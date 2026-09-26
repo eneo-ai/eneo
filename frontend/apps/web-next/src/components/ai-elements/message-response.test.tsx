@@ -4,7 +4,12 @@ import { useMemo } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatTestProviders } from "@/features/chat/testing";
 import { expectNoAxeViolations } from "@/test/axe";
-import { CitationSourcesProvider, citationComponents, remarkCitations } from "./citation";
+import {
+  CitationSourcesProvider,
+  citationComponents,
+  citationNumber,
+  remarkCitations
+} from "./citation";
 import { answerHeadingLevel } from "./markdown-components";
 import { MessageResponse } from "./message";
 
@@ -34,25 +39,30 @@ const ANSWER = [
 ].join("\n");
 
 function Answer({
+  text,
   onOpenSource
 }: {
-  onOpenSource?: (index: number, trigger: HTMLElement) => void;
+  text: string;
+  onOpenSource: (index: number, trigger: HTMLElement) => void;
 }) {
   // Memoized like the chat does, so blocks are not re-parsed every render.
   const remarkPlugins = useMemo(() => [remarkCitations(SOURCES.length, "msg-1")], []);
   return (
-    <CitationSourcesProvider value={SOURCES} onOpenSource={onOpenSource}>
+    <CitationSourcesProvider value={SOURCES} prefix="msg-1" onOpenSource={onOpenSource}>
       <MessageResponse remarkPlugins={remarkPlugins} components={citationComponents}>
-        {ANSWER}
+        {text}
       </MessageResponse>
     </CitationSourcesProvider>
   );
 }
 
-function renderAnswer(onOpenSource?: (index: number, trigger: HTMLElement) => void) {
+function renderAnswer(
+  onOpenSource: (index: number, trigger: HTMLElement) => void = vi.fn(),
+  text = ANSWER
+) {
   return render(
     <ChatTestProviders>
-      <Answer onOpenSource={onOpenSource} />
+      <Answer text={text} onOpenSource={onOpenSource} />
     </ChatTestProviders>
   );
 }
@@ -60,7 +70,7 @@ function renderAnswer(onOpenSource?: (index: number, trigger: HTMLElement) => vo
 describe("MessageResponse", () => {
   // Regression: passing remarkPlugins replaced Streamdown's defaults (GFM), so
   // tables rendered as raw `| a | b |` text.
-  it("renders GFM tables as real tables while citation links still resolve", () => {
+  it("renders GFM tables as real tables while citations still resolve", () => {
     const { container } = renderAnswer();
 
     const table = container.querySelector("table");
@@ -71,9 +81,11 @@ describe("MessageResponse", () => {
     for (const th of headers) expect(th.getAttribute("scope")).toBe("col");
     expect(within(table!).getAllByRole("row")).toHaveLength(3);
 
-    const first = screen.getByRole("link", { name: "Källa 1: Upphandlingspolicy 2024" });
-    expect(first.getAttribute("href")).toBe("#msg-1-cite-1");
-    expect(screen.getByRole("link", { name: "Källa 2: LOU 19 kap." })).toBeTruthy();
+    // Chips open the source in the activity panel: buttons, not dead in-page links.
+    const first = screen.getByRole("button", { name: "Källa 1: Upphandlingspolicy 2024" });
+    expect(first.textContent).toBe("1");
+    expect(first.hasAttribute("href")).toBe(false);
+    expect(screen.getByRole("button", { name: "Källa 2: LOU 19 kap." })).toBeTruthy();
   });
 
   it("puts tables and code blocks in named scroll regions", async () => {
@@ -101,12 +113,39 @@ describe("MessageResponse", () => {
     expect(answerHeadingLevel(6)).toBe(6);
   });
 
-  it("opens the cited source instead of following the in-page link", () => {
+  it("opens the cited source", () => {
     const onOpenSource = vi.fn();
     renderAnswer(onOpenSource);
-    const link = screen.getByRole("link", { name: "Källa 2: LOU 19 kap." });
-    fireEvent.click(link);
-    expect(onOpenSource).toHaveBeenCalledWith(1, link);
+    const chip = screen.getByRole("button", { name: "Källa 2: LOU 19 kap." });
+    fireEvent.click(chip);
+    expect(onOpenSource).toHaveBeenCalledWith(1, chip);
+  });
+
+  // Security: a link in the model's output must never pose as a source.
+  it("keeps other links plain, even when they look like citation markers", () => {
+    renderAnswer(
+      vi.fn(),
+      [
+        "Se [policyn](https://evil.example/lou-cite-1),",
+        "[ett annat svar](#msg-2-cite-1) och [en saknad källa](#msg-1-cite-9)."
+      ].join(" ")
+    );
+    expect(screen.queryByRole("button", { name: /^Källa/ })).toBeNull();
+    const external = screen.getByRole("link", { name: "policyn" });
+    expect(external.getAttribute("href")).toBe("https://evil.example/lou-cite-1");
+    expect(external.getAttribute("target")).toBe("_blank");
+    expect(screen.getByText("ett annat svar")).toBeTruthy();
+    expect(screen.getByText("en saknad källa")).toBeTruthy();
+  });
+
+  it("matches only this message's markers within its sources", () => {
+    expect(citationNumber("#msg-1-cite-2", "msg-1", 2)).toBe(2);
+    expect(citationNumber("#msg-1-cite-3", "msg-1", 2)).toBeNull();
+    expect(citationNumber("#msg-1-cite-0", "msg-1", 2)).toBeNull();
+    expect(citationNumber("#msg-2-cite-1", "msg-1", 2)).toBeNull();
+    expect(citationNumber("https://x.se/#msg-1-cite-1", "msg-1", 2)).toBeNull();
+    expect(citationNumber("#msg-1-cite-1x", "msg-1", 2)).toBeNull();
+    expect(citationNumber(undefined, "msg-1", 2)).toBeNull();
   });
 
   it("has no axe violations", async () => {

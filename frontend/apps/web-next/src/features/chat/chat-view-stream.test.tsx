@@ -1,26 +1,54 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import type { AppContextData } from "@/components/providers/app-context";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { ChatView, type ActivityState } from "./chat-view";
-import { ChatTestProviders, installDomPolyfills } from "./testing";
+import {
+  ChatTestProviders,
+  installDomPolyfills,
+  observedElements,
+  reportResize,
+  testAppContext
+} from "./testing";
 
 const spies = vi.hoisted(() => ({
   announce: vi.fn(),
   sent: [] as { text: string; body: unknown }[],
-  mode: "fail" as "fail" | "answer",
+  mode: "fail" as "fail" | "answer" | "hold",
   titled: [] as string[]
 }));
 
 // Fails before streaming starts, or streams a short answer (AI SDK UI chunks).
 vi.mock("@/lib/chat/transport", () => ({
   createChatTransport: () => ({
-    sendMessages: async ({ messages, body }: { messages: EneoUIMessage[]; body: unknown }) => {
+    sendMessages: async ({
+      messages,
+      body,
+      abortSignal
+    }: {
+      messages: EneoUIMessage[];
+      body: unknown;
+      abortSignal?: AbortSignal;
+    }) => {
       const last = messages.at(-1);
       const text = last?.parts.find((part) => part.type === "text");
       spies.sent.push({ text: text?.type === "text" ? text.text : "", body });
       if (spies.mode === "fail") throw new Error("Tjänsten svarar inte");
+      if (spies.mode === "hold") {
+        // Starts answering, then waits until the user stops it.
+        return new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: "start", messageId: "answer-1" });
+            controller.enqueue({ type: "text-start", id: "t" });
+            controller.enqueue({ type: "text-delta", id: "t", delta: "Gränsen " });
+            abortSignal?.addEventListener("abort", () =>
+              controller.error(new DOMException("Aborted", "AbortError"))
+            );
+          }
+        });
+      }
       const chunks = [
         { type: "start", messageId: "answer-1" },
         {
@@ -51,6 +79,12 @@ vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     GET: vi.fn(async () => ({ data: undefined, response: new Response() })),
     POST: vi.fn(async (path: string, init: { params?: { path?: { session_id?: string } } }) => {
+      if (path === "/api/v1/files/") {
+        return {
+          data: { id: "file-1", name: "Policy.pdf", mimetype: "application/pdf", size: 2048 },
+          response: new Response()
+        };
+      }
       if (path.endsWith("/title/")) spies.titled.push(init.params?.path?.session_id ?? "");
       return { data: { name: "Gräns för direktupphandling" }, response: new Response() };
     }),
@@ -81,16 +115,20 @@ const partner: ChatPartner = {
 
 function Harness({
   onSessionCreated,
-  onTitle
+  onTitle,
+  appContext,
+  chatPartner = partner
 }: {
   onSessionCreated?: (id: string) => void;
   onTitle?: (title: string) => void;
+  appContext?: AppContextData;
+  chatPartner?: ChatPartner;
 }) {
   const [activity, setActivity] = useState<ActivityState | null>(null);
   return (
-    <ChatTestProviders>
+    <ChatTestProviders appContext={appContext}>
       <ChatView
-        partner={partner}
+        partner={chatPartner}
         activity={activity}
         onActivityChange={setActivity}
         onSessionCreated={onSessionCreated}
@@ -127,6 +165,67 @@ describe("ChatView streaming an answer", () => {
   });
 });
 
+describe("ChatView sending", () => {
+  it("sends an @-mention to the group chat member it names", async () => {
+    spies.mode = "answer";
+    render(
+      <Harness
+        chatPartner={{
+          type: "group-chat",
+          id: "group-1",
+          name: "Upphandlingsgruppen",
+          mentionableAssistants: [{ id: "assistant-9", handle: "juristen" }]
+        }}
+      />
+    );
+    fireEvent.click(screen.getByRole("combobox", { name: "Nämn" }));
+    fireEvent.click(await screen.findByRole("option", { name: "@juristen" }));
+    ask("Är avtalet förenligt med LOU?");
+    await waitFor(() => expect(spies.sent).toHaveLength(1));
+    expect(spies.sent[0]?.body).toMatchObject({
+      group_chat_id: "group-1",
+      assistant_id: null,
+      tools: { assistants: [{ id: "assistant-9", handle: "juristen" }] }
+    });
+    // The mention applies to that question only.
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Nämn" }).textContent).toContain("Omnämnanden")
+    );
+  });
+
+  it("stops an answer from the stop button and says so", async () => {
+    spies.mode = "hold";
+    render(<Harness />);
+    ask("Vilken gräns gäller?");
+    const stop = await screen.findByRole("button", { name: "Stoppa generering" });
+    fireEvent.click(stop);
+    await waitFor(() => expect(spies.announce).toHaveBeenCalledWith("Svaret stoppades"));
+    expect(spies.announce).not.toHaveBeenCalledWith("Svaret är klart");
+    expect(await screen.findByRole("button", { name: "Skicka meddelande" })).toBeTruthy();
+  });
+});
+
+describe("ChatView docked composer", () => {
+  // WCAG 2.4.11: the conversation scrolls focused elements above the docked
+  // composer. A new conversation mounts the dock only after the first
+  // question, and its height must still be tracked.
+  it("keeps focus clear of the dock that appears with the first question", async () => {
+    spies.mode = "answer";
+    render(<Harness />);
+    ask("Vilken gräns gäller?");
+
+    const log = await screen.findByRole("log", { name: "Konversation" });
+    const scroller = log.closest<HTMLElement>('[style*="scroll-padding-bottom"]');
+    expect(scroller?.style.scrollPaddingBottom).toBe("28px");
+
+    const textarea = screen.getByRole("textbox", { name: /Meddelande till/ });
+    const dock = observedElements().find((element) => element.contains(textarea));
+    expect(dock).toBeDefined();
+    act(() => reportResize(dock!, 150));
+    expect(scroller?.style.scrollPaddingBottom).toBe("178px");
+  });
+});
+
 describe("ChatView when generation fails", () => {
   it("shows and announces the error, keeps the question and retries it", async () => {
     render(<Harness />);
@@ -147,5 +246,48 @@ describe("ChatView when generation fails", () => {
       "Vilken gräns gäller?",
       "Vilken gräns gäller?"
     ]);
+  });
+
+  it("puts the question's attachments back in the composer, previews intact", async () => {
+    const revoke = vi.fn();
+    vi.stubGlobal(
+      "URL",
+      Object.assign(URL, { createObjectURL: () => "blob:policy", revokeObjectURL: revoke })
+    );
+    const appContext = {
+      ...testAppContext,
+      limits: {
+        attachments: {
+          formats: [{ mimetype: "application/pdf", size: 10_000_000, vision: false }],
+          max_in_question: 5
+        }
+      }
+    } as unknown as AppContextData;
+    const { container } = render(<Harness appContext={appContext} />);
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const file = new File(["%PDF"], "Policy.pdf", { type: "application/pdf" });
+    fireEvent.change(input, { target: { files: [file] } });
+    const attachments = await screen.findByRole("list", { name: "Bilagor" });
+    await waitFor(() => expect(within(attachments).getByText(/Klar att använda/)).toBeTruthy());
+
+    ask("Sammanfatta policyn");
+    expect(await screen.findByText("Tjänsten svarar inte")).toBeTruthy();
+    // Back in the composer (it has the remove button; the log's copy does not).
+    await screen.findByRole("button", { name: "Ta bort Policy.pdf" });
+    const restored = screen.getByRole("list", { name: "Bilagor" });
+    const preview = within(restored).getByRole("button", { name: /^Förhandsvisning: Policy\.pdf/ });
+    expect(preview.hasAttribute("disabled")).toBe(false);
+    expect(revoke).not.toHaveBeenCalled();
+    // A retry that goes through sends the file again, takes it out of the
+    // composer and frees its preview.
+    spies.mode = "answer";
+    fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
+    await waitFor(() => expect(spies.sent).toHaveLength(2));
+    expect(spies.sent[1]?.body).toMatchObject({ files: [{ id: "file-1" }] });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Ta bort Policy.pdf" })).toBeNull()
+    );
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith("blob:policy"));
+    vi.unstubAllGlobals();
   });
 });

@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import type { ActivitySource } from "./activity";
-import { McpResourceSnippetDialog } from "./message-parts";
+import { McpSnippetButton } from "./message-parts";
 
 /** Id of the source entry that inline citation N (1-based) opens. */
 export function sourceAnchorId(messageId: string, number: number): string {
@@ -28,13 +28,16 @@ export function SourceList({
   const t = useTranslations();
   const itemRefs = useRef<Map<number, HTMLLIElement>>(new Map());
 
-  // A citation opened the panel: move focus to that source (WCAG 2.4.3).
+  // A citation opened the panel: move focus to that source (WCAG 2.4.3). In
+  // the bottom sheet this runs before the sheet's dialog opens (nothing in a
+  // closed dialog takes focus); the sheet then focuses the item marked
+  // data-autofocus instead.
   useEffect(() => {
     if (focusIndex === null) return;
     const item = itemRefs.current.get(focusIndex);
     item?.focus();
     item?.scrollIntoView({ block: "nearest" });
-  }, [focusIndex]);
+  }, [focusIndex, messageId]);
 
   if (sources.length === 0) {
     return (
@@ -48,7 +51,7 @@ export function SourceList({
         const number = index + 1;
         const meta = [
           source.origin,
-          source.detail ? t("mcp_resource_page_range", { pageRange: source.detail }) : null
+          source.pageRange ? t("mcp_resource_page_range", { pageRange: source.pageRange }) : null
         ]
           .filter(Boolean)
           .join(" · ");
@@ -63,6 +66,7 @@ export function SourceList({
               else itemRefs.current.delete(index);
             }}
             tabIndex={-1}
+            data-autofocus={index === focusIndex ? "" : undefined}
             className="focus-visible:outline-ring rounded-ax-element focus:bg-ax-selected flex gap-2.5 p-2 focus-visible:outline-2 focus-visible:outline-offset-2"
           >
             <span
@@ -85,11 +89,11 @@ export function SourceList({
                   <span className="sr-only"> {t("chat_opens_in_new_tab")}</span>
                 </a>
               ) : source.mcpSnippet ? (
-                <McpResourceSnippetDialog source={source} snippet={source.mcpSnippet}>
-                  <button type="button" className={cn(titleClass, "hover:underline")}>
-                    {source.title}
-                  </button>
-                </McpResourceSnippetDialog>
+                <McpSnippetButton
+                  source={source}
+                  snippet={source.mcpSnippet}
+                  className={cn(titleClass, "hover:underline")}
+                />
               ) : (
                 <span className="text-[13px] leading-snug font-medium break-words">
                   {source.title}

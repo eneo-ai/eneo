@@ -4,14 +4,16 @@ import { BottomSheet } from "@astryxdesign/core/BottomSheet";
 import { Button as AxButton } from "@astryxdesign/core/Button";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useId, useRef, useState, type Ref } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
+import { cursorPagination, flattenPages } from "@/lib/api/pagination";
 import type { ChatPartner } from "@/lib/chat/types";
-import { usePaginatedQuery } from "@/lib/hooks/use-paginated-query";
+import { rescueFocus } from "@/lib/focus-rescue";
 import { cn } from "@/lib/utils";
 import { historyBucket, type HistoryBucket } from "./format";
 import {
@@ -21,6 +23,8 @@ import {
   useSessionMutations
 } from "./session-actions";
 import { useNow } from "./use-now";
+
+const PAGE_SIZE = 50;
 
 type SessionRow = {
   id: string;
@@ -58,7 +62,8 @@ export function groupSessions<T extends SessionRow>(
 
 /**
  * The partner's conversation history, grouped by date (Idag, Igår, …). Each
- * row opens the conversation; its menu renames, rates or deletes it.
+ * row opens the conversation; its menu renames, rates or deletes it. "Visa
+ * fler" appends the next page and moves focus to the first row it added.
  */
 function HistoryPanel({
   partner,
@@ -66,20 +71,26 @@ function HistoryPanel({
   onSelect,
   onDeleted,
   onRenamed,
+  onRated,
   onClose,
-  headingRef
+  focusHeadingOnMount = false
 }: {
   partner: ChatPartner;
   activeSessionId: string | null;
   onSelect: (sessionId: string) => void;
   onDeleted: (sessionId: string) => void;
   onRenamed?: (sessionId: string, name: string) => void;
+  /** A conversation was rated (the open answer's thumbs follow). */
+  onRated?: (sessionId: string, value: 1 | -1) => void;
   onClose: () => void;
-  headingRef?: Ref<HTMLHeadingElement>;
+  /** Side panel: focus moves to the heading when it opens. */
+  focusHeadingOnMount?: boolean;
 }) {
   const t = useTranslations();
   const titleId = useId();
   const now = useNow();
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
   const { rename, remove, feedback } = useSessionMutations(partner, {
@@ -89,30 +100,60 @@ function HistoryPanel({
     },
     onDeleted: (id) => {
       setDeleting(null);
+      // The deleted row (and the menu button the dialog returns focus to) is gone.
+      rescueFocus(headingRef.current);
       onDeleted(id);
-    }
+    },
+    onRated
   });
 
+  useEffect(() => {
+    if (focusHeadingOnMount) headingRef.current?.focus();
+  }, [focusHeadingOnMount]);
+
   const isGroupChat = partner.type === "group-chat";
-  const history = usePaginatedQuery({
+  const history = useInfiniteQuery({
+    ...cursorPagination,
     queryKey: historyQueryKey(partner),
-    limit: 50,
-    fetchPage: async ({ cursor, limit }) =>
+    queryFn: ({ pageParam, signal }) =>
       unwrap(
         browserApi.GET("/api/v1/conversations/", {
           params: {
             query: {
               assistant_id: isGroupChat ? undefined : partner.id,
               group_chat_id: isGroupChat ? partner.id : undefined,
-              limit,
-              cursor: cursor ?? undefined
+              limit: PAGE_SIZE,
+              cursor: pageParam
             }
-          }
+          },
+          signal
         })
       )
   });
+  const pages = history.data?.pages;
+  const sessions = flattenPages(pages);
+  const groups = groupSessions(sessions, now);
 
-  const groups = groupSessions(history.items, now);
+  // "Visa fler": once the page it asked for renders, focus that page's first
+  // conversation (the button itself goes away with the last page).
+  const focusPage = useRef<number | null>(null);
+  const pageCount = pages?.length ?? 0;
+  useEffect(() => {
+    const page = focusPage.current;
+    if (page === null || pageCount <= page) return;
+    focusPage.current = null;
+    const first = pages?.[page]?.items[0];
+    if (!first) return;
+    listRef.current
+      ?.querySelector<HTMLElement>(`[data-session-row="${CSS.escape(first.id)}"]`)
+      ?.focus();
+  }, [pageCount, pages]);
+
+  function loadMore() {
+    if (history.isFetchingNextPage) return;
+    focusPage.current = pageCount;
+    void history.fetchNextPage();
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -133,10 +174,12 @@ function HistoryPanel({
           onClick={onClose}
         />
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-2">
         {history.isPending ? (
           <LoadingState rows={6} className="p-2" />
-        ) : history.items.length === 0 ? (
+        ) : history.isError ? (
+          <p className="text-ax-error p-2 text-[13px]">{t("request_failed")}</p>
+        ) : sessions.length === 0 ? (
           <p className="text-ax-text-secondary p-2 text-[13px]">{t("chat_history_empty")}</p>
         ) : (
           groups.map((group, index) => (
@@ -153,6 +196,7 @@ function HistoryPanel({
               <ul className="flex flex-col gap-0.5">
                 {group.sessions.map((session) => {
                   const active = session.id === activeSessionId;
+                  const name = session.name || t("chat_history_untitled");
                   return (
                     <li
                       key={session.id}
@@ -163,6 +207,7 @@ function HistoryPanel({
                     >
                       <button
                         type="button"
+                        data-session-row={session.id}
                         aria-current={active ? "true" : undefined}
                         onClick={() => onSelect(session.id)}
                         className={cn(
@@ -170,10 +215,10 @@ function HistoryPanel({
                           active ? "font-semibold" : "text-ax-text-secondary hover:text-ax-text"
                         )}
                       >
-                        {session.name || t("chat_history_untitled")}
+                        {name}
                       </button>
                       <MoreMenu
-                        label={t("chat_history_actions", { name: session.name })}
+                        label={t("chat_history_actions", { name })}
                         size="sm"
                         alignment="end"
                         items={[
@@ -193,7 +238,7 @@ function HistoryPanel({
                           {
                             label: t("delete"),
                             variant: "destructive",
-                            onClick: () => setDeleting({ id: session.id, name: session.name })
+                            onClick: () => setDeleting({ id: session.id, name })
                           }
                         ]}
                       />
@@ -204,30 +249,22 @@ function HistoryPanel({
             </section>
           ))
         )}
-        {(history.hasPreviousPage || history.hasNextPage) && (
-          <div className="flex justify-between gap-2 p-2">
-            {history.hasPreviousPage ? (
-              <AxButton
-                label={t("chat_history_newer")}
-                variant="ghost"
-                size="sm"
-                onClick={history.previousPage}
-              />
-            ) : (
-              <span />
-            )}
-            {history.hasNextPage && (
-              <AxButton
-                label={t("load_more")}
-                variant="ghost"
-                size="sm"
-                onClick={history.nextPage}
-              />
-            )}
+        {history.hasNextPage && (
+          <div className="flex justify-center p-2">
+            <AxButton
+              label={t("chat_history_load_more")}
+              variant="ghost"
+              size="sm"
+              // Stays enabled while loading so keyboard focus stays on it.
+              isLoading={history.isFetchingNextPage}
+              isInterruptible
+              onClick={loadMore}
+            />
           </div>
         )}
       </div>
 
+      {/* Outside the row menus: the menu closes before a dialog opens. */}
       <RenameSessionDialog
         session={renaming}
         pending={rename.isPending}
@@ -253,14 +290,9 @@ export function HistoryAside({
   onClose,
   inline,
   ...props
-}: Omit<Parameters<typeof HistoryPanel>[0], "headingRef"> & { inline: boolean }) {
+}: Omit<Parameters<typeof HistoryPanel>[0], "focusHeadingOnMount"> & { inline: boolean }) {
   const t = useTranslations();
-  const headingRef = useRef<HTMLHeadingElement>(null);
   const asideRef = useRef<HTMLElement>(null);
-
-  useEffect(() => {
-    if (inline) headingRef.current?.focus();
-  }, [inline]);
 
   useEffect(() => {
     const aside = asideRef.current;
@@ -294,7 +326,7 @@ export function HistoryAside({
       aria-label={t("history")}
       className="bg-ax-sunken border-ax-border flex w-72 shrink-0 flex-col border-s"
     >
-      <HistoryPanel {...props} onClose={onClose} headingRef={headingRef} />
+      <HistoryPanel {...props} onClose={onClose} focusHeadingOnMount />
     </aside>
   );
 }

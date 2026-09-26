@@ -17,6 +17,7 @@ export type ActivityTab = "steps" | "sources";
 export const ACTIVITY_PANEL_ID = "chat-activity-panel";
 
 function PanelBody({
+  id,
   messageId,
   activity,
   durations,
@@ -27,6 +28,8 @@ function PanelBody({
   onClose,
   tabListRef
 }: {
+  /** The panel id the activity pill's aria-controls points at (sheet variant). */
+  id?: string;
   messageId: string;
   activity: Activity;
   durations: TurnDurations | null;
@@ -44,7 +47,7 @@ function PanelBody({
   const steps = activity.steps.length;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div id={id} className="flex min-h-0 flex-1 flex-col">
       <div className="border-ax-border flex min-h-[52px] shrink-0 items-center justify-between gap-2 border-b ps-3.5 pe-2.5">
         <div ref={tabListRef}>
           <TabList
@@ -179,7 +182,7 @@ export function ActivityPanel({ variant, onClose, ...props }: ActivityPanelProps
         label={t("chat_activity_panel_label")}
         height="tall"
       >
-        <PanelBody {...props} onClose={onClose} />
+        <PanelBody {...props} id={ACTIVITY_PANEL_ID} onClose={onClose} />
       </BottomSheet>
     );
   }

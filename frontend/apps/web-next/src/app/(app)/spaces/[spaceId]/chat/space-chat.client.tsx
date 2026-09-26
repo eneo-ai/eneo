@@ -4,13 +4,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
-import { LoadingState } from "@/components/composites/loading-state";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import type { ChatPartner } from "@/lib/chat/types";
 import { selectEffectiveModelId } from "@/features/ai-models/select-effective-chat-model";
+import {
+  ChatPartnerError,
+  ChatPartnerLoading,
+  retryPartnerQuery
+} from "@/features/chat/chat-partner-state";
 import { ChatPage } from "@/features/chat/chat-page";
 import { chatPartnerSwitcherItems } from "@/features/chat/partner-switcher";
 import { partnerKnowledge } from "@/features/chat/partner-knowledge";
@@ -107,15 +111,26 @@ export function SpaceChat() {
     queryKey: ["assistants", partnerId],
     enabled: type === "assistant" && partnerId !== null,
     queryFn: () =>
-      unwrap(browserApi.GET("/api/v1/assistants/{id}/", { params: { path: { id: partnerId! } } }))
+      unwrap(browserApi.GET("/api/v1/assistants/{id}/", { params: { path: { id: partnerId! } } })),
+    retry: retryPartnerQuery
   });
 
   const groupChatQuery = useQuery({
     queryKey: ["group-chats", partnerId],
     enabled: type === "group-chat" && partnerId !== null,
     queryFn: () =>
-      unwrap(browserApi.GET("/api/v1/group-chats/{id}/", { params: { path: { id: partnerId! } } }))
+      unwrap(browserApi.GET("/api/v1/group-chats/{id}/", { params: { path: { id: partnerId! } } })),
+    retry: retryPartnerQuery
   });
+  // The query that loads a non-default partner (null for the space's own assistant).
+  const partnerQuery =
+    partnerId === null
+      ? null
+      : type === "assistant"
+        ? assistantQuery
+        : type === "group-chat"
+          ? groupChatQuery
+          : null;
 
   const spaceName = space.personal
     ? t("personal")
@@ -186,10 +201,13 @@ export function SpaceChat() {
   }
 
   if (!partner) {
+    if (partnerQuery?.isPending) return <ChatPartnerLoading />;
+    // A failed load can be retried; a space without its default assistant or
+    // an unknown partner type can't.
     return (
-      <div className="mx-auto w-full max-w-[712px] p-6">
-        <LoadingState rows={4} />
-      </div>
+      <ChatPartnerError
+        onRetry={partnerQuery?.isError ? () => void partnerQuery.refetch() : undefined}
+      />
     );
   }
 

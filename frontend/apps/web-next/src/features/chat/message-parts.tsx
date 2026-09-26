@@ -1,30 +1,24 @@
 "use client";
 
 import { Button as AxButton } from "@astryxdesign/core/Button";
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { HStack, Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
+import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { useMutation } from "@tanstack/react-query";
 import { Download, ExternalLink, ShieldAlert, ShieldCheck, ShieldX } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
-import { useId, useState, type ReactNode } from "react";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger
-} from "@/components/ui/dialog";
+import { useTranslations } from "next-intl";
+import { useId, useRef, useState } from "react";
 import { MessageResponse } from "@/components/ai-elements/message";
+import { useReturnFocus } from "@/components/ui/dialog-focus";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
+import { asString, hostOf } from "@/lib/chat/metadata";
 import type { EneoUIMessage, SessionData, ToolApprovalData } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import { AttachmentPreviewDialog, FileTypeTile, useSignedUrl } from "./attachments";
-import { formatFileSize } from "./format";
+import { formatBytes } from "@/lib/format";
 
 type Part = EneoUIMessage["parts"][number];
 type McpToolReference = Schema<"McpToolReferencePublic">;
@@ -51,24 +45,12 @@ type McpMeta = {
   section?: unknown;
 };
 
-function asString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function hostFromUri(uri: string): string {
-  try {
-    return new URL(uri).hostname || uri;
-  } catch {
-    return uri;
-  }
-}
-
 function mcpMeta(ref: McpToolReference): McpMeta {
   return (ref.meta ?? {}) as McpMeta;
 }
 
 function mcpReferenceTitle(ref: McpToolReference): string {
-  return asString(mcpMeta(ref).title) ?? hostFromUri(ref.uri);
+  return asString(mcpMeta(ref).title) ?? hostOf(ref.uri) ?? ref.uri;
 }
 
 function mcpSourceLabel(ref: McpToolReference): string {
@@ -190,66 +172,88 @@ export function mergeSources(
   return [...docs, ...web, ...mcp];
 }
 
-/** Shows an MCP resource's snippet (content, section, page range) in a dialog. */
-export function McpResourceSnippetDialog({
+/**
+ * A source's title as a button that shows the MCP resource's snippet (content,
+ * section, page range) in an Astryx Dialog.
+ */
+export function McpSnippetButton({
   source,
   snippet,
-  children
+  className
 }: {
   source: SourceChip;
   snippet: McpSnippetSource;
-  children: ReactNode;
+  className?: string;
 }) {
   const t = useTranslations();
-  const isHttp = isHttpUrl(snippet.uri);
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // Astryx returns focus to what had it at open; this also covers a tap that
+  // never focused the button (Safari).
+  useReturnFocus(open, triggerRef);
 
   return (
-    <Dialog>
-      <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="max-h-[85vh] sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{source.title}</DialogTitle>
-          <DialogDescription>
-            {t("mcp_resource_snippet_description", { title: source.title })}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="min-h-0 overflow-y-auto rounded-lg border p-4">
-          {(snippet.section || snippet.pageRange) && (
-            <p className="text-muted-foreground mb-3 text-sm">
-              {snippet.section}
-              {snippet.section && snippet.pageRange ? " · " : null}
-              {snippet.pageRange
-                ? t("mcp_resource_page_range", { pageRange: snippet.pageRange })
-                : null}
-            </p>
-          )}
-          {snippet.content ? (
-            <MessageResponse className="font-voice text-[15px] leading-[1.7]">
-              {snippet.content}
-            </MessageResponse>
-          ) : (
-            <p className="text-muted-foreground text-sm italic">
-              {t("mcp_resource_unknown_source")}
-            </p>
-          )}
-        </div>
-        <DialogFooter className="sm:justify-between">
-          {isHttp ? (
-            <Button variant="outline" asChild>
-              <a href={snippet.uri} target="_blank" rel="noreferrer">
-                <ExternalLink aria-hidden="true" className="size-4" />
-                {t("mcp_resource_open_external")}
-              </a>
-            </Button>
-          ) : (
-            <span />
-          )}
-          <DialogClose asChild>
-            <Button>{t("done")}</Button>
-          </DialogClose>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="dialog"
+        onClick={() => setOpen(true)}
+        className={className}
+      >
+        {source.title}
+      </button>
+      <Dialog isOpen={open} onOpenChange={setOpen} width={672} maxHeight="85dvh">
+        <Layout
+          header={
+            <DialogHeader
+              title={source.title}
+              subtitle={t("mcp_resource_snippet_description", { title: source.title })}
+              onOpenChange={setOpen}
+            />
+          }
+          content={
+            <LayoutContent>
+              {(snippet.section || snippet.pageRange) && (
+                <p className="text-ax-text-secondary mb-3 text-sm">
+                  {snippet.section}
+                  {snippet.section && snippet.pageRange ? " · " : null}
+                  {snippet.pageRange
+                    ? t("mcp_resource_page_range", { pageRange: snippet.pageRange })
+                    : null}
+                </p>
+              )}
+              {snippet.content ? (
+                <MessageResponse className="font-voice text-[15px] leading-[1.7]">
+                  {snippet.content}
+                </MessageResponse>
+              ) : (
+                <p className="text-ax-text-secondary text-sm italic">
+                  {t("mcp_resource_unknown_source")}
+                </p>
+              )}
+            </LayoutContent>
+          }
+          footer={
+            <LayoutFooter>
+              <HStack gap={2} hAlign="end">
+                {isHttpUrl(snippet.uri) && (
+                  <AxButton
+                    label={t("mcp_resource_open_external")}
+                    variant="secondary"
+                    icon={<ExternalLink aria-hidden="true" className="size-4" />}
+                    href={snippet.uri}
+                    target="_blank"
+                    rel="noreferrer"
+                  />
+                )}
+                <AxButton label={t("done")} variant="primary" onClick={() => setOpen(false)} />
+              </HStack>
+            </LayoutFooter>
+          }
+        />
+      </Dialog>
+    </>
   );
 }
 
@@ -345,9 +349,11 @@ export function ToolApprovalCard({
                   {decision === "approved" ? t("chat_tool_approved") : t("chat_tool_denied")}
                 </span>
               ) : (
+                // Astryx Button names itself from `label` (aria-label) and shows
+                // the children: each button names its tool, the text stays short.
                 <span className="flex gap-1.5">
                   <AxButton
-                    label={t("tool_accept")}
+                    label={t("chat_tool_accept_named", { tool: name })}
                     variant="primary"
                     size="sm"
                     isDisabled={submit.isPending}
@@ -356,10 +362,9 @@ export function ToolApprovalCard({
                     }
                   >
                     {t("tool_accept")}
-                    <span className="sr-only">: {name}</span>
                   </AxButton>
                   <AxButton
-                    label={t("tool_deny")}
+                    label={t("chat_tool_deny_named", { tool: name })}
                     variant="secondary"
                     size="sm"
                     isDisabled={submit.isPending}
@@ -368,7 +373,6 @@ export function ToolApprovalCard({
                     }
                   >
                     {t("tool_deny")}
-                    <span className="sr-only">: {name}</span>
                   </AxButton>
                 </span>
               )}
@@ -403,7 +407,11 @@ export function InlineImage({ file }: { file: Schema<"FilePublic"> }) {
   const url = useSignedUrl(file.id);
 
   if (!url) {
-    return <div className="bg-ax-muted rounded-ax-container h-40 w-56 max-w-full animate-pulse" />;
+    return (
+      <span className="block h-40 w-56 max-w-full">
+        <Skeleton radius={3} />
+      </span>
+    );
   }
   return (
     // eslint-disable-next-line @next/next/no-img-element -- signed cross-origin URL
@@ -425,14 +433,11 @@ function FileTokenBody({
   mimetype: string;
   size?: number | null;
 }) {
-  const locale = useLocale();
   return (
     <>
       <FileTypeTile mimetype={mimetype} size="sm" />
       <span className="min-w-0 truncate font-semibold">{name}</span>
-      {size ? (
-        <span className="text-ax-text-secondary shrink-0">{formatFileSize(size, locale)}</span>
-      ) : null}
+      {size ? <span className="text-ax-text-secondary shrink-0">{formatBytes(size)}</span> : null}
     </>
   );
 }

@@ -1,4 +1,5 @@
 import type { Schema } from "@/lib/api/models";
+import { asString, hostOf } from "@/lib/chat/metadata";
 import type { EneoUIMessage, KnowledgeOrigin } from "@/lib/chat/types";
 import { mcpReferencesFromParts, mergeSources, type SourceChip } from "./message-parts";
 import { eneoToolMetadata, isSkillCall } from "./tool-presentation";
@@ -52,8 +53,8 @@ export type ActivityStep =
 export type ActivitySource = SourceChip & {
   /** Where the source lives: collection/website name or web host. */
   origin: string | null;
-  /** Page range or section, when the reference carries one. */
-  detail: string | null;
+  /** The pages it was cited from, when the reference says ("4, 9"). */
+  pageRange: string | null;
 };
 
 export type Activity = {
@@ -69,10 +70,6 @@ function eneoMetadata(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || !("eneo" in value)) return {};
   const eneo = (value as { eneo?: unknown }).eneo;
   return eneo && typeof eneo === "object" ? (eneo as Record<string, unknown>) : {};
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
 }
 
 function toolStatus(part: ToolPart): StepStatus {
@@ -131,15 +128,6 @@ function sourceDocumentOrigin(part: Extract<Part, { type: "source-document" }>):
   return { groupId: asString(eneo.group_id), websiteId: asString(eneo.website_id) };
 }
 
-function hostOf(url: string | undefined): string | null {
-  if (!url || !/^https?:\/\//i.test(url)) return null;
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return null;
-  }
-}
-
 function knowledgeStep(
   parts: Part[],
   knowledge: KnowledgeOrigin[]
@@ -164,7 +152,8 @@ function knowledgeStep(
   return { kind: "knowledge", key: "knowledge", status: "done", hits: documents.length, origins };
 }
 
-function modelName(message: EneoUIMessage): string | null {
+/** The model that wrote an answer: its nickname, else its name. */
+export function modelName(message: EneoUIMessage): string | null {
   const fromMetadata = message.metadata?.completionModel;
   if (fromMetadata) {
     return asString(fromMetadata.nickname) ?? asString(fromMetadata.name);
@@ -198,12 +187,12 @@ function activitySources(
     const knowledgeName = document
       ? (byId.get(document.groupId ?? "") ?? byId.get(document.websiteId ?? "") ?? null)
       : null;
+    // A section is already part of an MCP source's title.
     const snippet = chip.mcpSnippet;
-    const detail = snippet?.pageRange ?? snippet?.section ?? null;
     return {
       ...chip,
       origin: knowledgeName ?? hostOf(chip.url) ?? hostOf(snippet?.uri) ?? null,
-      detail
+      pageRange: snippet?.pageRange ?? null
     };
   });
 }

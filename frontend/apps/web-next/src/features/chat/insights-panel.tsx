@@ -1,13 +1,13 @@
 "use client";
 
+import { Button } from "@astryxdesign/core/Button";
+import { useAnnounce } from "@astryxdesign/core/hooks";
+import { TextArea } from "@astryxdesign/core/TextArea";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { SendHorizontal } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useId, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { ChatPartner } from "@/lib/chat/types";
@@ -15,6 +15,8 @@ import type { ChatPartner } from "@/lib/chat/types";
 type InsightPartner = Extract<ChatPartner["type"], "assistant" | "group-chat">;
 
 const INSIGHT_DAYS = 30;
+/** How long to wait for an asynchronous insight job, polled once a second. */
+const MAX_POLLS = 120;
 
 function partnerQuery(partner: ChatPartner): {
   assistant_id?: string;
@@ -52,38 +54,65 @@ function booleanField(value: unknown, key: string): boolean {
   return (value as Record<string, unknown>)[key] === true;
 }
 
-async function resolveInsightAnswer(response: unknown): Promise<string> {
+/** Waits `ms`, or rejects as soon as `signal` aborts. */
+function wait(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        reject(signal.reason);
+      },
+      { once: true }
+    );
+  });
+}
+
+/** The answer of an insight question, polling its job when it runs asynchronously. */
+async function resolveInsightAnswer(response: unknown, signal: AbortSignal): Promise<string> {
   const immediate = stringField(response, "answer");
   if (immediate && !booleanField(response, "is_async")) return immediate;
 
   const jobId = stringField(response, "job_id") ?? stringField(response, "jobId");
   if (!jobId) return immediate ?? "";
 
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+  for (let attempt = 0; attempt < MAX_POLLS; attempt += 1) {
     const status = await unwrap(
       browserApi.GET("/api/v1/analysis/conversation-insights/jobs/{job_id}/", {
-        params: { path: { job_id: jobId } }
+        params: { path: { job_id: jobId } },
+        signal
       })
     );
     if (status.status === "completed") return status.answer ?? "";
     if (status.status === "failed") throw new Error(status.error ?? "Failed");
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await wait(1000, signal);
   }
 
   throw new Error("Timed out");
 }
 
+/**
+ * Insikter for an assistant or group chat: the last 30 days' conversation and
+ * question counts, and a question about those conversations. The answer is
+ * announced when it is ready (it can take a while: the backend may run it as
+ * a job); leaving the view stops waiting for it.
+ */
 export function InsightsPanel({ partner }: { partner: ChatPartner & { type: InsightPartner } }) {
   const t = useTranslations();
-  const questionId = useId();
+  const announce = useAnnounce();
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const range = insightRange();
   const query = partnerQuery(partner);
+  const request = useRef<AbortController | null>(null);
+
+  // Stop polling a job when the view goes away.
+  useEffect(() => () => request.current?.abort(), []);
 
   const stats = useQuery({
     queryKey: ["conversation-insights", "stats", partner.type, partner.id, range.fromDate],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       unwrap(
         browserApi.GET("/api/v1/analysis/conversation-insights/", {
           params: {
@@ -92,13 +121,17 @@ export function InsightsPanel({ partner }: { partner: ChatPartner & { type: Insi
               end_time: range.endTime,
               ...query
             }
-          }
+          },
+          signal
         })
       )
   });
 
   const ask = useMutation({
     mutationFn: async (text: string) => {
+      request.current?.abort();
+      const controller = new AbortController();
+      request.current = controller;
       const response = await unwrap(
         browserApi.POST("/api/v1/analysis/conversation-insights/", {
           params: {
@@ -109,12 +142,21 @@ export function InsightsPanel({ partner }: { partner: ChatPartner & { type: Insi
               ...query
             }
           },
-          body: { question: text }
+          body: { question: text },
+          signal: controller.signal
         })
       );
-      return resolveInsightAnswer(response);
+      return resolveInsightAnswer(response, controller.signal);
     },
-    onSuccess: setAnswer
+    onSuccess: (text) => {
+      setAnswer(text);
+      announce(t("chat_announce_answer_ready"));
+    },
+    onError: () => {
+      // Aborted because the view closed: nobody is waiting for the answer.
+      if (request.current?.signal.aborted) return;
+      announce(t("request_failed"));
+    }
   });
 
   return (
@@ -150,34 +192,35 @@ export function InsightsPanel({ partner }: { partner: ChatPartner & { type: Insi
           ask.mutate(text);
         }}
       >
-        <Label htmlFor={questionId}>{t("ask_about_insights")}</Label>
-        <Textarea
-          id={questionId}
+        <TextArea
+          label={t("ask_about_insights")}
           value={question}
+          onChange={setQuestion}
           rows={3}
-          onChange={(event) => setQuestion(event.target.value)}
         />
         <Button
           type="submit"
-          className="w-fit self-end"
-          disabled={!question.trim() || ask.isPending}
-        >
-          <SendHorizontal className="size-4" aria-hidden="true" />
-          {ask.isPending ? t("loading") : t("generate_insights")}
-        </Button>
+          label={t("generate_insights")}
+          variant="primary"
+          icon={<SendHorizontal className="size-4" aria-hidden="true" />}
+          isDisabled={!question.trim()}
+          // Stays focusable while the answer is prepared (a second submit is ignored).
+          isLoading={ask.isPending}
+          isInterruptible
+          className="self-end"
+        />
       </form>
 
-      {/* Always mounted so the finished answer is announced politely. */}
-      <div role="status" className="flex flex-col">
-        {(answer || ask.isError || ask.isPending) && (
-          <div className="bg-ax-sunken border-ax-border rounded-ax-container min-h-32 border p-4">
-            <p className="text-sm font-medium">{t("answer")}</p>
-            <div className="text-ax-text-secondary mt-2 text-sm whitespace-pre-wrap">
-              {ask.isPending ? t("loading") : ask.isError ? t("request_failed") : answer}
-            </div>
-          </div>
-        )}
-      </div>
+      {ask.isPending ? (
+        <LoadingState variant="text" rows={3} label={t("chat_insights_generating")} />
+      ) : ask.isError ? (
+        <p className="text-ax-error text-sm">{t("request_failed")}</p>
+      ) : answer ? (
+        <div className="bg-ax-sunken border-ax-border rounded-ax-container border p-4">
+          <p className="text-sm font-medium">{t("answer")}</p>
+          <div className="text-ax-text-secondary mt-2 text-sm whitespace-pre-wrap">{answer}</div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1,28 +1,17 @@
 "use client";
 
-import {
-  Download,
-  File,
-  FileSpreadsheet,
-  FileText,
-  ImageIcon,
-  Loader2,
-  Paperclip,
-  X
-} from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle
-} from "@/components/ui/dialog";
+import { Button } from "@astryxdesign/core/Button";
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
+import { Spinner } from "@astryxdesign/core/Spinner";
+import { Download, File, FileSpreadsheet, FileText, ImageIcon, Paperclip, X } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { useEffect, useRef, useState } from "react";
+import { useReturnFocus } from "@/components/ui/dialog-focus";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";
-import { formatFileSize } from "./format";
+import { formatBytes } from "@/lib/format";
 import type { Attachment } from "./use-attachments";
 
 /** A representative icon for an attachment, chosen from its mime type. */
@@ -60,9 +49,9 @@ export function useSignedUrl(fileId: string) {
 }
 
 /**
- * Full-screen preview of a single attachment: images render inline, PDFs in an
- * iframe, everything else falls back to a download link. `url` may be null while
- * a signed URL is still resolving.
+ * Preview of a single attachment in an Astryx Dialog: images render inline,
+ * PDFs in an iframe, everything else falls back to a download link. `url` may
+ * be null while a signed URL is still resolving.
  */
 export function AttachmentPreviewDialog({
   open,
@@ -78,43 +67,48 @@ export function AttachmentPreviewDialog({
   url: string | null;
 }) {
   const t = useTranslations();
+  const noTrigger = useRef<HTMLElement>(null);
+  // Focus goes back to the file that was opened (also after a tap in Safari).
+  useReturnFocus(open, noTrigger);
   const isImage = mimetype.startsWith("image/");
   const isPdf = mimetype === "application/pdf";
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] gap-0 overflow-hidden p-0 sm:max-w-5xl">
-        <DialogHeader className="border-b px-4 py-3">
-          <DialogTitle className="truncate pr-6 text-sm font-medium">{name}</DialogTitle>
-          <DialogDescription className="sr-only">{t("preview")}</DialogDescription>
-        </DialogHeader>
-        <div className="flex max-h-[82vh] min-h-40 items-center justify-center overflow-auto p-4">
-          {!url ? (
-            <Loader2
-              aria-label={t("loading")}
-              className="text-muted-foreground size-6 animate-spin"
-            />
-          ) : isImage ? (
-            // eslint-disable-next-line @next/next/no-img-element -- signed/object URL
-            <img
-              src={url}
-              alt={name}
-              className="max-h-[78vh] max-w-full rounded-md object-contain"
-            />
-          ) : isPdf ? (
-            <iframe src={url} title={name} className="h-[78vh] w-full rounded-md border" />
-          ) : (
-            <a
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-              className="bg-primary text-primary-foreground hover:bg-primary/90 inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors"
-            >
-              <Download className="size-4" aria-hidden /> {t("download")}
-            </a>
-          )}
-        </div>
-      </DialogContent>
+    <Dialog isOpen={open} onOpenChange={onOpenChange} width="min(64rem, 95vw)" maxHeight="90dvh">
+      <Layout
+        header={<DialogHeader title={name} subtitle={t("preview")} onOpenChange={onOpenChange} />}
+        content={
+          <LayoutContent>
+            <div className="flex min-h-40 items-center justify-center">
+              {!url ? (
+                <Spinner size="lg" aria-label={t("loading")} />
+              ) : isImage ? (
+                // eslint-disable-next-line @next/next/no-img-element -- signed/object URL
+                <img
+                  src={url}
+                  alt={name}
+                  className="rounded-ax-element max-h-[70dvh] max-w-full object-contain"
+                />
+              ) : isPdf ? (
+                <iframe
+                  src={url}
+                  title={name}
+                  className="border-ax-border rounded-ax-element h-[70dvh] w-full border"
+                />
+              ) : (
+                <Button
+                  label={t("download")}
+                  variant="primary"
+                  icon={<Download className="size-4" aria-hidden="true" />}
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer"
+                />
+              )}
+            </div>
+          </LayoutContent>
+        }
+      />
     </Dialog>
   );
 }
@@ -178,7 +172,8 @@ export function FileTypeTile({
       )}
     >
       {uploading ? (
-        <Loader2 className={cn("animate-spin", size === "lg" ? "size-4" : "size-3")} />
+        // Decorative (the tile is aria-hidden); the row's text says "Laddar upp…".
+        <Spinner size={size === "lg" ? "md" : "sm"} shade="inherit" />
       ) : extension ? (
         extension
       ) : (
@@ -202,7 +197,6 @@ export function ComposerAttachments({
   };
 }) {
   const t = useTranslations();
-  const locale = useLocale();
   const [preview, setPreview] = useState<PendingPreview | null>(null);
   const items = attachments.attachments;
 
@@ -256,7 +250,7 @@ export function ComposerAttachments({
                   {item.name}
                 </span>
                 <span className="text-ax-text-secondary text-xs tabular-nums">
-                  {formatFileSize(item.size, locale)} ·{" "}
+                  {formatBytes(item.size)} ·{" "}
                   {item.uploading ? t("chat_attachment_uploading") : t("chat_attachment_ready")}
                 </span>
               </span>

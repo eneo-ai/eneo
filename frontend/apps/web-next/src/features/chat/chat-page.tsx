@@ -9,7 +9,7 @@ import { useCallback, useRef, useState, type ReactNode } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import { toastApiError } from "@/lib/api/toast";
+import type { Schema } from "@/lib/api/models";
 import { mapSessionMessages } from "@/lib/chat/map-session";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { ChatHeader, PartnerSwitcher, type HeaderMenuItem } from "./chat-header";
@@ -28,6 +28,8 @@ type ActiveConversation = {
   feedback: 1 | -1 | null;
   /** The first question was sent (the header then shows a title). */
   started: boolean;
+  /** Replaces a deleted conversation: its composer takes focus if focus was lost. */
+  focusComposer?: boolean;
 };
 
 function hasInsights(partner: ChatPartner): partner is ChatPartner & {
@@ -39,7 +41,7 @@ function hasInsights(partner: ChatPartner): partner is ChatPartner & {
 let conversationCounter = 0;
 
 /** A fresh, unsent conversation (a new remount key each time). */
-function newConversationState(): ActiveConversation {
+function newConversationState({ focusComposer = false } = {}): ActiveConversation {
   conversationCounter += 1;
   return {
     key: `new-${conversationCounter}`,
@@ -47,7 +49,21 @@ function newConversationState(): ActiveConversation {
     messages: [],
     title: null,
     feedback: null,
-    started: false
+    started: false,
+    focusComposer
+  };
+}
+
+/** A saved conversation as loaded from the backend. */
+function savedConversationState(session: Schema<"SessionPublic">): ActiveConversation {
+  return {
+    key: session.id,
+    sessionId: session.id,
+    messages: mapSessionMessages(session.messages),
+    // An untitled session has an empty name: the header then says "Ny konversation".
+    title: session.name || null,
+    feedback: session.feedback?.value ?? null,
+    started: session.messages.length > 0
   };
 }
 
@@ -56,7 +72,9 @@ function newConversationState(): ActiveConversation {
  * conversation so useChat state stays scoped) or the insights view, and one
  * right-hand panel at a time (history or an answer's activity). Owns session
  * selection and keeps `?session_id=` (or the route's session segment) in the
- * address bar.
+ * address bar. Opening another conversation replaces the current view at once
+ * (a loading state until it arrives), so nothing typed or streamed there can
+ * land in the wrong conversation.
  */
 export function ChatPage({
   partner,
@@ -99,6 +117,13 @@ export function ChatPage({
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
   const historyTrigger = useRef<HTMLElement | null>(null);
 
+  /** Opens a saved conversation: the current view goes until it has loaded. */
+  function openSession(sessionId: string) {
+    setPendingSessionId(sessionId);
+    setActive(null);
+    setActivity(null);
+  }
+
   // Follow the URL (SideNav "Senaste", "Ny konversation", back/forward) on the
   // same route. The page writes its own URL with replaceState too; those
   // changes already match what it shows, so they are no-ops here.
@@ -106,12 +131,12 @@ export function ChatPage({
     setFollowedUrlSession(urlSessionId);
     const showing = pendingSessionId ?? active?.sessionId ?? null;
     if (urlSessionId !== showing) {
-      setActivity(null);
       if (urlSessionId) {
-        setPendingSessionId(urlSessionId);
+        openSession(urlSessionId);
       } else {
         setPendingSessionId(null);
         setActive(newConversationState());
+        setActivity(null);
       }
     }
   }
@@ -127,7 +152,7 @@ export function ChatPage({
   // Loading a session (initial deep-link or history click) goes through
   // pendingSessionId; the mapped messages then become the active conversation.
   // Never served from cache: re-opening a conversation must show its latest
-  // messages, and a cached (fresh) result would skip the switch entirely.
+  // messages. Switching again cancels the earlier request (its signal).
   const detail = useQuery({
     queryKey: ["conversations", "detail", pendingSessionId],
     enabled: pendingSessionId !== null,
@@ -135,29 +160,20 @@ export function ChatPage({
     gcTime: 0,
     // A missing or forbidden session will not appear on retry; fail once, visibly.
     retry: false,
-    queryFn: async () => {
-      try {
-        const session = await unwrap(
-          browserApi.GET("/api/v1/conversations/{session_id}/", {
-            params: { path: { session_id: pendingSessionId! } }
-          })
-        );
-        setActive({
-          key: session.id,
-          sessionId: session.id,
-          messages: mapSessionMessages(session.messages),
-          title: session.name,
-          feedback: session.feedback?.value ?? null,
-          started: session.messages.length > 0
-        });
-        setPendingSessionId(null);
-        return session;
-      } catch (error) {
-        toastApiError(error, t);
-        throw error;
-      }
-    }
+    queryFn: ({ signal }) =>
+      unwrap(
+        browserApi.GET("/api/v1/conversations/{session_id}/", {
+          params: { path: { session_id: pendingSessionId! } },
+          signal
+        })
+      )
   });
+  // The result belongs to the session still asked for (the query key), so an
+  // earlier, slower response can never replace a later pick.
+  if (pendingSessionId !== null && detail.isSuccess) {
+    setPendingSessionId(null);
+    setActive(savedConversationState(detail.data));
+  }
 
   function updateUrl(sessionId: string | null) {
     // Shallow history update on purpose: router.replace would start an RSC
@@ -194,24 +210,33 @@ export function ChatPage({
   }
 
   function selectSession(sessionId: string) {
-    setPendingSessionId(sessionId);
-    setActivity(null);
-    updateUrl(sessionId);
+    const showing = pendingSessionId ?? active?.sessionId ?? null;
+    if (sessionId !== showing) {
+      openSession(sessionId);
+      updateUrl(sessionId);
+    }
     // On phones the panel is an overlay over the chat; close it so the picked
     // conversation is visible. On wider screens it sits inline, so keep it open.
     if (!historyInline) closeHistory();
   }
 
-  function newConversation() {
-    setActive(newConversationState());
+  /** Starts a fresh conversation (`focusComposer`: it replaces a deleted one). */
+  function startConversation(focusComposer: boolean) {
+    setActive(newConversationState({ focusComposer }));
     setActivity(null);
     updateUrl(null);
   }
+  const newConversation = () => startConversation(false);
 
   const onActivityChange = useCallback((next: ActivityState | null) => {
     if (next) setHistoryOpen(false);
     setActivity(next);
   }, []);
+
+  /** A conversation was rated (answer thumbs or the history menu). */
+  function rated(id: string, value: 1 | -1) {
+    setActive((current) => (current?.sessionId === id ? { ...current, feedback: value } : current));
+  }
 
   const { rename, remove } = useSessionMutations(partner, {
     onRenamed: (id, name) => {
@@ -220,7 +245,9 @@ export function ChatPage({
     },
     onDeleted: (id) => {
       setDeleting(null);
-      if (active?.sessionId === id) newConversation();
+      // The header menu that opened the dialog can go with the conversation's
+      // actions, so the fresh conversation takes focus if it was lost.
+      if (active?.sessionId === id) startConversation(true);
     }
   });
 
@@ -266,7 +293,8 @@ export function ChatPage({
         partner={partner}
         switcherItems={switcherItems}
         title={effectiveTab === "insights" ? t("insights") : title}
-        modelName={partner.completionModel?.name ?? null}
+        // The personal assistant picks its model in the composer.
+        modelName={modelSelector ? null : (partner.completionModel?.name ?? null)}
         view={insightPartner ? { value: effectiveTab, onChange: selectTab } : null}
         historyOpen={historyOpen}
         onToggleHistory={toggleHistory}
@@ -276,41 +304,54 @@ export function ChatPage({
       />
       <div className="flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {insightPartner && effectiveTab === "insights" ? (
+          {insightPartner && effectiveTab === "insights" && (
             <InsightsPanel partner={insightPartner} />
-          ) : active ? (
-            <ChatView
-              key={active.key}
-              partner={partner}
-              initialSessionId={active.sessionId}
-              initialMessages={active.messages}
-              initialFeedback={active.feedback}
-              modelSelector={modelSelector}
-              partnerToken={partnerToken}
-              onNewConversation={newConversation}
-              onStarted={() =>
-                setActive((current) => (current ? { ...current, started: true } : current))
-              }
-              onTitle={(name) =>
-                setActive((current) => (current ? { ...current, title: name } : current))
-              }
-              onSessionCreated={(id) => {
-                setActive((current) => (current ? { ...current, sessionId: id } : current));
-                updateUrl(id);
-              }}
-              activity={activity}
-              onActivityChange={onActivityChange}
-            />
-          ) : detail.isError ? (
-            <div className="flex flex-col items-center gap-3 p-6 text-center">
-              <p className="text-ax-error text-sm">{t("chat_conversation_load_failed")}</p>
-              <Button label={t("new_conversation")} variant="secondary" onClick={newConversation} />
-            </div>
-          ) : (
-            <div className="mx-auto w-full max-w-[712px] p-6">
-              <LoadingState rows={4} label={t("chat_loading_conversation")} />
-            </div>
           )}
+          {/* The conversation stays mounted behind Insikter, so switching back
+              keeps this visit's turns (and an answer still streaming). */}
+          <div hidden={effectiveTab !== "chat"} className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {active ? (
+              <ChatView
+                key={active.key}
+                partner={partner}
+                initialSessionId={active.sessionId}
+                initialMessages={active.messages}
+                focusComposerIfLost={active.focusComposer}
+                feedback={active.feedback}
+                onRated={rated}
+                modelSelector={modelSelector}
+                partnerToken={partnerToken}
+                onNewConversation={newConversation}
+                onStartedChange={(value) =>
+                  setActive((current) =>
+                    current && current.started !== value ? { ...current, started: value } : current
+                  )
+                }
+                onTitle={(name) =>
+                  setActive((current) => (current ? { ...current, title: name } : current))
+                }
+                onSessionCreated={(id) => {
+                  setActive((current) => (current ? { ...current, sessionId: id } : current));
+                  updateUrl(id);
+                }}
+                activity={activity}
+                onActivityChange={onActivityChange}
+              />
+            ) : detail.isError ? (
+              <div className="flex flex-col items-center gap-3 p-6 text-center">
+                <p className="text-ax-error text-sm">{t("chat_conversation_load_failed")}</p>
+                <Button
+                  label={t("new_conversation")}
+                  variant="secondary"
+                  onClick={newConversation}
+                />
+              </div>
+            ) : (
+              <div className="mx-auto w-full max-w-[712px] p-6">
+                <LoadingState rows={4} label={t("chat_loading_conversation")} />
+              </div>
+            )}
+          </div>
         </div>
         {historyOpen && (
           <HistoryAside
@@ -326,6 +367,7 @@ export function ChatPage({
                 current?.sessionId === id ? { ...current, title: name } : current
               )
             }
+            onRated={rated}
             onClose={closeHistory}
           />
         )}

@@ -4,32 +4,27 @@ import { useChat } from "@ai-sdk/react";
 import { Button } from "@astryxdesign/core/Button";
 import { ChatLayout, ChatMessageList, ChatSystemMessage } from "@astryxdesign/core/Chat";
 import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
+import { Selector } from "@astryxdesign/core/Selector";
 import { useQueryClient } from "@tanstack/react-query";
 import { CircleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
   type ReactNode
 } from "react";
-import { toast } from "sonner";
 import { useAppContext } from "@/components/providers/app-context";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
 import { browserApi } from "@/lib/api/browser";
 import { getErrorMessageForCode } from "@/lib/api/errors";
 import { createChatTransport, type ChatSendOptions } from "@/lib/chat/transport";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
+import { rescueFocus } from "@/lib/focus-rescue";
 import { deriveActivity } from "./activity";
 import { ActivityPanel, type ActivityTab } from "./activity-panel";
 import { ActivityTimings } from "./activity-timings";
@@ -40,7 +35,7 @@ import { ContextUsageBar } from "./context-usage-bar";
 import { ChatMcpServers, mcpConversationOptions } from "./mcp-controls";
 import { historyQueryKey, useSessionMutations } from "./session-actions";
 import { StartState } from "./start-state";
-import { useAttachments } from "./use-attachments";
+import { releasePreviews, useAttachments, type Attachment } from "./use-attachments";
 import { useToolChoices } from "./use-tool-choices";
 
 const NO_MENTION = "__none__";
@@ -54,19 +49,23 @@ type SentFiles = NonNullable<NonNullable<EneoUIMessage["metadata"]>["files"]>;
 /** Which answer's activity is shown, on which tab, and which source to focus. */
 export type ActivityState = { messageId: string; tab: ActivityTab; source: number | null };
 
-/** Height of an element, tracked with a ResizeObserver (0 where unsupported). */
-function useElementHeight(ref: React.RefObject<HTMLElement | null>) {
+/**
+ * Height of an element, tracked with a ResizeObserver (0 where unsupported).
+ * Returns a callback ref, so an element that mounts after the view (the
+ * docked composer appears with the first question) is observed too.
+ */
+function useElementHeight<T extends HTMLElement>() {
+  const [element, setElement] = useState<T | null>(null);
   const [height, setHeight] = useState(0);
   useEffect(() => {
-    const element = ref.current;
     if (!element || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(([entry]) => {
       if (entry) setHeight(Math.ceil(entry.contentRect.height));
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [ref]);
-  return height;
+  }, [element]);
+  return [setElement, height] as const;
 }
 
 /**
@@ -80,15 +79,24 @@ function quietLog(element: HTMLDivElement | null) {
   element?.setAttribute("aria-live", "off");
 }
 
+/**
+ * One conversation: the start state, then the message list with the docked
+ * composer. Remount it (a new `key`) for another conversation; a view that
+ * unmounts while an answer streams lets the stream finish (the answer is
+ * saved and the history refreshed) but no longer calls its callbacks, so it
+ * never changes the conversation shown after it.
+ */
 export function ChatView({
   partner,
   initialSessionId = null,
   initialMessages = [],
-  initialFeedback = null,
+  focusComposerIfLost = false,
+  feedback = null,
+  onRated,
   onSessionCreated,
   onNewConversation,
   onTitle,
-  onStarted,
+  onStartedChange,
   modelSelector,
   partnerToken,
   activity,
@@ -97,15 +105,25 @@ export function ChatView({
   partner: ChatPartner;
   initialSessionId?: string | null;
   initialMessages?: EneoUIMessage[];
-  /** The loaded session's feedback (session-level, shown on the latest answer). */
-  initialFeedback?: 1 | -1 | null;
+  /**
+   * Replaces a conversation that was just deleted: the control that deleted it
+   * may be gone, so the composer takes focus if focus was lost.
+   */
+  focusComposerIfLost?: boolean;
+  /** The session's feedback (session-level, shown on the latest answer). */
+  feedback?: 1 | -1 | null;
+  /** The answer thumbs rated the session. */
+  onRated?: (sessionId: string, value: 1 | -1) => void;
   onSessionCreated?: (sessionId: string) => void;
   /** Start a fresh conversation (offered when the context estimate overflows). */
   onNewConversation?: () => void;
   /** The generated title of a new conversation. */
   onTitle?: (title: string) => void;
-  /** The first question of a new conversation was sent. */
-  onStarted?: () => void;
+  /**
+   * The list got its first message (a question was sent) or lost it again (a
+   * first question that failed before it was sent returns to the composer).
+   */
+  onStartedChange?: (started: boolean) => void;
   /** Interactive model picker shown in the composer (default-assistant only). */
   modelSelector?: ReactNode;
   /** Start state for the personal assistant: the assistant selector inside the composer. */
@@ -136,12 +154,21 @@ export function ChatView({
   const [streamErrorCode, setStreamErrorCode] = useState<number | null>(null);
   const streamErrorCodeRef = useRef<number | null>(null);
   const streamStartedRef = useRef(false);
-  const pendingSendRef = useRef<{ text: string } | null>(null);
+  // The question on its way: its text and the attachments it took from the
+  // composer, put back if it fails before the answer starts.
+  const pendingSendRef = useRef<{ text: string; attachments: Attachment[] } | null>(null);
   // The last question and its files, for "Försök igen" after an error.
   const [lastQuestion, setLastQuestion] = useState<{ text: string; files: SentFiles } | null>(null);
   const isNewSession = useRef(initialSessionId === null);
-  const [feedbackValue, setFeedbackValue] = useState<1 | -1 | null>(initialFeedback);
-  const { feedback: feedbackMutation } = useSessionMutations(partner);
+  const { feedback: feedbackMutation } = useSessionMutations(partner, { onRated });
+  // False once the view unmounted: its stream may still be running.
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const [lockedTokens, setLockedTokens] = useState(() => {
     const last = initialMessages[initialMessages.length - 1];
     return {
@@ -166,6 +193,18 @@ export function ChatView({
     return { tokens, turns };
   });
 
+  // Focus hand-off: the first question swaps the centred start composer for
+  // the docked one (and a first question that fails before it is sent swaps
+  // back); keep keyboard focus in the composer (WCAG 2.4.3).
+  const startComposerRef = useRef<HTMLDivElement>(null);
+  const dockElement = useRef<HTMLDivElement | null>(null);
+  const dockTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const startTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const refocusComposer = useRef(false);
+  useEffect(() => {
+    if (focusComposerIfLost) rescueFocus(startTextareaRef.current);
+  }, [focusComposerIfLost]);
+
   const transport = useMemo(() => createChatTransport(), []);
   const { messages, sendMessage, setMessages, status, stop, error, clearError } =
     useChat<EneoUIMessage>({
@@ -178,10 +217,13 @@ export function ChatView({
       onData: (part) => {
         if (part.type === "data-session") {
           streamStartedRef.current = true;
+          // The question went through: its attachments won't come back.
+          const pending = pendingSendRef.current;
+          if (pending) releasePreviews(pending.attachments.splice(0));
           if (!sessionIdRef.current) {
             sessionIdRef.current = part.data.session_id;
             setSessionId(part.data.session_id);
-            onSessionCreated?.(part.data.session_id);
+            if (mounted.current) onSessionCreated?.(part.data.session_id);
           }
           setLiveAnswering(part.data.answering_assistant ?? null);
         }
@@ -189,7 +231,11 @@ export function ChatView({
           streamErrorCodeRef.current = part.data.code ?? null;
           setStreamErrorCode(part.data.code ?? null);
         }
-        if (part.type === "data-tool-approval" && part.data.status === "pending") {
+        if (
+          part.type === "data-tool-approval" &&
+          part.data.status === "pending" &&
+          mounted.current
+        ) {
           const names = part.data.tools.map((tool) => tool.title || tool.tool_name).join(", ");
           announce(t("chat_announce_tool_approval", { tools: names }));
         }
@@ -209,36 +255,55 @@ export function ChatView({
         }
       },
       onError: (failure) => {
+        const pending = pendingSendRef.current;
+        pendingSendRef.current = null;
+        if (!mounted.current) {
+          if (pending) releasePreviews(pending.attachments);
+          return;
+        }
         announce(
           getErrorMessageForCode(streamErrorCodeRef.current, t) ??
             (failure.message || t("request_failed"))
         );
-        const pending = pendingSendRef.current;
         if (!pending || streamStartedRef.current) return;
+        // Failed before the answer started: the question goes back to the
+        // composer, attachments included. A first question takes the view back
+        // to the start state; keep focus in the composer across that swap.
         setInput((current) => (current.trim() ? current : pending.text));
+        attachments.restore(pending.attachments);
         setMessages((current) => {
           const last = current.at(-1);
           if (
             last?.role === "user" &&
             last.parts.some((part) => part.type === "text" && part.text === pending.text)
           ) {
+            // useChat applies this at once, before the view re-renders.
+            if (current.length === 1) {
+              refocusComposer.current =
+                dockElement.current?.contains(document.activeElement ?? null) ?? false;
+            }
             return current.slice(0, -1);
           }
           return current;
         });
       },
       onFinish: async ({ isAbort, isError }) => {
+        const pending = pendingSendRef.current;
         pendingSendRef.current = null;
-        if (isAbort) announce(t("chat_announce_stopped"));
-        else if (!isError) announce(t("chat_announce_answer_ready"));
-        // Auto-title after the first exchange of a fresh conversation.
+        if (pending) releasePreviews(pending.attachments);
+        if (mounted.current) {
+          if (isAbort) announce(t("chat_announce_stopped"));
+          else if (!isError) announce(t("chat_announce_answer_ready"));
+        }
+        // Auto-title after the first exchange of a fresh conversation (also when
+        // the view has gone: the history then lists it under its title).
         if (isNewSession.current && sessionIdRef.current) {
           isNewSession.current = false;
           try {
             const { data } = await browserApi.POST("/api/v1/conversations/{session_id}/title/", {
               params: { path: { session_id: sessionIdRef.current } }
             });
-            if (data?.name) onTitle?.(data.name);
+            if (data?.name && mounted.current) onTitle?.(data.name);
           } catch {
             // Title generation is a nicety; ignore failures.
           }
@@ -273,21 +338,20 @@ export function ChatView({
     fileInput.current?.click();
   }, []);
 
-  // Focus hand-off: sending from the centred start composer swaps in the
-  // docked one; keep keyboard focus in the composer (WCAG 2.4.3).
-  const startComposerRef = useRef<HTMLDivElement>(null);
-  const dockTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const startTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const refocusDock = useRef(false);
   const started = messages.length > 0;
+  const reportStarted = useEffectEvent((value: boolean) => onStartedChange?.(value));
   useEffect(() => {
-    if (started && refocusDock.current) {
-      refocusDock.current = false;
-      dockTextareaRef.current?.focus();
+    reportStarted(started);
+    if (refocusComposer.current) {
+      refocusComposer.current = false;
+      (started ? dockTextareaRef : startTextareaRef).current?.focus();
     }
   }, [started]);
 
-  /** Sends a question; `resendFiles` repeats a failed question's attachments. */
+  /**
+   * Sends a question; `resendFiles` repeats a failed question's attachments
+   * ("Försök igen"), which leave the composer if they were put back there.
+   */
   function sendQuestion(text: string, resendFiles?: SentFiles) {
     if (!text || busy || attachments.uploading || usage.willExceedContext) return;
     // Uploaded attachments travel as file ids; the metadata renders them as
@@ -310,13 +374,17 @@ export function ChatView({
     setStreamErrorCode(null);
     streamErrorCodeRef.current = null;
     streamStartedRef.current = false;
-    pendingSendRef.current = { text };
+    // Previews of an earlier question that never started are no longer needed.
+    if (pendingSendRef.current) releasePreviews(pendingSendRef.current.attachments);
+    pendingSendRef.current = {
+      text,
+      attachments: attachments.detach(new Set(files.map((file) => file.id)))
+    };
     setLastQuestion({ text, files });
     if (!started) {
-      refocusDock.current = Boolean(
+      refocusComposer.current = Boolean(
         startComposerRef.current?.contains(document.activeElement ?? null)
       );
-      onStarted?.();
     }
 
     const mention =
@@ -349,8 +417,8 @@ export function ChatView({
 
     timings.markSent();
     void sendMessage({ text, metadata: { files, createdAt: isoNow() } }, { body });
-    setInput("");
-    attachments.clear();
+    // A retry leaves the composer alone unless it holds the retried question.
+    setInput((current) => (resendFiles && current.trim() !== text ? current : ""));
     setMentionId(NO_MENTION);
   }
 
@@ -389,15 +457,7 @@ export function ChatView({
 
   const setFeedback = (value: 1 | -1) => {
     if (!sessionIdRef.current) return;
-    feedbackMutation.mutate(
-      { id: sessionIdRef.current, value },
-      {
-        onSuccess: () => {
-          setFeedbackValue(value);
-          toast.success(t("chat_feedback_thanks"));
-        }
-      }
-    );
+    feedbackMutation.mutate({ id: sessionIdRef.current, value });
   };
 
   const errorText = error
@@ -407,19 +467,21 @@ export function ChatView({
   const assistantIdentity = { id: partner.id, name: partner.name, iconId: partner.iconId };
   const mention =
     partner.type === "group-chat" && (partner.mentionableAssistants?.length ?? 0) > 0 ? (
-      <Select value={mentionId} onValueChange={setMentionId}>
-        <SelectTrigger size="sm" className="h-8 w-40 rounded-full" aria-label={t("mention")}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={NO_MENTION}>{t("mentions")}</SelectItem>
-          {partner.mentionableAssistants!.map((assistant) => (
-            <SelectItem key={assistant.id} value={assistant.id}>
-              @{assistant.handle}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <Selector
+        label={t("mention")}
+        isLabelHidden
+        variant="ghost"
+        size="sm"
+        value={mentionId}
+        onChange={setMentionId}
+        options={[
+          { value: NO_MENTION, label: t("mentions") },
+          ...partner.mentionableAssistants!.map((assistant) => ({
+            value: assistant.id,
+            label: `@${assistant.handle}`
+          }))
+        ]}
+      />
     ) : null;
 
   const tools =
@@ -463,8 +525,14 @@ export function ChatView({
     )
   };
 
-  const dockRef = useRef<HTMLDivElement>(null);
-  const dockHeight = useElementHeight(dockRef);
+  const [observeDock, dockHeight] = useElementHeight<HTMLDivElement>();
+  const dockRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      dockElement.current = element;
+      observeDock(element);
+    },
+    [observeDock]
+  );
 
   const fileInputElement =
     attachments.maxFiles !== 0 ? (
@@ -569,7 +637,7 @@ export function ChatView({
                   feedback={
                     messageIndex === lastAssistantIndex && sessionId && !streaming
                       ? {
-                          value: feedbackValue,
+                          value: feedback,
                           pending: feedbackMutation.isPending,
                           onChange: setFeedback
                         }

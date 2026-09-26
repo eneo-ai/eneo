@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
-import { ChatHeader, OPEN_NAV_EVENT } from "./chat-header";
+import { OPEN_NAV_EVENT } from "@/components/shell/routes";
+import { ChatHeader } from "./chat-header";
 import type { ChatPartnerSwitcherItem } from "./partner-switcher";
 import { ChatTestProviders, installDomPolyfills } from "./testing";
+
+const router = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => router }));
 
 beforeAll(() => installDomPolyfills());
 afterEach(cleanup);
@@ -65,6 +69,31 @@ describe("ChatHeader", () => {
     expect(
       screen.getAllByRole("button", { name: /byt assistent: upphandlingsassistenten/i }).length
     ).toBeGreaterThan(0);
+  });
+
+  it("shows a fixed model under the partner's name on every width", () => {
+    renderHeader();
+    // Desktop header and phone header (only one is displayed).
+    expect(screen.getAllByText("Upphandling · Claude Haiku 4.5")).toHaveLength(2);
+  });
+
+  it("switches assistant from a menu that marks the current one as selected", async () => {
+    renderHeader();
+    const [trigger] = screen.getAllByRole("button", {
+      name: "Byt assistent: Upphandlingsassistenten"
+    });
+    expect(trigger!.getAttribute("aria-haspopup")).toBe("menu");
+    fireEvent.click(trigger!);
+    const menu = document.getElementById(trigger!.getAttribute("aria-controls") ?? "")!;
+    const group = within(menu).getByRole("group", { name: "Välj en assistent" });
+    const current = within(group).getByRole("menuitemradio", { name: /Upphandlingsassistenten/ });
+    expect(current.getAttribute("aria-checked")).toBe("true");
+    const personal = within(group).getByRole("menuitemradio", { name: /Personlig assistent/ });
+    expect(personal.getAttribute("aria-checked")).toBe("false");
+    await expectNoAxeViolations(menu);
+
+    fireEvent.click(personal);
+    expect(router.push).toHaveBeenCalledWith("/spaces/s/chat");
   });
 
   it("renders no heading in the start state (the greeting is the h1 there)", () => {

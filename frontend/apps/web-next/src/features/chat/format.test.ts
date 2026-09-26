@@ -1,14 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { firstNameOf, formatFileSize, formatSeconds, greetingFor, historyBucket } from "./format";
+import { firstNameOf, formatSeconds, greetingFor, historyBucket } from "./format";
 import { groupSessions } from "./history-panel";
 
 describe("chat formatting", () => {
-  it("formats durations and file sizes the Swedish way", () => {
+  it("formats durations the Swedish way", () => {
     expect(formatSeconds(14_600, "sv")).toBe("14,6 s");
     expect(formatSeconds(600, "en")).toBe("0.6 s");
-    expect(formatFileSize(188_416, "sv")).toBe("184 kB");
-    expect(formatFileSize(1_258_291, "sv")).toBe("1,2 MB");
-    expect(formatFileSize(0, "sv")).toBe("0 B");
   });
 
   it("greets by time of day", () => {

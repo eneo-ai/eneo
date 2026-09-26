@@ -3,6 +3,8 @@
 import { ChatMessage as AxChatMessage, ChatMessageBubble } from "@astryxdesign/core/Chat";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
+import { Skeleton } from "@astryxdesign/core/Skeleton";
+import { Spinner } from "@astryxdesign/core/Spinner";
 import { Timestamp } from "@astryxdesign/core/Timestamp";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { Copy, ThumbsDown, ThumbsUp } from "lucide-react";
@@ -22,7 +24,7 @@ import { useAppContext } from "@/components/providers/app-context";
 import { resolveInrefs, trimPartialInref } from "@/lib/chat/inref";
 import type { EneoUIMessage, KnowledgeOrigin } from "@/lib/chat/types";
 
-import { deriveActivity } from "./activity";
+import { deriveActivity, modelName } from "./activity";
 import type { ActivityTab } from "./activity-panel";
 import { ActivityPill } from "./activity-pill";
 import type { TurnDurations } from "./activity-timings";
@@ -94,26 +96,32 @@ function UserMessage({ message }: { message: EneoUIMessage }) {
   );
 }
 
-/** "Assistenten tänker…" before any step or text has streamed in. */
+/**
+ * "Assistenten tänker…" before any step or text has streamed in. Not a live
+ * region: the view announces the finished answer instead (the spinner's own
+ * status role is hidden).
+ */
 function ThinkingStatus() {
   const t = useTranslations();
   return (
     <span className="bg-ax-accent-muted text-ax-text-accent inline-flex min-h-[30px] items-center gap-1.5 self-start rounded-full ps-2 pe-3 text-[12.5px] font-semibold">
-      <span
-        aria-hidden="true"
-        className="border-ax-accent size-3.5 animate-spin rounded-full border-2 border-t-transparent"
-      />
-      {t("assistant_is_thinking")}…
+      <span aria-hidden="true" className="flex">
+        <Spinner size="md" shade="inherit" />
+      </span>
+      {t("chat_assistant_thinking")}
     </span>
   );
 }
 
+const SKELETON_LINES = ["100%", "88%", "56%"];
+
+/** Placeholder lines where the answer will stream in (decorative). */
 function AnswerSkeleton() {
   return (
     <div aria-hidden="true" className="flex w-full flex-col gap-[9px] pt-0.5">
-      <span className="bg-ax-muted rounded-ax-inner h-[11px] w-full animate-pulse" />
-      <span className="bg-ax-muted rounded-ax-inner h-[11px] w-[88%] animate-pulse" />
-      <span className="bg-ax-muted rounded-ax-inner h-[11px] w-[56%] animate-pulse" />
+      {SKELETON_LINES.map((width, index) => (
+        <Skeleton key={width} index={index} width={width} height={11} radius={1} />
+      ))}
     </div>
   );
 }
@@ -153,18 +161,6 @@ function AssistantName({
       )}
     </span>
   );
-}
-
-function modelOf(message: EneoUIMessage): string | null {
-  const model =
-    message.metadata?.completionModel ??
-    (() => {
-      const session = message.parts.find((part) => part.type === "data-session");
-      return session?.type === "data-session" ? session.data.completion_model : null;
-    })();
-  if (!model) return null;
-  const nickname = typeof model.nickname === "string" && model.nickname ? model.nickname : null;
-  return nickname ?? model.name ?? null;
 }
 
 function AnswerActions({
@@ -318,7 +314,7 @@ function AssistantMessage({
       name={
         <AssistantName
           assistant={assistant}
-          model={modelOf(message)}
+          model={modelName(message)}
           handle={showResponseLabel && answering ? answering.handle : null}
         />
       }
@@ -340,7 +336,12 @@ function AssistantMessage({
             if (!part.text.trim()) return null;
             const streamingThis = isStreaming && part === textParts.at(-1);
             return (
-              <CitationSourcesProvider key={index} value={sources} onOpenSource={openSource}>
+              <CitationSourcesProvider
+                key={index}
+                value={sources}
+                prefix={message.id}
+                onOpenSource={openSource}
+              >
                 <MessageResponse
                   className="font-voice text-ax-text text-base leading-[1.62]"
                   remarkPlugins={remarkPlugins}
@@ -371,7 +372,7 @@ function AssistantMessage({
           <AnswerActions
             text={text}
             hasActivity={activity.hasActivity}
-            onShowActivity={(trigger) => onActivityToggle?.(trigger)}
+            onShowActivity={(trigger) => onActivityToggle?.(trigger, { tab: "steps" })}
             feedback={feedback}
             timestamp={message.metadata?.createdAt ?? durations?.finishedAt ?? null}
           />
