@@ -1580,6 +1580,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/conversations/recent/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Recent Conversations
+     * @description List the caller's own latest conversations across the personal assistant, space assistants and group chats they can still open, latest activity first.
+     */
+    get: operations["list_recent_conversations_api_v1_conversations_recent__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/conversations/{session_id}/": {
     parameters: {
       query?: never;
@@ -16214,6 +16234,19 @@ export interface components {
        */
       readonly count: number;
     };
+    /** PaginatedResponse[RecentConversation] */
+    PaginatedResponse_RecentConversation_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["RecentConversation"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** PaginatedResponse[RoleAssignmentPublic] */
     PaginatedResponse_RoleAssignmentPublic_: {
       /**
@@ -17430,6 +17463,69 @@ export interface components {
       default_effort: string | null;
       /** Allow User Override */
       allow_user_override: boolean;
+    };
+    /**
+     * RecentConversation
+     * @description One of the caller's own conversations, with what it takes to show and open it.
+     */
+    RecentConversation: {
+      /**
+       * Id
+       * Format: uuid
+       * @description The conversation (session) id.
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Last Activity At
+       * Format: date-time
+       * @description When the latest question was asked; the creation time for a conversation without questions.
+       */
+      last_activity_at: string;
+      partner: components["schemas"]["RecentConversationPartner"];
+      space: components["schemas"]["RecentConversationSpace"];
+    };
+    /**
+     * RecentConversationPartner
+     * @description The assistant or group chat a recent conversation is held with.
+     */
+    RecentConversationPartner: {
+      /**
+       * Type
+       * @description `default-assistant` is the space's own assistant; in the personal space that is the personal chat.
+       * @enum {string}
+       */
+      type: "assistant" | "default-assistant" | "group-chat";
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+    };
+    /**
+     * RecentConversationSpace
+     * @description The space the conversation's assistant or group chat belongs to.
+     */
+    RecentConversationSpace: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Personal */
+      personal: boolean;
+      /** Organization */
+      organization: boolean;
     };
     /**
      * ResourcePermission
@@ -29043,6 +29139,47 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_recent_conversations_api_v1_conversations_recent__get: {
+    parameters: {
+      query?: {
+        /** @description How many conversations to return. */
+        limit?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_RecentConversation_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
