@@ -412,7 +412,9 @@ jobs:
 
       - name: Build frontend
         if: matrix.task == 'build'
-        run: bun run build
+        # The legacy web image ships only apps/web. web-next has its own job
+        # with the server-side environment its production build requires.
+        run: bun run --filter '@eneo/web' build
         env:
           # The Svelte production build exceeds Node's default heap on GitHub-hosted runners.
           NODE_OPTIONS: --max-old-space-size=8192
@@ -859,6 +861,7 @@ jobs:
       - frontend
       - frontend-e2e
       - frontend-web-next
+      - frontend-web-next-e2e
       - schema-drift
       - docker-builds
 
@@ -876,6 +879,7 @@ jobs:
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           FRONTEND_E2E_RESULT: ${{ needs.frontend-e2e.result }}
           FRONTEND_WEB_NEXT_RESULT: ${{ needs.frontend-web-next.result }}
+          FRONTEND_WEB_NEXT_E2E_RESULT: ${{ needs.frontend-web-next-e2e.result }}
           SCHEMA_DRIFT_RESULT: ${{ needs.schema-drift.result }}
           DOCKER_BUILDS_RESULT: ${{ needs.docker-builds.result }}
         run: |
@@ -907,6 +911,7 @@ jobs:
           check_result "Frontend" "$FRONTEND_RESULT"
           check_result "Frontend E2E" "$FRONTEND_E2E_RESULT"
           check_result "Frontend (web-next)" "$FRONTEND_WEB_NEXT_RESULT"
+          check_result "Frontend E2E (web-next)" "$FRONTEND_WEB_NEXT_E2E_RESULT"
           check_result "Schema drift" "$SCHEMA_DRIFT_RESULT"
           check_result "Docker builds" "$DOCKER_BUILDS_RESULT"
 
