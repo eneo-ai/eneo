@@ -4,10 +4,13 @@ on:
   push:
     branches:
       - develop
+      - refactor/web-next
+      - feat/web-next-astryx
       - 'release/**'
   pull_request:
     branches:
       - develop
+      - refactor/web-next
       - 'release/**'
   # Merge queue candidates (develop + queued PRs). Every scoped job runs in
   # full here (their conditions only scope pull_request events), and the
