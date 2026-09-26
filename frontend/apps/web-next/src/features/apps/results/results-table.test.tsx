@@ -30,6 +30,13 @@ import { ResultsTable } from "./results-table";
 afterEach(cleanup);
 
 describe("ResultsTable", () => {
+  it("takes its name from the app page's Resultat tab", async () => {
+    renderInApp(<ResultsTable appId="app-1" resultHref={(id) => `/apps/app-1/results/${id}`} />);
+
+    const table = await screen.findByRole("table", { name: "Resultat" });
+    expect(within(table).getByText(/Sammanfatta protokollet/)).toBeTruthy();
+  });
+
   it("names each run's menu by the time its row shows", async () => {
     renderInApp(<ResultsTable appId="app-1" resultHref={(id) => `/apps/app-1/results/${id}`} />);
 

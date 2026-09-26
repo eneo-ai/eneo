@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
+import { useId } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -97,6 +98,7 @@ function UsageTab({
   open: boolean;
   t: ReturnType<typeof useTranslations>;
 }) {
+  const titleId = useId();
   const { data, isPending } = useQuery({
     ...modelUsageDetailsQueryOptions(browserApi, modelId, kind),
     enabled: open
@@ -108,9 +110,11 @@ function UsageTab({
 
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-muted-foreground text-xs">{t("model_usage_title")}</p>
+      <p id={titleId} className="text-muted-foreground text-xs">
+        {t("model_usage_title")}
+      </p>
       <div className="overflow-x-auto">
-        <Table>
+        <Table aria-labelledby={titleId}>
           <TableHeader>
             <TableRow>
               <TableHead>{t("name")}</TableHead>

@@ -134,7 +134,8 @@ export function ResultsTable({
 
   return (
     <div className="overflow-x-auto">
-      <Table>
+      {/* The runs fill the app page's "Resultat" tab, so the table takes its name. */}
+      <Table aria-label={t("results")}>
         <TableHeader>
           <TableRow>
             <TableHead>{t("name")}</TableHead>
