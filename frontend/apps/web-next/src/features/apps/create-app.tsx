@@ -73,7 +73,11 @@ export function CreateAppButton() {
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button size="icon" className="rounded-l-none border-l" aria-label={t("actions")}>
+              <Button
+                size="icon"
+                className="rounded-l-none border-l"
+                aria-label={t("ui_more_ways_to_create")}
+              >
                 <ChevronDown className="size-4" />
               </Button>
             </DropdownMenuTrigger>

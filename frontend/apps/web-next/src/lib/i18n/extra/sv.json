@@ -1379,5 +1379,6 @@
   "ui_more_actions_for": "Fler åtgärder för {name}",
   "insights_session_from": "Session från {time}",
   "provider_status_attention_title": "{count, plural, one {En leverantör behöver åtgärdas} other {# leverantörer behöver åtgärdas}}",
-  "provider_status_attention_hint": "Gå till leverantören för att testa anslutningen igen. Nyckel och utgångsdatum byter du under Redigera leverantör i leverantörens meny."
+  "provider_status_attention_hint": "Gå till leverantören för att testa anslutningen igen. Nyckel och utgångsdatum byter du under Redigera leverantör i leverantörens meny.",
+  "ui_more_ways_to_create": "Fler sätt att skapa"
 }
