@@ -104,6 +104,11 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
   container padding for them (`scroll-pt-*`, `scroll-pb-*` equal to the sticky
   element's height) so Tab and `focus()` scroll the element into the visible
   part. Check by tabbing through a long list with the sticky UI present.
+- Toasts move themselves instead: while they would cover the focused element
+  they rise just above it (`src/components/ui/toast-lift.ts`). A docked group
+  that should stay clear as a whole while focus is anywhere in it (the chat
+  composer) carries `data-clear-of-toasts`. The page scans check it with a
+  persistent error toast.
 
 ### 4. Target size (2.5.8)
 

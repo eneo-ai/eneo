@@ -167,7 +167,9 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
 - **Toasts**: only through `src/lib/toast.ts` (`no-restricted-imports` blocks
   `sonner` elsewhere). Errors and warnings don't time out; every toast has a
   close button; success and info close after 6 s. Sonner's stylesheet is
-  static (see CSP).
+  static (see CSP). The stack rises clear of the focused element
+  (`src/components/ui/toast-lift.ts`, WCAG 2.4.11); put `data-clear-of-toasts`
+  on a docked group (like the chat composer) that should stay clear as a whole.
 
 ## Styling
 
