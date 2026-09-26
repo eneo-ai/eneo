@@ -11,6 +11,7 @@ import * as React from "react";
 
 import { Button } from "@/components/ui/button";
 import { useReturnFocus } from "@/components/ui/dialog-focus";
+import { reportOpenModal } from "@/components/ui/open-modals";
 import { PortalContainerContext } from "@/components/ui/portal-container";
 import { cn } from "@/lib/utils";
 
@@ -96,13 +97,18 @@ function Dialog({ open: openProp, defaultOpen = false, onOpenChange, children }:
 
 type ButtonLikeProps = React.ComponentProps<"button"> & { asChild?: boolean };
 
+/*
+ * Trigger and Close are type="button" like Radix's, also with asChild (the
+ * child's own `type` wins): inside a <form> a plain <button> submits it.
+ */
+
 function DialogTrigger({ asChild = false, onClick, ref, ...props }: ButtonLikeProps) {
   const { open, setOpen, contentId, triggerRef } = useDialogContext("DialogTrigger");
   const mergedRef = useMergedRefs(ref, triggerRef);
   const Comp = asChild ? Slot.Root : "button";
   return (
     <Comp
-      type={asChild ? undefined : "button"}
+      type="button"
       aria-haspopup="dialog"
       aria-expanded={open}
       aria-controls={open ? contentId : undefined}
@@ -123,7 +129,7 @@ function DialogClose({ asChild = false, onClick, ...props }: ButtonLikeProps) {
   const Comp = asChild ? Slot.Root : "button";
   return (
     <Comp
-      type={asChild ? undefined : "button"}
+      type="button"
       data-slot="dialog-close"
       {...props}
       onClick={(event: React.MouseEvent<HTMLButtonElement>) => {
@@ -148,23 +154,38 @@ type DialogSurfaceProps = {
 
 /**
  * The <dialog> behind DialogContent and AlertDialogContent. Mounted on first
- * open (in <body>, like Radix's portal) and kept until the root unmounts, so
- * Astryx can close it and return focus; the children only exist while open.
+ * open (in <body>, like Radix's portal) and kept after it closes, so Astryx
+ * can close it and return focus; the children only exist while open.
+ *
+ * Each opening mounts a fresh Astryx Dialog (keyed by an open count): Astryx
+ * orders its Escape layer stack by first registration, so a dialog kept from
+ * an earlier opening would stay below dialogs opened since and one Escape
+ * would close the wrong one.
  */
 export function DialogSurface({ className, children, role, closeButton }: DialogSurfaceProps) {
   const t = useTranslations();
   const { open, setOpen, contentId, titleId, descriptionId, hasDescription, triggerRef } =
     useDialogContext(role === "alertdialog" ? "AlertDialogContent" : "DialogContent");
   const [dialogElement, setDialogElement] = React.useState<HTMLDialogElement | null>(null);
-  const [hasOpened, setHasOpened] = React.useState(open);
-  if (open && !hasOpened) setHasOpened(true);
+  const [openings, setOpenings] = React.useState(open ? 1 : 0);
+  const [wasOpen, setWasOpen] = React.useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setOpenings((count) => count + 1);
+  }
   useReturnFocus(open, triggerRef);
 
-  if (!hasOpened) return null;
+  // Toasts render inside the top-most open modal (sonner.tsx).
+  React.useEffect(() => {
+    if (open && dialogElement) return reportOpenModal(dialogElement);
+  }, [open, dialogElement]);
+
+  if (openings === 0) return null;
 
   return (
     <Portal.Root>
       <AstryxDialog
+        key={openings}
         ref={setDialogElement}
         id={contentId}
         isOpen={open}
@@ -242,7 +263,8 @@ function DialogFooter({
   return (
     <div
       data-slot="dialog-footer"
-      className={cn("flex flex-col-reverse gap-2 sm:flex-row sm:justify-end", className)}
+      // Stacked below sm in DOM order: focus order follows the visual order.
+      className={cn("flex flex-col gap-2 sm:flex-row sm:justify-end", className)}
       {...props}
     >
       {children}

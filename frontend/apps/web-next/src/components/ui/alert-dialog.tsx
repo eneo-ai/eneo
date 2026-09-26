@@ -46,11 +46,15 @@ function AlertDialogContent({
 
 type AlertDialogButtonProps = React.ComponentProps<typeof Button>;
 
-/** Confirms and closes (unless its click handler calls `preventDefault()`). */
+/**
+ * Confirms and closes (unless its click handler calls `preventDefault()`).
+ * type="button" like Radix's, so it never submits a surrounding form.
+ */
 function AlertDialogAction({ onClick, ...props }: AlertDialogButtonProps) {
   const { setOpen } = useDialogContext("AlertDialogAction");
   return (
     <Button
+      type="button"
       data-slot="alert-dialog-action"
       {...props}
       onClick={(event) => {
@@ -61,11 +65,12 @@ function AlertDialogAction({ onClick, ...props }: AlertDialogButtonProps) {
   );
 }
 
-/** Closes without acting; focused when the dialog opens. */
+/** Closes without acting (never submits a form); focused when the dialog opens. */
 function AlertDialogCancel({ variant = "outline", onClick, ...props }: AlertDialogButtonProps) {
   const { setOpen } = useDialogContext("AlertDialogCancel");
   return (
     <Button
+      type="button"
       data-slot="alert-dialog-cancel"
       data-autofocus=""
       variant={variant}
