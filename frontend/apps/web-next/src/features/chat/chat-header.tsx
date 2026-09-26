@@ -14,6 +14,7 @@ import { useTranslations } from "next-intl";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { iconUrl } from "@/components/composites/icon-field";
 import { OPEN_NAV_EVENT } from "@/components/shell/routes";
+import { useOwnMobileHeader } from "@/components/shell/shell-context";
 import type { ChatPartner } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import type { ChatPartnerSwitcherItem } from "./partner-switcher";
@@ -271,6 +272,9 @@ export function ChatHeader({
   menuItems,
   minimal = false
 }: ChatHeaderProps) {
+  // The chat header carries the phone menu button, so the shell hides its own
+  // top bar while this header is mounted.
+  useOwnMobileHeader();
   const t = useTranslations();
   const subtitle = [partner.spaceName, modelName].filter(Boolean).join(" · ") || null;
   const mobileMenu: HeaderMenuItem[] = [
