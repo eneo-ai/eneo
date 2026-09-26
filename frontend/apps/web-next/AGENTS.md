@@ -299,8 +299,15 @@ production build shows these violations. Never loosen the policy.
   (same keys in both; natural Swedish; append a block with your feature's
   prefix), then run `bun run i18n:convert`. To reword an apps/web string for
   web-next, add its key to `extra/`. Reuse existing keys when they fit.
-- `bun run lint` (`scripts/check-i18n.mjs`) checks that `sv` and `en` have the
-  same keys and that literal `t("key")` calls resolve.
+- `bun run lint` (`scripts/check-i18n.mjs`) fails when `messages/*` is not
+  what the converter writes, when `sv` and `en` have different keys, or when a
+  literal `t("key")` is missing.
+- So a change to apps/web's catalogs (e.g. merging `develop`) fails lint until
+  someone runs the converter. That's on purpose: the check can't tell an
+  apps/web change from a hand edit. Review the converter's diff: apps/web's new
+  wording replaces ours unless the key is in `extra/`, and keys apps/web
+  deleted are dropped. Lint lists those first ("It would drop these"): move the
+  ones web-next still uses to `extra/` before you run it.
 - Astryx's own strings (aria labels, pagination, …) come from its Swedish
   catalog through the provider; don't translate them yourself.
 

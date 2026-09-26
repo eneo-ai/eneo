@@ -1,6 +1,7 @@
 /**
  * How web-next's message catalogs are built, shared by
- * convert-paraglide-messages.mjs (writes them) and check-i18n.mjs (reads them).
+ * convert-paraglide-messages.mjs (writes them) and check-i18n.mjs (checks that
+ * the committed ones are what a run writes).
  *
  * src/lib/i18n/messages/{locale}.json is the SvelteKit app's Paraglide catalog
  * (apps/web/messages/{locale}.json) with src/lib/i18n/extra/{locale}.json
@@ -54,7 +55,7 @@ export function readCatalog(file) {
  * The catalog a converter run writes for one locale. Paraglide stores flat
  * key → string maps with `{param}` interpolation, which is already valid ICU
  * for the simple cases; messages that need manual review are copied through
- * unchanged and returned in `flagged`.
+ * unchanged and returned in `flagged`, unless extra replaces them.
  */
 function buildMessages(source, extra) {
   const messages = {};
@@ -63,6 +64,7 @@ function buildMessages(source, extra) {
   for (const [key, value] of Object.entries(source)) {
     if (key === "$schema") continue;
     messages[key] = value;
+    if (Object.hasOwn(extra, key)) continue;
 
     if (typeof value !== "string") {
       flagged.push(`${key}: non-string value (Paraglide variant/plural), copied as-is`);
@@ -73,6 +75,9 @@ function buildMessages(source, extra) {
     }
     if (/'[{}]/.test(value)) {
       flagged.push(`${key}: apostrophe before "{" or "}" (ICU escape, needs '' doubling)`);
+    }
+    if (/<\/?[A-Za-z]/.test(value)) {
+      flagged.push(`${key}: "<" before a letter (markup or <placeholder>; ICU parses tags)`);
     }
   }
 
@@ -86,6 +91,18 @@ export function buildLocale(locale) {
   const source = JSON.parse(readFileSync(paths.source, "utf8"));
   const extra = readCatalog(paths.extra);
   return { paths, extra, ...buildMessages(source, extra) };
+}
+
+/** What writing `expected` over `current` would change. */
+export function diffCatalogs(current, expected) {
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  return {
+    dropped: Object.keys(current).filter((key) => !Object.hasOwn(expected, key)),
+    changed: Object.keys(current).filter(
+      (key) => Object.hasOwn(expected, key) && !same(current[key], expected[key])
+    ),
+    added: Object.keys(expected).filter((key) => !Object.hasOwn(current, key))
+  };
 }
 
 export function serializeCatalog(catalog) {
