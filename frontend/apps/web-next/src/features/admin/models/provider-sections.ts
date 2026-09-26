@@ -3,17 +3,10 @@ import {
   formatCostPerMinute,
   getDeprecationStatus
 } from "@/features/ai-models/format-model-stats";
-import type { ModelProvider } from "./model-providers";
+import { isApiKeyRequired, type ModelProvider, type ProviderCapabilities } from "./model-providers";
 import { type AdminModel, type ModelKind, type ModelsPresentation, modelLabel } from "./models";
 
 export type KindedModel = { model: AdminModel; kind: ModelKind };
-
-/**
- * Provider types whose API key is optional (self-hosted endpoints). Mirrors the
- * backend's `PROVIDER_FIELD_DEFINITIONS` (backend/src/eneo/tenants/
- * provider_field_config.py): every other provider type requires `api_key`.
- */
-const API_KEY_OPTIONAL_PROVIDERS = new Set(["hosted_vllm", "vllm"]);
 
 /**
  * What the provider data says about a provider: switched off by an admin, a
@@ -46,11 +39,21 @@ function flatten(presentation: ModelsPresentation): KindedModel[] {
   ];
 }
 
-export function providerStatus(provider: ModelProvider): ProviderStatus {
+/**
+ * A required API key is missing. Whether the key is required comes from the
+ * backend's field definitions (the capabilities endpoint): self-hosted vLLM,
+ * for one, needs none.
+ */
+function needsKey(provider: ModelProvider, capabilities: ProviderCapabilities): boolean {
+  return !provider.masked_api_key && isApiKeyRequired(capabilities, provider.provider_type);
+}
+
+export function providerStatus(
+  provider: ModelProvider,
+  capabilities: ProviderCapabilities
+): ProviderStatus {
   if (!provider.is_active) return "inactive";
-  const needsKey =
-    !provider.masked_api_key && !API_KEY_OPTIONAL_PROVIDERS.has(provider.provider_type);
-  return needsKey ? "missing_key" : "ready";
+  return needsKey(provider, capabilities) ? "missing_key" : "ready";
 }
 
 /**
@@ -61,7 +64,8 @@ export function providerStatus(provider: ModelProvider): ProviderStatus {
  */
 export function buildProviderSections(
   presentation: ModelsPresentation,
-  providers: ModelProvider[]
+  providers: ModelProvider[],
+  capabilities: ProviderCapabilities
 ): ProviderSection[] {
   const byProvider = new Map<string, KindedModel[]>();
   for (const entry of flatten(presentation)) {
@@ -83,8 +87,8 @@ export function buildProviderSections(
       maskedKey: provider.masked_api_key,
       hasKey,
       isActive: provider.is_active,
-      needsKey: !hasKey && !API_KEY_OPTIONAL_PROVIDERS.has(provider.provider_type),
-      status: providerStatus(provider),
+      needsKey: needsKey(provider, capabilities),
+      status: providerStatus(provider, capabilities),
       models: byProvider.get(provider.id) ?? []
     };
   });

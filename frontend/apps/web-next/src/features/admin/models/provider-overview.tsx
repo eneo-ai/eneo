@@ -16,7 +16,7 @@ import {
   type SecurityClassification
 } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
-import { modelProvidersQueryOptions } from "./model-providers";
+import { modelProvidersQueryOptions, providerCapabilitiesQueryOptions } from "./model-providers";
 import { useModelTypeLabel } from "./model-type-label";
 import { type ModelsPresentation, modelLabel } from "./models";
 import { ProviderCard } from "./provider-card";
@@ -114,6 +114,8 @@ export function ProviderOverview({
   const t = useTranslations();
   const typeLabel = useModelTypeLabel();
   const providers = useQuery(modelProvidersQueryOptions(browserApi));
+  // Which provider types need an API key (static per deployment, cached).
+  const capabilities = useQuery(providerCapabilitiesQueryOptions(browserApi));
 
   const [search, setSearch] = useState("");
   const [kind, setKind] = useState<KindFilter>("all");
@@ -121,8 +123,11 @@ export function ProviderOverview({
   const security = securityEnabled ? securityFilter : "all";
 
   const sections = useMemo(
-    () => buildProviderSections(models, providers.data ?? []),
-    [models, providers.data]
+    () =>
+      capabilities.data
+        ? buildProviderSections(models, providers.data ?? [], capabilities.data)
+        : [],
+    [models, providers.data, capabilities.data]
   );
   const rendered = useMemo(
     () => filterSections(sections, { search, kind, security }),
@@ -147,17 +152,24 @@ export function ProviderOverview({
   ];
 
   let content: React.ReactNode;
-  if (providers.isPending) {
-    content = <LoadingState rows={4} />;
-  } else if (providers.isError) {
+  if (providers.isError || capabilities.isError) {
     content = (
       <EmptyState
         title={t("admin_models_providers_load_failed")}
         actions={
-          <Button label={t("retry")} onClick={() => void providers.refetch()} variant="secondary" />
+          <Button
+            label={t("retry")}
+            onClick={() => {
+              if (providers.isError) void providers.refetch();
+              if (capabilities.isError) void capabilities.refetch();
+            }}
+            variant="secondary"
+          />
         }
       />
     );
+  } else if (providers.isPending || capabilities.isPending) {
+    content = <LoadingState rows={4} />;
   } else if (rendered.length === 0) {
     content =
       sections.length === 0 ? (

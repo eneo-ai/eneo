@@ -6,7 +6,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { SECURITY_CLASSIFICATIONS_KEY } from "@/features/admin/security-classifications/security-classifications";
 import { expectNoAxeViolations } from "@/test/axe";
-import { PROVIDERS_KEY } from "./model-providers";
+import { CAPABILITIES_KEY, PROVIDERS_KEY } from "./model-providers";
 import { MODELS_KEY, type ModelsPresentation } from "./models";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), DELETE: vi.fn() }));
@@ -94,6 +94,18 @@ const providers = [
   provider("p-openai", "OpenAI", "openai", null)
 ];
 
+/** vLLM's key is optional; every other type needs one (the backend's defaults). */
+const capabilities = {
+  providers: {
+    hosted_vllm: {
+      modes: ["completion", "embedding"],
+      models: {},
+      fields: [{ name: "api_key", required: false, secret: true, in: "credentials" }]
+    }
+  },
+  default_fields: [{ name: "api_key", required: true, secret: true, in: "credentials" }]
+};
+
 const security = {
   security_enabled: true,
   security_classifications: [{ id: "s3", name: "Klass 3", security_level: 3 }]
@@ -147,6 +159,7 @@ function renderPage() {
   });
   client.setQueryData(MODELS_KEY, presentation);
   client.setQueryData(PROVIDERS_KEY, providers);
+  client.setQueryData(CAPABILITIES_KEY, capabilities);
   client.setQueryData(SECURITY_CLASSIFICATIONS_KEY, security);
   api.GET.mockImplementation((path: string) => {
     if (path === "/api/v1/ai-models/") return ok(presentation);

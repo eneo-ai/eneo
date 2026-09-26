@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ModelProvider } from "./model-providers";
+import type { ModelProvider, ProviderCapabilities } from "./model-providers";
 import type { AdminModel, ModelsPresentation } from "./models";
 import {
   buildProviderSections,
@@ -65,18 +65,62 @@ const providers = [
   provider({ id: "p3", name: "Mistral", provider_type: "mistral", masked_api_key: null })
 ];
 
-const sections = buildProviderSections(presentation, providers);
+/**
+ * What the capabilities endpoint serves (backend provider_field_config):
+ * vLLM's own fields, the defaults (key required) for every other type.
+ */
+const capabilities = {
+  providers: {
+    hosted_vllm: {
+      modes: ["completion", "embedding"],
+      models: {},
+      fields: [
+        { name: "api_key", required: false, secret: true, in: "credentials" },
+        { name: "endpoint", required: true, secret: false, in: "config" }
+      ]
+    }
+  },
+  default_fields: [
+    { name: "api_key", required: true, secret: true, in: "credentials" },
+    { name: "endpoint", required: false, secret: false, in: "config" }
+  ]
+} as unknown as ProviderCapabilities;
+
+const sections = buildProviderSections(presentation, providers, capabilities);
 const all = { search: "", kind: "all" as const, security: "all" };
 
 describe("provider status", () => {
   it("reads inactive, missing key and ready from the provider data", () => {
-    expect(providerStatus(provider({ is_active: false }))).toBe("inactive");
-    expect(providerStatus(provider({ masked_api_key: null }))).toBe("missing_key");
-    // Self-hosted vLLM has an optional key (backend provider_field_config).
-    expect(providerStatus(provider({ provider_type: "hosted_vllm", masked_api_key: null }))).toBe(
-      "ready"
-    );
-    expect(providerStatus(provider({}))).toBe("ready");
+    const status = (overrides: Partial<ModelProvider>) =>
+      providerStatus(provider(overrides), capabilities);
+    expect(status({ is_active: false })).toBe("inactive");
+    expect(status({ masked_api_key: null })).toBe("missing_key");
+    expect(status({})).toBe("ready");
+  });
+
+  it("takes the key requirement from the backend's field definitions", () => {
+    const status = (overrides: Partial<ModelProvider>) =>
+      providerStatus(provider({ masked_api_key: null, ...overrides }), capabilities);
+    // Self-hosted vLLM (and its alias "vllm") has an optional key.
+    expect(status({ provider_type: "hosted_vllm" })).toBe("ready");
+    expect(status({ provider_type: "vllm" })).toBe("ready");
+    // Types without their own definitions use the defaults: key required.
+    expect(status({ provider_type: "mistral" })).toBe("missing_key");
+    // A type the backend makes key-optional needs no frontend change.
+    const keyOptional = {
+      ...capabilities,
+      providers: {
+        ...capabilities.providers,
+        ollama: {
+          modes: ["completion"],
+          models: {},
+          fields: [{ name: "api_key", required: false, secret: true, in: "credentials" }]
+        }
+      }
+    } as ProviderCapabilities;
+    expect(
+      providerStatus(provider({ provider_type: "ollama", masked_api_key: null }), keyOptional)
+    ).toBe("ready");
   });
 
   it("groups provider-backed models and lists providers that need a key first", () => {
@@ -162,7 +206,8 @@ describe("lifecycle and attention", () => {
           model({ id: "c4", deprecation_date: "2025-01-01", migrated_to_model_id: "c1" })
         ]
       } as unknown as ModelsPresentation,
-      [provider({ id: "p1" }), provider({ id: "p3", is_active: false, masked_api_key: null })]
+      [provider({ id: "p1" }), provider({ id: "p3", is_active: false, masked_api_key: null })],
+      capabilities
     );
     expect(modelsAttention(quiet, TODAY)).toEqual({ missingKey: [], deprecated: [] });
   });

@@ -37,9 +37,11 @@ export function modelProvidersQueryOptions(api: EneoClient) {
   });
 }
 
+export const CAPABILITIES_KEY = ["admin-model-provider-capabilities"];
+
 export function providerCapabilitiesQueryOptions(api: EneoClient) {
   return queryOptions({
-    queryKey: ["admin-model-provider-capabilities"],
+    queryKey: CAPABILITIES_KEY,
     staleTime: Infinity, // capability metadata is static for a deployment
     queryFn: async (): Promise<ProviderCapabilities> =>
       // The endpoint is typed as a free-form object; shape verified above.
@@ -80,9 +82,22 @@ export function deleteProvider(api: EneoClient, id: string) {
   );
 }
 
+/**
+ * Provider types the backend treats as another type; capabilities are keyed
+ * by the canonical one. Mirrors `PROVIDER_ALIASES` in
+ * backend/src/eneo/tenants/provider_field_config.py.
+ */
+const PROVIDER_TYPE_ALIASES: Record<string, string> = { vllm: "hosted_vllm" };
+
 /** Credential/config field definitions for a provider type (with fallback). */
 export function providerFields(caps: ProviderCapabilities, type: string): ProviderFieldDef[] {
-  return caps.providers[type]?.fields ?? caps.default_fields ?? [];
+  const canonical = PROVIDER_TYPE_ALIASES[type.toLowerCase()] ?? type.toLowerCase();
+  return caps.providers[canonical]?.fields ?? caps.default_fields ?? [];
+}
+
+/** Whether the backend requires an API key for this provider type. */
+export function isApiKeyRequired(caps: ProviderCapabilities, type: string): boolean {
+  return providerFields(caps, type).some((field) => field.name === "api_key" && field.required);
 }
 
 export function providerFieldLabel(t: (key: string) => string, name: string): string {
