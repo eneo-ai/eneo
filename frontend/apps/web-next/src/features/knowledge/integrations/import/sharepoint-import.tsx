@@ -1,5 +1,6 @@
 "use client";
 
+import { Spinner } from "@astryxdesign/core/Spinner";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Cloud, Globe, Search } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -15,7 +16,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Spinner } from "@/components/ui/spinner";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -245,8 +245,11 @@ export function SharePointImportDialog({
                   settingsHref={settingsHref}
                 />
               ) : preview.isPending ? (
-                <div className="text-muted-foreground flex items-center gap-2 px-2 py-3 text-sm">
-                  <Spinner /> {t("loading_available_sites")}
+                <div
+                  role="status"
+                  className="text-muted-foreground flex items-center gap-2 px-2 py-3 text-sm"
+                >
+                  <Spinner size="sm" aria-hidden /> {t("loading_available_sites")}
                 </div>
               ) : groups.length === 0 ? (
                 <p className="text-muted-foreground px-2 py-3 text-sm">

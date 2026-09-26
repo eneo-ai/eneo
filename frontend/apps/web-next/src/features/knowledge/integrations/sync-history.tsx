@@ -1,5 +1,6 @@
 "use client";
 
+import { Spinner } from "@astryxdesign/core/Spinner";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Check, History, Loader2, X } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -12,7 +13,6 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
-import { Spinner } from "@/components/ui/spinner";
 import { browserApi } from "@/lib/api/browser";
 import { formatDuration } from "@/lib/format";
 import { ClientTime } from "@/features/spaces/client-time";
@@ -141,7 +141,7 @@ function SyncHistoryContent({ item }: { item: IntegrationKnowledge }) {
       <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto pr-1">
         {isPending ? (
           <div className="flex items-center justify-center gap-2 py-8">
-            <Spinner />
+            <Spinner size="lg" />
           </div>
         ) : isError ? (
           <div className="bg-destructive/10 text-destructive flex items-center gap-2 rounded-md p-4 text-sm">

@@ -7,11 +7,6 @@
       "count": 1
     }
   },
-  "src/components/ui/spinner.tsx": {
-    "eneo/no-literal-accessible-name": {
-      "count": 1
-    }
-  },
   "src/features/admin/api-keys/notification-policy-dialog.tsx": {
     "eneo/no-literal-accessible-name": {
       "count": 1

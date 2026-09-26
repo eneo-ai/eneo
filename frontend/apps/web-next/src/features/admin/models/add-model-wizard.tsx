@@ -1,5 +1,6 @@
 "use client";
 
+import { Spinner } from "@astryxdesign/core/Spinner";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -27,7 +28,6 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
-import { Spinner } from "@/components/ui/spinner";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
 import { cn } from "@/lib/utils";
@@ -294,7 +294,7 @@ export function AddModelWizard({
                 />
               ) : (
                 <div className="flex justify-center py-12">
-                  <Spinner className="size-6" />
+                  <Spinner size="lg" />
                 </div>
               )}
               {hasProviders && (

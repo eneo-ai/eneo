@@ -1,5 +1,6 @@
 "use client";
 
+import { Spinner } from "@astryxdesign/core/Spinner";
 import {
   Check,
   ChevronDown,
@@ -41,7 +42,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { extractFinalPrompt } from "./extract-final-prompt";
@@ -338,7 +338,7 @@ function PromptGuideConversation({
           className="text-muted-foreground flex h-full flex-col items-center justify-center gap-2 text-center text-sm"
           role="status"
         >
-          <Spinner className="size-5" aria-hidden="true" />
+          <Spinner size="md" aria-hidden />
           <p>{t("prompt_guide_analyzing")}</p>
         </div>
       ) : (
@@ -351,7 +351,7 @@ function PromptGuideConversation({
                 </div>
               ) : turn.isStreaming && turn.text.length === 0 ? (
                 <div className="text-muted-foreground flex items-center gap-2" role="status">
-                  <Spinner aria-hidden="true" />
+                  <Spinner size="sm" aria-hidden />
                   {index === 0 && hasCapturedPrompt && <span>{t("prompt_guide_analyzing")}</span>}
                 </div>
               ) : (
@@ -400,7 +400,7 @@ function AssistantTurn({
             className="text-muted-foreground flex items-center gap-2 text-xs italic"
             role="status"
           >
-            <Spinner className="size-3.5" aria-hidden="true" />
+            <Spinner size="sm" aria-hidden />
             <span>{t("prompt_guide_question_thinking")}</span>
           </div>
         </>
@@ -518,7 +518,7 @@ function PromptGuideInput({
             disabled={!canSend}
             aria-label={t("prompt_guide_question_send")}
           >
-            {disabled ? <Spinner /> : <SendHorizontal />}
+            {disabled ? <Spinner size="sm" shade="inherit" aria-hidden /> : <SendHorizontal />}
           </InputGroupButton>
         </InputGroupAddon>
       </InputGroup>

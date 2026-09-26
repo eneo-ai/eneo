@@ -1,10 +1,10 @@
 "use client";
 
+import { Spinner } from "@astryxdesign/core/Spinner";
 import { ImagePlus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toast } from "@/lib/toast";

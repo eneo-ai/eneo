@@ -1,5 +1,6 @@
 "use client";
 
+import { Spinner } from "@astryxdesign/core/Spinner";
 import { useQuery } from "@tanstack/react-query";
 import Image from "next/image";
 import Link from "next/link";
@@ -15,7 +16,6 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
-import { Spinner } from "@/components/ui/spinner";
 import { browserApi } from "@/lib/api/browser";
 import { useSpace } from "@/features/spaces/use-space";
 import { availableIntegrationsQueryOptions, type UserIntegration } from "../queries";
@@ -126,8 +126,11 @@ export function ImportKnowledgeDialog({
           </DialogHeader>
           <div className="flex flex-col gap-2">
             {isPending ? (
-              <div className="text-muted-foreground flex items-center justify-center gap-2 py-8">
-                <Spinner /> {t("loading_integrations")}
+              <div
+                role="status"
+                className="text-muted-foreground flex items-center justify-center gap-2 py-8"
+              >
+                <Spinner size="sm" aria-hidden /> {t("loading_integrations")}
               </div>
             ) : integrations.length === 0 ? (
               <p className="text-muted-foreground py-8 text-center text-sm">

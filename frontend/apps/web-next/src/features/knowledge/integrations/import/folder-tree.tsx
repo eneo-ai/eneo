@@ -1,5 +1,6 @@
 "use client";
 
+import { Spinner } from "@astryxdesign/core/Spinner";
 import { useQuery } from "@tanstack/react-query";
 import {
   ChevronRight,
@@ -14,7 +15,6 @@ import {
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Spinner } from "@/components/ui/spinner";
 import { browserApi } from "@/lib/api/browser";
 import { formatBytes } from "@/lib/format";
 import { sharepointTreeQueryOptions, type SharePointTreeItem } from "../queries";
@@ -129,8 +129,8 @@ export function SharePointFolderTree({
 
       <div className="max-h-[42vh] min-h-0 overflow-x-hidden overflow-y-auto rounded-md border">
         {isPending ? (
-          <div className="text-muted-foreground flex items-center gap-2 px-4 py-8">
-            <Spinner /> {t("loading_available_sites")}
+          <div role="status" className="text-muted-foreground flex items-center gap-2 px-4 py-8">
+            <Spinner size="sm" aria-hidden /> {t("loading_available_sites")}
           </div>
         ) : items.length === 0 && stack.length > 1 ? (
           <div className="text-muted-foreground px-4 py-4 text-sm">{t("no_items")}</div>

@@ -1,5 +1,6 @@
 "use client";
 
+import { Spinner } from "@astryxdesign/core/Spinner";
 import {
   ArrowUpDown,
   Braces,
@@ -28,7 +29,6 @@ import { SettingsGroup, SettingsRow } from "@/components/composites/settings-row
 import { useAutosave } from "@/components/composites/use-autosave";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Spinner } from "@/components/ui/spinner";
 import { AttachmentPreviewDialog, useSignedUrl } from "@/features/chat/attachments";
 import { FileFormatDetails } from "@/features/files/file-format-details";
 import { collectDroppedFiles } from "@/features/files/collect-dropped-files";
@@ -470,7 +470,7 @@ export function ResourceAttachmentsSection({
                         onClick={() => void downloadFile(file)}
                       >
                         {downloadingId === file.id ? (
-                          <Spinner className="size-4" />
+                          <Spinner size="sm" shade="inherit" />
                         ) : (
                           <Download className="size-4" />
                         )}
@@ -535,7 +535,11 @@ export function ResourceAttachmentsSection({
               disabled={uploading || atCapacity}
               onClick={() => fileInput.current?.click()}
             >
-              {uploading ? <Spinner className="size-4" /> : <Paperclip className="size-4" />}
+              {uploading ? (
+                <Spinner size="sm" shade="inherit" aria-hidden />
+              ) : (
+                <Paperclip className="size-4" />
+              )}
               {t("attach_files")}
             </Button>
           </div>
