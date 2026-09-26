@@ -115,6 +115,10 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
     (screen-reader-only) cell content escaped its scroll box and widened the
     page: `@/components/astryx/table` names the region, and `globals.css`
     (section 9) makes the scroll box `relative`.
+  - DateInput's calendar toggle is its 16 px icon, below the 24 px target
+    size: `globals.css` (section 11) grows it. DateRangeInput's toggle
+    (`astryx-date-range-input-toggle-icon`) is as small; extend section 11
+    before using it.
   - `CodeBlock`/`CodeEditor` inject runtime styles the CSP blocks (code fences
     in answers render through Streamdown's `@streamdown/code` in
     `MessageResponse`), `useClipboard` writes text/plain only (the chat's
