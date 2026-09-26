@@ -188,10 +188,43 @@ async function expectFocusClearOfToasts(page: Page) {
 }
 
 /** Opens a route, waits until it shows real content, then scans it. */
+/**
+ * The shell is locked to the viewport: pages scroll inside the page panel
+ * (main#main-content), never the document, or the whole shell slides up. An
+ * absolutely positioned box (visually hidden text) whose containing block is
+ * the document, not a region that scrolls, makes the document taller.
+ */
+async function expectShellHoldsStill(page: Page) {
+  const overflow = await page.evaluate(() => {
+    const main = document.getElementById("main-content");
+    if (!main || getComputedStyle(main).overflowY === "visible") return null;
+    const escaped = [...document.body.querySelectorAll("*")]
+      .filter(
+        (el) =>
+          el instanceof HTMLElement &&
+          getComputedStyle(el).position === "absolute" &&
+          el.offsetParent === document.body &&
+          el.getBoundingClientRect().bottom > window.innerHeight + 1
+      )
+      .slice(0, 5)
+      .map((el) => `${el.tagName.toLowerCase()}.${(el.getAttribute("class") ?? "").slice(0, 60)}`);
+    return {
+      scrolls: document.documentElement.scrollHeight > window.innerHeight + 1,
+      escaped
+    };
+  });
+  if (!overflow) return;
+  expect(
+    overflow.scrolls,
+    `The document scrolls under the shell on ${page.url()}: ${overflow.escaped.join(", ")}`
+  ).toBe(false);
+}
+
 async function scan(page: Page, path: string, ready: () => Promise<void>, exceptions?: Exceptions) {
   await page.goto(path);
   await ready();
   await expectNoAxeViolations(page, exceptions);
+  await expectShellHoldsStill(page);
 }
 
 /** The personal assistant's greeting, the chat start state's h1 (set once hydrated). */

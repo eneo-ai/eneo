@@ -140,11 +140,14 @@ export function AppShellFrame({
             <DesktopSideNav variant={variant} navId={navId} defaultCollapsed={sideNavCollapsed} />
           </div>
           {/* tabIndex -1: the skip link moves focus here, not just the scroll
-              position (WCAG 2.4.1); tests/a11y.spec.ts checks it. */}
+              position (WCAG 2.4.1); tests/a11y.spec.ts checks it. relative:
+              the panel contains what is absolutely positioned in it (visually
+              hidden text), which otherwise escapes its scroll box and makes
+              the document taller, so the whole shell scrolls. */}
           <main
             id="main-content"
             tabIndex={-1}
-            className="bg-ax-surface md:rounded-ax-page md:shadow-ax-low flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto focus:outline-none"
+            className="bg-ax-surface md:rounded-ax-page md:shadow-ax-low relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto focus:outline-none"
           >
             {children}
           </main>
