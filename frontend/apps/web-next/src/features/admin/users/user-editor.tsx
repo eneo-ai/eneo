@@ -4,9 +4,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import {
-  ConfirmedPasswordField,
-  isConfirmedPasswordValid
-} from "@/components/composites/confirmed-password-field";
+  ConfirmedSecretInput,
+  confirmedSecretProblem
+} from "@/components/composites/confirmed-secret-input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -131,11 +131,12 @@ function UserEditorForm({ user, onDone }: { user?: AdminUser; onDone: () => void
   const pending = create.isPending || updateUser.isPending;
   const passwordTouched = password.length > 0 || passwordConfirmation.length > 0;
   const passwordRequired = mode === "create";
-  const passwordConfirmed = isConfirmedPasswordValid({
-    value: password,
-    confirmation: passwordConfirmation,
-    required: passwordRequired || passwordTouched
-  });
+  const passwordConfirmed =
+    confirmedSecretProblem({
+      value: password,
+      confirmation: passwordConfirmation,
+      isRequired: passwordRequired || passwordTouched
+    }) === null;
   const passwordLongEnough = !passwordTouched || password.length >= 7;
   const formValid =
     email.trim().length > 0 &&
@@ -202,17 +203,18 @@ function UserEditorForm({ user, onDone }: { user?: AdminUser; onDone: () => void
           />
         </div>
 
-        <ConfirmedPasswordField
-          id="user-password"
+        <ConfirmedSecretInput
           label={t("password")}
           confirmLabel={t("confirm_password")}
           value={password}
           confirmation={passwordConfirmation}
           onValueChange={setPassword}
           onConfirmationChange={setPasswordConfirmation}
-          errorMessage={t("passwords_do_not_match")}
+          mismatchMessage={t("passwords_do_not_match")}
           description={t("password_needs_7_chars")}
-          required={passwordRequired}
+          isRequired={passwordRequired}
+          // Someone else's password: never the admin's own, and a password
+          // manager may offer a generated one.
           autoComplete="new-password"
           placeholder={mode === "update" ? t("admin_users_password_unchanged") : undefined}
         />

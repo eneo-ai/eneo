@@ -4,9 +4,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import {
-  ConfirmedPasswordField,
-  isConfirmedPasswordValid
-} from "@/components/composites/confirmed-password-field";
+  ConfirmedSecretInput,
+  confirmedSecretProblem
+} from "@/components/composites/confirmed-secret-input";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -221,11 +221,11 @@ export function WebsiteDialog({
     !httpAuthEnabled ||
     (httpAuthNeedsNewCredentials
       ? httpAuthUsername.trim().length > 0 &&
-        isConfirmedPasswordValid({
+        confirmedSecretProblem({
           value: httpAuthPassword,
           confirmation: httpAuthPasswordConfirmation,
-          required: true
-        })
+          isRequired: true
+        }) === null
       : true);
 
   function submit() {
@@ -332,26 +332,27 @@ export function WebsiteDialog({
                     onChange={(event) => setHttpAuthUsername(event.target.value)}
                   />
                 </div>
-                <ConfirmedPasswordField
-                  id="http-auth-password"
+                <ConfirmedSecretInput
                   label={t("password")}
                   confirmLabel={t("confirm_password")}
                   value={httpAuthPassword}
                   confirmation={httpAuthPasswordConfirmation}
                   onValueChange={setHttpAuthPassword}
                   onConfirmationChange={setHttpAuthPasswordConfirmation}
-                  errorMessage={t("passwords_do_not_match")}
+                  mismatchMessage={t("passwords_do_not_match")}
                   description={
                     website?.requires_http_auth ? t("leave_blank_keep_password") : undefined
                   }
-                  required={!website?.requires_http_auth}
+                  isRequired={!website?.requires_http_auth}
+                  // The website's password, not the user's own for Eneo.
+                  autoComplete="new-password"
                 />
               </div>
             )}
 
             <div className="flex gap-4">
               <div className="flex flex-1 flex-col gap-2">
-                <Label>{t("crawl_type")}</Label>
+                <Label htmlFor="website-crawl-type">{t("crawl_type")}</Label>
                 <Select
                   value={crawlType}
                   onValueChange={(value) => {
@@ -359,7 +360,7 @@ export function WebsiteDialog({
                     if (value === "sitemap") setDownloadFiles(false);
                   }}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger id="website-crawl-type" className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -369,12 +370,12 @@ export function WebsiteDialog({
                 </Select>
               </div>
               <div className="flex flex-1 flex-col gap-2">
-                <Label>{t("automatic_updates")}</Label>
+                <Label htmlFor="website-update-interval">{t("automatic_updates")}</Label>
                 <Select
                   value={updateInterval}
                   onValueChange={(value) => setUpdateInterval(value as UpdateInterval)}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger id="website-update-interval" className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
