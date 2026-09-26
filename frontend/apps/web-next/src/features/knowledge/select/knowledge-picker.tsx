@@ -277,17 +277,17 @@ function SelectedKnowledgeRow({
         </CollapsibleTrigger>
         {!isCollection && pagesFailed > 0 ? (
           <Badge variant="outline" className="text-destructive shrink-0 font-normal">
-            {t("pages_failed", { count: String(pagesFailed) })}
+            {t("space_crawl_failed", { items: t("space_pages_count", { count: pagesFailed }) })}
           </Badge>
         ) : null}
         {!isCollection && pagesCrawled > 0 ? (
           <Badge variant="outline" className="text-muted-foreground shrink-0 font-normal">
-            {t("pageCount", { count: String(pagesCrawled) })}
+            {t("space_pages_count", { count: pagesCrawled })}
           </Badge>
         ) : null}
         {isCollection ? (
           <Badge variant="outline" className="text-muted-foreground shrink-0 font-normal">
-            {indexedCount > 0 ? `${indexedCount} ${t("resource_files")}` : t("empty")}
+            {indexedCount > 0 ? t("space_files_count", { count: indexedCount }) : t("empty")}
           </Badge>
         ) : null}
         <Button
@@ -525,7 +525,9 @@ export function KnowledgePicker({
                             <span className="flex-1 truncate">{collection.name}</span>
                             <Badge variant="outline" className="text-muted-foreground font-normal">
                               {collection.metadata.num_info_blobs > 0
-                                ? `${collection.metadata.num_info_blobs} ${t("resource_files")}`
+                                ? t("space_files_count", {
+                                    count: collection.metadata.num_info_blobs
+                                  })
                                 : t("empty")}
                             </Badge>
                           </CommandItem>
@@ -546,7 +548,9 @@ export function KnowledgePicker({
                               <span className="flex-1 truncate">{formatWebsiteName(website)}</span>
                               {pagesFailed > 0 && (
                                 <Badge variant="outline" className="text-destructive font-normal">
-                                  {t("pages_failed", { count: String(pagesFailed) })}
+                                  {t("space_crawl_failed", {
+                                    items: t("space_pages_count", { count: pagesFailed })
+                                  })}
                                 </Badge>
                               )}
                             </CommandItem>
