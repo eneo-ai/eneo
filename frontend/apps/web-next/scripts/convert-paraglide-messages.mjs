@@ -22,47 +22,16 @@
  * catalogs (extra/ and messages/, sv and en) by hand; `bun run lint` checks
  * that the locales match.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { buildLocale, locales, messagesDir, serializeCatalog } from "./i18n-catalogs.mjs";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const sourceDir = path.resolve(here, "..", "..", "web", "messages");
-const extraDir = path.resolve(here, "..", "src", "lib", "i18n", "extra");
-const targetDir = path.resolve(here, "..", "src", "lib", "i18n", "messages");
-const locales = ["sv", "en"];
-
-mkdirSync(targetDir, { recursive: true });
+mkdirSync(messagesDir, { recursive: true });
 
 for (const locale of locales) {
-  const sourcePath = path.join(sourceDir, `${locale}.json`);
-  const source = JSON.parse(readFileSync(sourcePath, "utf8"));
-  const out = {};
-  const flagged = [];
+  const { paths, messages, flagged } = buildLocale(locale);
 
-  for (const [key, value] of Object.entries(source)) {
-    if (key === "$schema") continue;
-
-    if (typeof value !== "string") {
-      flagged.push(`${key}: non-string value (Paraglide variant/plural), copied as-is`);
-      out[key] = value;
-      continue;
-    }
-    if (key.includes(".")) {
-      flagged.push(`${key}: key contains "." (next-intl namespace separator)`);
-    }
-    if (/'[{}]/.test(value)) {
-      flagged.push(`${key}: apostrophe before "{" or "}" (ICU escape, needs '' doubling)`);
-    }
-    out[key] = value;
-  }
-
-  const extraPath = path.join(extraDir, `${locale}.json`);
-  const extra = existsSync(extraPath) ? JSON.parse(readFileSync(extraPath, "utf8")) : {};
-  Object.assign(out, extra);
-
-  writeFileSync(path.join(targetDir, `${locale}.json`), JSON.stringify(out, null, 2) + "\n");
-  console.log(`${locale}: ${Object.keys(out).length} messages written`);
+  writeFileSync(paths.messages, serializeCatalog(messages));
+  console.log(`${locale}: ${Object.keys(messages).length} messages written`);
   if (flagged.length > 0) {
     console.log(`${locale}: ${flagged.length} message(s) need manual review:`);
     for (const entry of flagged) console.log(`  - ${entry}`);

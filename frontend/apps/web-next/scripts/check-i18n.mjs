@@ -12,44 +12,16 @@
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { appRoot, catalogPaths, locales, messagesDir, readCatalog } from "./i18n-catalogs.mjs";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const appRoot = path.resolve(here, "..");
 const srcRoot = path.join(appRoot, "src");
-const messagesRoot = path.join(srcRoot, "lib", "i18n", "messages");
-const extraRoot = path.join(srcRoot, "lib", "i18n", "extra");
-const locales = ["sv", "en"];
-
-function readJson(file) {
-  const source = readFileSync(file, "utf8");
-  const seen = new Set();
-  const duplicates = [];
-
-  // The generated + extra catalogs are intentionally flat key/value JSON. Keep
-  // the duplicate check simple and explicit instead of hiding it in a parser
-  // dependency.
-  for (const line of source.split("\n")) {
-    const match = line.match(/^  "([^"]+)":/);
-    if (!match) continue;
-    const key = match[1];
-    if (seen.has(key)) duplicates.push(key);
-    seen.add(key);
-  }
-
-  if (duplicates.length > 0) {
-    throw new Error(`Duplicate i18n key(s) in ${file}: ${duplicates.join(", ")}`);
-  }
-
-  return JSON.parse(source);
-}
 
 function walk(dir, files = []) {
   for (const entry of readdirSync(dir)) {
     const file = path.join(dir, entry);
     const stat = statSync(file);
     if (stat.isDirectory()) {
-      if (entry === "messages" && file === messagesRoot) continue;
+      if (entry === "messages" && file === messagesDir) continue;
       walk(file, files);
       continue;
     }
@@ -60,9 +32,9 @@ function walk(dir, files = []) {
 
 const catalogs = Object.fromEntries(
   locales.map((locale) => {
-    const file = path.join(messagesRoot, `${locale}.json`);
+    const file = catalogPaths(locale).messages;
     if (!existsSync(file)) throw new Error(`Missing generated locale catalog: ${file}`);
-    return [locale, readJson(file)];
+    return [locale, readCatalog(file)];
   })
 );
 
@@ -88,9 +60,9 @@ function compareKeyParity(label, records) {
 
 const extraCatalogs = Object.fromEntries(
   locales.map((locale) => {
-    const file = path.join(extraRoot, `${locale}.json`);
+    const file = catalogPaths(locale).extra;
     if (!existsSync(file)) throw new Error(`Missing web-next extra locale catalog: ${file}`);
-    return [locale, readJson(file)];
+    return [locale, readCatalog(file)];
   })
 );
 
