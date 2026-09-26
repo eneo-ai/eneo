@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
+import { renderInApp } from "@/test/render";
 
 const api = vi.hoisted(() => ({ PATCH: vi.fn() }));
 const refresh = vi.hoisted(() => vi.fn());
@@ -41,12 +41,10 @@ afterEach(() => {
 });
 
 function renderToggles() {
-  render(
-    <NextIntlClientProvider locale="sv" messages={messages}>
-      <FeatureToggles />
-    </NextIntlClientProvider>
-  );
+  renderInApp(<FeatureToggles />);
 }
+
+const saved = () => Promise.resolve({ data: { enabled: true }, response: new Response("{}") });
 
 it("renders labelled, described switches in a titled card", async () => {
   renderToggles();
@@ -67,7 +65,7 @@ it("saves a toggle and refreshes the server layout", async () => {
 
   fireEvent.click(audit);
 
-  expect((audit as HTMLInputElement).checked).toBe(true);
+  await waitFor(() => expect((audit as HTMLInputElement).checked).toBe(true));
   expect(api.PATCH).toHaveBeenCalledWith("/api/v1/settings/audit-logging", {
     body: { enabled: true }
   });
@@ -89,4 +87,27 @@ it("reverts and reports the error when saving fails", async () => {
   await waitFor(() => expect(toastApiError).toHaveBeenCalled());
   expect((provisioning as HTMLInputElement).checked).toBe(false);
   expect(refresh).not.toHaveBeenCalled();
+});
+
+it("saves a press made during a save once that save is done", async () => {
+  const saves: Array<() => void> = [];
+  api.PATCH.mockImplementation(() => new Promise((resolve) => saves.push(() => resolve(saved()))));
+  renderToggles();
+  const audit = screen.getByRole("switch", { name: "Aktivera granskningsloggning" });
+
+  fireEvent.click(audit);
+  await waitFor(() => expect((audit as HTMLInputElement).checked).toBe(true));
+  // Pressed again while the first save runs: shown at once, not dropped.
+  fireEvent.click(audit);
+  await waitFor(() => expect((audit as HTMLInputElement).checked).toBe(false));
+  expect(api.PATCH).toHaveBeenCalledTimes(1);
+
+  await act(async () => saves[0]!());
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(2));
+  expect(api.PATCH).toHaveBeenLastCalledWith("/api/v1/settings/audit-logging", {
+    body: { enabled: false }
+  });
+  await act(async () => saves[1]!());
+  await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+  expect((audit as HTMLInputElement).checked).toBe(false);
 });

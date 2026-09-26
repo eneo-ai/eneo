@@ -2,13 +2,12 @@
 
 import { Heading } from "@astryxdesign/core/Heading";
 import { Switch } from "@astryxdesign/core/Switch";
-import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useId, useRef, useState } from "react";
+import { useId } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import { toastApiError } from "@/lib/api/toast";
+import { useSettingSwitch } from "./use-setting-switch";
 
 type ToggleKey = "templates" | "audit-logging" | "provisioning" | "whats-new";
 
@@ -21,62 +20,64 @@ function patchSetting(key: ToggleKey, enabled: boolean) {
   return browserApi.PATCH("/api/v1/settings/provisioning", { body });
 }
 
+function SettingRow({
+  setting,
+  initial,
+  label,
+  description
+}: {
+  setting: ToggleKey;
+  initial: boolean;
+  label: string;
+  description: string;
+}) {
+  const [value, setValue] = useSettingSwitch(setting, initial, (enabled) =>
+    unwrap(patchSetting(setting, enabled))
+  );
+  return (
+    <Switch
+      label={label}
+      description={description}
+      labelPosition="start"
+      labelSpacing="spread"
+      value={value}
+      onChange={setValue}
+    />
+  );
+}
+
 /**
  * Tenant feature toggles as settings rows: label and description on the left,
- * the switch on the right. Optimistic update with revert-on-error; a successful
- * write refreshes the server layout so the new settings propagate app-wide
- * (e.g. the templates toggle changes the space creation flows). A switch stays
- * enabled (and focused) while its write is in flight; toggling it again waits
- * for that write.
+ * the switch on the right. Each saves as described in `useSettingSwitch`
+ * (e.g. the templates toggle changes the space creation flows app-wide).
  */
 export function FeatureToggles() {
   const t = useTranslations();
-  const router = useRouter();
   const { settings } = useAppContext();
   const headingId = useId();
 
-  const [values, setValues] = useState<Record<ToggleKey, boolean>>({
-    templates: settings.using_templates ?? false,
-    "audit-logging": settings.audit_logging_enabled ?? false,
-    provisioning: settings.provisioning ?? false,
-    "whats-new": settings.whats_new_enabled !== false
-  });
-  const inFlight = useRef(new Set<ToggleKey>());
-
-  async function toggle(key: ToggleKey, next: boolean) {
-    if (inFlight.current.has(key)) return;
-    inFlight.current.add(key);
-    const previous = values[key];
-    setValues((current) => ({ ...current, [key]: next })); // optimistic
-    try {
-      await unwrap(patchSetting(key, next));
-      router.refresh();
-    } catch (error) {
-      setValues((current) => ({ ...current, [key]: previous })); // revert
-      toastApiError(error, t);
-    } finally {
-      inFlight.current.delete(key);
-    }
-  }
-
-  const rows: { key: ToggleKey; label: string; description: string }[] = [
+  const rows: { key: ToggleKey; initial: boolean; label: string; description: string }[] = [
     {
       key: "templates",
+      initial: settings.using_templates ?? false,
       label: t("enable_templates"),
       description: t("enable_templates_description")
     },
     {
       key: "audit-logging",
+      initial: settings.audit_logging_enabled ?? false,
       label: t("enable_audit_logging"),
       description: t("enable_audit_logging_description")
     },
     {
       key: "provisioning",
+      initial: settings.provisioning ?? false,
       label: t("enable_provisioning"),
       description: t("enable_provisioning_description")
     },
     {
       key: "whats-new",
+      initial: settings.whats_new_enabled !== false,
       label: t("enable_whats_new"),
       description: t("enable_whats_new_description")
     }
@@ -95,13 +96,11 @@ export function FeatureToggles() {
       <ul className="divide-ax-border divide-y">
         {rows.map((row) => (
           <li key={row.key} className="px-5 py-4">
-            <Switch
+            <SettingRow
+              setting={row.key}
+              initial={row.initial}
               label={row.label}
               description={row.description}
-              labelPosition="start"
-              labelSpacing="spread"
-              value={values[row.key]}
-              onChange={(next) => void toggle(row.key, next)}
             />
           </li>
         ))}
