@@ -9,9 +9,7 @@ type RoleLike = { permissions?: Permission[] | null };
  * `allOf` AND at least one of `anyOf`), or null for "always allowed".
  */
 export type PermissionRequirement =
-  | Permission
-  | { anyOf?: Permission[]; allOf?: Permission[] }
-  | null;
+  Permission | { anyOf?: Permission[]; allOf?: Permission[] } | null;
 
 /**
  * Flattens a user's roles into the effective permission set. The backend

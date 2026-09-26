@@ -11,8 +11,7 @@ import { isIntegrationCallbackMessage } from "./callback-message";
 type UserIntegration = Schema<"UserIntegration">;
 
 export type ConnectResult =
-  | { success: true; integration: UserIntegration }
-  | { success: false; error: Error };
+  { success: true; integration: UserIntegration } | { success: false; error: Error };
 
 type AuthRequest = {
   integration: UserIntegration;

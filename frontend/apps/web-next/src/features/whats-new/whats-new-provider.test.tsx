@@ -23,9 +23,7 @@ function Probe() {
 beforeEach(() => {
   put.mockImplementation((path: string) =>
     Promise.resolve({
-      data: path.endsWith("/seen/")
-        ? { seen_version: "2.2.0" }
-        : { announced_version: "2.2.0" },
+      data: path.endsWith("/seen/") ? { seen_version: "2.2.0" } : { announced_version: "2.2.0" },
       response: new Response("{}", { status: 200 })
     })
   );
@@ -38,7 +36,11 @@ afterEach(() => {
 
 describe("What's new markers", () => {
   it("keeps the unseen dot after recording the one-time announcement", async () => {
-    render(<WhatsNewProvider enabled initialSeen={null} initialAnnounced={null}><Probe /></WhatsNewProvider>);
+    render(
+      <WhatsNewProvider enabled initialSeen={null} initialAnnounced={null}>
+        <Probe />
+      </WhatsNewProvider>
+    );
     expect(screen.getByTestId("unseen").textContent).toBe("true");
     expect(screen.getByTestId("announcement").textContent).toBe("2.2.0");
     fireEvent.click(screen.getByText("Announced"));
@@ -49,7 +51,11 @@ describe("What's new markers", () => {
   });
 
   it("does not treat an unavailable state endpoint as a first visit", () => {
-    render(<WhatsNewProvider enabled initialSeen={undefined} initialAnnounced={undefined}><Probe /></WhatsNewProvider>);
+    render(
+      <WhatsNewProvider enabled initialSeen={undefined} initialAnnounced={undefined}>
+        <Probe />
+      </WhatsNewProvider>
+    );
     expect(screen.getByTestId("unseen").textContent).toBe("false");
     expect(screen.getByTestId("announcement").textContent).toBe("none");
     fireEvent.click(screen.getByText("Seen"));

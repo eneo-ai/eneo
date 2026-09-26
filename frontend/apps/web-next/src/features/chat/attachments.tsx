@@ -162,7 +162,7 @@ export function ComposerAttachments({
       <div
         role="list"
         aria-label={t("attachments_count_other", { count: items.length })}
-        className="grid max-h-[200px] auto-rows-max grid-cols-1 gap-2 overflow-y-auto pr-0.5 [scrollbar-width:thin] sm:grid-cols-2"
+        className="grid max-h-[200px] [scrollbar-width:thin] auto-rows-max grid-cols-1 gap-2 overflow-y-auto pr-0.5 sm:grid-cols-2"
       >
         {items.map((item) => {
           return (

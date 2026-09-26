@@ -91,14 +91,12 @@ export function GroupChatAssistantList({
 
   const available = (space.applications?.assistants.items ?? [])
     .filter((assistant) => !selected.some((entry) => entry.id === assistant.id))
-    .map(
-      (assistant): GroupChatAssistant => ({
-        id: assistant.id,
-        handle: assistant.name,
-        default_description: assistant.description ?? null,
-        user_description: null
-      })
-    );
+    .map((assistant): GroupChatAssistant => ({
+      id: assistant.id,
+      handle: assistant.name,
+      default_description: assistant.description ?? null,
+      user_description: null
+    }));
 
   return (
     <div className="flex flex-col gap-2">
