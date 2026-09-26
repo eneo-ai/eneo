@@ -429,3 +429,29 @@
     color: HighlightText;
   }
 }
+
+/*
+ * 11. The DateInput's calendar toggle is its 16 px icon (Astryx 0.6.3), below
+ *    the 24 px minimum (WCAG 2.5.8). The button grows to 24 × 24 and gives
+ *    the space back with a negative margin, so the field's text stays where it
+ *    is; on a coarse pointer its hit area reaches 44 × 44 through ::after, like
+ *    the toast close button's (section 8). The button has no class of its own:
+ *    the icon's theme class finds it.
+ */
+@layer components {
+  .astryx-date-input > button:has(> .astryx-date-input-toggle-icon) {
+    min-inline-size: 24px;
+    min-block-size: 24px;
+    margin: -4px;
+  }
+  @media (pointer: coarse) {
+    .astryx-date-input > button:has(> .astryx-date-input-toggle-icon) {
+      position: relative;
+    }
+    .astryx-date-input > button:has(> .astryx-date-input-toggle-icon)::after {
+      content: "";
+      position: absolute;
+      inset: -10px;
+    }
+  }
+}

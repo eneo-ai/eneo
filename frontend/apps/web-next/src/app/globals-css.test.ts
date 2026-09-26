@@ -177,6 +177,30 @@ describe("globals.css", () => {
     expect(rules.get("::after")).toMatchObject({ inset: "-10px" });
   });
 
+  it("makes the DateInput's calendar toggle a 24 px target (44 px on touch) in place", () => {
+    const toggle = ".astryx-date-input > button:has(> .astryx-date-input-toggle-icon)";
+    // "<media> <pseudo-element>" → declarations
+    const rules = new Map<string, Record<string, string>>();
+    postcss.parse(css).walkRules((rule: Rule) => {
+      if (!rule.selector.startsWith(toggle)) return;
+      const parent = rule.parent as AtRule | undefined;
+      const media = parent?.type === "atrule" && parent.name === "media" ? parent.params : "";
+      const declarations: Record<string, string> = {};
+      rule.walkDecls((decl) => {
+        declarations[decl.prop] = decl.value;
+      });
+      rules.set(`${media} ${rule.selector.slice(toggle.length)}`.trim(), declarations);
+    });
+    // The negative margin gives the growth back: the field's text stays put.
+    expect(rules.get("")).toMatchObject({
+      "min-inline-size": "24px",
+      "min-block-size": "24px",
+      margin: "-4px"
+    });
+    expect(rules.get("(pointer: coarse)")).toMatchObject({ position: "relative" });
+    expect(rules.get("(pointer: coarse) ::after")).toMatchObject({ inset: "-10px" });
+  });
+
   it("keeps what an Astryx table scrolls inside its scroll box", () => {
     let position: string | undefined;
     postcss.parse(css).walkRules(".astryx-table-scroll-wrapper", (rule: Rule) => {
