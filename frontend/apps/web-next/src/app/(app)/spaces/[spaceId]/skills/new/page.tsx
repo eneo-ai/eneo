@@ -20,7 +20,7 @@ export default async function NewSkillRoute({ params }: Props) {
     if (!hasPermission(user)("admin")) redirect("/spaces/list");
     return <OrganizationSkillNewPage />;
   }
-  const space = await getQueryClient().fetchQuery(spaceQueryOptions(eneoApi(), spaceId));
+  const space = await getQueryClient().query(spaceQueryOptions(eneoApi(), spaceId));
   if (!space.skill_permissions.includes("create"))
     redirect(
       space.skill_permissions.includes("read")

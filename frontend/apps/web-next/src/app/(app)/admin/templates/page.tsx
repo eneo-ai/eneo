@@ -14,8 +14,8 @@ export default async function AdminTemplatesRoute() {
   const queryClient = getQueryClient();
   const api = eneoApi();
   await Promise.all([
-    queryClient.fetchQuery(assistantTemplatesQueryOptions(api)),
-    queryClient.fetchQuery(appTemplatesQueryOptions(api))
+    queryClient.query(assistantTemplatesQueryOptions(api)),
+    queryClient.query(appTemplatesQueryOptions(api))
   ]);
 
   return (

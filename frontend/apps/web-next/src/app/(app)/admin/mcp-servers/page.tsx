@@ -12,8 +12,8 @@ export default async function AdminMcpServersRoute() {
   const queryClient = getQueryClient();
   const api = eneoApi();
   await Promise.all([
-    queryClient.fetchQuery(mcpServersQueryOptions(api)),
-    queryClient.fetchQuery(securityClassificationsQueryOptions(api))
+    queryClient.query(mcpServersQueryOptions(api)),
+    queryClient.query(securityClassificationsQueryOptions(api))
   ]);
 
   return (

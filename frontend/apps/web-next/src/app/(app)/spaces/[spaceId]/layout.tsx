@@ -16,7 +16,7 @@ export async function generateMetadata({
   params: Promise<{ spaceId: string }>;
 }): Promise<Metadata> {
   const { spaceId } = await params;
-  return spaceLayoutTitle(() => getQueryClient().fetchQuery(spaceQueryOptions(eneoApi(), spaceId)));
+  return spaceLayoutTitle(() => getQueryClient().query(spaceQueryOptions(eneoApi(), spaceId)));
 }
 
 export default async function SpaceLayout({
@@ -30,7 +30,7 @@ export default async function SpaceLayout({
   const queryClient = getQueryClient();
 
   try {
-    await queryClient.fetchQuery(spaceQueryOptions(eneoApi(), spaceId));
+    await queryClient.query(spaceQueryOptions(eneoApi(), spaceId));
   } catch (error) {
     if (error instanceof EneoApiError && error.status === 404) notFound();
     throw error;

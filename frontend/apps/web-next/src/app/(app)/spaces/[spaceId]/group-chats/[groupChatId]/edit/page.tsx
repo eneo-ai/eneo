@@ -15,9 +15,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { groupChatId } = await params;
   return spacePageTitle(async (t) => {
-    const groupChat = await getQueryClient().fetchQuery(
-      groupChatQueryOptions(eneoApi(), groupChatId)
-    );
+    const groupChat = await getQueryClient().query(groupChatQueryOptions(eneoApi(), groupChatId));
     return t("space_edit_title", { name: groupChat.name });
   }, "assistants");
 }
@@ -31,7 +29,7 @@ export default async function GroupChatEditPage({
   const queryClient = getQueryClient();
 
   try {
-    await queryClient.fetchQuery(groupChatQueryOptions(eneoApi(), groupChatId));
+    await queryClient.query(groupChatQueryOptions(eneoApi(), groupChatId));
   } catch (error) {
     if (error instanceof EneoApiError && error.status === 404) notFound();
     throw error;

@@ -15,7 +15,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { appId } = await params;
   return spacePageTitle(async (t) => {
-    const app = await getQueryClient().fetchQuery(appQueryOptions(eneoApi(), appId));
+    const app = await getQueryClient().query(appQueryOptions(eneoApi(), appId));
     return t("space_app_result_title", { name: app.name });
   }, "results");
 }
@@ -32,8 +32,8 @@ export default async function AppResultPage({
   let canEdit = false;
   try {
     const [app] = await Promise.all([
-      queryClient.fetchQuery(appQueryOptions(api, appId)),
-      queryClient.fetchQuery(appRunQueryOptions(api, resultId))
+      queryClient.query(appQueryOptions(api, appId)),
+      queryClient.query(appRunQueryOptions(api, resultId))
     ]);
     canEdit = (app.permissions ?? []).includes("edit");
   } catch (error) {

@@ -9,7 +9,7 @@ export const generateMetadata = pageTitle("insights");
 
 export default async function AdminInsightsRoute() {
   const queryClient = getQueryClient();
-  await queryClient.fetchQuery(insightCountsQueryOptions(eneoApi()));
+  await queryClient.query(insightCountsQueryOptions(eneoApi()));
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>

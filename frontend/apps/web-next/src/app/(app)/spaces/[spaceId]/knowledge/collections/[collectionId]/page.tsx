@@ -19,7 +19,7 @@ export async function generateMetadata({
   const { collectionId } = await params;
   return spacePageTitle(
     async () =>
-      (await getQueryClient().fetchQuery(collectionQueryOptions(eneoApi(), collectionId))).name,
+      (await getQueryClient().query(collectionQueryOptions(eneoApi(), collectionId))).name,
     "collections"
   );
 }
@@ -35,8 +35,8 @@ export default async function CollectionPage({
 
   try {
     await Promise.all([
-      queryClient.fetchQuery(collectionQueryOptions(api, collectionId)),
-      queryClient.fetchQuery(collectionBlobsQueryOptions(api, collectionId))
+      queryClient.query(collectionQueryOptions(api, collectionId)),
+      queryClient.query(collectionBlobsQueryOptions(api, collectionId))
     ]);
   } catch (error) {
     if (error instanceof EneoApiError && error.status === 404) notFound();

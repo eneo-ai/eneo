@@ -22,9 +22,7 @@ export async function generateMetadata({
   const { websiteId } = await params;
   return spacePageTitle(
     async () =>
-      formatWebsiteName(
-        await getQueryClient().fetchQuery(websiteQueryOptions(eneoApi(), websiteId))
-      ),
+      formatWebsiteName(await getQueryClient().query(websiteQueryOptions(eneoApi(), websiteId))),
     "websites"
   );
 }
@@ -40,9 +38,9 @@ export default async function WebsitePage({
 
   try {
     await Promise.all([
-      queryClient.fetchQuery(websiteQueryOptions(api, websiteId)),
-      queryClient.fetchQuery(websiteCrawlRunsQueryOptions(api, websiteId)),
-      queryClient.fetchQuery(websiteBlobsQueryOptions(api, websiteId))
+      queryClient.query(websiteQueryOptions(api, websiteId)),
+      queryClient.query(websiteCrawlRunsQueryOptions(api, websiteId)),
+      queryClient.query(websiteBlobsQueryOptions(api, websiteId))
     ]);
   } catch (error) {
     if (error instanceof EneoApiError && error.status === 404) notFound();

@@ -1,4 +1,4 @@
-import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
+import { dehydrate, HydrationBoundary, noop } from "@tanstack/react-query";
 import { getQueryClient } from "@/lib/api/query";
 import { eneoApi } from "@/lib/api/server";
 import { adminUsersQueryOptions, type StateFilter } from "@/features/admin/users/users";
@@ -25,8 +25,8 @@ export default async function AdminUsersRoute({
   };
 
   await Promise.all([
-    queryClient.prefetchQuery(adminUsersQueryOptions(api, params)),
-    queryClient.prefetchQuery(rolesQueryOptions(api))
+    queryClient.query(adminUsersQueryOptions(api, params)).catch(noop),
+    queryClient.query(rolesQueryOptions(api)).catch(noop)
   ]);
 
   return (

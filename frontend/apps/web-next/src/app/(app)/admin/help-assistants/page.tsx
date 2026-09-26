@@ -14,8 +14,8 @@ export default async function AdminHelpAssistantsRoute() {
   const queryClient = getQueryClient();
   const api = eneoApi();
   await Promise.all([
-    queryClient.fetchQuery(helpRolesQueryOptions(api)),
-    queryClient.fetchQuery(helpTemplatesQueryOptions(api))
+    queryClient.query(helpRolesQueryOptions(api)),
+    queryClient.query(helpTemplatesQueryOptions(api))
   ]);
 
   return (

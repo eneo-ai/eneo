@@ -9,7 +9,7 @@ export const generateMetadata = pageTitle("security_classifications");
 
 export default async function AdminSecurityClassificationsRoute() {
   const queryClient = getQueryClient();
-  await queryClient.fetchQuery(securityClassificationsQueryOptions(eneoApi()));
+  await queryClient.query(securityClassificationsQueryOptions(eneoApi()));
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>

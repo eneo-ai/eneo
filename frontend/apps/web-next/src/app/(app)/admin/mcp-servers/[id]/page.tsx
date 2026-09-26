@@ -22,9 +22,9 @@ export default async function AdminMcpServerDetailRoute({
   const api = eneoApi();
 
   const [servers] = await Promise.all([
-    queryClient.fetchQuery(mcpServersQueryOptions(api)),
-    queryClient.fetchQuery(securityClassificationsQueryOptions(api)),
-    queryClient.fetchQuery(mcpServerToolsQueryOptions(api, id))
+    queryClient.query(mcpServersQueryOptions(api)),
+    queryClient.query(securityClassificationsQueryOptions(api)),
+    queryClient.query(mcpServerToolsQueryOptions(api, id))
   ]);
 
   if (!servers.some((server) => server.id === id)) notFound();

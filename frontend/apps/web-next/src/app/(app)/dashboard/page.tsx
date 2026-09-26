@@ -13,10 +13,10 @@ export const generateMetadata = pageTitle("assistants");
 export default async function DashboardPage() {
   const t = await getTranslations();
 
-  // fetchQuery, not prefetchQuery: prefetchQuery swallows errors, which would
-  // also swallow the login redirect thrown by the 401 middleware.
+  // Errors are not swallowed here (no .catch): that would also swallow the
+  // login redirect thrown by the 401 middleware.
   const queryClient = getQueryClient();
-  await queryClient.fetchQuery(dashboardQueryOptions(eneoApi()));
+  await queryClient.query(dashboardQueryOptions(eneoApi()));
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-4 sm:p-6">
