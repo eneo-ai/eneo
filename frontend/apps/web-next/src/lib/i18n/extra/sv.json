@@ -1411,5 +1411,9 @@
   "provider_no_models": "Leverantören har inga modeller än.",
   "provider_delete_models_first": "Ta bort {count, plural, one {dess modell} other {dess # modeller}} först",
   "provider_delete_blocked_title": "{name} kan inte tas bort än",
-  "provider_delete_blocked_description": "Leverantören har {count, plural, one {en modell} other {# modeller}}. Ta bort {count, plural, one {den} other {dem}} i leverantörens tabell först, och ta sedan bort leverantören."
+  "provider_delete_blocked_description": "Leverantören har {count, plural, one {en modell} other {# modeller}}. Ta bort {count, plural, one {den} other {dem}} i leverantörens tabell först, och ta sedan bort leverantören.",
+  "change_password_current_required": "Ange ditt nuvarande lösenord.",
+  "change_password_new_required": "Ange ett nytt lösenord.",
+  "change_password_confirm_required": "Skriv det nya lösenordet en gång till.",
+  "change_password_mismatch": "Lösenorden matchar inte. Skriv samma lösenord i båda fälten."
 }

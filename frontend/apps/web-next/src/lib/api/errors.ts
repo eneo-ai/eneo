@@ -138,6 +138,10 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9005: "eneo_error_9005", // AUTHENTICATION_ERROR
   9019: "eneo_error_9019", // USER_INACTIVE
   9025: "eneo_error_9025", // TENANT_SUSPENDED
+  9058: "eneo_error_9058", // PASSWORD_REUSE
+  9059: "eneo_error_9059", // PASSWORD_POLICY_VIOLATION
+  9060: "eneo_error_9060", // LOCAL_PASSWORD_CHANGE_UNAVAILABLE
+  9061: "eneo_error_9061", // CURRENT_PASSWORD_INCORRECT
   // Model & provider issues
   9002: "eneo_error_9002", // UNSUPPORTED_MODEL
   9020: "eneo_error_9020", // NO_MODEL_SELECTED

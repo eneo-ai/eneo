@@ -143,6 +143,18 @@ describe("getErrorMessage", () => {
     );
   });
 
+  it("localizes the password refusals, as the SvelteKit app does", () => {
+    const refused = (code: number) =>
+      getErrorMessage(new EneoApiError("Refused", { status: 400, code }), translator("sv", sv));
+
+    expect(refused(9058)).toBe(
+      "Det nya lösenordet måste skilja sig från det nuvarande lösenordet."
+    );
+    expect(refused(9059)).toBe("Det nya lösenordet uppfyller inte lösenordspolicyn.");
+    expect(refused(9060)).toBe("Lösenordsbyte är inte tillgängligt för det här kontot.");
+    expect(refused(9061)).toBe("Det nuvarande lösenordet är felaktigt.");
+  });
+
   it("words a taken name for every resource that answers with it, not only models", () => {
     // Providers, MCP servers, templates, files, modules and models all send 9017.
     const error = new EneoApiError("An MCP server with this name already exists.", {

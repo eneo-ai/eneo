@@ -1411,5 +1411,9 @@
   "provider_no_models": "This provider has no models yet.",
   "provider_delete_models_first": "Delete {count, plural, one {its model} other {its # models}} first",
   "provider_delete_blocked_title": "{name} can't be deleted yet",
-  "provider_delete_blocked_description": "The provider has {count, plural, one {a model} other {# models}}. Delete {count, plural, one {it} other {them}} in the provider's table first, then delete the provider."
+  "provider_delete_blocked_description": "The provider has {count, plural, one {a model} other {# models}}. Delete {count, plural, one {it} other {them}} in the provider's table first, then delete the provider.",
+  "change_password_current_required": "Enter your current password.",
+  "change_password_new_required": "Enter a new password.",
+  "change_password_confirm_required": "Type the new password again.",
+  "change_password_mismatch": "The passwords don't match. Type the same password in both fields."
 }

@@ -39,6 +39,11 @@ export type ConfirmedSecretInputProps = {
   placeholder?: string;
   /** At the first field when a required secret is empty and `showErrors` is set. */
   requiredMessage?: string;
+  /**
+   * What is wrong with the secret itself (a rule it breaks, a server's
+   * refusal), at the first field. The caller decides when it shows.
+   */
+  valueError?: string;
   /** At the confirmation when the two differ: how to fix it. */
   mismatchMessage: string;
   /**
@@ -88,6 +93,7 @@ export function ConfirmedSecretInput({
   autoComplete = "new-password",
   placeholder,
   requiredMessage,
+  valueError,
   mismatchMessage,
   showErrors = false,
   valueRef,
@@ -95,7 +101,8 @@ export function ConfirmedSecretInput({
 }: ConfirmedSecretInputProps) {
   const [confirmationLeft, setConfirmationLeft] = useState(false);
   const problem = confirmedSecretProblem({ value, confirmation, isRequired });
-  const showRequired = showErrors && problem === "required" && requiredMessage;
+  const valueMessage =
+    showErrors && problem === "required" && requiredMessage ? requiredMessage : valueError;
   const showMismatch = problem === "mismatch" && (showErrors || confirmationLeft);
 
   return (
@@ -111,7 +118,7 @@ export function ConfirmedSecretInput({
         isDisabled={isDisabled}
         autoComplete={autoComplete}
         placeholder={placeholder}
-        status={showRequired ? { type: "error", message: requiredMessage } : undefined}
+        status={valueMessage ? { type: "error", message: valueMessage } : undefined}
       />
       <TextInput
         ref={confirmationRef}
