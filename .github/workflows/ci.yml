@@ -411,7 +411,9 @@ jobs:
 
       - name: Build frontend
         if: matrix.task == 'build'
-        run: bun run build
+        # The legacy web image ships only apps/web. web-next has its own job
+        # with the server-side environment its production build requires.
+        run: bun run --filter '@eneo/web' build
         env:
           # The Svelte production build exceeds Node's default heap on GitHub-hosted runners.
           NODE_OPTIONS: --max-old-space-size=8192
