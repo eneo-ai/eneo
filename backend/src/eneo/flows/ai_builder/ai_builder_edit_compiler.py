@@ -709,14 +709,23 @@ def _build_form_field_changes(
 ) -> list[FormFieldChange]:
     current_by_name = {field.name: field for field in current_fields or []}
     proposed_by_name = {field.name: field for field in proposed_fields or []}
+    kept_before = [f.name for f in current_fields or [] if f.name in proposed_by_name]
+    kept_now = [f.name for f in proposed_fields or [] if f.name in current_by_name]
+    moved = {name for before, name in zip(kept_before, kept_now) if before != name}
     changes: list[FormFieldChange] = []
 
     for field in proposed_fields or []:
         current = current_by_name.get(field.name)
         if current is None:
             changes.append(FormFieldChange(kind="added", field_name=field.name))
-        elif current != field:
+            continue
+        if current != field:
             changes.append(FormFieldChange(kind="modified", field_name=field.name))
+        # A move is its own change, whether or not the field also changed.
+        if field.name in moved:
+            changes.append(
+                FormFieldChange(kind="modified", field_name=field.name, details="moved")
+            )
 
     for field in current_fields or []:
         if field.name not in proposed_by_name:

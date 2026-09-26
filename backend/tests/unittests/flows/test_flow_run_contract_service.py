@@ -696,7 +696,39 @@ async def test_get_run_contract_marks_template_checksum_drift_needs_action(
 
 
 @pytest.mark.asyncio
-async def test_get_run_contract_normalizes_and_sorts_published_form_fields() -> None:
+@pytest.mark.parametrize(
+    ("fields", "shown"),
+    [
+        (
+            [
+                {"name": "second", "type": "email", "order": 2},
+                {"name": "first", "type": "textarea", "order": 1},
+            ],
+            ["first", "second"],
+        ),
+        # A field without an order sits at its position, as the editor shows it.
+        (
+            [
+                {"name": "explicit", "type": "text", "order": 2},
+                {"name": "implicit", "type": "text"},
+            ],
+            ["explicit", "implicit"],
+        ),
+        # A legacy order a persisted read tolerates (0) sits at its position.
+        (
+            [
+                {"name": "a", "type": "text", "order": 3},
+                {"name": "b", "type": "text", "order": 4},
+                {"name": "c", "type": "text", "order": 0},
+            ],
+            ["a", "c", "b"],
+        ),
+    ],
+    ids=["by-order", "mixed", "legacy"],
+)
+async def test_get_run_contract_normalizes_and_sorts_published_form_fields(
+    fields: list[dict[str, object]], shown: list[str]
+) -> None:
     flow_service = AsyncMock()
     settings_service = AsyncMock()
     flow_version_repo = AsyncMock()
@@ -710,14 +742,7 @@ async def test_get_run_contract_normalizes_and_sorts_published_form_fields() -> 
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
             "flow_id": str(flow.id),
-            "metadata_json": {
-                "form_schema": {
-                    "fields": [
-                        {"name": "second", "type": "email", "order": 2},
-                        {"name": "first", "type": "textarea", "order": 1},
-                    ]
-                }
-            },
+            "metadata_json": {"form_schema": {"fields": fields}},
             "steps": [
                 {
                     "step_id": str(step.id),
@@ -739,10 +764,11 @@ async def test_get_run_contract_normalizes_and_sorts_published_form_fields() -> 
         flow_version_repo=flow_version_repo,
     ).get_run_contract(flow_id=flow.id, space=_SPACE)
 
-    assert [(field.name, field.type) for field in contract.form_fields] == [
-        ("first", "text"),
-        ("second", "text"),
+    # Published orders are the display positions a client re-sorts by.
+    assert [(field.name, field.order) for field in contract.form_fields] == [
+        (name, position) for position, name in enumerate(shown, start=1)
     ]
+    assert {field.type for field in contract.form_fields} == {"text"}
 
 
 @pytest.mark.asyncio

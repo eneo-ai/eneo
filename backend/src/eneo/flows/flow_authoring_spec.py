@@ -255,6 +255,37 @@ class FlowDraftSpecCore(BaseModel):
         return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
+def authoring_form_field(field: Mapping[str, object]) -> FormFieldSpec | None:
+    """What the authoring view models of a saved form field; a field the editor
+    left unlabelled reads as its name, as the editor shows it."""
+
+    name = str(field.get("name", "")).strip()
+    if not name:
+        return None
+    options = field.get("options")
+    return FormFieldSpec(
+        name=name,
+        type=str(field.get("type", "text")).strip() or "text",
+        label=str(field.get("label") or name).strip() or name,
+        required=bool(field.get("required", False)),
+        options=(
+            [str(option) for option in cast(list[object], options)]
+            if isinstance(options, list)
+            else None
+        ),
+    )
+
+
+def authoring_form_field_payload(field: FormFieldSpec) -> FlowPersistedJsonObject:
+    return {
+        "name": field.name,
+        "type": field.type,
+        "label": field.label,
+        "required": field.required,
+        **({"options": field.options} if field.options is not None else {}),
+    }
+
+
 def metadata_json_from_authoring_form_fields(
     form_fields: list[FormFieldSpec] | None,
 ) -> FlowPersistedJsonObject | None:
@@ -262,16 +293,7 @@ def metadata_json_from_authoring_form_fields(
         return None
     return {
         "form_schema": {
-            "fields": [
-                {
-                    "name": field.name,
-                    "type": field.type,
-                    "label": field.label,
-                    "required": field.required,
-                    **({"options": field.options} if field.options is not None else {}),
-                }
-                for field in form_fields
-            ]
+            "fields": [authoring_form_field_payload(field) for field in form_fields]
         }
     }
 
@@ -287,6 +309,8 @@ __all__ = [
     "OutputMode",
     "OutputType",
     "StepSpec",
+    "authoring_form_field",
+    "authoring_form_field_payload",
     "has_flow_mcp_unsupported_error",
     "metadata_json_from_authoring_form_fields",
     "strip_inapplicable_completion_model",

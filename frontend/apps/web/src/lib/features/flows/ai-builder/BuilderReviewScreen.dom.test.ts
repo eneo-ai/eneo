@@ -1281,6 +1281,59 @@ describe("BuilderReviewScreen plan document", () => {
     ).toBe(true);
   });
 
+  it("names a form field that only moved, in the list and on the field", async () => {
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: {
+        session: makeSession({ status: "awaiting_approval", latest_plan_id: "plan-1" }),
+        currentPlan: makePlan({
+          proposal: makeProposal({
+            spec: {
+              flow_name: "Mötesrapport",
+              flow_description: "",
+              form_fields: [
+                { name: "datum", type: "text", label: "Datum", required: true },
+                { name: "ort", type: "text", label: "Plats", required: false }
+              ],
+              steps: [makeTranscribeStep({ existing_step_ref: "existing_step_1" })]
+            },
+            edit: {
+              base_flow_revision: 3,
+              removed_existing_step_refs: [],
+              scoped_target_existing_step_ref: null,
+              scoped_target_plan_step_ref: null,
+              diff: {
+                step_changes: [
+                  { kind: "unchanged", step_name: "Transkribera ljud", step_ref: "existing_step_1" }
+                ],
+                // "datum" moved and changed; "ort" only changed.
+                form_changes: [
+                  { kind: "modified", field_name: "datum", details: null },
+                  { kind: "modified", field_name: "datum", details: "moved" },
+                  { kind: "modified", field_name: "ort", details: null }
+                ]
+              },
+              warnings: [],
+              advisories: [],
+              risk_flags: [],
+              confidence: "ready"
+            }
+          })
+        })
+      }
+    });
+
+    const rows = within(screen.getByTestId("edit-change-list"))
+      .getAllByRole("listitem")
+      .map((li) => li.textContent?.replace(/\s+/g, " ").trim());
+    expect(rows).toContain(
+      `${m.ai_builder_form_fields_title()} ${m.ai_builder_change_list_form_modified({ count: "2" })} ${m.ai_builder_review_suggestion_steps_join()} ${m.ai_builder_change_list_form_moved({ count: "1" })}`
+    );
+    const movedBadges = screen.getAllByText(m.ai_builder_form_field_moved());
+    expect(movedBadges).toHaveLength(1);
+    expect(movedBadges[0].parentElement?.textContent).toContain("Datum");
+  });
+
   it("reads one list of what an edit changes, removed steps included", async () => {
     render(BuilderReviewScreenHarness, {
       currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),

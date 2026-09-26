@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
-from typing import Literal, get_args
+from typing import Literal, cast, get_args
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -14,6 +14,8 @@ from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     OutputType,
     StepSpec,
+    authoring_form_field,
+    authoring_form_field_payload,
     metadata_json_from_authoring_form_fields,
 )
 from eneo.flows.flow_authoring_transcription import (
@@ -23,7 +25,11 @@ from eneo.flows.flow_authoring_variable_rewriting import (
     build_ref_to_order,
     rewrite_step_spec_variables,
 )
-from eneo.flows.flow_metadata import normalize_persisted_flow_metadata
+from eneo.flows.flow_metadata import (
+    form_fields_in_display_order,
+    is_form_field_order,
+    normalize_persisted_flow_metadata,
+)
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
 from eneo.flows.http_transport import redact_persisted_config
 from eneo.flows.step_lineage import existing_step_ref_for_order
@@ -387,7 +393,10 @@ def build_flow_draft_metadata_json(
 
     form_metadata = metadata_json_from_authoring_form_fields(spec.form_fields)
     if form_metadata is not None:
-        metadata.update(form_metadata)
+        metadata["form_schema"] = _keep_unauthored_form_keys(
+            cast(FlowPersistedJsonObject, form_metadata["form_schema"]),
+            saved=metadata.get("form_schema"),
+        )
 
     metadata = (
         apply_audio_transcription_defaults(
@@ -398,6 +407,67 @@ def build_flow_draft_metadata_json(
         or {}
     )
     return metadata if metadata else None
+
+
+def _keep_unauthored_form_keys(
+    authored: FlowPersistedJsonObject, *, saved: object
+) -> FlowPersistedJsonObject:
+    """An edit changes only what it authored. A saved field whose authoring view
+    the edit left as it was stays exactly as saved; a changed field takes only
+    the changed values; `order` is renumbered only when the sequence changed,
+    so an untouched form stays exactly as saved."""
+
+    if not isinstance(saved, dict):
+        return authored
+    saved_schema = cast(FlowPersistedJsonObject, saved)
+    raw_fields = saved_schema.get("fields")
+    if not isinstance(raw_fields, list):
+        return authored
+    saved_fields = [
+        cast(FlowPersistedJsonObject, field)
+        for field in cast(list[object], raw_fields)
+        if isinstance(field, dict)
+    ]
+    saved_by_name = {
+        view.name: (field, authoring_form_field_payload(view))
+        for field in saved_fields
+        if (view := authoring_form_field(field)) is not None
+    }
+    authored_fields = cast(list[FlowPersistedJsonObject], authored["fields"])
+    sequence_kept = [field["name"] for field in authored_fields] == [
+        field.get("name") for field in form_fields_in_display_order(saved_fields)
+    ]
+    saved_orders = [field["order"] for field in saved_fields if "order" in field]
+    # An absent order is writable; a present one a persisted read tolerated
+    # (not a whole number from 1, or repeated) is not, so it is renumbered.
+    renumber = bool(saved_orders) and not (
+        sequence_kept
+        and all(is_form_field_order(order) for order in saved_orders)
+        and len(set(saved_orders)) == len(saved_orders)
+    )
+    fields: list[FlowPersistedJsonObject] = []
+    for position, field in enumerate(authored_fields, start=1):
+        saved_field, saved_view = saved_by_name.get(field["name"], ({}, {}))
+        patched = dict(saved_field)
+        for key in [*field, *(key for key in saved_view if key not in field)]:
+            if field.get(key) == saved_view.get(key):
+                continue
+            if key in field:
+                patched[key] = field[key]
+            else:
+                patched.pop(key, None)
+        if renumber:
+            patched["order"] = position
+        fields.append(patched)
+    if (
+        sequence_kept
+        and not renumber
+        and all(
+            field == saved_by_name.get(field["name"], ({}, {}))[0] for field in fields
+        )
+    ):
+        return saved_schema
+    return {**saved_schema, "fields": fields}
 
 
 def _resolve_existing_step(

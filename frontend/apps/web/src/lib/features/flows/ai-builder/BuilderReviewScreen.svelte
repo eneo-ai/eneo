@@ -173,6 +173,14 @@
 
   const revisedStepCount = $derived(steps.filter((step) => changeBadge(step) !== null).length);
 
+  const movedFormFields = $derived(
+    new Set(
+      (plan?.proposal.edit?.diff?.form_changes ?? [])
+        .filter((change) => change.details === "moved")
+        .map((change) => change.field_name)
+    )
+  );
+
   // ---- Scoped step review (edit mode) --------------------------------------
 
   const scopedTargetExistingStepRef = $derived(
@@ -688,17 +696,22 @@
     }
     const formChanges = plan.proposal.edit.diff?.form_changes ?? [];
     if (formChanges.length > 0) {
-      const count = (kind: (typeof formChanges)[number]["kind"]) =>
-        String(formChanges.filter((change) => change.kind === kind).length);
+      // A field that only moved is "modified" with details "moved".
+      const group = (change: (typeof formChanges)[number]) =>
+        change.details === "moved" ? "moved" : change.kind;
+      const count = (kind: string) => formChanges.filter((change) => group(change) === kind).length;
       const parts = [
-        formChanges.some((c) => c.kind === "added")
-          ? m.ai_builder_change_list_form_added({ count: count("added") })
+        count("added")
+          ? m.ai_builder_change_list_form_added({ count: String(count("added")) })
           : null,
-        formChanges.some((c) => c.kind === "modified")
-          ? m.ai_builder_change_list_form_modified({ count: count("modified") })
+        count("modified")
+          ? m.ai_builder_change_list_form_modified({ count: String(count("modified")) })
           : null,
-        formChanges.some((c) => c.kind === "removed")
-          ? m.ai_builder_change_list_form_removed({ count: count("removed") })
+        count("moved")
+          ? m.ai_builder_change_list_form_moved({ count: String(count("moved")) })
+          : null,
+        count("removed")
+          ? m.ai_builder_change_list_form_removed({ count: String(count("removed")) })
           : null
       ].filter((part) => part !== null);
       entries.push({
@@ -1715,8 +1728,17 @@
                     <div class="grid gap-x-8 gap-y-3 sm:grid-cols-2">
                       {#each spec.form_fields as field (`${field.name}-${field.type}`)}
                         <div class="min-w-0">
-                          <div class="text-primary truncate text-[0.8125rem] font-semibold">
-                            {field.label}
+                          <div class="flex min-w-0 items-center gap-2">
+                            <span class="text-primary truncate text-[0.8125rem] font-semibold">
+                              {field.label}
+                            </span>
+                            {#if movedFormFields.has(field.name)}
+                              <span
+                                class="bg-accent-dimmer text-accent-stronger inline-flex h-[1.3125rem] items-center rounded-full px-2 text-xs font-semibold whitespace-nowrap"
+                              >
+                                {m.ai_builder_form_field_moved()}
+                              </span>
+                            {/if}
                           </div>
                           <div
                             class="text-secondary mt-1 flex flex-wrap items-center gap-x-2 text-xs"

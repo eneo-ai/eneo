@@ -108,6 +108,31 @@ class FlowMetadata(BaseModel):
     ai_builder: FlowAIBuilderMetadata | None = None
 
 
+def is_form_field_order(value: object) -> bool:
+    """A writable `order`: a whole number from 1."""
+
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def form_field_display_position(order: object, index: int) -> int:
+    """Where the editor and the run form show a field: at its `order`, or at its
+    position when it has no writable one."""
+
+    return cast(int, order) if is_form_field_order(order) else index + 1
+
+
+def form_fields_in_display_order(
+    fields: list[FlowPersistedJsonObject],
+) -> list[FlowPersistedJsonObject]:
+    return [
+        field
+        for _, field in sorted(
+            enumerate(fields),
+            key=lambda item: form_field_display_position(item[1].get("order"), item[0]),
+        )
+    ]
+
+
 def form_field_name_error(
     *,
     message: str,

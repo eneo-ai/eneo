@@ -43,6 +43,7 @@ from eneo.flows.enums import (
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowValidationException
+from eneo.flows.flow_metadata import form_field_display_position
 from eneo.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
 from eneo.flows.flow_run_step_inputs import (
     RuntimeStepInputSpec,
@@ -401,18 +402,23 @@ def _published_form_fields(
     form_schema = published_definition.metadata().form_schema
     if form_schema is None:
         return []
-    fields = [
+    shown = sorted(
+        enumerate(form_schema.fields),
+        key=lambda item: form_field_display_position(item[1].order, item[0]),
+    )
+    # `order` is published as the display position, so a client that sorts by it
+    # again shows the same sequence.
+    return [
         FormFieldPublic(
             name=field.name,
             type=field.type,
             label=field.label,
             required=field.required,
             options=field.options,
-            order=field.order,
+            order=position,
         )
-        for field in form_schema.fields
+        for position, (_, field) in enumerate(shown, start=1)
     ]
-    return sorted(fields, key=lambda field: field.order or 0)
 
 
 def _runtime_input_contracts(

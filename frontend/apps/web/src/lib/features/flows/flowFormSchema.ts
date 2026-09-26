@@ -100,7 +100,9 @@ export function normalizeFlowFormFields(
             .map((option) => option.trim())
             .filter((option) => option.length > 0)
         : [],
-      order: typeof field.order === "number" ? field.order : index + 1
+      // The backend's rule: a whole number from 1, else the field's position.
+      order:
+        Number.isInteger(field.order) && Number(field.order) >= 1 ? Number(field.order) : index + 1
     }))
     .sort((left, right) => left.order - right.order)
     .map((field, index) => ({ ...field, order: index + 1 }));

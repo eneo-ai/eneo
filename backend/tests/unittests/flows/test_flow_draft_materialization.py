@@ -5,6 +5,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_form_fields import (
+    extract_form_fields_from_metadata,
+)
 from eneo.flows.application.flow_draft_materialization import (
     FlowDraftStepChangeKind,
     InvalidExistingStepRefReason,
@@ -24,6 +27,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from eneo.flows.flow_metadata import normalize_flow_metadata_for_write
 from eneo.main.exceptions import BadRequestException
 
 
@@ -146,6 +150,153 @@ def test_shared_compile_distinguishes_absent_and_empty_form_fields() -> None:
     assert absent_fields.metadata_json["form_schema"] == existing_form_schema
     assert empty_fields.metadata_json is not None
     assert empty_fields.metadata_json["form_schema"] == {"fields": []}
+
+
+# The editor saves `order` and may keep keys the authoring view does not model.
+_SAVED_FIELDS = [
+    {
+        "name": "case_id",
+        "type": "text",
+        "label": "Case id",
+        "required": True,
+        "order": 1,
+        "placeholder": "BAB-2026-0417",
+    },
+    {
+        "name": "amount",
+        "type": "number",
+        "label": "Amount",
+        "required": True,
+        "order": 2,
+    },
+]
+
+
+def _authored(*fields: tuple[str, str, str]) -> list[FormFieldSpec]:
+    return [
+        FormFieldSpec(name=name, type=type_, label=label, required=True)
+        for name, type_, label in fields
+    ]
+
+
+def _form_fields_after(authored: list[FormFieldSpec], saved: list[dict]) -> list[dict]:
+    changeset = compile_flow_draft_changeset(
+        FlowDraftSpecCore(flow_name="Flow", steps=[], form_fields=authored),
+        current_flow=_flow(metadata_json={"form_schema": {"fields": saved}}),
+    )
+    assert changeset.metadata_json is not None
+    return changeset.metadata_json["form_schema"]["fields"]
+
+
+def test_an_edit_that_leaves_the_form_alone_keeps_every_saved_field_key() -> None:
+    authored = _authored(("case_id", "text", "Case id"), ("amount", "number", "Amount"))
+
+    assert _form_fields_after(authored, _SAVED_FIELDS) == _SAVED_FIELDS
+
+
+def test_an_edited_field_keeps_the_keys_the_edit_did_not_author() -> None:
+    authored = _authored(
+        ("case_id", "text", "Diarienummer"), ("amount", "number", "Amount")
+    )
+
+    fields = _form_fields_after(authored, _SAVED_FIELDS)
+
+    assert fields[0] == {**_SAVED_FIELDS[0], "label": "Diarienummer"}
+    assert fields[1] == _SAVED_FIELDS[1]
+
+
+def test_added_and_reordered_fields_follow_the_authored_order() -> None:
+    authored = _authored(
+        ("amount", "number", "Amount"),
+        ("applicant", "text", "Applicant"),
+        ("case_id", "text", "Case id"),
+    )
+
+    fields = _form_fields_after(authored, _SAVED_FIELDS)
+
+    assert [(field["name"], field.get("order")) for field in fields] == [
+        ("amount", 1),
+        ("applicant", 2),
+        ("case_id", 3),
+    ]
+    assert fields[2]["placeholder"] == "BAB-2026-0417"
+    assert "placeholder" not in fields[1]
+
+
+def test_a_form_saved_without_order_gets_none_added() -> None:
+    saved = [
+        {key: value for key, value in field.items() if key != "order"}
+        for field in _SAVED_FIELDS
+    ]
+    authored = _authored(("case_id", "text", "Case id"), ("amount", "number", "Amount"))
+
+    assert _form_fields_after(authored, saved) == saved
+
+
+@pytest.mark.parametrize(
+    "saved",
+    [
+        # Valid and shown first-then-second: the runtime sorts by order.
+        [
+            {"name": "second", "type": "text", "label": "Second", "order": 2},
+            {"name": "first", "type": "text", "label": "First", "order": 1},
+        ],
+        # The editor shows an unlabelled field by its name.
+        [{"name": "case_id", "type": "text", "label": None, "required": True}],
+        # An absent order is valid beside a present one.
+        [
+            {"name": "explicit", "type": "text", "label": "Explicit", "order": 2},
+            {"name": "implicit", "type": "text", "label": "Implicit"},
+        ],
+    ],
+    ids=["order-differs-from-array", "unlabelled", "mixed-order"],
+)
+def test_an_edit_that_reads_the_form_back_unchanged_keeps_it_as_saved(
+    saved: list[dict],
+) -> None:
+    authored = extract_form_fields_from_metadata({"form_schema": {"fields": saved}})
+    assert authored is not None
+
+    assert _form_fields_after(authored, saved) == saved
+
+
+def test_a_field_added_to_a_mixed_order_form_keeps_what_the_run_form_showed() -> None:
+    saved = [
+        {"name": "explicit", "type": "text", "label": "Explicit", "order": 2},
+        {"name": "implicit", "type": "text", "label": "Implicit"},
+    ]
+    read_back = extract_form_fields_from_metadata({"form_schema": {"fields": saved}})
+    assert read_back is not None
+
+    fields = _form_fields_after(
+        [*read_back, *_authored(("added", "text", "Added"))], saved
+    )
+
+    assert [(field["name"], field["order"]) for field in fields] == [
+        ("explicit", 1),
+        ("implicit", 2),
+        ("added", 3),
+    ]
+
+
+@pytest.mark.parametrize("legacy", [0, "2", None], ids=["zero", "text", "null"])
+def test_an_unrelated_edit_makes_tolerated_legacy_orders_writable(
+    legacy: object,
+) -> None:
+    saved = [
+        {"name": "case_id", "type": "text", "label": "Case id", "order": legacy},
+        {"name": "amount", "type": "number", "label": "Amount", "order": 2},
+    ]
+    read_back = extract_form_fields_from_metadata({"form_schema": {"fields": saved}})
+    assert read_back is not None
+
+    fields = _form_fields_after(read_back, saved)
+
+    assert normalize_flow_metadata_for_write({"form_schema": {"fields": fields}})
+    assert [(field["name"], field["order"]) for field in fields] == [
+        ("case_id", 1),
+        ("amount", 2),
+    ]
 
 
 def test_shared_compile_preserves_output_config_when_output_mode_is_unchanged() -> None:

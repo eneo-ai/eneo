@@ -66,6 +66,36 @@ describe("flowFormSchema", () => {
     ]);
   });
 
+  it("shows a legacy order it cannot write at the field's position, as the backend does", () => {
+    const names = (fields: Parameters<typeof normalizeFlowFormFields>[0]) =>
+      normalizeFlowFormFields(fields).map((field) => field.name);
+
+    // Saved with a tolerated legacy order, then as a Builder edit repairs it.
+    expect(
+      names([
+        { name: "a", type: "text", order: 2 },
+        { name: "b", type: "text", order: 0 }
+      ])
+    ).toEqual(["a", "b"]);
+    expect(
+      names([
+        { name: "a", type: "text", order: 1 },
+        { name: "b", type: "text", order: 2 }
+      ])
+    ).toEqual(["a", "b"]);
+  });
+
+  it("keeps the sequence the run contract publishes when the run dialog sorts it again", () => {
+    // The contract publishes each field's display position as its order.
+    const published = [
+      { name: "a", type: "text", required: false, options: null, order: 1 },
+      { name: "c", type: "text", required: false, options: null, order: 2 },
+      { name: "b", type: "text", required: false, options: null, order: 3 }
+    ];
+
+    expect(normalizeFlowFormFields(published).map((field) => field.name)).toEqual(["a", "c", "b"]);
+  });
+
   it("accepts generated runtime contract fields with nullable option metadata", () => {
     type GeneratedFormFields = NonNullable<FlowRunContract["form_fields"]>;
 
