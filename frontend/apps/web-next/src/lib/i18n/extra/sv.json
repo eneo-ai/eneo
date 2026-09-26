@@ -563,5 +563,6 @@
   "fix_integrations_empty_title": "Inga integrationer ännu",
   "chat_tool_accept_named": "Godkänn {tool}",
   "chat_tool_deny_named": "Avvisa {tool}",
-  "chat_history_load_more": "Visa fler konversationer"
+  "chat_history_load_more": "Visa fler konversationer",
+  "chat_insights_generating": "Tar fram insikter…"
 }
