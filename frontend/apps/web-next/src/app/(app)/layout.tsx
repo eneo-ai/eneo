@@ -7,6 +7,7 @@ import {
   SIDE_NAV_COLLAPSED_COOKIE
 } from "@/components/shell/side-nav-preference";
 import { unwrap } from "@/lib/api/errors";
+import { backendVersionFrom } from "@/lib/api/version";
 import { eneoApi } from "@/lib/api/server";
 import { env } from "@/lib/env";
 import { JobsProvider } from "@/features/jobs/use-jobs";
@@ -43,8 +44,7 @@ export default async function AppLayout({
       unwrap(api.GET("/api/v1/settings/")),
       unwrap(api.GET("/api/v1/auth/federation-status")),
       unwrap(api.GET("/api/v1/limits/")),
-      // The spec types /version as unknown; it returns a bare string.
-      unwrap(api.GET("/version")).then((version) => (typeof version === "string" ? version : "")),
+      unwrap(api.GET("/version")).then(backendVersionFrom),
       // Optional during rolling deployments; an unavailable marker must not look like "never seen".
       unwrap(api.GET("/api/v1/whats-new/state/")).catch(() => null)
     ]);

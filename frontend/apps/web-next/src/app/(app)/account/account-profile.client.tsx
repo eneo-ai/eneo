@@ -148,7 +148,8 @@ export function AccountProfile() {
       </SettingsRow>
       <SettingsRow title={t("version")}>
         <p className="text-muted-foreground text-sm">
-          web-next {versions.frontend} · backend {versions.backend}
+          {t("version_frontend")} {versions.frontend}
+          {versions.backend ? ` · ${t("version_backend")} ${versions.backend}` : null}
         </p>
       </SettingsRow>
     </SettingsGroup>
