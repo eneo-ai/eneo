@@ -200,7 +200,8 @@ console.log(conversation.session_id, conversation.answer);
 - `DELETE /api/v1/conversations/{session_id}/` deletes it (`204`).
 - `PATCH /api/v1/conversations/{session_id}/name/` renames it with `{"name": "..."}`.
 - `POST /api/v1/conversations/{session_id}/title/` generates a title with the model.
-- `POST /api/v1/conversations/{session_id}/feedback/` records feedback.
+- `POST /api/v1/conversations/{session_id}/feedback/` records feedback on the whole conversation.
+- `PUT /api/v1/conversations/{session_id}/messages/{message_id}/feedback/` rates one answer with `{"value": 1}` (good) or `{"value": -1}` (bad) and an optional `"text"` comment, replacing an earlier rating of that answer. `DELETE` on the same path clears it (`204`). Each message in a conversation carries its rating as `feedback`.
 - `POST /api/v1/conversations/preflight` estimates the token cost of the next message before sending it.
 
 ---
