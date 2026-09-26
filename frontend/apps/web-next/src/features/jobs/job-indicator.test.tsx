@@ -79,6 +79,35 @@ describe("JobIndicator", () => {
     await expectNoAxeViolations(document.body);
   });
 
+  it("shows long names in full instead of cutting them off behind a tooltip", async () => {
+    const long = "Protokoll_kommunstyrelsen_2026-09-21_bilaga_4_slutlig_version.pdf";
+    jobs.state = {
+      runningCount: 1,
+      uploads: [
+        {
+          id: "u1",
+          file: new File(["x"], long),
+          status: "queued",
+          collectionId: "c1",
+          progress: 0
+        }
+      ],
+      jobs: [job({ id: "j1", name: long, status: "failed", result_location: "Tom fil" })]
+    };
+    renderInApp(<JobIndicator />);
+    fireEvent.click(screen.getByRole("button", { name: "Aviseringar, 1 pågår" }));
+    const panel = await screen.findByRole("dialog", { name: "Aviseringar och jobb" });
+
+    const names = within(panel).getAllByText(long);
+    expect(names).toHaveLength(2);
+    for (const name of names) {
+      // Not reachable by keyboard or touch: truncation with a title tooltip.
+      expect(name.className).not.toMatch(/truncate/);
+      expect(name.className).toContain("wrap-anywhere");
+    }
+    expect(panel.querySelector("[title]")).toBeNull();
+  });
+
   it("opens inside a modal dialog such as the navigation drawer", async () => {
     renderInApp(
       <Dialog isOpen onOpenChange={() => {}} aria-label="Meny">
