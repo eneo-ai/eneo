@@ -71,9 +71,10 @@ async function updateModelFlags(kind: ModelKind, id: string, flags: ModelFlags):
     await unwrap(
       browserApi.POST("/api/v1/embedding-models/{id}/", {
         params: { path: { id } },
+        // Omitted means "keep"; null removes the classification ("Ingen").
         body: {
           is_org_enabled: flags.is_org_enabled ?? undefined,
-          security_classification: flags.security_classification ?? undefined
+          security_classification: flags.security_classification
         }
       })
     );
@@ -179,14 +180,45 @@ export function ModelRow({
   const [showDelete, setShowDelete] = useState(false);
   const canViewDetail = kind === "completion" || kind === "transcription";
 
-  const flags = useMutation({
-    mutationFn: (next: ModelFlags) => updateModelFlags(kind, model.id, next),
-    // Returned so the mutation stays pending until the list has refetched.
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: MODELS_KEY }),
+  const label = modelLabel(model);
+  // Each returns the refetch, so a mutation stays pending until the list has
+  // the new state. One mutation per control, so a pending write on one never
+  // resets another's optimistic state.
+  const refetchModels = () => queryClient.invalidateQueries({ queryKey: MODELS_KEY });
+  const enable = useMutation({
+    mutationFn: (next: boolean) => updateModelFlags(kind, model.id, { is_org_enabled: next }),
+    // Presses during a write queue behind it instead of being dropped.
+    scope: { id: `model-enabled:${kind}:${model.id}` },
+    onSuccess: refetchModels,
+    onError: (error) => toastApiError(error, t)
+  });
+  const makeDefault = useMutation({
+    mutationFn: () => updateModelFlags(kind, model.id, { is_org_default: true }),
+    onSuccess: () => {
+      toast.success(t("admin_models_default_set", { name: label }));
+      return refetchModels();
+    },
+    onError: (error) => toastApiError(error, t)
+  });
+  const classify = useMutation({
+    mutationFn: (classification: SecurityClassification | null) =>
+      updateModelFlags(kind, model.id, {
+        security_classification: classification && { id: classification.id }
+      }),
+    onSuccess: (_data, classification) => {
+      toast.success(
+        classification
+          ? t("admin_models_classification_set", {
+              name: label,
+              classification: classification.name
+            })
+          : t("admin_models_classification_removed", { name: label })
+      );
+      return refetchModels();
+    },
     onError: (error) => toastApiError(error, t)
   });
 
-  const label = modelLabel(model);
   // The technical id under the display name, unless the name already is the id.
   const technicalId = model.name !== label ? model.name : null;
   const locked = model.is_locked ?? false;
@@ -208,15 +240,9 @@ export function ModelRow({
   const hasFlagActions = supportsDefault || supportsClassification;
   const hasMenu = hasModelActions || hasFlagActions || canDelete;
 
-  // Optimistic while the write + refetch are in flight; reverts on error.
-  const pendingEnabled = flags.isPending ? flags.variables?.is_org_enabled : undefined;
-  const enabled = pendingEnabled ?? model.is_org_enabled ?? false;
-
-  function setEnabled(next: boolean) {
-    // Ignore toggles while a write is in flight; the switch stays focusable.
-    if (flags.isPending) return;
-    flags.mutate({ is_org_enabled: next });
-  }
+  // Shows the latest press while writes and the refetch are in flight;
+  // falls back to the saved state when the last write failed.
+  const enabled = enable.isPending ? enable.variables : (model.is_org_enabled ?? false);
 
   const remove = useMutation({
     mutationFn: () => deleteTenantModel(browserApi, kind, model.id),
@@ -254,7 +280,7 @@ export function ModelRow({
           label={t("admin_models_enable_model", { name: label })}
           isLabelHidden
           value={enabled}
-          onChange={setEnabled}
+          onChange={(next) => enable.mutate(next)}
           isDisabled={locked}
           disabledMessage={locked ? t("api_credentials_required_for_provider") : undefined}
         />
@@ -365,8 +391,8 @@ export function ModelRow({
               <DropdownMenuItem
                 icon={Star}
                 label={t("set_as_default_model")}
-                isDisabled={isDefault || !enabled}
-                onClick={() => flags.mutate({ is_org_default: true })}
+                isDisabled={isDefault || !enabled || makeDefault.isPending}
+                onClick={() => makeDefault.mutate()}
               />
             )}
             {supportsClassification && (
@@ -375,9 +401,9 @@ export function ModelRow({
                   label={t("security_classification")}
                   value={currentClassification?.id ?? NO_CLASSIFICATION}
                   onChange={(value) =>
-                    flags.mutate({
-                      security_classification: value === NO_CLASSIFICATION ? null : { id: value }
-                    })
+                    classify.mutate(
+                      classifications.find((classification) => classification.id === value) ?? null
+                    )
                   }
                 >
                   <DropdownMenuRadioItem value={NO_CLASSIFICATION} label={t("none")} />

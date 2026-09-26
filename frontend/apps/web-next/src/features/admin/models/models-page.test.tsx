@@ -10,7 +10,9 @@ import { PROVIDERS_KEY } from "./model-providers";
 import { MODELS_KEY, type ModelsPresentation } from "./models";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), DELETE: vi.fn() }));
+const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+vi.mock("sonner", () => ({ toast }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/components/providers/app-context", () => ({
   useAppContext: () => ({ tenant: { show_model_pricing: true } })
@@ -66,7 +68,7 @@ const presentation = {
       open_source: true,
       is_org_enabled: false,
       provider_id: "p-vllm",
-      security_classification: null
+      security_classification: { id: "s3", name: "Klass 3", security_level: 3 }
     }
   ],
   transcription_models: []
@@ -121,6 +123,23 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
+
+/** Opens a row's menu from the keyboard; returns the menu that trigger controls. */
+function openRowMenu(name: string) {
+  const trigger = screen.getByRole("button", { name: `Fler åtgärder för ${name}` });
+  trigger.focus();
+  // jsdom does not turn Enter into a click; Astryx opens menus on the key.
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  // jsdom has no popover styles, so every row's (closed) menu is "visible".
+  return document.getElementById(trigger.getAttribute("aria-controls")!)!;
+}
+
+/** Picks a radio item in a submenu of a row menu. */
+function choose(menu: HTMLElement, submenu: string, option: string) {
+  fireEvent.keyDown(within(menu).getByRole("menuitem", { name: submenu }), { key: "ArrowRight" });
+  const items = within(menu).getByRole("menu", { name: submenu });
+  fireEvent.click(within(items).getByRole("menuitemradio", { name: option }));
+}
 
 function renderPage() {
   const client = new QueryClient({
@@ -275,6 +294,110 @@ describe("ModelsPage", () => {
     expect((pricing as HTMLInputElement).checked).toBe(true);
     await act(async () => {
       await expectNoAxeViolations(document.body);
+    });
+  });
+
+  it("removes an embedding model's security class: Ingen is sent as null", async () => {
+    renderPage();
+    const menu = openRowMenu("Multilingual E5 Large");
+    choose(menu, "Säkerhetsklassificering", "Ingen");
+
+    // Omitting the field would keep the old class on the backend.
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/embedding-models/{id}/", {
+        params: { path: { id: "e1" } },
+        body: { is_org_enabled: undefined, security_classification: null }
+      })
+    );
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "Multilingual E5 Large har inte längre någon säkerhetsklass."
+      )
+    );
+  });
+
+  it("confirms a new default model and a new security class", async () => {
+    renderPage();
+    const menu = openRowMenu("Claude 3.7 Sonnet");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Ange som standardmodell" }));
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/completion-models/{id}/", {
+        params: { path: { id: "c2" } },
+        body: { is_org_default: true }
+      })
+    );
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("Claude 3.7 Sonnet är nu standardmodell.")
+    );
+
+    choose(openRowMenu("Claude 3.7 Sonnet"), "Säkerhetsklassificering", "Klass 3");
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "Claude 3.7 Sonnet har nu säkerhetsklassen Klass 3."
+      )
+    );
+  });
+
+  it("queues a second press on a switch and keeps it while another write runs", async () => {
+    renderPage();
+    const writes: Array<() => void> = [];
+    api.POST.mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          writes.push(() => resolve({ data: {}, response: new Response("{}") }))
+        )
+    );
+    const toggle = screen.getByRole("switch", { name: "Aktivera Multilingual E5 Large" });
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect((toggle as HTMLInputElement).checked).toBe(true));
+    // A classification change on the same row must not reset the switch.
+    choose(openRowMenu("Multilingual E5 Large"), "Säkerhetsklassificering", "Ingen");
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(2));
+    expect((toggle as HTMLInputElement).checked).toBe(true);
+
+    // Pressed again while the first write runs: shown at once, sent after it.
+    fireEvent.click(toggle);
+    await waitFor(() => expect((toggle as HTMLInputElement).checked).toBe(false));
+    expect(api.POST).toHaveBeenCalledTimes(2);
+    await act(async () => writes[0]!());
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(3));
+    expect(api.POST).toHaveBeenLastCalledWith("/api/v1/embedding-models/{id}/", {
+      params: { path: { id: "e1" } },
+      body: { is_org_enabled: false, security_classification: undefined }
+    });
+    await act(async () => writes.forEach((write) => write()));
+  });
+
+  it("deletes a model after confirmation and keeps focus on the page", async () => {
+    renderPage();
+    api.DELETE.mockImplementation(() => ok({}));
+    const trigger = screen.getByRole("button", { name: "Fler åtgärder för Claude 3.7 Sonnet" });
+    const menu = openRowMenu("Claude 3.7 Sonnet");
+    // The list without the model, once it has been deleted.
+    api.GET.mockImplementation((path: string) =>
+      path === "/api/v1/ai-models/"
+        ? ok({ ...presentation, completion_models: presentation.completion_models.slice(0, 1) })
+        : ok([])
+    );
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Ta bort" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort modell" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
+
+    await waitFor(() =>
+      expect(api.DELETE).toHaveBeenCalledWith(
+        "/api/v1/admin/tenant-models/completion/{model_id}/",
+        {
+          params: { path: { model_id: "c2" } }
+        }
+      )
+    );
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Modellen togs bort"));
+    await waitFor(() => expect(screen.queryByText("Claude 3.7 Sonnet")).toBeNull());
+    expect(trigger.isConnected).toBe(false);
+    // The focused row is gone: focus moves to the tab panel, not <body>.
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")), {
+      timeout: 1500
     });
   });
 

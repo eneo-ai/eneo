@@ -564,5 +564,8 @@
   "fix_notifications_running": "Notifications, {count} in progress",
   "fix_crawl_started_column": "Started",
   "fix_crawls_filter_label": "Filter crawls",
-  "fix_integrations_empty_title": "No integrations yet"
+  "fix_integrations_empty_title": "No integrations yet",
+  "admin_models_default_set": "{name} is now the default model.",
+  "admin_models_classification_set": "{name} now has the security classification {classification}.",
+  "admin_models_classification_removed": "{name} no longer has a security classification."
 }
