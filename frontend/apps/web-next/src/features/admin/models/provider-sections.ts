@@ -147,17 +147,24 @@ function sectionModels(
 }
 
 /**
- * Each provider with the models that pass the filters. Providers left with
- * nothing to show (a fresh provider without models, or none of the filtered
- * kind) are dropped; they stay reachable through the add-model wizard.
+ * Each provider with the models that pass the filters. A provider none of
+ * whose models pass is dropped. One without models at all stays, so it can
+ * be given models or deleted, unless a type or class filter asks for models
+ * it cannot have, or a search does not match its name.
  */
 export function filterSections(
   sections: ProviderSection[],
   filters: ModelFilters
 ): { section: ProviderSection; models: KindedModel[] }[] {
+  const query = filters.search.trim().toLowerCase();
+  const showsEmpty = (section: ProviderSection) =>
+    section.models.length === 0 &&
+    filters.kind === "all" &&
+    filters.security === "all" &&
+    (query === "" || section.name.toLowerCase().includes(query));
   return sections
     .map((section) => ({ section, models: sectionModels(section, filters) }))
-    .filter((entry) => entry.models.length > 0);
+    .filter((entry) => entry.models.length > 0 || showsEmpty(entry.section));
 }
 
 /** Model count per type filter, honouring the search and security filters. */

@@ -11,6 +11,7 @@ vi.mock("$lib/paraglide/messages", () => ({
     eneo_error_9050: () => "An App run needs it.",
     eneo_error_9051: () => "Still attached.",
     eneo_error_9052: () => "The execution block changed.",
+    eneo_error_9069: () => "Deactivate it in the governance first.",
     request_failed: () => "Request failed."
   }
 }));
@@ -18,9 +19,9 @@ vi.mock("$lib/paraglide/messages", () => ({
 import { getErrorMessage } from "./getErrorMessage";
 
 /** Reason codes for the Skill lifecycle conflicts, and the code that used to
-    answer for all of them: the AI model display-name collision. */
+    answer for all of them: a taken name. */
 const SKILL_CONFLICT_CODES = [9048, 9049, 9050, 9051, 9052] as const;
-const MODEL_NAME_COLLISION = 9017;
+const NAME_COLLISION = 9017;
 
 describe("getErrorMessage", () => {
   it("localizes missing credential encryption configuration", () => {
@@ -59,16 +60,42 @@ describe("getErrorMessage", () => {
     });
   });
 
-  it("never answers a Skill conflict with the model display-name copy", () => {
+  it("says what blocks deleting a prompt the governance uses", () => {
+    const error = new EneoError(
+      "Prompt 'Standard' is referenced by the personal assistant governance policy.",
+      "RESPONSE",
+      409,
+      9069,
+      {},
+      { endpoint: "DELETE@/api/v1/admin/prompt-library/p1/" }
+    );
+
+    expect(getErrorMessage(error)).toBe("Deactivate it in the governance first.");
     for (const catalogue of [en, sv] as Record<string, string>[]) {
-      const modelCopy = catalogue[`eneo_error_${MODEL_NAME_COLLISION}`];
-      expect(modelCopy).toBeTruthy();
+      // Its own copy: it used to arrive as a taken name (9017).
+      expect(catalogue.eneo_error_9069).toBeTruthy();
+      expect(catalogue.eneo_error_9069).not.toBe(catalogue.eneo_error_9017);
+    }
+  });
+
+  it("never answers a Skill conflict with the taken-name copy", () => {
+    for (const catalogue of [en, sv] as Record<string, string>[]) {
+      const takenNameCopy = catalogue[`eneo_error_${NAME_COLLISION}`];
+      expect(takenNameCopy).toBeTruthy();
 
       for (const code of SKILL_CONFLICT_CODES) {
         const skillCopy = catalogue[`eneo_error_${code}`];
         expect(skillCopy, `eneo_error_${code}`).toBeTruthy();
-        expect(skillCopy).not.toBe(modelCopy);
+        expect(skillCopy).not.toBe(takenNameCopy);
       }
     }
+  });
+
+  it("words a taken name for every resource that answers with it, not only models", () => {
+    // Providers, MCP servers, templates, files, modules and models send 9017.
+    expect(en[`eneo_error_${NAME_COLLISION}`]).toBe(
+      "This name is already in use. Choose a different one."
+    );
+    expect(sv[`eneo_error_${NAME_COLLISION}`]).toBe("Namnet används redan. Välj ett annat namn.");
   });
 });

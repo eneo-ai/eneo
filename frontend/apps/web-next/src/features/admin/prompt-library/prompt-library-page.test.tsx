@@ -51,13 +51,13 @@ describe("PromptLibraryPage", () => {
   });
 
   it("says why a prompt the personal assistant's governance uses cannot be deleted", async () => {
-    // The backend answers with the taken-name code; its text would not fit.
+    // Its own code (9069), not the taken-name one it used to borrow.
     api.DELETE.mockImplementation(() =>
       Promise.resolve({
         error: {
           message:
             "Prompt 'Sammanfatta ett beslut' is referenced by the personal assistant governance policy.",
-          eneo_error_code: 9017
+          eneo_error_code: 9069
         },
         response: new Response(null, { status: 409 })
       })
@@ -73,7 +73,8 @@ describe("PromptLibraryPage", () => {
 
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
-        "Prompten är aktiv i styrningen för personlig assistent. Avaktivera den först."
+        "Prompten är aktiv i styrningen för personlig assistent. Avaktivera den där först, och ta sedan bort den.",
+        expect.anything()
       )
     );
   });

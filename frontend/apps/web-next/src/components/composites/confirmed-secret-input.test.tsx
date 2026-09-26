@@ -19,7 +19,15 @@ describe("confirmedSecretProblem", () => {
   });
 });
 
-function Harness({ showErrors = false, isRequired = true }) {
+function Harness({
+  showErrors = false,
+  isRequired = true,
+  valueError
+}: {
+  showErrors?: boolean;
+  isRequired?: boolean;
+  valueError?: string;
+}) {
   const [value, setValue] = useState("");
   const [confirmation, setConfirmation] = useState("");
   return (
@@ -36,6 +44,7 @@ function Harness({ showErrors = false, isRequired = true }) {
       requiredMessage="Ange API-nyckeln."
       mismatchMessage="Nycklarna matchar inte. Skriv samma nyckel i båda fälten."
       showErrors={showErrors}
+      valueError={valueError}
     />
   );
 }
@@ -93,6 +102,16 @@ describe("ConfirmedSecretInput", () => {
     expect(key().getAttribute("aria-invalid")).toBe("true");
     expect(within(container).getByText("Ange API-nyckeln.")).toBeTruthy();
     expect(confirmation().getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("shows what is wrong with the secret itself at the first field", async () => {
+    const { container } = renderInApp(<Harness valueError="Använd minst 12 tecken" />);
+
+    const error = within(container).getByText("Använd minst 12 tecken");
+    expect(key().getAttribute("aria-invalid")).toBe("true");
+    expect(key().getAttribute("aria-describedby")).toContain(error.id);
+    expect(confirmation().getAttribute("aria-invalid")).toBeNull();
+    await expectNoAxeViolations(container);
   });
 
   it("asks for the confirmation of an optional secret once one is typed", () => {

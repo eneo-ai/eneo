@@ -1406,7 +1406,14 @@
   "provider_form_token_limits_description": "The catalog has no token limits for this model. You'll find them in the provider's documentation.",
   "provider_form_token_limit_required": "Enter a whole number greater than 0.",
   "provider_form_name_taken": "A provider called {name} already exists. Enter another name.",
-  "eneo_error_9017": "This name is already in use. Choose a different one.",
   "provider_form_model_added": "Already added",
-  "provider_form_model_added_error": "The provider already has {name}. Enter another model id."
+  "provider_form_model_added_error": "The provider already has {name}. Enter another model id.",
+  "provider_no_models": "This provider has no models yet.",
+  "provider_delete_models_first": "Delete {count, plural, one {its model} other {its # models}} first",
+  "provider_delete_blocked_title": "{name} can't be deleted yet",
+  "provider_delete_blocked_description": "The provider has {count, plural, one {a model} other {# models}}. Delete {count, plural, one {it} other {them}} in the provider's table first, then delete the provider.",
+  "change_password_current_required": "Enter your current password.",
+  "change_password_new_required": "Enter a new password.",
+  "change_password_confirm_required": "Type the new password again.",
+  "change_password_mismatch": "The passwords don't match. Type the same password in both fields."
 }

@@ -10,8 +10,8 @@ from sqlalchemy.exc import IntegrityError
 
 from eneo.main.exceptions import (
     BadRequestException,
-    NameCollisionException,
     NotFoundException,
+    PromptInUseException,
 )
 from eneo.main.models import NOT_PROVIDED, NotProvided
 from eneo.prompt_library.domain.prompt_library import (
@@ -164,7 +164,7 @@ class PromptLibraryService:
                 tenant_id=self.user.tenant_id, prompt_library_id=id
             )
             if policy is not None:
-                raise NameCollisionException(
+                raise PromptInUseException(
                     f"Prompt '{entry.name}' is referenced by the personal "
                     f"assistant governance policy. Unset it on the policy before deleting."
                 )

@@ -91,7 +91,6 @@
   "governance_prompts_create_first": "Create the first prompt",
   "governance_col_updated": "Updated",
   "governance_prompts_delete_title": "Remove prompt?",
-  "governance_prompts_delete_conflict": "The prompt is active in the personal assistant governance. Deactivate it first.",
   "governance_prompts_delete_error": "Could not remove the prompt.",
   "governance_prompt_versions_title": "Version history",
   "governance_prompt_versions_characters": "Characters",
@@ -4106,6 +4105,7 @@
   "organization_skills_removed_empty": "No removed skills",
   "organization_skills_removed_at": "Removed {time}",
   "eneo_error_9062": "A skill is being updated. Nothing was removed. Wait a moment and try again.",
+  "eneo_error_9069": "The prompt is active in the personal assistant governance. Deactivate it there first, then delete it.",
   "whats_new": "What's new",
   "whats_new_unseen": "New updates",
   "whats_new_intro": "What has changed in Eneo, one release at a time. The newest is selected.",
@@ -5580,5 +5580,13 @@
   "provider_form_token_limit_required": "Enter a whole number greater than 0.",
   "provider_form_name_taken": "A provider called {name} already exists. Enter another name.",
   "provider_form_model_added": "Already added",
-  "provider_form_model_added_error": "The provider already has {name}. Enter another model id."
+  "provider_form_model_added_error": "The provider already has {name}. Enter another model id.",
+  "provider_no_models": "This provider has no models yet.",
+  "provider_delete_models_first": "Delete {count, plural, one {its model} other {its # models}} first",
+  "provider_delete_blocked_title": "{name} can't be deleted yet",
+  "provider_delete_blocked_description": "The provider has {count, plural, one {a model} other {# models}}. Delete {count, plural, one {it} other {them}} in the provider's table first, then delete the provider.",
+  "change_password_current_required": "Enter your current password.",
+  "change_password_new_required": "Enter a new password.",
+  "change_password_confirm_required": "Type the new password again.",
+  "change_password_mismatch": "The passwords don't match. Type the same password in both fields."
 }

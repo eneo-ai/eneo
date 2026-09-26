@@ -91,7 +91,6 @@
   "governance_prompts_create_first": "Skapa första prompten",
   "governance_col_updated": "Uppdaterad",
   "governance_prompts_delete_title": "Ta bort prompt?",
-  "governance_prompts_delete_conflict": "Prompten är aktiv i styrningen för personlig assistent. Avaktivera den först.",
   "governance_prompts_delete_error": "Kunde inte ta bort prompten.",
   "governance_prompt_versions_title": "Versionshistorik",
   "governance_prompt_versions_characters": "Tecken",
@@ -4106,6 +4105,7 @@
   "organization_skills_removed_empty": "Inga borttagna skills",
   "organization_skills_removed_at": "Borttagen {time}",
   "eneo_error_9062": "En skill uppdateras. Inget togs bort. Vänta en stund och försök igen.",
+  "eneo_error_9069": "Prompten är aktiv i styrningen för personlig assistent. Avaktivera den där först, och ta sedan bort den.",
   "whats_new": "Nyheter",
   "whats_new_unseen": "Nya uppdateringar",
   "whats_new_intro": "Vad som har ändrats i Eneo, en version i taget. Den senaste är vald.",
@@ -5580,5 +5580,13 @@
   "provider_form_token_limit_required": "Ange ett heltal större än 0.",
   "provider_form_name_taken": "Det finns redan en leverantör som heter {name}. Ange ett annat namn.",
   "provider_form_model_added": "Tillagd",
-  "provider_form_model_added_error": "Leverantören har redan {name}. Ange ett annat modell-id."
+  "provider_form_model_added_error": "Leverantören har redan {name}. Ange ett annat modell-id.",
+  "provider_no_models": "Leverantören har inga modeller än.",
+  "provider_delete_models_first": "Ta bort {count, plural, one {dess modell} other {dess # modeller}} först",
+  "provider_delete_blocked_title": "{name} kan inte tas bort än",
+  "provider_delete_blocked_description": "Leverantören har {count, plural, one {en modell} other {# modeller}}. Ta bort {count, plural, one {den} other {dem}} i leverantörens tabell först, och ta sedan bort leverantören.",
+  "change_password_current_required": "Ange ditt nuvarande lösenord.",
+  "change_password_new_required": "Ange ett nytt lösenord.",
+  "change_password_confirm_required": "Skriv det nya lösenordet en gång till.",
+  "change_password_mismatch": "Lösenorden matchar inte. Skriv samma lösenord i båda fälten."
 }

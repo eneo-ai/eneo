@@ -27,6 +27,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import type { SecurityClassification } from "@/features/admin/security-classifications/security-classifications";
+import { useRemovalMutation } from "@/features/spaces/removal";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -160,16 +161,13 @@ export function ModelRow({
   kind,
   classifications,
   securityEnabled,
-  showKind = false,
-  onRemoved
+  showKind = false
 }: {
   model: AdminModel;
   kind: ModelKind;
   classifications: SecurityClassification[];
   securityEnabled: boolean;
   showKind?: boolean;
-  /** Called after the model was deleted and the list refetched. */
-  onRemoved?: () => void;
 }) {
   const t = useTranslations();
   const typeLabel = useModelTypeLabel();
@@ -244,13 +242,14 @@ export function ModelRow({
   // falls back to the saved state when the last write failed.
   const enabled = enable.isPending ? enable.variables : (model.is_org_enabled ?? false);
 
-  const remove = useMutation({
+  // The row, its menu and the dialog go with the model: focus moves to the
+  // page's RemovalFocusScope (the tab panel) once the list has refetched.
+  const remove = useRemovalMutation({
     mutationFn: () => deleteTenantModel(browserApi, kind, model.id),
-    onSuccess: async () => {
+    refresh: refetchModels,
+    onRemoved: () => {
       setShowDelete(false);
       toast.success(t("model_deleted_success"));
-      await queryClient.invalidateQueries({ queryKey: MODELS_KEY });
-      onRemoved?.();
     },
     onError: (error) => {
       if (
