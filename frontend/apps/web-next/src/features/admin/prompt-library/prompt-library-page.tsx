@@ -33,8 +33,9 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
+import { EneoApiError, unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { toast } from "@/lib/toast";
 import {
   type Entry,
   PROMPT_LIBRARY_KEY as KEY,
@@ -181,7 +182,15 @@ function EntryRow({ entry }: { entry: Entry }) {
       void queryClient.invalidateQueries({ queryKey: KEY });
       setShowDelete(false);
     },
-    onError: (error) => toastApiError(error, t)
+    // The backend refuses a prompt the personal assistant's governance uses
+    // with a 409 that carries the taken-name code, whose text would not fit.
+    onError: (error) => {
+      if (error instanceof EneoApiError && error.status === 409) {
+        toast.error(t("governance_prompts_delete_conflict"));
+      } else {
+        toastApiError(error, t);
+      }
+    }
   });
 
   return (
