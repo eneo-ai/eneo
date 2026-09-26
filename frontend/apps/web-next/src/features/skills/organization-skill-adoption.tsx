@@ -3,7 +3,7 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useState, type SubmitEvent } from "react";
+import { useId, useState, type SubmitEvent } from "react";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -60,6 +60,7 @@ export function OrganizationSkillAdoption({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState("");
+  const resourcesHeadingId = useId();
   const path = { skill_id: skill.id };
   const bindings = useInfiniteQuery({
     queryKey: [...ORGANIZATION_SKILLS_KEY, skill.id, "adoption", search, kind, drift],
@@ -339,7 +340,9 @@ export function OrganizationSkillAdoption({
             </>
           )}
           <div className="space-y-3">
-            <h3 className="font-medium">{t("organization_skills_adoption_resources_heading")}</h3>
+            <h3 id={resourcesHeadingId} className="font-medium">
+              {t("organization_skills_adoption_resources_heading")}
+            </h3>
             <p className="text-muted-foreground text-sm">
               {t("organization_skills_adoption_resources_description")}
             </p>
@@ -437,7 +440,10 @@ export function OrganizationSkillAdoption({
               </p>
             ) : (
               <div className="overflow-x-auto rounded-lg border">
-                <table className="w-full min-w-[650px] text-sm">
+                <table
+                  className="w-full min-w-[650px] text-sm"
+                  aria-labelledby={resourcesHeadingId}
+                >
                   <thead>
                     <tr className="border-b text-left">
                       <th className="w-10 p-3">

@@ -5,7 +5,7 @@ import { BookOpenCheck, Plus, Search, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useState, type SubmitEvent } from "react";
+import { useId, useState, type SubmitEvent } from "react";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -92,6 +92,7 @@ export function OrganizationSkillsPage() {
   const [removalTargets, setRemovalTargets] = useState<OrganizationSkill[]>([]);
   const [announcement, setAnnouncement] = useState("");
   const usageLabel = useUsageLabel();
+  const headingId = useId();
 
   const skills = useInfiniteQuery({
     queryKey: [...ORGANIZATION_SKILLS_KEY, search, removed],
@@ -151,6 +152,7 @@ export function OrganizationSkillsPage() {
       {/* A tab of the organization space: the space header holds the h1. */}
       <PageHeader
         headingLevel={2}
+        headingId={headingId}
         title={t("skills")}
         actions={
           removed ? undefined : (
@@ -278,7 +280,7 @@ export function OrganizationSkillsPage() {
             </div>
           )}
           <div className="overflow-x-auto rounded-xl border">
-            <table className="w-full min-w-[700px] text-sm">
+            <table className="w-full min-w-[700px] text-sm" aria-labelledby={headingId}>
               <thead>
                 <tr className="border-b text-left">
                   {!removed && (
