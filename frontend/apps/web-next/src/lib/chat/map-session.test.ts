@@ -28,6 +28,19 @@ describe("mapSessionMessages", () => {
     expect(messages[1]!.parts.at(-1)).toEqual({ type: "text", text: "An AI platform." });
   });
 
+  it("restores each answer's stored rating, and none where it was not rated", () => {
+    const messages = mapSessionMessages([
+      { ...baseMessage, id: "m1", feedback: { value: -1, text: "Fel paragraf" } },
+      { ...baseMessage, id: "m2", feedback: null },
+      { ...baseMessage, id: "m3" }
+    ]);
+
+    const answers = messages.filter((message) => message.role === "assistant");
+    expect(answers.map((message) => message.metadata?.feedback)).toEqual([-1, null, null]);
+    // Ratings belong to answers; the user's messages carry none.
+    expect(messages[0]!.metadata).not.toHaveProperty("feedback");
+  });
+
   it("maps references to source-document parts before the answer text", () => {
     const messages = mapSessionMessages([
       {

@@ -62,8 +62,8 @@ export function groupSessions<T extends SessionRow>(
 
 /**
  * The partner's conversation history, grouped by date (Idag, Igår, …). Each
- * row opens the conversation; its menu renames, rates or deletes it. "Visa
- * fler" appends the next page and moves focus to the first row it added.
+ * row opens the conversation; its menu renames or deletes it. "Visa fler"
+ * appends the next page and moves focus to the first row it added.
  */
 function HistoryPanel({
   partner,
@@ -71,7 +71,6 @@ function HistoryPanel({
   onSelect,
   onDeleted,
   onRenamed,
-  onRated,
   onClose,
   focusHeadingOnMount = false
 }: {
@@ -80,8 +79,6 @@ function HistoryPanel({
   onSelect: (sessionId: string) => void;
   onDeleted: (sessionId: string) => void;
   onRenamed?: (sessionId: string, name: string) => void;
-  /** A conversation was rated (the open answer's thumbs follow). */
-  onRated?: (sessionId: string, value: 1 | -1) => void;
   onClose: () => void;
   /** Side panel: focus moves to the heading when it opens. */
   focusHeadingOnMount?: boolean;
@@ -93,7 +90,7 @@ function HistoryPanel({
   const listRef = useRef<HTMLDivElement>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
-  const { rename, remove, feedback } = useSessionMutations(partner, {
+  const { rename, remove } = useSessionMutations(partner, {
     onRenamed: (id, name) => {
       setRenaming(null);
       onRenamed?.(id, name);
@@ -103,8 +100,7 @@ function HistoryPanel({
       // The deleted row (and the menu button the dialog returns focus to) is gone.
       rescueFocus(headingRef.current);
       onDeleted(id);
-    },
-    onRated
+    }
   });
 
   useEffect(() => {
@@ -225,14 +221,6 @@ function HistoryPanel({
                           {
                             label: t("rename"),
                             onClick: () => setRenaming({ id: session.id, name: session.name })
-                          },
-                          {
-                            label: t("chat_history_rate_good"),
-                            onClick: () => feedback.mutate({ id: session.id, value: 1 })
-                          },
-                          {
-                            label: t("chat_history_rate_bad"),
-                            onClick: () => feedback.mutate({ id: session.id, value: -1 })
                           },
                           { type: "divider" },
                           {

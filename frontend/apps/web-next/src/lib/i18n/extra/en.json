@@ -505,8 +505,6 @@
   "chat_history_week": "Previous 7 days",
   "chat_history_month": "Previous 30 days",
   "chat_history_older": "Older",
-  "chat_history_rate_good": "Rate as good",
-  "chat_history_rate_bad": "Rate as bad",
   "chat_knowledge_pill": "Knowledge: {name}",
   "chat_knowledge_popover_label": "Knowledge the assistant searches",
   "chat_knowledge_popover_hint": "The assistant searches these sources when it answers.",
@@ -575,5 +573,7 @@
   "space_knowledge_tabs_label": "Knowledge sources",
   "ui_copy_failed_copy_by_hand": "Couldn't copy. Select the key and copy it yourself.",
   "ui_toast_close": "Close notification",
-  "ui_website_tabs_label": "Crawls and content"
+  "ui_website_tabs_label": "Crawls and content",
+  "feedback_group_label": "Rate the answer",
+  "feedback_removed": "Your feedback was removed"
 }

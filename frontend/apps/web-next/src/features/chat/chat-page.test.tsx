@@ -83,7 +83,8 @@ const api = vi.hoisted(() => ({
                 references: [],
                 files: [],
                 generated_files: [],
-                tools: { assistants: [] }
+                tools: { assistants: [] },
+                feedback: id === "s-rated" ? { value: -1, text: "Fel paragraf" } : null
               }
             ]
           },
@@ -102,7 +103,11 @@ const api = vi.hoisted(() => ({
       }
       if (path === "/api/v1/analysis/conversation-insights/") {
         return {
-          data: { total_conversations: 12, total_questions: 30 },
+          data: {
+            total_conversations: 12,
+            total_questions: 30,
+            feedback: { positive: 3, negative: 1 }
+          },
           response: new Response()
         };
       }
@@ -274,18 +279,16 @@ describe("ChatPage", () => {
     expect(h1Texts()).toEqual(["Ny konversation", "Ny konversation"]);
   });
 
-  it("updates the open answer's thumbs when the history rates its conversation", async () => {
-    renderPage("s-1");
+  it("shows each answer's stored rating when a conversation opens", async () => {
+    renderPage("s-rated");
     const log = await screen.findByRole("log", { name: "Konversation" });
-    const good = within(log).getByRole("button", { name: "Bra svar" });
-    expect(good.getAttribute("aria-pressed")).toBe("false");
-
-    fireEvent.click(screen.getByRole("button", { name: "Historik" }));
-    const trigger = await screen.findByRole("button", { name: "Åtgärder för Samtal s-1" });
-    fireEvent.click(trigger);
-    const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "")!;
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "Betygsätt som bra" }));
-    await waitFor(() => expect(good.getAttribute("aria-pressed")).toBe("true"));
+    const rating = within(log).getByRole("group", { name: "Betygsätt svaret" });
+    expect(
+      within(rating).getByRole("button", { name: "Bra svar" }).getAttribute("aria-pressed")
+    ).toBe("false");
+    expect(
+      within(rating).getByRole("button", { name: "Dåligt svar" }).getAttribute("aria-pressed")
+    ).toBe("true");
   });
 
   it("starts over with focus in the composer after deleting the open conversation", async () => {

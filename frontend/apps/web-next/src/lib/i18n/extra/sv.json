@@ -505,8 +505,6 @@
   "chat_history_week": "Senaste 7 dagarna",
   "chat_history_month": "Senaste 30 dagarna",
   "chat_history_older": "Äldre",
-  "chat_history_rate_good": "Betygsätt som bra",
-  "chat_history_rate_bad": "Betygsätt som dålig",
   "chat_knowledge_pill": "Kunskap: {name}",
   "chat_knowledge_popover_label": "Kunskap som assistenten söker i",
   "chat_knowledge_popover_hint": "Assistenten söker i de här källorna när den svarar.",
@@ -575,5 +573,7 @@
   "space_knowledge_tabs_label": "Kunskapskällor",
   "ui_copy_failed_copy_by_hand": "Det gick inte att kopiera. Markera nyckeln och kopiera den själv.",
   "ui_toast_close": "Stäng aviseringen",
-  "ui_website_tabs_label": "Indexeringar och innehåll"
+  "ui_website_tabs_label": "Indexeringar och innehåll",
+  "feedback_group_label": "Betygsätt svaret",
+  "feedback_removed": "Din återkoppling har tagits bort"
 }

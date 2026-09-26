@@ -24,15 +24,7 @@ const api = vi.hoisted(() => ({
     return { data: null, response: new Response(null, { status: 204 }) };
   })
 }));
-const toastSuccess = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
-vi.mock("sonner", async (importOriginal) => {
-  const original = await importOriginal<typeof import("sonner")>();
-  return {
-    ...original,
-    toast: Object.assign(vi.fn(), { ...original.toast, success: toastSuccess })
-  };
-});
 
 beforeAll(() => {
   api.GET.mockImplementation(
@@ -75,12 +67,7 @@ async function rowMenuItem(row: string, item: string) {
   return within(menu!).getByRole("menuitem", { name: item });
 }
 
-function renderHistory({
-  onClose = vi.fn(),
-  onSelect = vi.fn(),
-  onDeleted = vi.fn(),
-  onRated = vi.fn()
-} = {}) {
+function renderHistory({ onClose = vi.fn(), onSelect = vi.fn(), onDeleted = vi.fn() } = {}) {
   renderInApp(
     <HistoryAside
       inline
@@ -88,11 +75,10 @@ function renderHistory({
       activeSessionId="s1"
       onSelect={onSelect}
       onDeleted={onDeleted}
-      onRated={onRated}
       onClose={onClose}
     />
   );
-  return { onClose, onSelect, onDeleted, onRated };
+  return { onClose, onSelect, onDeleted };
 }
 
 describe("HistoryAside", () => {
@@ -156,11 +142,16 @@ describe("HistoryAside", () => {
     );
   });
 
-  it("confirms a rating and reports it", async () => {
-    const { onRated } = renderHistory();
-    fireEvent.click(await rowMenuItem("Upphandlingsanalys", "Betygsätt som bra"));
-    await waitFor(() => expect(onRated).toHaveBeenCalledWith("s1", 1));
-    expect(toastSuccess).toHaveBeenCalledWith("Tack för din återkoppling");
+  it("renames and deletes from a row's menu; answers are rated in the conversation", async () => {
+    renderHistory();
+    const trigger = await screen.findByRole("button", { name: "Åtgärder för Upphandlingsanalys" });
+    fireEvent.click(trigger);
+    const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "")!;
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent)
+    ).toEqual(["Byt namn", "Ta bort"]);
   });
 
   it("names untitled conversations", async () => {

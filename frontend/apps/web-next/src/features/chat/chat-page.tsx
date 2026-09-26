@@ -25,7 +25,6 @@ type ActiveConversation = {
   sessionId: string | null;
   messages: EneoUIMessage[];
   title: string | null;
-  feedback: 1 | -1 | null;
   /** The first question was sent (the header then shows a title). */
   started: boolean;
   /** Replaces a deleted conversation: its composer takes focus if focus was lost. */
@@ -48,7 +47,6 @@ function newConversationState({ focusComposer = false } = {}): ActiveConversatio
     sessionId: null,
     messages: [],
     title: null,
-    feedback: null,
     started: false,
     focusComposer
   };
@@ -62,7 +60,6 @@ function savedConversationState(session: Schema<"SessionPublic">): ActiveConvers
     messages: mapSessionMessages(session.messages),
     // An untitled session has an empty name: the header then says "Ny konversation".
     title: session.name || null,
-    feedback: session.feedback?.value ?? null,
     started: session.messages.length > 0
   };
 }
@@ -105,9 +102,7 @@ export function ChatPage({
   // History is an inline panel from 768px up, an overlay drawer below.
   const historyInline = useMediaQuery("(min-width: 768px)");
   const [active, setActive] = useState<ActiveConversation | null>(() =>
-    urlSessionId
-      ? null
-      : { key: "new", sessionId: null, messages: [], title: null, feedback: null, started: false }
+    urlSessionId ? null : { key: "new", sessionId: null, messages: [], title: null, started: false }
   );
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(urlSessionId);
   const [followedUrlSession, setFollowedUrlSession] = useState<string | null>(urlSessionId);
@@ -233,11 +228,6 @@ export function ChatPage({
     setActivity(next);
   }, []);
 
-  /** A conversation was rated (answer thumbs or the history menu). */
-  function rated(id: string, value: 1 | -1) {
-    setActive((current) => (current?.sessionId === id ? { ...current, feedback: value } : current));
-  }
-
   const { rename, remove } = useSessionMutations(partner, {
     onRenamed: (id, name) => {
       setRenaming(null);
@@ -325,8 +315,6 @@ export function ChatPage({
                 initialSessionId={active.sessionId}
                 initialMessages={active.messages}
                 focusComposerIfLost={active.focusComposer}
-                feedback={active.feedback}
-                onRated={rated}
                 modelSelector={modelSelector}
                 partnerToken={partnerToken}
                 onNewConversation={newConversation}
@@ -375,7 +363,6 @@ export function ChatPage({
                 current?.sessionId === id ? { ...current, title: name } : current
               )
             }
-            onRated={rated}
             onClose={closeHistory}
           />
         )}

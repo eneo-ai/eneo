@@ -93,6 +93,9 @@ export type EneoDataParts = {
   error: { code?: number | null };
 };
 
+/** A rating of one answer: 1 good, -1 bad, null not rated. */
+export type AnswerRating = 1 | -1 | null;
+
 /** Message metadata used when mapping persisted sessions (not streamed). */
 export type EneoMessageMetadata = {
   /** Uploaded attachments on a user message. */
@@ -107,6 +110,8 @@ export type EneoMessageMetadata = {
   answeringAssistant?: { id: string; handle: string } | null;
   /** When the message was created (ISO 8601), for the timestamp under answers. */
   createdAt?: string | null;
+  /** A saved answer's rating by the conversation's owner. */
+  feedback?: AnswerRating;
 };
 
 export type EneoUIMessage = UIMessage<EneoMessageMetadata, EneoDataParts>;
