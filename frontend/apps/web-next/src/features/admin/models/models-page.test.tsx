@@ -119,9 +119,9 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-/** Opens a row's menu from the keyboard; returns the menu that trigger controls. */
-function openRowMenu(name: string) {
-  const trigger = screen.getByRole("button", { name: `Fler åtgärder för ${name}` });
+/** Opens a row's (or a card's) menu from the keyboard; returns the menu it controls. */
+function openRowMenu(name: string, prefix = "Fler åtgärder för") {
+  const trigger = screen.getByRole("button", { name: `${prefix} ${name}` });
   trigger.focus();
   // jsdom does not turn Enter into a click; Astryx opens menus on the key.
   fireEvent.keyDown(trigger, { key: "Enter" });
@@ -160,7 +160,7 @@ function renderPage() {
 }
 
 describe("ModelsPage", () => {
-  it("shows the header, the tabs and one section per provider with models", async () => {
+  it("shows the header, the tabs and one section per provider", async () => {
     renderPage();
     expect(screen.getByRole("heading", { level: 1, name: "Modeller" })).toBeTruthy();
     const trail = screen.getByRole("navigation");
@@ -189,11 +189,14 @@ describe("ModelsPage", () => {
     // Prices: visible "$5.00 / $25.00", spelled out for screen readers.
     expect(within(anthropic).getAllByText("Indata $5.00, utdata $25.00")).toHaveLength(2);
 
-    // A self-hosted provider without a key is fine; OpenAI has no models yet.
+    // A self-hosted provider without a key is fine.
     const vllm = screen.getByRole("region", { name: "vLLM" });
     expect(within(vllm).queryByText("Nyckel saknas")).toBeNull();
     expect(within(vllm).getByText("Inte testad")).toBeTruthy();
-    expect(screen.queryByRole("region", { name: "OpenAI" })).toBeNull();
+    // OpenAI has no models yet: listed all the same, so it can get some or go.
+    const openai = screen.getByRole("region", { name: "OpenAI" });
+    expect(within(openai).getByText("Leverantören har inga modeller än.")).toBeTruthy();
+    expect(within(openai).queryByRole("table")).toBeNull();
 
     await expectNoAxeViolations(document.body);
   });
@@ -407,6 +410,59 @@ describe("ModelsPage", () => {
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")), {
       timeout: 1500
     });
+  });
+
+  it("deletes a provider without models after confirmation and keeps focus on the page", async () => {
+    renderPage();
+    api.DELETE.mockImplementation(() => ok({}));
+    const menu = openRowMenu("OpenAI", "Fler alternativ för");
+    // The providers without OpenAI, once it has been deleted.
+    api.GET.mockImplementation((path: string) =>
+      path === "/api/v1/admin/model-providers/"
+        ? ok(providers.filter((item) => item.id !== "p-openai"))
+        : path === "/api/v1/ai-models/"
+          ? ok(presentation)
+          : ok([])
+    );
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /^Ta bort leverantör/ }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort leverantör" });
+    expect(within(dialog).getByText(/Är du säker på att du vill ta bort OpenAI\?/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
+
+    await waitFor(() =>
+      expect(api.DELETE).toHaveBeenCalledWith("/api/v1/admin/model-providers/{provider_id}/", {
+        params: { path: { provider_id: "p-openai" } }
+      })
+    );
+    await waitFor(() => expect(screen.queryByRole("region", { name: "OpenAI" })).toBeNull());
+    expect(toast.success).toHaveBeenCalledWith("OpenAI togs bort");
+    // The card and its menu are gone: focus moves to the tab panel, not <body>.
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")), {
+      timeout: 1500
+    });
+  });
+
+  it("says at the delete action, and when it is chosen, why a provider with models stays", async () => {
+    renderPage();
+    const menu = openRowMenu("Anthropic", "Fler alternativ för");
+    const remove = within(menu).getByRole("menuitem", { name: /^Ta bort leverantör/ });
+    // Reachable like any item, with its reason as text (not a dimmed item).
+    expect(remove.getAttribute("aria-disabled")).toBeNull();
+    expect(remove.textContent).toContain("Ta bort dess 2 modeller först");
+
+    fireEvent.click(remove);
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Anthropic kan inte tas bort än",
+      description:
+        "Leverantören har 2 modeller. Ta bort dem i leverantörens tabell först, och ta sedan bort leverantören."
+    });
+    expect(within(dialog).queryByRole("button", { name: "Ta bort" })).toBeNull();
+    await expectNoAxeViolations(document.body);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Stäng" }));
+    await waitFor(() => expect(dialog.hasAttribute("open")).toBe(false));
+    expect(api.DELETE).not.toHaveBeenCalled();
   });
 
   it("opens a row menu from the keyboard and returns focus to it on Escape", async () => {

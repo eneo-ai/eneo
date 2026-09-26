@@ -9,7 +9,7 @@ import { useId, useRef, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
-import { rescueFocus } from "@/lib/focus-rescue";
+import { RemovalFocusScope } from "@/features/spaces/removal";
 import { AddModelWizard } from "./add-model-wizard";
 import { MigrationHistoryPanel } from "./migration-history-panel";
 import { adminModelsQueryOptions } from "./models";
@@ -104,7 +104,7 @@ export function ModelsPage() {
 
       {/* One panel whose content follows the selected tab, so every tab's
           aria-controls points at an element that exists. It takes focus when
-          a delete removed the focused row or card (see rescueFocus). */}
+          a delete removed the focused row or card (RemovalFocusScope). */}
       <div
         ref={panelRef}
         role="tabpanel"
@@ -115,14 +115,15 @@ export function ModelsPage() {
       >
         {visited.has("models") && (
           <div hidden={tab !== "models"}>
-            <ProviderOverview
-              models={models}
-              classifications={security.security_classifications}
-              securityEnabled={security.security_enabled}
-              onAddModel={openAddModel}
-              onAddProvider={openAddProvider}
-              onRemoved={() => rescueFocus(panelRef.current)}
-            />
+            <RemovalFocusScope target={panelRef}>
+              <ProviderOverview
+                models={models}
+                classifications={security.security_classifications}
+                securityEnabled={security.security_enabled}
+                onAddModel={openAddModel}
+                onAddProvider={openAddProvider}
+              />
+            </RemovalFocusScope>
           </div>
         )}
         {visited.has("history") && (

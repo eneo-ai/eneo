@@ -5580,5 +5580,9 @@
   "provider_form_token_limit_required": "Ange ett heltal större än 0.",
   "provider_form_name_taken": "Det finns redan en leverantör som heter {name}. Ange ett annat namn.",
   "provider_form_model_added": "Tillagd",
-  "provider_form_model_added_error": "Leverantören har redan {name}. Ange ett annat modell-id."
+  "provider_form_model_added_error": "Leverantören har redan {name}. Ange ett annat modell-id.",
+  "provider_no_models": "Leverantören har inga modeller än.",
+  "provider_delete_models_first": "Ta bort {count, plural, one {dess modell} other {dess # modeller}} först",
+  "provider_delete_blocked_title": "{name} kan inte tas bort än",
+  "provider_delete_blocked_description": "Leverantören har {count, plural, one {en modell} other {# modeller}}. Ta bort {count, plural, one {den} other {dem}} i leverantörens tabell först, och ta sedan bort leverantören."
 }

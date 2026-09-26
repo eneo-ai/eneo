@@ -5,6 +5,7 @@ import {
   buildProviderSections,
   countByKind,
   filterSections,
+  type ModelFilters,
   modelLifecycle,
   modelPrice,
   modelsAttention,
@@ -133,6 +134,18 @@ describe("provider status", () => {
 });
 
 describe("filters", () => {
+  it("keeps a provider without models, unless a filter asks for models it lacks", () => {
+    const names = (filters: Partial<ModelFilters>) =>
+      filterSections(sections, { ...all, ...filters }).map(({ section }) => section.name);
+
+    // Listed, so it can be given models or deleted.
+    expect(names({})).toEqual(["Mistral", "OpenAI", "vLLM"]);
+    expect(names({ search: "mistral" })).toEqual(["Mistral"]);
+    expect(names({ search: "gpt" })).toEqual(["OpenAI"]);
+    expect(names({ kind: "completion" })).toEqual(["OpenAI"]);
+    expect(names({ security: UNCLASSIFIED })).toEqual(["OpenAI", "vLLM"]);
+  });
+
   it("filters by type and drops providers left without models", () => {
     const result = filterSections(sections, { ...all, kind: "embedding" });
     expect(result.map(({ section }) => section.name)).toEqual(["vLLM"]);

@@ -145,7 +145,7 @@ describe("the models page's attention banner", () => {
     await expectNoAxeViolations(document.body);
   });
 
-  it("links each provider with a card; one without models is plain text", () => {
+  it("links each provider to its card, one without models too", () => {
     renderOverview();
     const attention = banner("4 leverantörer behöver åtgärdas");
 
@@ -154,11 +154,13 @@ describe("the models page's attention banner", () => {
         .getAllByRole("link")
         .map((link) => [link.textContent, link.getAttribute("href")])
     ).toEqual([
+      ["Mistral", "#provider-p-mistral"],
       ["Anthropic", "#provider-p-anthropic"],
       ["OpenAI", "#provider-p-openai"],
       ["vLLM", "#provider-p-vllm"]
     ]);
-    expect(within(attention).queryByRole("link", { name: "Mistral" })).toBeNull();
+    fireEvent.click(within(attention).getByRole("link", { name: "Mistral" }));
+    expect(document.activeElement).toBe(screen.getByRole("region", { name: "Mistral" }));
   });
 
   it("moves focus to the provider's card", () => {

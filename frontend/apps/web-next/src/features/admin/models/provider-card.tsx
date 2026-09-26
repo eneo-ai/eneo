@@ -1,16 +1,18 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import {
   DropdownMenu,
   DropdownMenuDivider,
   DropdownMenuItem
 } from "@astryxdesign/core/DropdownMenu";
 import { Heading } from "@astryxdesign/core/Heading";
+import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { TableBody, TableHeader, TableHeaderCell, TableRow } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
 import { Text } from "@astryxdesign/core/Text";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
@@ -18,8 +20,8 @@ import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { StatusLabel } from "@/components/composites/status-label";
 import type { SecurityClassification } from "@/features/admin/security-classifications/security-classifications";
+import { useRemovalMutation } from "@/features/spaces/removal";
 import { browserApi } from "@/lib/api/browser";
-import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { deleteProvider, PROVIDERS_KEY } from "./model-providers";
 import { ModelRow } from "./model-row";
@@ -39,15 +41,13 @@ function ModelTable({
   labelledBy,
   showKind,
   classifications,
-  securityEnabled,
-  onRemoved
+  securityEnabled
 }: {
   models: KindedModel[];
   labelledBy: string;
   showKind: boolean;
   classifications: SecurityClassification[];
   securityEnabled: boolean;
-  onRemoved?: () => void;
 }) {
   const t = useTranslations();
 
@@ -93,7 +93,6 @@ function ModelTable({
             classifications={classifications}
             securityEnabled={securityEnabled}
             showKind={showKind}
-            onRemoved={onRemoved}
           />
         ))}
       </TableBody>
@@ -102,10 +101,53 @@ function ModelTable({
 }
 
 /**
+ * Why a provider cannot be deleted yet: the backend refuses a provider that
+ * still has models. The menu item says so too; this is what choosing it
+ * anyway opens, instead of a confirmation that would fail.
+ */
+function DeleteBlockedDialog({
+  open,
+  onOpenChange,
+  name,
+  count
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  name: string;
+  count: number;
+}) {
+  const t = useTranslations();
+  const descriptionId = useId();
+  // One way out besides Escape and the backdrop: "Stäng" (no header X).
+  return (
+    <Dialog isOpen={open} onOpenChange={onOpenChange} aria-describedby={descriptionId}>
+      <Layout
+        height="auto"
+        header={<DialogHeader title={t("provider_delete_blocked_title", { name })} />}
+        content={
+          <LayoutContent>
+            <p id={descriptionId} className="text-sm">
+              {t("provider_delete_blocked_description", { count })}
+            </p>
+          </LayoutContent>
+        }
+        footer={
+          <LayoutFooter>
+            <div className="flex justify-end">
+              <Button label={t("close")} onClick={() => onOpenChange(false)} />
+            </div>
+          </LayoutFooter>
+        }
+      />
+    </Dialog>
+  );
+}
+
+/**
  * One provider: logo, name, model count and masked key, a setup problem (key
  * missing, inactive), "Lägg till modell" and the provider menu (edit,
  * delete); then the connection line (latest check, key expiry, "Testa
- * anslutning") and its models as a table.
+ * anslutning") and its models as a table, or a line saying it has none yet.
  */
 export function ProviderCard({
   section,
@@ -113,8 +155,7 @@ export function ProviderCard({
   showKind,
   classifications,
   securityEnabled,
-  onAddModel,
-  onRemoved
+  onAddModel
 }: {
   section: ProviderSection;
   /** The provider's models that pass the page filters. */
@@ -123,8 +164,6 @@ export function ProviderCard({
   classifications: SecurityClassification[];
   securityEnabled: boolean;
   onAddModel: (providerId: string) => void;
-  /** Called after a delete removed the provider or one of its models. */
-  onRemoved?: () => void;
 }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -132,19 +171,22 @@ export function ProviderCard({
   const headingId = useId();
   const [showEdit, setShowEdit] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
+  // All of them, not only those the filters show: any one blocks a delete.
+  const modelCount = section.models.length;
 
-  const remove = useMutation({
+  // The card, its menu and the dialog go with the provider: focus moves to
+  // the page's RemovalFocusScope (the tab panel) once the lists refetched.
+  const remove = useRemovalMutation({
     mutationFn: () => deleteProvider(browserApi, section.providerId),
-    onSuccess: async () => {
-      setShowDelete(false);
-      toast.success(t("admin_models_provider_deleted", { name: section.name }));
-      await Promise.all([
+    refresh: () =>
+      Promise.all([
         queryClient.invalidateQueries({ queryKey: PROVIDERS_KEY }),
         queryClient.invalidateQueries({ queryKey: MODELS_KEY })
-      ]);
-      onRemoved?.();
-    },
-    onError: (error) => toastApiError(error, t)
+      ]),
+    onRemoved: () => {
+      setShowDelete(false);
+      toast.success(t("admin_models_provider_deleted", { name: section.name }));
+    }
   });
 
   const summary = [
@@ -209,6 +251,13 @@ export function ProviderCard({
             <DropdownMenuItem
               icon={Trash2}
               label={t("delete_provider")}
+              // The reason is at the action, and the item stays reachable:
+              // Astryx menus skip disabled items, reason and all.
+              description={
+                modelCount > 0
+                  ? t("provider_delete_models_first", { count: modelCount })
+                  : undefined
+              }
               variant="destructive"
               onClick={() => setShowDelete(true)}
             />
@@ -218,25 +267,39 @@ export function ProviderCard({
 
       <ProviderConnectionStatus provider={section.provider} />
 
-      <ModelTable
-        models={models}
-        labelledBy={headingId}
-        showKind={showKind}
-        classifications={classifications}
-        securityEnabled={securityEnabled}
-        onRemoved={onRemoved}
-      />
+      {modelCount === 0 ? (
+        <Text type="supporting" className="block px-4 py-3">
+          {t("provider_no_models")}
+        </Text>
+      ) : (
+        <ModelTable
+          models={models}
+          labelledBy={headingId}
+          showKind={showKind}
+          classifications={classifications}
+          securityEnabled={securityEnabled}
+        />
+      )}
 
       <ProviderEditDialog provider={section.provider} open={showEdit} onOpenChange={setShowEdit} />
-      <ConfirmDialogControlled
-        open={showDelete}
-        onOpenChange={setShowDelete}
-        title={t("delete_provider")}
-        description={`${t("delete_provider_confirm", { name: section.name })} ${t("delete_provider_warning")}`}
-        confirmLabel={t("delete")}
-        pending={remove.isPending}
-        onConfirm={() => remove.mutate()}
-      />
+      {modelCount > 0 ? (
+        <DeleteBlockedDialog
+          open={showDelete}
+          onOpenChange={setShowDelete}
+          name={section.name}
+          count={modelCount}
+        />
+      ) : (
+        <ConfirmDialogControlled
+          open={showDelete}
+          onOpenChange={setShowDelete}
+          title={t("delete_provider")}
+          description={`${t("delete_provider_confirm", { name: section.name })} ${t("delete_provider_warning")}`}
+          confirmLabel={t("delete")}
+          pending={remove.isPending}
+          onConfirm={() => remove.mutate()}
+        />
+      )}
     </section>
   );
 }

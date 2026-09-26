@@ -111,24 +111,19 @@ function AttentionBanner({
           <ul className="flex flex-col gap-2">
             {rows.map(({ section, notices: rowNotices }) => (
               <li key={section.key} className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                {/* A provider without models has no card to go to. */}
-                {section.models.length > 0 ? (
-                  <Link
-                    href={`#${providerCardId(section.providerId)}`}
-                    hasUnderline
-                    isStandalone
-                    // A 44 px target on touch (ACCESSIBILITY.md → Target size).
-                    className="pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      onShowProvider(section.providerId);
-                    }}
-                  >
-                    {section.name}
-                  </Link>
-                ) : (
-                  <Text type="label">{section.name}</Text>
-                )}
+                <Link
+                  href={`#${providerCardId(section.providerId)}`}
+                  hasUnderline
+                  isStandalone
+                  // A 44 px target on touch (ACCESSIBILITY.md → Target size).
+                  className="pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    onShowProvider(section.providerId);
+                  }}
+                >
+                  {section.name}
+                </Link>
                 {rowNotices.map((notice) => (
                   <StatusLabel key={notice.label} status={notice.tone} label={notice.label} />
                 ))}
@@ -151,16 +146,13 @@ export function ProviderOverview({
   classifications,
   securityEnabled,
   onAddModel,
-  onAddProvider,
-  onRemoved
+  onAddProvider
 }: {
   models: ModelsPresentation;
   classifications: SecurityClassification[];
   securityEnabled: boolean;
   onAddModel: (providerId: string) => void;
   onAddProvider: () => void;
-  /** Called after a delete removed a provider or model (focus rescue). */
-  onRemoved?: () => void;
 }) {
   const t = useTranslations();
   const typeLabel = useModelTypeLabel();
@@ -279,7 +271,6 @@ export function ProviderOverview({
         classifications={classifications}
         securityEnabled={securityEnabled}
         onAddModel={onAddModel}
-        onRemoved={onRemoved}
       />
     ));
   }
