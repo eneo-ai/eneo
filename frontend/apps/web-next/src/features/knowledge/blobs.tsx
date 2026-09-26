@@ -1,6 +1,7 @@
 "use client";
 
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
+import { useClipboard } from "@astryxdesign/core/hooks";
 import { useCollator } from "@astryxdesign/core/i18n";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import {
@@ -16,7 +17,7 @@ import {
 } from "@astryxdesign/core/Table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileText, Pencil, SearchX, Trash2 } from "lucide-react";
+import { Check, Copy, FileText, Pencil, SearchX, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { Streamdown } from "streamdown";
@@ -74,12 +75,10 @@ export function BlobPreviewDialog({
       unwrap(browserApi.GET("/api/v1/info-blobs/{id}/", { params: { path: { id: blob.id } } })),
     enabled: open
   });
+  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
 
   async function copyText() {
-    if (data?.text) {
-      await navigator.clipboard.writeText(data.text);
-      toast.success(t("copied_to_clipboard"));
-    }
+    if (data?.text && !(await copy(data.text))) toast.error(t("chat_copy_failed"));
   }
 
   return (
@@ -98,8 +97,9 @@ export function BlobPreviewDialog({
           )}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={copyText} disabled={!data?.text}>
-            {t("copy_to_clipboard")}
+          <Button variant="outline" onClick={() => void copyText()} disabled={!data?.text}>
+            {isCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
+            {isCopied ? t("copied_to_clipboard") : t("copy_to_clipboard")}
           </Button>
           <Button onClick={() => onOpenChange(false)}>{t("close")}</Button>
         </DialogFooter>

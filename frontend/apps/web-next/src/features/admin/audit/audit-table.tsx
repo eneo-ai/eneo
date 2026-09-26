@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronDown, ChevronRight, Copy } from "lucide-react";
+import { useClipboard } from "@astryxdesign/core/hooks";
+import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Fragment, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -116,14 +117,10 @@ export function AuditTable({ logs }: { logs: AuditLog[] }) {
 
 function AuditDetailRow({ log, t }: { log: AuditLog; t: ReturnType<typeof useTranslations> }) {
   const hasMetadata = log.metadata && Object.keys(log.metadata).length > 0;
+  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
 
   const copyMetadata = async () => {
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(log.metadata, null, 2));
-      toast.success(t("audit_json_copied"));
-    } catch {
-      toast.error(t("audit_export_failed"));
-    }
+    if (!(await copy(JSON.stringify(log.metadata, null, 2)))) toast.error(t("chat_copy_failed"));
   };
 
   return (
@@ -170,10 +167,10 @@ function AuditDetailRow({ log, t }: { log: AuditLog; t: ReturnType<typeof useTra
                 variant="ghost"
                 size="sm"
                 className="h-7 gap-1 text-xs"
-                onClick={copyMetadata}
+                onClick={() => void copyMetadata()}
               >
-                <Copy className="size-3" />
-                {t("audit_copy_json")}
+                {isCopied ? <Check className="size-3" /> : <Copy className="size-3" />}
+                {isCopied ? t("audit_json_copied") : t("audit_copy_json")}
               </Button>
             </div>
             <pre className="bg-background max-h-64 overflow-auto rounded-md border p-3 font-mono text-xs">

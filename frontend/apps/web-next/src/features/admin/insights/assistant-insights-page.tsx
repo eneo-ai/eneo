@@ -1,8 +1,10 @@
 "use client";
 
+import { useClipboard } from "@astryxdesign/core/hooks";
 import { useInfiniteQuery, useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   BarChart3,
+  Check,
   Copy,
   ExternalLink,
   History,
@@ -32,6 +34,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { browserApi } from "@/lib/api/browser";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
+import { toast } from "@/lib/toast";
 import {
   askAssistantInsightQuestion,
   assistantQuestionHistoryQueryOptions,
@@ -132,7 +135,7 @@ function AnalysisTab({
   const t = useTranslations();
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
-  const [copied, setCopied] = useState(false);
+  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
 
   const ask = useMutation({
     mutationFn: (text: string) =>
@@ -150,7 +153,6 @@ function AnalysisTab({
             const text = question.trim();
             if (!text || ask.isPending) return;
             setAnswer("");
-            setCopied(false);
             ask.mutate(text);
           }}
         >
@@ -182,13 +184,12 @@ function AnalysisTab({
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={() => {
-                  void navigator.clipboard.writeText(answer);
-                  setCopied(true);
+                onClick={async () => {
+                  if (!(await copy(answer))) toast.error(t("chat_copy_failed"));
                 }}
               >
-                <Copy className="size-4" />
-                {copied ? t("copied") : t("copy")}
+                {isCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
+                {isCopied ? t("copied") : t("copy")}
               </Button>
             ) : null}
           </div>

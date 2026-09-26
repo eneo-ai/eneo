@@ -73,26 +73,45 @@ export function assistantRichTextClipboardPayload(answer: string): {
   return { html, plainText: (container.innerText || container.textContent || "").trim() };
 }
 
-export async function copyAssistantAnswer(
+/**
+ * What copying an answer puts on the clipboard: the markdown as plain text,
+ * or rich text as HTML with a plain-text twin.
+ */
+export function assistantClipboardContent(
   answer: string,
   format: AssistantCopyFormat
-): Promise<void> {
-  if (format === "markdown") {
-    await navigator.clipboard.writeText(stripInrefs(answer));
-    return;
-  }
-
+): { text: string; html: string | null } {
+  if (format === "markdown") return { text: stripInrefs(answer), html: null };
   const { html, plainText } = assistantRichTextClipboardPayload(answer);
+  return { text: plainText, html };
+}
 
-  if (typeof ClipboardItem !== "undefined" && navigator.clipboard.write) {
+/** Whether the browser can put HTML on the clipboard. */
+export function canCopyRichText(): boolean {
+  return typeof ClipboardItem !== "undefined" && typeof navigator.clipboard?.write === "function";
+}
+
+/**
+ * Puts HTML and its plain-text twin on the clipboard; resolves false when the
+ * browser refuses. Astryx useClipboard writes text/plain only, so rich text
+ * needs its own ClipboardItem write.
+ */
+export async function copyRichText({
+  text,
+  html
+}: {
+  text: string;
+  html: string;
+}): Promise<boolean> {
+  try {
     await navigator.clipboard.write([
       new ClipboardItem({
-        "text/plain": new Blob([plainText], { type: "text/plain" }),
+        "text/plain": new Blob([text], { type: "text/plain" }),
         "text/html": new Blob([html], { type: "text/html" })
       })
     ]);
-    return;
+    return true;
+  } catch {
+    return false;
   }
-
-  await navigator.clipboard.writeText(plainText);
 }

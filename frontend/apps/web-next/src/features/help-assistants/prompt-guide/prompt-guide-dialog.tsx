@@ -1,5 +1,6 @@
 "use client";
 
+import { useClipboard } from "@astryxdesign/core/hooks";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import {
   Check,
@@ -43,6 +44,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { extractFinalPrompt } from "./extract-final-prompt";
 import { extractStructuredQuestion, type PromptGuideQuestion } from "./extract-structured-question";
@@ -430,16 +432,10 @@ function PromptGuideFinalCard({
   onApply: (text: string) => void;
 }) {
   const t = useTranslations();
-  const [copied, setCopied] = useState(false);
+  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
 
   async function copyToClipboard() {
-    try {
-      await navigator.clipboard.writeText(prompt);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setCopied(false);
-    }
+    if (!(await copy(prompt))) toast.error(t("chat_copy_failed"));
   }
 
   return (
@@ -451,9 +447,9 @@ function PromptGuideFinalCard({
         <div className="text-sm font-medium">{t("prompt_guide_final_prompt_label")}</div>
         <div className="text-muted-foreground text-xs">{t("prompt_guide_final_prompt_hint")}</div>
       </div>
-      <Button type="button" variant="outline" size="sm" onClick={copyToClipboard}>
-        {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-        {copied ? t("copied") : t("copy")}
+      <Button type="button" variant="outline" size="sm" onClick={() => void copyToClipboard()}>
+        {isCopied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+        {isCopied ? t("copied") : t("copy")}
       </Button>
       <Button type="button" size="sm" disabled={disabled} onClick={() => onApply(prompt)}>
         {t("prompt_guide_apply_button")}

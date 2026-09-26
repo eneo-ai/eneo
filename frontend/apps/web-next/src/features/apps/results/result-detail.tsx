@@ -1,7 +1,8 @@
 "use client";
 
+import { useClipboard } from "@astryxdesign/core/hooks";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { ChevronLeft, Copy, Download } from "lucide-react";
+import { Check, ChevronLeft, Copy, Download } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { Streamdown } from "streamdown";
@@ -37,17 +38,18 @@ function downloadText(text: string, fileName: string) {
 
 function OutputToolbar({ text, fileName }: { text: string; fileName: string }) {
   const t = useTranslations();
+  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
   return (
     <div className="flex justify-end gap-1">
       <Button
         variant="ghost"
         size="sm"
-        onClick={() => {
-          void navigator.clipboard.writeText(text);
-          toast.success(t("copied"));
+        onClick={async () => {
+          if (!(await copy(text))) toast.error(t("chat_copy_failed"));
         }}
       >
-        <Copy className="size-4" /> {t("copy")}
+        {isCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
+        {isCopied ? t("copied") : t("copy")}
       </Button>
       <Button variant="ghost" size="sm" onClick={() => downloadText(text, fileName)}>
         <Download className="size-4" /> {t("download")}

@@ -1,6 +1,7 @@
 "use client";
 
 import { ChatMessage as AxChatMessage, ChatMessageBubble } from "@astryxdesign/core/Chat";
+import { useClipboard } from "@astryxdesign/core/hooks";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
@@ -29,7 +30,9 @@ import type { ActivityTab } from "./activity-panel";
 import { ActivityPill } from "./activity-pill";
 import type { TurnDurations } from "./activity-timings";
 import {
-  copyAssistantAnswer,
+  assistantClipboardContent,
+  canCopyRichText,
+  copyRichText,
   getPreferredAssistantCopyFormat,
   type AssistantCopyFormat
 } from "./copy-assistant-answer";
@@ -180,17 +183,21 @@ function AnswerActions({
   const { settings } = useAppContext();
   const preferred = getPreferredAssistantCopyFormat(settings);
   const moreRef = useRef<HTMLDivElement>(null);
+  const { copy: copyText } = useClipboard();
 
+  // Confirmed with a toast (seen and announced) for both formats: a rich-text
+  // copy does not go through useClipboard, so it has no copied state to show.
   const copy = useCallback(
     async (format: AssistantCopyFormat) => {
-      try {
-        await copyAssistantAnswer(text, format);
-        toast.success(t("copied"));
-      } catch {
-        toast.error(t("chat_copy_failed"));
-      }
+      const { text: plainText, html } = assistantClipboardContent(text, format);
+      const copied =
+        html !== null && canCopyRichText()
+          ? await copyRichText({ text: plainText, html })
+          : await copyText(plainText);
+      if (copied) toast.success(t("copied"));
+      else toast.error(t("chat_copy_failed"));
     },
-    [t, text]
+    [copyText, t, text]
   );
 
   const iconClass = "pointer-coarse:size-11";

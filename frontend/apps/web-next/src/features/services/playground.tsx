@@ -1,7 +1,8 @@
 "use client";
 
+import { useClipboard } from "@astryxdesign/core/hooks";
 import { useMutation } from "@tanstack/react-query";
-import { Copy } from "lucide-react";
+import { Check, Copy } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ export function ServicePlayground({ serviceId }: { serviceId: string }) {
   const t = useTranslations();
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
+  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
 
   const run = useMutation({
     mutationFn: async (text: string) => {
@@ -65,13 +67,12 @@ export function ServicePlayground({ serviceId }: { serviceId: string }) {
           variant="outline"
           className="self-end"
           disabled={!output}
-          onClick={() => {
-            void navigator.clipboard.writeText(output);
-            toast.success(t("copied"));
+          onClick={async () => {
+            if (!(await copy(output))) toast.error(t("chat_copy_failed"));
           }}
         >
-          <Copy className="size-4" />
-          {t("copy_response")}
+          {isCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
+          {isCopied ? t("copied") : t("copy_response")}
         </Button>
       </div>
     </div>
