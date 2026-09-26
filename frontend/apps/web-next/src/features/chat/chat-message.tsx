@@ -3,6 +3,8 @@
 import { ChatMessage as AxChatMessage, ChatMessageBubble } from "@astryxdesign/core/Chat";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
+import { Skeleton } from "@astryxdesign/core/Skeleton";
+import { Spinner } from "@astryxdesign/core/Spinner";
 import { Timestamp } from "@astryxdesign/core/Timestamp";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { Copy, ThumbsDown, ThumbsUp } from "lucide-react";
@@ -94,26 +96,32 @@ function UserMessage({ message }: { message: EneoUIMessage }) {
   );
 }
 
-/** "Assistenten tänker…" before any step or text has streamed in. */
+/**
+ * "Assistenten tänker…" before any step or text has streamed in. Not a live
+ * region: the view announces the finished answer instead (the spinner's own
+ * status role is hidden).
+ */
 function ThinkingStatus() {
   const t = useTranslations();
   return (
     <span className="bg-ax-accent-muted text-ax-text-accent inline-flex min-h-[30px] items-center gap-1.5 self-start rounded-full ps-2 pe-3 text-[12.5px] font-semibold">
-      <span
-        aria-hidden="true"
-        className="border-ax-accent size-3.5 animate-spin rounded-full border-2 border-t-transparent"
-      />
+      <span aria-hidden="true" className="flex">
+        <Spinner size="md" shade="inherit" />
+      </span>
       {t("chat_assistant_thinking")}
     </span>
   );
 }
 
+const SKELETON_LINES = ["100%", "88%", "56%"];
+
+/** Placeholder lines where the answer will stream in (decorative). */
 function AnswerSkeleton() {
   return (
     <div aria-hidden="true" className="flex w-full flex-col gap-[9px] pt-0.5">
-      <span className="bg-ax-muted rounded-ax-inner h-[11px] w-full animate-pulse" />
-      <span className="bg-ax-muted rounded-ax-inner h-[11px] w-[88%] animate-pulse" />
-      <span className="bg-ax-muted rounded-ax-inner h-[11px] w-[56%] animate-pulse" />
+      {SKELETON_LINES.map((width, index) => (
+        <Skeleton key={width} index={index} width={width} height={11} radius={1} />
+      ))}
     </div>
   );
 }

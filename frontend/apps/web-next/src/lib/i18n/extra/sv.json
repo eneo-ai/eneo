@@ -543,7 +543,6 @@
   "chat_starter_summarize_description": "Protokoll, rapporter och utredningar",
   "chat_starter_draft_description": "Tjänsteskrivelse, mejl eller svar till invånare",
   "chat_starter_plan_description": "Steg, ansvar och tidslinje",
-  "chat_switch_assistant": "Byt assistent",
   "chat_tool_approval_hint": "Assistenten vill köra verktyg. Godkänn eller avvisa varje anrop.",
   "chat_tool_approval_record": "Verktygsgodkännande",
   "chat_tool_approval_timed_out": "Avvisad, tiden gick ut",
@@ -566,5 +565,7 @@
   "chat_history_load_more": "Visa fler konversationer",
   "chat_insights_generating": "Tar fram insikter…",
   "chat_activity_running_step": "{step}…",
-  "chat_assistant_thinking": "Assistenten tänker…"
+  "chat_assistant_thinking": "Assistenten tänker…",
+  "chat_switch_assistant_named": "Byt assistent: {name}",
+  "chat_tools_named": "Verktyg: {status}"
 }

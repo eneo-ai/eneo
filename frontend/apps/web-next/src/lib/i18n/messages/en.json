@@ -5052,7 +5052,6 @@
   "chat_starter_summarize_description": "Minutes, reports and inquiries",
   "chat_starter_draft_description": "Memos, emails or replies to residents",
   "chat_starter_plan_description": "Steps, owners and a timeline",
-  "chat_switch_assistant": "Switch assistant",
   "chat_tool_approval_hint": "The assistant wants to run tools. Approve or deny each call.",
   "chat_tool_approval_record": "Tool approval",
   "chat_tool_approval_timed_out": "Denied, timed out",
@@ -5075,5 +5074,7 @@
   "chat_history_load_more": "Show more conversations",
   "chat_insights_generating": "Generating insights…",
   "chat_activity_running_step": "{step}…",
-  "chat_assistant_thinking": "The assistant is thinking…"
+  "chat_assistant_thinking": "The assistant is thinking…",
+  "chat_switch_assistant_named": "Switch assistant: {name}",
+  "chat_tools_named": "Tools: {status}"
 }

@@ -1,29 +1,39 @@
 "use client";
 
+import {
+  DropdownMenu,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem
+} from "@astryxdesign/core/DropdownMenu";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
-import { Check, ChevronDown, History, Menu, ShieldCheck, SquarePen } from "lucide-react";
-import Link from "next/link";
+import { ChevronDown, History, Menu, ShieldCheck, SquarePen } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { iconUrl } from "@/components/composites/icon-field";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
 import { OPEN_NAV_EVENT } from "@/components/shell/routes";
 import type { ChatPartner } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import type { ChatPartnerSwitcherItem } from "./partner-switcher";
 import { BrandMark } from "./start-state";
 
-/** Asks the app shell to open its navigation drawer (phones). */
-function openAppNavigation() {
-  window.dispatchEvent(new CustomEvent(OPEN_NAV_EVENT));
+/**
+ * Opens the app shell's navigation drawer on phones, where chat routes have
+ * no shell top bar (the shell listens for OPEN_NAV_EVENT).
+ */
+export function AppMenuButton() {
+  const t = useTranslations();
+  return (
+    <IconButton
+      label={t("chat_open_menu")}
+      icon={<Menu className="size-5" />}
+      variant="ghost"
+      onClick={() => window.dispatchEvent(new CustomEvent(OPEN_NAV_EVENT))}
+      className="size-11"
+    />
+  );
 }
 
 type SwitcherVariant = "header" | "token" | "mobile";
@@ -88,40 +98,50 @@ function SwitcherFace({
   }
   if (variant === "token") {
     return (
-      <>
+      <span className="flex min-w-0 items-center gap-1.5">
         <PartnerTile partner={partner} size="sm" />
         <span className="truncate">{partner.name}</span>
         {chevron}
-      </>
+      </span>
     );
   }
   return (
-    <>
+    <span className="flex min-w-0 items-center gap-2.5">
       <PartnerTile partner={partner} size="md" />
       <span className="flex min-w-0 flex-col items-start leading-tight">
         <span className="max-w-full truncate font-semibold">{partner.name}</span>
         {subtitle && (
-          <span className="text-ax-text-secondary max-w-full truncate text-xs">{subtitle}</span>
+          <span className="text-ax-text-secondary max-w-full truncate text-xs font-normal">
+            {subtitle}
+          </span>
         )}
       </span>
       {chevron}
-    </>
+    </span>
   );
 }
 
+/** Box of the selector (the menu button, or the static identity without a menu). */
 const SWITCHER_CLASS: Record<SwitcherVariant, string> = {
   header:
-    "flex h-[42px] max-w-[min(22rem,40vw)] min-w-0 items-center gap-2.5 rounded-ax-element ps-1.5 pe-2 text-start",
+    "text-ax-text flex h-[42px] max-w-[min(22rem,40vw)] min-w-0 items-center justify-start rounded-ax-element ps-1.5 pe-2 text-start text-sm pointer-coarse:h-11",
   token:
-    "border-ax-border-control flex h-8 max-w-[16rem] min-w-0 items-center gap-1.5 rounded-full border ps-1 pe-2 text-[13px] font-semibold pointer-coarse:h-11",
+    "text-ax-text border-ax-border-control flex h-8 max-w-[16rem] min-w-0 items-center justify-start rounded-full border ps-1 pe-2 text-[13px] font-semibold pointer-coarse:h-11",
   mobile:
-    "flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center rounded-ax-container px-2"
+    "text-ax-text flex h-auto min-h-11 min-w-0 flex-1 flex-col items-center justify-center rounded-ax-container px-2"
 };
+
+/** Menu value of a switcher item. */
+function itemValue(item: Pick<ChatPartnerSwitcherItem, "type" | "id">): string {
+  return `${item.type}:${item.id}`;
+}
 
 /**
  * The assistant selector: shows who you are talking to and, in a space,
- * opens today's partner switcher (assistants and group chats of the space).
- * Without switcher items it is a static identity.
+ * opens the partner switcher (assistants and group chats of the space) as an
+ * Astryx menu of radio items, so the current one is announced as selected.
+ * Picking another opens its chat. Without switcher items it is a static
+ * identity.
  */
 export function PartnerSwitcher({
   partner,
@@ -135,6 +155,7 @@ export function PartnerSwitcher({
   variant: SwitcherVariant;
 }) {
   const t = useTranslations();
+  const router = useRouter();
   const interactive = (items?.length ?? 0) > 1;
 
   if (!interactive) {
@@ -145,29 +166,36 @@ export function PartnerSwitcher({
     );
   }
 
+  const active = items!.find((item) => item.active);
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className={cn(
-            SWITCHER_CLASS[variant],
-            "hover:bg-ax-hover focus-visible:outline-ring data-[state=open]:bg-ax-hover focus-visible:outline-2 focus-visible:outline-offset-2"
-          )}
-        >
-          <span className="sr-only">{t("chat_switch_assistant")}: </span>
+    <DropdownMenu
+      button={{
+        label: t("chat_switch_assistant_named", { name: partner.name }),
+        variant: "ghost",
+        className: SWITCHER_CLASS[variant],
+        children: (
           <SwitcherFace partner={partner} subtitle={subtitle} variant={variant} interactive />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align={variant === "mobile" ? "center" : "start"} className="w-72">
-        <DropdownMenuLabel>{t("select_an_assistant")}</DropdownMenuLabel>
+        )
+      }}
+      // The face draws its own chevron (beside the name on phones).
+      hasChevron={false}
+      alignment={variant === "mobile" ? "center" : "start"}
+      menuWidth={288}
+    >
+      <DropdownMenuRadioGroup
+        label={t("select_an_assistant")}
+        value={active ? itemValue(active) : undefined}
+        onChange={(value) => {
+          const item = items!.find((candidate) => itemValue(candidate) === value);
+          if (item && !item.active) router.push(item.href);
+        }}
+      >
         {items!.map((item) => (
-          <DropdownMenuItem key={`${item.type}:${item.id}`} asChild>
-            <Link
-              href={item.href}
-              aria-current={item.active ? "page" : undefined}
-              className="flex min-w-0 items-center gap-2"
-            >
+          <DropdownMenuRadioItem
+            key={itemValue(item)}
+            value={itemValue(item)}
+            label={item.name}
+            icon={
               <PartnerTile
                 partner={{
                   id: item.id,
@@ -177,12 +205,10 @@ export function PartnerSwitcher({
                 }}
                 size="sm"
               />
-              <span className="min-w-0 flex-1 truncate">{item.name}</span>
-              {item.active && <Check aria-hidden="true" className="text-ax-text-accent size-4" />}
-            </Link>
-          </DropdownMenuItem>
+            }
+          />
         ))}
-      </DropdownMenuContent>
+      </DropdownMenuRadioGroup>
     </DropdownMenu>
   );
 }
@@ -319,13 +345,7 @@ export function ChatHeader({
 
       {/* Phones: the shell hides its own top bar on chat routes. */}
       <div className="border-ax-border flex min-h-14 shrink-0 items-center gap-0.5 border-b px-1 md:hidden">
-        <IconButton
-          label={t("chat_open_menu")}
-          icon={<Menu className="size-5" />}
-          variant="ghost"
-          onClick={openAppNavigation}
-          className="size-11"
-        />
+        <AppMenuButton />
         <PartnerSwitcher
           partner={partner}
           items={switcherItems}

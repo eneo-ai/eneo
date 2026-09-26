@@ -16,18 +16,39 @@ import {
 const spies = vi.hoisted(() => ({
   announce: vi.fn(),
   sent: [] as { text: string; body: unknown }[],
-  mode: "fail" as "fail" | "answer",
+  mode: "fail" as "fail" | "answer" | "hold",
   titled: [] as string[]
 }));
 
 // Fails before streaming starts, or streams a short answer (AI SDK UI chunks).
 vi.mock("@/lib/chat/transport", () => ({
   createChatTransport: () => ({
-    sendMessages: async ({ messages, body }: { messages: EneoUIMessage[]; body: unknown }) => {
+    sendMessages: async ({
+      messages,
+      body,
+      abortSignal
+    }: {
+      messages: EneoUIMessage[];
+      body: unknown;
+      abortSignal?: AbortSignal;
+    }) => {
       const last = messages.at(-1);
       const text = last?.parts.find((part) => part.type === "text");
       spies.sent.push({ text: text?.type === "text" ? text.text : "", body });
       if (spies.mode === "fail") throw new Error("Tjänsten svarar inte");
+      if (spies.mode === "hold") {
+        // Starts answering, then waits until the user stops it.
+        return new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: "start", messageId: "answer-1" });
+            controller.enqueue({ type: "text-start", id: "t" });
+            controller.enqueue({ type: "text-delta", id: "t", delta: "Gränsen " });
+            abortSignal?.addEventListener("abort", () =>
+              controller.error(new DOMException("Aborted", "AbortError"))
+            );
+          }
+        });
+      }
       const chunks = [
         { type: "start", messageId: "answer-1" },
         {
@@ -95,17 +116,19 @@ const partner: ChatPartner = {
 function Harness({
   onSessionCreated,
   onTitle,
-  appContext
+  appContext,
+  chatPartner = partner
 }: {
   onSessionCreated?: (id: string) => void;
   onTitle?: (title: string) => void;
   appContext?: AppContextData;
+  chatPartner?: ChatPartner;
 }) {
   const [activity, setActivity] = useState<ActivityState | null>(null);
   return (
     <ChatTestProviders appContext={appContext}>
       <ChatView
-        partner={partner}
+        partner={chatPartner}
         activity={activity}
         onActivityChange={setActivity}
         onSessionCreated={onSessionCreated}
@@ -139,6 +162,46 @@ describe("ChatView streaming an answer", () => {
     expect(spies.titled).toEqual(["session-1"]);
     // A new assistant-first send sends the assistant id, not a session.
     expect(spies.sent[0]?.body).toMatchObject({ assistant_id: "assistant-1", session_id: null });
+  });
+});
+
+describe("ChatView sending", () => {
+  it("sends an @-mention to the group chat member it names", async () => {
+    spies.mode = "answer";
+    render(
+      <Harness
+        chatPartner={{
+          type: "group-chat",
+          id: "group-1",
+          name: "Upphandlingsgruppen",
+          mentionableAssistants: [{ id: "assistant-9", handle: "juristen" }]
+        }}
+      />
+    );
+    fireEvent.click(screen.getByRole("combobox", { name: "Nämn" }));
+    fireEvent.click(await screen.findByRole("option", { name: "@juristen" }));
+    ask("Är avtalet förenligt med LOU?");
+    await waitFor(() => expect(spies.sent).toHaveLength(1));
+    expect(spies.sent[0]?.body).toMatchObject({
+      group_chat_id: "group-1",
+      assistant_id: null,
+      tools: { assistants: [{ id: "assistant-9", handle: "juristen" }] }
+    });
+    // The mention applies to that question only.
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Nämn" }).textContent).toContain("Omnämnanden")
+    );
+  });
+
+  it("stops an answer from the stop button and says so", async () => {
+    spies.mode = "hold";
+    render(<Harness />);
+    ask("Vilken gräns gäller?");
+    const stop = await screen.findByRole("button", { name: "Stoppa generering" });
+    fireEvent.click(stop);
+    await waitFor(() => expect(spies.announce).toHaveBeenCalledWith("Svaret stoppades"));
+    expect(spies.announce).not.toHaveBeenCalledWith("Svaret är klart");
+    expect(await screen.findByRole("button", { name: "Skicka meddelande" })).toBeTruthy();
   });
 });
 

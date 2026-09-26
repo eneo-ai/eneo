@@ -140,7 +140,8 @@ describe("ChatMessage", () => {
     const { container } = renderMessages(
       <ChatMessage message={streaming} assistant={assistant} isStreaming />
     );
-    expect(container.querySelector('[aria-hidden="true"] .animate-pulse')).not.toBeNull();
+    expect(container.querySelectorAll('[aria-hidden="true"] .astryx-skeleton')).toHaveLength(3);
+    expect(screen.getByText("Assistenten tänker…")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Kopiera svaret" })).toBeNull();
   });
 

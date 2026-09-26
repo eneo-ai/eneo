@@ -1,9 +1,10 @@
 "use client";
 
+import { Button } from "@astryxdesign/core/Button";
+import { Popover } from "@astryxdesign/core/Popover";
 import { Eye, EyeOff, Info, TriangleAlert } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useMemo, useSyncExternalStore } from "react";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import type { ContextUsage } from "@/lib/chat/use-preflight";
 import { cn } from "@/lib/utils";
 
@@ -82,6 +83,7 @@ export function ContextUsageBar({
 
   // Persisted show/hide preference; server snapshot defaults to visible.
   const isVisible = useSyncExternalStore(subscribeVisibility, readVisibility, () => true);
+  const [open, setOpen] = useState(false);
 
   const {
     contextLimit,
@@ -155,9 +157,163 @@ export function ContextUsageBar({
 
   const percentLabel = projectedPercent.toFixed(projectedPercent >= 10 ? 0 : 1);
 
+  const details = (
+    <div className="flex flex-col text-xs">
+      <div className="border-ax-border border-b pb-3">
+        <p className="text-sm font-medium">{t("context_usage_estimate")}</p>
+        <p className="text-ax-text-secondary mt-0.5 text-xs tabular-nums">
+          ≈ {fmt(projectedTotal)} / {fmt(contextLimit)} {t("chat_tokens_separator")} {percentLabel}%
+        </p>
+      </div>
+
+      <div className="space-y-3 py-3">
+        {(lockedInputTokens > 0 || lockedOutputTokens > 0) && (
+          <div className="space-y-1.5">
+            <p className="text-ax-text-secondary text-[10px] font-medium tracking-wide uppercase">
+              {t("context_usage_section_locked")}
+            </p>
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="flex items-center gap-2">
+                <span className="bg-ax-text-secondary inline-block size-2.5 rounded-full" />
+                {t("context_usage_label_input")}
+              </span>
+              <span className="text-ax-text-secondary tabular-nums">{fmt(lockedInputTokens)}</span>
+            </div>
+            <p className="text-ax-text-secondary ps-[18px] text-[10px] leading-snug">
+              {t("context_usage_label_input_hint")}
+            </p>
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="flex items-center gap-2">
+                <span className="bg-ax-purple inline-block size-2.5 rounded-full" />
+                {t("context_usage_label_output")}
+              </span>
+              <span className="text-ax-text-secondary tabular-nums">{fmt(lockedOutputTokens)}</span>
+            </div>
+          </div>
+        )}
+
+        {pendingTotal > 0 && (
+          <div className="border-ax-border space-y-1.5 border-t pt-3">
+            <p className="text-ax-text-secondary text-[10px] font-medium tracking-wide uppercase">
+              {t("context_usage_section_pending")}
+            </p>
+            {pendingTextTokens > 0 && (
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="flex items-center gap-2">
+                  <span className="bg-ax-blue inline-block size-2.5 rounded-full" />
+                  {t("context_usage_label_your_text")}
+                </span>
+                <span className="text-ax-text-secondary tabular-nums">
+                  {fmt(pendingTextTokens)}
+                </span>
+              </div>
+            )}
+            {pendingFileTokens > 0 && (
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="flex items-center gap-2">
+                  <span className="bg-ax-orange inline-block size-2.5 rounded-full" />
+                  {t("context_usage_label_files")}
+                </span>
+                <span className="text-ax-text-secondary tabular-nums">
+                  {fmt(pendingFileTokens)}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {pendingTotal > 0 && (
+          <div className="border-ax-border space-y-1.5 border-t pt-3">
+            <p className="text-ax-text-secondary text-[10px] font-medium tracking-wide uppercase">
+              {t("context_usage_section_excluded")}
+            </p>
+            <p className="text-ax-text-secondary leading-snug">
+              {t("context_usage_excluded_hint")}
+            </p>
+          </div>
+        )}
+
+        {hasCumulative && (
+          <div className="border-ax-border space-y-1.5 border-t pt-3">
+            <p className="text-ax-text-secondary text-[10px] font-medium tracking-wide uppercase">
+              {t("context_usage_section_cumulative")}
+            </p>
+            <div className="flex items-baseline justify-between gap-3">
+              <span>{t("context_usage_cumulative_label")}</span>
+              <span className="text-ax-text-secondary tabular-nums">{cumulativeSummary}</span>
+            </div>
+            {turnCount > 1 && (
+              <p className="text-ax-text-secondary text-[10px] leading-snug tabular-nums">
+                {t("context_usage_cumulative_average", { average: fmt(averagePerTurn) })}
+              </p>
+            )}
+            <p className="text-ax-text-secondary leading-snug">
+              {t("context_usage_cumulative_hint")}
+            </p>
+          </div>
+        )}
+
+        {willExceed && (
+          <div className="bg-ax-error-muted text-ax-error rounded-ax-inner flex flex-col gap-2 px-2 py-1.5">
+            <div className="flex items-start gap-2">
+              <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+              <span className="text-[11px] leading-snug">
+                {t("context_usage_will_exceed_estimate")}
+              </span>
+            </div>
+            {onNewConversation && (
+              <Button
+                label={t("new_conversation")}
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setOpen(false);
+                  onNewConversation();
+                }}
+                className="self-start"
+              />
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="border-ax-border flex items-center justify-between gap-2 border-t pt-2">
+        {modelName ? (
+          <p className="text-ax-text-secondary text-[10px]">
+            {t("context_usage_model_label")}: <span className="text-ax-text">{modelName}</span>
+          </p>
+        ) : (
+          <span />
+        )}
+        <Button
+          label={t("context_usage_hide_bar")}
+          variant="ghost"
+          size="sm"
+          icon={<EyeOff className="size-3" aria-hidden />}
+          onClick={() => {
+            setOpen(false);
+            writeVisibility(false);
+          }}
+        />
+      </div>
+    </div>
+  );
+
   return (
-    <Popover>
-      <PopoverTrigger
+    <Popover
+      isOpen={open}
+      onOpenChange={setOpen}
+      placement="above"
+      alignment="end"
+      width={340}
+      label={t("context_usage_estimate")}
+      closeButtonLabel={t("close")}
+      content={details}
+    >
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
         className={cn(
           "text-ax-text-secondary hover:text-ax-text focus-visible:outline-ring rounded-ax-inner flex min-h-6 w-full items-center gap-3 px-1 text-[11px] leading-none transition-colors focus-visible:outline-2 focus-visible:outline-offset-2",
           quietClass
@@ -195,147 +351,7 @@ export function ContextUsageBar({
           {fmt(contextLimit)} ({percentLabel}%)
           <Info className="size-3" aria-hidden />
         </span>
-      </PopoverTrigger>
-
-      <PopoverContent side="top" align="end" className="w-[340px] p-0">
-        <div className="border-b px-4 py-3">
-          <p className="text-sm font-medium">{t("context_usage_estimate")}</p>
-          <p className="text-ax-text-secondary mt-0.5 text-xs tabular-nums">
-            ≈ {fmt(projectedTotal)} / {fmt(contextLimit)} {t("chat_tokens_separator")}{" "}
-            {percentLabel}%
-          </p>
-        </div>
-
-        <div className="space-y-3 px-4 py-3 text-xs">
-          {(lockedInputTokens > 0 || lockedOutputTokens > 0) && (
-            <div className="space-y-1.5">
-              <p className="text-ax-text-secondary text-[10px] font-medium tracking-wide uppercase">
-                {t("context_usage_section_locked")}
-              </p>
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="flex items-center gap-2">
-                  <span className="bg-ax-text-secondary inline-block size-2.5 rounded-full" />
-                  {t("context_usage_label_input")}
-                </span>
-                <span className="text-ax-text-secondary tabular-nums">
-                  {fmt(lockedInputTokens)}
-                </span>
-              </div>
-              <p className="text-ax-text-secondary pl-[18px] text-[10px] leading-snug">
-                {t("context_usage_label_input_hint")}
-              </p>
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="flex items-center gap-2">
-                  <span className="bg-ax-purple inline-block size-2.5 rounded-full" />
-                  {t("context_usage_label_output")}
-                </span>
-                <span className="text-ax-text-secondary tabular-nums">
-                  {fmt(lockedOutputTokens)}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {pendingTotal > 0 && (
-            <div className="space-y-1.5 border-t pt-3">
-              <p className="text-ax-text-secondary text-[10px] font-medium tracking-wide uppercase">
-                {t("context_usage_section_pending")}
-              </p>
-              {pendingTextTokens > 0 && (
-                <div className="flex items-baseline justify-between gap-3">
-                  <span className="flex items-center gap-2">
-                    <span className="bg-ax-blue inline-block size-2.5 rounded-full" />
-                    {t("context_usage_label_your_text")}
-                  </span>
-                  <span className="text-ax-text-secondary tabular-nums">
-                    {fmt(pendingTextTokens)}
-                  </span>
-                </div>
-              )}
-              {pendingFileTokens > 0 && (
-                <div className="flex items-baseline justify-between gap-3">
-                  <span className="flex items-center gap-2">
-                    <span className="bg-ax-orange inline-block size-2.5 rounded-full" />
-                    {t("context_usage_label_files")}
-                  </span>
-                  <span className="text-ax-text-secondary tabular-nums">
-                    {fmt(pendingFileTokens)}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
-
-          {pendingTotal > 0 && (
-            <div className="space-y-1.5 border-t pt-3">
-              <p className="text-ax-text-secondary text-[10px] font-medium tracking-wide uppercase">
-                {t("context_usage_section_excluded")}
-              </p>
-              <p className="text-ax-text-secondary leading-snug">
-                {t("context_usage_excluded_hint")}
-              </p>
-            </div>
-          )}
-
-          {hasCumulative && (
-            <div className="space-y-1.5 border-t pt-3">
-              <p className="text-ax-text-secondary text-[10px] font-medium tracking-wide uppercase">
-                {t("context_usage_section_cumulative")}
-              </p>
-              <div className="flex items-baseline justify-between gap-3">
-                <span>{t("context_usage_cumulative_label")}</span>
-                <span className="text-ax-text-secondary tabular-nums">{cumulativeSummary}</span>
-              </div>
-              {turnCount > 1 && (
-                <p className="text-ax-text-secondary text-[10px] leading-snug tabular-nums">
-                  {t("context_usage_cumulative_average", { average: fmt(averagePerTurn) })}
-                </p>
-              )}
-              <p className="text-ax-text-secondary leading-snug">
-                {t("context_usage_cumulative_hint")}
-              </p>
-            </div>
-          )}
-
-          {willExceed && (
-            <div className="bg-ax-error-muted text-ax-error rounded-ax-inner flex flex-col gap-2 px-2 py-1.5">
-              <div className="flex items-start gap-2">
-                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                <span className="text-[11px] leading-snug">
-                  {t("context_usage_will_exceed_estimate")}
-                </span>
-              </div>
-              {onNewConversation && (
-                <button
-                  type="button"
-                  onClick={onNewConversation}
-                  className="border-ax-error hover:bg-ax-hover focus-visible:outline-ring rounded-ax-inner self-start border px-2 py-1 text-[11px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2"
-                >
-                  {t("new_conversation")}
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="bg-ax-sunken border-ax-border flex items-center justify-between gap-2 border-t px-4 py-2">
-          {modelName ? (
-            <p className="text-ax-text-secondary text-[10px]">
-              {t("context_usage_model_label")}: <span className="text-ax-text">{modelName}</span>
-            </p>
-          ) : (
-            <span />
-          )}
-          <button
-            type="button"
-            onClick={() => writeVisibility(false)}
-            className="text-ax-text-secondary hover:text-ax-text focus-visible:outline-ring rounded-ax-inner flex min-h-6 items-center gap-1 text-[10px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2"
-          >
-            <EyeOff className="size-3" aria-hidden />
-            {t("context_usage_hide_bar")}
-          </button>
-        </div>
-      </PopoverContent>
+      </button>
     </Popover>
   );
 }

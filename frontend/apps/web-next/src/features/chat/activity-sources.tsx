@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import type { ActivitySource } from "./activity";
-import { McpResourceSnippetDialog } from "./message-parts";
+import { McpSnippetButton } from "./message-parts";
 
 /** Id of the source entry that inline citation N (1-based) opens. */
 export function sourceAnchorId(messageId: string, number: number): string {
@@ -89,11 +89,11 @@ export function SourceList({
                   <span className="sr-only"> {t("chat_opens_in_new_tab")}</span>
                 </a>
               ) : source.mcpSnippet ? (
-                <McpResourceSnippetDialog source={source} snippet={source.mcpSnippet}>
-                  <button type="button" className={cn(titleClass, "hover:underline")}>
-                    {source.title}
-                  </button>
-                </McpResourceSnippetDialog>
+                <McpSnippetButton
+                  source={source}
+                  snippet={source.mcpSnippet}
+                  className={cn(titleClass, "hover:underline")}
+                />
               ) : (
                 <span className="text-[13px] leading-snug font-medium break-words">
                   {source.title}

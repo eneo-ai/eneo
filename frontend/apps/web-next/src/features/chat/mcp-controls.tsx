@@ -1,10 +1,11 @@
 "use client";
 
+import { Button } from "@astryxdesign/core/Button";
+import { Popover } from "@astryxdesign/core/Popover";
+import { Switch } from "@astryxdesign/core/Switch";
 import { Plug, ShieldCheck } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
-import { Separator } from "@/components/ui/separator";
-import { Switch } from "@/components/ui/switch";
+import { useState } from "react";
 import type { Schema } from "@/lib/api/models";
 import type { ChatPartner, ConversationBody } from "@/lib/chat/types";
 
@@ -62,6 +63,10 @@ export function mcpConversationOptions({
   };
 }
 
+/**
+ * The composer's Verktyg pill: a popover with a switch per MCP server (and
+ * all on / all off), plus whether tools run without asking for approval.
+ */
 export function ChatMcpServers({
   servers,
   disabledServerIds,
@@ -76,8 +81,10 @@ export function ChatMcpServers({
   onAutoAcceptToolsChange: (next: boolean) => void;
 }) {
   const t = useTranslations();
+  const [open, setOpen] = useState(false);
   const total = servers.length;
   const activeCount = activeMcpServerCount(servers, disabledServerIds);
+  const activeLabel = t("mcp_servers_active_count", { active: activeCount, total });
 
   function setServer(id: string, enabled: boolean) {
     const next = new Set(disabledServerIds);
@@ -98,71 +105,47 @@ export function ChatMcpServers({
   if (servers.length === 0) return null;
 
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label={`${t("chat_tools")}: ${t("mcp_servers_active_count", { active: activeCount, total })}`}
-          className="text-ax-text-secondary hover:bg-ax-hover hover:text-ax-text focus-visible:outline-ring aria-expanded:bg-ax-hover inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:h-11 pointer-coarse:min-w-11"
-        >
-          <Plug aria-hidden="true" className="size-[15px]" />
-          <span className="max-sm:sr-only">{t("chat_tools")}</span>
-          <span
-            aria-hidden="true"
-            className="bg-ax-muted text-ax-text flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1.5 text-[11px] tabular-nums"
-          >
-            {activeCount}
-          </span>
-        </button>
-      </PopoverTrigger>
-
-      <PopoverContent side="top" align="start" className="w-80 gap-0 p-0">
-        <div className="border-b px-3 py-2.5">
-          <PopoverTitle className="text-sm">{t("mcp_servers")}</PopoverTitle>
-          <div className="text-muted-foreground mt-0.5 flex items-center justify-between gap-2 text-xs">
-            <span>{t("mcp_servers_active_count", { active: activeCount, total })}</span>
-            {total > 1 && (
-              <span className="flex items-center gap-0.5">
-                <button
-                  type="button"
-                  className="hover:text-foreground rounded px-1 py-0.5 font-medium transition-colors disabled:pointer-events-none disabled:opacity-40"
-                  disabled={activeCount === total}
-                  onClick={() => setAll(true)}
-                >
-                  {t("mcp_all_on")}
-                </button>
-                <span aria-hidden="true" className="text-border">
-                  ·
+    <Popover
+      isOpen={open}
+      onOpenChange={setOpen}
+      placement="above"
+      alignment="start"
+      width={320}
+      label={t("mcp_servers")}
+      closeButtonLabel={t("close")}
+      content={
+        <div className="flex flex-col">
+          <div className="border-ax-border flex flex-col gap-1 border-b pb-2">
+            <p className="text-sm font-semibold">{t("mcp_servers")}</p>
+            <div className="text-ax-text-secondary flex items-center justify-between gap-2 text-xs">
+              <span>{activeLabel}</span>
+              {total > 1 && (
+                // Never disabled: a button that disables itself when pressed
+                // would drop keyboard focus. Pressing it again changes nothing.
+                <span className="flex items-center gap-1">
+                  <Button
+                    label={t("mcp_all_on")}
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setAll(true)}
+                  />
+                  <Button
+                    label={t("mcp_all_off")}
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setAll(false)}
+                  />
                 </span>
-                <button
-                  type="button"
-                  className="hover:text-foreground rounded px-1 py-0.5 font-medium transition-colors disabled:pointer-events-none disabled:opacity-40"
-                  disabled={activeCount === 0}
-                  onClick={() => setAll(false)}
-                >
-                  {t("mcp_all_off")}
-                </button>
-              </span>
-            )}
+              )}
+            </div>
           </div>
-        </div>
 
-        <div
-          className="flex max-h-64 flex-col overflow-y-auto p-1"
-          role="group"
-          aria-label={t("mcp_servers")}
-        >
-          {servers.map((server) => {
-            const enabled = !disabledServerIds.has(server.id);
-            const descriptionId = server.description ? `mcp-desc-${server.id}` : undefined;
-            return (
-              <div
-                key={server.id}
-                className="hover:bg-muted flex items-center gap-2.5 rounded-md px-2 py-2 transition-colors"
-              >
+          <ul aria-label={t("mcp_servers")} className="flex max-h-64 flex-col overflow-y-auto py-1">
+            {servers.map((server) => (
+              <li key={server.id} className="flex items-center gap-2.5 py-1.5">
                 <span
-                  className="bg-ax-muted text-ax-text-secondary rounded-ax-inner flex size-7 shrink-0 items-center justify-center overflow-hidden text-xs font-semibold"
                   aria-hidden="true"
+                  className="bg-ax-muted text-ax-text-secondary rounded-ax-inner flex size-7 shrink-0 items-center justify-center overflow-hidden text-xs font-semibold"
                 >
                   {server.icon_url ? (
                     // Backend-served MCP icon URL.
@@ -172,58 +155,59 @@ export function ChatMcpServers({
                     server.name.charAt(0).toUpperCase()
                   )}
                 </span>
-                <span className="min-w-0 flex-1">
-                  <span
-                    className={`block truncate text-sm font-medium ${enabled ? "text-ax-text" : "text-ax-text-secondary"}`}
-                  >
-                    {server.name}
-                  </span>
-                  {server.description && (
-                    <span
-                      id={descriptionId}
-                      className="text-muted-foreground block truncate text-xs"
-                      title={server.description}
-                    >
-                      {server.description}
-                    </span>
-                  )}
-                </span>
-                <Switch
-                  checked={enabled}
-                  onCheckedChange={(value) => setServer(server.id, value)}
-                  aria-label={server.name}
-                  aria-describedby={descriptionId}
-                />
-              </div>
-            );
-          })}
-        </div>
+                <div className="min-w-0 flex-1">
+                  <Switch
+                    label={server.name}
+                    description={server.description ?? undefined}
+                    labelPosition="start"
+                    labelSpacing="spread"
+                    size="sm"
+                    value={!disabledServerIds.has(server.id)}
+                    onChange={(value) => setServer(server.id, value)}
+                  />
+                </div>
+              </li>
+            ))}
+          </ul>
 
-        <Separator />
-
-        <div className="p-1">
-          <div className="hover:bg-muted flex items-start gap-2.5 rounded-md px-2 py-2 transition-colors">
+          <div className="border-ax-border flex items-start gap-2.5 border-t pt-2">
             <ShieldCheck
-              className="text-muted-foreground mt-0.5 size-5 shrink-0"
               aria-hidden="true"
+              className="text-ax-text-secondary mt-0.5 size-5 shrink-0"
             />
-            <span className="min-w-0 flex-1">
-              <span className="text-foreground block text-sm font-medium">
-                {t("mcp_run_tools_automatically")}
-              </span>
-              <span id="mcp-auto-accept-desc" className="text-muted-foreground block text-xs">
-                {autoAcceptTools ? t("auto_accept_tools_on") : t("auto_accept_tools_off")}
-              </span>
-            </span>
-            <Switch
-              checked={autoAcceptTools}
-              onCheckedChange={onAutoAcceptToolsChange}
-              aria-label={t("mcp_run_tools_automatically")}
-              aria-describedby="mcp-auto-accept-desc"
-            />
+            <div className="min-w-0 flex-1">
+              <Switch
+                label={t("mcp_run_tools_automatically")}
+                description={
+                  autoAcceptTools ? t("auto_accept_tools_on") : t("auto_accept_tools_off")
+                }
+                labelPosition="start"
+                labelSpacing="spread"
+                size="sm"
+                value={autoAcceptTools}
+                onChange={onAutoAcceptToolsChange}
+              />
+            </div>
           </div>
         </div>
-      </PopoverContent>
+      }
+    >
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={t("chat_tools_named", { status: activeLabel })}
+        className="text-ax-text-secondary hover:bg-ax-hover hover:text-ax-text focus-visible:outline-ring aria-expanded:bg-ax-hover inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:h-11 pointer-coarse:min-w-11"
+      >
+        <Plug aria-hidden="true" className="size-[15px]" />
+        <span className="max-sm:sr-only">{t("chat_tools")}</span>
+        <span
+          aria-hidden="true"
+          className="bg-ax-muted text-ax-text flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1.5 text-[11px] tabular-nums"
+        >
+          {activeCount}
+        </span>
+      </button>
     </Popover>
   );
 }
