@@ -237,9 +237,19 @@ function blobComparators(
 /**
  * Files of a collection or website: a search box, name and size sortable by
  * their headers (unsorted keeps the upload order), and pages of 100 (the
- * pager only shows when there is more than one).
+ * pager only shows when there is more than one). `labelledBy` names the table
+ * after what the page shows it under: the collection's title or the website's
+ * "Indexerat innehåll" tab.
  */
-export function BlobTable({ blobs, canEdit }: { blobs: InfoBlob[]; canEdit: boolean }) {
+export function BlobTable({
+  blobs,
+  canEdit,
+  labelledBy
+}: {
+  blobs: InfoBlob[];
+  canEdit: boolean;
+  labelledBy: string;
+}) {
   const t = useTranslations();
   const locale = useLocale();
   const collator = useCollator();
@@ -316,6 +326,7 @@ export function BlobTable({ blobs, canEdit }: { blobs: InfoBlob[]; canEdit: bool
             data={paginateData(sortedData, currentPage, PAGE_SIZE)}
             columns={columns}
             idKey="id"
+            aria-labelledby={labelledBy}
             plugins={{ sort: sortPlugin, pagination: paginationPlugin }}
           />
         </SpaceTableFrame>

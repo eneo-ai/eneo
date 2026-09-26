@@ -139,6 +139,10 @@ describe("CrawlRunsTable", () => {
       target: { value: "saknas" }
     });
     expect(screen.queryByRole("table")).toBeNull();
+    // In the words of the filter box, not the English "crawls".
+    expect(
+      screen.getByRole("heading", { name: "Hittade inga indexeringar som matchar dina kriterier" })
+    ).toBeTruthy();
   });
 
   it("says so when the website was never crawled", () => {

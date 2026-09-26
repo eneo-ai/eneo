@@ -211,8 +211,8 @@ export function WebsiteActions({ website }: { website: Website }) {
 /**
  * One embedding model's websites. Sorting is shared across the groups; the
  * checkboxes (for bulk sync) select into one set, the header one selects this
- * group's rows. A grouped table is named by its model heading, which tells
- * the groups' "select all" checkboxes apart.
+ * group's rows. `labelledBy` names the table: the model heading when grouped
+ * (which tells the groups' "select all" checkboxes apart), else the tab.
  */
 function WebsitesTable({
   websites,
@@ -227,7 +227,7 @@ function WebsitesTable({
   selectable: boolean;
   selectedKeys: Set<string>;
   setSelectedKeys: Dispatch<SetStateAction<Set<string>>>;
-  labelledBy?: string;
+  labelledBy: string;
 }) {
   const t = useTranslations();
   const { routeId } = useSpace();
@@ -314,7 +314,8 @@ function WebsitesTable({
   );
 }
 
-export function WebsitesTab({ canCreate }: { canCreate: boolean }) {
+/** The websites tab; `labelledBy` is the tab, which names an ungrouped table. */
+export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; labelledBy: string }) {
   const t = useTranslations();
   const { space, routeId } = useSpace();
   const queryClient = useQueryClient();
@@ -470,7 +471,7 @@ export function WebsitesTab({ canCreate }: { canCreate: boolean }) {
               selectable={canCreate}
               selectedKeys={selected}
               setSelectedKeys={setSelected}
-              labelledBy={headingId}
+              labelledBy={headingId ?? labelledBy}
             />
           </div>
         );

@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -75,6 +75,7 @@ export function SharePointSubscriptions() {
     onSettled: () => setRenewingId(null)
   });
 
+  const titleId = useId();
   const items = subscriptions ?? [];
   const expiredCount = items.filter((sub) => sub.is_expired).length;
   const activeCount = items.length - expiredCount;
@@ -83,7 +84,9 @@ export function SharePointSubscriptions() {
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
         <div className="flex flex-col">
-          <span className="text-sm font-medium">{t("sharepoint_subscriptions_title")}</span>
+          <span id={titleId} className="text-sm font-medium">
+            {t("sharepoint_subscriptions_title")}
+          </span>
           {items.length > 0 && (
             <span className="text-muted-foreground text-xs">
               {t("sharepoint_subscriptions_summary", {
@@ -115,7 +118,7 @@ export function SharePointSubscriptions() {
         </p>
       ) : (
         <div className="overflow-x-auto">
-          <Table>
+          <Table aria-labelledby={titleId}>
             <TableHeader>
               <TableRow>
                 <TableHead>{t("sharepoint_subscription_status")}</TableHead>

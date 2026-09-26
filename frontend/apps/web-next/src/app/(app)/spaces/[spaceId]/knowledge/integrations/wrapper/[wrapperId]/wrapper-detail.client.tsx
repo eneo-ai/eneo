@@ -4,7 +4,7 @@ import { ChevronLeft } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useRef } from "react";
+import { useId, useRef } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { WrapperActions } from "@/features/knowledge/integrations/actions";
@@ -23,6 +23,7 @@ export function WrapperDetail({ wrapperId }: { wrapperId: string }) {
   const router = useRouter();
   const { space, routeId } = useSpace();
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const headingId = useId();
 
   const items = space.knowledge.integration_knowledge_list.items.filter(
     (item) => item.wrapper_id === wrapperId && item.space_id === space.id
@@ -43,7 +44,7 @@ export function WrapperDetail({ wrapperId }: { wrapperId: string }) {
             <ChevronLeft className="size-4" />
             {t("integrations")}
           </Link>
-          <PageHeader title={wrapperName} headingRef={headingRef}>
+          <PageHeader title={wrapperName} headingRef={headingRef} headingId={headingId}>
             <WrapperActions
               wrapperId={wrapperId}
               wrapperName={wrapperName}
@@ -63,6 +64,7 @@ export function WrapperDetail({ wrapperId }: { wrapperId: string }) {
               item,
               embeddingModelId: item.embedding_model.id
             }))}
+            labelledBy={headingId}
           />
         )}
       </div>

@@ -20,6 +20,11 @@ export type PageHeaderProps = {
    */
   headingLevel?: 1 | 2;
   /**
+   * Id for the title heading, so the page's main table or region can take the
+   * title as its name (`aria-labelledby`).
+   */
+  headingId?: string;
+  /**
    * Ref to the title heading. Setting it also makes the heading a programmatic
    * focus target (`tabIndex={-1}`), e.g. for focus after a delete removed the
    * focused row (`RemovalFocusScope`).
@@ -58,6 +63,7 @@ export type PageHeaderProps = {
 export function PageHeader({
   title,
   headingLevel = 1,
+  headingId,
   headingRef,
   description,
   breadcrumbs,
@@ -88,6 +94,7 @@ export function PageHeader({
         <div className="flex min-w-0 flex-col gap-1">
           <Heading
             level={headingLevel}
+            id={headingId}
             className={cn(
               "break-words",
               headingRef &&

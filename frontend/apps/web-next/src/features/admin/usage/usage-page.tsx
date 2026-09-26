@@ -56,7 +56,7 @@ function TokensTab() {
       {data.models.length === 0 ? (
         <p className="text-muted-foreground text-sm">{t("no_usage_data")}</p>
       ) : (
-        <Table>
+        <Table aria-label={t("tokens")}>
           <TableHeader>
             <TableRow>
               <TableHead>{t("model")}</TableHead>
@@ -103,7 +103,7 @@ function StorageTab() {
       {spaces.items.length === 0 ? (
         <p className="text-muted-foreground text-sm">{t("no_usage_data")}</p>
       ) : (
-        <Table>
+        <Table aria-label={t("storage")}>
           <TableHeader>
             <TableRow>
               <TableHead>{t("name")}</TableHead>
@@ -137,14 +137,14 @@ function UsersTab() {
   return (
     <div className="flex flex-col gap-6">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Stat label={t("resource_users")} value={NUMBER.format(data.total_users)} />
+        <Stat label={t("users")} value={NUMBER.format(data.total_users)} />
         <Stat label={t("usage_total_tokens")} value={NUMBER.format(data.total_tokens)} />
         <Stat label={t("requests")} value={NUMBER.format(data.total_requests)} />
       </div>
       {data.users.length === 0 ? (
         <p className="text-muted-foreground text-sm">{t("no_user_token_usage_data")}</p>
       ) : (
-        <Table>
+        <Table aria-label={t("users")}>
           <TableHeader>
             <TableRow>
               <TableHead>{t("user")}</TableHead>
@@ -198,7 +198,7 @@ export function UsagePage() {
       <Tabs defaultValue="tokens">
         <TabsList>
           <TabsTrigger value="tokens">{t("tokens")}</TabsTrigger>
-          <TabsTrigger value="users">{t("resource_users")}</TabsTrigger>
+          <TabsTrigger value="users">{t("users")}</TabsTrigger>
           <TabsTrigger value="storage">{t("storage")}</TabsTrigger>
         </TabsList>
         <TabsContent value="tokens" className="pt-4">

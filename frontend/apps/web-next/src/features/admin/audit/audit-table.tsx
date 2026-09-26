@@ -32,7 +32,7 @@ export function AuditTable({ logs }: { logs: AuditLog[] }) {
 
   return (
     <div className="overflow-x-auto">
-      <Table>
+      <Table aria-label={t("audit_logs")}>
         <TableHeader>
           <TableRow>
             <TableHead className="w-8" />

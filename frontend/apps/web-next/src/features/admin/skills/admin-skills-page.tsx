@@ -258,7 +258,10 @@ function PolicyEditor({
                 count: String(modelProjections.models.length)
               })}
             >
-              <table className="w-full min-w-[44rem] text-sm">
+              <table
+                className="w-full min-w-[44rem] text-sm"
+                aria-labelledby="skill-models-heading"
+              >
                 <thead className="bg-background sticky top-0">
                   <tr className="border-b text-left">
                     <th className="p-3">{t("skills_runtime_models_model")}</th>

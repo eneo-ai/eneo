@@ -46,6 +46,9 @@ describe("AuditTable", () => {
   it("shows when it happened in the viewer's locale and the metadata as a scrollable region", async () => {
     openDetails();
 
+    // Named like the tab and page it sits in.
+    expect(screen.getByRole("table", { name: "Granskningsloggar" })).toBeTruthy();
+
     expect(screen.getByText(/^25 sep\. 2026/)).toBeTruthy();
     const json = screen.getByRole("region", { name: "Metadata (JSON)" });
     expect(json.tabIndex).toBe(0);

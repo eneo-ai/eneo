@@ -154,15 +154,15 @@ function NameCell({ row }: { row: IntegrationRow }) {
 /**
  * The integrations of a space (or of one SharePoint folder): a bordered
  * Astryx table that sorts by name or last sync, with the sync history one
- * click away and a named row menu per item or folder. `labelledBy` names a
- * table that is one of several (one per embedding model).
+ * click away and a named row menu per item or folder. `labelledBy` names the
+ * table: the tab or its embedding model's heading, or the folder's title.
  */
 export function IntegrationItemsTable({
   rows,
   labelledBy
 }: {
   rows: IntegrationRow[];
-  labelledBy?: string;
+  labelledBy: string;
 }) {
   const t = useTranslations();
   const [syncHistoryItem, setSyncHistoryItem] = useState<IntegrationKnowledge | null>(null);

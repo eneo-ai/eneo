@@ -27,12 +27,18 @@ const names = () =>
 describe("BlobTable", () => {
   it("keeps the upload order until a header sorts it", async () => {
     const { container } = renderInApp(
-      <BlobTable
-        blobs={[blob("1", "b.pdf", 300), blob("2", "ö.pdf", 100), blob("3", "a.pdf", 200)]}
-        canEdit
-      />
+      <>
+        <h1 id="collection-title">Upphandlingspolicy</h1>
+        <BlobTable
+          blobs={[blob("1", "b.pdf", 300), blob("2", "ö.pdf", 100), blob("3", "a.pdf", 200)]}
+          canEdit
+          labelledBy="collection-title"
+        />
+      </>
     );
 
+    // Named by what the page shows it under (here the collection's title).
+    expect(screen.getByRole("table", { name: "Upphandlingspolicy" })).toBeTruthy();
     expect(names()).toEqual(["b.pdf", "ö.pdf", "a.pdf"]);
     fireEvent.click(screen.getByRole("button", { name: "Sortera efter Storlek" }));
     expect(names()).toEqual(["ö.pdf", "a.pdf", "b.pdf"]);
@@ -46,7 +52,7 @@ describe("BlobTable", () => {
     const blobs = Array.from({ length: 105 }, (_, index) =>
       blob(String(index), `fil-${String(index).padStart(3, "0")}.pdf`, index)
     );
-    renderInApp(<BlobTable blobs={blobs} canEdit={false} />);
+    renderInApp(<BlobTable blobs={blobs} canEdit={false} labelledBy="files" />);
 
     expect(names()).toHaveLength(100);
     const pages = screen.getByRole("navigation", { name: /Bläddra bland filer/ });
@@ -69,7 +75,7 @@ describe("BlobTable", () => {
     function Files() {
       const [blobs, set] = useState(() => files(105));
       setBlobs = set;
-      return <BlobTable blobs={blobs} canEdit={false} />;
+      return <BlobTable blobs={blobs} canEdit={false} labelledBy="files" />;
     }
     renderInApp(<Files />);
     fireEvent.click(screen.getByRole("button", { name: "Gå till nästa sida" }));
@@ -93,7 +99,7 @@ describe("BlobTable", () => {
 
   it("explains an empty list, one level below the page's h1", () => {
     // Both pages render the table straight under their h1 (1.3.1 heading order).
-    renderInApp(<BlobTable blobs={[]} canEdit />);
+    renderInApp(<BlobTable blobs={[]} canEdit labelledBy="files" />);
     expect(
       screen.getByRole("heading", { level: 2, name: "Du har inga filer uppladdade ännu" })
     ).toBeTruthy();

@@ -4,7 +4,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useRef } from "react";
+import { useId, useRef } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
 import { AddTextDialog, BlobTable } from "@/features/knowledge/blobs";
@@ -20,6 +20,7 @@ export function CollectionDetail({ collectionId }: { collectionId: string }) {
   const t = useTranslations();
   const { space, routeId } = useSpace();
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const headingId = useId();
   const { data: collection } = useSuspenseQuery(collectionQueryOptions(browserApi, collectionId));
   const { data: blobs } = useSuspenseQuery(collectionBlobsQueryOptions(browserApi, collectionId));
 
@@ -42,7 +43,7 @@ export function CollectionDetail({ collectionId }: { collectionId: string }) {
             <ChevronLeft className="size-4" />
             {t("knowledge")}
           </Link>
-          <PageHeader title={collection.name} headingRef={headingRef}>
+          <PageHeader title={collection.name} headingRef={headingRef} headingId={headingId}>
             <AddTextDialog collectionId={collection.id} disabled={readonly || modelDisabled} />
             <UploadBlobsButton
               collectionId={collection.id}
@@ -51,7 +52,7 @@ export function CollectionDetail({ collectionId }: { collectionId: string }) {
             />
           </PageHeader>
         </div>
-        <BlobTable blobs={blobs} canEdit={!readonly} />
+        <BlobTable blobs={blobs} canEdit={!readonly} labelledBy={headingId} />
       </div>
     </RemovalFocusScope>
   );

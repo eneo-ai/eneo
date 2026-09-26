@@ -106,6 +106,10 @@ describe("organisation Skill bindings", () => {
   it("filters on the server and detaches only selected resources", async () => {
     show();
     await screen.findByText("Review app");
+    // Named by its heading (translation keys stand in for the text).
+    expect(
+      screen.getByRole("table", { name: "organization_skills_adoption_resources_heading" })
+    ).toBeTruthy();
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Review" } });
     fireEvent.submit(screen.getByRole("search"));
     await waitFor(() =>

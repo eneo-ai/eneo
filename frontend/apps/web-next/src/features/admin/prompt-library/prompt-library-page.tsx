@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
@@ -223,10 +223,11 @@ export function PromptLibraryPage() {
   const t = useTranslations();
   const { data: entries } = useSuspenseQuery(promptLibraryQueryOptions(browserApi));
   const [showCreate, setShowCreate] = useState(false);
+  const headingId = useId();
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-      <PageHeader title={t("governance_tab_prompts")}>
+      <PageHeader title={t("governance_tab_prompts")} headingId={headingId}>
         <Button onClick={() => setShowCreate(true)}>
           <Plus className="size-4" /> {t("governance_prompt_create")}
         </Button>
@@ -234,7 +235,7 @@ export function PromptLibraryPage() {
       {entries.length === 0 ? (
         <EmptyState title={t("governance_prompts_empty")} />
       ) : (
-        <Table>
+        <Table aria-labelledby={headingId}>
           <TableHeader>
             <TableRow>
               <TableHead>{t("name")}</TableHead>

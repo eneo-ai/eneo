@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { type Dispatch, type SetStateAction, useMemo, useState } from "react";
+import { type Dispatch, type SetStateAction, useId, useMemo, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -190,6 +190,7 @@ function ProviderBreakdown({ data }: { data: TokenUsage }) {
   const t = useTranslations();
   const locale = useLocale();
   const unknown = t("unknown");
+  const labelId = useId();
   const providers = useMemo(() => {
     const rows = new Map<string, { provider: string; tokens: number; requests: number }>();
     for (const model of data.models) {
@@ -211,16 +212,21 @@ function ProviderBreakdown({ data }: { data: TokenUsage }) {
         <p className="text-muted-foreground text-sm">{t("see_token_usage_by_model")}</p>
       </div>
       <div className="grid gap-3">
-        {providers.map((provider) => (
+        {providers.map((provider, index) => (
           <div key={provider.provider} className="grid gap-1">
             <div className="flex items-center justify-between gap-3 text-sm">
-              <span className="font-medium">{provider.provider}</span>
+              <span id={`${labelId}-${index}`} className="font-medium">
+                {provider.provider}
+              </span>
               <span className="text-muted-foreground tabular-nums">
                 {NUMBER.format(provider.tokens)} ·{" "}
                 {percent(share(provider.tokens, data.total_token_usage), locale)}
               </span>
             </div>
-            <Progress value={share(provider.tokens, data.total_token_usage) * 100} />
+            <Progress
+              aria-labelledby={`${labelId}-${index}`}
+              value={share(provider.tokens, data.total_token_usage) * 100}
+            />
           </div>
         ))}
       </div>
@@ -230,6 +236,7 @@ function ProviderBreakdown({ data }: { data: TokenUsage }) {
 
 function TopModels({ data }: { data: TokenUsage }) {
   const t = useTranslations();
+  const labelId = useId();
   const topModels = useMemo(
     () => [...data.models].sort((a, b) => b.total_token_usage - a.total_token_usage).slice(0, 5),
     [data.models]
@@ -241,16 +248,21 @@ function TopModels({ data }: { data: TokenUsage }) {
     <Card className="flex flex-col gap-4 p-4">
       <h2 className="font-semibold">{t("usage_top_models")}</h2>
       <div className="grid gap-3">
-        {topModels.map((model) => (
+        {topModels.map((model, index) => (
           <div key={`${model.model_id}-${model.model_name}`} className="grid gap-1">
             <div className="flex items-center justify-between gap-3 text-sm">
-              <span className="min-w-0 truncate font-medium">{modelDisplayName(model)}</span>
+              <span id={`${labelId}-${index}`} className="min-w-0 truncate font-medium">
+                {modelDisplayName(model)}
+              </span>
               <span className="text-muted-foreground shrink-0 tabular-nums">
                 {NUMBER.format(model.total_token_usage)} · {NUMBER.format(model.request_count)}{" "}
                 {t("usage_requests_label")}
               </span>
             </div>
-            <Progress value={share(model.total_token_usage, topTotal) * 100} />
+            <Progress
+              aria-labelledby={`${labelId}-${index}`}
+              value={share(model.total_token_usage, topTotal) * 100}
+            />
           </div>
         ))}
       </div>
@@ -267,6 +279,7 @@ function ModelBreakdownTable({
 }) {
   const t = useTranslations();
   const unknown = t("unknown");
+  const headingId = useId();
 
   if (data.models.length === 0) {
     return (
@@ -281,8 +294,10 @@ function ModelBreakdownTable({
 
   return (
     <Card className="flex flex-col gap-4 p-4">
-      <h2 className="font-semibold">{t("usage_complete_model_breakdown")}</h2>
-      <Table>
+      <h2 id={headingId} className="font-semibold">
+        {t("usage_complete_model_breakdown")}
+      </h2>
+      <Table aria-labelledby={headingId}>
         <TableHeader>
           <TableRow>
             <TableHead>{t("model")}</TableHead>

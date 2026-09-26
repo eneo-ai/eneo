@@ -42,7 +42,9 @@ vi.mock("@/lib/api/browser", () => ({
                   }
                 ]
               }
-            : { items: [] };
+            : path === "/api/v1/websites/{id}/info-blobs/"
+              ? { items: [{ id: "blob-1", metadata: { title: "lou.html", size: 2048 } }] }
+              : { items: [] };
       return Promise.resolve({ data, response: new Response("{}") });
     }
   }
@@ -65,10 +67,14 @@ describe("WebsiteDetail", () => {
     const crawls = within(tablist).getByRole("tab", { name: "Indexeringar" });
     expect(crawls.getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("tabpanel", { name: "Indexeringar" })).toBeTruthy();
+    // Each tab's table takes the tab's name.
+    expect(screen.getByRole("table", { name: "Indexeringar" })).toBeTruthy();
     await expectNoAxeViolations(container);
 
     fireEvent.click(within(tablist).getByRole("tab", { name: "Indexerat innehåll" }));
     expect(screen.getByRole("tabpanel", { name: "Indexerat innehåll" })).toBeTruthy();
+    expect(screen.getByRole("table", { name: "Indexerat innehåll" })).toBeTruthy();
+    await expectNoAxeViolations(container);
   });
 
   it("says in text why Synkronisera nu is unavailable while a crawl runs", async () => {

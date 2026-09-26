@@ -211,19 +211,22 @@ function TemplateRow({
   );
 }
 
+/** One tab's templates; `label` is the tab's name, which names the table. */
 function TemplateTable({
   templates,
   kind,
+  label,
   onEdit
 }: {
   templates: TemplateRowData[];
   kind: TemplateKind;
+  label: string;
   onEdit: (template: TemplateRowData) => void;
 }) {
   const t = useTranslations();
   if (templates.length === 0) return <EmptyState title={t("no_templates_found")} />;
   return (
-    <Table>
+    <Table aria-label={label}>
       <TableHeader>
         <TableRow>
           <TableHead>{t("name")}</TableHead>
@@ -321,7 +324,7 @@ function DeletedTab() {
   if (rows.length === 0) return <EmptyState title={t("no_deleted_templates")} />;
 
   return (
-    <Table>
+    <Table aria-label={t("deleted_templates")}>
       <TableHeader>
         <TableRow>
           <TableHead>{t("name")}</TableHead>
@@ -372,6 +375,7 @@ export function TemplatesPage() {
           <TemplateTable
             templates={assistantTemplates}
             kind="assistants"
+            label={t("assistants")}
             onEdit={(template) => setEditor({ kind: "assistants", template })}
           />
         </TabsContent>
@@ -384,6 +388,7 @@ export function TemplatesPage() {
           <TemplateTable
             templates={appTemplates}
             kind="apps"
+            label={t("apps")}
             onEdit={(template) => setEditor({ kind: "apps", template })}
           />
         </TabsContent>
