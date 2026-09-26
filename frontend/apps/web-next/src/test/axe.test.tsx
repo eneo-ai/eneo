@@ -2,6 +2,7 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { expectNoAxeViolations } from "./axe";
+import { assertDocumented } from "./wcag";
 
 afterEach(cleanup);
 
@@ -53,7 +54,9 @@ describe("expectNoAxeViolations", () => {
 
   it.each([
     ["an empty reason", ""],
+    ["a blank reason", "   "],
     ["a reason without an issue", "Covered by the surrounding fixture"],
+    ["a reason with a hash that is no issue", "Covered by the fixture #abc"],
     ["an issue without a reason", "#1234"],
     ["a bare link", "https://github.com/facebook/astryx/issues/1"]
   ])("refuses to skip a rule with %s", async (_case, reason) => {
@@ -61,5 +64,32 @@ describe("expectNoAxeViolations", () => {
     await expect(
       expectNoAxeViolations(container, { disableRules: { label: reason } })
     ).rejects.toThrow(/needs a reason and an issue link/);
+  });
+});
+
+// The page scans (tests/a11y.spec.ts) accept left-out regions and skipped
+// rules on the same terms.
+describe("assertDocumented", () => {
+  const describeRegion = (selector: string) => `Leaving "${selector}" out of the page scan`;
+
+  it("accepts every entry that has a reason and an issue link", () => {
+    expect(() =>
+      assertDocumented(
+        {
+          "#composer": "Astryx renders the dock twice, see facebook/astryx#12",
+          ".tsqd-parent-container": "Dev tooling, see https://github.com/eneo-ai/eneo/issues/1"
+        },
+        describeRegion
+      )
+    ).not.toThrow();
+  });
+
+  it("names the entry that lacks one", () => {
+    expect(() =>
+      assertDocumented({ "#composer": "Astryx renders it twice" }, describeRegion)
+    ).toThrow(
+      'Leaving "#composer" out of the page scan needs a reason and an issue link ' +
+        '(ACCESSIBILITY.md → Exceptions); got "Astryx renders it twice".'
+    );
   });
 });

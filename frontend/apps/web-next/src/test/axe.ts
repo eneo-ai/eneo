@@ -1,5 +1,5 @@
 import axe from "axe-core";
-import { WCAG_22_AA_TAGS } from "./wcag";
+import { assertDocumented, WCAG_22_AA_TAGS } from "./wcag";
 
 /**
  * Rules jsdom cannot evaluate: it has no layout or rendering, so every element
@@ -21,23 +21,6 @@ export type AxeCheckOptions = {
    */
   disableRules?: Record<string, string>;
 };
-
-/** An issue reference: a URL, `#1234` or `owner/repo#1234`. */
-const ISSUE_LINK = /https?:\/\/\S+|(?<![\w/])(?:[\w.-]+\/[\w.-]+)?#\d+\b/;
-
-/** An exception without a reason and an issue link is a silent pass. */
-function assertDocumented(disableRules: Record<string, string>) {
-  for (const [rule, reason] of Object.entries(disableRules)) {
-    const hasIssue = ISSUE_LINK.test(reason);
-    const hasReason = /\p{L}{3}/u.test(reason.replace(ISSUE_LINK, ""));
-    if (!hasIssue || !hasReason) {
-      throw new Error(
-        `Skipping the axe rule "${rule}" needs a reason and an issue link ` +
-          `(ACCESSIBILITY.md → Exceptions); got ${JSON.stringify(reason)}.`
-      );
-    }
-  }
-}
 
 function describeViolation(violation: axe.Result): string {
   const nodes = violation.nodes
@@ -64,7 +47,7 @@ export async function expectNoAxeViolations(
   container: Element | Document = document.body,
   options: AxeCheckOptions = {}
 ): Promise<void> {
-  assertDocumented(options.disableRules ?? {});
+  assertDocumented(options.disableRules ?? {}, (rule) => `Skipping the axe rule "${rule}"`);
   const disabled = [...JSDOM_UNSUPPORTED_RULES, ...Object.keys(options.disableRules ?? {})];
   const results = await axe.run(container, {
     runOnly: { type: "tag", values: WCAG_22_AA_TAGS },
