@@ -179,7 +179,7 @@ async def test_check_result_is_stored_without_secrets_and_cleared_by_a_new_key(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_only_admins_can_run_a_check(
+async def test_only_admins_can_call_provider_with_stored_credentials(
     client, admin_token, regular_user_token, db_session, provider_answers
 ):
     created = await _create_provider(client, admin_token)
@@ -191,6 +191,19 @@ async def test_only_admins_can_run_a_check(
             headers=_auth(regular_user_token),
         )
         assert response.status_code == 403, response.text
+
+    models = await client.get(
+        f"{PROVIDERS}{created['id']}/models/",
+        headers=_auth(regular_user_token),
+    )
+    assert models.status_code == 403, models.text
+
+    validation = await client.post(
+        f"{PROVIDERS}{created['id']}/validate-model/",
+        headers=_auth(regular_user_token),
+        json={"model_name": "gpt-4o", "model_type": "completion"},
+    )
+    assert validation.status_code == 403, validation.text
 
     assert (await _row(db_session, created["id"])).connection_status is None
 
