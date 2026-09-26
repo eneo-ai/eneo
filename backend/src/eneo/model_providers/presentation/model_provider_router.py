@@ -450,10 +450,11 @@ async def update_provider(
     description=(
         "List available models from the provider's API using its credentials."
     ),
-    responses=responses.get_responses([404, 503]),
+    responses=responses.get_responses([403, 404, 503]),
 )
 async def list_provider_models(
     provider_id: UUID,
+    user: CurrentUser,
     service: ServiceDep,
     mode: Annotated[
         Literal["completion", "embedding", "transcription", "image"] | None,
@@ -468,6 +469,7 @@ async def list_provider_models(
     ``output_vector_size``. When ``mode`` is supplied the server returns
     only matching entries — consumers don't need to filter client-side.
     """
+    validate_permission(user, Permission.ADMIN)
     return await service.list_available_models(provider_id, mode=mode)
 
 
@@ -475,13 +477,15 @@ async def list_provider_models(
     "/{provider_id}/test/",
     response_model=dict[str, Any],
     description="Test connectivity to a model provider.",
-    responses=responses.get_responses([404, 503]),
+    responses=responses.get_responses([403, 404, 503]),
 )
 async def test_provider(
     provider_id: UUID,
+    user: CurrentUser,
     service: ServiceDep,
 ) -> dict[str, Any]:
     """Test connectivity to a model provider."""
+    validate_permission(user, Permission.ADMIN)
     return await service.test_connection(provider_id)
 
 
@@ -491,14 +495,16 @@ async def test_provider(
     description=(
         "Validate that a model works with this provider by making a minimal API call."
     ),
-    responses=responses.get_responses([404, 503]),
+    responses=responses.get_responses([403, 404, 503]),
 )
 async def validate_model(
     provider_id: UUID,
     body: ValidateModelRequest,
+    user: CurrentUser,
     service: ServiceDep,
 ) -> dict[str, Any]:
     """Validate that a model works with this provider by making a minimal API call."""
+    validate_permission(user, Permission.ADMIN)
     return await service.validate_model(provider_id, body.model_name, body.model_type)
 
 
