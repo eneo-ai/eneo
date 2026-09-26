@@ -19,6 +19,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 
+from eneo.authentication import auth_service as auth_service_module
 from eneo.authentication import oidc_resource_server
 from eneo.authentication.auth_service import AuthService
 from eneo.main.exceptions import AuthenticationException, UniqueException
@@ -284,9 +285,14 @@ async def test_valid_idp_token_resolves_correct_user(setup):
 
 
 @pytest.mark.asyncio
-async def test_eneo_hs256_jwt_still_works_with_resource_server_enabled(setup):
+async def test_eneo_hs256_jwt_still_works_with_resource_server_enabled(
+    setup, monkeypatch
+):
     # Mint with the harness settings the token is verified against; the
-    # default audience comes from the ambient environment.
+    # minting defaults come from the ambient environment.
+    monkeypatch.setattr(
+        auth_service_module, "JWT_ALGORITHM", setup.settings.jwt_algorithm
+    )
     token = setup.service.auth_service.create_access_token_for_user(
         user=setup.user,
         secret_key=setup.settings.jwt_secret,
