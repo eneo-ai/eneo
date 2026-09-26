@@ -28,6 +28,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
+import { useSettingSwitch } from "@/features/admin/use-setting-switch";
 import { readinessKey } from "@/features/capabilities/capabilities";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
@@ -71,14 +72,18 @@ export function McpServerDetail({
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: MCP_KEY });
 
-  const setEnabled = useMutation({
-    mutationFn: async (next: boolean) => {
+  const securityEnabled = security.security_enabled;
+  const activation = server ? activationState(server, securityEnabled) : null;
+  // Saves on toggle and keeps focus while it saves (see useSettingSwitch).
+  const [active, setActive, saving] = useSettingSwitch(
+    `mcp-server:${serverId}`,
+    activation?.active ?? false,
+    async (next) => {
       if (!server) throw new Error("MCP server no longer exists");
       await setServerActivation(browserApi, server, next);
     },
-    onSuccess: invalidate,
-    onError: (error) => toastApiError(error, t)
-  });
+    { onSaved: () => void invalidate() }
+  );
 
   const remove = useMutation({
     mutationFn: () => deleteMcpServer(browserApi, serverId),
@@ -95,8 +100,7 @@ export function McpServerDetail({
   const listHref =
     server.purpose && server.purpose !== "general" ? "/admin/tools" : "/admin/mcp-servers";
 
-  const securityEnabled = security.security_enabled;
-  const { capability, active, blocked } = activationState(server, securityEnabled);
+  const { capability, blocked } = activationState(server, securityEnabled);
   // The security tab only exists when classifications are enforced; a deep link
   // to it otherwise falls back to overview so the page never renders blank.
   const activeTab = tab === "security" && !securityEnabled ? "overview" : tab;
@@ -125,9 +129,10 @@ export function McpServerDetail({
                 <span className="inline-flex">
                   <Switch
                     checked={active}
-                    disabled={setEnabled.isPending || blocked}
+                    disabled={blocked}
+                    aria-busy={saving || undefined}
                     aria-label={t("mcp_toggle_server", { name: server.name })}
-                    onCheckedChange={(checked) => setEnabled.mutate(checked)}
+                    onCheckedChange={setActive}
                   />
                 </span>
               </TooltipTrigger>

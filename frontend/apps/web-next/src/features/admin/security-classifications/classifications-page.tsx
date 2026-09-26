@@ -144,11 +144,15 @@ function EnableToggle({ enabled }: { enabled: boolean }) {
     >
       <Label className="flex items-center justify-between gap-2 py-1 font-normal">
         {enabled ? t("enabled") : t("disabled")}
+        {/* It asks first; while the confirmed change saves it stays enabled so it
+            keeps focus, and a toggle meanwhile is ignored. */}
         <Switch
           id="security-classification-enabled"
           checked={enabled}
-          disabled={toggle.isPending}
-          onCheckedChange={(next) => setConfirm(next ? "enable" : "disable")}
+          aria-busy={toggle.isPending || undefined}
+          onCheckedChange={(next) => {
+            if (!toggle.isPending) setConfirm(next ? "enable" : "disable");
+          }}
         />
       </Label>
       <AlertDialog open={confirm !== null} onOpenChange={(open) => !open && setConfirm(null)}>

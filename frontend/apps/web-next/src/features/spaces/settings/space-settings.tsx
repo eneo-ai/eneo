@@ -434,7 +434,13 @@ function McpServersSection() {
   const knownIds = new Set(candidates.map((server) => server.id));
   const activeCount = selectedVisibleMcpServerCount(candidates, selected);
 
+  // The selection shows each press at once and saves in order (the space's
+  // saves queue), so a switch stays enabled and keeps focus while it saves;
+  // the last one pressed shows it is saving.
+  const [toggled, setToggled] = useState<string | null>(null);
+
   function toggle(id: string, on: boolean) {
+    setToggled(id);
     const previous = selected;
     const next = new Set(pruneUnknownMcpServerIds(selected, knownIds));
     if (on) next.add(id);
@@ -487,7 +493,8 @@ function McpServersSection() {
                 </span>
                 <Switch
                   checked={selected.has(server.id)}
-                  disabled={update.isPending || (!server.is_available && !selected.has(server.id))}
+                  disabled={!server.is_available && !selected.has(server.id)}
+                  aria-busy={(update.isPending && toggled === server.id) || undefined}
                   aria-label={server.name}
                   onCheckedChange={(on) => toggle(server.id, on)}
                 />
@@ -575,17 +582,26 @@ function SpaceCapabilitiesSection() {
               <Label htmlFor={`space-${capability.purpose}`}>{t(capability.purpose)}</Label>
               <p className="text-muted-foreground text-sm">{hint}</p>
             </div>
+            {/* Saving, it stays enabled so it keeps focus. A toggle meanwhile is
+                ignored: each save sends the whole selection. */}
             <Switch
               id={`space-${capability.purpose}`}
               checked={enabled}
-              disabled={!can("edit", "space") || update.isPending || blocked !== null}
-              onCheckedChange={() =>
+              disabled={!can("edit", "space") || blocked !== null}
+              aria-busy={
+                (update.isPending &&
+                  update.variables?.enabled_capabilities?.includes(capability.purpose) !==
+                    enabled) ||
+                undefined
+              }
+              onCheckedChange={() => {
+                if (update.isPending) return;
                 void autosave(() =>
                   update.mutateAsync({
                     enabled_capabilities: toggleCapability(selected, capability.purpose)
                   })
-                )
-              }
+                );
+              }}
             />
           </div>
         );

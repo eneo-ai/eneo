@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
+import { QueryClient, QueryClientProvider, useMutation } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Assistant } from "./use-assistant";
 
 const update = vi.hoisted(() => vi.fn().mockResolvedValue({}));
+// The section's own mutation, saving through `update`.
 vi.mock("./use-assistant", () => ({
-  useUpdateAssistant: () => ({ mutateAsync: update, isPending: false })
+  useUpdateAssistant: () => useMutation({ mutationFn: (body: unknown) => update(body) })
 }));
 vi.mock("@/features/spaces/use-space", () => ({
   useSpace: () => ({ space: { enabled_capabilities: ["web_search", "image_generation"] } })
@@ -19,8 +21,17 @@ import { CapabilitiesSection } from "./capabilities-section";
 
 afterEach(() => {
   cleanup();
-  update.mockClear();
+  update.mockReset();
+  update.mockResolvedValue({});
 });
+
+function show(value: Assistant) {
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <CapabilitiesSection assistant={value} />
+    </QueryClientProvider>
+  );
+}
 
 const assistant = (enabled: ("web_search" | "image_generation")[], available: boolean) =>
   ({
@@ -36,7 +47,7 @@ const assistant = (enabled: ("web_search" | "image_generation")[], available: bo
 
 describe("assistant capabilities", () => {
   it("saves the complete selection when enabling a function", async () => {
-    render(<CapabilitiesSection assistant={assistant(["image_generation"], true)} />);
+    show(assistant(["image_generation"], true));
     fireEvent.click(screen.getByRole("switch", { name: "web_search" }));
     await waitFor(() =>
       expect(update).toHaveBeenCalledWith({
@@ -46,12 +57,32 @@ describe("assistant capabilities", () => {
   });
 
   it("lets editors disable a function whose provider became unavailable", async () => {
-    render(<CapabilitiesSection assistant={assistant(["web_search"], false)} />);
+    show(assistant(["web_search"], false));
     const web = screen.getByRole("switch", { name: "web_search" });
     const image = screen.getByRole("switch", { name: "image_generation" });
     expect(web.hasAttribute("disabled")).toBe(false);
     expect(image.hasAttribute("disabled")).toBe(true);
     fireEvent.click(web);
     await waitFor(() => expect(update).toHaveBeenCalledWith({ enabled_capabilities: [] }));
+  });
+
+  it("keeps focus on a switch while it saves, and ignores a toggle meanwhile", async () => {
+    update.mockReturnValue(new Promise(() => {}));
+    show(assistant([], true));
+    const web = screen.getByRole("switch", { name: "web_search" });
+    web.focus();
+
+    fireEvent.click(web);
+
+    await waitFor(() => expect(web.getAttribute("aria-busy")).toBe("true"));
+    expect(web.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(web);
+    // Only the switch being saved says so.
+    expect(
+      screen.getByRole("switch", { name: "image_generation" }).getAttribute("aria-busy")
+    ).toBeNull();
+    fireEvent.click(web);
+    fireEvent.click(screen.getByRole("switch", { name: "image_generation" }));
+    expect(update).toHaveBeenCalledTimes(1);
   });
 });

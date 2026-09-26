@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 
 vi.mock("next/navigation", () => import("@/test/navigation"));
+const remove = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
+    DELETE: remove,
     GET: (path: string) =>
       Promise.resolve({
         data:
@@ -36,7 +38,10 @@ vi.mock("@/lib/api/browser", () => ({
 
 import { McpServerDetail } from "./mcp-server-detail";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  remove.mockReset();
+});
 
 describe("McpServerDetail", () => {
   it("names the page's menu after the server", async () => {
@@ -44,5 +49,20 @@ describe("McpServerDetail", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Diariet" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Fler åtgärder för Diariet" })).toBeTruthy();
+  });
+
+  it("keeps focus on the switch while it saves, and saves the press once", async () => {
+    remove.mockReturnValue(new Promise(() => {}));
+    renderInApp(<McpServerDetail serverId="diariet" />);
+    const toggle = await screen.findByRole("switch", { name: "Aktivera Diariet" });
+    toggle.focus();
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(toggle.getAttribute("aria-busy")).toBe("true"));
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(toggle.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(toggle);
+    expect(remove).toHaveBeenCalledTimes(1);
   });
 });

@@ -20,6 +20,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { useSettingSwitch } from "@/features/admin/use-setting-switch";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -129,28 +130,31 @@ function HelpAssistantRow({ role }: { role: RoleAssignment }) {
     onSuccess: invalidate,
     onError: (error) => toastApiError(error, t)
   });
-  const toggleEnabled = useMutation({
-    mutationFn: (value: boolean) =>
+  // Each switch saves on toggle and keeps focus while it saves (see useSettingSwitch).
+  const [enabled, setEnabled, savingEnabled] = useSettingSwitch(
+    `help-assistant:${kind}:enabled`,
+    role.is_enabled,
+    (value) =>
       unwrap(
         browserApi.PATCH("/api/v1/admin/help-assistants/roles/{kind}/enabled", {
           params: { path: { kind } },
           body: { value }
         })
       ),
-    onSuccess: invalidate,
-    onError: (error) => toastApiError(error, t)
-  });
-  const toggleVisible = useMutation({
-    mutationFn: (value: boolean) =>
+    { onSaved: invalidate }
+  );
+  const [visible, setVisible, savingVisible] = useSettingSwitch(
+    `help-assistant:${kind}:visible`,
+    role.is_visible_to_users,
+    (value) =>
       unwrap(
         browserApi.PATCH("/api/v1/admin/help-assistants/roles/{kind}/visible", {
           params: { path: { kind } },
           body: { value }
         })
       ),
-    onSuccess: invalidate,
-    onError: (error) => toastApiError(error, t)
-  });
+    { onSaved: invalidate }
+  );
 
   return (
     <div className="border-b last:border-b-0">
@@ -182,9 +186,9 @@ function HelpAssistantRow({ role }: { role: RoleAssignment }) {
             </span>
           </span>
           <Switch
-            checked={role.is_enabled}
-            disabled={toggleEnabled.isPending}
-            onCheckedChange={(value) => toggleEnabled.mutate(value)}
+            checked={enabled}
+            aria-busy={savingEnabled || undefined}
+            onCheckedChange={setEnabled}
           />
         </Label>
         <Label className="flex items-center justify-between gap-4 font-normal">
@@ -195,9 +199,9 @@ function HelpAssistantRow({ role }: { role: RoleAssignment }) {
             </span>
           </span>
           <Switch
-            checked={role.is_visible_to_users}
-            disabled={toggleVisible.isPending}
-            onCheckedChange={(value) => toggleVisible.mutate(value)}
+            checked={visible}
+            aria-busy={savingVisible || undefined}
+            onCheckedChange={setVisible}
           />
         </Label>
         <div className="flex justify-end">

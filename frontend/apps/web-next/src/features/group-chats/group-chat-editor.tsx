@@ -119,6 +119,13 @@ function AdvancedSection({ groupChat }: { groupChat: GroupChat }) {
   const t = useTranslations();
   const update = useUpdateGroupChat(groupChat.id);
   const autosave = useAutosave("advanced");
+  // Saving, a switch stays enabled so it keeps focus (aria-busy on the one
+  // being saved); a toggle meanwhile is ignored.
+  const saving = (field: "allow_mentions" | "show_response_label") =>
+    (update.isPending && update.variables?.[field] !== undefined) || undefined;
+  const saveField = (body: { allow_mentions: boolean } | { show_response_label: boolean }) => {
+    if (!update.isPending) void autosave(() => update.mutateAsync(body));
+  };
 
   return (
     <SettingsGroup title={t("advanced_settings")}>
@@ -130,10 +137,8 @@ function AdvancedSection({ groupChat }: { groupChat: GroupChat }) {
           {t("enable_mentions")}
           <Switch
             checked={groupChat.allow_mentions}
-            disabled={update.isPending}
-            onCheckedChange={(checked) =>
-              autosave(() => update.mutateAsync({ allow_mentions: checked }))
-            }
+            aria-busy={saving("allow_mentions")}
+            onCheckedChange={(checked) => saveField({ allow_mentions: checked })}
           />
         </Label>
       </SettingsRow>
@@ -145,10 +150,8 @@ function AdvancedSection({ groupChat }: { groupChat: GroupChat }) {
           {t("show_labels")}
           <Switch
             checked={groupChat.show_response_label}
-            disabled={update.isPending}
-            onCheckedChange={(checked) =>
-              autosave(() => update.mutateAsync({ show_response_label: checked }))
-            }
+            aria-busy={saving("show_response_label")}
+            onCheckedChange={(checked) => saveField({ show_response_label: checked })}
           />
         </Label>
       </SettingsRow>
@@ -218,12 +221,14 @@ function PublishingSection({ groupChat }: { groupChat: GroupChat }) {
         >
           <Label className="flex items-center justify-between gap-2 py-1 font-normal">
             {t("enable_insights")}
+            {/* Saving, it stays enabled so it keeps focus; a toggle meanwhile is ignored. */}
             <Switch
               checked={groupChat.insight_enabled}
-              disabled={update.isPending}
-              onCheckedChange={(checked) =>
-                autosave(() => update.mutateAsync({ insight_enabled: checked }))
-              }
+              aria-busy={update.isPending || undefined}
+              onCheckedChange={(checked) => {
+                if (!update.isPending)
+                  void autosave(() => update.mutateAsync({ insight_enabled: checked }));
+              }}
             />
           </Label>
         </SettingsRow>
