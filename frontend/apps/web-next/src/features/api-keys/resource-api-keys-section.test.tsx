@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
+import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
 
 const apiKey = {
@@ -42,6 +43,18 @@ describe("ResourceApiKeysSection", () => {
     expect(screen.getByRole("heading", { level: 2, name: "API-nycklar" })).toBeTruthy();
     const table = await screen.findByRole("table", { name: "API-nycklar" });
     expect(await within(table).findByText("Upphandlingsflödet")).toBeTruthy();
+  });
+
+  it("shows the keys in the panel of the selected state tab", async () => {
+    const { container } = renderInApp(
+      <ResourceApiKeysSection scopeType="space" scopeId="space-1" resourceName="Upphandling" />,
+      { appContext: testAppContext({ permissions: ["api_keys"] }) }
+    );
+
+    const panel = screen.getByRole("tabpanel", { name: "Aktiv" });
+    expect(screen.getByRole("tab", { name: "Aktiv" }).getAttribute("aria-controls")).toBe(panel.id);
+    expect(await within(panel).findByText("Upphandlingsflödet")).toBeTruthy();
+    await expectNoAxeViolations(container);
   });
 
   it("names the resource in the create dialog's title", async () => {

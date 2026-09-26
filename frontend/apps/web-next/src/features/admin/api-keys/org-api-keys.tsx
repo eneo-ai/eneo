@@ -40,7 +40,7 @@ import {
   TableHeader,
   TableRow
 } from "@/components/ui/table";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -317,8 +317,12 @@ export function OrgApiKeysPage() {
       <NotificationPolicyDialog open={showPolicy} onOpenChange={setShowPolicy} />
       <ApiKeyPolicyDialog open={showConstraintPolicy} onOpenChange={setShowConstraintPolicy} />
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Tabs value={state} onValueChange={(value) => setState(value as ApiKeyState)}>
+      <Tabs
+        value={state}
+        onValueChange={(value) => setState(value as ApiKeyState)}
+        className="gap-6"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <TabsList>
             {API_KEY_STATES.map((value) => (
               <TabsTrigger key={value} value={value}>
@@ -326,78 +330,81 @@ export function OrgApiKeysPage() {
               </TabsTrigger>
             ))}
           </TabsList>
-        </Tabs>
-        <div className="flex flex-wrap gap-2">
-          <Select
-            value={scopeType}
-            onValueChange={(value) => setScopeType(value as ApiKeyScopeType | "all")}
-          >
-            <SelectTrigger className="w-40" aria-label={t("api_keys_admin_label_scope_type")}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t("api_keys_admin_scope_all")}</SelectItem>
-              <SelectItem value="tenant">{t("api_keys_admin_scope_tenant")}</SelectItem>
-              <SelectItem value="space">{t("api_keys_admin_scope_space")}</SelectItem>
-              <SelectItem value="assistant">{t("api_keys_admin_scope_assistant")}</SelectItem>
-              <SelectItem value="app">{t("api_keys_admin_scope_app")}</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
-            value={keyType}
-            onValueChange={(value) => setKeyType(value as ApiKeyType | "all")}
-          >
-            <SelectTrigger className="w-40" aria-label={t("api_keys_admin_label_key_type")}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t("api_keys_admin_key_type_all")}</SelectItem>
-              <SelectItem value="pk_">{t("api_keys_admin_key_type_public")}</SelectItem>
-              <SelectItem value="sk_">{t("api_keys_admin_key_type_secret")}</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="flex flex-wrap gap-2">
+            <Select
+              value={scopeType}
+              onValueChange={(value) => setScopeType(value as ApiKeyScopeType | "all")}
+            >
+              <SelectTrigger className="w-40" aria-label={t("api_keys_admin_label_scope_type")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("api_keys_admin_scope_all")}</SelectItem>
+                <SelectItem value="tenant">{t("api_keys_admin_scope_tenant")}</SelectItem>
+                <SelectItem value="space">{t("api_keys_admin_scope_space")}</SelectItem>
+                <SelectItem value="assistant">{t("api_keys_admin_scope_assistant")}</SelectItem>
+                <SelectItem value="app">{t("api_keys_admin_scope_app")}</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              value={keyType}
+              onValueChange={(value) => setKeyType(value as ApiKeyType | "all")}
+            >
+              <SelectTrigger className="w-40" aria-label={t("api_keys_admin_label_key_type")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("api_keys_admin_key_type_all")}</SelectItem>
+                <SelectItem value="pk_">{t("api_keys_admin_key_type_public")}</SelectItem>
+                <SelectItem value="sk_">{t("api_keys_admin_key_type_secret")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
-      </div>
 
-      {!isPending && items.length === 0 ? (
-        <EmptyState title={t("api_keys_no_keys")} />
-      ) : (
-        <Table aria-labelledby={headingId}>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("name")}</TableHead>
-              <TableHead>{t("api_keys_permission_level")}</TableHead>
-              <TableHead>{t("status")}</TableHead>
-              <TableHead>{t("api_keys_expires")}</TableHead>
-              <TableHead className="w-12" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.map((apiKey) => (
-              <TableRow key={apiKey.id}>
-                <TableCell className="font-medium">
-                  {apiKey.name}
-                  <span className="text-muted-foreground ml-2 font-mono text-xs">
-                    {apiKey.key_prefix}…
-                  </span>
-                </TableCell>
-                <TableCell>{t(`api_keys_permission_${apiKey.permission}`)}</TableCell>
-                <TableCell>
-                  <Badge variant={API_KEY_STATE_BADGE_VARIANT[apiKey.state]}>
-                    {t(`api_keys_status_${apiKey.state}`)}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-muted-foreground text-sm">
-                  {formatApiKeyDate(apiKey.expires_at)}
-                </TableCell>
-                <TableCell>
-                  <KeyActions apiKey={apiKey} onRotated={setSecret} />
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
+        {/* The keys in the selected state: the state tabs' panel. */}
+        <TabsContent value={state}>
+          {!isPending && items.length === 0 ? (
+            <EmptyState title={t("api_keys_no_keys")} />
+          ) : (
+            <Table aria-labelledby={headingId}>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t("name")}</TableHead>
+                  <TableHead>{t("api_keys_permission_level")}</TableHead>
+                  <TableHead>{t("status")}</TableHead>
+                  <TableHead>{t("api_keys_expires")}</TableHead>
+                  <TableHead className="w-12" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {items.map((apiKey) => (
+                  <TableRow key={apiKey.id}>
+                    <TableCell className="font-medium">
+                      {apiKey.name}
+                      <span className="text-muted-foreground ml-2 font-mono text-xs">
+                        {apiKey.key_prefix}…
+                      </span>
+                    </TableCell>
+                    <TableCell>{t(`api_keys_permission_${apiKey.permission}`)}</TableCell>
+                    <TableCell>
+                      <Badge variant={API_KEY_STATE_BADGE_VARIANT[apiKey.state]}>
+                        {t(`api_keys_status_${apiKey.state}`)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-sm">
+                      {formatApiKeyDate(apiKey.expires_at)}
+                    </TableCell>
+                    <TableCell>
+                      <KeyActions apiKey={apiKey} onRotated={setSecret} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </TabsContent>
+      </Tabs>
 
       <div className="flex justify-end gap-2">
         <Button variant="outline" size="sm" disabled={!hasPreviousPage} onClick={previousPage}>

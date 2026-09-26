@@ -2,6 +2,7 @@
 import { cleanup, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
+import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
 
 const apiKey = {
@@ -56,6 +57,17 @@ describe("OrgApiKeysPage", () => {
 
     const table = await screen.findByRole("table", { name: "API-nycklar" });
     expect(await within(table).findByText("Ärendesystemet")).toBeTruthy();
+  });
+
+  it("shows the keys in the panel of the selected state tab", async () => {
+    const { container } = renderInApp(<OrgApiKeysPage />, {
+      appContext: testAppContext({ permissions: ["admin"] })
+    });
+
+    const panel = screen.getByRole("tabpanel", { name: "Aktiv" });
+    expect(screen.getByRole("tab", { name: "Aktiv" }).getAttribute("aria-controls")).toBe(panel.id);
+    expect(await within(panel).findByText("Ärendesystemet")).toBeTruthy();
+    await expectNoAxeViolations(container);
   });
 });
 

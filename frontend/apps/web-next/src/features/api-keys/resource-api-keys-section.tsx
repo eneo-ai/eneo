@@ -36,7 +36,7 @@ import {
   TableHeader,
   TableRow
 } from "@/components/ui/table";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -316,7 +316,11 @@ export function ResourceApiKeysSection({
         ) : null
       }
     >
-      <Tabs value={stateFilter} onValueChange={(value) => setStateFilter(value as ApiKeyState)}>
+      <Tabs
+        value={stateFilter}
+        onValueChange={(value) => setStateFilter(value as ApiKeyState)}
+        className="gap-6"
+      >
         <TabsList>
           {API_KEY_STATES.map((state) => (
             <TabsTrigger key={state} value={state}>
@@ -324,77 +328,82 @@ export function ResourceApiKeysSection({
             </TabsTrigger>
           ))}
         </TabsList>
-      </Tabs>
 
-      {keys.items.length === 0 && !keys.isPending ? (
-        <EmptyState title={t("api_keys_no_keys")} description={t("api_keys_no_keys_desc")} />
-      ) : (
-        <>
-          <Table aria-label={t("api_keys")}>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("name")}</TableHead>
-                <TableHead>{t("status")}</TableHead>
-                <TableHead>{t("api_keys_permission_level")}</TableHead>
-                <TableHead>{t("api_keys_expires")}</TableHead>
-                <TableHead>{t("api_keys_created")}</TableHead>
-                <TableHead className="w-24" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {keys.items.map((apiKey) => (
-                <TableRow key={apiKey.id}>
-                  <TableCell>
-                    <div className="flex flex-col">
-                      <span className="font-medium">{apiKey.name}</span>
-                      <code className="text-muted-foreground font-mono text-xs">
-                        {apiKey.key_prefix}...{apiKey.key_suffix}
-                      </code>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={API_KEY_STATE_BADGE_VARIANT[apiKey.state]}>
-                      {stateLabels[apiKey.state]}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{t(`api_keys_permission_${apiKey.permission}`)}</TableCell>
-                  <TableCell>
-                    {apiKey.expires_at ? formatApiKeyDate(apiKey.expires_at) : t("api_keys_never")}
-                  </TableCell>
-                  <TableCell>{formatApiKeyDate(apiKey.created_at)}</TableCell>
-                  <TableCell>
-                    <ScopedKeyActions
-                      apiKey={apiKey}
-                      queryKey={queryKey}
-                      onRotated={showSecret(t("api_keys_rotated_title"))}
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          {(keys.hasPreviousPage || keys.hasNextPage) && (
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!keys.hasPreviousPage}
-                onClick={keys.previousPage}
-              >
-                {t("previous")}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!keys.hasNextPage}
-                onClick={keys.nextPage}
-              >
-                {t("next")}
-              </Button>
-            </div>
+        {/* The keys in the selected state: the state tabs' panel. */}
+        <TabsContent value={stateFilter} className="flex flex-col gap-4">
+          {keys.items.length === 0 && !keys.isPending ? (
+            <EmptyState title={t("api_keys_no_keys")} description={t("api_keys_no_keys_desc")} />
+          ) : (
+            <>
+              <Table aria-label={t("api_keys")}>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("name")}</TableHead>
+                    <TableHead>{t("status")}</TableHead>
+                    <TableHead>{t("api_keys_permission_level")}</TableHead>
+                    <TableHead>{t("api_keys_expires")}</TableHead>
+                    <TableHead>{t("api_keys_created")}</TableHead>
+                    <TableHead className="w-24" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {keys.items.map((apiKey) => (
+                    <TableRow key={apiKey.id}>
+                      <TableCell>
+                        <div className="flex flex-col">
+                          <span className="font-medium">{apiKey.name}</span>
+                          <code className="text-muted-foreground font-mono text-xs">
+                            {apiKey.key_prefix}...{apiKey.key_suffix}
+                          </code>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={API_KEY_STATE_BADGE_VARIANT[apiKey.state]}>
+                          {stateLabels[apiKey.state]}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{t(`api_keys_permission_${apiKey.permission}`)}</TableCell>
+                      <TableCell>
+                        {apiKey.expires_at
+                          ? formatApiKeyDate(apiKey.expires_at)
+                          : t("api_keys_never")}
+                      </TableCell>
+                      <TableCell>{formatApiKeyDate(apiKey.created_at)}</TableCell>
+                      <TableCell>
+                        <ScopedKeyActions
+                          apiKey={apiKey}
+                          queryKey={queryKey}
+                          onRotated={showSecret(t("api_keys_rotated_title"))}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              {(keys.hasPreviousPage || keys.hasNextPage) && (
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!keys.hasPreviousPage}
+                    onClick={keys.previousPage}
+                  >
+                    {t("previous")}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!keys.hasNextPage}
+                    onClick={keys.nextPage}
+                  >
+                    {t("next")}
+                  </Button>
+                </div>
+              )}
+            </>
           )}
-        </>
-      )}
+        </TabsContent>
+      </Tabs>
 
       <SecretRevealDialog title={secretTitle} secret={secret} onClose={() => setSecret(null)} />
     </SettingsGroup>
