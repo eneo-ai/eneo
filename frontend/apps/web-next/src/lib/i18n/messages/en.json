@@ -5082,5 +5082,6 @@
   "space_next_crawl": "Next crawl: <time></time>",
   "space_sync_stale": "Over {days} days ago",
   "space_knowledge_tabs_label": "Knowledge sources",
-  "ui_copy_failed_copy_by_hand": "Couldn't copy. Select the key and copy it yourself."
+  "ui_copy_failed_copy_by_hand": "Couldn't copy. Select the key and copy it yourself.",
+  "ui_toast_close": "Close notification"
 }

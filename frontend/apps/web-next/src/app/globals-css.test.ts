@@ -117,4 +117,20 @@ describe("globals.css", () => {
     );
     expect(inputs?.[1]).toMatchObject({ "min-inline-size": "44px", "min-block-size": "44px" });
   });
+
+  it("makes the toast close button a 24 px target (44 px on touch) with a full-strength focus outline", () => {
+    const button = '[data-sonner-toast][data-styled="true"] [data-close-button]';
+    const rules = new Map<string, Record<string, string>>();
+    postcss.parse(css).walkRules((rule: Rule) => {
+      if (!rule.selector.includes(button)) return;
+      const declarations: Record<string, string> = {};
+      rule.walkDecls((decl) => {
+        declarations[decl.prop] = decl.value;
+      });
+      rules.set(rule.selector.replace(/^.*\[data-close-button\]/, ""), declarations);
+    });
+    expect(rules.get("")).toMatchObject({ width: "24px", height: "24px" });
+    expect(rules.get(":focus-visible")).toMatchObject({ outline: "2px solid var(--ring)" });
+    expect(rules.get("::after")).toMatchObject({ inset: "-10px" });
+  });
 });

@@ -3,7 +3,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { toast } from "sonner";
 import {
   ConfirmedPasswordField,
   isConfirmedPasswordValid
@@ -37,6 +36,7 @@ import { Switch } from "@/components/ui/switch";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { toast } from "@/lib/toast";
 import { ClientTime } from "@/features/spaces/client-time";
 import { useSpace } from "@/features/spaces/use-space";
 import { EmbeddingModelSelect } from "./embedding-model-select";

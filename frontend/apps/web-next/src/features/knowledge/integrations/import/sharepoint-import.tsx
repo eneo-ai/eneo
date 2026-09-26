@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Cloud, Globe, Search } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -21,6 +20,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { formatBytes } from "@/lib/format";
+import { toast } from "@/lib/toast";
 import { useJobs } from "@/features/jobs/use-jobs";
 import { useSpace } from "@/features/spaces/use-space";
 import { EmbeddingModelSelect } from "../../embedding-model-select";

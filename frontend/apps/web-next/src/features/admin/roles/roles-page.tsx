@@ -6,7 +6,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useState, type FormEvent } from "react";
-import { toast } from "sonner";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -24,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { browserApi } from "@/lib/api/browser";
 import { getErrorMessage, unwrap } from "@/lib/api/errors";
+import { toast } from "@/lib/toast";
 import { useAppContext } from "@/components/providers/app-context";
 import {
   groupPermissions,

@@ -3,7 +3,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { toast } from "sonner";
 import {
   ConfirmedPasswordField,
   isConfirmedPasswordValid
@@ -23,6 +22,7 @@ import { Label } from "@/components/ui/label";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { toast } from "@/lib/toast";
 import { rolesQueryOptions, type Role } from "@/features/admin/roles/roles";
 import { type AdminUser } from "./users";
 

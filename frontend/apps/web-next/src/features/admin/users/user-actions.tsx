@@ -9,12 +9,12 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, Pencil, Trash2, UserMinus, UserPlus } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { toast } from "sonner";
 import { useAppContext } from "@/components/providers/app-context";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { toast } from "@/lib/toast";
 import { UserEditorDialog } from "./user-editor";
 import type { AdminUser } from "./users";
 

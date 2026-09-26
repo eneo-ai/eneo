@@ -4,12 +4,12 @@ import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { ChevronLeft, Copy, Download } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { toast } from "sonner";
 import { Streamdown } from "streamdown";
 import { PageHeader } from "@/components/composites/page-header";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
+import { toast } from "@/lib/toast";
 import { ClientTime } from "@/features/spaces/client-time";
 import {
   appRunQueryOptions,

@@ -3,7 +3,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,6 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { SecurityClassification } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
+import { toast } from "@/lib/toast";
 import { type AdminModel, MODELS_KEY, type ModelKind, updateTenantModel } from "./models";
 
 /** Stored cost is per-token (tiny); the form edits the friendlier per-1M value. */

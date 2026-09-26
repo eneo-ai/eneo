@@ -5,12 +5,12 @@ import type { EntryArea, Locale, Release, ReleaseEntry } from "@eneo/whats-new";
 import { Sparkles } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
-import { toast } from "sonner";
 import { PageHeader } from "@/components/composites/page-header";
 import { useAppContext } from "@/components/providers/app-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { toast } from "@/lib/toast";
 import {
   areasPresent,
   filterEntries,

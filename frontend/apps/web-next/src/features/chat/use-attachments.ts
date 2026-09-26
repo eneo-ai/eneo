@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { toast } from "sonner";
 import { useAppContext } from "@/components/providers/app-context";
 import { unwrap } from "@/lib/api/errors";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
 import type { ChatPartner } from "@/lib/chat/types";
+import { toast } from "@/lib/toast";
 import { chatCapabilities } from "./chat-capabilities";
 import { type ChatAttachmentRejection, planChatAttachmentUploads } from "./chat-attachment-plan";
 

@@ -139,6 +139,27 @@ const eslintConfig = defineConfig([
     }
   },
   {
+    // Toasts (2.2.1): errors and warnings stay until the user closes them.
+    // src/lib/toast.ts owns that policy, so it and the Toaster are the only
+    // shipped code that talks to sonner.
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/lib/toast.ts", "src/components/ui/sonner.tsx", "src/**/*.test.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "sonner",
+              message:
+                "Use `toast` from @/lib/toast: it keeps errors and warnings up until they are closed."
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
     // Visible focus (2.4.7, 1.4.11): no translucent focus rings (`ring-ring/50`
     // is about 2:1) and no `outline-none` without a focus-visible replacement
     // in the same class list. Class strings live in .ts files too.

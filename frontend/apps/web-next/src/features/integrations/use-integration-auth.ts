@@ -2,10 +2,10 @@
 
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { toast } from "@/lib/toast";
 import { isIntegrationCallbackMessage } from "./callback-message";
 
 type UserIntegration = Schema<"UserIntegration">;

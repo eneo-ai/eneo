@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Brain, Eye, Plus, RefreshCw, Search, Wrench } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -24,6 +23,7 @@ import { formatCostPerMillionTokens, formatTokens } from "@/features/ai-models/f
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
   type CatalogModel,

@@ -16,9 +16,13 @@ import { Toaster as Sonner, type ToasterProps } from "sonner";
 // frontend/patches/sonner@*.patch.
 import "sonner/dist/styles.css";
 import { useLiveRegionsIn, useTopModalDialog } from "@/components/ui/open-modals";
+import { TOAST_DURATION_MS } from "@/lib/toast";
 
 /**
  * The app's toasts (sonner): a polite live region at the edge of the page.
+ * Show them with `toast` from src/lib/toast.ts. Every toast has a close
+ * button (sized and focus-styled in globals.css); errors and warnings stay
+ * until it is used, the rest close after TOAST_DURATION_MS.
  *
  * A modal dialog makes the rest of the page inert and covers it, so a toast
  * shown while one is open (a failed save, say) would be dimmed, unclickable
@@ -38,6 +42,9 @@ const Toaster = ({ ...props }: ToasterProps) => {
       theme={theme as ToasterProps["theme"]}
       className="toaster group"
       containerAriaLabel={t("notifications")}
+      closeButton
+      duration={TOAST_DURATION_MS}
+      toastOptions={{ closeButtonAriaLabel: t("ui_toast_close") }}
       icons={{
         success: <CircleCheckIcon className="size-4" />,
         info: <InfoIcon className="size-4" />,

@@ -3,12 +3,12 @@
 import { Loader2, Upload, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { inputFieldRules } from "@/features/files/upload-plan";
 import { FileFormatDetails } from "@/features/files/file-format-details";
 import { collectDroppedFiles } from "@/features/files/collect-dropped-files";
 import { formatBytes } from "@/lib/format";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import type { InputField } from "../apps";
 import type { RunFile } from "./use-app-run";

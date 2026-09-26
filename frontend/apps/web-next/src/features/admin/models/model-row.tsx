@@ -25,12 +25,12 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { toast } from "sonner";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import type { SecurityClassification } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { EditModelDialog } from "./edit-model-dialog";
 import { MigrateModelDialog } from "./migrate-model-dialog";

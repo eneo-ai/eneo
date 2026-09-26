@@ -1,5 +1,5 @@
-import { toast } from "sonner";
 import { formatBytes } from "@/lib/format";
+import { toast } from "@/lib/toast";
 import type { UploadRejection, UploadPlanFile } from "./upload-plan";
 
 export function toastUploadRejection<FileLike extends UploadPlanFile>(

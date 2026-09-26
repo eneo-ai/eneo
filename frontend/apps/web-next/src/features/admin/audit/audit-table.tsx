@@ -3,7 +3,6 @@
 import { ChevronDown, ChevronRight, Copy } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Fragment, useState } from "react";
-import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +14,7 @@ import {
   TableRow
 } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/format";
+import { toast } from "@/lib/toast";
 import { actionLabel, type AuditLog } from "./audit";
 
 export function AuditTable({ logs }: { logs: AuditLog[] }) {

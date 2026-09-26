@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { toast } from "sonner";
 import {
   ConfirmedPasswordField,
   isConfirmedPasswordValid
@@ -35,6 +34,7 @@ import {
 } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
+import { toast } from "@/lib/toast";
 import { createMcpServer, MCP_KEY, type McpAuthType, type McpServerCreatePayload } from "./mcp";
 import { initials } from "./mcp-helpers";
 import { TagInput } from "./tag-input";

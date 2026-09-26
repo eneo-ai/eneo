@@ -3,7 +3,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -19,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { collectDroppedFiles } from "@/features/files/collect-dropped-files";
 import { FileFormatDetails } from "@/features/files/file-format-details";

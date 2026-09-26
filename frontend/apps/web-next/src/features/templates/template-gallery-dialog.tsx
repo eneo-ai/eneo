@@ -4,7 +4,6 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, BookOpen, FileUp, Loader2, Paperclip, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +28,7 @@ import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { formatBytes } from "@/lib/format";
 import type { Schema } from "@/lib/api/models";
+import { toast } from "@/lib/toast";
 import {
   buildTemplateCreate,
   templateHasWizard,

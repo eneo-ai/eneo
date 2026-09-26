@@ -5,7 +5,6 @@ import { CircleAlert, Database, HardDrive, Info, RefreshCw } from "lucide-react"
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
-import { toast } from "sonner";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { SettingsGroup } from "@/components/composites/settings-rows";
@@ -16,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
+import { toast } from "@/lib/toast";
 import { ByteLimitField } from "./byte-limit-field";
 import { StorageConnectionSection } from "./storage-connection-section";
 import { StorageContent } from "./storage-content";

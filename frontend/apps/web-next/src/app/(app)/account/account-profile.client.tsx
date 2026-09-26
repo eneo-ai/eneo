@@ -3,7 +3,6 @@
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useState, useTransition } from "react";
-import { toast } from "sonner";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +20,7 @@ import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { setLocale } from "@/lib/i18n/actions";
 import { locales } from "@/lib/i18n/locales";
+import { toast } from "@/lib/toast";
 import {
   type AssistantCopyFormat,
   getPreferredAssistantCopyFormat,

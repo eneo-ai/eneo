@@ -11,10 +11,10 @@ import {
   useRef,
   useState
 } from "react";
-import { toast } from "sonner";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { toast } from "@/lib/toast";
 
 export type Job = Schema<"JobPublic">;
 

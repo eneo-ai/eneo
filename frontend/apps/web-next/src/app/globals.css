@@ -361,3 +361,27 @@
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
+
+/*
+ * 9. The toast close button (sonner; every toast has one, see
+ *    src/components/ui/sonner.tsx). Sonner draws it 20 px with a faint shadow
+ *    for focus: make it 24 px (WCAG 2.5.8), 44 px to touch on a coarse
+ *    pointer, and give it the app's full-strength focus outline. Sonner's
+ *    stylesheet is unlayered, so these rules are too, one selector stronger.
+ */
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"] [data-close-button] {
+  width: 24px;
+  height: 24px;
+}
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"] [data-close-button]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+@media (pointer: coarse) {
+  [data-sonner-toaster] [data-sonner-toast][data-styled="true"] [data-close-button]::after {
+    content: "";
+    position: absolute;
+    inset: -10px;
+  }
+}

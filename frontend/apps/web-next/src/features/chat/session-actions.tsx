@@ -7,13 +7,13 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { toast } from "sonner";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { CursorPage } from "@/lib/api/pagination";
 import { toastApiError } from "@/lib/api/toast";
 import type { ChatPartner } from "@/lib/chat/types";
+import { toast } from "@/lib/toast";
 
 /** Query key of a partner's conversation history (an infinite, cursor-paged list). */
 export function historyQueryKey(partner: Pick<ChatPartner, "type" | "id">) {

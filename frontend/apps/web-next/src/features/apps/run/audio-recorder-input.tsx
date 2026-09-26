@@ -3,10 +3,10 @@
 import { Mic, Square, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { inputFieldRules } from "@/features/files/upload-plan";
 import { formatBytes } from "@/lib/format";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import type { InputField } from "../apps";
 import { FileChip } from "./upload-input";

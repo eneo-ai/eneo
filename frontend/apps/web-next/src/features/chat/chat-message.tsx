@@ -10,7 +10,6 @@ import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { Copy, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useMemo, useRef } from "react";
-import { toast } from "sonner";
 
 import {
   CitationSourcesProvider,
@@ -23,6 +22,7 @@ import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
 import { resolveInrefs, trimPartialInref } from "@/lib/chat/inref";
 import type { EneoUIMessage, KnowledgeOrigin } from "@/lib/chat/types";
+import { toast } from "@/lib/toast";
 
 import { deriveActivity, modelName } from "./activity";
 import type { ActivityTab } from "./activity-panel";

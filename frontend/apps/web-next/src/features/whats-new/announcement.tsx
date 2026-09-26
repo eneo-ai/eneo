@@ -6,7 +6,6 @@ import { ArrowRight, Sparkles } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
 import { useAppContext } from "@/components/providers/app-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +16,7 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
+import { toast } from "@/lib/toast";
 import { shouldShowAnnouncement, tourEntries } from "./release-model";
 import { useTour } from "./tour-provider";
 import { useWhatsNew } from "./whats-new-provider";

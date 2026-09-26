@@ -3,7 +3,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { toast } from "sonner";
 import {
   ConfirmedPasswordField,
   isConfirmedPasswordValid
@@ -31,6 +30,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { toast } from "@/lib/toast";
 import { SHAREPOINT_APP_KEY, sharepointAppQueryOptions } from "./integrations";
 
 type AuthMethod = "service_account" | "tenant_app";
