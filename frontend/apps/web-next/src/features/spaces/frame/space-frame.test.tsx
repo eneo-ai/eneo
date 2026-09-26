@@ -112,7 +112,7 @@ describe("SpaceFrame", () => {
     expect(within(tabs).getByRole("link", { name: "Förmågor" })).toBeTruthy();
 
     expect(screen.getByRole("group", { name: "4 medlemmar" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Bjud in" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Lägg till medlem" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Ny chatt" }).getAttribute("href")).toBe(
       "/spaces/space-1/chat"
     );
@@ -121,11 +121,23 @@ describe("SpaceFrame", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("scrolls with the page panel instead of a scroll container of its own", () => {
+    const { container } = show(sharedSpace(), ["overview"]);
+    // main#main-content (the app shell) is the one scroll container, so Page
+    // Down works after the skip link and nothing inside can trap the scroll.
+    expect(container.querySelector(".overflow-y-auto, .overflow-auto")).toBeNull();
+    const content = screen.getByText("Sidans innehåll").parentElement!;
+    // The page inset, which a full-bleed page (the assistant editor) drops.
+    expect(content.className).toContain("p-6");
+    expect(content.className).toContain("has-[[data-space-full-bleed]]:p-0");
+  });
+
   it("leaves the h1 to a detail page and marks its tab as current", async () => {
     const { container } = show(sharedSpace(), ["knowledge", "collections", "c1"]);
 
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
-    expect(screen.getByText("Upphandling", { selector: "p" })).toBeTruthy();
+    // The space name is a small label there, not a second title.
+    expect(screen.getByText("Upphandling", { selector: "p" }).className).toContain("text-sm");
     // The description belongs to the tab pages; details keep the header short.
     expect(screen.queryByText("Stöd för kommunens upphandlare.")).toBeNull();
     const crumbs = screen.getAllByRole("navigation")[0]!;
@@ -148,7 +160,7 @@ describe("SpaceFrame", () => {
     show(space, ["overview"], "personal");
 
     expect(screen.getByRole("heading", { level: 1, name: "Personligt" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Bjud in" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Lägg till medlem" })).toBeNull();
     expect(screen.queryByRole("group", { name: /medlem/ })).toBeNull();
     expect(screen.getByRole("link", { name: "Ny chatt" }).getAttribute("href")).toBe(
       "/spaces/personal/chat"
@@ -189,7 +201,7 @@ describe("SpaceFrame", () => {
     });
     show(space, ["overview"]);
 
-    expect(screen.queryByRole("button", { name: "Bjud in" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Lägg till medlem" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Ny chatt" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Inställningar" })).toBeNull();
     expect(screen.getByRole("group", { name: "1 medlem" })).toBeTruthy();
@@ -211,9 +223,14 @@ describe("SpaceFrame", () => {
     expect(document.activeElement).toBe(within(tabs).getByRole("link", { name: "Förmågor" }));
   });
 
-  it("opens the add-member dialog from Bjud in and returns focus on Escape", async () => {
+  it("leaves adding members to the members tab's own button there", () => {
+    show(sharedSpace(), ["members"]);
+    expect(screen.queryByRole("button", { name: "Lägg till medlem" })).toBeNull();
+  });
+
+  it("opens the add-member dialog from the header and returns focus on Escape", async () => {
     show(sharedSpace(), ["overview"]);
-    const invite = screen.getByRole("button", { name: "Bjud in" });
+    const invite = screen.getByRole("button", { name: "Lägg till medlem" });
     invite.focus();
     fireEvent.click(invite);
 

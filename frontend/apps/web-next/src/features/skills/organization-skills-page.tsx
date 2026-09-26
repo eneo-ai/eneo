@@ -19,7 +19,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SpaceSectionHeader } from "@/features/spaces/frame/space-section-header";
+import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
 import {
@@ -149,7 +149,8 @@ export function OrganizationSkillsPage() {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
       {/* A tab of the organization space: the space header holds the h1. */}
-      <SpaceSectionHeader
+      <PageHeader
+        headingLevel={2}
         title={t("skills")}
         actions={
           removed ? undefined : (
@@ -234,13 +235,14 @@ export function OrganizationSkillsPage() {
       ) : items.length === 0 ? (
         <div className="flex max-w-3xl flex-col items-center gap-3 rounded-xl border border-dashed p-10 text-center">
           <BookOpenCheck className="text-muted-foreground size-9" />
-          <h2 className="font-medium">
+          {/* Under the tab's h2. */}
+          <h3 className="font-medium">
             {removed && !search
               ? t("organization_skills_removed_empty")
               : search
                 ? t("skills_library_no_results")
                 : t("organization_skills_empty_manage_title")}
-          </h2>
+          </h3>
           {!removed && !search && (
             <>
               <p className="text-muted-foreground text-sm">

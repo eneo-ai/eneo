@@ -1,6 +1,9 @@
 import type { ResourcePermission, Space, SpaceResource, SpaceRouteId } from "../space";
 
-/** The space tabs, in display order. Each id is also the route segment. */
+/**
+ * The space tabs, in display order. Each id is also the route segment and the
+ * translation key of the tab label (web-next overrides `skills` to "Förmågor").
+ */
 export const SPACE_SECTION_IDS = [
   "overview",
   "assistants",
@@ -13,18 +16,6 @@ export const SPACE_SECTION_IDS = [
 ] as const;
 
 export type SpaceSectionId = (typeof SPACE_SECTION_IDS)[number];
-
-/** Translation key of each tab label (web-next overrides `skills` to "Förmågor"). */
-export const SPACE_SECTION_LABEL_KEYS: Record<SpaceSectionId, string> = {
-  overview: "overview",
-  assistants: "assistants",
-  apps: "apps",
-  knowledge: "knowledge",
-  skills: "skills",
-  services: "services",
-  members: "members",
-  settings: "settings"
-};
 
 export type SpaceSection = {
   id: SpaceSectionId;
@@ -101,15 +92,6 @@ export function spaceRoute(segments: readonly string[]): SpaceRoute {
   if (first === "group-chats") return { kind: "page", section: "assistants", isSectionRoot: false };
   if (!isSectionId(first)) return { kind: "page", section: null, isSectionRoot: false };
   return { kind: "page", section: first, isSectionRoot: rest.length === 0 };
-}
-
-/**
- * Whether the space name is the page's h1. Tab pages are sections of the space
- * (their own title is an h2); detail pages and editors below a tab have an h1
- * of their own.
- */
-export function spaceNameIsPageHeading(route: Extract<SpaceRoute, { kind: "page" }>): boolean {
-  return route.isSectionRoot;
 }
 
 /** Where the space crumb in the breadcrumbs points: the overview, or the first tab. */

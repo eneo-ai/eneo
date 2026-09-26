@@ -13,12 +13,7 @@ import { cn } from "@/lib/utils";
 import { AddMemberDialog } from "../members/space-members";
 import { memberDisplayName, personToneClass } from "../members/member-avatar";
 import { useSpace } from "../use-space";
-import {
-  spaceLandingHref,
-  spaceNameIsPageHeading,
-  spaceSections,
-  type SpaceRoute
-} from "./space-sections";
+import { spaceLandingHref, spaceSections, type SpaceRoute } from "./space-sections";
 import { SpaceTabs } from "./space-tabs";
 
 const VISIBLE_MEMBERS = 3;
@@ -59,20 +54,14 @@ function MemberStack() {
  * tile and name, its security classification and description, members and
  * the primary actions, then the section tabs. On a tab's own page the name is
  * the page's h1; below a tab (details, editors) the page brings its own h1 and
- * the name is plain text.
+ * the name is a small label, so it doesn't compete with that heading.
  */
-export function SpaceHeader({
-  route,
-  className
-}: {
-  route: Extract<SpaceRoute, { kind: "page" }>;
-  className?: string;
-}) {
+export function SpaceHeader({ route }: { route: Extract<SpaceRoute, { kind: "page" }> }) {
   const t = useTranslations();
   const { space, routeId, can } = useSpace();
   const name = useSpaceDisplayName();
   const sections = spaceSections(space, can, routeId);
-  const isHeading = spaceNameIsPageHeading(route);
+  const isHeading = route.isSectionRoot;
   const isShared = !space.personal && !space.organization;
   const description = space.personal
     ? t("personal_space_description")
@@ -81,15 +70,14 @@ export function SpaceHeader({
   const icon = iconUrl(space.icon_id);
 
   const showMembers = isShared && can("read", "member") && space.members.items.length > 0;
-  const canInvite = isShared && can("add", "member");
+  // The members tab has the same "Lägg till medlem" button in its own header.
+  const canAddMember = isShared && can("add", "member") && route.section !== "members";
   const canChat =
     !space.organization && space.default_assistant != null && can("read", "default_assistant");
   const isOverview = route.section === "overview" && route.isSectionRoot;
 
-  const titleClass = "text-2xl leading-tight font-bold tracking-tight break-words";
-
   return (
-    <header className={cn("border-ax-border flex flex-col gap-4 border-b px-6 pt-5", className)}>
+    <header className="border-ax-border flex flex-col gap-4 border-b px-6 pt-5">
       <Breadcrumbs variant="supporting">
         <BreadcrumbItem href="/spaces/list" isCurrent={false}>
           {t("spaces")}
@@ -116,17 +104,21 @@ export function SpaceHeader({
                 <Building2 aria-hidden="true" />
               ) : undefined
             }
-            size="xl"
-            className="size-12 text-lg [&_svg]:size-6"
+            size={isHeading ? "xl" : "md"}
+            className={isHeading ? "size-12 text-lg [&_svg]:size-6" : undefined}
           />
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className={cn("flex min-w-0 flex-1 flex-col gap-1", !isHeading && "self-center")}>
             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
               {isHeading ? (
-                <Heading level={1} weight="bold" className={titleClass}>
+                <Heading
+                  level={1}
+                  weight="bold"
+                  className="text-2xl leading-tight font-bold tracking-tight break-words"
+                >
                   {name}
                 </Heading>
               ) : (
-                <p className={cn("text-ax-text", titleClass)}>{name}</p>
+                <p className="text-ax-text text-sm font-semibold break-words">{name}</p>
               )}
               {classification ? (
                 <span className="bg-ax-muted text-ax-text-secondary inline-flex min-h-6 items-center gap-1.5 rounded-full px-2.5 text-xs font-semibold">
@@ -142,10 +134,10 @@ export function SpaceHeader({
           </div>
         </div>
 
-        {showMembers || canInvite || canChat ? (
+        {showMembers || canAddMember || canChat ? (
           <div className="flex flex-wrap items-center gap-2.5">
             {showMembers ? <MemberStack /> : null}
-            {canInvite ? <AddMemberDialog variant="invite" /> : null}
+            {canAddMember ? <AddMemberDialog variant="header" /> : null}
             {canChat ? (
               <Button
                 label={t("space_new_chat")}
