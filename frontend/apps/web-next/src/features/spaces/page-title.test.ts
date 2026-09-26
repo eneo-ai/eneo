@@ -7,7 +7,7 @@ vi.mock("next-intl/server", () => ({
     values ? `${key}:${JSON.stringify(values)}` : key
 }));
 
-import { spacePageTitle } from "./page-title";
+import { spaceLayoutTitle, spacePageTitle } from "./page-title";
 
 describe("spacePageTitle", () => {
   it("titles the page after the resource", async () => {
@@ -29,6 +29,30 @@ describe("spacePageTitle", () => {
   it("lets a redirect (an expired session) through", async () => {
     await expect(
       spacePageTitle(async () => redirect("/logout?reason=expired"), "apps")
+    ).rejects.toMatchObject({ digest: expect.stringContaining("NEXT_REDIRECT") });
+  });
+});
+
+describe("spaceLayoutTitle", () => {
+  const space = { name: "Upphandling", personal: false, organization: false };
+
+  it("names the tab after the space, with the template for the pages below", async () => {
+    await expect(spaceLayoutTitle(async () => space)).resolves.toEqual({
+      title: { default: "Upphandling", template: "%s · Upphandling · Eneo" }
+    });
+    await expect(
+      spaceLayoutTitle(async () => ({ ...space, personal: true }))
+    ).resolves.toMatchObject({ title: { default: "personal" } });
+  });
+
+  it("keeps the root title when the space cannot be loaded", async () => {
+    const missing = new EneoApiError("Not found", { status: 404 });
+    await expect(spaceLayoutTitle(() => Promise.reject(missing))).resolves.toEqual({});
+  });
+
+  it("lets a redirect (an expired session) through", async () => {
+    await expect(
+      spaceLayoutTitle(async () => redirect("/logout?reason=expired"))
     ).rejects.toMatchObject({ digest: expect.stringContaining("NEXT_REDIRECT") });
   });
 });

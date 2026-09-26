@@ -30,3 +30,28 @@ export async function spacePageTitle(
     return { title: t(fallbackKey) };
   }
 }
+
+/**
+ * The space layout's title: the space's name (the localized alias for the
+ * personal and organization spaces) and the template that pages below it put
+ * their own title in front of: "Kunskap · Upphandling · Eneo". When the space
+ * cannot be loaded (the layout then shows the 404 or error), the root title
+ * stays; redirects (an expired session) go through.
+ */
+export async function spaceLayoutTitle(
+  load: () => Promise<{ name: string; personal: boolean; organization: boolean }>
+): Promise<Metadata> {
+  const t = await getTranslations();
+  try {
+    const space = await load();
+    const name = space.personal
+      ? t("personal")
+      : space.organization
+        ? t("organization")
+        : space.name;
+    return { title: { default: name, template: `%s · ${name} · Eneo` } };
+  } catch (error) {
+    unstable_rethrow(error);
+    return {};
+  }
+}

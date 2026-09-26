@@ -1,37 +1,22 @@
 import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getTranslations } from "next-intl/server";
 import { EneoApiError } from "@/lib/api/errors";
 import { getQueryClient } from "@/lib/api/query";
 import { eneoApi } from "@/lib/api/server";
 import { SpaceFrame } from "@/features/spaces/frame/space-frame";
+import { spaceLayoutTitle } from "@/features/spaces/page-title";
 import { spaceQueryOptions } from "@/features/spaces/space";
 import { SpaceProvider } from "@/features/spaces/use-space";
 
-/**
- * The tab title is the space name (or the localized alias for personal/org).
- * Tab pages set their own title, which the template puts in front of it:
- * "Kunskap · Upphandling · Eneo".
- */
+/** The tab title is the space's name; pages below put their own in front of it. */
 export async function generateMetadata({
   params
 }: {
   params: Promise<{ spaceId: string }>;
 }): Promise<Metadata> {
   const { spaceId } = await params;
-  try {
-    const space = await getQueryClient().fetchQuery(spaceQueryOptions(eneoApi(), spaceId));
-    const t = await getTranslations();
-    const name = space.personal
-      ? t("personal")
-      : space.organization
-        ? t("organization")
-        : space.name;
-    return { title: { default: name, template: `%s · ${name} · Eneo` } };
-  } catch {
-    return {};
-  }
+  return spaceLayoutTitle(() => getQueryClient().fetchQuery(spaceQueryOptions(eneoApi(), spaceId)));
 }
 
 export default async function SpaceLayout({
