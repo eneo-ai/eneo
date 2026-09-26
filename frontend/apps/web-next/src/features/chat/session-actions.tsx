@@ -14,24 +14,21 @@ import { unwrap } from "@/lib/api/errors";
 import type { CursorPage } from "@/lib/api/pagination";
 import { toastApiError } from "@/lib/api/toast";
 import type { ChatPartner } from "@/lib/chat/types";
-import { toast } from "@/lib/toast";
 
 /** Query key of a partner's conversation history (an infinite, cursor-paged list). */
 export function historyQueryKey(partner: Pick<ChatPartner, "type" | "id">) {
   return ["conversations", partner.type === "group-chat" ? "group-chat" : "assistant", partner.id];
 }
 
-/** Rename, delete and session feedback for conversations of one partner. */
+/** Rename and delete for conversations of one partner. */
 export function useSessionMutations(
   partner: Pick<ChatPartner, "type" | "id">,
   {
     onRenamed,
-    onDeleted,
-    onRated
+    onDeleted
   }: {
     onRenamed?: (id: string, name: string) => void;
     onDeleted?: (id: string) => void;
-    onRated?: (id: string, value: 1 | -1) => void;
   } = {}
 ) {
   const t = useTranslations();
@@ -81,22 +78,7 @@ export function useSessionMutations(
     onError: (error) => toastApiError(error, t)
   });
 
-  const feedback = useMutation({
-    mutationFn: ({ id, value }: { id: string; value: 1 | -1 }) =>
-      unwrap(
-        browserApi.POST("/api/v1/conversations/{session_id}/feedback/", {
-          params: { path: { session_id: id } },
-          body: { value }
-        })
-      ),
-    onSuccess: (_, { id, value }) => {
-      toast.success(t("chat_feedback_thanks"));
-      onRated?.(id, value);
-    },
-    onError: (error) => toastApiError(error, t)
-  });
-
-  return { rename, remove, feedback };
+  return { rename, remove };
 }
 
 /** Rename dialog (Astryx Dialog, form purpose) with a visible label; Enter saves. */

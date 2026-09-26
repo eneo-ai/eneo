@@ -7,7 +7,7 @@ import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { Timestamp } from "@astryxdesign/core/Timestamp";
-import { ToggleButton } from "@astryxdesign/core/ToggleButton";
+import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { Copy, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useMemo, useRef } from "react";
@@ -22,7 +22,7 @@ import { iconUrl } from "@/components/composites/icon-field";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
 import { resolveInrefs, trimPartialInref } from "@/lib/chat/inref";
-import type { EneoUIMessage, KnowledgeOrigin } from "@/lib/chat/types";
+import type { AnswerRating, EneoUIMessage, KnowledgeOrigin } from "@/lib/chat/types";
 import { toast } from "@/lib/toast";
 
 import { deriveActivity, modelName } from "./activity";
@@ -49,12 +49,13 @@ import {
 /** Who answers: the chat partner's name and tile. */
 export type AssistantIdentity = { id: string; name: string; iconId?: string | null };
 
-/** Session-level feedback (there is no per-message feedback), shown on the latest answer. */
+/** An answer's rating and how to change it (null clears it). */
 export type AnswerFeedback = {
-  value: 1 | -1 | null;
-  pending: boolean;
-  onChange: (value: 1 | -1) => void;
+  value: AnswerRating;
+  onChange: (value: AnswerRating) => void;
 };
+
+const RATING_VALUE = { good: 1, bad: -1 } as const;
 
 export type ActivityRequest = { tab?: ActivityTab; source?: number };
 
@@ -230,25 +231,32 @@ function AnswerActions({
       />
       {feedback && (
         // ToggleButton takes no className: size its buttons for touch from here.
-        <span className="contents pointer-coarse:[&>button]:size-11">
-          <ToggleButton
-            label={t("chat_feedback_good")}
-            isIconOnly
-            icon={<ThumbsUp className="size-4" />}
-            isPressed={feedback.value === 1}
-            isDisabled={feedback.pending}
-            onPressedChange={() => feedback.onChange(1)}
+        <span className="contents pointer-coarse:[&_button]:size-11">
+          {/* One choice at a time; pressing the chosen thumb again clears it.
+              A filled thumb marks the choice besides the pressed background. */}
+          <ToggleButtonGroup
+            label={t("feedback_group_label")}
             size="sm"
-          />
-          <ToggleButton
-            label={t("chat_feedback_bad")}
-            isIconOnly
-            icon={<ThumbsDown className="size-4" />}
-            isPressed={feedback.value === -1}
-            isDisabled={feedback.pending}
-            onPressedChange={() => feedback.onChange(-1)}
-            size="sm"
-          />
+            value={feedback.value === 1 ? "good" : feedback.value === -1 ? "bad" : null}
+            onChange={(next) =>
+              feedback.onChange(next === "good" || next === "bad" ? RATING_VALUE[next] : null)
+            }
+          >
+            <ToggleButton
+              value="good"
+              label={t("chat_feedback_good")}
+              isIconOnly
+              icon={<ThumbsUp className="size-4" />}
+              pressedIcon={<ThumbsUp className="size-4" fill="currentColor" />}
+            />
+            <ToggleButton
+              value="bad"
+              label={t("chat_feedback_bad")}
+              isIconOnly
+              icon={<ThumbsDown className="size-4" />}
+              pressedIcon={<ThumbsDown className="size-4" fill="currentColor" />}
+            />
+          </ToggleButtonGroup>
         </span>
       )}
       <div ref={moreRef} className="contents">
@@ -418,7 +426,7 @@ export function ChatMessage({
   durations?: TurnDurations | null;
   activityExpanded?: boolean;
   onActivityToggle?: (trigger: HTMLElement, request?: ActivityRequest) => void;
-  /** Only for the latest answer: thumbs post the session-level feedback. */
+  /** A finished answer of a saved conversation: its rating control. */
   feedback?: AnswerFeedback | null;
 }) {
   if (message.role === "user") return <UserMessage message={message} />;

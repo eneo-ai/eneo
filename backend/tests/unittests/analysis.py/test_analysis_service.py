@@ -8,7 +8,7 @@ from eneo.actors import SpaceActor
 from eneo.ai_models.completion_models.completion_model import (
     CompletionModel,
 )
-from eneo.analysis.analysis import AnalysisProcessingMode
+from eneo.analysis.analysis import AnalysisProcessingMode, MessageFeedbackCounts
 from eneo.analysis.analysis_service import (
     ASYNC_AUTO_QUESTION_THRESHOLD,
     NO_QUESTIONS_ANSWER,
@@ -81,6 +81,9 @@ def analysis_service(user, mock_space_service):
     repo.get_group_chat_question_texts_since.return_value = []
     repo.count_assistant_questions_since.return_value = 0
     repo.count_group_chat_questions_since.return_value = 0
+    repo.get_message_feedback_counts.return_value = MessageFeedbackCounts(
+        positive=0, negative=0
+    )
 
     # Configure assistant for insight checks
     mock_assistant = AsyncMock()
@@ -355,6 +358,9 @@ async def test_get_conversation_stats_assistant(service: AnalysisService):
 
     # Mock repository response - now using optimized count method
     service.repo.get_assistant_conversation_counts.return_value = (2, 3)
+    service.repo.get_message_feedback_counts.return_value = MessageFeedbackCounts(
+        positive=5, negative=1
+    )
 
     # Call the service method
     result = await service.get_conversation_stats(
@@ -364,11 +370,20 @@ async def test_get_conversation_stats_assistant(service: AnalysisService):
     # Verify results
     assert result.total_conversations == 2
     assert result.total_questions == 3
+    assert result.feedback == MessageFeedbackCounts(positive=5, negative=1)
     service.repo.get_assistant_conversation_counts.assert_called_once_with(
         assistant_id=assistant_id,
         from_date=ANY,
         to_date=ANY,
         tenant_id=service.user.tenant_id,
+    )
+    # Every answer in the window counts, follow-ups included, like the totals.
+    service.repo.get_message_feedback_counts.assert_awaited_once_with(
+        tenant_id=service.user.tenant_id,
+        assistant_id=assistant_id,
+        group_chat_id=None,
+        from_date=ANY,
+        to_date=ANY,
     )
 
 
@@ -381,6 +396,9 @@ async def test_get_conversation_stats_group_chat(service: AnalysisService):
 
     # Mock repository response - now using optimized count method
     service.repo.get_group_chat_conversation_counts.return_value = (3, 4)
+    service.repo.get_message_feedback_counts.return_value = MessageFeedbackCounts(
+        positive=0, negative=2
+    )
 
     # Call the service method
     result = await service.get_conversation_stats(
@@ -390,6 +408,14 @@ async def test_get_conversation_stats_group_chat(service: AnalysisService):
     # Verify results
     assert result.total_conversations == 3
     assert result.total_questions == 4
+    assert result.feedback == MessageFeedbackCounts(positive=0, negative=2)
+    service.repo.get_message_feedback_counts.assert_awaited_once_with(
+        tenant_id=service.user.tenant_id,
+        assistant_id=None,
+        group_chat_id=group_chat_id,
+        from_date=ANY,
+        to_date=ANY,
+    )
 
 
 async def test_get_assistant_question_history_page_passes_tenant_and_cursor(
@@ -406,6 +432,8 @@ async def test_get_assistant_question_history_page_passes_tenant_and_cursor(
         question="test question",
         created_at=datetime(2026, 2, 11, 11, 0, 0),
         session_id=uuid4(),
+        feedback_value=None,
+        feedback_text=None,
     )
     service.repo.get_assistant_question_history_page = AsyncMock(
         return_value=([row], 123, True)
@@ -437,6 +465,98 @@ async def test_get_assistant_question_history_page_passes_tenant_and_cursor(
         cursor_created_at=datetime(2026, 2, 10, 12, 30, 0, tzinfo=timezone.utc),
         cursor_id=UUID("3fa85f64-5717-4562-b3fc-2c963f66afa6"),
     )
+
+
+async def test_get_assistant_question_history_page_carries_answer_ratings(
+    service: AnalysisService,
+):
+    service.assistant_service.get_assistant.return_value = (
+        AsyncMock(space_id=None, user=service.user),
+        MagicMock(),
+    )
+    rated = MagicMock(
+        id=uuid4(),
+        question="Rated",
+        created_at=datetime(2026, 2, 11, 11, 0, 0),
+        session_id=uuid4(),
+        feedback_value=-1,
+        feedback_text="Missade LOU-gränsen",
+    )
+    unrated = MagicMock(
+        id=uuid4(),
+        question="Unrated",
+        created_at=datetime(2026, 2, 11, 10, 0, 0),
+        session_id=uuid4(),
+        feedback_value=None,
+        feedback_text=None,
+    )
+    service.repo.get_assistant_question_history_page = AsyncMock(
+        return_value=([rated, unrated], 2, False)
+    )
+
+    items, _, _ = await service.get_assistant_question_history_page(
+        assistant_id=uuid4(),
+        from_date=datetime(2026, 2, 1),
+        to_date=datetime(2026, 2, 11),
+        include_followups=True,
+        limit=100,
+    )
+
+    assert items[0].feedback is not None
+    assert items[0].feedback.value == -1
+    assert items[0].feedback.text == "Missade LOU-gränsen"
+    assert items[1].feedback is None
+
+
+async def test_get_assistant_feedback_counts_checks_access_and_passes_filters(
+    service: AnalysisService,
+):
+    assistant_id = uuid4()
+    space_id = uuid4()
+    service.assistant_service.get_assistant.return_value = (
+        MagicMock(space_id=space_id),
+        MagicMock(),
+    )
+    service.repo.get_message_feedback_counts.return_value = MessageFeedbackCounts(
+        positive=4, negative=1
+    )
+    check_space = AsyncMock()
+    service._check_space_permissions = check_space
+
+    counts = await service.get_assistant_feedback_counts(
+        assistant_id=assistant_id,
+        from_date=datetime(2026, 2, 1),
+        to_date=datetime(2026, 2, 11),
+        include_followups=False,
+    )
+
+    assert counts == MessageFeedbackCounts(positive=4, negative=1)
+    service.assistant_service.get_assistant.assert_awaited_once_with(assistant_id)
+    check_space.assert_awaited_once_with(space_id)
+    service.repo.get_message_feedback_counts.assert_awaited_once_with(
+        tenant_id=service.user.tenant_id,
+        assistant_id=assistant_id,
+        from_date=datetime(2026, 2, 1),
+        to_date=datetime(2026, 2, 11),
+        include_followups=False,
+    )
+
+
+async def test_get_assistant_feedback_counts_denied_without_assistant_access(
+    service: AnalysisService,
+):
+    service.assistant_service.get_assistant.side_effect = UnauthorizedException(
+        "no access"
+    )
+
+    with pytest.raises(UnauthorizedException):
+        await service.get_assistant_feedback_counts(
+            assistant_id=uuid4(),
+            from_date=datetime(2026, 2, 1),
+            to_date=datetime(2026, 2, 11),
+            include_followups=True,
+        )
+    service.repo.get_message_feedback_counts.assert_not_awaited()
 
 
 async def test_get_assistant_question_history_page_invalid_cursor_raises(

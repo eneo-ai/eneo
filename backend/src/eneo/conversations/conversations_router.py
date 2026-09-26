@@ -41,6 +41,7 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     get_approval_manager,
 )
+from eneo.questions.question import MessageFeedback
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
@@ -258,13 +259,25 @@ async def _authorize_session_access(container: Container, session: SessionInDB) 
     UnauthorizedException when access is no longer allowed, and get_assistant is
     default-assistant-aware so the personal chat is gated by personal_chat.
     """
-    if session.group_chat_id:
+    await _authorize_partner_access(
+        container,
+        assistant_id=session.assistant.id if session.assistant else None,
+        group_chat_id=session.group_chat_id,
+    )
+
+
+async def _authorize_partner_access(
+    container: Container, *, assistant_id: UUID | None, group_chat_id: UUID | None
+) -> None:
+    """The partner half of ``_authorize_session_access``, for callers that hold
+    only the partner ids of an owned conversation."""
+    if group_chat_id:
         group_chat_service = container.group_chat_service()
-        await group_chat_service.get_group_chat(group_chat_id=session.group_chat_id)
+        await group_chat_service.get_group_chat(group_chat_id=group_chat_id)
     else:
-        assert session.assistant is not None
+        assert assistant_id is not None
         assistant_service = container.assistant_service()
-        await assistant_service.get_assistant(session.assistant.id)
+        await assistant_service.get_assistant(assistant_id)
 
 
 @router.post(
@@ -749,6 +762,81 @@ async def leave_feedback(
         )
 
     return to_session_public(updated_session)
+
+
+@router.put(
+    "/{session_id}/messages/{message_id}/feedback/",
+    response_model=MessageFeedback,
+    description=(
+        "Rate one answer in a conversation, with an optional comment. Replaces "
+        "the answer's earlier rating."
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+async def set_message_feedback(
+    feedback: MessageFeedback,
+    session_id: Annotated[
+        UUID, Path(description="The UUID of the conversation/session")
+    ],
+    message_id: Annotated[
+        UUID, Path(description="The UUID of the message (a question and its answer)")
+    ],
+    container: Annotated[
+        Container,
+        # Committed before the response: a reload right after shows the rating.
+        Depends(get_container(with_user=True, transaction_scope="function")),
+    ],
+) -> MessageFeedback:
+    """Only the conversation's owner can rate its answers. Separate from the
+    conversation-level feedback, which this does not change."""
+    session_service = container.session_service()
+    partner = await session_service.get_message_partner(
+        session_id=session_id, message_id=message_id
+    )
+    await _authorize_partner_access(
+        container,
+        assistant_id=partner.assistant_id,
+        group_chat_id=partner.group_chat_id,
+    )
+    return await session_service.set_message_feedback(
+        session_id=session_id, message_id=message_id, feedback=feedback
+    )
+
+
+@router.delete(
+    "/{session_id}/messages/{message_id}/feedback/",
+    status_code=204,
+    description="Remove the rating of one answer in a conversation.",
+    responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+async def delete_message_feedback(
+    session_id: Annotated[
+        UUID, Path(description="The UUID of the conversation/session")
+    ],
+    message_id: Annotated[
+        UUID, Path(description="The UUID of the message (a question and its answer)")
+    ],
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user=True, transaction_scope="function")),
+    ],
+) -> None:
+    """Only the conversation's owner can remove a rating; removing a rating that
+    is not there succeeds."""
+    session_service = container.session_service()
+    partner = await session_service.get_message_partner(
+        session_id=session_id, message_id=message_id
+    )
+    await _authorize_partner_access(
+        container,
+        assistant_id=partner.assistant_id,
+        group_chat_id=partner.group_chat_id,
+    )
+    await session_service.clear_message_feedback(
+        session_id=session_id, message_id=message_id
+    )
 
 
 @router.post(

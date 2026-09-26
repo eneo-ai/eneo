@@ -505,8 +505,6 @@
   "chat_history_week": "Senaste 7 dagarna",
   "chat_history_month": "Senaste 30 dagarna",
   "chat_history_older": "Äldre",
-  "chat_history_rate_good": "Betygsätt som bra",
-  "chat_history_rate_bad": "Betygsätt som dålig",
   "chat_knowledge_pill": "Kunskap: {name}",
   "chat_knowledge_popover_label": "Kunskap som assistenten söker i",
   "chat_knowledge_popover_hint": "Assistenten söker i de här källorna när den svarar.",
@@ -1372,5 +1370,13 @@
   "provider_status_key_expiring": "Nyckeln går ut {date}",
   "provider_status_key_expired": "Nyckeln har gått ut {date}",
   "provider_status_key_expiry_label": "Nyckelns utgångsdatum",
-  "provider_status_key_expiry_description": "De flesta leverantörer visar inte när en nyckel går ut, så ange datumet själv. Leverantörens kort varnar {days} dagar innan."
+  "provider_status_key_expiry_description": "De flesta leverantörer visar inte när en nyckel går ut, så ange datumet själv. Leverantörens kort varnar {days} dagar innan.",
+  "feedback_group_label": "Betygsätt svaret",
+  "feedback_removed": "Din återkoppling har tagits bort",
+  "feedback_column": "Återkoppling",
+  "feedback_none": "Ingen återkoppling",
+  "feedback_comment": "Kommentar",
+  "feedback_summary_title": "Återkoppling på svar",
+  "feedback_good_answers": "Bra svar",
+  "feedback_bad_answers": "Dåliga svar"
 }

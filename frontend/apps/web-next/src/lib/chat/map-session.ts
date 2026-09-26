@@ -98,7 +98,8 @@ export function mapSessionMessages(messages: PersistedMessage[]): EneoUIMessage[
               handle: message.tools.assistants[0].handle
             }
           : null,
-        createdAt: message.updated_at ?? message.created_at ?? null
+        createdAt: message.updated_at ?? message.created_at ?? null,
+        feedback: message.feedback?.value ?? null
       }
     });
   }

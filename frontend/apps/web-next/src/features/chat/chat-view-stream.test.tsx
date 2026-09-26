@@ -13,7 +13,8 @@ const spies = vi.hoisted(() => ({
   announce: vi.fn(),
   sent: [] as { text: string; body: unknown }[],
   mode: "fail" as "fail" | "answer" | "hold",
-  titled: [] as string[]
+  titled: [] as string[],
+  rated: [] as { path: string; params: unknown; body: unknown }[]
 }));
 
 // Fails before streaming starts, or streams a short answer (AI SDK UI chunks).
@@ -84,6 +85,10 @@ vi.mock("@/lib/api/browser", () => ({
       if (path.endsWith("/title/")) spies.titled.push(init.params?.path?.session_id ?? "");
       return { data: { name: "Gräns för direktupphandling" }, response: new Response() };
     }),
+    PUT: vi.fn(async (path: string, init: { params: { path: unknown }; body: unknown }) => {
+      spies.rated.push({ path, params: init.params.path, body: init.body });
+      return { data: init.body, response: new Response() };
+    }),
     DELETE: vi.fn(),
     PATCH: vi.fn()
   }
@@ -99,6 +104,7 @@ afterEach(() => {
   spies.announce.mockReset();
   spies.sent.length = 0;
   spies.titled.length = 0;
+  spies.rated.length = 0;
   spies.mode = "fail";
 });
 
@@ -167,6 +173,38 @@ describe("ChatView streaming an answer", () => {
 
     await waitFor(() => expect(queryClient.getQueryState(recent)?.isInvalidated).toBe(true));
     expect(queryClient.getQueryState(history)?.isInvalidated).toBe(true);
+  });
+});
+
+describe("ChatView rating a streamed answer", () => {
+  it("offers no rating while the answer streams", async () => {
+    spies.mode = "hold";
+    renderInApp(<Harness />);
+    ask("Vilken gräns gäller?");
+    const log = await screen.findByRole("log", { name: "Konversation" });
+    await within(log).findByText(/Gränsen/);
+    expect(within(log).queryByRole("group", { name: "Betygsätt svaret" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Stoppa generering" }));
+    expect(await screen.findByRole("button", { name: "Skicka meddelande" })).toBeTruthy();
+  });
+
+  it("rates the finished answer under the id the backend saved it with", async () => {
+    spies.mode = "answer";
+    renderInApp(<Harness />);
+    ask("Vilken gräns gäller?");
+    const log = await screen.findByRole("log", { name: "Konversation" });
+    const rating = await within(log).findByRole("group", { name: "Betygsätt svaret" });
+
+    fireEvent.click(within(rating).getByRole("button", { name: "Bra svar" }));
+
+    await waitFor(() => expect(spies.rated).toHaveLength(1));
+    expect(spies.rated[0]).toEqual({
+      path: "/api/v1/conversations/{session_id}/messages/{message_id}/feedback/",
+      params: { session_id: "session-1", message_id: "answer-1" },
+      body: { value: 1 }
+    });
+    await waitFor(() => expect(spies.announce).toHaveBeenCalledWith("Tack för din återkoppling"));
   });
 });
 

@@ -1664,6 +1664,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/conversations/{session_id}/messages/{message_id}/feedback/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Set Message Feedback
+     * @description Rate one answer in a conversation, with an optional comment. Replaces the answer's earlier rating.
+     */
+    put: operations["set_message_feedback_api_v1_conversations__session_id__messages__message_id__feedback__put"];
+    post?: never;
+    /**
+     * Delete Message Feedback
+     * @description Remove the rating of one answer in a conversation.
+     */
+    delete: operations["delete_message_feedback_api_v1_conversations__session_id__messages__message_id__feedback__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/conversations/{session_id}/title/": {
     parameters: {
       query?: never;
@@ -1950,6 +1974,26 @@ export interface paths {
      * @description Get paginated question history for an assistant.
      */
     get: operations["get_most_recent_questions_paginated_api_v1_analysis_assistants__assistant_id__questions__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/analysis/assistants/{assistant_id}/feedback/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Assistant Feedback Counts
+     * @description Count the good and bad ratings of an assistant's answers within a time range.
+     */
+    get: operations["get_assistant_feedback_counts_api_v1_analysis_assistants__assistant_id__feedback__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -10115,6 +10159,8 @@ export interface components {
        * Format: uuid
        */
       session_id: string;
+      /** @description The conversation owner's rating of the answer; null when unrated. */
+      feedback?: components["schemas"]["MessageFeedback"] | null;
     };
     /** AssistantMetadata */
     AssistantMetadata: {
@@ -11516,6 +11562,8 @@ export interface components {
       total_conversations: number;
       /** Total Questions */
       total_questions: number;
+      /** @description Ratings on the answers in these conversations. Conversation-level feedback is not included. */
+      feedback: components["schemas"]["MessageFeedbackCounts"];
     };
     /** ConversationRenameRequest */
     ConversationRenameRequest: {
@@ -14766,6 +14814,8 @@ export interface components {
       skill_provenance?: components["schemas"]["SkillExecutionReference"][] | null;
       /** Reasoning */
       reasoning?: string | null;
+      /** @description The conversation owner's rating of this answer; null when it is not rated. Separate from the conversation-level feedback. */
+      feedback?: components["schemas"]["MessageFeedback"] | null;
       /**
        * Num Tokens Question
        * @description Cumulative prompt tokens across all provider requests in the turn. Use context_prompt_tokens for context-window headroom.
@@ -14793,6 +14843,38 @@ export interface components {
        * @description Model-aware Skill-owned subset of context_prompt_tokens. Already included; do not add it to context usage again. Null for legacy rows.
        */
       skill_context_tokens?: number | null;
+    };
+    /**
+     * MessageFeedback
+     * @description A rating of one answer: 1 (good) or -1 (bad), with an optional comment.
+     */
+    MessageFeedback: {
+      /**
+       * Value
+       * @enum {integer}
+       */
+      value: -1 | 1;
+      /**
+       * Text
+       * @description Optional comment on the answer. Blank text is stored as null.
+       */
+      text?: string | null;
+    };
+    /**
+     * MessageFeedbackCounts
+     * @description How many answers their conversation owners rated good and bad.
+     */
+    MessageFeedbackCounts: {
+      /**
+       * Positive
+       * @description Answers rated good (1).
+       */
+      positive: number;
+      /**
+       * Negative
+       * @description Answers rated bad (-1).
+       */
+      negative: number;
     };
     /** MessageLogging */
     MessageLogging: {
@@ -14828,6 +14910,8 @@ export interface components {
       skill_provenance?: components["schemas"]["SkillExecutionReference"][] | null;
       /** Reasoning */
       reasoning?: string | null;
+      /** @description The conversation owner's rating of this answer; null when it is not rated. Separate from the conversation-level feedback. */
+      feedback?: components["schemas"]["MessageFeedback"] | null;
       /**
        * Num Tokens Question
        * @description Cumulative prompt tokens across all provider requests in the turn. Use context_prompt_tokens for context-window headroom.
@@ -29504,6 +29588,130 @@ export interface operations {
       };
     };
   };
+  set_message_feedback_api_v1_conversations__session_id__messages__message_id__feedback__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The UUID of the conversation/session */
+        session_id: string;
+        /** @description The UUID of the message (a question and its answer) */
+        message_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MessageFeedback"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MessageFeedback"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_message_feedback_api_v1_conversations__session_id__messages__message_id__feedback__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The UUID of the conversation/session */
+        session_id: string;
+        /** @description The UUID of the message (a question and its answer) */
+        message_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   set_title_of_conversation_api_v1_conversations__session_id__title__post: {
     parameters: {
       query?: never;
@@ -30492,6 +30700,69 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CursorPaginatedResponse_AssistantInsightQuestion_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_assistant_feedback_counts_api_v1_analysis_assistants__assistant_id__feedback__get: {
+    parameters: {
+      query?: {
+        days_since?: number;
+        from_date?: string | null;
+        to_date?: string | null;
+        include_followups?: boolean;
+      };
+      header?: never;
+      path: {
+        assistant_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MessageFeedbackCounts"];
         };
       };
       /** @description Bad Request */

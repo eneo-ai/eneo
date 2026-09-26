@@ -46,6 +46,8 @@ import {
   type AssistantInsightFilters,
   type AssistantInsightQuestion
 } from "./insights";
+import { AnswerFeedbackCell } from "./answer-feedback-cell";
+import { AnswerFeedbackSummary } from "./answer-feedback-summary";
 import { assistantQueryOptions } from "@/features/assistants/editor/use-assistant";
 
 type InsightsTab = "analysis" | "questions";
@@ -276,6 +278,12 @@ function QuestionsTab({
     // Room for whole words: on a phone the table scrolls sideways instead.
     { key: "question", header: t("question"), width: proportional(1, { minWidth: 240 }) },
     {
+      key: "feedback",
+      header: t("feedback_column"),
+      width: proportional(0.5),
+      renderCell: (item) => <AnswerFeedbackCell feedback={item.feedback} />
+    },
+    {
       key: "session_id",
       header: t("session"),
       width: pixel(136),
@@ -406,6 +414,7 @@ export function AssistantInsightsPage({ assistantId }: { assistantId: string }) 
           value={filters.includeFollowups ? t("yes") : t("no")}
         />
       </dl>
+      <AnswerFeedbackSummary assistantId={assistantId} filters={filters} />
 
       <FilterBar filters={filters} setFilters={setFilters} />
 

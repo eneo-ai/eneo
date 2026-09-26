@@ -21,6 +21,7 @@ from eneo.analysis.analysis import (
     ConversationInsightRequest,
     ConversationInsightResponse,
     Counts,
+    MessageFeedbackCounts,
     MetadataStatistics,
     MetadataStatisticsAggregated,
 )
@@ -282,6 +283,39 @@ async def get_most_recent_questions_paginated(
         limit=limit,
         next_cursor=next_cursor,
         previous_cursor=cursor,
+    )
+
+
+@router.get(
+    "/assistants/{assistant_id}/feedback/",
+    response_model=MessageFeedbackCounts,
+    description="Count the good and bad ratings of an assistant's answers within a time range.",
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def get_assistant_feedback_counts(
+    assistant_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    days_since: Annotated[int, Query(ge=0, le=90)] = 30,
+    from_date: datetime | None = None,
+    to_date: datetime | None = None,
+    include_followups: bool = False,
+):
+    """Count the ratings of the answers `/questions/` lists for the same filters.
+
+    Only per-answer ratings are counted; conversation-level feedback is not.
+    """
+    from_date, to_date = _normalize_datetime_range(
+        from_date=from_date,
+        to_date=to_date,
+        days_since=days_since,
+    )
+
+    service = container.analysis_service()
+    return await service.get_assistant_feedback_counts(
+        assistant_id=assistant_id,
+        from_date=from_date,
+        to_date=to_date,
+        include_followups=include_followups,
     )
 
 

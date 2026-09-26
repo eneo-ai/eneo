@@ -110,26 +110,26 @@ describe("ChatMessage", () => {
     expect(onActivityToggle).toHaveBeenCalledWith(more, { tab: "steps" });
   });
 
-  it("offers copy and more actions; thumbs only for the latest answer", () => {
+  it("offers copy and more actions; thumbs where the answer can be rated", () => {
     const onChange = vi.fn();
     const { rerender } = renderMessages(<ChatMessage message={answer} assistant={assistant} />);
     expect(screen.getByRole("button", { name: "Kopiera svaret" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Fler åtgärder" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Bra svar" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Betygsätt svaret" })).toBeNull();
 
     rerender(
-      <ChatMessage
-        message={answer}
-        assistant={assistant}
-        feedback={{ value: 1, pending: false, onChange }}
-      />
+      <ChatMessage message={answer} assistant={assistant} feedback={{ value: 1, onChange }} />
     );
-    const good = screen.getByRole("button", { name: "Bra svar" });
+    const rating = screen.getByRole("group", { name: "Betygsätt svaret" });
+    const good = within(rating).getByRole("button", { name: "Bra svar" });
     expect(good.getAttribute("aria-pressed")).toBe("true");
-    const bad = screen.getByRole("button", { name: "Dåligt svar" });
+    const bad = within(rating).getByRole("button", { name: "Dåligt svar" });
     expect(bad.getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(bad);
-    expect(onChange).toHaveBeenCalledWith(-1);
+    expect(onChange).toHaveBeenLastCalledWith(-1);
+    // Pressing the chosen thumb again clears the rating.
+    fireEvent.click(good);
+    expect(onChange).toHaveBeenLastCalledWith(null);
   });
 
   it("shows skeleton lines, not actions, while an answer streams", () => {
@@ -149,7 +149,7 @@ describe("ChatMessage", () => {
         <ChatMessage
           message={answer}
           assistant={assistant}
-          feedback={{ value: null, pending: false, onChange: vi.fn() }}
+          feedback={{ value: -1, onChange: vi.fn() }}
         />
         <PendingAnswer assistant={assistant} />
       </div>

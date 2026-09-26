@@ -662,6 +662,8 @@ class TestHighRiskExactRouteGuards:
             ("GET", "/conversations/"),
             ("GET", "/conversations/{session_id}/"),
             ("DELETE", "/conversations/{session_id}/"),
+            ("PUT", "/conversations/{session_id}/messages/{message_id}/feedback/"),
+            ("DELETE", "/conversations/{session_id}/messages/{message_id}/feedback/"),
             ("GET", "/assistants/{id}/sessions/"),
             ("GET", "/assistants/{id}/sessions/{session_id}/"),
             ("DELETE", "/assistants/{id}/sessions/{session_id}/"),
@@ -1190,7 +1192,9 @@ class TestReadOverrideSnapshot:
         ],
         "CONVERSATIONS_READ_OVERRIDES": [
             "chat",
+            "delete_message_feedback",
             "leave_feedback",
+            "set_message_feedback",
         ],
         "APPS_READ_OVERRIDES": [
             "run_app",

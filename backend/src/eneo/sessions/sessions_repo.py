@@ -5,7 +5,9 @@ from typing import Any, NamedTuple
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy.orm import aliased, selectinload
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import QueryableAttribute, aliased, selectinload
 
 from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
 from eneo.database.database import AsyncSession
@@ -18,6 +20,7 @@ from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.questions_table import (
     InfoBlobReferences,
+    QuestionFeedback,
     Questions,
     QuestionsFiles,
 )
@@ -27,6 +30,7 @@ from eneo.database.tables.user_groups_table import UserGroups
 from eneo.database.tables.users_table import Users
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
+from eneo.questions.question import MessageFeedback
 from eneo.questions.question_file_projection import attach_question_files
 from eneo.sessions.session import (
     SessionAdd,
@@ -424,6 +428,149 @@ class SessionRepository:
         )
         result = await self.session.execute(query)
         return [RecentSessionRow(*row) for row in result.tuples()]
+
+    @staticmethod
+    def _owned_by(
+        user_id: UUID | None, api_key_id: UUID | None
+    ) -> sa.ColumnElement[bool]:
+        """Sessions of exactly this principal: a user, or a service API key.
+
+        Never matches NULL against NULL, so a request without either principal
+        owns nothing.
+        """
+        if user_id is not None:
+            return Sessions.user_id == user_id
+        if api_key_id is not None:
+            return Sessions.api_key_id == api_key_id
+        return sa.false()
+
+    def _owned_message(
+        self,
+        *columns: sa.ColumnElement[Any] | QueryableAttribute[Any],
+        session_id: UUID,
+        message_id: UUID,
+        tenant_id: UUID,
+        user_id: UUID | None,
+        api_key_id: UUID | None,
+    ) -> sa.Select[Any]:
+        """A message in one of the principal's assistant or group chat conversations."""
+        query = (
+            sa.select(*columns)
+            .select_from(Questions)
+            .join(Sessions, Sessions.id == Questions.session_id)
+            .where(Questions.id == message_id)
+            .where(Questions.session_id == session_id)
+            .where(Questions.tenant_id == tenant_id)
+            .where(self._owned_by(user_id, api_key_id))
+            .where(
+                sa.or_(
+                    Sessions.assistant_id.is_not(None),
+                    Sessions.group_chat_id.is_not(None),
+                )
+            )
+        )
+        return self._exclude_helper_run_sessions(query)
+
+    async def get_owned_message_partner(
+        self,
+        *,
+        session_id: UUID,
+        message_id: UUID,
+        tenant_id: UUID,
+        user_id: UUID | None,
+        api_key_id: UUID | None,
+    ) -> OwnedChatPartner | None:
+        """The chat partner of a message in one of the principal's conversations.
+
+        None when the message is not in that session, the session belongs to
+        another principal or tenant, or it has no assistant or group chat.
+        """
+        query = self._owned_message(
+            Sessions.assistant_id,
+            Sessions.group_chat_id,
+            session_id=session_id,
+            message_id=message_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            api_key_id=api_key_id,
+        )
+        row = (await self.session.execute(query)).one_or_none()
+        if row is None:
+            return None
+        return OwnedChatPartner(
+            assistant_id=row.assistant_id,
+            group_chat_id=row.group_chat_id,
+        )
+
+    async def set_message_feedback(
+        self,
+        *,
+        session_id: UUID,
+        message_id: UUID,
+        tenant_id: UUID,
+        user_id: UUID | None,
+        api_key_id: UUID | None,
+        feedback: MessageFeedback,
+    ) -> MessageFeedback | None:
+        """Rate a message in one of the principal's conversations.
+
+        Replaces an earlier rating of the message. Returns None, and writes
+        nothing, when the message is not the principal's.
+        """
+        source = self._owned_message(
+            Questions.id,
+            sa.literal(feedback.value, sa.SmallInteger()),
+            sa.literal(feedback.text, sa.Text()),
+            sa.literal(user_id, PG_UUID(as_uuid=True)),
+            sa.literal(api_key_id, PG_UUID(as_uuid=True)),
+            session_id=session_id,
+            message_id=message_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            api_key_id=api_key_id,
+        )
+        insert = pg_insert(QuestionFeedback).from_select(
+            ["question_id", "value", "text", "user_id", "api_key_id"], source
+        )
+        stmt = insert.on_conflict_do_update(
+            index_elements=[QuestionFeedback.question_id],
+            set_={
+                "value": insert.excluded.value,
+                "text": insert.excluded.text,
+                "user_id": insert.excluded.user_id,
+                "api_key_id": insert.excluded.api_key_id,
+                "updated_at": sa.func.now(),
+            },
+        ).returning(QuestionFeedback.value, QuestionFeedback.text)
+        row = (await self.session.execute(stmt)).one_or_none()
+        if row is None:
+            return None
+        return MessageFeedback(value=row.value, text=row.text)
+
+    async def delete_message_feedback(
+        self,
+        *,
+        session_id: UUID,
+        message_id: UUID,
+        tenant_id: UUID,
+        user_id: UUID | None,
+        api_key_id: UUID | None,
+    ) -> None:
+        """Remove the rating of a message in one of the principal's conversations.
+
+        A no-op when the message has no rating or is not the principal's.
+        """
+        owned = self._owned_message(
+            Questions.id,
+            session_id=session_id,
+            message_id=message_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            api_key_id=api_key_id,
+        )
+        await self.session.execute(
+            sa.delete(QuestionFeedback).where(QuestionFeedback.question_id.in_(owned))
+        )
 
     async def get_for_helper_run(self, id: UUID, tenant_id: UUID) -> SessionInDB | None:
         """Load a helper-run session with its prior questions eager-loaded.

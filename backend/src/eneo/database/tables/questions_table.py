@@ -1,13 +1,21 @@
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Index
+from sqlalchemy import (
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    SmallInteger,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.associationproxy import AssociationProxy, association_proxy
 from sqlalchemy.inspection import inspect as sa_inspect
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.database.tables.ai_models_table import CompletionModels
+from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.base_class import BaseCrossReference, BasePublic
 from eneo.database.tables.files_table import Files
@@ -16,6 +24,7 @@ from eneo.database.tables.logging_table import logging_table
 from eneo.database.tables.service_table import Services
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.tenant_table import Tenants
+from eneo.database.tables.users_table import Users
 
 if TYPE_CHECKING:
     from eneo.database.tables.mcp_tool_references_table import McpToolReference
@@ -81,6 +90,11 @@ class Questions(BasePublic):
     mcp_tool_references: Mapped[list["McpToolReference"]] = relationship(
         order_by="[McpToolReference.tool_call_id, McpToolReference.order]"
     )
+    # Loaded with every question (one small IN query), so each path that turns
+    # rows into Question models carries the rating without its own option.
+    feedback: Mapped[Optional["QuestionFeedback"]] = relationship(
+        lazy="selectin", viewonly=True
+    )
 
     @property
     def skill_activation(self) -> Optional[dict[str, object]]:
@@ -90,6 +104,33 @@ class Questions(BasePublic):
         if "skill_activation_data" in state.unloaded:
             return None
         return self.skill_activation_data
+
+
+class QuestionFeedback(BasePublic):
+    """The conversation owner's rating of one answer, with an optional comment.
+
+    One row per answer: rating again replaces it, clearing deletes it. The
+    principal columns record who rated: the owning user, or the service API
+    key that owns the conversation. Independent of the conversation-level
+    rating on ``sessions.feedback_value``.
+    """
+
+    question_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Questions.id, ondelete="CASCADE")
+    )
+    value: Mapped[int] = mapped_column(SmallInteger)
+    text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="CASCADE"), nullable=True
+    )
+    api_key_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(ApiKeysV2.id, ondelete="SET NULL"), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint("question_id", name="uq_question_feedback_question_id"),
+        CheckConstraint("value IN (-1, 1)", name="ck_question_feedback_value"),
+    )
 
 
 class InfoBlobReferences(BaseCrossReference):

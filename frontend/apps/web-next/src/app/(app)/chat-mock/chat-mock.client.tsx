@@ -111,7 +111,7 @@ export function ChatMock({ sections }: { sections: MockSection[] }) {
                     }
                     feedback={
                       entry.message.id === "a-clean"
-                        ? { value: 1, pending: false, onChange: () => undefined }
+                        ? { value: 1, onChange: () => undefined }
                         : null
                     }
                   />

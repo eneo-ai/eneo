@@ -4,7 +4,7 @@ Additive: four nullable columns on model_providers. Existing providers read
 as never checked and without an expiry date.
 
 Revision ID: 202609261300
-Revises: 202609231001
+Revises: 202609261200
 """
 
 import sqlalchemy as sa
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "202609261300"
-down_revision = "202609231001"
+down_revision = "202609261200"
 branch_labels = None
 depends_on = None
 

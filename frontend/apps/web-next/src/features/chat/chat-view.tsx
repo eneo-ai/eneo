@@ -16,6 +16,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ComponentProps,
   type ReactNode
 } from "react";
 import { useAppContext } from "@/components/providers/app-context";
@@ -23,18 +24,19 @@ import { browserApi } from "@/lib/api/browser";
 import { invalidateConversationLists } from "@/lib/api/conversations";
 import { getErrorMessageForCode } from "@/lib/api/errors";
 import { createChatTransport, type ChatSendOptions } from "@/lib/chat/transport";
-import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
+import type { AnswerRating, ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
 import { rescueFocus } from "@/lib/focus-rescue";
 import { deriveActivity } from "./activity";
 import { ActivityPanel, type ActivityTab } from "./activity-panel";
 import { ActivityTimings } from "./activity-timings";
+import { useAnswerFeedback } from "./answer-feedback";
 import { disabledCapabilitiesForRequest } from "./chat-capabilities";
 import { ChatMessage, PendingAnswer, type ActivityRequest } from "./chat-message";
 import { Composer } from "./composer";
 import { ContextUsageBar } from "./context-usage-bar";
 import { ChatMcpServers, mcpConversationOptions } from "./mcp-controls";
-import { historyQueryKey, useSessionMutations } from "./session-actions";
+import { historyQueryKey } from "./session-actions";
 import { StartState } from "./start-state";
 import { releasePreviews, useAttachments, type Attachment } from "./use-attachments";
 import { useToolChoices } from "./use-tool-choices";
@@ -81,6 +83,24 @@ function quietLog(element: HTMLDivElement | null) {
 }
 
 /**
+ * A message of the conversation. Every finished answer of a saved
+ * conversation can be rated on its own; the rating starts from the one stored
+ * with the answer.
+ */
+function ConversationMessage({
+  sessionId,
+  ...props
+}: Omit<ComponentProps<typeof ChatMessage>, "feedback"> & { sessionId: string | null }) {
+  const { message, isStreaming } = props;
+  const [rating, rate] = useAnswerFeedback(message.id, message.metadata?.feedback ?? null);
+  const feedback =
+    sessionId !== null && message.role === "assistant" && !isStreaming
+      ? { value: rating, onChange: (value: AnswerRating) => rate(sessionId, value) }
+      : null;
+  return <ChatMessage {...props} feedback={feedback} />;
+}
+
+/**
  * One conversation: the start state, then the message list with the docked
  * composer. Remount it (a new `key`) for another conversation; a view that
  * unmounts while an answer streams lets the stream finish (the answer is
@@ -92,8 +112,6 @@ export function ChatView({
   initialSessionId = null,
   initialMessages = [],
   focusComposerIfLost = false,
-  feedback = null,
-  onRated,
   onSessionCreated,
   onNewConversation,
   onTitle,
@@ -111,10 +129,6 @@ export function ChatView({
    * may be gone, so the composer takes focus if focus was lost.
    */
   focusComposerIfLost?: boolean;
-  /** The session's feedback (session-level, shown on the latest answer). */
-  feedback?: 1 | -1 | null;
-  /** The answer thumbs rated the session. */
-  onRated?: (sessionId: string, value: 1 | -1) => void;
   onSessionCreated?: (sessionId: string) => void;
   /** Start a fresh conversation (offered when the context estimate overflows). */
   onNewConversation?: () => void;
@@ -161,7 +175,6 @@ export function ChatView({
   // The last question and its files, for "Försök igen" after an error.
   const [lastQuestion, setLastQuestion] = useState<{ text: string; files: SentFiles } | null>(null);
   const isNewSession = useRef(initialSessionId === null);
-  const { feedback: feedbackMutation } = useSessionMutations(partner, { onRated });
   // False once the view unmounted: its stream may still be running.
   const mounted = useRef(false);
   useEffect(() => {
@@ -425,7 +438,6 @@ export function ChatView({
 
   const canSubmit = input.trim().length > 0 && !attachments.uploading && !usage.willExceedContext;
 
-  const lastAssistantIndex = messages.findLastIndex((message) => message.role === "assistant");
   const activityMessage = activity
     ? messages.find((message) => message.id === activity.messageId)
     : undefined;
@@ -455,11 +467,6 @@ export function ChatView({
     activityTrigger.current = null;
     if (trigger) requestAnimationFrame(() => trigger.focus());
   }, [onActivityChange]);
-
-  const setFeedback = (value: 1 | -1) => {
-    if (!sessionIdRef.current) return;
-    feedbackMutation.mutate({ id: sessionIdRef.current, value });
-  };
 
   const errorText = error
     ? (getErrorMessageForCode(streamErrorCode, t) ?? (error.message || t("request_failed")))
@@ -622,8 +629,9 @@ export function ChatView({
             {messages.map((message, messageIndex) => {
               const streaming = busy && messageIndex === messages.length - 1;
               return (
-                <ChatMessage
+                <ConversationMessage
                   key={message.id}
+                  sessionId={sessionId}
                   message={message}
                   assistant={assistantIdentity}
                   isStreaming={streaming}
@@ -634,15 +642,6 @@ export function ChatView({
                   activityExpanded={activity?.messageId === message.id}
                   onActivityToggle={(trigger, request) =>
                     toggleActivity(message.id, trigger, request)
-                  }
-                  feedback={
-                    messageIndex === lastAssistantIndex && sessionId && !streaming
-                      ? {
-                          value: feedback,
-                          pending: feedbackMutation.isPending,
-                          onChange: setFeedback
-                        }
-                      : null
                   }
                 />
               );
