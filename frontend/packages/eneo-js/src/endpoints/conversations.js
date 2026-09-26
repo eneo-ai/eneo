@@ -148,7 +148,7 @@ export function initConversations(client) {
      * @param {(data: import("../types/resources").SSE.Text) => void} [params.callbacks.onText] Callback to run when a new token/word of the answer is received
      * @param {(data: import("../types/resources").SSE.Reasoning) => void} [params.callbacks.onReasoning] Callback to run when a chunk of the model's reasoning/thinking text is received
      * @param {(data: import("../types/resources").SSE.Files) => void} [params.callbacks.onImage] Callback to run when generated files of the answer is received
-     * @param {(data: import("../types/resources").SSE.Eneo | import("../types/resources").SSE.TokenUsage) => void} [params.callbacks.onEneoEvent] Callback to run when an eneo or token-usage event is received
+     * @param {(data: import("../types/resources").SSE.TokenUsage) => void} [params.callbacks.onEneoEvent] Callback to run when a token-usage event is received
      * @param {(data: import("../types/resources").SSE.ToolCall) => void} [params.callbacks.onToolCall] Callback to run when MCP tools are being executed
      * @param {(data: import("../types/resources").SSE.ToolApprovalRequired) => void} [params.callbacks.onToolApprovalRequired] Callback to run when MCP tools require user approval
      * @param {(data: import("../types/resources").SSE.ToolApprovalTimeout) => void} [params.callbacks.onToolApprovalTimeout] Callback to run when a pending tool approval expires
@@ -241,7 +241,6 @@ export function initConversations(client) {
                   callbacks?.onImage?.(data);
                   break;
 
-                case "eneo_event":
                 case "token_usage":
                   callbacks?.onEneoEvent?.(data);
                   break;

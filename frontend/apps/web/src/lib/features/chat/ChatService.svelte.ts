@@ -689,10 +689,9 @@ export class ChatService {
               if (!ensureCurrentSession(event)) return;
 
               if (event.eneo_event_type === "token_usage" && "usage" in event) {
-                // The backend routes token_usage events through the same SSE
-                // channel as eneo events. Reflect them on the live message
-                // so reload-from-history matches the in-memory state, then
-                // expose the running context fill for the UI bar.
+                // Reflect token usage on the live message so reload-from-history
+                // matches the in-memory state, then expose the running context
+                // fill for the UI bar.
                 const usage = event.usage;
                 if (ref) {
                   ref.num_tokens_question = usage.prompt_tokens;
