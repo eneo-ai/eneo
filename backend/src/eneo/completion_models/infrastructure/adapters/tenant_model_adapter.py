@@ -1278,6 +1278,27 @@ class TenantModelAdapter(CompletionModelAdapter):
                     and skill_runtime.tool_definition is not None
                 )
                 forced_final = False
+                answer_rounds = _RoundJoiner()
+                reasoning_rounds = _RoundJoiner()
+                answer_text: str | None = None
+                reasoning_text: str | None = None
+
+                def _keep_round(round_msg: _LiteLLMMessage) -> None:
+                    # Every round's text and reasoning belong to the answer,
+                    # as they do when the same turn is streamed.
+                    nonlocal answer_text, reasoning_text
+                    answer_rounds.start_round()
+                    reasoning_rounds.start_round()
+                    if round_msg.content:
+                        text = self._strip_thinking_content(round_msg.content)
+                        joined = answer_rounds.join(text) if text else ""
+                        answer_text = (answer_text or "") + joined
+                    reasoning = getattr(round_msg, "reasoning_content", None)
+                    if reasoning:
+                        joined = reasoning_rounds.join(reasoning)
+                        reasoning_text = (reasoning_text or "") + joined
+
+                _keep_round(msg)
 
                 async def _follow_up_completion() -> bool:
                     """Run the next completion and refresh msg; False when empty."""
@@ -1326,6 +1347,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                         return False
                     choice = response.choices[0]
                     msg = choice.message
+                    _keep_round(msg)
                     return True
 
                 while msg.tool_calls and (mcp_proxy or activation_available):
@@ -1503,8 +1525,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                     completion.generated_images = captured_images
                 if collected_tool_metadata:
                     completion.tool_calls_metadata = collected_tool_metadata
-                if msg.content:
-                    completion.text = self._strip_thinking_content(msg.content)
+                completion.text = answer_text
+                completion.reasoning_content = reasoning_text
                 completion.stop = choice.finish_reason == "stop"
 
             if used_input_estimate:

@@ -98,10 +98,12 @@ def _reasoning_chunk(reasoning: str):
     return SimpleNamespace(choices=[choice])
 
 
-def _response(*, content=None, tool_calls=None, finish_reason="stop"):
+def _response(
+    *, content=None, reasoning_content=None, tool_calls=None, finish_reason="stop"
+):
     message = SimpleNamespace(
         content=content,
-        reasoning_content=None,
+        reasoning_content=reasoning_content,
         tool_calls=tool_calls,
     )
     choice = SimpleNamespace(message=message, finish_reason=finish_reason)
@@ -1550,3 +1552,63 @@ async def test_iterate_stream_separates_reasoning_of_rounds_around_a_tool_call()
     # Reasoning and answer text are joined separately: the first answer text
     # follows reasoning, not earlier answer text, so it gets no break.
     assert _streamed_texts(completions) == ["It is ten."]
+
+
+# (reasoning, text, calls_a_tool) for each model round of one turn.
+_SCRIPTED_TURN = [
+    ("I need the time.", "Jag hämtar tiden.", True),
+    (None, None, True),
+    ("Format it.", "**Aktuell tid:** 10:00", False),
+]
+
+
+def _streamed_round(index: int, reasoning, text, calls_a_tool: bool):
+    chunks = []
+    if reasoning:
+        chunks.append(_reasoning_chunk(reasoning))
+    if text:
+        chunks.append(_text_chunk(text, finish_reason=None if calls_a_tool else "stop"))
+    if calls_a_tool:
+        chunks.append(_tool_call_chunk(tool_call_id=f"call_{index}"))
+    return chunks
+
+
+def _non_streamed_round(index: int, reasoning, text, calls_a_tool: bool):
+    if calls_a_tool:
+        return _response(
+            content=text,
+            reasoning_content=reasoning,
+            tool_calls=[_response_tool_call(f"call_{index}", '{"q":"x"}')],
+            finish_reason="tool_calls",
+        )
+    return _response(content=text, reasoning_content=reasoning)
+
+
+@pytest.mark.parametrize(
+    ("field", "expected"),
+    [
+        ("text", "Jag hämtar tiden.\n\n**Aktuell tid:** 10:00"),
+        ("reasoning_content", "I need the time.\n\nFormat it."),
+    ],
+)
+async def test_non_streaming_answer_matches_the_streamed_answer(
+    field: str, expected: str
+):
+    streamed = await _stream_rounds(
+        [_streamed_round(i, *round_) for i, round_ in enumerate(_SCRIPTED_TURN)]
+    )
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(
+            side_effect=[
+                _non_streamed_round(i, *round_)
+                for i, round_ in enumerate(_SCRIPTED_TURN)
+            ]
+        ),
+    ):
+        completion = await _make_completion_adapter().get_response(
+            context=SimpleNamespace(), model_kwargs={}, mcp_proxy=_FakeMCPProxy()
+        )
+
+    assert "".join(getattr(c, field) or "" for c in streamed) == expected
+    assert getattr(completion, field) == expected
