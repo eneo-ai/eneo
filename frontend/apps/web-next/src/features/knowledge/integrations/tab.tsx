@@ -47,12 +47,15 @@ function ImportAction() {
   return <p className="text-ax-text-secondary text-sm">{t(action.messageKey)}</p>;
 }
 
+/** The integrations tab; `labelledBy` is the tab, which names an ungrouped table. */
 export function IntegrationsTab({
   canCreate,
-  integrationRequestFormUrl
+  integrationRequestFormUrl,
+  labelledBy
 }: {
   canCreate: boolean;
   integrationRequestFormUrl?: string;
+  labelledBy: string;
 }) {
   const t = useTranslations();
   const { space } = useSpace();
@@ -103,7 +106,7 @@ export function IntegrationsTab({
                     {model.inSpace ? "" : ` (${t("disabled")})`}
                   </h3>
                 )}
-                <IntegrationItemsTable rows={modelRows} labelledBy={headingId} />
+                <IntegrationItemsTable rows={modelRows} labelledBy={headingId ?? labelledBy} />
               </div>
             );
           })}

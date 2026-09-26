@@ -105,7 +105,8 @@ describe("KnowledgePage", () => {
       })
     );
 
-    const table = screen.getByRole("table");
+    // One embedding model: no model headings, so the table takes the tab's name.
+    const table = screen.getByRole("table", { name: "Samlingar" });
     const policy = within(table).getByRole("link", { name: "Upphandlingspolicy" }).closest("tr")!;
     expect(within(policy).getByText("42 filer")).toBeTruthy();
     expect(within(policy).getByText("Indexerad")).toBeTruthy();
@@ -158,7 +159,7 @@ describe("KnowledgePage", () => {
       "websites"
     );
 
-    const table = screen.getByRole("table");
+    const table = screen.getByRole("table", { name: "Webbplatser" });
     // The same words as on the space overview.
     expect(within(table).getByText("Inte crawlad ännu")).toBeTruthy();
     expect(within(table).getByText("Synkfel")).toBeTruthy();
@@ -198,7 +199,7 @@ describe("KnowledgePage", () => {
       "integrations"
     );
 
-    const table = await screen.findByRole("table");
+    const table = await screen.findByRole("table", { name: "Integrationer" });
     const names = () =>
       within(table)
         .getAllByRole("row")

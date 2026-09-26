@@ -265,7 +265,10 @@ export function CollectionActions({ collection }: { collection: Collection }) {
   );
 }
 
-/** One embedding model's collections; a grouped table is named by its model heading. */
+/**
+ * One embedding model's collections, named by `labelledBy`: the model heading
+ * when grouped, else the tab.
+ */
 function CollectionsTable({
   collections,
   sortConfig,
@@ -273,7 +276,7 @@ function CollectionsTable({
 }: {
   collections: Collection[];
   sortConfig: UseTableSortableConfig<CollectionSortKey>;
-  labelledBy?: string;
+  labelledBy: string;
 }) {
   const t = useTranslations();
   const { routeId } = useSpace();
@@ -345,7 +348,14 @@ function CollectionsTable({
   );
 }
 
-export function CollectionsTab({ canCreate }: { canCreate: boolean }) {
+/** The collections tab; `labelledBy` is the tab, which names an ungrouped table. */
+export function CollectionsTab({
+  canCreate,
+  labelledBy
+}: {
+  canCreate: boolean;
+  labelledBy: string;
+}) {
   const t = useTranslations();
   const { space } = useSpace();
   const groupId = useId();
@@ -428,7 +438,11 @@ export function CollectionsTab({ canCreate }: { canCreate: boolean }) {
                 {model.inSpace ? "" : ` (${t("disabled")})`}
               </h3>
             )}
-            <CollectionsTable collections={rows} sortConfig={sortConfig} labelledBy={headingId} />
+            <CollectionsTable
+              collections={rows}
+              sortConfig={sortConfig}
+              labelledBy={headingId ?? labelledBy}
+            />
           </div>
         );
       })}

@@ -85,13 +85,17 @@ export function KnowledgePage({
           >
             <RemovalFocusScope target={panelRef}>
               {tab === "collections" ? (
-                <CollectionsTab canCreate={can("create", "collection")} />
+                <CollectionsTab
+                  canCreate={can("create", "collection")}
+                  labelledBy={tabId("collections")}
+                />
               ) : tab === "websites" ? (
-                <WebsitesTab canCreate={can("create", "website")} />
+                <WebsitesTab canCreate={can("create", "website")} labelledBy={tabId("websites")} />
               ) : (
                 <IntegrationsTab
                   canCreate={can("create", "integrationKnowledge")}
                   integrationRequestFormUrl={integrationRequestFormUrl}
+                  labelledBy={tabId("integrations")}
                 />
               )}
             </RemovalFocusScope>
