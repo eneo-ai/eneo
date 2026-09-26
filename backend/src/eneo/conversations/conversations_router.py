@@ -20,19 +20,23 @@ from eneo.authentication.auth_dependencies import (
     require_resource_permission_for_method,
     require_session_auth,
 )
+from eneo.conversations.application.recent_conversations_service import (
+    RecentConversationsService,
+)
 from eneo.conversations.conversation_models import (
     ChatTurnDiagnostics,
     ConversationRenameRequest,
     ConversationRequest,
     PreflightRequest,
     PreflightResponse,
+    RecentConversation,
 )
 from eneo.conversations.ui_message_stream import to_ui_message_stream_response
 from eneo.database.database import AsyncSession
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.main.logging import get_logger
-from eneo.main.models import CursorPaginatedResponse
+from eneo.main.models import CursorPaginatedResponse, PaginatedResponse
 from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     get_approval_manager,
@@ -65,6 +69,9 @@ from eneo.sessions.session_protocol import (
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+RECENT_CONVERSATIONS_DEFAULT_LIMIT = 20
+RECENT_CONVERSATIONS_MAX_LIMIT = 50
 
 
 def _raise_conversation_scope_denied(http_request: Request, message: str) -> NoReturn:
@@ -584,6 +591,42 @@ async def list_conversations(
         previous=previous,
         total_count=total_count,
     )
+
+
+# Declared before "/{session_id}/": the path would otherwise match "recent" as a
+# session id and fail its UUID validation.
+@router.get(
+    "/recent/",
+    response_model=PaginatedResponse[RecentConversation],
+    description=(
+        "List the caller's own latest conversations across the personal "
+        "assistant, space assistants and group chats they can still open, "
+        "latest activity first."
+    ),
+    responses=responses.get_responses([403]),
+    dependencies=[Depends(require_session_auth)],
+)
+async def list_recent_conversations(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    limit: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=RECENT_CONVERSATIONS_MAX_LIMIT,
+            description="How many conversations to return.",
+        ),
+    ] = RECENT_CONVERSATIONS_DEFAULT_LIMIT,
+) -> PaginatedResponse[RecentConversation]:
+    """Each item names its assistant or group chat and that one's space, so a
+    client can label and link it without further requests. Session-only: the
+    list serves the signed-in user's own navigation.
+    """
+    service = RecentConversationsService(
+        user=container.user(),
+        session_repo=container.session_repo(),
+        actor_manager=container.actor_manager(),
+    )
+    return PaginatedResponse(items=await service.list_recent(limit=limit))
 
 
 @router.get(
