@@ -26,3 +26,15 @@ it("styles toasts from the bundled stylesheet instead of an injected <style>", a
   // recreate it for the new version with `bun patch sonner`.
   expect(document.querySelectorAll("style")).toHaveLength(0);
 });
+
+it("finds open dialogs without watching every DOM change on the page", () => {
+  // A body-wide MutationObserver ran on each streamed chat token; dialogs
+  // report themselves instead (open-modals.ts).
+  const observe = vi.spyOn(MutationObserver.prototype, "observe");
+  renderInApp(<Toaster theme="light" />);
+  expect(observe).not.toHaveBeenCalledWith(
+    document.body,
+    expect.objectContaining({ subtree: true })
+  );
+  observe.mockRestore();
+});

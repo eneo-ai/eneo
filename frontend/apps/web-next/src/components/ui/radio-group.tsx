@@ -4,6 +4,7 @@ import * as React from "react";
 import { RadioGroup as RadioGroupPrimitive } from "radix-ui";
 import { CircleIcon } from "lucide-react";
 
+import { TOGGLE_HIT_AREA } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 
 function RadioGroup({
@@ -27,7 +28,8 @@ function RadioGroupItem({
     <RadioGroupPrimitive.Item
       data-slot="radio-group-item"
       className={cn(
-        "border-input text-primary focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 aria-invalid:border-destructive aspect-square size-4 shrink-0 rounded-full border shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50",
+        "border-input text-primary aria-invalid:border-destructive focus-visible:outline-ring relative aspect-square size-4 shrink-0 rounded-full border shadow-xs transition-[color,box-shadow] focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+        TOGGLE_HIT_AREA,
         className
       )}
       {...props}

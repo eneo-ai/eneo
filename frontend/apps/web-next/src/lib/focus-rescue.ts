@@ -8,14 +8,30 @@
  * the page behind them.
  */
 
-/** Focus is on nothing, inside a dialog that has closed, or on a closed menu's item. */
+/**
+ * A menu that is still in the page but not shown: a closed Astryx menu (a
+ * hidden popover) or a Radix menu playing its close animation. Focus left on
+ * one of its items is on nothing the user can see.
+ */
+function isHiddenMenu(menu: Element): boolean {
+  if (menu.closest('[hidden], [data-state="closed"]')) return true;
+  const popover = menu.closest("[popover]");
+  // Without the Popover API (jsdom) a popover's state cannot be read.
+  if (!popover || typeof HTMLElement.prototype.showPopover !== "function") return false;
+  return !popover.matches(":popover-open");
+}
+
+/**
+ * Focus is on nothing, inside a dialog that has closed, or on an item of a
+ * menu that is no longer shown. An open menu (one the user just opened) is
+ * not lost focus.
+ */
 export function isFocusLost(): boolean {
   const active = document.activeElement;
-  return (
-    !active ||
-    active === document.body ||
-    active.closest('dialog:not([open]), [role="menu"]') !== null
-  );
+  if (!active || active === document.body) return true;
+  if (active.closest("dialog:not([open])")) return true;
+  const menu = active.closest('[role="menu"]');
+  return menu !== null && isHiddenMenu(menu);
 }
 
 /**

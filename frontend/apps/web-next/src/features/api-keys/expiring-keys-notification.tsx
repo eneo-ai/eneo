@@ -117,9 +117,9 @@ export function ExpiringKeysNotification({ alignment = "end" }: { alignment?: "s
                       isUrgent(item) ? "bg-ax-error size-2.5" : "bg-ax-warning size-2"
                     )}
                   />
-                  <span className="truncate text-sm" title={item.name}>
-                    {item.name}
-                  </span>
+                  {/* Wraps instead of truncating: a title tooltip is not
+                      reachable with the keyboard or on touch. */}
+                  <span className="min-w-0 text-sm wrap-anywhere">{item.name}</span>
                   {item.keySuffix && hasDuplicateName(item.name, items) ? (
                     <span className="text-ax-text-secondary shrink-0 font-mono text-xs">
                       ...{item.keySuffix}

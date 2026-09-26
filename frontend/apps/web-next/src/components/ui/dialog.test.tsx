@@ -1,11 +1,25 @@
 // @vitest-environment jsdom
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
+import {
+  Dialog as AstryxDialog,
+  DialogHeader as AstryxDialogHeader
+} from "@astryxdesign/core/Dialog";
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from "./alert-dialog";
 import { Button } from "./button";
 import {
   Dialog,
@@ -312,5 +326,244 @@ describe("Dialog", () => {
 
     expect(await within(dialog).findByText("Namnet kunde inte sparas")).toBeTruthy();
     toast.dismiss();
+  });
+
+  it("returns focus to a button the browser never focused on press (Safari, iOS)", async () => {
+    renderInApp(<ControlledDialog />);
+    const opener = screen.getByRole("button", { name: "Redigera" });
+    // Safari fires the pointer events and the click but leaves focus on <body>.
+    fireEvent.pointerDown(opener);
+    fireEvent.click(opener);
+    expect(document.activeElement).not.toBe(opener);
+    const dialog = await screen.findByRole("dialog", { name: "Byt namn på samlingen" });
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("closes the dialog opened last with Escape, also when it was opened before", async () => {
+    // Astryx orders its Escape stack by first registration: a dialog kept
+    // mounted from an earlier opening would sit below one opened since.
+    function Siblings() {
+      const [first, setFirst] = useState(false);
+      const [second, setSecond] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setFirst(true)}>
+            Öppna första
+          </button>
+          <button type="button" onClick={() => setSecond(true)}>
+            Öppna andra
+          </button>
+          <Dialog open={first} onOpenChange={setFirst}>
+            <DialogContent>
+              <DialogTitle>Första</DialogTitle>
+            </DialogContent>
+          </Dialog>
+          <Dialog open={second} onOpenChange={setSecond}>
+            <DialogContent>
+              <DialogTitle>Andra</DialogTitle>
+              <button type="button" onClick={() => setFirst(true)}>
+                Öppna första härifrån
+              </button>
+            </DialogContent>
+          </Dialog>
+        </>
+      );
+    }
+    renderInApp(<Siblings />);
+    fireEvent.click(screen.getByRole("button", { name: "Öppna första" }));
+    const first = await screen.findByRole("dialog", { name: "Första" });
+    fireEvent.keyDown(first, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Första" })).toBeNull());
+
+    fireEvent.click(screen.getByRole("button", { name: "Öppna andra" }));
+    const second = await screen.findByRole("dialog", { name: "Andra" });
+    fireEvent.click(within(second).getByRole("button", { name: "Öppna första härifrån" }));
+    const reopened = await screen.findByRole("dialog", { name: "Första" });
+
+    fireEvent.keyDown(reopened, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Första" })).toBeNull());
+    expect(screen.getByRole("dialog", { name: "Andra" })).toBeTruthy();
+  });
+
+  it("stacks the footer in DOM order, so focus order follows what is seen", () => {
+    renderInApp(
+      <Dialog open onOpenChange={() => {}}>
+        <DialogContent>
+          <RenameBody />
+        </DialogContent>
+      </Dialog>
+    );
+    const footer = document.querySelector('[data-slot="dialog-footer"]')!;
+    expect(footer.className).not.toMatch(/reverse/);
+  });
+
+  it("never submits a form from its trigger or close button", async () => {
+    const onSubmit = vi.fn((event: React.FormEvent) => event.preventDefault());
+    renderInApp(
+      <form onSubmit={onSubmit}>
+        <Dialog>
+          <DialogTrigger asChild>
+            <Button>Byt namn</Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogTitle>Byt namn på samlingen</DialogTitle>
+            <form onSubmit={onSubmit}>
+              <DialogFooter>
+                <DialogClose asChild>
+                  <Button variant="outline">Avbryt</Button>
+                </DialogClose>
+                <Button type="submit">Spara</Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </form>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Byt namn" }));
+    const dialog = await screen.findByRole("dialog", { name: "Byt namn på samlingen" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("moves toasts to the dialog opened last and back to the page when all close", async () => {
+    function Stacked() {
+      const [second, setSecond] = useState(false);
+      return (
+        <>
+          <ControlledDialog />
+          <Dialog open={second} onOpenChange={setSecond}>
+            <DialogContent>
+              <DialogTitle>Andra</DialogTitle>
+            </DialogContent>
+          </Dialog>
+          <button type="button" onClick={() => setSecond(true)}>
+            Öppna andra
+          </button>
+        </>
+      );
+    }
+    renderInApp(
+      <>
+        <Toaster />
+        <Stacked />
+      </>
+    );
+    const toasterIn = (element: HTMLElement) =>
+      within(element).queryByRole("region", { name: /Aviseringar/ });
+
+    fireEvent.click(screen.getByRole("button", { name: "Redigera" }));
+    const first = await screen.findByRole("dialog", { name: "Byt namn på samlingen" });
+    await waitFor(() => expect(toasterIn(first)).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Öppna andra" }));
+    const second = await screen.findByRole("dialog", { name: "Andra" });
+    await waitFor(() => expect(toasterIn(second)).toBeTruthy());
+    expect(toasterIn(first)).toBeNull();
+
+    fireEvent.keyDown(second, { key: "Escape" });
+    await waitFor(() => expect(toasterIn(first)).toBeTruthy());
+    fireEvent.keyDown(first, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getAllByRole("region", { name: /Aviseringar/ })).toHaveLength(1);
+  });
+
+  it("keeps Astryx announcements audible while it is open (the page behind is inert)", async () => {
+    function Announcer() {
+      const announce = useAnnounce();
+      return (
+        <button type="button" onClick={() => announce("Kopierat")}>
+          Kopiera
+        </button>
+      );
+    }
+    function WithAnnouncer() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Öppna
+          </button>
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogContent>
+              <DialogTitle>Nyckel</DialogTitle>
+              <Announcer />
+            </DialogContent>
+          </Dialog>
+        </>
+      );
+    }
+    renderInApp(
+      <>
+        <Toaster />
+        <WithAnnouncer />
+      </>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Öppna" }));
+    const dialog = await screen.findByRole("dialog", { name: "Nyckel" });
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Kopiera" }));
+
+    await waitFor(() =>
+      expect(dialog.querySelector('[data-astryx-live-region="polite"]')?.textContent).toBe(
+        "Kopierat"
+      )
+    );
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() =>
+      expect(document.querySelector('[data-astryx-live-region="polite"]')?.parentElement).toBe(
+        document.body
+      )
+    );
+  });
+
+  it("also shows toasts in a modal opened outside these wrappers (Astryx Dialog)", async () => {
+    renderInApp(
+      <>
+        <Toaster />
+        <AstryxDialog isOpen onOpenChange={() => {}}>
+          <AstryxDialogHeader title="Ny yta" />
+        </AstryxDialog>
+      </>
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Ny yta" });
+    await waitFor(() =>
+      expect(within(dialog).getByRole("region", { name: /Aviseringar/ })).toBeTruthy()
+    );
+  });
+});
+
+describe("AlertDialog", () => {
+  it("never submits a form from Cancel or the action", async () => {
+    const onSubmit = vi.fn((event: React.FormEvent) => event.preventDefault());
+    const onAction = vi.fn();
+    renderInApp(
+      <AlertDialog open onOpenChange={() => {}}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Ta bort samlingen?</AlertDialogTitle>
+          </AlertDialogHeader>
+          <form onSubmit={onSubmit}>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Avbryt</AlertDialogCancel>
+              <AlertDialogAction onClick={onAction}>Ta bort</AlertDialogAction>
+            </AlertDialogFooter>
+          </form>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort samlingen?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
+
+    expect(onAction).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });

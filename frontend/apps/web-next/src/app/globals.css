@@ -262,6 +262,18 @@
   }
 }
 
+/*
+ * 8. Hover tint on filled legacy controls (shadcn Button and Badge fills), the
+ *    way Astryx does it: the neutral hover overlay is painted over the fill
+ *    instead of fading the fill. A faded fill lightens the background behind
+ *    white text (a 90% accent is 4.15:1); the overlay darkens it in light mode
+ *    and lightens it behind the dark on-colour in dark mode, so the label keeps
+ *    its contrast (checked in eneo-theme.contrast.test.ts).
+ */
+@utility bg-ax-hover-overlay {
+  background-image: linear-gradient(var(--color-overlay-hover), var(--color-overlay-hover));
+}
+
 @layer base {
   /* Full-strength ring colour for any outline an element draws without its own
      colour: a 50% ring is ~2:1 on white, below the 3:1 a focus indicator needs

@@ -64,6 +64,9 @@ describe("ExpiringKeysNotification", () => {
     expect(
       within(panel).getByRole("link", { name: "Hantera API-nycklar" }).getAttribute("href")
     ).toBe("/account/api-keys");
+    // Names wrap instead of being cut off behind a title tooltip.
+    expect(within(panel).getByText("Integration").className).toContain("wrap-anywhere");
+    expect(panel.querySelector("[title]")).toBeNull();
     await expectNoAxeViolations(document.body);
 
     fireEvent.keyDown(panel, { key: "Escape" });

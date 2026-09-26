@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
   AlertDialog,
@@ -17,12 +17,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 /**
- * Confirmation dialog for destructive actions. With `confirmValue` set, the
- * user must type it (e.g. the resource name) before the action is enabled.
- */
-/**
  * Controlled confirmation dialog without a trigger, for actions launched from
- * dropdown menus (the menu closes before the dialog opens).
+ * dropdown menus (the menu closes before the dialog opens). While `pending`,
+ * neither Cancel nor Escape closes it.
  */
 export function ConfirmDialogControlled({
   open,
@@ -45,7 +42,12 @@ export function ConfirmDialogControlled({
 }) {
   const t = useTranslations();
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next || !pending) onOpenChange(next);
+      }}
+    >
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
@@ -62,6 +64,12 @@ export function ConfirmDialogControlled({
   );
 }
 
+/**
+ * Confirmation dialog for destructive actions. With `confirmValue` set, the
+ * user must type it (e.g. the resource name) before the action is enabled.
+ * While the action runs it cannot be closed; when it fails (the caller reports
+ * the error) the dialog stays open with what the user typed.
+ */
 export function ConfirmDialog({
   trigger,
   title,
@@ -82,18 +90,36 @@ export function ConfirmDialog({
   onConfirm: () => void | Promise<void>;
 }) {
   const t = useTranslations();
+  const inputId = useId();
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState("");
+  const [running, setRunning] = useState(false);
+  const busy = pending || running;
   const blocked = confirmValue !== undefined && typed !== confirmValue;
 
+  function changeOpen(next: boolean) {
+    if (!next && busy) return;
+    setOpen(next);
+    if (!next) setTyped("");
+  }
+
   async function confirm() {
-    await onConfirm();
+    setRunning(true);
+    try {
+      await onConfirm();
+    } catch {
+      // The caller reports the failure (a toast from its mutation); keep the
+      // dialog open so the user can retry or cancel.
+      return;
+    } finally {
+      setRunning(false);
+    }
     setOpen(false);
     setTyped("");
   }
 
   return (
-    <AlertDialog open={open} onOpenChange={setOpen}>
+    <AlertDialog open={open} onOpenChange={changeOpen}>
       <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
@@ -102,9 +128,9 @@ export function ConfirmDialog({
         </AlertDialogHeader>
         {confirmValue !== undefined ? (
           <div className="flex flex-col gap-2">
-            <Label htmlFor="confirm-value">{confirmValueLabel}</Label>
+            <Label htmlFor={inputId}>{confirmValueLabel}</Label>
             <Input
-              id="confirm-value"
+              id={inputId}
               value={typed}
               placeholder={confirmValue}
               onChange={(event) => setTyped(event.target.value)}
@@ -112,8 +138,8 @@ export function ConfirmDialog({
           </div>
         ) : null}
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>{t("cancel")}</AlertDialogCancel>
-          <Button variant="destructive" disabled={blocked || pending} onClick={confirm}>
+          <AlertDialogCancel disabled={busy}>{t("cancel")}</AlertDialogCancel>
+          <Button variant="destructive" disabled={blocked || busy} onClick={() => void confirm()}>
             {confirmLabel}
           </Button>
         </AlertDialogFooter>

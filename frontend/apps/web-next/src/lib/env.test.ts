@@ -48,6 +48,26 @@ it("accepts an accessibility statement URL and rejects anything else", () => {
   );
 });
 
+it.each(["ACCESSIBILITY_STATEMENT_URL", "HELP_CENTER_URL", "REQUEST_INTEGRATION_FORM_URL"])(
+  "treats an empty %s as unset and only accepts http(s) links",
+  (name) => {
+    const base = { ENEO_BACKEND_URL: "http://localhost:8123", SESSION_SECRET: SECRET };
+    // `NAME=` in an env file must not stop the app from booting.
+    expect(parseEnv({ ...base, [name]: "" })[name as keyof ReturnType<typeof parseEnv>]).toBe(
+      undefined
+    );
+    // Rendered as href: no script or data URLs.
+    for (const url of ["javascript:alert(1)", "data:text/html,hej", "ftp://example.com/x"]) {
+      expect(() => parseEnv({ ...base, [name]: url })).toThrow(new RegExp(name));
+    }
+    expect(
+      parseEnv({ ...base, [name]: "http://intranet.local/hjalp" })[
+        name as keyof ReturnType<typeof parseEnv>
+      ]
+    ).toBe("http://intranet.local/hjalp");
+  }
+);
+
 it("parses enabled boolean feature flags", () => {
   const env = parseEnv({
     ENEO_BACKEND_URL: "http://localhost:8123",

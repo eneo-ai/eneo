@@ -21,13 +21,18 @@ or invalid required vars fail the build/boot fast. This maps the old SvelteKit
 | `OIDC_SCOPES` | Default `openid profile email offline_access`. |
 | `APP_ORIGIN` | Public origin used to build OIDC redirect URIs. Default `http://localhost:3100`. In prod set to the deployed origin (drives the redirect URI registered with the IdP — see CUTOVER.md). |
 
-## Optional feature flags
+## Optional feature flags and links
+
+The link URLs must be `http://` or `https://` (they are rendered as links).
+An empty value (`HELP_CENTER_URL=`) counts as unset.
 
 | Var | Default | Purpose |
 |---|---|---|
+| `SHOW_WEB_SEARCH` | `false` | Offers web search in the chat. |
 | `SHOW_HELP_CENTER` | `false` | Shows the help-center link in the admin shell. |
 | `HELP_CENTER_URL` | — | URL for the above. |
 | `REQUEST_INTEGRATION_FORM_URL` | — | "Request an integration" link target. |
+| `ACCESSIBILITY_STATEMENT_URL` | — | The deploying organisation's accessibility statement (_tillgänglighetsredogörelse_, required by DOS-lagen). Linked from every public page (login, login failed, activation, deactivated organisation) and from the profile menu. Unset ⇒ no link. |
 
 ## Migration mapping (SvelteKit `apps/web` → web-next)
 
@@ -39,6 +44,7 @@ or invalid required vars fail the build/boot fast. This maps the old SvelteKit
 | — | `SESSION_SECRET` | **new** (cookie encryption) |
 | — | `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` / `OIDC_SCOPES` | **new** (generic OIDC) |
 | — | `APP_ORIGIN` | **new** (redirect-URI origin) |
+| — | `ACCESSIBILITY_STATEMENT_URL` | **new** (accessibility statement link) |
 
 ## Reverse proxy
 

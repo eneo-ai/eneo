@@ -24,6 +24,12 @@ const TASK_SECTIONS: [Job["task"], string][] = [
 const ROW_CLASSES =
   "border-ax-border flex items-center justify-between gap-x-3 border-b px-2 py-1.5 last-of-type:border-b-0";
 
+/**
+ * File and job names wrap instead of being cut off: a `title` tooltip is not
+ * reachable with the keyboard or on touch (WCAG 1.4.13, 2.1.1).
+ */
+const NAME_CLASSES = "min-w-0 pe-4 wrap-anywhere";
+
 function ExpandableErrorRow({ label, message }: { label: string; message: string }) {
   const t = useTranslations();
   const [expanded, setExpanded] = useState(false);
@@ -37,9 +43,7 @@ function ExpandableErrorRow({ label, message }: { label: string; message: string
         aria-expanded={expanded}
         aria-controls={messageId}
       >
-        <span className="truncate pe-4" title={label}>
-          {label}
-        </span>
+        <span className={NAME_CLASSES}>{label}</span>
         <span className="text-ax-error flex min-w-fit items-center gap-1 font-medium">
           {t("failed")}
           <ChevronDown
@@ -76,10 +80,8 @@ function UploadRow({ upload }: { upload: Upload }) {
     return <ExpandableErrorRow label={upload.file.name} message={upload.errorMessage} />;
   }
   return (
-    <div className={cn(ROW_CLASSES, "whitespace-nowrap")}>
-      <span className="truncate pe-4" title={upload.file.name}>
-        {upload.file.name}
-      </span>
+    <div className={ROW_CLASSES}>
+      <span className={NAME_CLASSES}>{upload.file.name}</span>
       {upload.status === "queued" ? (
         <span className="text-ax-text-secondary min-w-fit">{t("waiting")}</span>
       ) : (
@@ -103,10 +105,8 @@ function JobRow({ job }: { job: Job }) {
     return <ExpandableErrorRow label={label} message={job.result_location} />;
   }
   return (
-    <div className={cn(ROW_CLASSES, "whitespace-nowrap")}>
-      <span className="truncate pe-4" title={label}>
-        {label}
-      </span>
+    <div className={ROW_CLASSES}>
+      <span className={NAME_CLASSES}>{label}</span>
       {isJobActive(job) ? (
         <Spinner size="sm" aria-label={t("in_progress")} />
       ) : job.status === "failed" ? (

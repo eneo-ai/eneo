@@ -1,9 +1,4 @@
 {
-  "src/components/composites/context-budget.tsx": {
-    "jsx-a11y/no-noninteractive-tabindex": {
-      "count": 1
-    }
-  },
   "src/components/ui/input-group.tsx": {
     "jsx-a11y/click-events-have-key-events": {
       "count": 1
