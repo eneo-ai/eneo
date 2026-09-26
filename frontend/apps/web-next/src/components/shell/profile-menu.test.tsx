@@ -1,28 +1,25 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
+import { router } from "@/test/navigation";
+import { renderInApp, testAppContext } from "@/test/render";
 import { ProfileMenu, profileDisplayName, profileInitials } from "./profile-menu";
-import { appContext, installBrowserMocks, renderWithProviders } from "./test-support";
 
-const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
-
-vi.mock("next/navigation", () => ({ useRouter: () => router }));
+vi.mock("next/navigation", () => import("@/test/navigation"));
 vi.mock("@/lib/i18n/actions", () => ({ setLocale: vi.fn() }));
 vi.mock("@/features/whats-new/whats-new-provider", () => ({
   useWhatsNew: () => ({ enabled: true, hasUnseen: true })
 }));
 
-const TRIGGER = "anna.lind, Sundsvalls kommun: konto och inställningar";
+const TRIGGER = "Anna Lind, Sundsvalls kommun: konto och inställningar";
 
-beforeEach(() => installBrowserMocks());
-afterEach(() => {
-  cleanup();
-  router.push.mockReset();
-});
+afterEach(cleanup);
 
 async function openMenu(accessibilityStatement: string | null = null) {
-  renderWithProviders(<ProfileMenu />, { context: appContext({ accessibilityStatement }) });
+  renderInApp(<ProfileMenu />, {
+    appContext: testAppContext({ links: { accessibilityStatement } })
+  });
   const trigger = screen.getByRole("button", { name: TRIGGER });
   expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
   fireEvent.click(trigger);
@@ -32,9 +29,9 @@ async function openMenu(accessibilityStatement: string | null = null) {
 
 describe("ProfileMenu", () => {
   it("names the button after the visible name and organisation", () => {
-    renderWithProviders(<ProfileMenu />);
+    renderInApp(<ProfileMenu />);
     const trigger = screen.getByRole("button", { name: TRIGGER });
-    expect(trigger.textContent).toContain("anna.lind");
+    expect(trigger.textContent).toContain("Anna Lind");
     expect(trigger.textContent).toContain("Sundsvalls kommun");
   });
 

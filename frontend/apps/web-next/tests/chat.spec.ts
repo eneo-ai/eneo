@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./csp";
 import { askChatQuestion, conversationLog, MOCK_REPLY, uniqueName } from "./helpers";
 
 test("personal chat streams an answer and reloads the saved session", async ({ page }) => {

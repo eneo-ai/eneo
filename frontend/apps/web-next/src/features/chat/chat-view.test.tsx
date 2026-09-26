@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
+import { renderInApp } from "@/test/render";
 import { ChatView, type ActivityState } from "./chat-view";
-import { ChatTestProviders, installDomPolyfills } from "./testing";
 
 const api = vi.hoisted(() => ({
   GET: vi.fn(async (path: string) => {
@@ -39,11 +39,8 @@ const api = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() })
-}));
+vi.mock("next/navigation", () => import("@/test/navigation"));
 
-beforeAll(() => installDomPolyfills());
 afterEach(cleanup);
 
 const personal: ChatPartner = {
@@ -79,23 +76,21 @@ function Harness({
 }) {
   const [activity, setActivity] = useState<ActivityState | null>(null);
   return (
-    <ChatTestProviders>
-      <div className="flex h-[600px] flex-col">
-        <ChatView
-          partner={partner}
-          initialMessages={messages}
-          initialSessionId={sessionId}
-          activity={activity}
-          onActivityChange={setActivity}
-        />
-      </div>
-    </ChatTestProviders>
+    <div className="flex h-[600px] flex-col">
+      <ChatView
+        partner={partner}
+        initialMessages={messages}
+        initialSessionId={sessionId}
+        activity={activity}
+        onActivityChange={setActivity}
+      />
+    </div>
   );
 }
 
 describe("ChatView start state", () => {
   it("greets the user, fills the composer from a starter card and links their assistants", async () => {
-    render(<Harness partner={personal} />);
+    renderInApp(<Harness partner={personal} />);
     expect(
       screen.getByRole("heading", { level: 1, name: /^God (morgon|dag|kväll), Anna$/ })
     ).toBeTruthy();
@@ -112,14 +107,14 @@ describe("ChatView start state", () => {
   });
 
   it("introduces other assistants by name and description", () => {
-    render(<Harness partner={assistant} />);
+    renderInApp(<Harness partner={assistant} />);
     expect(screen.getByRole("heading", { level: 1, name: "Upphandlingsassistenten" })).toBeTruthy();
     expect(screen.getByText("Granskar upphandlingar mot LOU.")).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Dina assistenter" })).toBeNull();
   });
 
   it("has no axe violations", async () => {
-    const { container } = render(<Harness partner={personal} />);
+    const { container } = renderInApp(<Harness partner={personal} />);
     await screen.findByRole("region", { name: "Dina assistenter" });
     await expectNoAxeViolations(container);
   });
@@ -127,7 +122,7 @@ describe("ChatView start state", () => {
 
 describe("ChatView conversation", () => {
   it("names the message list and keeps it out of live announcements", () => {
-    render(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
     const log = screen.getByRole("log", { name: "Konversation" });
     expect(log.getAttribute("aria-live")).toBe("off");
     expect(within(log).getByRole("article", { name: "Ditt meddelande" })).toBeTruthy();
@@ -142,12 +137,12 @@ describe("ChatView conversation", () => {
   });
 
   it("offers session feedback on the latest answer", () => {
-    render(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
     expect(screen.getByRole("button", { name: "Bra svar" })).toBeTruthy();
   });
 
   it("has no axe violations", async () => {
-    const { container } = render(
+    const { container } = renderInApp(
       <Harness partner={assistant} messages={history} sessionId="session-1" />
     );
     await waitFor(() => expect(screen.getByRole("log")).toBeTruthy());

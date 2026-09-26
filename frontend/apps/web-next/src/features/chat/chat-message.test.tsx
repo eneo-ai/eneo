@@ -1,14 +1,13 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
+import { renderInApp } from "@/test/render";
 import { ChatMessage, PendingAnswer } from "./chat-message";
-import { ChatTestProviders, installDomPolyfills } from "./testing";
 
 type Part = EneoUIMessage["parts"][number];
 
-beforeAll(() => installDomPolyfills());
 afterEach(cleanup);
 
 const assistant = { id: "assistant-1", name: "Upphandlingsassistenten" };
@@ -60,7 +59,7 @@ const answer: EneoUIMessage = {
 };
 
 function renderMessages(ui: React.ReactNode) {
-  return render(<ChatTestProviders>{ui}</ChatTestProviders>);
+  return renderInApp(ui);
 }
 
 describe("ChatMessage", () => {
@@ -119,13 +118,11 @@ describe("ChatMessage", () => {
     expect(screen.queryByRole("button", { name: "Bra svar" })).toBeNull();
 
     rerender(
-      <ChatTestProviders>
-        <ChatMessage
-          message={answer}
-          assistant={assistant}
-          feedback={{ value: 1, pending: false, onChange }}
-        />
-      </ChatTestProviders>
+      <ChatMessage
+        message={answer}
+        assistant={assistant}
+        feedback={{ value: 1, pending: false, onChange }}
+      />
     );
     const good = screen.getByRole("button", { name: "Bra svar" });
     expect(good.getAttribute("aria-pressed")).toBe("true");

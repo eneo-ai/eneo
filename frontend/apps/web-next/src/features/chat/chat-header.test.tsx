@@ -1,17 +1,16 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
+import { router } from "@/test/navigation";
+import { renderInApp } from "@/test/render";
 import { OPEN_NAV_EVENT } from "@/components/shell/routes";
 import { ChatHeader } from "./chat-header";
 import type { ChatPartnerSwitcherItem } from "./partner-switcher";
-import { ChatTestProviders, installDomPolyfills } from "./testing";
 
-const router = vi.hoisted(() => ({ push: vi.fn() }));
-vi.mock("next/navigation", () => ({ useRouter: () => router }));
+vi.mock("next/navigation", () => import("@/test/navigation"));
 
-beforeAll(() => installDomPolyfills());
 afterEach(cleanup);
 
 const partner: ChatPartner = {
@@ -51,11 +50,7 @@ function renderHeader(overrides: Partial<Parameters<typeof ChatHeader>[0]> = {})
     menuItems: [{ label: "Byt namn på konversationen", onClick: vi.fn() }],
     ...overrides
   };
-  return render(
-    <ChatTestProviders>
-      <ChatHeader {...props} />
-    </ChatTestProviders>
-  );
+  return renderInApp(<ChatHeader {...props} />);
 }
 
 describe("ChatHeader", () => {

@@ -1,16 +1,15 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Capability } from "@/features/capabilities/capabilities";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
+import { renderInApp } from "@/test/render";
 import type { ChatCapability } from "./chat-capabilities";
 import { Composer } from "./composer";
-import { ChatTestProviders, installDomPolyfills } from "./testing";
 import { useAttachments } from "./use-attachments";
 
-beforeAll(() => installDomPolyfills());
 afterEach(cleanup);
 
 const partner: ChatPartner = {
@@ -67,11 +66,7 @@ function Harness({
 }
 
 function renderComposer(props: Parameters<typeof Harness>[0] = {}) {
-  return render(
-    <ChatTestProviders>
-      <Harness {...props} />
-    </ChatTestProviders>
-  );
+  return renderInApp(<Harness {...props} />);
 }
 
 describe("Composer", () => {

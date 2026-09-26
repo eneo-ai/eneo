@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./csp";
 
 // Smoke coverage for the parity-buildout surfaces: each page loads
 // authenticated and shows a marker element from the newly-ported feature.

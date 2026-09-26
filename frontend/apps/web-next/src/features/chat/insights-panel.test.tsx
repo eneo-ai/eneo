@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
+import { renderInApp } from "@/test/render";
 import { InsightsPanel } from "./insights-panel";
-import { ChatTestProviders, installDomPolyfills } from "./testing";
 
 const spies = vi.hoisted(() => ({
   announce: vi.fn(),
@@ -33,7 +33,6 @@ vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   useAnnounce: () => spies.announce
 }));
 
-beforeAll(() => installDomPolyfills());
 afterEach(() => {
   cleanup();
   spies.announce.mockReset();
@@ -49,11 +48,7 @@ const partner: ChatPartner & { type: "assistant" } = {
 };
 
 function renderPanel() {
-  return render(
-    <ChatTestProviders>
-      <InsightsPanel partner={partner} />
-    </ChatTestProviders>
-  );
+  return renderInApp(<InsightsPanel partner={partner} />);
 }
 
 function ask(question: string) {

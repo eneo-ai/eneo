@@ -1,30 +1,24 @@
 // @vitest-environment jsdom
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { ThemeProvider } from "next-themes";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, expect, it } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { installBrowserMocks } from "./test-support";
+import { renderInApp } from "@/test/render";
 import { ThemeSubMenu } from "./theme-switcher";
 
-const messages = { theme: "Tema", light: "Ljust", dark: "Mörkt", system: "System" };
-
-beforeEach(() => installBrowserMocks());
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
 });
 
 function renderMenu() {
-  return render(
-    <NextIntlClientProvider locale="sv" messages={messages}>
-      <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-        <DropdownMenu button={{ label: "Meny" }}>
-          <ThemeSubMenu />
-        </DropdownMenu>
-      </ThemeProvider>
-    </NextIntlClientProvider>
+  return renderInApp(
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+      <DropdownMenu button={{ label: "Meny" }}>
+        <ThemeSubMenu />
+      </DropdownMenu>
+    </ThemeProvider>
   );
 }
 

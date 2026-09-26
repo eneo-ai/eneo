@@ -28,14 +28,6 @@ vi.mock("@/lib/api/browser", () => ({
     }
   }
 }));
-vi.mock("@/components/providers/app-context", () => ({
-  useAppContext: () => ({
-    can: () => true,
-    settings: { using_templates: false },
-    limits: { attachments: { formats: [] } },
-    user: { id: "user-1" }
-  })
-}));
 
 import { AppsPage } from "@/features/apps/apps-page";
 import { AssistantsPage } from "@/features/assistants/assistants-page";

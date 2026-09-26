@@ -2,23 +2,23 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testAppContext } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), DELETE: vi.fn() }));
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 const searchParams = vi.hoisted(() => ({ value: "role_id=custom" }));
-const narrow = vi.hoisted(() => ({ value: false }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("sonner", () => ({ toast }));
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(searchParams.value)
 }));
-vi.mock("@/components/providers/app-context", () => ({
-  useAppContext: () => ({ user: { id: "me" } })
-}));
 vi.mock("./user-editor", () => ({ UserEditorDialog: () => null }));
 
 import { AdminUsersPage } from "./users-page";
+
+/** The signed-in admin: not a user in the lists below. */
+const appContext = testAppContext({ user: { id: "me" } });
 
 const ok = (data: unknown) =>
   Promise.resolve({ data, response: new Response("{}", { status: 200 }) });
@@ -79,7 +79,7 @@ function serve(pages: (query: Record<string, unknown>) => Page) {
 
 function renderPage(items: unknown[] = []) {
   serve(() => ({ items }));
-  return renderInApp(<AdminUsersPage />);
+  return renderInApp(<AdminUsersPage />, { appContext });
 }
 
 function usersQuery(overrides: Record<string, unknown>) {
@@ -101,28 +101,13 @@ function liveRegion() {
   return document.querySelector("[data-astryx-live-region='polite']")?.textContent ?? "";
 }
 
-beforeEach(() => {
-  vi.stubGlobal("matchMedia", (query: string) => ({
-    matches: narrow.value && query.includes("40rem"),
-    media: query,
-    onchange: null,
-    addEventListener() {},
-    removeEventListener() {},
-    addListener() {},
-    removeListener() {},
-    dispatchEvent: () => false
-  }));
-});
-
 afterEach(() => {
   cleanup();
   // Astryx keeps one live region on <body> (re-created on the next announce):
   // no announcement may carry over into the next test.
   document.querySelectorAll("[data-astryx-live-region]").forEach((region) => region.remove());
   vi.clearAllMocks();
-  vi.unstubAllGlobals();
   searchParams.value = "role_id=custom";
-  narrow.value = false;
 });
 
 describe("AdminUsersPage", () => {
@@ -189,7 +174,7 @@ describe("AdminUsersPage", () => {
   it("announces the result count of a search once its results are in", async () => {
     searchParams.value = "";
     serve((query) => ({ items: query.search_email ? [users[0]] : users }));
-    renderInApp(<AdminUsersPage />);
+    renderInApp(<AdminUsersPage />, { appContext });
     await screen.findByText("2 användare");
     // Not on first load.
     expect(liveRegion()).toBe("");
@@ -211,7 +196,7 @@ describe("AdminUsersPage paging", () => {
   it("keeps the pressed page button enabled and focused while the page loads", async () => {
     let release: () => void = () => {};
     serve((query) => ({ items: [user({ email: `sida${query.page}@kommun.se` })], totalPages: 3 }));
-    renderInApp(<AdminUsersPage />);
+    renderInApp(<AdminUsersPage />, { appContext });
     await screen.findByText("sida1@kommun.se");
 
     // Page 2 answers only when released: the list is still loading.
@@ -239,7 +224,7 @@ describe("AdminUsersPage paging", () => {
 
   it("moves focus to the list when the next-page button disables at the last page", async () => {
     serve((query) => ({ items: [user({ email: `sida${query.page}@kommun.se` })], totalPages: 2 }));
-    renderInApp(<AdminUsersPage />);
+    renderInApp(<AdminUsersPage />, { appContext });
     await screen.findByText("sida1@kommun.se");
 
     const next = screen.getByRole("button", { name: "Gå till nästa sida" });
@@ -267,16 +252,16 @@ describe("AdminUsersPage paging", () => {
         ? { items: [], totalPages: 2 }
         : { items: [user({ email: `sida${query.page}@kommun.se` })], totalPages: 2 }
     );
-    renderInApp(<AdminUsersPage />);
+    renderInApp(<AdminUsersPage />, { appContext });
 
     expect(await screen.findByText("sida2@kommun.se")).toBeTruthy();
     expect(api.GET).toHaveBeenCalledWith("/api/v1/admin/users/", usersQuery({ page: 2 }));
   });
 
   it("fits a phone: page x of y instead of page numbers below the sm breakpoint", async () => {
-    narrow.value = true;
+    setViewport("phone");
     serve(() => ({ items: users, totalPages: 12 }));
-    renderInApp(<AdminUsersPage />);
+    renderInApp(<AdminUsersPage />, { appContext });
 
     const pagination = await screen.findByRole("navigation", { name: "Sidnumrering" });
     expect(within(pagination).getByText("Sida 1 av 12")).toBeTruthy();
@@ -302,7 +287,7 @@ describe("AdminUsersPage row actions", () => {
   it("deactivates a user, confirms it and keeps focus in the list", async () => {
     let list = users;
     serve(() => ({ items: list }));
-    renderInApp(<AdminUsersPage />);
+    renderInApp(<AdminUsersPage />, { appContext });
     await screen.findByText("anna.lind@kommun.se");
 
     list = users.slice(1); // The deactivated user leaves the active tab.
@@ -327,7 +312,7 @@ describe("AdminUsersPage row actions", () => {
 
   it("does not let admins deactivate or delete themselves", async () => {
     serve(() => ({ items: [user({ id: "me" })] }));
-    renderInApp(<AdminUsersPage />);
+    renderInApp(<AdminUsersPage />, { appContext });
     await screen.findByText("anna.lind@kommun.se");
 
     const menu = openRowMenu("anna.lind@kommun.se");
@@ -341,7 +326,7 @@ describe("AdminUsersPage row actions", () => {
   it("reactivates an inactive user", async () => {
     searchParams.value = "tab=inactive";
     serve(() => ({ items: [user({ state: "inactive", is_active: false })] }));
-    renderInApp(<AdminUsersPage />);
+    renderInApp(<AdminUsersPage />, { appContext });
     await screen.findByText("anna.lind@kommun.se");
 
     fireEvent.click(
@@ -361,7 +346,7 @@ describe("AdminUsersPage row actions", () => {
   it("deletes a user after confirmation", async () => {
     let list = users;
     serve(() => ({ items: list }));
-    renderInApp(<AdminUsersPage />);
+    renderInApp(<AdminUsersPage />, { appContext });
     await screen.findByText("per.berg@kommun.se");
 
     fireEvent.click(

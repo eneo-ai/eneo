@@ -2,14 +2,13 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testAppContext } from "@/test/render";
 import { ExpiringKeysNotification } from "./expiring-keys-notification";
+
+const appContext = testAppContext({ settings: { api_key_expiry_notifications: true } });
 
 const api = vi.hoisted(() => ({ items: [] as unknown[] }));
 
-vi.mock("@/components/providers/app-context", () => ({
-  useAppContext: () => ({ settings: { api_key_expiry_notifications: true } })
-}));
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     GET: (path: string) => {
@@ -33,7 +32,7 @@ const inDays = (days: number) => new Date(Date.now() + (days + 0.5) * 86_400_000
 
 describe("ExpiringKeysNotification", () => {
   it("stays out of the way while no followed key expires", async () => {
-    const { container } = renderInApp(<ExpiringKeysNotification />);
+    const { container } = renderInApp(<ExpiringKeysNotification />, { appContext });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(container.querySelector("button")).toBeNull();
   });
@@ -49,7 +48,7 @@ describe("ExpiringKeysNotification", () => {
       },
       { id: "k2", name: "Rapporter", key_suffix: "b2", expires_at: inDays(9), severity: "warning" }
     ];
-    renderInApp(<ExpiringKeysNotification />);
+    renderInApp(<ExpiringKeysNotification />, { appContext });
     const bell = await screen.findByRole("button", { name: "API-nycklar som går ut" });
     bell.focus();
     fireEvent.click(bell);

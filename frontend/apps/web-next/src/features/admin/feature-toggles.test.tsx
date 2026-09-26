@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeAll, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testAppContext } from "@/test/render";
 
 const api = vi.hoisted(() => ({ PATCH: vi.fn() }));
 const refresh = vi.hoisted(() => vi.fn());
@@ -11,29 +11,8 @@ const toastApiError = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("@/lib/api/toast", () => ({ toastApiError }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
-vi.mock("@/components/providers/app-context", () => ({
-  useAppContext: () => ({
-    settings: {
-      using_templates: true,
-      audit_logging_enabled: false,
-      provisioning: false,
-      whats_new_enabled: true
-    }
-  })
-}));
 
 import { FeatureToggles } from "./feature-toggles";
-
-beforeAll(() => {
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-  );
-});
 
 afterEach(() => {
   cleanup();
@@ -41,7 +20,16 @@ afterEach(() => {
 });
 
 function renderToggles() {
-  renderInApp(<FeatureToggles />);
+  renderInApp(<FeatureToggles />, {
+    appContext: testAppContext({
+      settings: {
+        using_templates: true,
+        audit_logging_enabled: false,
+        provisioning: false,
+        whats_new_enabled: true
+      }
+    })
+  });
 }
 
 const saved = () => Promise.resolve({ data: { enabled: true }, response: new Response("{}") });

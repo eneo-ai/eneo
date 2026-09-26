@@ -3,10 +3,9 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { Suspense, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ShellContext } from "@/components/shell/shell-context";
-import { noopShell } from "@/components/shell/test-support";
 import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { noopShell, renderInApp, testAppContext } from "@/test/render";
 
 const api = vi.hoisted(() => ({
   spaces: [] as unknown[],
@@ -16,9 +15,6 @@ const api = vi.hoisted(() => ({
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: () => {}, prefetch: () => {} })
-}));
-vi.mock("@/components/providers/app-context", () => ({
-  useAppContext: () => ({ can: () => true })
 }));
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
@@ -84,7 +80,8 @@ async function show() {
       <Suspense fallback={null}>
         <SpacesList title="Ytor" />
       </Suspense>
-    </Shell>
+    </Shell>,
+    { appContext: testAppContext({ permissions: ["shared_spaces"] }) }
   );
   await screen.findByRole("heading", { level: 1, name: "Ytor" });
   return view;
