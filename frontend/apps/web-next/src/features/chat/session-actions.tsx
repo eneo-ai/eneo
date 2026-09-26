@@ -4,15 +4,18 @@ import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { HStack, Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { toast } from "sonner";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
+import type { CursorPage } from "@/lib/api/pagination";
 import { toastApiError } from "@/lib/api/toast";
 import type { ChatPartner } from "@/lib/chat/types";
 
+/** Query key of a partner's conversation history (an infinite, cursor-paged list). */
 export function historyQueryKey(partner: Pick<ChatPartner, "type" | "id">) {
   return ["conversations", partner.type === "group-chat" ? "group-chat" : "assistant", partner.id];
 }
@@ -22,12 +25,18 @@ export function useSessionMutations(
   partner: Pick<ChatPartner, "type" | "id">,
   {
     onRenamed,
-    onDeleted
-  }: { onRenamed?: (id: string, name: string) => void; onDeleted?: (id: string) => void } = {}
+    onDeleted,
+    onRated
+  }: {
+    onRenamed?: (id: string, name: string) => void;
+    onDeleted?: (id: string) => void;
+    onRated?: (id: string, value: 1 | -1) => void;
+  } = {}
 ) {
   const t = useTranslations();
   const queryClient = useQueryClient();
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: historyQueryKey(partner) });
+  const historyKey = historyQueryKey(partner);
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: historyKey });
 
   const rename = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) =>
@@ -52,6 +61,19 @@ export function useSessionMutations(
         })
       ),
     onSuccess: (_, id) => {
+      // Drop the row at once (the refetch follows), so the history never shows
+      // a deleted conversation and focus can move on from its row.
+      queryClient.setQueryData<InfiniteData<CursorPage<{ id: string }>>>(historyKey, (data) =>
+        data
+          ? {
+              ...data,
+              pages: data.pages.map((page) => ({
+                ...page,
+                items: page.items.filter((item) => item.id !== id)
+              }))
+            }
+          : data
+      );
       invalidate();
       onDeleted?.(id);
     },
@@ -66,6 +88,10 @@ export function useSessionMutations(
           body: { value }
         })
       ),
+    onSuccess: (_, { id, value }) => {
+      toast.success(t("chat_feedback_thanks"));
+      onRated?.(id, value);
+    },
     onError: (error) => toastApiError(error, t)
   });
 

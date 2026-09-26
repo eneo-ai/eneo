@@ -2,9 +2,16 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import type { AppContextData } from "@/components/providers/app-context";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { ChatView, type ActivityState } from "./chat-view";
-import { ChatTestProviders, installDomPolyfills, observedElements, reportResize } from "./testing";
+import {
+  ChatTestProviders,
+  installDomPolyfills,
+  observedElements,
+  reportResize,
+  testAppContext
+} from "./testing";
 
 const spies = vi.hoisted(() => ({
   announce: vi.fn(),
@@ -51,6 +58,12 @@ vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     GET: vi.fn(async () => ({ data: undefined, response: new Response() })),
     POST: vi.fn(async (path: string, init: { params?: { path?: { session_id?: string } } }) => {
+      if (path === "/api/v1/files/") {
+        return {
+          data: { id: "file-1", name: "Policy.pdf", mimetype: "application/pdf", size: 2048 },
+          response: new Response()
+        };
+      }
       if (path.endsWith("/title/")) spies.titled.push(init.params?.path?.session_id ?? "");
       return { data: { name: "Gräns för direktupphandling" }, response: new Response() };
     }),
@@ -81,14 +94,16 @@ const partner: ChatPartner = {
 
 function Harness({
   onSessionCreated,
-  onTitle
+  onTitle,
+  appContext
 }: {
   onSessionCreated?: (id: string) => void;
   onTitle?: (title: string) => void;
+  appContext?: AppContextData;
 }) {
   const [activity, setActivity] = useState<ActivityState | null>(null);
   return (
-    <ChatTestProviders>
+    <ChatTestProviders appContext={appContext}>
       <ChatView
         partner={partner}
         activity={activity}
@@ -168,5 +183,48 @@ describe("ChatView when generation fails", () => {
       "Vilken gräns gäller?",
       "Vilken gräns gäller?"
     ]);
+  });
+
+  it("puts the question's attachments back in the composer, previews intact", async () => {
+    const revoke = vi.fn();
+    vi.stubGlobal(
+      "URL",
+      Object.assign(URL, { createObjectURL: () => "blob:policy", revokeObjectURL: revoke })
+    );
+    const appContext = {
+      ...testAppContext,
+      limits: {
+        attachments: {
+          formats: [{ mimetype: "application/pdf", size: 10_000_000, vision: false }],
+          max_in_question: 5
+        }
+      }
+    } as unknown as AppContextData;
+    const { container } = render(<Harness appContext={appContext} />);
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const file = new File(["%PDF"], "Policy.pdf", { type: "application/pdf" });
+    fireEvent.change(input, { target: { files: [file] } });
+    const attachments = await screen.findByRole("list", { name: "Bilagor" });
+    await waitFor(() => expect(within(attachments).getByText(/Klar att använda/)).toBeTruthy());
+
+    ask("Sammanfatta policyn");
+    expect(await screen.findByText("Tjänsten svarar inte")).toBeTruthy();
+    // Back in the composer (it has the remove button; the log's copy does not).
+    await screen.findByRole("button", { name: "Ta bort Policy.pdf" });
+    const restored = screen.getByRole("list", { name: "Bilagor" });
+    const preview = within(restored).getByRole("button", { name: /^Förhandsvisning: Policy\.pdf/ });
+    expect(preview.hasAttribute("disabled")).toBe(false);
+    expect(revoke).not.toHaveBeenCalled();
+    // A retry that goes through sends the file again, takes it out of the
+    // composer and frees its preview.
+    spies.mode = "answer";
+    fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
+    await waitFor(() => expect(spies.sent).toHaveLength(2));
+    expect(spies.sent[1]?.body).toMatchObject({ files: [{ id: "file-1" }] });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Ta bort Policy.pdf" })).toBeNull()
+    );
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith("blob:policy"));
+    vi.unstubAllGlobals();
   });
 });

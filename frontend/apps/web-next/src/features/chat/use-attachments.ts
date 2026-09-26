@@ -23,6 +23,13 @@ export type Attachment = {
   previewUrl?: string;
 };
 
+/** Frees the composer preview URLs of attachments that have left the composer. */
+export function releasePreviews(attachments: Attachment[]) {
+  for (const attachment of attachments) {
+    if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+  }
+}
+
 function toastRejection(
   rejection: ChatAttachmentRejection<File>,
   t: (key: string, values?: Record<string, string | number | Date>) => string,
@@ -113,13 +120,28 @@ export function useAttachments(partner: ChatPartner) {
     }
   }
 
-  function clear() {
-    setAttachments((current) => {
-      for (const attachment of current) {
-        if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
-      }
-      return [];
-    });
+  /**
+   * Takes the attachments with these file ids out of the composer when their
+   * question is sent. Their previews stay valid: the caller puts them back with
+   * `restore` (the question failed before it was sent) or frees them with
+   * `releasePreviews`.
+   */
+  function detach(fileIds: ReadonlySet<string>): Attachment[] {
+    const taken = attachments.filter(
+      (attachment) => attachment.fileId !== undefined && fileIds.has(attachment.fileId)
+    );
+    const keys = new Set(taken.map((attachment) => attachment.key));
+    setAttachments((current) => current.filter((attachment) => !keys.has(attachment.key)));
+    return taken;
+  }
+
+  /** Puts detached attachments back, before any added since. */
+  function restore(taken: Attachment[]) {
+    const keys = new Set(taken.map((attachment) => attachment.key));
+    setAttachments((current) => [
+      ...taken,
+      ...current.filter((attachment) => !keys.has(attachment.key))
+    ]);
   }
 
   return {
@@ -128,7 +150,8 @@ export function useAttachments(partner: ChatPartner) {
     canAddMore,
     addFiles,
     removeAttachment,
-    clear,
+    detach,
+    restore,
     maxFiles,
     uploading: attachments.some((attachment) => attachment.uploading),
     fileIds: attachments.flatMap((attachment) => (attachment.fileId ? [attachment.fileId] : []))

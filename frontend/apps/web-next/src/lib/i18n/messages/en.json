@@ -5031,7 +5031,6 @@
   "chat_history_week": "Previous 7 days",
   "chat_history_month": "Previous 30 days",
   "chat_history_older": "Older",
-  "chat_history_newer": "Newer",
   "chat_history_rate_good": "Rate as good",
   "chat_history_rate_bad": "Rate as bad",
   "chat_knowledge_pill": "Knowledge: {name}",
@@ -5072,5 +5071,6 @@
   "fix_crawls_filter_label": "Filter crawls",
   "fix_integrations_empty_title": "No integrations yet",
   "chat_tool_accept_named": "Accept {tool}",
-  "chat_tool_deny_named": "Deny {tool}"
+  "chat_tool_deny_named": "Deny {tool}",
+  "chat_history_load_more": "Show more conversations"
 }

@@ -522,7 +522,6 @@
   "chat_history_week": "Senaste 7 dagarna",
   "chat_history_month": "Senaste 30 dagarna",
   "chat_history_older": "Äldre",
-  "chat_history_newer": "Nyare",
   "chat_history_rate_good": "Betygsätt som bra",
   "chat_history_rate_bad": "Betygsätt som dålig",
   "chat_knowledge_pill": "Kunskap: {name}",
@@ -563,5 +562,6 @@
   "fix_crawls_filter_label": "Filtrera indexeringar",
   "fix_integrations_empty_title": "Inga integrationer ännu",
   "chat_tool_accept_named": "Godkänn {tool}",
-  "chat_tool_deny_named": "Avvisa {tool}"
+  "chat_tool_deny_named": "Avvisa {tool}",
+  "chat_history_load_more": "Visa fler konversationer"
 }
