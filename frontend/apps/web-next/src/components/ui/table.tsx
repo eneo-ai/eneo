@@ -6,7 +6,8 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-function Table({ className, ref, ...props }: React.ComponentProps<"table">) {
+// No `ref`: the scrollable-area hook owns the <table>'s ref to measure it.
+function Table({ className, ...props }: Omit<React.ComponentProps<"table">, "ref">) {
   const t = useTranslator();
   // A table wider than its container scrolls sideways, and the keyboard must
   // reach that scroll too (2.1.1): Tab goes to the first link or button in
@@ -34,7 +35,6 @@ function Table({ className, ref, ...props }: React.ComponentProps<"table">) {
       <table
         {...props}
         {...getContentProps<HTMLTableElement>({
-          ref,
           "data-slot": "table",
           className: cn("w-full caption-bottom text-sm", className)
         })}
