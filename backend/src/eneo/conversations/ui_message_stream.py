@@ -9,7 +9,6 @@ version=1/2 framing (assistant_protocol.to_conversation_response) is untouched.
 Custom data parts (consumed by the web-next chat UI):
 - `data-session`: session id, completion model and uploaded files, replacing
   v2's first_chunk metadata.
-- `data-status`: transient progress events (e.g. generating_image).
 - `data-mcp-tool-references`: MCP resource citations emitted by tool calls.
 - `data-token-usage`: transient prompt/completion/turn token counts.
 - `data-tool-approval`: MCP tool approval requests; reconciled in place by
@@ -164,6 +163,17 @@ def _generated_file_chunk(file: Any, base_url: str) -> dict[str, Any]:
     }
 
 
+def _part_delta(text: str | None, *, starts_later_part: bool) -> str:
+    """The delta to append to a text or reasoning part.
+
+    Parts render as separate blocks, so the boundary before a later part
+    already divides it from the previous one; the paragraph break that opens
+    a later model round's text or reasoning would only add a blank line.
+    """
+    delta = text or ""
+    return delta.lstrip("\n") if starts_later_part else delta
+
+
 def _mcp_tool_references_chunk(references: list[Any]) -> dict[str, Any] | None:
     if not references:
         return None
@@ -255,29 +265,33 @@ async def _ui_message_chunks(
             if text_id is not None:
                 yield {"type": "text-end", "id": text_id}
                 text_id = None
-            if not reasoning_open:
-                reasoning_id = f"reasoning-{reasoning_index}"
-                reasoning_index += 1
-                reasoning_open = True
-                yield {"type": "reasoning-start", "id": reasoning_id}
-            if completion.reasoning_content:
-                yield {
-                    "type": "reasoning-delta",
-                    "id": reasoning_id,
-                    "delta": completion.reasoning_content,
-                }
+            delta = _part_delta(
+                completion.reasoning_content,
+                starts_later_part=not reasoning_open and reasoning_index > 0,
+            )
+            if delta:
+                if not reasoning_open:
+                    reasoning_id = f"reasoning-{reasoning_index}"
+                    reasoning_index += 1
+                    reasoning_open = True
+                    yield {"type": "reasoning-start", "id": reasoning_id}
+                yield {"type": "reasoning-delta", "id": reasoning_id, "delta": delta}
 
         elif response_type == ResponseType.TEXT:
             # Reasoning always precedes the answer; close it before text opens.
             if reasoning_open and reasoning_id is not None:
                 yield {"type": "reasoning-end", "id": reasoning_id}
                 reasoning_open = False
-            if text_id is None:
-                text_id = f"text-{text_index}"
-                text_index += 1
-                yield {"type": "text-start", "id": text_id}
-            if completion.text:
-                yield {"type": "text-delta", "id": text_id, "delta": completion.text}
+            delta = _part_delta(
+                completion.text,
+                starts_later_part=text_id is None and text_index > 0,
+            )
+            if delta:
+                if text_id is None:
+                    text_id = f"text-{text_index}"
+                    text_index += 1
+                    yield {"type": "text-start", "id": text_id}
+                yield {"type": "text-delta", "id": text_id, "delta": delta}
             for blob in completion.reference_chunks or []:
                 chunk_dict = _source_document_chunk(blob)
                 if chunk_dict["sourceId"] not in seen_source_ids:
@@ -287,13 +301,6 @@ async def _ui_message_chunks(
         elif response_type == ResponseType.FILES:
             assert completion.generated_file is not None
             yield _generated_file_chunk(completion.generated_file, base_url)
-
-        elif response_type == ResponseType.ENEO_EVENT:
-            yield {
-                "type": "data-status",
-                "data": {"status": "generating_image"},
-                "transient": True,
-            }
 
         elif response_type == ResponseType.TOOL_CALL:
             reference_chunk = _mcp_tool_references_chunk(

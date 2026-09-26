@@ -359,18 +359,13 @@ class GroupChatService:
         if stream:
 
             async def response_stream():
-                response_string = ""
                 completed = False
 
                 try:
-                    chunk_response = response.split()
-                    for i, chunk in enumerate(chunk_response):
-                        if i < len(chunk_response):
-                            chunk_text = chunk + " "
-                        else:
-                            chunk_text = chunk
-
-                        response_string += chunk_text
+                    # Echo the reply a word at a time, each word with the
+                    # whitespace that follows it, so the streamed text adds up
+                    # to the reply exactly, line breaks included.
+                    for chunk_text in re.findall(r"\S+\s*|\s+", response):
                         # yield empty references and chunk text, matching assistant_service format
                         yield Completion(
                             text=chunk_text,
@@ -395,24 +390,24 @@ class GroupChatService:
                     completed = True
                 finally:
                     # Selector-echo stream did not reach normal completion. The
-                    # placeholder already captures the question; only schedule a
-                    # background UPDATE when there's actual content to persist.
-                    if not completed and response_string:
+                    # reply was complete before the echo began, so persist all
+                    # of it, as a finished echo does; the placeholder already
+                    # captures the question when there is no reply.
+                    if not completed and response:
                         from eneo.sessions.session_service import (
                             persist_partial_question_answer,
                             safe_count_tokens,
                             schedule_background_save,
                         )
 
-                        partial_tokens_answer = safe_count_tokens(
-                            response_string, completion_model.name
-                        )
                         schedule_background_save(
                             persist_partial_question_answer(
                                 tenant_id=tenant_id,
                                 question_id=question_id,
-                                answer=response_string,
-                                num_tokens_answer=partial_tokens_answer,
+                                answer=response,
+                                num_tokens_answer=safe_count_tokens(
+                                    response, completion_model.name
+                                ),
                             )
                         )
 

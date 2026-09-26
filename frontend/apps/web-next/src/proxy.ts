@@ -40,7 +40,10 @@ export function buildContentSecurityPolicy(
   const directives = [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDevelopment ? " 'unsafe-eval'" : ""}`,
-    `style-src 'self' 'nonce-${nonce}'${isDevelopment ? " 'unsafe-inline'" : ""}`,
+    // The dev tools (Next.js dev overlay, TanStack Query devtools) inject
+    // <style> elements without the nonce, and a nonce in the list makes
+    // browsers ignore 'unsafe-inline', so development leaves the nonce out.
+    isDevelopment ? "style-src 'self' 'unsafe-inline'" : `style-src 'self' 'nonce-${nonce}'`,
     "style-src-attr 'unsafe-inline'",
     "img-src 'self' blob: data:",
     "font-src 'self' data:",

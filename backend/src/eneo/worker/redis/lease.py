@@ -110,12 +110,14 @@ async def redis_lease(
         while True:
             await asyncio.sleep(renew_interval)
             try:
-                still_owner = await asyncio.wait_for(
-                    LuaScripts.refresh_leader_lock(
+                # Not asyncio.wait_for: on Python 3.11 it returns the refresh
+                # result when the exit's cancellation arrives just as the
+                # refresh completes, and the watchdog would renew forever while
+                # the exit waits on it.
+                async with asyncio.timeout(refresh_timeout):
+                    still_owner = await LuaScripts.refresh_leader_lock(
                         redis_client, key, owner, ttl_seconds
-                    ),
-                    timeout=refresh_timeout,
-                )
+                    )
             except Exception as exc:
                 # Transient Redis error — keep trying; the lock only lapses if
                 # this keeps failing past the TTL (which is the failover we want).

@@ -289,6 +289,7 @@ def _fake_service(provider: ModelProvider, check: ConnectionCheck) -> MagicMock:
     service.check_connection = AsyncMock(return_value=(provider, check))
     service.update = AsyncMock(return_value=provider)
     service.create = AsyncMock(return_value=provider)
+    service.masked_api_key = MagicMock(return_value="...cret")
     return service
 
 
@@ -321,6 +322,9 @@ class TestRoutes:
         }
         assert body["connection_check_supported"] is True
         assert body["key_expires_on"] == "2026-10-12"
+        # Like every provider response, it names the key by its masked tail,
+        # so the UI still sees a configured key after a check.
+        assert body["masked_api_key"] == "...cret"
         assert KEY not in response.text
         assert "credentials" not in body
 

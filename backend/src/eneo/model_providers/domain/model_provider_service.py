@@ -3,7 +3,11 @@ from enum import Enum
 from typing import Any, Literal, Optional
 from uuid import UUID, uuid4
 
-from eneo.main.exceptions import BadRequestException, NameCollisionException
+from eneo.main.exceptions import (
+    BadRequestException,
+    EncryptionNotConfiguredException,
+    NameCollisionException,
+)
 from eneo.model_providers.domain.connection_check import (
     ConnectionCheck,
     ConnectionCheckError,
@@ -294,6 +298,23 @@ class ModelProviderService:
             )
 
         return decrypted_creds
+
+    def masked_api_key(self, provider: ModelProvider) -> str | None:
+        """The provider's API key reduced to its last four characters, or None.
+
+        The stored key is ciphertext when encryption is on, so it is decrypted
+        here and only its last four characters leave this method. A key too
+        short to hide, or one that cannot be decrypted, still reads as
+        configured without revealing any of it.
+        """
+        stored_key = provider.credentials.get("api_key")
+        if not stored_key:
+            return None
+        try:
+            api_key = self.encryption.decrypt(stored_key)
+        except (ValueError, EncryptionNotConfiguredException):
+            return "****"
+        return f"...{api_key[-4:]}" if len(api_key) > 4 else "****"
 
     async def get_all(self, active_only: bool = False) -> list[ModelProvider]:
         """Get all providers for the tenant."""

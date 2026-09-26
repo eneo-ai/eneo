@@ -353,38 +353,18 @@ class CompletionService:
             unavailable_model_ids=frozenset(unavailable_model_ids),
         )
 
-    async def _handle_tool_call(self, completion: AsyncGenerator[Completion]):
+    async def _typed_chunks(self, completion: AsyncGenerator[Completion]):
         async for chunk in completion:
-            # Pass through stop chunk (carries usage data)
-            if chunk.stop:
-                yield chunk
-                continue
-
-            # Pass through reasoning/thinking events directly (text=None, so the
-            # branches below would otherwise drop them before they reach SSE).
-            if chunk.response_type == ResponseType.REASONING:
-                yield chunk
-                continue
-
-            # Pass through MCP tool call events directly
-            if chunk.response_type == ResponseType.TOOL_CALL:
-                yield chunk
-                continue
-
-            # Pass through tool approval required events directly
-            if chunk.response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
-                yield chunk
-                continue
-
-            # Pass through generated images (MCP image content blocks) directly
-            if chunk.response_type == ResponseType.FILES:
-                yield chunk
-                continue
-
-            if chunk.text:
-                chunk.response_type = ResponseType.TEXT
-
-                yield chunk
+            # Adapter events name their own type (tool calls, approvals and
+            # their timeouts, reasoning, images, errors) and pass through
+            # whether or not they carry text. An untyped chunk is answer text,
+            # or the closing stop chunk that carries usage.
+            if chunk.response_type is None:
+                if chunk.text:
+                    chunk.response_type = ResponseType.TEXT
+                elif not chunk.stop:
+                    continue
+            yield chunk
 
     async def get_response(
         self,
@@ -624,7 +604,7 @@ class CompletionService:
                     if mcp_proxy:
                         await mcp_proxy.close()
 
-            completion = self._handle_tool_call(streaming_wrapper())
+            completion = self._typed_chunks(streaming_wrapper())
             adapter_input_estimate = None
             usage = None
 

@@ -311,6 +311,92 @@ async def test_reasoning_can_resume_after_text():
     ]
 
 
+def _part_texts(chunks: list[dict], kind: str = "text") -> dict[str, str]:
+    parts: dict[str, str] = {}
+    for chunk in chunks:
+        if chunk["type"] == f"{kind}-delta":
+            parts[chunk["id"]] = parts.get(chunk["id"], "") + chunk["delta"]
+    return parts
+
+
+@pytest.mark.asyncio
+async def test_round_break_stays_in_a_continuing_part_but_never_starts_one():
+    # The adapter opens a later model round's text with a paragraph break.
+    completions = [
+        Completion(response_type=ResponseType.TEXT, text="Checking."),
+        Completion(
+            response_type=ResponseType.TOOL_CALL,
+            tool_calls_metadata=[_tool(status="succeeded")],
+        ),
+        Completion(response_type=ResponseType.TEXT, text="\n\nFound it."),
+        Completion(response_type=ResponseType.REASONING, reasoning_content="Again"),
+        Completion(response_type=ResponseType.TEXT, text="\n\nAnswer"),
+    ]
+
+    chunks = await _collect(_response(completions))
+
+    assert _part_texts(chunks) == {
+        "text-0": "Checking.\n\nFound it.",
+        "text-1": "Answer",
+    }
+
+
+@pytest.mark.asyncio
+async def test_round_break_in_reasoning_follows_the_same_part_rules():
+    # The adapter opens a later model round's reasoning with a paragraph break.
+    completions = [
+        Completion(response_type=ResponseType.REASONING, reasoning_content="Plan."),
+        Completion(
+            response_type=ResponseType.TOOL_CALL,
+            tool_calls_metadata=[_tool(status="succeeded")],
+        ),
+        Completion(
+            response_type=ResponseType.REASONING, reasoning_content="\n\nCheck."
+        ),
+        Completion(response_type=ResponseType.TEXT, text="Found it."),
+        Completion(
+            response_type=ResponseType.REASONING, reasoning_content="\n\nFormat."
+        ),
+        Completion(response_type=ResponseType.TEXT, text="\n\nDone."),
+    ]
+
+    chunks = await _collect(_response(completions))
+
+    assert _part_texts(chunks, "reasoning") == {
+        "reasoning-0": "Plan.\n\nCheck.",
+        "reasoning-1": "Format.",
+    }
+    assert _part_texts(chunks) == {"text-0": "Found it.", "text-1": "Done."}
+
+
+@pytest.mark.asyncio
+async def test_later_text_part_opens_at_its_first_text():
+    completions = [
+        Completion(response_type=ResponseType.TEXT, text="First"),
+        Completion(response_type=ResponseType.REASONING, reasoning_content="Hmm"),
+        Completion(response_type=ResponseType.TEXT, text="\n"),
+        Completion(response_type=ResponseType.TEXT, text="\nSecond"),
+    ]
+
+    chunks = await _collect(_response(completions))
+
+    assert [chunk["type"] for chunk in chunks] == [
+        "start",
+        "data-session",
+        "text-start",
+        "text-delta",
+        "text-end",
+        "reasoning-start",
+        "reasoning-delta",
+        "reasoning-end",
+        "text-start",
+        "text-delta",
+        "text-end",
+        "finish",
+    ]
+    assert _part_texts(chunks) == {"text-0": "First", "text-1": "Second"}
+
+
 @pytest.mark.asyncio
 async def test_tool_calls_and_approval_pause_resume():
     completions = [
@@ -453,21 +539,16 @@ async def test_failed_tool_maps_to_output_error():
 
 
 @pytest.mark.asyncio
-async def test_generated_image_and_status_event():
+async def test_generated_image():
     completions = [
-        Completion(response_type=ResponseType.ENEO_EVENT),
         Completion(response_type=ResponseType.FILES, generated_file=_generated_file()),
     ]
 
     chunks = await _collect(_response(completions))
     types = [chunk["type"] for chunk in chunks]
-    assert types == ["start", "data-session", "data-status", "file", "finish"]
+    assert types == ["start", "data-session", "file", "finish"]
 
-    status = chunks[2]
-    assert status["data"] == {"status": "generating_image"}
-    assert status["transient"] is True
-
-    file_chunk = chunks[3]
+    file_chunk = chunks[2]
     assert file_chunk["mediaType"] == "image/png"
     assert file_chunk["filename"] == "generated.png"
     assert file_chunk["url"].startswith("http://backend:8123/api/v1/files/")

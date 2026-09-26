@@ -2238,9 +2238,6 @@ class AssistantService:
                             chunk.generated_file = image_file
                             yield chunk
 
-                        if chunk.response_type == ResponseType.ENEO_EVENT:
-                            yield chunk
-
                         if chunk.response_type == ResponseType.TOOL_CALL:
                             if chunk.mcp_tool_references:
                                 for ref in chunk.mcp_tool_references:

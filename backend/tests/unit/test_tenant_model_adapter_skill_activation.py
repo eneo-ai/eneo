@@ -737,7 +737,12 @@ async def test_streaming_activates_skill_without_mcp_proxy() -> None:
             )
         ]
 
-    assert any(completion.text == "Payroll answer" for completion in output)
+    # The follow-up round's answer starts a new paragraph in the stream; the
+    # provider history below keeps each round's text as the model wrote it.
+    assert [completion.text for completion in output if completion.text] == [
+        "I will load the payroll procedure.",
+        "\n\nPayroll answer",
+    ]
     assert runtime.snapshot().accepted == ("skill-1",)
     follow_up_messages = completion_call.await_args.kwargs["messages"]
     assert "Use the exact payroll procedure." in follow_up_messages[0]["content"]

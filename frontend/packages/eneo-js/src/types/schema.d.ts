@@ -22417,12 +22417,7 @@ export interface components {
       finished_at: string | null;
     };
     /** @enum {string} */
-    EneoEventType:
-      | "generating_image"
-      | "tool_call"
-      | "tool_approval_required"
-      | "tool_approval_timeout"
-      | "token_usage";
+    EneoEventType: "tool_call" | "tool_approval_required" | "tool_approval_timeout" | "token_usage";
     /** SSEText */
     SSEText: {
       /**
@@ -22447,15 +22442,6 @@ export interface components {
       session_id: string;
       /** Reasoning */
       reasoning: string;
-    };
-    /** SSEEneoEvent */
-    SSEEneoEvent: {
-      /**
-       * Session Id
-       * Format: uuid
-       */
-      session_id: string;
-      eneo_event_type: components["schemas"]["EneoEventType"];
     };
     /**
      * SSEToolCall
@@ -28576,26 +28562,6 @@ export interface operations {
                  * Format: uuid
                  */
                 session_id: string;
-                eneo_event_type: components["schemas"]["EneoEventType"];
-                $defs: {
-                  /**
-                   * EneoEventType
-                   * @enum {string}
-                   */
-                  EneoEventType:
-                    | "generating_image"
-                    | "tool_call"
-                    | "tool_approval_required"
-                    | "tool_approval_timeout"
-                    | "token_usage";
-                };
-              }
-            | {
-                /**
-                 * Session Id
-                 * Format: uuid
-                 */
-                session_id: string;
                 /** @default tool_call */
                 eneo_event_type?: components["schemas"]["EneoEventType"];
                 /** Tools */
@@ -28611,7 +28577,6 @@ export interface operations {
                    * @enum {string}
                    */
                   EneoEventType:
-                    | "generating_image"
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
@@ -28707,7 +28672,6 @@ export interface operations {
                    * @enum {string}
                    */
                   EneoEventType:
-                    | "generating_image"
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
@@ -28766,7 +28730,6 @@ export interface operations {
                    * @enum {string}
                    */
                   EneoEventType:
-                    | "generating_image"
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"

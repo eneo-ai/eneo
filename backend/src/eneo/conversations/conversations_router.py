@@ -48,7 +48,6 @@ from eneo.sessions.session import (
     SessionMetadataPublic,
     SessionPublic,
     SessionUpdate,
-    SSEEneoEvent,
     SSEError,
     SSEFiles,
     SSEFirstChunk,
@@ -284,7 +283,6 @@ async def _authorize_partner_access(
         response_codes=[400, 403, 404],
         models=[
             SSEText,
-            SSEEneoEvent,
             SSEToolCall,
             SSEToolApprovalRequired,
             SSEToolApprovalTimeout,
@@ -323,7 +321,6 @@ async def chat(
     Streams the response as Server-Sent Events if stream == true.
     The following SSE response models are supported in the stream:
     - SSEText: Text completion chunks
-    - SSEEneoEvent: Internal events like generating an image
     - SSEFiles: Generated files/images responses
     - SSEFirstChunk: Initial response with metadata
     - SSEError: Error events (API errors, authentication failures, rate limits, etc.)

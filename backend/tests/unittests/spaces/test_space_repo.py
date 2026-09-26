@@ -12,6 +12,7 @@ def _repo(session: MagicMock) -> SpaceRepository:
         session=session,
         user=user,
         factory=MagicMock(),
+        file_content_loader=MagicMock(),
         app_repo=MagicMock(),
         assistant_repo=MagicMock(),
         completion_model_repo=MagicMock(),

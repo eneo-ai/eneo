@@ -15,6 +15,7 @@ from eneo.model_providers.domain.connection_check import (
     ConnectionCheckStatus,
 )
 from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
+from eneo.model_providers.domain.model_provider import ModelProvider
 from eneo.model_providers.domain.model_provider_service import (
     LITELLM_MODE_TO_OUR_MODE,
     UNCHANGED,
@@ -129,6 +130,14 @@ def get_model_provider_service(
 ServiceDep = Annotated[ModelProviderService, Depends(get_model_provider_service)]
 
 
+def _public(
+    provider: ModelProvider, service: ModelProviderService
+) -> ModelProviderPublic:
+    return ModelProviderPublic(
+        **provider.to_dict(), masked_api_key=service.masked_api_key(provider)
+    )
+
+
 @router.get(
     "/",
     response_model=list[ModelProviderPublic],
@@ -142,7 +151,7 @@ async def list_providers(
     """List all model providers for the tenant."""
     validate_permission(user, Permission.ADMIN)
     providers = await service.get_all()
-    return [ModelProviderPublic(**provider.to_dict()) for provider in providers]
+    return [_public(provider, service) for provider in providers]
 
 
 @router.get(
@@ -399,7 +408,7 @@ async def get_provider(
     """Get a specific model provider."""
     validate_permission(user, Permission.ADMIN)
     provider = await service.get_by_id(provider_id)
-    return ModelProviderPublic(**provider.to_dict())
+    return _public(provider, service)
 
 
 @router.post(
@@ -424,7 +433,7 @@ async def create_provider(
         is_active=data.is_active,
         key_expires_on=data.key_expires_on,
     )
-    return ModelProviderPublic(**provider.to_dict())
+    return _public(provider, service)
 
 
 @router.put(
@@ -453,7 +462,7 @@ async def update_provider(
             else UNCHANGED
         ),
     )
-    return ModelProviderPublic(**provider.to_dict())
+    return _public(provider, service)
 
 
 @router.get(
@@ -503,7 +512,7 @@ async def check_provider_connection(
 ) -> ModelProviderPublic:
     validate_permission(user, Permission.ADMIN)
     provider, _check = await service.check_connection(provider_id)
-    return ModelProviderPublic(**provider.to_dict())
+    return _public(provider, service)
 
 
 # What the deprecated /test/ endpoint said before it ran the connection check.

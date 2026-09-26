@@ -92,26 +92,35 @@ def _text_chunk(text: str, finish_reason: str | None = None):
     return SimpleNamespace(choices=[choice])
 
 
-def _response(*, content=None, tool_calls=None, finish_reason="stop"):
+def _reasoning_chunk(reasoning: str):
+    delta = SimpleNamespace(content=None, reasoning_content=reasoning, tool_calls=None)
+    choice = SimpleNamespace(delta=delta, finish_reason=None)
+    return SimpleNamespace(choices=[choice])
+
+
+def _response(
+    *, content=None, reasoning_content=None, tool_calls=None, finish_reason="stop"
+):
     message = SimpleNamespace(
         content=content,
-        reasoning_content=None,
+        reasoning_content=reasoning_content,
         tool_calls=tool_calls,
     )
     choice = SimpleNamespace(message=message, finish_reason=finish_reason)
     return SimpleNamespace(choices=[choice], usage=None)
 
 
-def _response_tool_call(tool_call_id: str, arguments: str):
+def _response_tool_call(tool_call_id: str, arguments: str, name: str = "server__tool"):
     return SimpleNamespace(
         id=tool_call_id,
-        function=SimpleNamespace(name="server__tool", arguments=arguments),
+        function=SimpleNamespace(name=name, arguments=arguments),
     )
 
 
 class _FakeMCPProxy:
     def __init__(self):
         self.calls = []
+        self.refreshed = []
 
     def get_allowed_tool_names(self):
         return {"server__tool"}
@@ -129,6 +138,43 @@ class _FakeMCPProxy:
             {"content": [{"type": "text", "text": "tool-ok"}], "is_error": False}
             for _ in proxy_calls
         ]
+
+    async def refresh_tools(self, touched_tool_names: list[str] | None = None) -> bool:
+        # A static tool set: re-listing after a round never changes it.
+        self.refreshed.append(touched_tool_names)
+        return False
+
+
+class _ProgressiveMCPProxy(_FakeMCPProxy):
+    """A progressive-discovery server: calling its loader activates a tool."""
+
+    def __init__(self):
+        super().__init__()
+        self.tools = {"server__load_tools"}
+
+    def get_allowed_tool_names(self):
+        return set(self.tools)
+
+    def get_tools_for_llm(self):
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": name,
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+            for name in sorted(self.tools)
+        ]
+
+    async def refresh_tools(self, touched_tool_names: list[str] | None = None) -> bool:
+        self.refreshed.append(touched_tool_names)
+        if "server__load_tools" not in (touched_tool_names or []):
+            return False
+        before = set(self.tools)
+        self.tools.add("server__search")
+        return self.tools != before
 
 
 class _ResourceMCPProxy(_FakeMCPProxy):
@@ -1399,3 +1445,338 @@ async def test_forced_final_drops_ignored_tool_calls_without_pending_events():
     # Text streamed by the final response is preserved and the turn stops.
     assert "partial answer" in "".join(c.text for c in completions if c.text)
     assert any(c.stop for c in completions)
+
+
+async def _stream_rounds(rounds: list[list[SimpleNamespace]]):
+    """Stream scripted provider rounds; every round but the last calls a tool."""
+    first_round, *follow_up_rounds = rounds
+    stream = _AsyncChunkStream(
+        first_round,
+        eneo_context={
+            "mcp_proxy": _FakeMCPProxy(),
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=[_AsyncChunkStream(r) for r in follow_up_rounds]),
+    ):
+        return await _collect(
+            _make_adapter(),
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+
+async def test_iterate_stream_refreshes_tools_after_each_tool_round():
+    mcp_proxy = _FakeMCPProxy()
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk(tool_call_id="call_1")],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+    follow_ups = [
+        _AsyncChunkStream([_tool_call_chunk(tool_call_id="call_2")]),
+        _AsyncChunkStream([_text_chunk("done", finish_reason="stop")]),
+    ]
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=follow_ups),
+    ):
+        await _collect(
+            _make_adapter(),
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    assert mcp_proxy.refreshed == [["server__tool"], ["server__tool"]]
+
+
+def _advertised_tools(completion_call) -> list[set[str]]:
+    return [
+        {tool["function"]["name"] for tool in call.kwargs.get("tools", [])}
+        for call in completion_call.await_args_list
+    ]
+
+
+async def test_non_streaming_refreshes_tools_after_each_tool_round():
+    adapter = _make_completion_adapter()
+    del adapter._merge_mcp_tools  # the real merge builds the advertised tools
+    adapter.model.supports_tool_calling = True
+    mcp_proxy = _ProgressiveMCPProxy()
+    responses = [
+        _response(
+            tool_calls=[_response_tool_call("call_1", "{}", name="server__load_tools")],
+            finish_reason="tool_calls",
+        ),
+        _response(
+            tool_calls=[
+                _response_tool_call("call_2", '{"q":"x"}', name="server__search")
+            ],
+            finish_reason="tool_calls",
+        ),
+        _response(content="Found it."),
+    ]
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=responses),
+    ) as completion_call:
+        completion = await adapter.get_response(
+            context=SimpleNamespace(), model_kwargs={}, mcp_proxy=mcp_proxy
+        )
+
+    loaded = {"server__load_tools", "server__search"}
+    assert _advertised_tools(completion_call) == [
+        {"server__load_tools"},
+        loaded,
+        loaded,
+    ]
+    assert mcp_proxy.calls == [
+        [("server__load_tools", {})],
+        [("server__search", {"q": "x"})],
+    ]
+    assert completion.text == "Found it."
+
+
+async def test_iterate_stream_announces_tools_activated_by_a_refresh():
+    adapter = _make_adapter()
+    adapter.model.supports_tool_calling = True
+    mcp_proxy = _ProgressiveMCPProxy()
+    stream = _AsyncChunkStream(
+        [
+            _tool_call_chunk(
+                tool_call_id="call_1", tool_name="server__load_tools", arguments="{}"
+            )
+        ],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+    follow_ups = [
+        _AsyncChunkStream(
+            [_tool_call_chunk(tool_call_id="call_2", tool_name="server__search")]
+        ),
+        _AsyncChunkStream([_text_chunk("Found it.", finish_reason="stop")]),
+    ]
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=follow_ups),
+    ) as completion_call:
+        completions = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    loaded = {"server__load_tools", "server__search"}
+    assert _advertised_tools(completion_call) == [loaded, loaded]
+    assert [
+        metadata.tool_call_id
+        for event in _tool_call_events(completions)
+        for metadata in event.tool_calls_metadata
+        if metadata.result_status == "pending"
+    ] == ["call_1", "call_2"]
+    assert mcp_proxy.calls == [
+        [("server__load_tools", {})],
+        [("server__search", {"q": "x"})],
+    ]
+
+
+def _streamed_texts(completions) -> list[str]:
+    return [c.text for c in completions if c.text]
+
+
+async def test_iterate_stream_separates_text_of_rounds_around_a_tool_call():
+    completions = await _stream_rounds(
+        [
+            [_text_chunk("Jag hämtar aktuell tid åt dig."), _tool_call_chunk()],
+            [
+                _text_chunk("**Aktuell tid:**"),
+                _text_chunk("\n- **Sverige:** 10:00", finish_reason="stop"),
+            ],
+        ]
+    )
+
+    assert _streamed_texts(completions) == [
+        "Jag hämtar aktuell tid åt dig.",
+        "\n\n**Aktuell tid:**",
+        "\n- **Sverige:** 10:00",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("before_tool", "after_tool"),
+    [
+        ("Checking.\n", "Result"),
+        ("Checking.\n\n", "Result"),
+        ("Checking.", "\nResult"),
+        ("Checking.", "\n\nResult"),
+    ],
+)
+async def test_iterate_stream_keeps_a_newline_that_already_separates_rounds(
+    before_tool: str, after_tool: str
+):
+    completions = await _stream_rounds(
+        [
+            [_text_chunk(before_tool), _tool_call_chunk()],
+            [_text_chunk(after_tool, finish_reason="stop")],
+        ]
+    )
+
+    assert "".join(_streamed_texts(completions)) == before_tool + after_tool
+
+
+async def test_iterate_stream_leaves_text_within_a_round_unchanged():
+    # The round's text continues after its tool call starts streaming (the
+    # pending step is emitted in between); only the next round is separated.
+    completions = await _stream_rounds(
+        [
+            [
+                _text_chunk("Let me check"),
+                _tool_call_delta_chunk(tool_call_id="call_1", tool_name="server__tool"),
+                _text_chunk(" the time."),
+                _tool_call_delta_chunk(
+                    arguments='{"q":"x"}', finish_reason="tool_calls"
+                ),
+            ],
+            [_text_chunk("It is ten."), _text_chunk(" Done.", finish_reason="stop")],
+        ]
+    )
+
+    assert _streamed_texts(completions) == [
+        "Let me check",
+        " the time.",
+        "\n\nIt is ten.",
+        " Done.",
+    ]
+    pending_at = next(
+        i
+        for i, c in enumerate(completions)
+        if c.tool_calls_metadata and c.tool_calls_metadata[0].result_status == "pending"
+    )
+    assert completions[pending_at - 1].text == "Let me check"
+    assert completions[pending_at + 1].text == " the time."
+
+
+async def test_iterate_stream_single_round_text_is_unchanged():
+    completions = await _stream_rounds(
+        [[_text_chunk("Hel"), _text_chunk("lo", finish_reason="stop")]]
+    )
+
+    assert _streamed_texts(completions) == ["Hel", "lo"]
+
+
+async def test_iterate_stream_separates_only_rounds_that_stream_text():
+    completions = await _stream_rounds(
+        [
+            [_tool_call_chunk(tool_call_id="call_1")],
+            [_text_chunk("Found it."), _tool_call_chunk(tool_call_id="call_2")],
+            [_tool_call_chunk(tool_call_id="call_3")],
+            [_text_chunk("Answer", finish_reason="stop")],
+        ]
+    )
+
+    assert _streamed_texts(completions) == ["Found it.", "\n\nAnswer"]
+
+
+async def test_iterate_stream_separates_reasoning_of_rounds_around_a_tool_call():
+    completions = await _stream_rounds(
+        [
+            [_reasoning_chunk("I need the time."), _tool_call_chunk()],
+            [
+                _reasoning_chunk("Format"),
+                _reasoning_chunk(" it."),
+                _text_chunk("It is ten.", finish_reason="stop"),
+            ],
+        ]
+    )
+
+    assert [
+        c.reasoning_content
+        for c in completions
+        if c.response_type == ResponseType.REASONING
+    ] == ["I need the time.", "\n\nFormat", " it."]
+    # Reasoning and answer text are joined separately: the first answer text
+    # follows reasoning, not earlier answer text, so it gets no break.
+    assert _streamed_texts(completions) == ["It is ten."]
+
+
+# (reasoning, text, calls_a_tool) for each model round of one turn.
+_SCRIPTED_TURN = [
+    ("I need the time.", "Jag hämtar tiden.", True),
+    (None, None, True),
+    ("Format it.", "**Aktuell tid:** 10:00", False),
+]
+
+
+def _streamed_round(index: int, reasoning, text, calls_a_tool: bool):
+    chunks = []
+    if reasoning:
+        chunks.append(_reasoning_chunk(reasoning))
+    if text:
+        chunks.append(_text_chunk(text, finish_reason=None if calls_a_tool else "stop"))
+    if calls_a_tool:
+        chunks.append(_tool_call_chunk(tool_call_id=f"call_{index}"))
+    return chunks
+
+
+def _non_streamed_round(index: int, reasoning, text, calls_a_tool: bool):
+    if calls_a_tool:
+        return _response(
+            content=text,
+            reasoning_content=reasoning,
+            tool_calls=[_response_tool_call(f"call_{index}", '{"q":"x"}')],
+            finish_reason="tool_calls",
+        )
+    return _response(content=text, reasoning_content=reasoning)
+
+
+@pytest.mark.parametrize(
+    ("field", "expected"),
+    [
+        ("text", "Jag hämtar tiden.\n\n**Aktuell tid:** 10:00"),
+        ("reasoning_content", "I need the time.\n\nFormat it."),
+    ],
+)
+async def test_non_streaming_answer_matches_the_streamed_answer(
+    field: str, expected: str
+):
+    streamed = await _stream_rounds(
+        [_streamed_round(i, *round_) for i, round_ in enumerate(_SCRIPTED_TURN)]
+    )
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(
+            side_effect=[
+                _non_streamed_round(i, *round_)
+                for i, round_ in enumerate(_SCRIPTED_TURN)
+            ]
+        ),
+    ):
+        completion = await _make_completion_adapter().get_response(
+            context=SimpleNamespace(), model_kwargs={}, mcp_proxy=_FakeMCPProxy()
+        )
+
+    assert "".join(getattr(c, field) or "" for c in streamed) == expected
+    assert getattr(completion, field) == expected

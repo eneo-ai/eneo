@@ -31,7 +31,6 @@ from eneo.authentication.auth_models import (
     audit_actor_for,
 )
 from eneo.database.database import AsyncSession
-from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.models import (
     NOT_PROVIDED,
