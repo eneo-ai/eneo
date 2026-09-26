@@ -55,7 +55,7 @@ it("lists favourites first and pins with a toggle that keeps its name", async ()
 
 it("filters by capability, self-hosting and search", () => {
   renderPicker(new Set());
-  const capabilities = screen.getByRole("radiogroup", { name: "Kapaciteter" });
+  const capabilities = screen.getByRole("radiogroup", { name: "Funktioner" });
 
   fireEvent.click(within(capabilities).getByRole("radio", { name: "Tal-till-text" }));
   expect(screen.queryByRole("button", { name: "Lägg till OpenAI" })).toBeNull();
