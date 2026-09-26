@@ -1,68 +1,76 @@
 #!/usr/bin/env node
 /**
- * Converts the Paraglide (inlang message format) catalogs of apps/web into
- * next-intl catalogs for apps/web-next.
+ * Generates web-next's next-intl catalogs, src/lib/i18n/messages/{sv,en}.json,
+ * from the SvelteKit app's Paraglide catalogs (apps/web/messages) with
+ * src/lib/i18n/extra/{sv,en}.json merged over them (extra wins).
  *
- * Paraglide stores flat key → string maps with `{param}` interpolation, which
- * is already valid ICU for the simple cases. Messages that need manual review
- * are flagged on stdout and copied through unchanged:
+ * messages/* is generated: never edit it. Every string web-next owns lives in
+ * extra/ (sv and en with the same keys): new keys, and web-next's wording for
+ * an apps/web key. Everything else comes from apps/web, so a run also picks up
+ * apps/web's new keys and wording and drops the keys it deleted. `bun run
+ * lint` (scripts/check-i18n.mjs) fails while messages/* differs from what a
+ * run writes.
+ *
+ * Messages that need manual review are flagged on stdout and copied through
+ * unchanged:
  *   - non-string values (Paraglide variants/plurals)
  *   - keys containing "." (next-intl treats dots as namespace separators)
  *   - apostrophes directly before "{" or "}" (ICU escape semantics differ)
- *
- * Keys that exist only in web-next live in src/lib/i18n/extra/{locale}.json
- * and are merged last (they win over converted keys).
+ *   - "<" before a letter (markup or a <placeholder>; ICU parses tags)
+ * To fix one for web-next, put its ICU version in extra/; that clears the flag.
  *
  * Usage: bun run i18n:convert
- *
- * DRIFT: do not run this until the catalogs are reconciled. About 750
- * web-next keys were added to messages/*.json directly instead of to
- * extra/*.json, so a run drops them (and changes some values and adds keys
- * from apps/web). Until they move into extra/, add new keys to all four
- * catalogs (extra/ and messages/, sv and en) by hand; `bun run lint` checks
- * that the locales match.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+  appRoot,
+  buildLocale,
+  diffCatalogs,
+  locales,
+  messagesDir,
+  serializeCatalog
+} from "./i18n-catalogs.mjs";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const sourceDir = path.resolve(here, "..", "..", "web", "messages");
-const extraDir = path.resolve(here, "..", "src", "lib", "i18n", "extra");
-const targetDir = path.resolve(here, "..", "src", "lib", "i18n", "messages");
-const locales = ["sv", "en"];
+mkdirSync(messagesDir, { recursive: true });
 
-mkdirSync(targetDir, { recursive: true });
+// The previous catalog only feeds the summary; after a bad merge it may not
+// parse, and regenerating it is the fix.
+function readPrevious(file) {
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
 
 for (const locale of locales) {
-  const sourcePath = path.join(sourceDir, `${locale}.json`);
-  const source = JSON.parse(readFileSync(sourcePath, "utf8"));
-  const out = {};
-  const flagged = [];
+  const { paths, messages, flagged } = buildLocale(locale);
+  const previous = readPrevious(paths.messages);
 
-  for (const [key, value] of Object.entries(source)) {
-    if (key === "$schema") continue;
+  writeFileSync(paths.messages, serializeCatalog(messages));
 
-    if (typeof value !== "string") {
-      flagged.push(`${key}: non-string value (Paraglide variant/plural), copied as-is`);
-      out[key] = value;
-      continue;
+  const count = `${locale}: ${Object.keys(messages).length} messages written`;
+  if (!previous) {
+    console.log(count);
+  } else {
+    const { dropped, changed, added } = diffCatalogs(previous, messages);
+    console.log(
+      `${count} (${added.length} added, ${changed.length} changed, ${dropped.length} removed)`
+    );
+    // A removal is the one change that can break web-next: apps/web deletes
+    // keys it stops using, even when web-next still uses them.
+    if (dropped.length > 0) {
+      const extra = path.relative(appRoot, paths.extra);
+      console.log(`${locale}: removed because neither apps/web nor ${extra} has them any more:`);
+      for (const key of dropped) console.log(`  - ${key}`);
+      console.log(
+        "  If web-next still uses one, add it back to extra/ (sv and en; git has the old text) " +
+          "and run `bun run i18n:convert` again."
+      );
     }
-    if (key.includes(".")) {
-      flagged.push(`${key}: key contains "." (next-intl namespace separator)`);
-    }
-    if (/'[{}]/.test(value)) {
-      flagged.push(`${key}: apostrophe before "{" or "}" (ICU escape, needs '' doubling)`);
-    }
-    out[key] = value;
   }
 
-  const extraPath = path.join(extraDir, `${locale}.json`);
-  const extra = existsSync(extraPath) ? JSON.parse(readFileSync(extraPath, "utf8")) : {};
-  Object.assign(out, extra);
-
-  writeFileSync(path.join(targetDir, `${locale}.json`), JSON.stringify(out, null, 2) + "\n");
-  console.log(`${locale}: ${Object.keys(out).length} messages written`);
   if (flagged.length > 0) {
     console.log(`${locale}: ${flagged.length} message(s) need manual review:`);
     for (const entry of flagged) console.log(`  - ${entry}`);

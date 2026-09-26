@@ -294,14 +294,24 @@ production build shows these violations. Never loosen the policy.
 
 - next-intl, locales `sv` (default) and `en`, chosen by the `NEXT_LOCALE` cookie.
   No hardcoded UI text (`eneo/no-hardcoded-text`).
-- New web-next strings go in **four** files with identical key sets:
-  `src/lib/i18n/extra/{sv,en}.json` and `src/lib/i18n/messages/{sv,en}.json`
-  (natural Swedish; append a block with your feature's prefix). `bun run lint`
-  (`scripts/check-i18n.mjs`) checks that they stay in sync. Reuse existing keys
-  when they fit.
-- Don't run `bun run i18n:convert` (`scripts/convert-paraglide-messages.mjs`)
-  until the catalogs are reconciled: `messages/*` holds ~750 web-next keys that
-  are in neither `apps/web/messages` nor `extra/`, and a run would drop them.
+- `src/lib/i18n/messages/{sv,en}.json` are generated; never edit them.
+  `bun run i18n:convert` builds them from the SvelteKit app's catalogs
+  (`apps/web/messages`) with `src/lib/i18n/extra/{sv,en}.json` merged over
+  them, so web-next reuses apps/web's translations and `extra/` holds every
+  string web-next owns.
+- New or changed web-next text goes in `extra/sv.json` and `extra/en.json`
+  (same keys in both; natural Swedish; append a block with your feature's
+  prefix), then run `bun run i18n:convert`. To reword an apps/web string for
+  web-next, add its key to `extra/`. Reuse existing keys when they fit.
+- `bun run lint` (`scripts/check-i18n.mjs`) fails when `messages/*` is not
+  what the converter writes, when `sv` and `en` have different keys, or when a
+  literal `t("key")` is missing.
+- So a change to apps/web's catalogs (e.g. merging `develop`) fails lint until
+  someone runs the converter. That's on purpose: the check can't tell an
+  apps/web change from a hand edit. Review the converter's diff: apps/web's new
+  wording replaces ours unless the key is in `extra/`, and keys apps/web
+  deleted are dropped. Lint lists those first ("It would drop these"): move the
+  ones web-next still uses to `extra/` before you run it.
 - Astryx's own strings (aria labels, pagination, …) come from its Swedish
   catalog through the provider; don't translate them yourself.
 
