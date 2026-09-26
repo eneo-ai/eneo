@@ -750,9 +750,8 @@ def get_application():
 
         try:
             # 2 second timeout to keep endpoint responsive
-            db_in_progress = await asyncio.wait_for(
-                _query_db_crawl_count(), timeout=2.0
-            )
+            async with asyncio.timeout(2.0):
+                db_in_progress = await _query_db_crawl_count()
         except asyncio.TimeoutError:
             db_query_error = True
             logger.warning("DB query timeout in crawler health check")
