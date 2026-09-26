@@ -1,8 +1,10 @@
 "use client";
 
+import { useAnnounce, useClipboard } from "@astryxdesign/core/hooks";
+import { IconButton } from "@astryxdesign/core/IconButton";
 import { Check, Copy } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,7 +17,9 @@ import {
 
 /**
  * One-time secret display: shown exactly once after creation/rotation, with
- * a copy button and a "this won't be shown again" warning.
+ * a copy button and a "this won't be shown again" warning. The key wraps
+ * instead of scrolling and selects as a whole, for copying by hand; the copy
+ * is announced (Astryx useClipboard), and a refused clipboard says so.
  */
 export function SecretRevealDialog({
   title,
@@ -27,17 +31,25 @@ export function SecretRevealDialog({
   onClose: () => void;
 }) {
   const t = useTranslations();
-  const [copied, setCopied] = useState(false);
+  const announce = useAnnounce();
+  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
+  const [copyFailed, setCopyFailed] = useState(false);
+  const failureId = useId();
 
-  async function copy() {
+  async function copySecret() {
     if (!secret) return;
-    await navigator.clipboard.writeText(secret);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    const copied = await copy(secret);
+    setCopyFailed(!copied);
+    if (!copied) announce(t("ui_copy_failed_copy_by_hand"));
+  }
+
+  function close() {
+    setCopyFailed(false);
+    onClose();
   }
 
   return (
-    <Dialog open={secret !== null} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={secret !== null} onOpenChange={(open) => !open && close()}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
@@ -46,21 +58,25 @@ export function SecretRevealDialog({
           <AlertTitle>{t("api_keys_important")}</AlertTitle>
           <AlertDescription>{t("api_keys_copy_warning")}</AlertDescription>
         </Alert>
-        <div className="flex items-center gap-2">
-          <code className="bg-muted min-w-0 flex-1 overflow-x-auto rounded-md px-3 py-2 font-mono text-sm whitespace-nowrap">
+        <div className="flex items-start gap-2">
+          <code className="bg-muted min-w-0 flex-1 rounded-md px-3 py-2 font-mono text-sm break-all select-all">
             {secret}
           </code>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={copy}
-            aria-label={t("api_keys_copy_to_clipboard")}
-          >
-            {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-          </Button>
+          <IconButton
+            label={t("api_keys_copy_to_clipboard")}
+            tooltip={t("api_keys_copy_to_clipboard")}
+            icon={isCopied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+            aria-describedby={copyFailed ? failureId : undefined}
+            onClick={() => void copySecret()}
+          />
         </div>
+        {copyFailed ? (
+          <p id={failureId} className="text-destructive text-sm">
+            {t("ui_copy_failed_copy_by_hand")}
+          </p>
+        ) : null}
         <DialogFooter>
-          <Button onClick={onClose}>{t("done")}</Button>
+          <Button onClick={close}>{t("done")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

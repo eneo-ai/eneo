@@ -5073,5 +5073,6 @@
   "fix_notifications_running": "Notifications, {count} in progress",
   "fix_crawl_started_column": "Started",
   "fix_crawls_filter_label": "Filter crawls",
-  "fix_integrations_empty_title": "No integrations yet"
+  "fix_integrations_empty_title": "No integrations yet",
+  "ui_copy_failed_copy_by_hand": "Couldn't copy. Select the key and copy it yourself."
 }
