@@ -44,9 +44,11 @@ manual test protocol and the exceptions process. Read it before building UI.
   with opacity. Colour is never the only signal.
 - Targets are at least 24×24 px; 44×44 px on touch layouts.
 - Every drag has a button alternative (file drop zones have "Välj filer").
-- Status changes are announced politely without moving focus (toasts, a
-  `role="status"` region). In chat: one polite live region for "svar klart",
-  errors and tool approvals; never `aria-live` on streaming text.
+- Status changes are announced politely without moving focus: Astryx
+  `useAnnounce` (never a hand-rolled `aria-live`/`role="status"` region) and
+  toasts from `@/lib/toast` (lint-enforced; errors and warnings stay until
+  closed). In chat: "svar klart", errors and tool approvals go through
+  `useAnnounce`; never `aria-live` on streaming text.
 - Works at 320 px width and 400% zoom, with reduced motion and in forced
   colours; parts in another language get `lang`.
 - Shared components get an axe test (`expectNoAxeViolations` from
@@ -97,9 +99,11 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
   Astryx doesn't meet — and say why in a comment next to it. Known gaps in
   Astryx 0.6.3: `Switch` hard-codes the English busy label "Loading" (don't use
   `isLoading`/`changeAction` on it), `CodeBlock`/`CodeEditor` inject runtime
-  styles the CSP blocks (use our shiki code block), and dictation hooks
-  (`useChatDictation`, `useSpeechRecognition`) send audio to the browser
-  vendor, so we don't use them.
+  styles the CSP blocks (code fences in answers render through Streamdown's
+  `@streamdown/code` in `MessageResponse`), `useClipboard` writes text/plain
+  only (the chat's rich-text copy keeps `navigator.clipboard.write`, commented),
+  and the dictation hooks (`useChatDictation`, `useSpeechRecognition`) send
+  audio to the browser vendor, so we don't use them.
 - **Quality bar for every change:** small focused modules, typed APIs, no dead
   or duplicated code, tests for behaviour (including keyboard and axe), and
   `bun run check && bun run lint && bun run test` green.
@@ -123,13 +127,25 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
   `Theme`, Astryx's own strings in the active locale and `next/link` for Astryx
   links. Don't add another app-wide `Theme`; a nested `<Theme>` for one region
   is fine.
-- **Colour mode**: next-themes owns it (`ThemeSwitcher` calls `setTheme`). Its
+- **Colour mode**: next-themes owns it (the profile menu's `ThemeSubMenu` calls
+  `setTheme`). Its
   nonce'd blocking script sets `.light`/`.dark` and `data-theme` on `<html>`
   before first paint; Astryx mirrors `resolvedTheme` after hydration. For other
   client-only values use `useHydrated()` (`src/lib/hooks/use-hydrated.ts`)
   instead of effect + setState.
 - **Fonts**: Figtree for UI (`font-sans`), JetBrains Mono (`font-mono`), Source
   Serif 4 for assistant answers (`font-voice`). Type scale 14px / 1.2.
+- **App shell** (`src/components/shell/`): Astryx `SideNav` (collapsed state in
+  the `eneo_sidenav_collapsed` cookie, read by the layout), an admin mode under
+  `/admin`, Astryx `MobileNav` below 768px and the ⌘K `CommandPalette`. A page
+  header that carries its own phone menu button (the chat header) calls
+  `useOwnMobileHeader()` so the shell hides its top bar while it is mounted, and
+  opens the drawer with `window.dispatchEvent(new CustomEvent(OPEN_NAV_EVENT))`
+  (`src/components/shell/routes.ts`).
+- **Toasts**: only through `src/lib/toast.ts` (`no-restricted-imports` blocks
+  `sonner` elsewhere). Errors and warnings don't time out; every toast has a
+  close button; success and info close after 6 s. Sonner's stylesheet is
+  static (see CSP).
 
 ## Styling
 
@@ -175,6 +191,12 @@ shadcn names (`bg-background`, `text-muted-foreground`, `border-input`,
   overrides.
 - `--color-*` custom properties are Astryx tokens (`--color-accent` is the blue);
   `--accent` is the shadcn hover tint. Don't mix them up in `var()`.
+- Filled controls darken on hover with `bg-ax-hover-overlay` (an overlay on the
+  fill), never a faded fill: `hover:bg-primary/90` drops text below 4.5:1.
+- Focus rings are full strength (`focus-visible:outline-2
+focus-visible:outline-offset-2 focus-visible:outline-ring`);
+  `eneo/no-weak-focus-indicator` rejects translucent rings (`ring-ring/50`) and
+  `outline-none` without a replacement.
 - Page layout: the app shell (`src/components/shell/app-shell.tsx`) puts
   pages in a `bg-ax-surface rounded-ax-page` panel on the `bg-ax-body`
   background, and `main#main-content` is the scroll container. Pages don't
@@ -184,17 +206,40 @@ shadcn names (`bg-background`, `text-muted-foreground`, `border-input`,
 
 - `PageHeader` — `title`, `description?`, `breadcrumbs?: {label, href?, current?}[]`
   (only `current` marks a crumb as this page; a crumb without `href` is a plain
-  label), `actions?` (legacy `children` still work), `tour?`.
+  label), `actions?` (legacy `children` still work), `headingLevel?`,
+  `headingRef?`, `tour?`.
 - `EmptyState` — `title`, `description?`, `icon?`, `actions?` (or `children`),
-  `headingLevel?` (2), `isCompact?`, `framed?` (dashed frame, default on).
+  `headingLevel?` (1–4, default 2), `isCompact?`, `framed?` (dashed frame,
+  default on).
 - `LoadingState` — skeleton status region: `label?`, `rows?`,
   `variant?: "rows" | "text"`. Never show an EmptyState that says "Loading".
 - `EntityAvatar` — coloured tile for spaces/assistants: `name`, `id?`, `tone?`,
   `src?`, `icon?`, `size?: sm|md|lg|xl`, `label?`. Colours via
   `entityTone()` / `entityAccent()` in `src/lib/entity-accent.ts`.
 - `StatusLabel` — Astryx `StatusDot` plus text: `status`, `label`, `isPulsing?`.
-- `SettingsGroup` / `SettingsRow`, `ResourceTileCard` — legacy (shadcn-based);
-  keep using them until a screen is migrated.
+- `ClientTime` — the one way to show a date: `value`, `format: "date" |
+"date_long" | "date_time" | "relative"`. It renders in the viewer's time zone
+  after hydration, so server and client HTML never disagree.
+- `ResourceCard` (`resource-tile.tsx`) — the card for assistants, apps and
+  services (Astryx `ClickableCard`; its action menu is a sibling, so actions
+  never open the card).
+- `ConfirmDialog` / `ConfirmDialogControlled` — confirmations; put the
+  controlled one outside menus.
+- `SettingsGroup` / `SettingsRow` — legacy (shadcn-based); keep using them until
+  a screen is migrated.
+
+Shared behaviour outside `composites`:
+
+- Removing something from a list: `useRemovalMutation` + `RemovalFocusScope`
+  (`src/features/spaces/removal.tsx`) wait for the refetch, close the dialog and
+  move focus with `rescueFocus` (`src/lib/focus-rescue.ts`) to the list's
+  heading or panel, so focus never falls to `<body>`.
+- Settings switches that save on toggle: `useSettingSwitch`
+  (`src/features/admin/use-setting-switch.ts`) — optimistic, reverts on error,
+  queues a press made during a save.
+- Public pages (login, activate, …) use `PublicPage`
+  (`src/app/(public)/public-page.tsx`): one `main`, one `h1` and the
+  accessibility statement link.
 
 ## CSP
 
@@ -205,10 +250,17 @@ loosen the policy.
 - The Eneo theme is pre-built, so `Theme` injects nothing. Never pass a runtime
   `defineTheme()` object to `<Theme>`; runtime themes inject `<style>` tags.
 - Astryx parts that still inject `<style>` at runtime and are blocked in
-  production: `CodeBlock`/`CodeEditor` syntax colours (use
-  `src/components/ai-elements/code-block.tsx` instead), `DateInput`'s engine
+  production: `CodeBlock`/`CodeEditor` syntax colours (don't use them; code
+  fences render through Streamdown's `@streamdown/code`), `DateInput`'s engine
   probe (falls back to a pointer heuristic; harmless) and Chat's stream-scroll
   rule (shipped statically in `globals.css`).
+- Sonner injects its stylesheet at runtime unless patched:
+  `frontend/patches/sonner@2.0.8.patch` makes the Toaster import the static
+  `sonner/dist/styles.css`. After a sonner upgrade bun silently skips the stale
+  patch; recreate it with `bun patch sonner` (`src/components/ui/sonner.test.tsx`
+  fails if a `<style>` appears).
+- e2e specs import `{ expect, test }` from `tests/csp.ts`, which fails a test
+  on any `securitypolicyviolation`, so the production build is checked too.
 - A server component that needs the nonce reads `(await headers()).get("x-nonce")`
   (see `src/app/layout.tsx`).
 
@@ -216,9 +268,14 @@ loosen the policy.
 
 - next-intl, locales `sv` (default) and `en`, chosen by the `NEXT_LOCALE` cookie.
   No hardcoded UI text (`eneo/no-hardcoded-text`).
-- New web-next strings go in **both** `src/lib/i18n/extra/sv.json` and `en.json`
-  (same keys, natural Swedish), then `node scripts/convert-paraglide-messages.mjs`.
-  Never edit `src/lib/i18n/messages/*` by hand. Reuse existing keys when they fit.
+- New web-next strings go in **four** files with identical key sets:
+  `src/lib/i18n/extra/{sv,en}.json` and `src/lib/i18n/messages/{sv,en}.json`
+  (natural Swedish; append a block with your feature's prefix). `bun run lint`
+  (`scripts/check-i18n.mjs`) checks that they stay in sync. Reuse existing keys
+  when they fit.
+- Don't run `bun run i18n:convert` (`scripts/convert-paraglide-messages.mjs`)
+  until the catalogs are reconciled: `messages/*` holds ~750 web-next keys that
+  are in neither `apps/web/messages` nor `extra/`, and a run would drop them.
 - Astryx's own strings (aria labels, pagination, …) come from its Swedish
   catalog through the provider; don't translate them yourself.
 

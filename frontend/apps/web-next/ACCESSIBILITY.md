@@ -123,7 +123,10 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
     `pointer-coarse:size-11` or drop it. Custom targets (links styled as
     buttons, legacy shadcn controls) use Tailwind's `pointer-coarse:` variant
     (`pointer-coarse:min-h-11`).
-- Measured on real pages by axe (`target-size`) in `tests/a11y.spec.ts`.
+- axe's `target-size` rule in `tests/a11y.spec.ts` checks the 24 px minimum on
+  real pages. It does not check the 44 px touch standard: that comes from the
+  theme overrides and `globals.css` (guarded by `src/app/globals-css.test.ts`)
+  and is checked by hand at phone width in the manual protocol.
 
 ### 5. Colour and contrast (1.4.1, 1.4.3, 1.4.11)
 
@@ -211,13 +214,17 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 ### 10. Status messages (4.1.3)
 
 - Results of an action that don't move focus are announced politely: saved,
-  copied, "3 filer uppladdade", search result counts. Use a toast (the sonner
-  `Toaster` is a polite live region) or a `role="status"` region that is
-  already in the DOM before the message is written into it.
+  copied, "3 filer uppladdade", search result counts. Use Astryx `useAnnounce`
+  (one shared live region; never a hand-rolled `aria-live`/`role="status"`
+  element) or a toast from `@/lib/toast`. While a modal is open, the Toaster
+  moves the live regions into it, because everything outside a modal is hidden
+  from screen readers.
 - Urgent errors that block the task use `role="alert"`, sparingly. Loading
   uses `LoadingState` (a `role="status"` region); don't announce every spinner.
-- Error toasts stay until dismissed; don't auto-hide information the user
-  must act on (2.2.1).
+- Toasts come only from `@/lib/toast` (`no-restricted-imports` blocks `sonner`
+  elsewhere). Errors and warnings stay until closed; every toast has a
+  labelled close button; success and info close after 6 s. Don't auto-hide
+  information the user must act on (2.2.1).
 
 #### AI chat
 
@@ -316,11 +323,14 @@ Run from `frontend/apps/web-next`.
 | Check                                                | Catches                                                                       | Runs in                                          |
 | ---------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------ |
 | ESLint `jsx-a11y` (strict set)                       | Static markup errors: click handlers on divs, autofocus, invalid ARIA, labels | `bun run lint`, CI "Frontend (web-next)"         |
-| ESLint `eneo/no-literal-accessible-name`             | Literal `aria-label`, `alt`, `title`, `placeholder`, … (not from i18n)        | `bun run lint`, CI "Frontend (web-next)"         |
+| ESLint `eneo/no-literal-accessible-name`             | Literal `aria-label`, `alt`, `title`, `placeholder`, Astryx `label`/`tooltip` | `bun run lint`, CI "Frontend (web-next)"         |
+| ESLint `eneo/no-weak-focus-indicator`                | Translucent focus rings (`ring-ring/50`), `outline-none` without replacement  | `bun run lint`, CI "Frontend (web-next)"         |
+| ESLint `no-restricted-imports` (`sonner`)            | Toasts that bypass `@/lib/toast` (and its no-timeout rule for errors)         | `bun run lint`, CI "Frontend (web-next)"         |
 | ESLint `eneo/no-raw-color`, `eneo/no-hardcoded-text` | Raw colours, untranslated text                                                | `bun run lint`, CI "Frontend (web-next)"         |
 | `src/theme/eneo-theme.contrast.test.ts`              | Token pairs below 4.5:1 (text) or 3:1 (non-text), light and dark              | `bun run test`, CI "Frontend (web-next)"         |
 | Vitest + axe (`src/test/axe.ts`)                     | Component markup: names, roles, ARIA, labels, lists, landmarks                | `bun run test`, CI "Frontend (web-next)"         |
 | Playwright + axe (`tests/a11y.spec.ts`)              | Real pages in light and dark mode, incl. contrast and target size; skip link  | `bun run test:e2e`, CI "Frontend E2E (web-next)" |
+| Playwright CSP fixture (`tests/csp.ts`)              | Any `securitypolicyviolation` on a page an e2e test visits                    | `bun run test:e2e`, CI "Frontend E2E (web-next)" |
 | [Manual protocol](#manual-test-protocol)             | Everything else: focus order, announcements, zoom, reading experience         | Every PR that changes UI                         |
 
 Both axe checks use the WCAG 2.2 A/AA tags from `src/test/wcag.ts`. Automated
