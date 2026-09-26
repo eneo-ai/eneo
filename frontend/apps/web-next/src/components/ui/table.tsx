@@ -1,16 +1,43 @@
 "use client";
 
+import { useScrollableArea } from "@astryxdesign/core/hooks";
+import { useTranslator } from "@astryxdesign/core/i18n";
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+function Table({ className, ref, ...props }: React.ComponentProps<"table">) {
+  const t = useTranslator();
+  // A table wider than its container scrolls sideways, and the keyboard must
+  // reach that scroll too (2.1.1): Tab goes to the first link or button in
+  // the table, or else the container is a named stop while it overflows.
+  // Astryx's own Table does the same with this hook (a group, not a landmark,
+  // and the same label); the hook also owns the container's overflow.
+  const { getViewportProps, getContentProps } = useScrollableArea({
+    axis: "inline",
+    keyboardAccess: {
+      owner: "contentOrViewport",
+      label: props["aria-label"] ?? t("@astryx.table.label"),
+      role: "group"
+    },
+    overscroll: "contain"
+  });
   return (
-    <div data-slot="table-container" className="relative w-full overflow-x-auto">
+    <div
+      {...getViewportProps<HTMLDivElement>({
+        "data-slot": "table-container",
+        className: "relative w-full"
+      })}
+      // A table named by a heading names its scroll region the same way.
+      aria-labelledby={props["aria-labelledby"]}
+    >
       <table
-        data-slot="table"
-        className={cn("w-full caption-bottom text-sm", className)}
         {...props}
+        {...getContentProps<HTMLTableElement>({
+          ref,
+          "data-slot": "table",
+          className: cn("w-full caption-bottom text-sm", className)
+        })}
       />
     </div>
   );
