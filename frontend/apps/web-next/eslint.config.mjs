@@ -170,6 +170,27 @@ const eslintConfig = defineConfig([
     }
   },
   {
+    // Astryx parts we wrap to work around their gaps (AGENTS.md → Reuse
+    // before you build). A separate rule from no-restricted-imports above, so
+    // neither block replaces the other's options.
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/components/astryx/**"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "@astryxdesign/core/Switch",
+              message:
+                'Use `Switch` from "@/components/astryx/switch": Astryx\'s busy state announces an English "Loading".'
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
     // Deprecated APIs (TanStack Query methods, React types, DOM properties)
     // are replaced while their successors exist, not when a major upgrade
     // removes them. The rule needs type information, so this block turns on

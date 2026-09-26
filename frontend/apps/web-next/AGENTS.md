@@ -96,14 +96,27 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
   replaces ours, delete our version and its tests in the same change instead
   of keeping both.
 - **Keep ours only for a reason** — a CSP, accessibility or product constraint
-  Astryx doesn't meet — and say why in a comment next to it. Known gaps in
-  Astryx 0.6.3: `Switch` hard-codes the English busy label "Loading" (don't use
-  `isLoading`/`changeAction` on it), `CodeBlock`/`CodeEditor` inject runtime
-  styles the CSP blocks (code fences in answers render through Streamdown's
-  `@streamdown/code` in `MessageResponse`), `useClipboard` writes text/plain
-  only (the chat's rich-text copy keeps `navigator.clipboard.write`, commented),
-  and the dictation hooks (`useChatDictation`, `useSpeechRecognition`) send
-  audio to the browser vendor, so we don't use them.
+  Astryx doesn't meet — and say why in a comment next to it.
+- **Fix an Astryx gap in one place**, never at each call site: a wrapper in
+  `src/components/astryx/` (lint sends imports there), or the bun patch for
+  what a wrapper can't reach (How it is wired → Packages). Known gaps in
+  Astryx 0.6.3:
+  - `Switch` announces a hard-coded English "Loading" in its busy state: use
+    `Switch` from `@/components/astryx/switch`, which leaves
+    `isLoading`/`changeAction` out.
+  - CommandPalette marks only a picked value as selected, and DateInput passes
+    `nativePicker` on to the DOM: both patched.
+  - BottomSheet skips `data-autofocus` when opening the dialog already focused
+    its panel: focus the target yourself once the sheet is open (as
+    `activity-sources.tsx` does).
+  - A searchable Selector names its trigger by its label alone: give it an
+    `aria-label` that includes the value (as `model-selector.tsx` does).
+  - `CodeBlock`/`CodeEditor` inject runtime styles the CSP blocks (code fences
+    in answers render through Streamdown's `@streamdown/code` in
+    `MessageResponse`), `useClipboard` writes text/plain only (the chat's
+    rich-text copy keeps `navigator.clipboard.write`, commented), and the
+    dictation hooks (`useChatDictation`, `useSpeechRecognition`) send audio to
+    the browser vendor, so we don't use them.
 - **Quality bar for every change:** small focused modules, typed APIs, no dead
   or duplicated code, tests for behaviour (including keyboard and axe), and
   `bun run check && bun run lint && bun run test` green.

@@ -4,7 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { DateInput } from "@astryxdesign/core/DateInput";
 import { useAnnounce, useClipboard } from "@astryxdesign/core/hooks";
-import { Switch } from "@astryxdesign/core/Switch";
+import { Switch } from "@/components/astryx/switch";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { pixel, proportional, Table, type TableColumn } from "@astryxdesign/core/Table";
 import { TextArea } from "@astryxdesign/core/TextArea";

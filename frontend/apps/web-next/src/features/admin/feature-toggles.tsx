@@ -1,7 +1,7 @@
 "use client";
 
 import { Heading } from "@astryxdesign/core/Heading";
-import { Switch } from "@astryxdesign/core/Switch";
+import { Switch } from "@/components/astryx/switch";
 import { useTranslations } from "next-intl";
 import { useId } from "react";
 import { useAppContext } from "@/components/providers/app-context";
