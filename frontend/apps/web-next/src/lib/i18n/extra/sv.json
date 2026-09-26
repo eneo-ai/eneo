@@ -359,7 +359,6 @@
   "shell_untitled_conversation": "Namnlös konversation",
   "shell_administration": "Administration",
   "shell_back_to_eneo": "Tillbaka till Eneo",
-  "shell_admin_section_access": "Användare och åtkomst",
   "shell_profile_button_label": "{name}, {organisation}: konto och inställningar",
   "shell_versions": "Frontend {frontend} · Backend {backend}",
   "shell_account_nav_label": "Kontoinställningar",
@@ -565,6 +564,7 @@
   "fix_crawl_started_column": "Startad",
   "fix_crawls_filter_label": "Filtrera indexeringar",
   "fix_integrations_empty_title": "Inga integrationer ännu",
+  "admin_section_access": "Användare och åtkomst",
   "admin_models_default_set": "{name} är nu standardmodell.",
   "admin_models_classification_set": "{name} har nu säkerhetsklassen {classification}.",
   "admin_models_classification_removed": "{name} har inte längre någon säkerhetsklass."

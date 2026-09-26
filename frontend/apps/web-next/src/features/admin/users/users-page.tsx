@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
+import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { Pagination } from "@astryxdesign/core/Pagination";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { TextInput } from "@astryxdesign/core/TextInput";
@@ -21,6 +22,8 @@ import { adminUsersQueryOptions, MIN_SEARCH_LENGTH, type StateFilter } from "./u
 
 const SEARCH_DEBOUNCE_MS = 250;
 const STATE_TABS: StateFilter[] = ["active", "inactive"];
+/** Below Tailwind's `sm`, page numbers at 44 px touch sizes overflow a phone. */
+const NARROW_QUERY = "(width < 40rem)";
 
 /** Sync the current filter state into the URL for shareable links. */
 function syncUrl(stateFilter: StateFilter, search: string, page: number, roleId: string | null) {
@@ -55,6 +58,8 @@ export function AdminUsersPage() {
   const tabLabel = (value: StateFilter) =>
     value === "active" ? t("active_users") : t("inactive_users");
   const panelRef = useRef<HTMLDivElement>(null);
+  const announce = useAnnounce();
+  const isNarrow = useMediaQuery(NARROW_QUERY);
 
   // Debounce the search box; only commit at 0 or ≥3 chars (backend rule).
   const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -93,11 +98,34 @@ export function AdminUsersPage() {
   const users = data?.items ?? [];
   const metadata = data?.metadata;
   const counts = metadata?.counts ?? {};
-  const totalPages = metadata?.total_pages ?? 1;
+  const totalPages = Math.max(1, metadata?.total_pages ?? 1);
+  const total = isPlaceholderData ? undefined : metadata?.total_count;
+
+  // A page past the end (its last user was deactivated or deleted, or an old
+  // link): show the last page rather than an empty list.
+  if (metadata && !isPlaceholderData && page > totalPages) setPage(totalPages);
+
+  // Announce the result count once the results of a new search, tab or role
+  // filter are in (WCAG 4.1.3); not on first load, not for page changes
+  // (Pagination announces those).
+  const resultsFor = `${stateFilter}|${search}|${roleId ?? ""}`;
+  const announcedFor = useRef(resultsFor);
+  useEffect(() => {
+    if (total == null || announcedFor.current === resultsFor) return;
+    announcedFor.current = resultsFor;
+    announce(t("admin_users_count", { count: total }));
+  }, [announce, resultsFor, t, total]);
 
   function selectTab(next: StateFilter) {
     setStateFilter(next);
     setPage(1);
+  }
+
+  function changePage(next: number) {
+    setPage(next);
+    // The pressed button stays focused, except "next"/"previous" at the last
+    // or first page, which becomes disabled: then focus moves to the panel.
+    rescueFocus(panelRef.current);
   }
 
   let results: React.ReactNode;
@@ -204,22 +232,22 @@ export function AdminUsersPage() {
               />
             </div>
           )}
-          {/* The result count, announced politely when a search changes it. */}
-          <p role="status" className="text-ax-text-secondary ms-auto text-sm">
-            {metadata?.total_count != null && !isPlaceholderData
-              ? t("admin_users_count", { count: metadata.total_count })
-              : ""}
+          <p className="text-ax-text-secondary ms-auto text-sm">
+            {total != null ? t("admin_users_count", { count: total }) : ""}
           </p>
         </div>
 
         <div aria-busy={isPlaceholderData || undefined}>{results}</div>
 
+        {/* Never disabled while a page loads: that would take focus from the
+            pressed button. The previous page stays visible (aria-busy) and
+            the requested page is shown as current. */}
         {totalPages > 1 && (
           <Pagination
-            page={metadata?.page ?? page}
+            page={Math.min(page, totalPages)}
             totalPages={totalPages}
-            onChange={setPage}
-            isDisabled={isPlaceholderData}
+            onChange={changePage}
+            variant={isNarrow ? "compact" : "pages"}
           />
         )}
       </div>

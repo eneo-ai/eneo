@@ -98,7 +98,7 @@ export function adminNavGroups({
     },
     {
       id: "access",
-      labelKey: "shell_admin_section_access",
+      labelKey: "admin_section_access",
       items: [
         { href: "/admin/users", icon: Users, labelKey: "users" },
         { href: "/admin/roles", icon: UserCheck, labelKey: "roles" },

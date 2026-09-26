@@ -359,7 +359,6 @@
   "shell_untitled_conversation": "Untitled conversation",
   "shell_administration": "Administration",
   "shell_back_to_eneo": "Back to Eneo",
-  "shell_admin_section_access": "Users and access",
   "shell_profile_button_label": "{name}, {organisation}: account and settings",
   "shell_versions": "Frontend {frontend} · Backend {backend}",
   "shell_account_nav_label": "Account settings",
@@ -565,6 +564,7 @@
   "fix_crawl_started_column": "Started",
   "fix_crawls_filter_label": "Filter crawls",
   "fix_integrations_empty_title": "No integrations yet",
+  "admin_section_access": "Users and access",
   "admin_models_default_set": "{name} is now the default model.",
   "admin_models_classification_set": "{name} now has the security classification {classification}.",
   "admin_models_classification_removed": "{name} no longer has a security classification."
