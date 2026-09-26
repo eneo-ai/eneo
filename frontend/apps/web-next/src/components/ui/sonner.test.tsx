@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { toast } from "sonner";
 import { expect, it, vi } from "vitest";
 
@@ -10,10 +10,12 @@ vi.mock("sonner/dist/styles.css", () => {
   return {};
 });
 
+import { renderInApp } from "@/test/render";
 import { Toaster } from "./sonner";
 
 it("styles toasts from the bundled stylesheet instead of an injected <style>", async () => {
-  render(<Toaster theme="light" />);
+  // The Toaster reads its labels from next-intl, so render it in the app providers.
+  renderInApp(<Toaster theme="light" />);
   toast("Sparat");
 
   expect(await screen.findByText("Sparat")).toBeTruthy();
