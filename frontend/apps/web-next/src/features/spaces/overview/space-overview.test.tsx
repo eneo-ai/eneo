@@ -64,6 +64,58 @@ function show(space: Space) {
   return renderInApp(<SpaceOverview />, { appContext });
 }
 
+const itemTexts = (list: HTMLElement) =>
+  within(list)
+    .getAllByRole("listitem")
+    .map((item) => item.textContent);
+
+/**
+ * Presses Enter or Space on a native button as a browser does: Enter clicks on
+ * keydown, Space on keyup. jsdom fires the key events but not the click.
+ */
+function press(button: HTMLElement, key: "Enter" | " ") {
+  expect(button.tagName).toBe("BUTTON");
+  fireEvent.keyDown(button, { key });
+  if (key === "Enter") fireEvent.click(button);
+  fireEvent.keyUp(button, { key });
+  if (key === " ") fireEvent.click(button);
+}
+
+/** Models as the space API returns them, in its order. */
+const models = (names: string[], defaultName?: string) =>
+  names.map((name, index) => ({
+    id: `${name}-${index}`,
+    name,
+    nickname: null,
+    is_org_default: name === defaultName
+  }));
+
+// A real space's chat models: 15 ids, the organization's default fifth.
+const CHAT_MODELS = [
+  "claude-3-7-sonnet-20250219",
+  "claude-haiku-4-5",
+  "gpt-4o",
+  "gpt-4o-mini",
+  "gpt-5.4-2026-03-05",
+  "gpt-5-mini",
+  "mistral-large-2411",
+  "mistral-small-2503",
+  "llama-3.3-70b-instruct",
+  "gemma-3-27b-it",
+  "qwen3-235b-a22b",
+  "claude-opus-4-1-20250805",
+  "o3-mini",
+  "o4-mini",
+  "gemini-2.5-pro"
+];
+const EMBEDDING_MODELS = [
+  "multilingual-e5-large",
+  "text-embedding-3-large",
+  "text-embedding-3-small",
+  "bge-m3",
+  "nomic-embed-text-v1.5"
+];
+
 const busySpace = () =>
   makeSpace({
     assistants: [
@@ -146,8 +198,12 @@ describe("SpaceOverview", () => {
 
     const about = screen.getByRole("region", { name: "Om ytan" });
     expect(within(about).getByText("Klass 2 · Intern")).toBeTruthy();
-    expect(within(about).getByText("Haiku 4.5, claude-opus")).toBeTruthy();
-    expect(within(about).getByText("multilingual-e5-large")).toBeTruthy();
+    // A few models: every name on its own line, no button.
+    expect(within(about).getAllByRole("list").map(itemTexts)).toEqual([
+      ["Haiku 4.5", "claude-opus"],
+      ["multilingual-e5-large"]
+    ]);
+    expect(within(about).queryByRole("button")).toBeNull();
     expect(within(about).getByText("12 mars 2026")).toBeTruthy();
 
     const members = screen.getByRole("region", { name: "Medlemmar" });
@@ -224,5 +280,65 @@ describe("SpaceOverview", () => {
     expect(screen.queryByRole("region", { name: "Assistenter" })).toBeNull();
     expect(screen.queryByRole("region", { name: "Medlemmar" })).toBeNull();
     expect(screen.getByRole("region", { name: "Kunskap" })).toBeTruthy();
+  });
+});
+
+describe("SpaceOverview: models in Om ytan", () => {
+  it("shows the default and two more of many models, and the rest from the keyboard", async () => {
+    const { container } = show(
+      makeSpace({
+        overrides: {
+          completion_models: models(CHAT_MODELS, "gpt-5.4-2026-03-05"),
+          embedding_models: models(EMBEDDING_MODELS)
+        }
+      })
+    );
+    const about = screen.getByRole("region", { name: "Om ytan" });
+
+    // The count is on the button; its name says which models it shows.
+    const toggle = within(about).getByRole("button", { name: "Visa alla 15 chattmodeller" });
+    expect(toggle.textContent).toBe("Visa alla 15");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    const list = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    expect(itemTexts(list)).toEqual([
+      "gpt-5.4-2026-03-05Standard",
+      "claude-3-7-sonnet-20250219",
+      "claude-haiku-4-5"
+    ]);
+    await expectNoAxeViolations(container);
+
+    toggle.focus();
+    press(toggle, "Enter");
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(within(about).getByRole("button", { name: "Visa färre chattmodeller" })).toBe(toggle);
+    expect(toggle.textContent).toBe("Visa färre");
+    const all = itemTexts(list).map((text) => text!.replace(/Standard$/, ""));
+    expect(all).toHaveLength(15);
+    expect([...all].sort()).toEqual([...CHAT_MODELS].sort());
+    await expectNoAxeViolations(container);
+
+    press(toggle, " ");
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(itemTexts(list)).toHaveLength(3);
+
+    // Embedding models get the same treatment, with a button of their own.
+    const embedding = within(about).getByRole("button", {
+      name: "Visa alla 5 inbäddningsmodeller"
+    });
+    const embeddingList = document.getElementById(embedding.getAttribute("aria-controls")!)!;
+    expect(itemTexts(embeddingList)).toEqual(EMBEDDING_MODELS.slice(0, 3));
+    fireEvent.click(embedding);
+    expect(itemTexts(embeddingList)).toEqual(EMBEDDING_MODELS);
+    // Each list opens on its own.
+    expect(itemTexts(list)).toHaveLength(3);
+  });
+
+  it("shows up to four models without a button", () => {
+    show(makeSpace({ overrides: { completion_models: models(CHAT_MODELS.slice(0, 4)) } }));
+    const about = screen.getByRole("region", { name: "Om ytan" });
+    expect(itemTexts(within(about).getAllByRole("list")[0]!)).toEqual(CHAT_MODELS.slice(0, 4));
+    expect(within(about).queryByRole("button")).toBeNull();
   });
 });

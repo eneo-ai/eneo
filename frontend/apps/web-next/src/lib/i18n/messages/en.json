@@ -5084,5 +5084,11 @@
   "space_knowledge_tabs_label": "Knowledge sources",
   "ui_copy_failed_copy_by_hand": "Couldn't copy. Select the key and copy it yourself.",
   "ui_toast_close": "Close notification",
-  "ui_website_tabs_label": "Crawls and content"
+  "ui_website_tabs_label": "Crawls and content",
+  "space_about_show_all": "Show all {count}",
+  "space_about_show_fewer": "Show fewer",
+  "space_about_show_all_chat_models": "Show all {count} chat models",
+  "space_about_show_fewer_chat_models": "Show fewer chat models",
+  "space_about_show_all_embedding_models": "Show all {count} embedding models",
+  "space_about_show_fewer_embedding_models": "Show fewer embedding models"
 }

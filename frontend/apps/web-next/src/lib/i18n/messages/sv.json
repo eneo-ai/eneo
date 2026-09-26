@@ -5084,5 +5084,11 @@
   "space_knowledge_tabs_label": "Kunskapskällor",
   "ui_copy_failed_copy_by_hand": "Det gick inte att kopiera. Markera nyckeln och kopiera den själv.",
   "ui_toast_close": "Stäng aviseringen",
-  "ui_website_tabs_label": "Indexeringar och innehåll"
+  "ui_website_tabs_label": "Indexeringar och innehåll",
+  "space_about_show_all": "Visa alla {count}",
+  "space_about_show_fewer": "Visa färre",
+  "space_about_show_all_chat_models": "Visa alla {count} chattmodeller",
+  "space_about_show_fewer_chat_models": "Visa färre chattmodeller",
+  "space_about_show_all_embedding_models": "Visa alla {count} inbäddningsmodeller",
+  "space_about_show_fewer_embedding_models": "Visa färre inbäddningsmodeller"
 }
