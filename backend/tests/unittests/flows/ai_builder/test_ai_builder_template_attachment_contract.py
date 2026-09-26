@@ -7,6 +7,7 @@ import pytest
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
+from eneo.flows.ai_builder.ai_builder_new_step_compiler import make_plan_step_ref
 from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
     apply_template_attachment_contract,
 )
@@ -654,6 +655,44 @@ def test_contract_keeps_text_step_referenced_by_template() -> None:
     assert contracted.steps[-1].output_config == {
         "bindings": {"föregående_steg": "{{ föregående_steg }}"}
     }
+
+
+def test_contract_keeps_a_retained_mapping_to_the_step_at_position_27() -> None:
+    # The plan ref of position 27 was spelled "step_27", which the contract
+    # read as a removed producer's runtime alias and reported as broken.
+    steps = [
+        StepSpec(
+            plan_step_ref=make_plan_step_ref(index),
+            name=f"Step {index + 1}",
+            assistant_spec=AssistantSpec(instructions="Write."),
+            input_source=(
+                InputSource.FLOW_INPUT if index == 0 else InputSource.PREVIOUS_STEP
+            ),
+            input_type=InputType.TEXT,
+            output_type=OutputType.TEXT,
+        )
+        for index in range(27)
+    ]
+    fill = StepSpec(
+        plan_step_ref=make_plan_step_ref(27),
+        name="Fill",
+        assistant_spec=AssistantSpec(instructions="Fill the template."),
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        output_mode=OutputMode.TEMPLATE_FILL,
+        output_type=OutputType.DOCX,
+    )
+    binding = "{{ " + make_plan_step_ref(26) + ".output.text }}"
+
+    contracted = apply_template_attachment_contract(
+        FlowDraftSpecCore(flow_name="Long template flow", steps=[*steps, fill]),
+        selected_template_count=1,
+        placeholders=("underlag",),
+        existing_bindings={"underlag": binding},
+    )
+
+    assert len(contracted.steps) == 28
+    assert contracted.steps[-1].output_config == {"bindings": {"underlag": binding}}
 
 
 def test_contract_prefers_declared_form_field_over_prepared_field() -> None:

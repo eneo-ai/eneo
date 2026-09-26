@@ -204,9 +204,14 @@ def require_resolved_input_source(step_draft: NewStepDraft) -> InputSource:
 
 
 def make_plan_step_ref(index: int) -> str:
-    if index < len(string.ascii_lowercase):
-        return f"step_{string.ascii_lowercase[index]}"
-    return f"step_{index + 1}"
+    # Letters only, bijective base 26 (step_z, step_aa, step_ab, ...): a
+    # numeric step_27 would read as the runtime alias of saved step 27.
+    letters = ""
+    number = index + 1
+    while number:
+        number, digit = divmod(number - 1, len(string.ascii_lowercase))
+        letters = string.ascii_lowercase[digit] + letters
+    return f"step_{letters}"
 
 
 def derive_output_mode(

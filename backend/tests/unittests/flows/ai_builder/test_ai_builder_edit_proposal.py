@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 from unittest.mock import (
     AsyncMock,
@@ -39,6 +40,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     validate_review_edit_effect,
     validate_review_edit_proposal,
 )
+from eneo.flows.ai_builder.ai_builder_new_step_compiler import make_plan_step_ref
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     AIBuilderSavedFlowStepEditContext,
@@ -2140,6 +2142,82 @@ async def test_ordered_edit_rewrites_source_ref_runtime_aliases_to_plan_refs() -
         "step_a",
         "step_b",
     ]
+
+
+@pytest.mark.parametrize(
+    ("index", "plan_ref"),
+    [(25, "step_z"), (26, "step_aa"), (27, "step_ab"), (28, "step_ac")],
+)
+def test_plan_refs_past_step_26_never_look_like_runtime_aliases(index, plan_ref):
+    assert make_plan_step_ref(index) == plan_ref
+    assert re.fullmatch(r"step_\d+", make_plan_step_ref(index)) is None
+
+
+def test_edit_binds_the_step_at_position_27_not_saved_alias_step_27() -> None:
+    # Case G: the plan ref of position 27 was spelled "step_27", so the edit
+    # compiler read it as the saved alias of existing_step_27 and bound the
+    # step after the one the model named.
+    summary_contract = {
+        "type": "object",
+        "properties": {"summary": {"type": "string"}},
+    }
+    flow = _flow(
+        *(
+            _flow_step(
+                step_order=order,
+                user_description=f"Step {order}",
+                input_source="flow_input" if order == 1 else "previous_step",
+                output_type="json" if order in (26, 27) else "text",
+                output_contract=summary_contract if order in (26, 27) else None,
+                input_bindings=(
+                    {"question": "{{ step_27.output.structured.summary }}"}
+                    if order == 29
+                    else None
+                ),
+            )
+            for order in range(1, 30)
+        )
+    )
+    proposal = OrderedEditProposal.model_validate(
+        {
+            "plan_rationale": "Insert a check and feed step 28 the earlier summary.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {"kind": "add", "step": {"name": "Check", "instructions": "Check."}},
+                *(
+                    {"kind": "modify", "existing_step_ref": f"existing_step_{order}"}
+                    for order in range(2, 28)
+                ),
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_28",
+                    # Position 27 of the edited flow is existing_step_26.
+                    "uses_previous_fields": [
+                        {"from_step": 27, "field_path": "summary"}
+                    ],
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_29"},
+            ],
+        }
+    )
+
+    result = compile_edit_proposal(
+        proposal,
+        current_steps=flow.steps,
+        base_flow_revision=flow.draft_revision,
+    )
+
+    steps = result.spec.steps
+    plan_ref = {step.existing_step_ref: step.plan_step_ref for step in steps}
+    consumer, kept = steps[28], steps[29]
+    assert consumer.existing_step_ref == "existing_step_28"
+    assert [ref["step_ref"] for ref in consumer.input_bindings["source_refs"]] == [
+        plan_ref["existing_step_26"]
+    ]
+    # A saved alias still names the saved step it named before the edit.
+    assert kept.input_bindings["question"] == (
+        "{{ " + plan_ref["existing_step_27"] + ".output.structured.summary }}"
+    )
 
 
 @pytest.mark.asyncio
