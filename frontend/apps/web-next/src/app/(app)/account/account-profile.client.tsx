@@ -89,7 +89,8 @@ export function AccountProfile() {
           ))}
         </div>
       </SettingsRow>
-      <SettingsRow title={t("language")}>
+      {/* A combobox takes no name from its value: the row title labels it. */}
+      <SettingsRow title={t("language")} htmlFor="account-language">
         <Select
           value={locale}
           onValueChange={(next) =>
@@ -103,7 +104,7 @@ export function AccountProfile() {
             })
           }
         >
-          <SelectTrigger className="w-48">
+          <SelectTrigger id="account-language" className="w-48">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
