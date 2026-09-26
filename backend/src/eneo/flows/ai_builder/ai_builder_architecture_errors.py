@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import Literal
 
@@ -40,6 +40,7 @@ class AIBuilderArchitectureError(Exception):
         repair_disposition: ArchitectureRepairDisposition,
         detail: str,
         log_context: Mapping[str, ArchitectureLogValue] | None = None,
+        affected: Sequence[str] = (),
     ) -> None:
         super().__init__(detail)
         self.public_code = public_code
@@ -48,6 +49,9 @@ class AIBuilderArchitectureError(Exception):
         self.log_context: Mapping[str, ArchitectureLogValue] = MappingProxyType(
             dict(log_context or {})
         )
+        # What the user has to change (a placeholder, a form field), for the
+        # answer that names it.
+        self.affected = tuple(affected)
 
     @property
     def failure_code(self) -> str | None:
@@ -91,7 +95,7 @@ def architecture_failure_outcome(
             kind="validation",
             codes=codes,
         )
-    logger.error("ai_builder_architecture_error", extra=error.log_extra())
+    log_architecture_error(error)
     return TerminalFailure(
         kind="architecture",
         message=_TERMINAL_MESSAGES[disposition],
@@ -100,3 +104,7 @@ def architecture_failure_outcome(
         details=error.log_extra(),
         codes=codes,
     )
+
+
+def log_architecture_error(error: AIBuilderArchitectureError) -> None:
+    logger.error("ai_builder_architecture_error", extra=error.log_extra())

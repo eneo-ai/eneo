@@ -23,7 +23,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
-    scoped_revision_out_of_reach_message,
+    scoped_revision_out_of_reach_answer,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     ResolvedAIBuilderEditContext,
@@ -44,7 +44,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
     CorrectableFailure,
     PreparationOutcome,
-    ProposalAnswer,
     ProposalReady,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
@@ -225,8 +224,8 @@ async def _process_create_spec(
             # compiled content and no repair can reach this bar. The user gets
             # one answer naming the scope that can carry the change instead of
             # three more provider calls that fail the same way.
-            return ProposalAnswer(
-                answer=scoped_revision_out_of_reach_message(ui_language=ui_language)
+            return scoped_revision_out_of_reach_answer(
+                target_step_ref=target_step_ref, ui_language=ui_language
             )
         return CorrectableFailure(
             feedback=format_create_intent_quality_feedback(scoped_rejection.feedback)

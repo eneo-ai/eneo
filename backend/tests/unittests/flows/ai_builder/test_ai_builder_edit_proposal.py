@@ -15,7 +15,11 @@ from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from eneo.flows.ai_builder.ai_builder_create_compile_context import (
+    CreateCompileContext,
     create_compile_context_from_planning_state,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
@@ -41,6 +45,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     validate_review_edit_proposal,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import make_plan_step_ref
+from eneo.flows.ai_builder.ai_builder_non_plan_outcome import user_action_answer
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     AIBuilderSavedFlowStepEditContext,
@@ -51,6 +56,9 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
 from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     _prior_spec_for_revision,
 )
+from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
+    primary_input_reserved_names,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_capture import (
     REJECTED_PROPOSAL_CAPTURE_DIR_ENV,
 )
@@ -60,7 +68,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_policy import resolve_ui_language
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    MAX_DIAGNOSTIC_NAMES,
     CorrectableFailure,
+    ProposalAnswer,
     ProposalReady,
     TerminalFailure,
 )
@@ -2352,6 +2362,118 @@ async def test_an_unrelated_edit_keeps_every_producer_a_saved_fan_in_step_reads(
 
 
 @pytest.mark.asyncio
+async def test_an_edit_whose_failure_has_its_own_card_keeps_the_typed_error() -> None:
+    """The frontend shows this failure with its own action; an answer would hide it."""
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Läs ärendet"),
+        _flow_step(
+            step_order=2,
+            user_description="Fyll mall",
+            input_source="previous_step",
+            output_mode="template_fill",
+            output_type="docx",
+        ),
+    )
+
+    result = await process_edit_arguments(
+        turn=_make_turn(),
+        conversation=[],
+        arguments={
+            "plan_rationale": "Byt namn.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "name": "Läs",
+                },
+                {"kind": "keep", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+        available_model_refs=None,
+        available_kb_refs=None,
+        flow=flow,
+        assistant_snapshots=None,
+        compile_context=CreateCompileContext(
+            ui_language="sv", selected_template_count=0
+        ),
+    )
+
+    assert isinstance(result, TerminalFailure), result
+    assert result.details["failure_code"] == "template_attachment_selection_invalid"
+    assert result.codes == frozenset({"template_attachment_selection_invalid"})
+
+
+def test_confirmed_form_fields_that_shadow_the_run_input_are_all_named() -> None:
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Transkribera", input_type="audio")
+    )
+    proposal = OrderedEditProposal.model_validate(
+        {
+            "plan_rationale": "Lägg till fält.",
+            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
+            "form_fields": [
+                {
+                    "variable_name": name,
+                    "label": name.capitalize(),
+                    "field_type": "text",
+                    "provenance": "user_confirmed",
+                }
+                for name in ("transkribering", "audio")
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_edit_proposal(
+            proposal,
+            current_steps=flow.steps,
+            base_flow_revision=flow.draft_revision,
+        )
+
+    assert exc_info.value.failure_code == "confirmed_form_field_incompatible"
+    assert exc_info.value.affected == ("transkribering", "audio")
+    assert exc_info.value.log_context["runtime_input_type"] == "audio"
+
+
+def test_the_shadowing_field_diagnostic_is_bounded_where_it_is_raised() -> None:
+    names = primary_input_reserved_names(InputType.AUDIO)
+    assert len(names) > MAX_DIAGNOSTIC_NAMES
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Transkribera", input_type="audio")
+    )
+    proposal = OrderedEditProposal.model_validate(
+        {
+            "plan_rationale": "Lägg till fält.",
+            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
+            "form_fields": [
+                {
+                    "variable_name": name,
+                    "label": name,
+                    "field_type": "text",
+                    "provenance": "user_confirmed",
+                }
+                for name in names
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_edit_proposal(
+            proposal,
+            current_steps=flow.steps,
+            base_flow_revision=flow.draft_revision,
+        )
+
+    context = exc_info.value.log_context
+    assert context["field_names"] == ", ".join(names[:MAX_DIAGNOSTIC_NAMES])
+    assert context["field_names_remaining"] == len(names) - MAX_DIAGNOSTIC_NAMES
+    # The answer still counts every field it cannot list.
+    answer = user_action_answer(exc_info.value, ui_language="sv")
+    assert answer is not None
+    assert f"och {len(names) - MAX_DIAGNOSTIC_NAMES} till" in answer.answer
+
+
+@pytest.mark.asyncio
 async def test_ordered_add_step_derives_omitted_input_source_through_pipeline() -> None:
     first_result = await _process(
         flow=_flow(
@@ -2723,7 +2845,9 @@ async def test_confirmed_edit_field_survives_when_model_omits_form_fields() -> N
 
 
 @pytest.mark.asyncio
-async def test_confirmed_edit_shadow_field_is_rejected_explicitly() -> None:
+async def test_confirmed_edit_shadow_field_is_answered_with_the_field_to_rename() -> (
+    None
+):
     flow = _flow(_flow_step(step_order=1, user_description="Analyze text"))
     state = PlanningState.empty()
     state.input_fields = [
@@ -2748,9 +2872,15 @@ async def test_confirmed_edit_shadow_field_is_rejected_explicitly() -> None:
         },
     )
 
-    assert isinstance(result, TerminalFailure)
-    assert result.kind == "architecture"
-    assert result.codes == frozenset({"confirmed_form_field_incompatible"})
+    # Only the user can rename a field they confirmed: the turn ends with that
+    # remedy instead of a generic error.
+    assert isinstance(result, ProposalAnswer), result
+    assert result.outcome is not None
+    assert (result.outcome.kind, result.outcome.affected) == (
+        "form_field_conflicts_with_run_input",
+        ("text",),
+    )
+    assert result.answer.startswith("Formulärfältet `text` har")
 
 
 @pytest.mark.asyncio
@@ -4109,6 +4239,11 @@ async def test_an_investigation_that_finds_nothing_to_change_ends_the_turn():
 
     assert isinstance(result, ProposalAnswer)
     assert "hittar inget" in result.answer
+    assert result.outcome is not None
+    assert (result.outcome.kind, result.outcome.required_action) == (
+        "review_found_nothing",
+        "none",
+    )
 
 
 @pytest.mark.asyncio

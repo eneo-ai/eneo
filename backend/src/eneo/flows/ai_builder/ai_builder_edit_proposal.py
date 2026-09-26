@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
     architecture_failure_outcome,
+    log_architecture_error,
 )
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
@@ -41,6 +42,10 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     review_edit_changes_of_the_model,
     validate_review_edit_effect,
     validate_review_edit_proposal,
+)
+from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
+    non_plan_outcome,
+    user_action_answer,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     ResolvedAIBuilderEditContext,
@@ -230,7 +235,7 @@ async def process_edit_arguments(
 
     def compile_and_prepare(
         candidate: OrderedEditProposal,
-    ) -> _PreparedCandidate | CorrectableFailure | TerminalFailure:
+    ) -> _PreparedCandidate | ProposalAnswer | CorrectableFailure | TerminalFailure:
         """One deterministic path from an edit proposal to the plan it becomes."""
 
         try:
@@ -273,7 +278,12 @@ async def process_edit_arguments(
                 codes=_edit_compilation_request_failure_codes(exc),
             )
         except AIBuilderArchitectureError as exc:
-            return architecture_failure_outcome(exc)
+            # A failure only the user can fix ends as an answer naming the fix.
+            answer = user_action_answer(exc, ui_language=ui_language)
+            if answer is None:
+                return architecture_failure_outcome(exc)
+            log_architecture_error(exc)
+            return answer
         except AssistantSnapshotResourceUnavailableError as exc:
             logger.warning(
                 "Edit compilation failed because an assistant snapshot references "
@@ -354,7 +364,8 @@ async def process_edit_arguments(
             return ProposalAnswer(
                 answer=_REVIEW_FOUND_NOTHING_TO_CHANGE[
                     "sv" if (ui_language or "sv") == "sv" else "en"
-                ]
+                ],
+                outcome=non_plan_outcome("review_found_nothing", "none"),
             )
 
     compiled_spec = candidate.spec

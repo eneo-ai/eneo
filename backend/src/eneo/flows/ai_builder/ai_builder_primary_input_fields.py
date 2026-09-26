@@ -32,6 +32,12 @@ def primary_input_shadow_alias_input_types() -> frozenset[InputType]:
     return frozenset(_PRIMARY_INPUT_FIELD_ALIASES)
 
 
+def primary_input_reserved_names(runtime_input_type: InputType) -> tuple[str, ...]:
+    """The form field names a flow keeps for the run input of this type."""
+
+    return tuple(sorted(_PRIMARY_INPUT_FIELD_ALIASES.get(runtime_input_type, ())))
+
+
 def is_primary_runtime_input_shadow_field(
     *,
     variable_name: str,
@@ -81,5 +87,6 @@ def split_primary_runtime_input_shadow_names(
 __all__ = [
     "is_primary_runtime_input_shadow_field",
     "primary_input_shadow_alias_input_types",
+    "primary_input_reserved_names",
     "split_primary_runtime_input_shadow_names",
 ]

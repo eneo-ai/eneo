@@ -13,6 +13,7 @@ from uuid import uuid4
 
 import pytest
 
+import eneo.flows.ai_builder.ai_builder_architecture_errors as architecture_errors_module
 import eneo.flows.ai_builder.ai_builder_proposal_telemetry as proposal_telemetry_module
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
@@ -61,6 +62,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_capture import (
 from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizer,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_proposal_retry import (
     build_self_correction_error_event,
 )
@@ -75,6 +77,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
     CorrectableFailure,
+    NonPlanOutcome,
     ProposalAnswer,
     ProposalCompleted,
     ProposalMessageGroup,
@@ -94,6 +97,7 @@ from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     CheckpointIntent,
+    ConfirmedRuntimeMetadataField,
     PlanningState,
     PlanningStatePayloadTooLargeError,
     StepTriple,
@@ -118,6 +122,12 @@ from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
     _make_tool_call,
     _make_usage,
     _store_compiled_plan,
+)
+from tests.unittests.flows.ai_builder.test_ai_builder_edit_proposal import (
+    _flow as _edit_flow,
+)
+from tests.unittests.flows.ai_builder.test_ai_builder_edit_proposal import (
+    _flow_step as _edit_flow_step,
 )
 from tests.unittests.flows.ai_builder.test_ai_builder_reference_flow_preservation import (
     _bytes,
@@ -1045,7 +1055,13 @@ async def test_create_propose_flow_terminal_answer_is_committed_not_just_streame
         tool_call_id="call-create-user-message",
     )
     process_outline = AsyncMock(
-        return_value=ProposalAnswer(answer="I need one more detail.")
+        return_value=ProposalAnswer(
+            answer="I need one more detail.",
+            outcome=NonPlanOutcome(
+                kind="template_placeholder_too_long",
+                required_action="edit_template_placeholders",
+            ),
+        )
     )
 
     with (
@@ -1070,6 +1086,116 @@ async def test_create_propose_flow_terminal_answer_is_committed_not_just_streame
     assert [message.role for message in stored] == ["assistant", "tool"]
     assert stored[0].content == "I need one more detail."
     assert stored[0].tool_calls[0]["name"] == PROPOSE_FLOW_TOOL_NAME
+    assert stored[0].tool_calls[0]["arguments"] == {
+        "flow_name": "Need details",
+        "plan_rationale": "Ask for missing detail.",
+        "steps": [],
+    }
+    assert stored[0].metadata["non_plan_outcome"] == {
+        "kind": "template_placeholder_too_long",
+        "required_action": "edit_template_placeholders",
+        "affected": [],
+        "affected_remaining": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_an_edit_only_the_user_can_fix_is_answered_after_one_provider_call() -> (
+    None
+):
+    """The answer spends no repair call and keeps the failure observable."""
+    state = PlanningState.empty()
+    state.input_fields = [
+        ConfirmedRuntimeMetadataField(
+            value=FlowInputFieldIntent(
+                variable_name="text", label="Text", provenance="user_confirmed"
+            ),
+            purpose="interpret_input",
+            structured_answer_message_id="message-1",
+        )
+    ]
+    repo = AsyncMock()
+    repo.commit_turn = AsyncMock(return_value=5)
+    submission = _make_submission(repo=repo)
+    submission.litellm_client.acompletion = AsyncMock(
+        return_value=_make_response_with_tool_calls(
+            _make_tool_call(
+                PROPOSE_FLOW_TOOL_NAME,
+                {
+                    "plan_rationale": "Use the confirmed text field.",
+                    "steps": [
+                        {"kind": "modify", "existing_step_ref": "existing_step_1"}
+                    ],
+                    "form_fields": [{"name": "text", "type": "text", "label": "Text"}],
+                },
+                tool_call_id="call-shadow",
+            )
+        )
+    )
+    usage_tracker = ProposalTurnTelemetry(
+        request_id="req-shadow",
+        model=_route().litellm_model,
+        target_kind=TargetKind.EDIT,
+    )
+    resource_catalog = build_ai_builder_resource_catalog(
+        available_models=[], available_kbs=[]
+    )
+
+    with patch.object(architecture_errors_module.logger, "error") as logged:
+        events = _wire_events(
+            [
+                event
+                async for event in submission.run_active_submission_attempt(
+                    turn=_make_context().turn,
+                    conversation=[
+                        ConversationMessage(role="user", content="Använd textfältet.")
+                    ],
+                    new_messages_start=1,
+                    message_groups=_message_groups(
+                        [{"role": "system", "content": "Prompt"}]
+                    ),
+                    completion_model_route=_route(),
+                    available_model_refs=None,
+                    available_kb_refs=None,
+                    resource_catalog=resource_catalog,
+                    proposal_tool_schema=_proposal_tool_schema_double(),
+                    proposal_request_budget=_proposal_request_budget(8_192),
+                    proposal_temperature=0.2,
+                    request_id="req-shadow",
+                    usage_tracker=usage_tracker,
+                    flow=_edit_flow(
+                        _edit_flow_step(step_order=1, user_description="Analyze text")
+                    ),
+                    planning_state=state,
+                    compile_context=create_compile_context_from_planning_state(
+                        state, ui_language="sv"
+                    ),
+                )
+            ]
+        )
+
+    assert submission.litellm_client.acompletion.await_count == 1
+    assert events[-1]["event"] == "text"
+    repo.commit_turn.assert_awaited_once()
+    stored = repo.commit_turn.await_args.kwargs["new_messages"]
+    assert stored[0].metadata["non_plan_outcome"] == {
+        "kind": "form_field_conflicts_with_run_input",
+        "required_action": "rename_form_field",
+        "affected": ["text"],
+        "affected_remaining": 0,
+    }
+    # The answer replaces the error the user saw, not the record of the failure.
+    assert usage_tracker.proposal_first_attempt_failure_kind == "architecture"
+    attempt = usage_tracker.proposal_attempts[-1]
+    assert (attempt.failure_kind, attempt.failure_codes) == (
+        "architecture",
+        ("confirmed_form_field_incompatible",),
+    )
+    logged.assert_called_once()
+    assert logged.call_args.args == ("ai_builder_architecture_error",)
+    assert logged.call_args.kwargs["extra"]["failure_code"] == (
+        "confirmed_form_field_incompatible"
+    )
 
 
 @pytest.mark.asyncio

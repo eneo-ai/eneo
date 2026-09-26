@@ -47,6 +47,7 @@ from eneo.flows.ai_builder.ai_builder_litellm_completion import (
 from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
     decline_message,
     decline_reason_from_arguments,
+    non_plan_outcome,
     persist_non_plan_turn,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
@@ -525,7 +526,8 @@ class ProposalSubmissionOwner:
         if isinstance(result, ProposalAnswer):
             return await self._persist_invocation_answer(
                 invocation=invocation,
-                answer=result.answer,
+                answer=result,
+                request_id=request_id,
                 usage_tracker=usage_tracker,
                 planning_state=planning_state,
             )
@@ -549,7 +551,8 @@ class ProposalSubmissionOwner:
         self,
         *,
         invocation: ToolRetryInvocation,
-        answer: str,
+        answer: ProposalAnswer,
+        request_id: str,
         usage_tracker: ProposalTurnTelemetry | None,
         planning_state: PlanningState,
     ) -> ProposalCompleted:
@@ -560,6 +563,21 @@ class ProposalSubmissionOwner:
         provider actually sent.
         """
 
+        if answer.codes:
+            # The answer replaces the error the user saw, not the record that
+            # the proposal failed.
+            record_proposal_first_attempt(
+                usage_tracker,
+                request_id=request_id,
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
+                success=False,
+                failure_kind="architecture",
+            )
+            if usage_tracker is not None:
+                usage_tracker.record_attempt_failure(
+                    failure_kind="architecture", failure_codes=answer.codes
+                )
+
         answered = await persist_non_plan_turn(
             repo=self.repo,
             turn=invocation.turn,
@@ -568,12 +586,13 @@ class ProposalSubmissionOwner:
             tool_name=PROPOSE_FLOW_TOOL_NAME,
             arguments=invocation.arguments,
             tool_content="No plan was proposed; the user was answered.",
-            message=answer,
+            message=answer.answer,
             tool_call_id=invocation.tool_call_id,
             base_assistant_metadata=invocation.assistant_metadata,
             usage_tracker=usage_tracker,
             planning_state=planning_state,
             flow=invocation.flow,
+            outcome=answer.outcome,
         )
         return ProposalCompleted(events=answered)
 
@@ -717,6 +736,14 @@ class ProposalSubmissionOwner:
             tool_name=DECLINE_FLOW_CHANGE_TOOL_NAME,
             success=True,
         )
+        # A decline in a selected-step edit names that step: the reply by the
+        # name the user sees, the outcome by its stable ref.
+        edit = ctx.plan_edit_context
+        step_ref = (
+            edit.target_plan_step_ref or edit.target_existing_step_ref
+            if edit is not None
+            else None
+        )
         events = await persist_non_plan_turn(
             repo=self.repo,
             turn=ctx.turn,
@@ -732,6 +759,7 @@ class ProposalSubmissionOwner:
                     if ctx.compile_context is not None
                     else None
                 ),
+                step_name=edit.target_step_name if edit is not None else None,
             ),
             tool_call_id=make_provider_safe_server_tool_call_id(
                 kind="decline_flow_change",
@@ -741,6 +769,11 @@ class ProposalSubmissionOwner:
             usage_tracker=ctx.usage_tracker,
             planning_state=ctx.planning_state,
             flow=ctx.flow,
+            outcome=non_plan_outcome(
+                reason,
+                "change_model_in_step_editor",
+                affected=[step_ref] if step_ref else [],
+            ),
         )
         for event in events:
             yield event

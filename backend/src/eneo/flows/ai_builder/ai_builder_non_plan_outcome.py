@@ -4,15 +4,21 @@ The model can decline a change the edit contract cannot carry — a step's
 model lives in the step editor and nowhere else. The server answers instead
 of planning when it knows no plan can be made this turn: a scoped revision
 the model cannot satisfy, a selected step that changed under the proposal,
-or text the user wrote that could not be read. Each owns its user-visible
-sentence here, and each is stored like an accepted proposal, so the
-conversation records what was asked and what was answered.
+an edit only the user can fix, or text the user wrote that could not be
+read. Each owns its user-visible sentence here, and each is stored like an
+accepted proposal, so the conversation records what was asked and what was
+answered.
 """
 
 from __future__ import annotations
 
+import unicodedata
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Final, Literal, cast, get_args
 
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     PersistedAssistantToolCall,
     UnsettledUserText,
@@ -21,15 +27,27 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from eneo.flows.ai_builder.ai_builder_events import build_text_event
+from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
+    primary_input_reserved_names,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
     assistant_metadata_with_usage,
+)
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    MAX_DIAGNOSTIC_NAME_LENGTH,
+    MAX_DIAGNOSTIC_NAMES,
+    NonPlanKind,
+    NonPlanOutcome,
+    ProposalAnswer,
+    RequiredAction,
 )
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.ai_builder_tool_names import DECLINE_FLOW_CHANGE_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_tools import ProposalToolSchema
 from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.flow_authoring_spec import InputType
 
 if TYPE_CHECKING:
     from eneo.flows.domain.flow import Flow
@@ -42,6 +60,19 @@ _DECLINE_MESSAGES: Final[dict[DeclineReason, dict[str, str]]] = {
     "model_choice_belongs_to_step_editor": {
         "sv": "Jag kan inte byta modell åt dig — det gör du i stegredigeraren.",
         "en": "I can't change the model for you — you pick it in the step editor.",
+    },
+}
+# The same declines in a selected-step edit, naming the step as it is shown.
+_SELECTED_STEP_DECLINE_MESSAGES: Final[dict[DeclineReason, dict[str, str]]] = {
+    "model_choice_belongs_to_step_editor": {
+        "sv": (
+            "Jag kan inte byta modell åt dig. Öppna steget {step} i "
+            "stegredigeraren och välj modellen där."
+        ),
+        "en": (
+            "I can't change the model for you. Open the step {step} in the step "
+            "editor and pick the model there."
+        ),
     },
 }
 
@@ -96,9 +127,15 @@ def decline_reason_from_arguments(arguments: dict[str, Any]) -> DeclineReason | 
     return None
 
 
-def decline_message(reason: DeclineReason, *, ui_language: str | None) -> str:
-    messages = _DECLINE_MESSAGES[reason]
-    return messages["en" if _uses_english(ui_language) else "sv"]
+def decline_message(
+    reason: DeclineReason, *, ui_language: str | None, step_name: str | None = None
+) -> str:
+    language = "en" if _uses_english(ui_language) else "sv"
+    if step_name:
+        return _SELECTED_STEP_DECLINE_MESSAGES[reason][language].format(
+            step=_code_span(_shortened(step_name))
+        )
+    return _DECLINE_MESSAGES[reason][language]
 
 
 def _uses_english(ui_language: str | None) -> bool:
@@ -123,6 +160,189 @@ def scoped_revision_out_of_reach_message(*, ui_language: str | None) -> str:
     return SCOPED_REVISION_OUT_OF_REACH_MESSAGES[
         "en" if _uses_english(ui_language) else "sv"
     ]
+
+
+def scoped_revision_out_of_reach_answer(
+    *, target_step_ref: str | None, ui_language: str | None
+) -> ProposalAnswer:
+    return ProposalAnswer(
+        answer=scoped_revision_out_of_reach_message(ui_language=ui_language),
+        outcome=non_plan_outcome(
+            "scoped_revision_out_of_reach",
+            "edit_whole_plan",
+            affected=(target_step_ref,) if target_step_ref else (),
+        ),
+    )
+
+
+def non_plan_outcome(
+    kind: NonPlanKind,
+    required_action: RequiredAction,
+    *,
+    affected: Sequence[str] = (),
+) -> NonPlanOutcome:
+    return NonPlanOutcome(
+        kind=kind,
+        required_action=required_action,
+        affected=tuple(_shortened(name) for name in affected[:MAX_DIAGNOSTIC_NAMES]),
+        affected_remaining=max(0, len(affected) - MAX_DIAGNOSTIC_NAMES),
+    )
+
+
+# A mark or joiner belongs to the character before it.
+_ATTACHED_CATEGORIES: Final = frozenset({"Mn", "Mc", "Me", "Cf"})
+
+
+def _shortened(name: str) -> str:
+    """``name`` within the bound, cut with an ellipsis between whole characters."""
+
+    if len(name) <= MAX_DIAGNOSTIC_NAME_LENGTH:
+        return name
+    cut = MAX_DIAGNOSTIC_NAME_LENGTH - 1
+    while cut and (
+        unicodedata.category(name[cut]) in _ATTACHED_CATEGORIES
+        or unicodedata.category(name[cut - 1]) == "Cf"
+    ):
+        cut -= 1
+    return name[:cut] + "…"
+
+
+# The failures only the user can fix that end an edit with an answer, keyed by
+# the failure code their raise site declares. Template selection, unreadable
+# templates and unresolved or invalid placeholders keep their typed error: the
+# chat shows those with their own card and action.
+_USER_ACTION_OUTCOMES: Final[dict[str, tuple[NonPlanKind, RequiredAction]]] = {
+    "template_placeholder_depth_exceeded": (
+        "template_placeholder_too_deep",
+        "edit_template_placeholders",
+    ),
+    "template_placeholder_path_too_long": (
+        "template_placeholder_too_long",
+        "edit_template_placeholders",
+    ),
+    "template_placeholder_count_exceeded": (
+        "template_has_too_many_placeholders",
+        "simplify_template",
+    ),
+    "confirmed_form_field_incompatible": (
+        "form_field_conflicts_with_run_input",
+        "rename_form_field",
+    ),
+}
+
+_USER_ACTION_MESSAGES: Final[dict[NonPlanKind, dict[str, str]]] = {
+    "template_placeholder_too_deep": {
+        "sv": (
+            "Fältet {names} i mallen har för många nivåer. Förenkla fältnamnet i "
+            "mallen och försök igen."
+        ),
+        "en": (
+            "The field {names} in the template has too many levels. Simplify the "
+            "field name in the template and try again."
+        ),
+    },
+    "template_placeholder_too_long": {
+        "sv": "Fältnamnet {names} i mallen är för långt. Korta det i mallen och försök igen.",
+        "en": (
+            "The field name {names} in the template is too long. Shorten it in the "
+            "template and try again."
+        ),
+    },
+    "template_has_too_many_placeholders": {
+        "sv": (
+            "Mallen har fler fält med punkt i namnet (som kund.namn) än som kan "
+            "läggas till automatiskt i ett förberedande steg (högst {max_paths}). "
+            "Fält som ett tidigare steg redan tar fram räknas inte. Minska antalet "
+            "sådana fält i mallen, eller låt ett tidigare steg ta fram några av "
+            "dem, och försök igen."
+        ),
+        "en": (
+            "The template has more fields with a dot in their name (like "
+            "customer.name) than can be added automatically to one preparation "
+            "step (at most {max_paths}). Fields an earlier step already produces "
+            "don't count. Reduce the number of those fields in the template, or "
+            "have an earlier step produce some of them, and try again."
+        ),
+    },
+    "form_field_conflicts_with_run_input": {
+        "sv": (
+            "Formulärfältet {names} har samma namn som det flödet tar emot när det "
+            "körs. Byt namn på fältet eller ta bort det och försök igen. "
+            "Reserverade namn: {reserved}."
+        ),
+        "en": (
+            "The form field {names} has the same name as what the flow receives "
+            "when it runs. Rename the field or remove it and try again. Reserved "
+            "names: {reserved}."
+        ),
+    },
+}
+# The same answers when they name more than one thing.
+_SEVERAL_NAMES_MESSAGES: Final[dict[NonPlanKind, dict[str, str]]] = {
+    "form_field_conflicts_with_run_input": {
+        "sv": (
+            "Formulärfälten {names} har samma namn som det flödet tar emot när det "
+            "körs. Byt namn på fälten eller ta bort dem och försök igen. "
+            "Reserverade namn: {reserved}."
+        ),
+        "en": (
+            "The form fields {names} have the same names as what the flow receives "
+            "when it runs. Rename the fields or remove them and try again. "
+            "Reserved names: {reserved}."
+        ),
+    },
+}
+
+
+def user_action_answer(
+    error: AIBuilderArchitectureError, *, ui_language: str | None
+) -> ProposalAnswer | None:
+    """The answer for a failure only the user can fix, or None to keep the error."""
+
+    failure_code = error.failure_code or ""
+    mapped = _USER_ACTION_OUTCOMES.get(failure_code)
+    if error.repair_disposition != "user_action" or mapped is None:
+        return None
+    outcome = non_plan_outcome(*mapped, affected=error.affected)
+    language = "en" if _uses_english(ui_language) else "sv"
+    messages = (
+        _SEVERAL_NAMES_MESSAGES.get(outcome.kind) if len(error.affected) > 1 else None
+    ) or _USER_ACTION_MESSAGES[outcome.kind]
+    runtime_input_type = error.log_context.get("runtime_input_type")
+    reserved = (
+        primary_input_reserved_names(InputType(runtime_input_type))
+        if isinstance(runtime_input_type, str)
+        else ()
+    )
+    return ProposalAnswer(
+        answer=messages[language].format(
+            names=_name_list(outcome.affected, outcome.affected_remaining, language),
+            max_paths=error.log_context.get("max_paths"),
+            reserved=_name_list(reserved, 0, language),
+        ),
+        outcome=outcome,
+        codes=frozenset({failure_code}),
+    )
+
+
+def _name_list(names: Sequence[str], remaining: int, language: str) -> str:
+    more, conjunction = ("{} more", "and") if language == "en" else ("{} till", "och")
+    items = [_code_span(name) for name in names]
+    if remaining:
+        items.append(more.format(remaining))
+    if len(items) < 2:
+        return "".join(items)
+    return f"{', '.join(items[:-1])} {conjunction} {items[-1]}"
+
+
+def _code_span(name: str) -> str:
+    """``name`` as a Markdown code span, which the chat shows exactly as written."""
+
+    fence = "`"
+    while fence in name:
+        fence += "`"
+    padding = " " if name[:1] in ("`", " ") or name[-1:] in ("`", " ") else ""
+    return f"{fence}{padding}{name}{padding}{fence}"
 
 
 _STALE_SAVED_STEP_REVISION_MESSAGES: Final[dict[str, str]] = {
@@ -192,6 +412,7 @@ async def persist_non_plan_turn(
     usage_tracker: ProposalTurnTelemetry | None,
     planning_state: PlanningState,
     flow: "Flow | None",
+    outcome: NonPlanOutcome | None = None,
 ) -> tuple[AIBuilderStreamEvent, ...]:
     """Store an answered turn the same way an accepted proposal is stored.
 
@@ -217,7 +438,19 @@ async def persist_non_plan_turn(
             content=message,
             metadata=assistant_metadata_with_usage(
                 conversation=conversation,
-                base_metadata=base_assistant_metadata,
+                base_metadata=(
+                    base_assistant_metadata
+                    if outcome is None
+                    else {
+                        **(base_assistant_metadata or {}),
+                        "non_plan_outcome": {
+                            "kind": outcome.kind,
+                            "required_action": outcome.required_action,
+                            "affected": list(outcome.affected),
+                            "affected_remaining": outcome.affected_remaining,
+                        },
+                    }
+                ),
                 usage_tracker=usage_tracker,
                 tool_calls=tool_calls or None,
             ),

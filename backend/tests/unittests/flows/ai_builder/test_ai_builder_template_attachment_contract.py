@@ -8,7 +8,9 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import make_plan_step_ref
+from eneo.flows.ai_builder.ai_builder_non_plan_outcome import user_action_answer
 from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
+    MAX_TEMPLATE_MATERIALIZED_PATHS,
     apply_template_attachment_contract,
 )
 from eneo.flows.domain.runtime_input import build_runtime_input_config
@@ -506,6 +508,7 @@ def test_contract_materializes_missing_nested_placeholder_on_json_preparation() 
             "one.two.three.four.five.six",
             "template_placeholder_depth_exceeded",
         ),
+        ("section." + "v" * 240, "template_placeholder_path_too_long"),
     ],
 )
 def test_contract_rejects_unresolvable_or_too_deep_materialized_path(
@@ -533,8 +536,35 @@ def test_contract_bounds_server_materialized_template_paths() -> None:
         )
 
     assert exc_info.value.log_context["failure_code"] == (
-        "template_placeholder_materialization_limit_exceeded"
+        "template_placeholder_count_exceeded"
     )
+
+
+@pytest.mark.parametrize(
+    ("placeholders", "swedish"),
+    [
+        (("one.two.three.four.five.six",), "Fältet `one.two.three.four.five.six`"),
+        (("section." + "v" * 240,), "Fältnamnet `section.vvv"),
+        (
+            tuple(f"section.value_{index}" for index in range(101)),
+            "än som kan läggas till automatiskt i ett förberedande steg "
+            f"(högst {MAX_TEMPLATE_MATERIALIZED_PATHS})",
+        ),
+    ],
+)
+def test_a_template_limit_answer_is_built_from_what_the_raise_site_reports(
+    placeholders: tuple[str, ...], swedish: str
+) -> None:
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        apply_template_attachment_contract(
+            _template_spec(), selected_template_count=1, placeholders=placeholders
+        )
+
+    answer = user_action_answer(exc_info.value, ui_language="sv")
+
+    assert answer is not None
+    assert swedish in answer.answer
+    assert "None" not in answer.answer
 
 
 def test_contract_drops_unused_text_step_before_template_fill() -> None:

@@ -698,6 +698,47 @@ async def test_terminal_architecture_dispositions_end_the_turn_with_their_own_me
     assert expected_message_fragment in result.message
 
 
+@pytest.mark.parametrize(
+    "failure_code",
+    [
+        "template_placeholder_depth_exceeded",
+        "template_placeholder_path_too_long",
+        "template_placeholder_count_exceeded",
+        "confirmed_form_field_incompatible",
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_failure_an_edit_answers_still_ends_a_create_turn_typed(
+    failure_code: str,
+) -> None:
+    """Only the edit path answers these; create keeps today's typed error."""
+    error = AIBuilderArchitectureError(
+        public_code="architecture_materialization_failed",
+        repair_disposition="user_action",
+        detail="The selected DOCX cannot be filled.",
+        log_context={"failure_code": failure_code, "max_paths": 100},
+        affected=("kund.namn",),
+    )
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_create_proposal."
+        "compile_create_intent_to_spec",
+        side_effect=error,
+    ):
+        result = await _process_create_intent_arguments(
+            turn=_make_turn(),
+            conversation=[],
+            arguments=_ARCHITECTURE_CLASSIFICATION_ARGUMENTS,
+            tool_call_id="call-architecture-classification",
+            available_model_refs=None,
+            available_kb_refs=None,
+        )
+
+    assert isinstance(result, TerminalFailure)
+    assert result.codes == frozenset({failure_code})
+    assert result.details["failure_code"] == failure_code
+
+
 @pytest.mark.asyncio
 async def test_model_correctable_architecture_failure_becomes_repair_feedback() -> None:
     error = AIBuilderArchitectureError(

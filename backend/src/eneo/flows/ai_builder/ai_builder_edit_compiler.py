@@ -53,6 +53,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     ModifyExistingStep,
     OrderedEditProposal,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    MAX_DIAGNOSTIC_NAME_LENGTH,
+    MAX_DIAGNOSTIC_NAMES,
+)
 from eneo.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
 from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
     StepNormalizationChange,
@@ -570,7 +574,11 @@ def _sanitize_shadowed_form_fields(
     base_form_fields: list[FormFieldSpec] | None,
     primary_runtime_input_type: InputType | None,
 ) -> tuple[MaterializedOrderedEditProposal, list[str]]:
-    if "form_fields" not in proposal.model_fields_set or proposal.form_fields is None:
+    if (
+        "form_fields" not in proposal.model_fields_set
+        or proposal.form_fields is None
+        or primary_runtime_input_type is None
+    ):
         return proposal, []
 
     kept_fields: list[FormFieldSpec] = []
@@ -581,23 +589,31 @@ def _sanitize_shadowed_form_fields(
             field_type=field.type,
             runtime_input_type=primary_runtime_input_type,
         ):
-            if proposal.form_field_provenance.get(field.name) == "user_confirmed":
-                raise AIBuilderArchitectureError(
-                    public_code="architecture_materialization_failed",
-                    repair_disposition="user_action",
-                    detail=(
-                        f"Confirmed runtime field '{field.name}' duplicates the "
-                        "flow's primary runtime input."
-                    ),
-                    log_context={
-                        "failure_code": "confirmed_form_field_incompatible",
-                        "field_names": field.name,
-                    },
-                )
             dropped_field_names.append(field.name)
             continue
         kept_fields.append(field)
 
+    confirmed = [
+        name
+        for name in dropped_field_names
+        if proposal.form_field_provenance.get(name) == "user_confirmed"
+    ]
+    if confirmed:
+        raise AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            repair_disposition="user_action",
+            detail="Confirmed runtime fields duplicate the flow's primary runtime input.",
+            log_context={
+                "failure_code": "confirmed_form_field_incompatible",
+                "field_names": ", ".join(
+                    name[:MAX_DIAGNOSTIC_NAME_LENGTH]
+                    for name in confirmed[:MAX_DIAGNOSTIC_NAMES]
+                ),
+                "field_names_remaining": max(0, len(confirmed) - MAX_DIAGNOSTIC_NAMES),
+                "runtime_input_type": primary_runtime_input_type.value,
+            },
+            affected=confirmed,
+        )
     if not dropped_field_names:
         return proposal, []
     if not kept_fields and not base_form_fields:

@@ -17,6 +17,10 @@ from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     MAX_COMPILED_STRUCTURED_FIELD_DEPTH,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    MAX_DIAGNOSTIC_NAME_LENGTH,
+    MAX_DIAGNOSTIC_NAMES,
+)
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     fold_result_field_name,
 )
@@ -56,7 +60,6 @@ _LOCAL_TEMPLATE_CONFIG_KEYS = frozenset(
         "placeholders",
     }
 )
-_MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH = 80
 _REMOVED_PRODUCER_ALIAS = re.compile(r"\{\{\s*step_\d+(?:\.[^{}]*)?\s*\}\}")
 MAX_TEMPLATE_PREPARATION_STAGES = 5
 MAX_TEMPLATE_MATERIALIZED_PATHS = NAMED_RESULT_EVIDENCE_MAX_ITEMS
@@ -219,7 +222,8 @@ def apply_template_attachment_contract(
             ),
             unresolved_count=len(unresolved),
             unresolved_placeholders=", ".join(
-                name[:_MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH] for name in unresolved[:8]
+                name[:MAX_DIAGNOSTIC_NAME_LENGTH]
+                for name in unresolved[:MAX_DIAGNOSTIC_NAMES]
             ),
         )
 
@@ -376,13 +380,13 @@ def template_binding_dependency_broken_error(
         repair_disposition="model_correctable",
         detail=(
             f"The flow's DOCX template maps placeholder "
-            f"'{placeholder[:_MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH]}' to "
-            f"{binding[:_MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH]}, which this "
+            f"'{placeholder[:MAX_DIAGNOSTIC_NAME_LENGTH]}' to "
+            f"{binding[:MAX_DIAGNOSTIC_NAME_LENGTH]}, which this "
             "edit breaks. Keep the step and output that mapping reads, "
             "or remove that dependency deliberately."
         ),
-        placeholder=placeholder[:_MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH],
-        binding=binding[:_MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH],
+        placeholder=placeholder[:MAX_DIAGNOSTIC_NAME_LENGTH],
+        binding=binding[:MAX_DIAGNOSTIC_NAME_LENGTH],
     )
 
 
@@ -542,16 +546,18 @@ def _materialize_nested_template_outputs(
                     "the compiled Flow schema supports."
                 ),
                 max_depth=MAX_COMPILED_STRUCTURED_FIELD_DEPTH,
+                affected=(placeholder,),
             )
         if len(placeholder) > NAMED_RESULT_FIELD_NAME_MAX_LENGTH:
             raise _architecture_error(
-                failure_code="template_placeholder_materialization_limit_exceeded",
+                failure_code="template_placeholder_path_too_long",
                 repair_disposition="user_action",
                 detail=(
                     "The selected DOCX contains a placeholder path too large to "
                     "materialize safely."
                 ),
                 max_path_length=NAMED_RESULT_FIELD_NAME_MAX_LENGTH,
+                affected=(placeholder,),
             )
         expanded_contract = deepcopy(contract)
         if _add_required_string_path(
@@ -561,9 +567,7 @@ def _materialize_nested_template_outputs(
         ):
             if len(added_paths) >= MAX_TEMPLATE_MATERIALIZED_PATHS:
                 raise _architecture_error(
-                    failure_code=(
-                        "template_placeholder_materialization_limit_exceeded"
-                    ),
+                    failure_code="template_placeholder_count_exceeded",
                     repair_disposition="user_action",
                     detail=(
                         "The selected DOCX requires more server-materialized "
@@ -836,12 +840,14 @@ def _architecture_error(
     failure_code: str,
     repair_disposition: ArchitectureRepairDisposition,
     detail: str,
+    affected: Sequence[str] = (),
     **context: ArchitectureLogValue,
 ) -> AIBuilderArchitectureError:
     return AIBuilderArchitectureError(
         public_code="architecture_materialization_failed",
         repair_disposition=repair_disposition,
         detail=detail,
+        affected=affected,
         log_context={
             "failure_code": failure_code,
             "reason": failure_code,

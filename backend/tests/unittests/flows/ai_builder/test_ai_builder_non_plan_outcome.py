@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+    ArchitectureRepairDisposition,
+)
 from eneo.flows.ai_builder.ai_builder_create_compile_context import CreateCompileContext
 from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
 from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
@@ -12,9 +17,12 @@ from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
     build_decline_flow_change_tool_schema,
     decline_message,
     decline_reason_from_arguments,
+    scoped_revision_out_of_reach_answer,
+    user_action_answer,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    NonPlanOutcome,
     forced_tool_choice,
 )
 from eneo.flows.ai_builder.ai_builder_telemetry import PLANNER_TELEMETRY_KEY
@@ -145,6 +153,80 @@ async def test_a_model_change_request_is_declined_without_a_plan() -> None:
     assert stored[0].tool_calls[0]["arguments"] == {
         "reason": "model_choice_belongs_to_step_editor"
     }
+    assert stored[0].metadata["non_plan_outcome"] == {
+        "kind": "model_choice_belongs_to_step_editor",
+        "required_action": "change_model_in_step_editor",
+        "affected": [],
+        "affected_remaining": 0,
+    }
+
+
+@pytest.mark.parametrize(
+    ("edit_context", "ui_language", "text", "affected"),
+    [
+        (
+            SimpleNamespace(
+                target_plan_step_ref=None,
+                target_existing_step_ref="existing_step_2",
+                target_step_name="Sammanfatta *ärendet*",
+            ),
+            "sv",
+            "Jag kan inte byta modell åt dig. Öppna steget `Sammanfatta *ärendet*` "
+            "i stegredigeraren och välj modellen där.",
+            ["existing_step_2"],
+        ),
+        (
+            SimpleNamespace(
+                target_plan_step_ref="step_b",
+                target_existing_step_ref=None,
+                target_step_name="Summarize",
+            ),
+            "en",
+            "I can't change the model for you. Open the step `Summarize` in the "
+            "step editor and pick the model there.",
+            ["step_b"],
+        ),
+        # A whole-plan edit selects no step and keeps the whole-flow sentence.
+        (
+            SimpleNamespace(
+                target_plan_step_ref=None,
+                target_existing_step_ref=None,
+                target_step_name=None,
+            ),
+            "sv",
+            "Jag kan inte byta modell åt dig — det gör du i stegredigeraren.",
+            [],
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_decline_in_a_selected_step_edit_names_that_step(
+    edit_context: SimpleNamespace, ui_language: str, text: str, affected: list[str]
+) -> None:
+    repo = AsyncMock()
+    repo.commit_turn = AsyncMock(return_value=7)
+    submission = _make_submission(repo=repo)
+    dispatched = submission.dispatch_submission_tool_call(
+        ctx=_decline_context(
+            repo,
+            plan_edit_context=edit_context,
+            compile_context=CreateCompileContext(ui_language=ui_language),
+        ),
+        tool_call=_make_tool_call(
+            DECLINE_FLOW_CHANGE_TOOL_NAME,
+            {"reason": "model_choice_belongs_to_step_editor"},
+            tool_call_id="call-decline",
+        ),
+    )
+
+    assert dispatched is not None
+    events = [encode_ai_builder_stream_event(event) async for event in dispatched]
+    assert [event["event"] for event in events] == ["text"]
+    assert json.loads(events[0]["data"]) == {"text": text}
+    stored = repo.commit_turn.await_args.kwargs["new_messages"]
+    assert stored[0].content == text
+    # The metadata keeps the stable ref; the reply names the step as shown.
+    assert stored[0].metadata["non_plan_outcome"]["affected"] == affected
 
 
 def test_a_repair_request_never_offers_the_decline_tool() -> None:
@@ -208,3 +290,201 @@ async def test_a_decline_is_ignored_when_the_turn_never_offered_it() -> None:
     assert dispatched is not None
     assert [event async for event in dispatched] == []
     repo.commit_turn.assert_not_awaited()
+
+
+def _user_action_error(
+    failure_code: str,
+    *,
+    affected: tuple[str, ...] = (),
+    disposition: ArchitectureRepairDisposition = "user_action",
+    **context: str | int,
+) -> AIBuilderArchitectureError:
+    return AIBuilderArchitectureError(
+        public_code="architecture_materialization_failed",
+        repair_disposition=disposition,
+        detail="English diagnostic for logs.",
+        log_context={"failure_code": failure_code, **context},
+        affected=affected,
+    )
+
+
+@pytest.mark.parametrize(
+    ("failure_code", "affected", "context", "kind", "action", "swedish"),
+    [
+        (
+            "template_placeholder_depth_exceeded",
+            ("a.b.c.d.e.f",),
+            {},
+            "template_placeholder_too_deep",
+            "edit_template_placeholders",
+            "Fältet `a.b.c.d.e.f`",
+        ),
+        (
+            "template_placeholder_path_too_long",
+            ("rubrik",),
+            {},
+            "template_placeholder_too_long",
+            "edit_template_placeholders",
+            "Fältnamnet `rubrik`",
+        ),
+        (
+            "template_placeholder_count_exceeded",
+            (),
+            {"max_paths": 100},
+            "template_has_too_many_placeholders",
+            "simplify_template",
+            "högst 100",
+        ),
+        (
+            "confirmed_form_field_incompatible",
+            ("transkribering",),
+            {"runtime_input_type": "audio"},
+            "form_field_conflicts_with_run_input",
+            "rename_form_field",
+            "Formulärfältet `transkribering`",
+        ),
+    ],
+)
+def test_a_user_action_error_answers_with_its_remedy(
+    failure_code: str,
+    affected: tuple[str, ...],
+    context: dict[str, str | int],
+    kind: str,
+    action: str,
+    swedish: str,
+) -> None:
+    error = _user_action_error(failure_code, affected=affected, **context)
+
+    answer = user_action_answer(error, ui_language="sv")
+    english = user_action_answer(error, ui_language="en")
+
+    assert answer is not None and english is not None
+    assert answer.outcome is not None
+    assert (answer.outcome.kind, answer.outcome.required_action) == (kind, action)
+    assert answer.outcome.affected == affected
+    assert answer.codes == frozenset({failure_code})
+    assert swedish in answer.answer
+    assert english.answer != answer.answer and english.outcome == answer.outcome
+
+
+def test_a_shadowing_form_field_answer_agrees_in_number_and_names_the_reserved_names() -> (
+    None
+):
+    one = user_action_answer(
+        _user_action_error(
+            "confirmed_form_field_incompatible",
+            affected=("text",),
+            runtime_input_type="text",
+        ),
+        ui_language="sv",
+    )
+    two = user_action_answer(
+        _user_action_error(
+            "confirmed_form_field_incompatible",
+            affected=("text", "input"),
+            runtime_input_type="text",
+        ),
+        ui_language="en",
+    )
+
+    assert one is not None and two is not None
+    assert one.answer.startswith("Formulärfältet `text` har")
+    assert "Byt namn på fältet eller ta bort det" in one.answer
+    assert one.answer.endswith("Reserverade namn: `indata_text`, `input` och `text`.")
+    assert two.answer.startswith("The form fields `text` and `input` have")
+    assert "Rename the fields or remove them" in two.answer
+    assert two.answer.endswith("Reserved names: `indata_text`, `input` and `text`.")
+
+
+def test_affected_names_are_bounded_in_the_outcome_and_the_answer() -> None:
+    names = tuple(f"falt{index:02d}" + "x" * 114 for index in range(20))
+    error = _user_action_error(
+        "confirmed_form_field_incompatible", affected=names, runtime_input_type="text"
+    )
+
+    answer = user_action_answer(error, ui_language="sv")
+    english = user_action_answer(error, ui_language="en")
+
+    assert answer is not None and answer.outcome is not None and english is not None
+    assert len(answer.outcome.affected) == 8
+    assert all(
+        len(name) == 80 and name.endswith("…") for name in answer.outcome.affected
+    )
+    assert answer.outcome.affected_remaining == 12
+    assert "och 12 till" in answer.answer
+    assert "and 12 more" in english.answer
+    assert "falt08" not in answer.answer
+
+
+def test_a_truncated_name_keeps_whole_characters_and_renders_literally() -> None:
+    accent = "a" * 78 + "e\u0301" + "tail"
+    family = "b" * 77 + "\U0001f468\u200d\U0001f469" + "tail"
+    markdown = "*[länk](x)*"
+
+    answer = user_action_answer(
+        _user_action_error(
+            "confirmed_form_field_incompatible",
+            affected=(accent, family, markdown, "a`b", "`x"),
+            runtime_input_type="text",
+        ),
+        ui_language="sv",
+    )
+
+    assert answer is not None and answer.outcome is not None
+    kept_accent, kept_family, kept_markdown, *_ = answer.outcome.affected
+    assert kept_accent == "a" * 78 + "…"
+    assert kept_family == "b" * 77 + "…"
+    assert kept_markdown == markdown
+    # A code span is the one form the chat's Markdown shows exactly as written.
+    assert "`*[länk](x)*`, ``a`b`` och `` `x ``" in answer.answer
+
+
+@pytest.mark.parametrize(
+    ("affected", "remaining"),
+    [(tuple(str(index) for index in range(9)), 0), (("x" * 81,), 0), ((), -1)],
+)
+def test_a_non_plan_outcome_refuses_an_unbounded_affected_list(
+    affected: tuple[str, ...], remaining: int
+) -> None:
+    with pytest.raises(ValueError):
+        NonPlanOutcome(
+            kind="template_placeholder_too_long",
+            required_action="edit_template_placeholders",
+            affected=affected,
+            affected_remaining=remaining,
+        )
+
+
+@pytest.mark.parametrize(
+    ("failure_code", "disposition"),
+    [
+        ("template_placeholder_depth_exceeded", "server_defect"),
+        ("template_placeholder_depth_exceeded", "model_correctable"),
+        ("flow_input_schema_composite_bindings_unsupported", "user_action"),
+        # The frontend already shows these with their own card and action.
+        ("template_attachment_selection_invalid", "user_action"),
+        ("template_attachment_unreadable", "user_action"),
+        ("template_placeholder_path_invalid", "user_action"),
+        ("template_placeholder_unresolved", "user_action"),
+    ],
+)
+def test_only_a_mapped_user_action_error_becomes_an_answer(
+    failure_code: str, disposition: ArchitectureRepairDisposition
+) -> None:
+    error = _user_action_error(failure_code, disposition=disposition)
+
+    assert user_action_answer(error, ui_language="sv") is None
+
+
+def test_the_scoped_revision_answer_asks_for_a_whole_plan_edit() -> None:
+    answer = scoped_revision_out_of_reach_answer(
+        target_step_ref="step_b", ui_language="sv"
+    )
+
+    assert "Redigera hela planen" in answer.answer
+    assert answer.outcome is not None
+    assert (answer.outcome.kind, answer.outcome.required_action) == (
+        "scoped_revision_out_of_reach",
+        "edit_whole_plan",
+    )
+    assert answer.outcome.affected == ("step_b",)

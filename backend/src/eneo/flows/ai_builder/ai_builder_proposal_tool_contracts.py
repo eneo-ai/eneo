@@ -387,6 +387,51 @@ class ProposalReady:
     compiled: CompiledProposal
 
 
+NonPlanKind: TypeAlias = Literal[
+    "review_found_nothing",
+    "scoped_revision_out_of_reach",
+    "model_choice_belongs_to_step_editor",
+    "template_placeholder_too_deep",
+    "template_placeholder_too_long",
+    "template_has_too_many_placeholders",
+    "form_field_conflicts_with_run_input",
+]
+RequiredAction: TypeAlias = Literal[
+    "none",
+    "edit_whole_plan",
+    "change_model_in_step_editor",
+    "edit_template_placeholders",
+    "simplify_template",
+    "rename_form_field",
+]
+# How many names a diagnostic or an answer lists, and how much of each: a
+# template can carry a thousand placeholders, and neither should.
+MAX_DIAGNOSTIC_NAMES = 8
+MAX_DIAGNOSTIC_NAME_LENGTH = 80
+
+
+@dataclass(frozen=True)
+class NonPlanOutcome:
+    """Why a turn answered instead of planning, and what the user can do.
+
+    Stored with the answer. `affected` names what to change, within the
+    diagnostic bound; `affected_remaining` counts the rest.
+    """
+
+    kind: NonPlanKind
+    required_action: RequiredAction
+    affected: tuple[str, ...] = ()
+    affected_remaining: int = 0
+
+    def __post_init__(self) -> None:
+        if (
+            len(self.affected) > MAX_DIAGNOSTIC_NAMES
+            or any(len(name) > MAX_DIAGNOSTIC_NAME_LENGTH for name in self.affected)
+            or self.affected_remaining < 0
+        ):
+            raise ValueError("A non-plan outcome names what to change within bounds.")
+
+
 @dataclass(frozen=True)
 class ProposalAnswer:
     """A completed answer with no plan.
@@ -396,6 +441,9 @@ class ProposalAnswer:
     """
 
     answer: str
+    outcome: NonPlanOutcome | None = None
+    # The failure codes behind an answer that replaced a failed proposal.
+    codes: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
