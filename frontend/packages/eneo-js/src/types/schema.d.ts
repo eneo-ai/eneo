@@ -3823,6 +3823,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/model-providers/{provider_id}/connection-check/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Check a model provider's connection
+     * @description Call the provider with its stored credentials the cheap way (its model list, 10 second timeout) and store the result on the provider as `connection_check`. The response never contains the key, the provider's headers or its response body. Returns 400 when `connection_check_supported` is false. Requires admin.
+     */
+    post: operations["check_provider_connection_api_v1_admin_model_providers__provider_id__connection_check__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/model-providers/{provider_id}/test/": {
     parameters: {
       query?: never;
@@ -3834,7 +3854,8 @@ export interface paths {
     put?: never;
     /**
      * Test Provider
-     * @description Test connectivity to a model provider.
+     * @deprecated
+     * @description Deprecated: use POST /{provider_id}/connection-check/. Runs the same check, stores its result, and answers in the older `{success, message | error}` shape. Requires admin.
      */
     post: operations["test_provider_api_v1_admin_model_providers__provider_id__test__post"];
     delete?: never;
@@ -11385,6 +11406,42 @@ export interface components {
       security_classification?: components["schemas"]["ModelId"] | null;
     };
     /**
+     * ConnectionCheckError
+     * @description Why a connection check failed: a fixed category, never provider text.
+     *
+     *     Upstream bodies and headers can echo the key or internal details, so only
+     *     the category is stored and returned; the UI turns it into a sentence.
+     * @enum {string}
+     */
+    ConnectionCheckError:
+      | "authentication_failed"
+      | "missing_credentials"
+      | "not_found"
+      | "rate_limited"
+      | "rejected"
+      | "provider_error"
+      | "timeout"
+      | "unreachable";
+    /**
+     * ConnectionCheckPublic
+     * @description The latest connection check: an authenticated call to the provider.
+     */
+    ConnectionCheckPublic: {
+      status: components["schemas"]["ConnectionCheckStatus"];
+      /**
+       * Checked At
+       * Format: date-time
+       */
+      checked_at: string;
+      /** @description Why the check failed; set only when status is failed. A fixed category, never text from the provider's response. */
+      error?: components["schemas"]["ConnectionCheckError"] | null;
+    };
+    /**
+     * ConnectionCheckStatus
+     * @enum {string}
+     */
+    ConnectionCheckStatus: "ok" | "failed";
+    /**
      * ConstrainingSource
      * @enum {string}
      */
@@ -15022,6 +15079,11 @@ export interface components {
        * @default true
        */
       is_active?: boolean;
+      /**
+       * Key Expires On
+       * @description Date the API key stops working, entered by an admin so the key can be renewed in time. Few providers report key expiry through their API, so Eneo stores this date as given and does not verify it.
+       */
+      key_expires_on?: string | null;
     };
     /**
      * ModelProviderPublic
@@ -15050,6 +15112,19 @@ export interface components {
       is_active: boolean;
       /** Masked Api Key */
       masked_api_key?: string | null;
+      /**
+       * Key Expires On
+       * @description Date the API key stops working, entered by an admin so the key can be renewed in time. Few providers report key expiry through their API, so Eneo stores this date as given and does not verify it.
+       */
+      key_expires_on?: string | null;
+      /** @description Result of the latest connection check; null until one runs and again after the credentials or endpoint change. */
+      connection_check?: components["schemas"]["ConnectionCheckPublic"] | null;
+      /**
+       * Connection Check Supported
+       * @description Whether POST /{provider_id}/connection-check/ can check this provider: Eneo knows a cheap authenticated call for its type, or it has an OpenAI-compatible endpoint.
+       * @default false
+       */
+      connection_check_supported?: boolean;
       /**
        * Created At
        * Format: date-time
@@ -15090,6 +15165,11 @@ export interface components {
        * @description Whether the provider is active
        */
       is_active?: boolean | null;
+      /**
+       * Key Expires On
+       * @description Date the API key stops working, entered by an admin so the key can be renewed in time. Few providers report key expiry through their API, so Eneo stores this date as given and does not verify it. Send null to remove the date; leave the field out to keep it.
+       */
+      key_expires_on?: string | null;
     };
     /** ModelUsage */
     ModelUsage: {
@@ -35979,6 +36059,73 @@ export interface operations {
       };
     };
   };
+  check_provider_connection_api_v1_admin_model_providers__provider_id__connection_check__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        provider_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModelProviderPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   test_provider_api_v1_admin_model_providers__provider_id__test__post: {
     parameters: {
       query?: never;
@@ -35999,6 +36146,15 @@ export interface operations {
           "application/json": {
             [key: string]: unknown;
           };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
