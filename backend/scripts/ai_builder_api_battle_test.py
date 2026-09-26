@@ -4814,7 +4814,31 @@ def _judge_edit(
     edit: EditCase | None, evidence: Mapping[str, Any] | None
 ) -> JsonObject:
     assert edit is not None and edit.gold is not None and evidence is not None
-    return evaluate_edit(edit.gold, seed=edit.fixture, evidence=evidence)
+    return evaluate_edit(
+        edit.gold,
+        seed=edit.fixture,
+        evidence=evidence,
+        selected_step_name=_selected_step_name(edit, evidence["baseline"]),
+    )
+
+
+def _selected_step_name(edit: EditCase, baseline: Mapping[str, Any]) -> str | None:
+    """The name the Builder shows for the selected step: its saved user_description.
+
+    Derived from the recorded baseline, so a live judgement and a replay agree.
+    """
+
+    if edit.target_order is None:
+        return None
+    flow = baseline.get("flow")
+    steps = _mapping_list(flow.get("steps")) if isinstance(flow, Mapping) else []
+    step = next((s for s in steps if s.get("step_order") == edit.target_order), None)
+    name = step.get("user_description") if step is not None else None
+    if not isinstance(name, str) or not name:
+        raise ValueError(
+            f"selected step {edit.target_order} has no name in the recorded baseline"
+        )
+    return name
 
 
 def _edit_report(

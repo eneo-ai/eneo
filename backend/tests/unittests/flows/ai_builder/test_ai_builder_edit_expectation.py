@@ -632,6 +632,45 @@ def test_a_decline_is_judged_without_a_plan_or_apply() -> None:
     assert _failed(other) == {"outcome": "fulfilment"}
 
 
+def test_a_selected_step_decline_is_judged_by_the_sentence_that_names_the_step() -> (
+    None
+):
+    from eneo.flows.ai_builder.ai_builder_non_plan_outcome import decline_message
+
+    gold = edit.parse_edit_expectation(
+        {
+            "outcome": "declined",
+            "decline_reason": "model_choice_belongs_to_step_editor",
+        },
+        seed=A,
+        owner="test",
+    )
+
+    def judge(text: str) -> dict[str, Any]:
+        outcome = {
+            "plan": False,
+            "questions": 0,
+            "final_text": text,
+            "ui_language": "sv",
+        }
+        return edit.evaluate_edit(
+            gold,
+            seed=A,
+            evidence=_evidence(A, None, None, outcome=outcome),
+            selected_step_name="Bedöm ärendet",
+        )
+
+    named = decline_message(
+        "model_choice_belongs_to_step_editor",
+        ui_language="sv",
+        step_name="Bedöm ärendet",
+    )
+    unnamed = decline_message("model_choice_belongs_to_step_editor", ui_language="sv")
+
+    assert judge(named)["verdict"] == "pass"
+    assert _failed(judge(unnamed)) == {"outcome": "fulfilment"}
+
+
 def test_a_plan_that_silently_drops_a_step_and_is_refused_is_scored_as_it_happened() -> (
     None
 ):

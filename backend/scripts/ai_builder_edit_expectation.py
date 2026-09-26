@@ -673,7 +673,11 @@ def gold_atoms(
 
 
 def evaluate_edit(
-    gold: EditExpectation, *, seed: Mapping[str, Any], evidence: Mapping[str, Any]
+    gold: EditExpectation,
+    *,
+    seed: Mapping[str, Any],
+    evidence: Mapping[str, Any],
+    selected_step_name: str | None = None,
 ) -> JsonObject:
     """The structural phase: judge one observation by its expected outcome.
 
@@ -701,11 +705,13 @@ def evaluate_edit(
     outcome = _obj(evidence["outcome"])
     has_plan, questions = outcome.get("plan") is True, outcome.get("questions") or 0
     if gold.outcome == "declined":
-        # A behavioural proxy until the product exposes a typed outcome: the
-        # exact server-owned sentence for the declared reason.
+        # A behavioural proxy until the session API exposes the typed outcome:
+        # the exact server-owned sentence for the declared reason, which names
+        # the selected step in a selected-step edit.
         sentence = decline_message(
             cast(DeclineReason, gold.decline_reason),
             ui_language=outcome.get("ui_language"),
+            step_name=selected_step_name,
         )
         declined = (
             not has_plan and not questions and outcome.get("final_text") == sentence

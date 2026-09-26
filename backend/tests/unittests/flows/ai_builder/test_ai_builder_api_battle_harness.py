@@ -2961,6 +2961,59 @@ def test_a_case_with_a_source_is_recorded_so_its_observation_stays_valid() -> No
     }
 
 
+def test_a_selected_step_decline_is_judged_with_the_step_name_from_the_baseline() -> (
+    None
+):
+    # Live E27 on luna, 2026-09-26: the product names the selected step when it declines;
+    # _judge_edit serves both the live observation and a replay of its bundle.
+    from eneo.flows.ai_builder.ai_builder_non_plan_outcome import decline_message
+
+    harness = _battle_harness()
+    (case,) = [
+        c
+        for c in harness._read_cases_file(
+            harness.FIXTURE_DIR.parents[1] / "ai_builder_api_edit_cases.json"
+        )
+        if c.case_id == "edit_e27_a_selected_step_model_decline"
+    ]
+    assert case.edit is not None and case.edit.target_order == 2
+    steps = [
+        {"step_order": order, "user_description": step["name"]}
+        for order, step in enumerate(case.edit.fixture["steps"], start=1)
+    ]
+    name = steps[1]["user_description"]
+
+    def evidence(text: str) -> dict[str, object]:
+        baseline = {"flow": {"revision": 3, "steps": steps}, "assistants": []}
+        return {
+            "identity": {},
+            "captured_revision": 3,
+            "baseline": baseline,
+            "after_turn": baseline,
+            "outcome": {
+                "plan": False,
+                "questions": 0,
+                "final_text": text,
+                "ui_language": "sv",
+            },
+            "plan": None,
+            "apply": None,
+            "applied": None,
+        }
+
+    named = decline_message(
+        "model_choice_belongs_to_step_editor", ui_language="sv", step_name=name
+    )
+    unnamed = decline_message("model_choice_belongs_to_step_editor", ui_language="sv")
+
+    assert harness._judge_edit(case.edit, evidence(named))["verdict"] == "pass"
+    assert harness._judge_edit(case.edit, evidence(unnamed))["verdict"] == "fail"
+    with raises(ValueError, match="has no name in the recorded baseline"):
+        harness._judge_edit(
+            case.edit, {**evidence(named), "baseline": {"flow": {"steps": []}}}
+        )
+
+
 def test_evidence_report_rejects_classifier_diagnostics_from_another_session() -> None:
     harness = _battle_harness()
     bundle = _complete_reanalysis_bundle(
