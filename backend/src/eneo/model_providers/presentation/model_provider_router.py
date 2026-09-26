@@ -11,6 +11,7 @@ from eneo.authentication.auth_dependencies import get_current_active_user
 from eneo.database.database import AsyncSession, get_session_with_transaction
 from eneo.main.config import get_settings
 from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
+from eneo.model_providers.domain.model_provider import ModelProvider
 from eneo.model_providers.domain.model_provider_service import (
     LITELLM_MODE_TO_OUR_MODE,
     ModelProviderService,
@@ -123,6 +124,14 @@ def get_model_provider_service(
 ServiceDep = Annotated[ModelProviderService, Depends(get_model_provider_service)]
 
 
+def _public(
+    provider: ModelProvider, service: ModelProviderService
+) -> ModelProviderPublic:
+    return ModelProviderPublic(
+        **provider.to_dict(), masked_api_key=service.masked_api_key(provider)
+    )
+
+
 @router.get(
     "/",
     response_model=list[ModelProviderPublic],
@@ -136,7 +145,7 @@ async def list_providers(
     """List all model providers for the tenant."""
     validate_permission(user, Permission.ADMIN)
     providers = await service.get_all()
-    return [ModelProviderPublic(**provider.to_dict()) for provider in providers]
+    return [_public(provider, service) for provider in providers]
 
 
 @router.get(
@@ -393,7 +402,7 @@ async def get_provider(
     """Get a specific model provider."""
     validate_permission(user, Permission.ADMIN)
     provider = await service.get_by_id(provider_id)
-    return ModelProviderPublic(**provider.to_dict())
+    return _public(provider, service)
 
 
 @router.post(
@@ -417,7 +426,7 @@ async def create_provider(
         config=data.config,
         is_active=data.is_active,
     )
-    return ModelProviderPublic(**provider.to_dict())
+    return _public(provider, service)
 
 
 @router.put(
@@ -441,7 +450,7 @@ async def update_provider(
         config=data.config,
         is_active=data.is_active,
     )
-    return ModelProviderPublic(**provider.to_dict())
+    return _public(provider, service)
 
 
 @router.get(
