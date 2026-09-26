@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSkillCall, skillName, toolPresentation } from "./tool-presentation";
+import { humanizeToolName, isSkillCall, skillName, toolPresentation } from "./tool-presentation";
 
 const t = (key: string, values?: Record<string, string>) =>
   `${key}${values?.query ? `:${values.query}` : ""}`;
@@ -26,6 +26,15 @@ describe("chat tool presentation", () => {
     };
     expect(toolPresentation(call, t, false).label).toBe("tool_edit_image");
     expect(toolPresentation(call, t, true).label).toBe("tool_edit_image_done");
+  });
+
+  it("names untitled external tools from their identifier", () => {
+    expect(humanizeToolName("search_knowledge_base")).toBe("Search knowledge base");
+    expect(humanizeToolName("jira/create-issue")).toBe("Jira create issue");
+    expect(humanizeToolName("__")).toBe("__");
+    expect(toolPresentation({ toolName: "lou_troskelvarden" }, t, true).label).toBe(
+      "Lou troskelvarden"
+    );
   });
 
   it("localizes Eneo's knowledge tools and keeps external tool titles", () => {

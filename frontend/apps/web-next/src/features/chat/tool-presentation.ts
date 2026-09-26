@@ -1,4 +1,13 @@
-import { humanizeToolName } from "@/components/ai-elements/tool-status";
+/**
+ * Turn a raw tool identifier into a readable label: drop a server/ prefix,
+ * swap separators for spaces, and capitalize. `search_knowledge_base` →
+ * `Search knowledge base`, `jira/create_issue` → `Jira create issue`.
+ */
+export function humanizeToolName(name: string): string {
+  const words = name.replace(/[/_-]+/g, " ").trim();
+  if (!words) return name;
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 
 type Translate = (key: string, values?: Record<string, string>) => string;
 type ToolLike = {
