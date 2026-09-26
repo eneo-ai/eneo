@@ -130,22 +130,28 @@ function HistoryPanel({
         })
       )
   });
-  const sessions = flattenPages(history.data?.pages);
+  const pages = history.data?.pages;
+  const sessions = flattenPages(pages);
   const groups = groupSessions(sessions, now);
 
-  // "Visa fler": focus the first conversation it added once it renders (the
-  // button itself goes away with the last page).
-  const focusRowAt = useRef<number | null>(null);
+  // "Visa fler": once the page it asked for renders, focus that page's first
+  // conversation (the button itself goes away with the last page).
+  const focusPage = useRef<number | null>(null);
+  const pageCount = pages?.length ?? 0;
   useEffect(() => {
-    const index = focusRowAt.current;
-    if (index === null || sessions.length <= index) return;
-    focusRowAt.current = null;
-    listRef.current?.querySelectorAll<HTMLElement>("[data-session-row]")[index]?.focus();
-  }, [sessions.length]);
+    const page = focusPage.current;
+    if (page === null || pageCount <= page) return;
+    focusPage.current = null;
+    const first = pages?.[page]?.items[0];
+    if (!first) return;
+    listRef.current
+      ?.querySelector<HTMLElement>(`[data-session-row="${CSS.escape(first.id)}"]`)
+      ?.focus();
+  }, [pageCount, pages]);
 
   function loadMore() {
     if (history.isFetchingNextPage) return;
-    focusRowAt.current = sessions.length;
+    focusPage.current = pageCount;
     void history.fetchNextPage();
   }
 
@@ -201,7 +207,7 @@ function HistoryPanel({
                     >
                       <button
                         type="button"
-                        data-session-row=""
+                        data-session-row={session.id}
                         aria-current={active ? "true" : undefined}
                         onClick={() => onSelect(session.id)}
                         className={cn(
