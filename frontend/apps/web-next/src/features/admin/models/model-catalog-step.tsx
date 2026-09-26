@@ -1,30 +1,26 @@
 "use client";
 
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
+import { CheckboxList, CheckboxListItem } from "@astryxdesign/core/CheckboxList";
+import { useAnnounce } from "@astryxdesign/core/hooks";
+import { NumberInput } from "@astryxdesign/core/NumberInput";
+import { Selector } from "@astryxdesign/core/Selector";
+import { Text } from "@astryxdesign/core/Text";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { Token } from "@astryxdesign/core/Token";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Brain, Eye, Plus, RefreshCw, Search, Wrench } from "lucide-react";
+import { Plus, RefreshCw, Search } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { DialogFooter } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { LoadingState } from "@/components/composites/loading-state";
 import { formatCostPerMillionTokens, formatTokens } from "@/features/ai-models/format-model-stats";
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
-import { cn } from "@/lib/utils";
 import {
   type CatalogModel,
   getModelDefaults,
@@ -35,37 +31,34 @@ import {
 import { providerCapabilitiesQueryOptions } from "./model-providers";
 import { useModelTypeLabel } from "./model-type-label";
 import { createTenantModel, MODELS_KEY, type ModelKind, validateProviderModel } from "./models";
+import { useFieldFocus } from "./provider-form-fields";
 
-function CapabilityIcons({ model }: { model: CatalogModel }) {
-  const t = useTranslations();
-  const items: { show: boolean; icon: typeof Eye; label: string }[] = [
-    { show: model.supports_vision, icon: Eye, label: t("capability_vision") },
-    { show: model.supports_function_calling, icon: Wrench, label: t("model_label_tool_calling") },
-    { show: model.supports_reasoning, icon: Brain, label: t("reasoning") }
-  ];
+const NO_CLASSIFICATION = "__none__";
+
+/** Vision, tools and reasoning in words, as the model table shows them. */
+function capabilityLabels(t: ReturnType<typeof useTranslations>, model: CatalogModel): string[] {
+  return [
+    model.supports_vision ? t("admin_models_capability_vision") : null,
+    model.supports_function_calling ? t("model_label_tool_calling") : null,
+    model.supports_reasoning ? t("model_label_reasoning") : null
+  ].filter((label): label is string => label !== null);
+}
+
+/** A completion model needs both token limits before it can be created. */
+function missingTokenLimits(model: CatalogModel, mode: ModelKind): boolean {
   return (
-    <span className="flex items-center gap-1.5">
-      {items
-        .filter((item) => item.show)
-        .map(({ icon: Icon, label }) => (
-          <Tooltip key={label}>
-            <TooltipTrigger asChild>
-              <span className="text-muted-foreground inline-flex">
-                <Icon className="size-4" aria-label={label} />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>{label}</TooltipContent>
-          </Tooltip>
-        ))}
-    </span>
+    mode === "completion" && (!(model.max_input_tokens ?? 0) || !(model.max_output_tokens ?? 0))
   );
 }
 
 /**
- * Restores the Svelte wizard's "auto-fetch models" step. Pulls the provider's
- * live catalog (`/models`), falling back to the static LiteLLM catalog, and
- * lets the admin multi-select pre-filled models (capabilities + indicative
- * pricing) plus add unlisted ids by hand. All picks are created in one batch.
+ * The wizard's model step: the provider's live model list (`/models`), else
+ * the static LiteLLM catalog, to pick several from, plus models added by id.
+ * Picks the catalog knows no token limits for ask for them. All picks are
+ * validated with the provider and created in one batch.
+ *
+ * `frame` puts the fields and the step's buttons into the wizard's dialog
+ * layout, so the buttons stay in view while the list scrolls.
  */
 export function ModelCatalogStep({
   providerId,
@@ -74,7 +67,8 @@ export function ModelCatalogStep({
   supportedModes,
   onModeChange,
   onCreated,
-  onBack
+  onBack,
+  frame
 }: {
   providerId: string;
   providerType: string;
@@ -83,10 +77,14 @@ export function ModelCatalogStep({
   onModeChange?: (mode: ModelKind) => void;
   onCreated: () => void;
   onBack: () => void;
+  frame: (content: React.ReactNode, footer: React.ReactNode) => React.ReactNode;
 }) {
   const t = useTranslations();
   const typeLabel = useModelTypeLabel();
   const queryClient = useQueryClient();
+  const announce = useAnnounce();
+  const focus = useFieldFocus();
+  const acknowledgeRef = useRef<HTMLInputElement>(null);
 
   const capsQuery = useQuery(providerCapabilitiesQueryOptions(browserApi));
   const securityQuery = useQuery(securityClassificationsQueryOptions(browserApi));
@@ -109,62 +107,97 @@ export function ModelCatalogStep({
   const [search, setSearch] = useState("");
   const [manualName, setManualName] = useState("");
   const [manualBusy, setManualBusy] = useState(false);
-  const [classificationId, setClassificationId] = useState("__none__");
+  const [classificationId, setClassificationId] = useState(NO_CLASSIFICATION);
   const [validating, setValidating] = useState(false);
   const [createAnyway, setCreateAnyway] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const [validationFailures, setValidationFailures] = useState<
     { model: string; message: string }[]
   >([]);
 
-  const filtered = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return catalog;
-    return catalog.filter((model) =>
-      `${model.name} ${model.display_name ?? ""}`.toLowerCase().includes(query)
-    );
-  }, [catalog, search]);
+  const countText = `${t("models_found_count", { count: catalog.length })}${
+    usedFallback ? ` · ${t("provider_models_fallback_notice")}` : ""
+  }`;
+  // How many models the list offers, once it has loaded (WCAG 4.1.3).
+  const wasLoading = useRef(loading);
+  useEffect(() => {
+    if (wasLoading.current && !loading) announce(countText);
+    wasLoading.current = loading;
+  }, [loading, countText, announce]);
 
-  function toggle(model: CatalogModel) {
-    setSelected((prev) => {
-      const next = new Map(prev);
-      if (next.has(model.name)) next.delete(model.name);
-      else next.set(model.name, model);
-      return next;
-    });
+  // Picks added by id are not in the catalog; they head the list so they can
+  // be seen and unticked like the others.
+  const listed = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const added = [...selected.values()].filter(
+      (model) => !catalog.some((item) => item.name === model.name)
+    );
+    return [...added, ...catalog].filter(
+      (model) => !query || `${model.name} ${model.display_name ?? ""}`.toLowerCase().includes(query)
+    );
+  }, [catalog, search, selected]);
+
+  function resetOutcome() {
     setValidationFailures([]);
     setCreateAnyway(false);
+  }
+
+  /** The list reports the ticked models it shows; picks it hides are kept. */
+  function selectListed(names: string[]) {
+    setSelected((previous) => {
+      const shown = new Set(listed.map((model) => model.name));
+      const next = new Map([...previous].filter(([name]) => !shown.has(name)));
+      for (const name of names) {
+        const model = previous.get(name) ?? listed.find((item) => item.name === name);
+        if (model) next.set(name, model);
+      }
+      return next;
+    });
+    resetOutcome();
+  }
+
+  function setTokenLimit(
+    name: string,
+    key: "max_input_tokens" | "max_output_tokens",
+    value: number
+  ) {
+    setSelected((previous) => {
+      const model = previous.get(name);
+      if (!model) return previous;
+      return new Map(previous).set(name, { ...model, [key]: value });
+    });
+    resetOutcome();
   }
 
   async function addManual() {
     const name = manualName.trim();
-    if (!name) return;
-    if (selected.has(name) || catalog.some((model) => model.name === name)) {
-      setManualName("");
-      return;
+    if (!name || manualBusy) return;
+    let model = selected.get(name) ?? catalog.find((item) => item.name === name);
+    if (!model) {
+      setManualBusy(true);
+      const defaults = await getModelDefaults(browserApi, name, providerType);
+      setManualBusy(false);
+      model = {
+        ...(defaults ?? {
+          supports_vision: false,
+          supports_function_calling: false,
+          supports_reasoning: false
+        }),
+        name
+      };
     }
-    setManualBusy(true);
-    const defaults = await getModelDefaults(browserApi, name, providerType);
-    setManualBusy(false);
-    const model: CatalogModel = defaults ?? {
-      name,
-      supports_vision: false,
-      supports_function_calling: false,
-      supports_reasoning: false
-    };
-    setSelected((prev) => new Map(prev).set(name, { ...model, name }));
+    const next = new Map(selected).set(name, model);
+    setSelected(next);
     setManualName("");
-    setValidationFailures([]);
-    setCreateAnyway(false);
+    // Focus stays in the field; the list shows the pick at the top.
+    announce(t("models_selected_count", { count: next.size }));
+    resetOutcome();
   }
 
   const selectedModels = useMemo(() => [...selected.values()], [selected]);
-  const invalidTokenModels =
-    mode === "completion"
-      ? selectedModels.filter(
-          (model) => (model.max_input_tokens ?? 0) <= 0 || (model.max_output_tokens ?? 0) <= 0
-        )
-      : [];
-  const selectedClassification = classificationId === "__none__" ? null : { id: classificationId };
+  const needsLimits = selectedModels.filter((model) => missingTokenLimits(model, mode));
+  const selectedClassification =
+    classificationId === NO_CLASSIFICATION ? null : { id: classificationId };
 
   async function validateSelectedModels(models: CatalogModel[]) {
     const results = await Promise.all(
@@ -248,8 +281,7 @@ export function ModelCatalogStep({
     },
     onSuccess: ({ total, failed }) => {
       void queryClient.invalidateQueries({ queryKey: MODELS_KEY });
-      setValidationFailures([]);
-      setCreateAnyway(false);
+      resetOutcome();
       if (failed === 0) toast.success(t("models_added_count", { count: total }));
       else toast.warning(t("models_added_partial", { added: total - failed, total }));
       onCreated();
@@ -257,20 +289,42 @@ export function ModelCatalogStep({
     onError: (error) => toastApiError(error, t)
   });
 
+  const busy = create.isPending || validating;
   const canList = !NO_SUGGESTIONS_PROVIDERS.has(providerType);
-  const canCreate =
-    selected.size > 0 && invalidTokenModels.length === 0 && !create.isPending && !validating;
   const modes = supportedModes?.length ? supportedModes : [mode];
 
+  /** Moves focus to the first problem, shown at its field (WCAG 3.3.1). */
+  function focusFirstProblem(): boolean {
+    if (selected.size === 0) return focus.focus("list") || focus.focus("manual");
+    const model = needsLimits[0];
+    if (!model) return false;
+    return focus.focus(
+      `${model.name}:${model.max_input_tokens ? "max_output_tokens" : "max_input_tokens"}`
+    );
+  }
+
   async function handleCreate() {
-    if (!canCreate) return;
+    if (busy) return;
+    if (selected.size === 0 || needsLimits.length > 0) {
+      flushSync(() => setSubmitted(true));
+      focusFirstProblem();
+      return;
+    }
+    if (validationFailures.length > 0 && !createAnyway) {
+      acknowledgeRef.current?.focus();
+      return;
+    }
     if (!createAnyway) {
       setValidating(true);
       try {
         const failures = await validateSelectedModels(selectedModels);
         if (failures.length > 0) {
-          setValidationFailures(failures);
-          setValidating(false);
+          flushSync(() => {
+            setValidationFailures(failures);
+            setValidating(false);
+          });
+          // The next decision: create anyway, or change the picks.
+          acknowledgeRef.current?.focus();
           return;
         }
       } catch (error) {
@@ -283,230 +337,231 @@ export function ModelCatalogStep({
     create.mutate();
   }
 
-  return (
-    <div className="flex flex-col gap-4">
+  const noSelection = submitted && selected.size === 0;
+
+  const content = (
+    <div className="flex flex-col gap-5">
       {modes.length > 1 && onModeChange && (
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="catalog-model-kind">{t("model_type")}</Label>
-          <Select
-            value={mode}
-            onValueChange={(value) => {
-              onModeChange(value as ModelKind);
-              setSelected(new Map());
-              setValidationFailures([]);
-              setCreateAnyway(false);
-            }}
-          >
-            <SelectTrigger id="catalog-model-kind" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {modes.map((supportedMode) => (
-                <SelectItem key={supportedMode} value={supportedMode}>
-                  {typeLabel(supportedMode)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <Selector
+          label={t("model_type")}
+          options={modes.map((value) => ({ value, label: typeLabel(value) }))}
+          value={mode}
+          onChange={(value) => {
+            onModeChange(value as ModelKind);
+            setSelected(new Map());
+            setSubmitted(false);
+            resetOutcome();
+          }}
+        />
       )}
 
       {securityQuery.data?.security_enabled && (
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="catalog-security-classification">{t("security_classification")}</Label>
-          <Select value={classificationId} onValueChange={setClassificationId}>
-            <SelectTrigger id="catalog-security-classification" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">{t("none")}</SelectItem>
-              {securityQuery.data.security_classifications.map((classification) => (
-                <SelectItem key={classification.id} value={classification.id}>
-                  {classification.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <Selector
+          label={t("security_classification")}
+          options={[
+            { value: NO_CLASSIFICATION, label: t("none") },
+            ...securityQuery.data.security_classifications.map((classification) => ({
+              value: classification.id,
+              label: classification.name
+            }))
+          ]}
+          value={classificationId}
+          onChange={setClassificationId}
+        />
       )}
 
       {canList && (
-        <>
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search
-                className="text-muted-foreground absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
-                aria-hidden="true"
-              />
-              <Input
-                className="pl-8"
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="min-w-48 flex-1">
+              <TextInput
+                label={t("filter_catalog")}
+                isLabelHidden
                 placeholder={t("filter_catalog")}
+                startIcon={Search}
                 value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                aria-label={t("filter_catalog")}
+                onChange={setSearch}
+                hasClear
               />
             </div>
             <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => liveQuery.refetch()}
-              disabled={liveQuery.isFetching}
+              label={t("provider_form_refetch_models")}
+              icon={<RefreshCw className="size-4" aria-hidden="true" />}
+              // Keeps focus while the list reloads; a second press is ignored.
+              isLoading={liveQuery.isFetching}
+              isInterruptible
+              onClick={() => {
+                if (!liveQuery.isFetching) void liveQuery.refetch();
+              }}
             >
-              <RefreshCw className={cn("size-4", liveQuery.isFetching && "animate-spin")} />
               {t("refetch")}
             </Button>
           </div>
-
-          <p className="text-muted-foreground text-xs" aria-live="polite">
-            {loading ? t("loading") : t("models_found_count", { count: catalog.length })}
-            {usedFallback ? ` · ${t("provider_models_fallback_notice")}` : ""}
-          </p>
-
           {loading ? (
-            <div className="flex flex-col gap-2">
-              <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-12 w-full" />
-            </div>
+            <LoadingState rows={3} label={t("loading")} />
           ) : (
-            <div className="max-h-72 overflow-y-auto rounded-lg border">
-              {filtered.length === 0 ? (
-                <p className="text-muted-foreground p-4 text-sm">{t("no_models_found")}</p>
+            <>
+              <Text type="supporting">{countText}</Text>
+              {listed.length === 0 ? (
+                <Text type="supporting">{t("no_models_found")}</Text>
               ) : (
-                filtered.map((model) => {
-                  const isSelected = selected.has(model.name);
-                  const price = formatCostPerMillionTokens(model.input_cost_per_token);
-                  return (
-                    <label
-                      key={model.name}
-                      className={cn(
-                        "flex cursor-pointer items-center gap-3 border-b px-3 py-2.5 last:border-b-0",
-                        isSelected ? "bg-ax-selected" : "hover:bg-ax-hover"
-                      )}
-                    >
-                      <Checkbox
-                        checked={isSelected}
-                        onCheckedChange={() => toggle(model)}
-                        aria-label={model.display_name ?? model.name}
+                <CheckboxList
+                  ref={focus.ref("list")}
+                  label={t("provider_form_catalog_label")}
+                  isLabelHidden
+                  value={listed.map((model) => model.name).filter((name) => selected.has(name))}
+                  onChange={selectListed}
+                  density="compact"
+                  hasDividers
+                  // The options scroll in their own box (focus scrolls them from
+                  // the keyboard); the error below stays in view.
+                  className="[&_[role=group]]:border-ax-border [&_[role=group]]:rounded-ax-element [&_[role=group]]:max-h-72 [&_[role=group]]:overflow-y-auto [&_[role=group]]:border [&_[role=group]]:px-3 [&_[role=group]]:py-1"
+                  status={
+                    noSelection
+                      ? { type: "error", message: t("provider_form_select_model_required") }
+                      : undefined
+                  }
+                >
+                  {listed.map((model) => {
+                    const price = formatCostPerMillionTokens(model.input_cost_per_token);
+                    const capabilities = capabilityLabels(t, model);
+                    const details = [
+                      model.display_name && model.display_name !== model.name ? model.name : null,
+                      model.max_input_tokens ? formatTokens(model.max_input_tokens) : null,
+                      price ? t("price_per_million", { price }) : null
+                    ].filter(Boolean);
+                    return (
+                      <CheckboxListItem
+                        key={model.name}
+                        value={model.name}
+                        label={model.display_name ?? model.name}
+                        // Below the name, not beside it: on a phone the name
+                        // would be cut off.
+                        description={
+                          details.length > 0 || capabilities.length > 0 ? (
+                            <span className="flex flex-col gap-1">
+                              {details.length > 0 ? <span>{details.join(" · ")}</span> : null}
+                              {capabilities.length > 0 ? (
+                                <span className="flex flex-wrap gap-1">
+                                  {capabilities.map((label) => (
+                                    <Token key={label} label={label} size="sm" />
+                                  ))}
+                                </span>
+                              ) : null}
+                            </span>
+                          ) : undefined
+                        }
                       />
-                      <span className="flex min-w-0 flex-1 flex-col">
-                        <span className="truncate text-sm font-medium">
-                          {model.display_name ?? model.name}
-                        </span>
-                        <span className="text-muted-foreground truncate font-mono text-xs">
-                          {model.name}
-                          {model.max_input_tokens
-                            ? ` · ${formatTokens(model.max_input_tokens)}`
-                            : ""}
-                        </span>
-                      </span>
-                      <CapabilityIcons model={model} />
-                      {price && (
-                        <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-                          {t("price_per_million", { price })}
-                        </span>
-                      )}
-                    </label>
-                  );
-                })
+                    );
+                  })}
+                </CheckboxList>
               )}
-            </div>
+            </>
           )}
-        </>
+        </div>
       )}
 
-      <div className="flex items-end gap-2">
-        <div className="flex flex-1 flex-col gap-1.5">
-          <label htmlFor="catalog-manual" className="text-muted-foreground text-xs">
-            {canList ? t("model_not_listed") : t("enter_model_id")}
-          </label>
-          <Input
-            id="catalog-manual"
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="min-w-48 flex-1">
+          <TextInput
+            ref={focus.ref("manual")}
+            label={canList ? t("model_not_listed") : t("enter_model_id")}
             placeholder={t("model_identifier")}
             value={manualName}
+            onChange={setManualName}
+            onEnter={() => void addManual()}
             autoComplete="off"
-            onChange={(event) => setManualName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                void addManual();
-              }
-            }}
+            status={
+              noSelection && !canList
+                ? { type: "error", message: t("provider_form_select_model_required") }
+                : undefined
+            }
           />
         </div>
         <Button
-          type="button"
-          variant="outline"
+          label={t("provider_form_add_model_id")}
+          icon={<Plus className="size-4" aria-hidden="true" />}
+          isLoading={manualBusy}
+          isInterruptible
           onClick={() => void addManual()}
-          disabled={!manualName.trim() || manualBusy}
         >
-          <Plus className="size-4" />
           {t("add")}
         </Button>
       </div>
 
-      {selected.size > 0 && (
-        <p className="text-muted-foreground text-xs" aria-live="polite">
-          {t("models_selected_count", { count: selected.size })}
-        </p>
-      )}
+      {needsLimits.map((model) => (
+        <fieldset key={model.name} className="flex min-w-0 flex-col gap-3">
+          <legend className="text-ax-text mb-1 text-sm font-semibold">
+            {model.display_name ?? model.name}
+          </legend>
+          <Text type="supporting">{t("provider_form_token_limits_description")}</Text>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(["max_input_tokens", "max_output_tokens"] as const).map((key) => (
+              <NumberInput
+                key={key}
+                ref={focus.ref(`${model.name}:${key}`)}
+                label={t(key)}
+                value={model[key] ?? null}
+                onChange={(value) => setTokenLimit(model.name, key, value)}
+                isRequired
+                isIntegerOnly
+                min={1}
+                status={
+                  submitted && !(model[key] ?? 0)
+                    ? { type: "error", message: t("provider_form_token_limit_required") }
+                    : undefined
+                }
+              />
+            ))}
+          </div>
+        </fieldset>
+      ))}
 
-      {invalidTokenModels.length > 0 && (
-        <div className="border-warning/30 bg-warning/10 text-warning flex items-start gap-2 rounded-md border px-3 py-2 text-sm">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-          <span>
-            {t("model_catalog_token_limits_missing", {
-              models: invalidTokenModels.map((model) => model.display_name ?? model.name).join(", ")
-            })}
-          </span>
-        </div>
+      {selected.size > 0 && (
+        <Text type="supporting">{t("models_selected_count", { count: selected.size })}</Text>
       )}
 
       {validationFailures.length > 0 && (
-        <div className="border-warning/30 bg-warning/10 flex flex-col gap-2 rounded-md border px-3 py-2 text-sm">
-          <div className="text-warning flex items-center gap-2 font-medium">
-            <AlertTriangle className="size-4" aria-hidden="true" />
-            {t("model_validation_warning_title")}
-          </div>
-          <ul className="text-muted-foreground flex flex-col gap-1">
-            {validationFailures.map((failure) => (
-              <li key={failure.model}>
-                <Badge variant="outline" className="mr-2">
-                  {failure.model}
-                </Badge>
-                {failure.message}
-              </li>
-            ))}
-          </ul>
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox
-              checked={createAnyway}
-              onCheckedChange={(checked) => setCreateAnyway(checked === true)}
-            />
-            {t("model_validation_create_anyway_ack")}
-          </label>
+        <div className="flex flex-col gap-3">
+          {/* Mounted by the press on the create button: announced as an alert. */}
+          <Banner status="warning" title={t("model_validation_warning_title")} collapsible={false}>
+            <ul className="flex flex-col gap-1.5">
+              {validationFailures.map((failure) => (
+                <li key={failure.model} className="flex flex-wrap items-center gap-2 text-sm">
+                  <Token label={failure.model} size="sm" />
+                  <span className="text-ax-text-secondary">{failure.message}</span>
+                </li>
+              ))}
+            </ul>
+          </Banner>
+          <CheckboxInput
+            ref={acknowledgeRef}
+            label={t("model_validation_create_anyway_ack")}
+            value={createAnyway}
+            onChange={setCreateAnyway}
+          />
         </div>
       )}
-
-      <DialogFooter>
-        <Button type="button" variant="outline" onClick={onBack}>
-          {t("back")}
-        </Button>
-        <Button
-          type="button"
-          disabled={!canCreate || (validationFailures.length > 0 && !createAnyway)}
-          onClick={() => void handleCreate()}
-        >
-          {create.isPending
-            ? t("saving")
-            : validating
-              ? t("validating_models")
-              : validationFailures.length > 0
-                ? t("create_anyway")
-                : t("add_n_models", { count: selected.size })}
-        </Button>
-      </DialogFooter>
     </div>
   );
+
+  const footer = (
+    <div className="flex flex-wrap justify-end gap-2">
+      <Button label={t("back")} isDisabled={busy} onClick={onBack} />
+      <Button
+        variant="primary"
+        label={
+          validationFailures.length > 0
+            ? t("create_anyway")
+            : t("add_n_models", { count: selected.size })
+        }
+        // Keeps focus while models are validated and created.
+        isLoading={busy}
+        isInterruptible
+        onClick={() => void handleCreate()}
+      />
+    </div>
+  );
+
+  return frame(content, footer);
 }
