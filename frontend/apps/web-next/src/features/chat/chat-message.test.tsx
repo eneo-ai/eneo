@@ -69,7 +69,7 @@ describe("ChatMessage", () => {
     const article = screen.getByRole("article", { name: "Ditt meddelande" });
     expect(within(article).getByText("Jämför policyn mot LOU.")).toBeTruthy();
     const file = within(article).getByRole("button", { name: /Upphandlingspolicy 2024\.pdf/ });
-    expect(file.textContent).toContain("184.0 kB");
+    expect(file.textContent).toContain("184 kB");
   });
 
   it("renders an answer: named by its sender, with model, activity pill, table and citation", () => {

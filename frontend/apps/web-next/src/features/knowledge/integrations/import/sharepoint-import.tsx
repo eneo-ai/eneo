@@ -3,7 +3,7 @@
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Cloud, Globe, Search } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -88,6 +88,7 @@ export function SharePointImportDialog({
   integration: UserIntegration;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const { space, routeId } = useSpace();
   const queryClient = useQueryClient();
   const { trackJob } = useJobs();
@@ -352,7 +353,7 @@ export function SharePointImportDialog({
                       <div className="text-muted-foreground mt-1 flex min-w-0 items-center gap-2 text-xs">
                         <span className="min-w-0 flex-1 truncate">{entry.item.path}</span>
                         {entry.item.size != null && (
-                          <span className="shrink-0">({formatBytes(entry.item.size)})</span>
+                          <span className="shrink-0">({formatBytes(entry.item.size, locale)})</span>
                         )}
                         {deduped.excludedKeys.has(entry.selectionKey) && (
                           <span className="shrink-0">

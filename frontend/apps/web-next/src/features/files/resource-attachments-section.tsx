@@ -23,7 +23,7 @@ import {
   UploadCloud,
   type LucideIcon
 } from "lucide-react";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useLocale, useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosave } from "@/components/composites/use-autosave";
@@ -248,6 +248,7 @@ export function ResourceAttachmentsSection({
   onSave: (attachments: { id: string }[]) => Promise<unknown>;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const format = useFormatter();
   const autosave = useAutosave("attachments");
   const fileInput = useRef<HTMLInputElement>(null);
@@ -319,7 +320,7 @@ export function ResourceAttachmentsSection({
   function metaLine(file: Attachment): string {
     return [
       attachmentTypeLabel(file),
-      formatBytes(file.size),
+      formatBytes(file.size, locale),
       file.token_count != null ? `${compactTokens(file.token_count)} ${t("tokens")}` : null,
       file.created_at
         ? format.dateTime(new Date(file.created_at), { day: "numeric", month: "short" })
@@ -356,7 +357,7 @@ export function ResourceAttachmentsSection({
     if (selected.length === 0) return;
     const plan = planFileUploads(selected, files, rules);
     const shown = { maxFiles: false };
-    for (const rejection of plan.rejected) toastUploadRejection(rejection, t, shown);
+    for (const rejection of plan.rejected) toastUploadRejection(rejection, t, locale, shown);
     if (plan.accepted.length === 0) return;
 
     setUploading(true);
@@ -405,7 +406,7 @@ export function ResourceAttachmentsSection({
             {t("attachment_count", { count: files.length })}
           </span>
           <span className="bg-secondary text-secondary-foreground rounded-full px-2.5 py-1 text-xs font-medium">
-            {t("total_size", { size: formatBytes(totalSize) })}
+            {t("total_size", { size: formatBytes(totalSize, locale) })}
           </span>
         </>
       }

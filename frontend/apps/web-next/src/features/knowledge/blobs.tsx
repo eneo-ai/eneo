@@ -18,7 +18,7 @@ import {
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, FileText, Pencil, SearchX, Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { Streamdown } from "streamdown";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -241,6 +241,7 @@ function blobComparators(
  */
 export function BlobTable({ blobs, canEdit }: { blobs: InfoBlob[]; canEdit: boolean }) {
   const t = useTranslations();
+  const locale = useLocale();
   const collator = useCollator();
   const [filter, setFilter] = useState("");
   const [page, setPage] = useState(1);
@@ -284,7 +285,7 @@ export function BlobTable({ blobs, canEdit }: { blobs: InfoBlob[]; canEdit: bool
       header: t("size"),
       width: proportional(1),
       sortable: true,
-      renderCell: (blob) => formatBytes(blob.metadata.size)
+      renderCell: (blob) => formatBytes(blob.metadata.size, locale)
     },
     {
       key: "actions",

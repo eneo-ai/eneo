@@ -3,7 +3,7 @@
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useMemo } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { Button } from "@/components/ui/button";
@@ -89,15 +89,16 @@ function TokensTab() {
 
 function StorageTab() {
   const t = useTranslations();
+  const locale = useLocale();
   const { data: storage } = useSuspenseQuery(storageQueryOptions(browserApi));
   const { data: spaces } = useSuspenseQuery(storageSpacesQueryOptions(browserApi));
 
   return (
     <div className="flex flex-col gap-6">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Stat label={t("storage_used")} value={formatBytes(storage.total_used)} />
-        <Stat label={t("personal")} value={formatBytes(storage.personal_used)} />
-        <Stat label={t("shared")} value={formatBytes(storage.shared_used)} />
+        <Stat label={t("storage_used")} value={formatBytes(storage.total_used, locale)} />
+        <Stat label={t("personal")} value={formatBytes(storage.personal_used, locale)} />
+        <Stat label={t("shared")} value={formatBytes(storage.shared_used, locale)} />
       </div>
       {spaces.items.length === 0 ? (
         <p className="text-muted-foreground text-sm">{t("no_usage_data")}</p>
@@ -113,7 +114,9 @@ function StorageTab() {
             {spaces.items.map((space) => (
               <TableRow key={space.name}>
                 <TableCell className="font-medium">{space.name}</TableCell>
-                <TableCell className="text-right tabular-nums">{formatBytes(space.size)}</TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {formatBytes(space.size, locale)}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>

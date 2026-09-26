@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader2, Upload, X } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { inputFieldRules } from "@/features/files/upload-plan";
@@ -43,6 +43,7 @@ function friendlyType(mime: string): string {
 
 export function FileChip({ file, onRemove }: { file: RunFile; onRemove?: () => void }) {
   const t = useTranslations();
+  const locale = useLocale();
 
   return (
     <div className="border-border bg-background flex items-center gap-2 rounded-lg border px-3 py-2">
@@ -50,7 +51,9 @@ export function FileChip({ file, onRemove }: { file: RunFile; onRemove?: () => v
         <Loader2 className="text-muted-foreground size-4 shrink-0 animate-spin" />
       ) : null}
       <span className="min-w-0 flex-1 truncate text-sm">{file.name}</span>
-      <span className="text-muted-foreground shrink-0 text-xs">{formatBytes(file.size)}</span>
+      <span className="text-muted-foreground shrink-0 text-xs">
+        {formatBytes(file.size, locale)}
+      </span>
       {onRemove && (
         <Button
           variant="ghost"

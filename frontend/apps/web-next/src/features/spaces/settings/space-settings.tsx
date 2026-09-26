@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { ConfirmDialog } from "@/components/composites/confirm-dialog";
 import { IconField } from "@/components/composites/icon-field";
@@ -35,6 +35,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
+import { formatBytes } from "@/lib/format";
 import { ResourceApiKeysSection } from "@/features/api-keys/resource-api-keys-section";
 import {
   CAPABILITIES,
@@ -149,6 +150,7 @@ function GeneralSection() {
 
 function StorageSection() {
   const t = useTranslations();
+  const locale = useLocale();
   const { space } = useSpace();
 
   const categories = [
@@ -161,22 +163,16 @@ function StorageSection() {
   }));
   const total = categories.reduce((sum, category) => sum + category.size, 0);
 
-  function formatBytes(bytes: number): string {
-    if (bytes === 0) return "0 B";
-    const units = ["B", "kB", "MB", "GB", "TB"];
-    const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1000)), units.length - 1);
-    return `${(bytes / 1000 ** exponent).toFixed(exponent === 0 ? 0 : 1)} ${units[exponent]}`;
-  }
-
   return (
     <SettingsRow title={t("storage")} description={t("storage_description")}>
       <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
         <span>
-          <span className="font-medium">{t("total")}</span>: {formatBytes(total)}
+          <span className="font-medium">{t("total")}</span>: {formatBytes(total, locale)}
         </span>
         {categories.map((category) => (
           <span key={category.label}>
-            <span className="font-medium">{category.label}</span>: {formatBytes(category.size)}
+            <span className="font-medium">{category.label}</span>:{" "}
+            {formatBytes(category.size, locale)}
           </span>
         ))}
       </div>

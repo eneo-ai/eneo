@@ -5,7 +5,7 @@ import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { Download, File, FileSpreadsheet, FileText, ImageIcon, Paperclip, X } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { useReturnFocus } from "@/components/ui/dialog-focus";
 import { browserApi } from "@/lib/api/browser";
@@ -197,6 +197,7 @@ export function ComposerAttachments({
   };
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const [preview, setPreview] = useState<PendingPreview | null>(null);
   const items = attachments.attachments;
 
@@ -250,7 +251,7 @@ export function ComposerAttachments({
                   {item.name}
                 </span>
                 <span className="text-ax-text-secondary text-xs tabular-nums">
-                  {formatBytes(item.size)} ·{" "}
+                  {formatBytes(item.size, locale)} ·{" "}
                   {item.uploading ? t("chat_attachment_uploading") : t("chat_attachment_ready")}
                 </span>
               </span>

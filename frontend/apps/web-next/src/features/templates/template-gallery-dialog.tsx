@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, BookOpen, FileUp, Loader2, Paperclip, X } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useRef, useState } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
@@ -123,6 +123,7 @@ function TemplateAttachmentList({
   onRemove: (key: string) => void;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
 
   if (attachments.length === 0) {
     return <p className="text-muted-foreground text-sm">{t("no_attachments")}</p>;
@@ -144,7 +145,9 @@ function TemplateAttachmentList({
           </span>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">{attachment.name}</p>
-            <p className="text-muted-foreground truncate text-xs">{formatBytes(attachment.size)}</p>
+            <p className="text-muted-foreground truncate text-xs">
+              {formatBytes(attachment.size, locale)}
+            </p>
           </div>
           <Button
             type="button"
@@ -308,6 +311,7 @@ export function TemplateGalleryDialog({
   onCreate: (fromTemplate: TemplateCreate, name: string) => Promise<void> | void;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const { limits } = useAppContext();
   const [selected, setSelected] = useState<TemplateOption | null>(null);
   const [name, setName] = useState("");
@@ -347,7 +351,7 @@ export function TemplateGalleryDialog({
     if (files.length === 0) return;
     const plan = planFileUploads(files, attachments, uploadRules);
     const shown = { maxFiles: false };
-    for (const rejection of plan.rejected) toastUploadRejection(rejection, t, shown);
+    for (const rejection of plan.rejected) toastUploadRejection(rejection, t, locale, shown);
 
     for (const file of plan.accepted) {
       const key = crypto.randomUUID();

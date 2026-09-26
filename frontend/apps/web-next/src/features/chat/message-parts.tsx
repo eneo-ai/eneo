@@ -6,7 +6,7 @@ import { HStack, Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { useMutation } from "@tanstack/react-query";
 import { Download, ExternalLink, ShieldAlert, ShieldCheck, ShieldX } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { useReturnFocus } from "@/components/ui/dialog-focus";
@@ -433,11 +433,14 @@ function FileTokenBody({
   mimetype: string;
   size?: number | null;
 }) {
+  const locale = useLocale();
   return (
     <>
       <FileTypeTile mimetype={mimetype} size="sm" />
       <span className="min-w-0 truncate font-semibold">{name}</span>
-      {size ? <span className="text-ax-text-secondary shrink-0">{formatBytes(size)}</span> : null}
+      {size ? (
+        <span className="text-ax-text-secondary shrink-0">{formatBytes(size, locale)}</span>
+      ) : null}
     </>
   );
 }

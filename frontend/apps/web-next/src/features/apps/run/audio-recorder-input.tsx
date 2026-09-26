@@ -1,7 +1,7 @@
 "use client";
 
 import { Mic, Square, Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { inputFieldRules } from "@/features/files/upload-plan";
@@ -46,6 +46,7 @@ export function AudioRecorderInput({
   onRemoveFile: (key: string) => void;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const rules = inputFieldRules(field);
   const maxBytes = Number.isFinite(rules.maxSize) ? rules.maxSize : null;
 
@@ -227,7 +228,7 @@ export function AudioRecorderInput({
               </div>
               {maxBytes && (
                 <span className="text-muted-foreground text-xs">
-                  {formatBytes(bytes)} / {formatBytes(maxBytes)}
+                  {formatBytes(bytes, locale)} / {formatBytes(maxBytes, locale)}
                 </span>
               )}
             </div>

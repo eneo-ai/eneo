@@ -46,7 +46,7 @@ export function FileFormatDetails({ formats }: { formats: readonly AcceptedForma
               {t(GROUP_KEYS[group.kind])}
               {group.maxSizeBytes !== null && (
                 <span className="text-muted-foreground block text-xs">
-                  {t("max_size_per_file", { size: formatBytes(group.maxSizeBytes) })}
+                  {t("max_size_per_file", { size: formatBytes(group.maxSizeBytes, locale) })}
                 </span>
               )}
             </dt>

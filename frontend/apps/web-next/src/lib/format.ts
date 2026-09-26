@@ -1,11 +1,29 @@
-/** Shared display formatting for dates, sizes and relative time. */
+/** Shared display formatting for sizes, dates and durations. */
 
-export function formatBytes(bytes: number, decimals = 1): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  const units = ["B", "kB", "MB", "GB", "TB"];
-  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const value = bytes / 1024 ** exponent;
-  return `${value.toFixed(exponent === 0 ? 0 : decimals)} ${units[exponent]}`;
+const BYTE_UNITS = ["byte", "kilobyte", "megabyte", "gigabyte", "terabyte"] as const;
+
+/**
+ * A file or storage size in the given locale: "184 kB" and "1,2 MB" in
+ * Swedish, "1.2 MB" in English. Steps of 1024, at most `maximumFractionDigits`
+ * decimals above bytes (trailing zeros dropped).
+ */
+export function formatBytes(bytes: number, locale: string, maximumFractionDigits = 1): string {
+  let value = Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
+  let exponent =
+    value > 0 ? Math.min(Math.floor(Math.log(value) / Math.log(1024)), BYTE_UNITS.length - 1) : 0;
+  value /= 1024 ** exponent;
+  const digits = exponent === 0 ? 0 : maximumFractionDigits;
+  // 1023.96 kB would round to "1 024 kB": show "1 MB" instead.
+  if (exponent < BYTE_UNITS.length - 1 && Number(value.toFixed(digits)) >= 1024) {
+    value /= 1024;
+    exponent += 1;
+  }
+  return new Intl.NumberFormat(locale, {
+    style: "unit",
+    unit: BYTE_UNITS[exponent],
+    unitDisplay: "short",
+    maximumFractionDigits: exponent === 0 ? 0 : maximumFractionDigits
+  }).format(value);
 }
 
 export function formatDateTime(value: string | null | undefined): string {

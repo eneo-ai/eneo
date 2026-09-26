@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { toastUploadRejection } from "@/features/files/upload-rejection-toast";
 import { planFileUploads, type FileUploadRules } from "@/features/files/upload-plan";
 import { browserApi } from "@/lib/api/browser";
@@ -38,6 +38,7 @@ async function uploadRunFile(file: File): Promise<{ id: string }> {
  */
 export function useAppRunInputs() {
   const t = useTranslations();
+  const locale = useLocale();
   const [text, setText] = useState<string>("");
   const [files, setFiles] = useState<RunFile[]>([]);
 
@@ -45,7 +46,7 @@ export function useAppRunInputs() {
     async (incoming: File[], rules: FileUploadRules) => {
       const plan = planFileUploads(incoming, files, rules);
       const shown = { maxFiles: false };
-      for (const rejection of plan.rejected) toastUploadRejection(rejection, t, shown);
+      for (const rejection of plan.rejected) toastUploadRejection(rejection, t, locale, shown);
 
       for (const file of plan.accepted) {
         const key = crypto.randomUUID();
@@ -66,7 +67,7 @@ export function useAppRunInputs() {
         }
       }
     },
-    [files, t]
+    [files, locale, t]
   );
 
   const removeFile = useCallback((key: string) => {

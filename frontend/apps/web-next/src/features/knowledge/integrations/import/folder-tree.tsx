@@ -12,7 +12,7 @@ import {
   Folder,
   Globe
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { browserApi } from "@/lib/api/browser";
@@ -70,6 +70,7 @@ export function SharePointFolderTree({
   onToggleSelect: (item: SelectedTreeItem) => void;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const isOneDrive = site.type === "onedrive";
   const [stack, setStack] = useState<Crumb[]>([{ folderId: null, path: "/", name: site.name }]);
   const current = stack.at(-1) ?? { folderId: null, path: "/", name: site.name };
@@ -206,7 +207,7 @@ export function SharePointFolderTree({
                     </span>
                     {item.type !== "folder" && item.size != null && (
                       <span className="text-muted-foreground hidden shrink-0 text-xs tabular-nums md:inline">
-                        {formatBytes(item.size)}
+                        {formatBytes(item.size, locale)}
                       </span>
                     )}
                   </button>

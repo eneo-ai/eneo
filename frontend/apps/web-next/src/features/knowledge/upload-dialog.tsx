@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
@@ -73,6 +73,7 @@ export function UploadBlobsDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const { limits, user, tenant, can } = useAppContext();
   const { queueUploads } = useJobs();
   // The collection's files, for the duplicate-title warning (cached on its page).
@@ -110,7 +111,7 @@ export function UploadBlobsDialog({
       if (limit !== undefined && file.size > limit) {
         found.push({
           fileName: file.name,
-          message: `${file.name}: ${t("file_too_large")} (${formatBytes(file.size)} / max ${formatBytes(limit)})`
+          message: `${file.name}: ${t("file_too_large")} (${formatBytes(file.size, locale)} / max ${formatBytes(limit, locale)})`
         });
       }
     }
@@ -244,7 +245,9 @@ export function UploadBlobsDialog({
                     className="flex justify-between gap-4 truncate py-0.5"
                   >
                     <span className="truncate">{file.name}</span>
-                    <span className="text-muted-foreground shrink-0">{formatBytes(file.size)}</span>
+                    <span className="text-muted-foreground shrink-0">
+                      {formatBytes(file.size, locale)}
+                    </span>
                   </li>
                 ))}
               </ul>

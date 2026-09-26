@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Database, FileText, Globe, Plus, X } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { BlobPreviewDialog } from "@/features/knowledge/blobs";
 import { Badge } from "@/components/ui/badge";
@@ -102,6 +102,7 @@ function blobTitle(blob: InfoBlob): string {
 }
 
 function SelectedKnowledgeBlobRow({ blob }: { blob: InfoBlob }) {
+  const locale = useLocale();
   const [showPreview, setShowPreview] = useState(false);
 
   return (
@@ -117,7 +118,7 @@ function SelectedKnowledgeBlobRow({ blob }: { blob: InfoBlob }) {
         </span>
         {blob.metadata.size ? (
           <span className="text-muted-foreground shrink-0 text-xs">
-            {formatBytes(blob.metadata.size)}
+            {formatBytes(blob.metadata.size, locale)}
           </span>
         ) : null}
       </button>
