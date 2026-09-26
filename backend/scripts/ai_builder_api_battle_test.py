@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import io
+import itertools
 import json
 import math
 import mimetypes
@@ -22,7 +23,9 @@ import unicodedata
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
+from dataclasses import field as dataclass_field
+from dataclasses import fields as dataclass_fields
 from http.client import HTTPException
 from pathlib import Path
 from threading import Lock
@@ -93,7 +96,8 @@ MAX_INTERACTIONS_PER_CASE = 6
 # Both the runtime poll loop and the request-demand arithmetic read this. A
 # literal in either place lets the planner agree with a stale formula.
 RUNTIME_POLL_INTERVAL_SECONDS = 1
-SUPPORTED_CASES_FILE_VERSION = 8
+# v9: `execution` replaces `execute_flow` and `runtime_files`.
+SUPPORTED_CASES_FILE_VERSION = 9
 # Bump when the meaning of question-relevance checks changes; receipts
 # across different semantics versions must never be compared.
 QUESTION_RELEVANCE_SEMANTICS_VERSION = 3
@@ -156,6 +160,9 @@ LOCAL_APP_VERSION = os.getenv("ENEO_APP_VERSION") or _local_app_version()
 # Keep standalone script execution on the same production models as the API.
 from ai_builder_release_gate import replacement_limit  # noqa: E402
 
+from eneo.files.docx_template_validation import (  # noqa: E402
+    docx_template_archive_metrics,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (  # noqa: E402
     StructuredQuestionAnswerMetadata,
 )
@@ -168,10 +175,29 @@ from eneo.flows.ai_builder.ai_builder_flow_schema_values import (  # noqa: E402
 from eneo.flows.ai_builder.ai_builder_new_step_models import (  # noqa: E402
     normalize_authoring_string_list,
 )
+from eneo.flows.api.flow_runtime_paths import (  # noqa: E402
+    FLOW_REVIEW_ACTIVE_PATH,
+    FLOW_REVIEW_APPROVE_AND_CONTINUE_PATH,
+    FLOW_REVIEW_CHECKPOINT_PATH,
+    FLOW_ROOT_PATH,
+    FLOW_RUN_ARTIFACT_SIGNED_URL_PATH,
+    FLOW_RUN_CANCEL_PATH,
+    FLOW_RUN_PATH,
+)
 from eneo.flows.domain.flow import (  # noqa: E402
     FlowProviderCallTokenUsage,
     FlowRunTokenUsage,
 )
+from eneo.flows.enums import (  # noqa: E402
+    TERMINAL_FLOW_RUN_STATUSES,
+    FlowOutputType,
+    FlowRunStatus,
+)
+from eneo.flows.flow_review_policy import FlowStepReviewMode  # noqa: E402
+from eneo.flows.runtime.docx_template_runtime import (  # noqa: E402
+    extract_docx_text,
+)
+from eneo.main.exceptions import BadRequestException  # noqa: E402
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,6 +290,50 @@ class SeededFlow:
 
 
 @dataclass(frozen=True, slots=True)
+class ExecutionInputs:
+    """What one run of the applied Flow is given, by kind.
+
+    Each kind maps onto the published run contract the way the product's run
+    form does: files to the one file-input step, text to the flow input's
+    free `text`, and form values to `input_payload_json`.
+    """
+
+    files: tuple[str, ...] = ()
+    text: str | None = None
+    form_fields: Mapping[str, object] = dataclass_field(default_factory=lambda: {})
+
+
+@dataclass(frozen=True, slots=True)
+class ExpectedCheckpoint:
+    """One review pause the run must reach, in order, and what to do there.
+
+    A checkpoint is recognised by its structure (review mode, and output type
+    when declared), never by a step name: names are Builder prose.
+    """
+
+    review_mode: str
+    output_type: str | None
+    action: str
+    edited_value: object = None
+
+
+@dataclass(frozen=True, slots=True)
+class OutputExpectation:
+    """Oracles for the final output of a run over the case's own fixtures."""
+
+    output_kind: str | None
+    required_facts: tuple[str, ...] = ()
+    forbidden: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class CaseExecution:
+    inputs: ExecutionInputs
+    checkpoints: tuple[ExpectedCheckpoint, ...]
+    expect: OutputExpectation
+
+
+@dataclass(frozen=True, slots=True)
 class BattleCase:
     case_id: str
     prompt: str
@@ -271,17 +341,26 @@ class BattleCase:
     domain: str = "custom"
     required: bool = False
     apply_plan: bool = False
-    execute_flow: bool = False
     release_dimensions: tuple[str, ...] = ()
     expected: JsonObject | None = None
     file_ids: tuple[str, ...] = ()
     attachments: tuple[str, ...] = ()
-    runtime_files: tuple[str, ...] = ()
     synthetic_user_profile: str | None = None
     cohorts: tuple[str, ...] = ()
     configured_question_answers: JsonObject | None = None
     question_answer_sources: JsonObject | None = None
     edit: SavedStepEditCase | None = None
+    execution: CaseExecution | None = None
+
+    @property
+    def executes(self) -> bool:
+        return self.execution is not None
+
+    @property
+    def runtime_files(self) -> tuple[str, ...]:
+        """The fixtures the run uploads; runtime lineage is proven against these."""
+
+        return self.execution.inputs.files if self.execution is not None else ()
 
 
 def _edit_contract(edit: SavedStepEditCase) -> JsonObject:
@@ -302,6 +381,24 @@ def _case_identity(case: BattleCase) -> JsonObject:
     }
 
 
+def _execution_contract(execution: CaseExecution) -> JsonObject:
+    """The authored execution block; its files are pinned as `runtime_files`."""
+
+    inputs = execution.inputs
+    return {
+        "inputs": {
+            **({"text": inputs.text} if inputs.text is not None else {}),
+            **({"form_fields": dict(inputs.form_fields)} if inputs.form_fields else {}),
+        },
+        "checkpoints": [asdict(checkpoint) for checkpoint in execution.checkpoints],
+        "expect": {
+            "output_kind": execution.expect.output_kind,
+            "required_facts": list(execution.expect.required_facts),
+            "forbidden": list(execution.expect.forbidden),
+        },
+    }
+
+
 def _case_contract_payload(case: BattleCase) -> JsonObject:
     """Return the portable behavior contract for one selected benchmark case."""
     payload: JsonObject = {
@@ -311,7 +408,11 @@ def _case_contract_payload(case: BattleCase) -> JsonObject:
         "domain": case.domain,
         "required": case.required,
         "apply_plan": case.apply_plan,
-        "execute_flow": case.execute_flow,
+        # Derived from `execution`, and kept under its old key with
+        # `attachment_fixture.runtime_files` so that every case which does not
+        # execute keeps its contract hash: only the case whose question
+        # changed is rescored.
+        "execute_flow": case.executes,
         "release_dimensions": list(case.release_dimensions),
         "expected": case.expected or {},
         # Fixtures are hashed by content, not named by environment variable: a
@@ -330,6 +431,8 @@ def _case_contract_payload(case: BattleCase) -> JsonObject:
     }
     if case.edit is not None:
         payload["edit"] = _edit_contract(case.edit)
+    if case.execution is not None:
+        payload["execution"] = _execution_contract(case.execution)
     return payload
 
 
@@ -383,6 +486,9 @@ def _observed_case_contract_payload(case: Mapping[str, object]) -> JsonObject:
             key: edit.get(key)
             for key in ("seed_flow_fixture", "seed_flow_sha256", "target_step_order")
         }
+    raw_execution = case.get("execution")
+    if isinstance(raw_execution, Mapping):
+        payload["execution"] = dict(cast(Mapping[str, Any], raw_execution))
     return payload
 
 
@@ -648,6 +754,11 @@ _PLAN_FETCH_REQUESTS = 1  # the loop exits on the first plan, so at most one
 _OBSERVATION_DIAGNOSTIC_REQUESTS = 2  # classifier-slots + proposal-telemetry
 _APPLY_PLAN_REQUESTS = 3  # plan->Flow create + Flow read + Flow delete
 _RUNTIME_FIXED_REQUESTS = 5  # publish, run contract, create run, evidence, URL
+# A declared review checkpoint: read the active checkpoint, edit it, continue.
+_RUNTIME_CHECKPOINT_REQUESTS = 3
+# Stopping a run the case did not expect to pause or finish: one more
+# active-checkpoint read (an undeclared pause) and the cancel.
+_RUNTIME_ABORT_REQUESTS = 2
 
 
 def runtime_poll_requests(*, timeout_seconds: int) -> int:
@@ -679,11 +790,13 @@ def observation_request_demand(case: BattleCase, *, timeout_seconds: int) -> int
     if not case.apply_plan:
         return total
     total += _APPLY_PLAN_REQUESTS
-    if case.execute_flow:
+    if case.execution is not None:
         total += (
             _RUNTIME_FIXED_REQUESTS
             + len(case.runtime_files)
             + runtime_poll_requests(timeout_seconds=timeout_seconds)
+            + _RUNTIME_CHECKPOINT_REQUESTS * len(case.execution.checkpoints)
+            + _RUNTIME_ABORT_REQUESTS
         )
     return total
 
@@ -707,7 +820,7 @@ def suite_request_demand(
         {name for case in cases for name in (*case.attachments, *case.runtime_files)}
     )
     capacity_reads = capacity_snapshot_request_count(
-        runtime_required=any(case.apply_plan and case.execute_flow for case in cases)
+        runtime_required=any(case.apply_plan and case.executes for case in cases)
     )
     observation_requests = repetitions * sum(
         observation_request_demand(case, timeout_seconds=timeout_seconds)
@@ -761,9 +874,7 @@ def required_runtime_slots(*, cases: Sequence[BattleCase], max_concurrency: int)
     Case isolation only serialises repeats of one case, so distinct executing
     cases can overlap up to the configured concurrency.
     """
-    executing = {
-        case.case_id for case in cases if case.apply_plan and case.execute_flow
-    }
+    executing = {case.case_id for case in cases if case.apply_plan and case.executes}
     return min(max(1, max_concurrency), len(executing)) if executing else 0
 
 
@@ -1258,12 +1369,11 @@ _CASE_KEYS = frozenset(
         "domain",
         "required",
         "apply_plan",
-        "execute_flow",
+        "execution",
         "release_dimensions",
         "expected",
         "file_ids",
         "attachments",
-        "runtime_files",
         "synthetic_user_profile",
         "question_answer_overrides",
         "cohorts",
@@ -1421,16 +1531,11 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             manifest=manifest,
             owner=f"{path} case {case_id}.attachments",
         )
-        runtime_files = _case_fixture_names(
-            raw_case.get("runtime_files"),
+        execution = _case_execution(
+            raw_case.get("execution"),
             manifest=manifest,
-            owner=f"{path} case {case_id}.runtime_files",
+            owner=f"{path} case {case_id}.execution",
         )
-        if raw_case.get("execute_flow") is not True and runtime_files:
-            raise ValueError(
-                f"{path} case {case_id} cannot declare runtime_files without "
-                "execute_flow=true."
-            )
         release_dimensions = raw_case.get("release_dimensions")
         if release_dimensions is None:
             release_dimensions = []
@@ -1510,12 +1615,10 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             domain=str(raw_case.get("domain") or "custom"),
             required=raw_case.get("required") is True,
             apply_plan=raw_case.get("apply_plan") is True,
-            execute_flow=raw_case.get("execute_flow") is True,
             release_dimensions=tuple(release_dimensions),
             expected=dict(expected) if isinstance(expected, Mapping) else None,
             file_ids=tuple(file_ids),
             attachments=attachments,
-            runtime_files=runtime_files,
             synthetic_user_profile=(
                 profile_name if isinstance(profile_name, str) else None
             ),
@@ -1523,24 +1626,19 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             configured_question_answers=configured_answers,
             question_answer_sources=answer_sources,
             edit=edit,
+            execution=execution,
         )
         if case.edit is not None and (
-            case.apply_plan
-            or case.execute_flow
-            or case.file_ids
-            or case.attachments
-            or case.runtime_files
+            case.apply_plan or case.executes or case.file_ids or case.attachments
         ):
             raise ValueError(
                 f"{path} case {case_id} is a saved-step edit case and cannot "
                 "apply, execute or attach files."
             )
-        if case.execute_flow and not case.apply_plan:
+        if case.executes and not case.apply_plan:
             raise ValueError(
                 f"{path} case {case_id} cannot execute without apply_plan=true."
             )
-        if case.execute_flow and not case.runtime_files:
-            raise ValueError(f"{path} case {case_id} must declare runtime_files.")
         cases.append(case)
     return cases
 
@@ -1571,6 +1669,176 @@ def _case_fixture_names(
             f"Known fixtures: {', '.join(sorted(manifest))}."
         )
     return names
+
+
+# A run's final output kind is the published final step's output type.
+_OUTPUT_KINDS = frozenset(output_type.value for output_type in FlowOutputType)
+_REVIEW_MODES = frozenset(mode.value for mode in FlowStepReviewMode)
+_CHECKPOINT_ACTIONS = frozenset({"approve", "edit"})
+
+
+def _field_names(cls: type[object]) -> frozenset[str]:
+    return frozenset(item.name for item in dataclass_fields(cast(Any, cls)))
+
+
+def _closed_object(
+    value: object,
+    allowed: frozenset[str],
+    *,
+    owner: str,
+    noun: str = "keys",
+) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{owner} must be an object.")
+    raw = cast(Mapping[str, Any], value)
+    unknown = sorted(str(key) for key in set(raw) - allowed)
+    if unknown:
+        raise ValueError(f"{owner} has unknown {noun}: {', '.join(unknown)}")
+    return raw
+
+
+def _one_of(value: object, allowed: frozenset[str], *, owner: str) -> str:
+    if value not in allowed:
+        raise ValueError(f"{owner} must be one of {', '.join(sorted(allowed))}.")
+    return cast(str, value)
+
+
+def _case_execution(
+    value: object,
+    *,
+    manifest: Mapping[str, str],
+    owner: str,
+) -> CaseExecution | None:
+    """Read an authored execution block, offline, before any case runs."""
+
+    if value is None:
+        return None
+    block = _closed_object(value, _field_names(CaseExecution), owner=owner)
+    if "inputs" not in block or "expect" not in block:
+        raise ValueError(f"{owner} needs inputs and expect.")
+    raw_checkpoints = block.get("checkpoints", [])
+    if not isinstance(raw_checkpoints, list):
+        raise ValueError(f"{owner}.checkpoints must be a list.")
+    return CaseExecution(
+        inputs=_execution_inputs(
+            block["inputs"], manifest=manifest, owner=f"{owner}.inputs"
+        ),
+        checkpoints=tuple(
+            _expected_checkpoint(item, owner=f"{owner}.checkpoints[{index}]")
+            for index, item in enumerate(cast(list[object], raw_checkpoints))
+        ),
+        expect=_output_expectation(block["expect"], owner=f"{owner}.expect"),
+    )
+
+
+def _execution_inputs(
+    value: object,
+    *,
+    manifest: Mapping[str, str],
+    owner: str,
+) -> ExecutionInputs:
+    raw = _closed_object(
+        value, _field_names(ExecutionInputs), owner=owner, noun="input kinds"
+    )
+    files = _case_fixture_names(
+        raw.get("files"), manifest=manifest, owner=f"{owner}.files"
+    )
+    if "files" in raw and not files:
+        raise ValueError(f"{owner}.files must name at least one fixture.")
+    text = raw.get("text")
+    if "text" in raw and not (isinstance(text, str) and text.strip()):
+        raise ValueError(f"{owner}.text must be non-empty text.")
+    form_fields = raw.get("form_fields", {})
+    if "form_fields" in raw and not (
+        isinstance(form_fields, Mapping)
+        and form_fields
+        and all(
+            isinstance(name, str) and name.strip() and _is_form_field_value(item)
+            for name, item in cast(Mapping[object, object], form_fields).items()
+        )
+    ):
+        raise ValueError(
+            f"{owner}.form_fields must map field names to text, a number, a "
+            "boolean or a list of text."
+        )
+    if text is not None and form_fields:
+        # A flow input that carries `text` reads only that text.
+        raise ValueError(f"{owner}.text cannot be combined with form_fields.")
+    return ExecutionInputs(
+        files=files,
+        text=text,
+        form_fields=dict(cast(Mapping[str, object], form_fields)),
+    )
+
+
+def _is_form_field_value(value: object) -> bool:
+    if isinstance(value, list):
+        return all(isinstance(item, str) for item in cast(list[object], value))
+    return isinstance(value, (str, int, float, bool))
+
+
+def _expected_checkpoint(value: object, *, owner: str) -> ExpectedCheckpoint:
+    raw = _closed_object(value, _field_names(ExpectedCheckpoint), owner=owner)
+    review_mode = _one_of(
+        raw.get("review_mode"), _REVIEW_MODES, owner=f"{owner}.review_mode"
+    )
+    output_type = raw.get("output_type")
+    if output_type is not None:
+        _one_of(output_type, _OUTPUT_KINDS, owner=f"{owner}.output_type")
+    action = _one_of(raw.get("action"), _CHECKPOINT_ACTIONS, owner=f"{owner}.action")
+    edited_value = raw.get("edited_value")
+    if action == "edit":
+        if review_mode != FlowStepReviewMode.EDIT.value:
+            raise ValueError(f"{owner} edits a checkpoint whose review_mode is view.")
+        if not (
+            (isinstance(edited_value, str) and edited_value.strip())
+            or isinstance(edited_value, (list, dict))
+        ):
+            raise ValueError(
+                f"{owner}.edited_value must be the corrected text or JSON value."
+            )
+    elif "edited_value" in raw:
+        raise ValueError(f"{owner} approves as is and takes no edited_value.")
+    return ExpectedCheckpoint(
+        review_mode=review_mode,
+        output_type=output_type,
+        action=action,
+        edited_value=edited_value,
+    )
+
+
+def _output_expectation(value: object, *, owner: str) -> OutputExpectation:
+    raw = _closed_object(value, _field_names(OutputExpectation), owner=owner)
+    output_kind = raw.get("output_kind")
+    if output_kind is not None:
+        _one_of(output_kind, _OUTPUT_KINDS, owner=f"{owner}.output_kind")
+    required_facts = _literal_list(
+        raw.get("required_facts"), owner=f"{owner}.required_facts"
+    )
+    if output_kind is None and not required_facts:
+        raise ValueError(
+            f"{owner} needs required_facts or an output_kind: forbidden literals "
+            "alone assert nothing the run must produce."
+        )
+    return OutputExpectation(
+        output_kind=output_kind,
+        required_facts=required_facts,
+        forbidden=_literal_list(raw.get("forbidden"), owner=f"{owner}.forbidden"),
+    )
+
+
+def _literal_list(value: object, *, owner: str) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) and _normalized_output_text(item)
+        for item in cast(list[object], value)
+    ):
+        raise ValueError(f"{owner} must be a list of non-empty literals.")
+    literals = tuple(cast(list[str], value))
+    if len({_normalized_output_text(item) for item in literals}) != len(literals):
+        raise ValueError(f"{owner} repeats a literal.")
+    return literals
 
 
 def _synthetic_user_profiles(
@@ -4101,6 +4369,7 @@ def _run_case_session(
             else None
         ),
         runtime_evidence=runtime_evidence,
+        output_expectation=case.execution.expect if case.execution else None,
     )
     live_execution_provenance = _live_execution_provenance(
         case=case,
@@ -4137,7 +4406,7 @@ def _run_case_session(
             "domain": case.domain,
             "required": case.required,
             "apply_plan": case.apply_plan,
-            "execute_flow": case.execute_flow,
+            "execute_flow": case.executes,
             "release_dimensions": list(case.release_dimensions),
             "prompt": case.prompt,
             "expected": case.expected or {},
@@ -4168,6 +4437,8 @@ def _run_case_session(
         "runtime_metrics": _runtime_metrics_from_quality_report(quality_report),
         "quality_report": quality_report,
     }
+    if case.execution is not None:
+        bundle["case"]["execution"] = _execution_contract(case.execution)
     if case.edit is not None and seeded_flow is not None:
         bundle["case"]["edit"] = _edit_contract(case.edit)
         bundle["edit_evidence"] = _saved_step_edit_evidence(
@@ -4190,6 +4461,9 @@ def _apply_execute_and_cleanup_flow(
     apply_result: JsonObject | None = None
     applied_flow_evidence: JsonObject | None = None
     runtime_evidence: JsonObject | None = None
+    # Filled by the collector as the run proceeds, so a failure after the run
+    # was created still carries it.
+    runtime_record: JsonObject = {}
     flow_id: str | None = None
     primary_error: Exception | None = None
     cleanup_error: Exception | None = None
@@ -4215,15 +4489,37 @@ def _apply_execute_and_cleanup_flow(
                     "does_not_prove_runtime_checkpoint_pause_or_resume"
                 ),
             }
-            if case.execute_flow:
+            if case.execution is not None:
                 runtime_evidence = _execute_and_collect_runtime_evidence(
                     config=config,
                     flow_id=flow_id,
+                    execution=case.execution,
                     runtime_file_paths=runtime_file_paths,
                     timeout_seconds=timeout_seconds,
                     artifact_output_dir=artifact_output_dir,
                     case_id=case.case_id,
+                    record=runtime_record,
                 )
+                if runtime_record.get(
+                    "outcome"
+                ) == "timed_out" and _runtime_lineage_sha256s(
+                    runtime_evidence, expected_count=len(runtime_file_paths)
+                )[1] not in {"complete", "not_required"}:
+                    # Without runtime lineage the evidence could never be
+                    # scored, so this stays the re-measurable stack fault a
+                    # timeout always was.
+                    raise TimeoutError(
+                        f"case {case.case_id} timed out before its run consumed "
+                        "the runtime files."
+                    )
+                final_file = runtime_evidence.get("final_artifact") or {}
+                if unmeasured := final_file.get("unmeasured"):
+                    # Past a read bound the output cannot be judged, so the
+                    # slot is re-measurable and no acceptance check scores it.
+                    runtime_record["unmeasured"] = unmeasured
+                    raise ValueError(
+                        f"case {case.case_id} final output is unmeasured: {unmeasured}"
+                    )
         except Exception as error:
             primary_error = error
     finally:
@@ -4240,7 +4536,9 @@ def _apply_execute_and_cleanup_flow(
                 cleanup_error = error
 
     if cleanup_error is not None:
-        lifecycle = {"status": "cleanup_failed", "flow_id": flow_id}
+        lifecycle: JsonObject = {"status": "cleanup_failed", "flow_id": flow_id}
+        if runtime_record:
+            lifecycle["execution"] = runtime_record
         message = f"generated Flow cleanup failed: {cleanup_error}"
         if primary_error is not None:
             message = f"{primary_error}; {message}"
@@ -4261,6 +4559,8 @@ def _apply_execute_and_cleanup_flow(
                 )
             }
         )
+        if runtime_record:
+            lifecycle["execution"] = runtime_record
         if isinstance(primary_error, (HTTPError, URLError, TimeoutError, ValueError)):
             raise BattleFlowLifecycleError(
                 message=str(primary_error),
@@ -4279,15 +4579,29 @@ def _apply_execute_and_cleanup_flow(
     )
 
 
+def _flow_api_path(template: str, **ids: str) -> str:
+    return FLOW_ROOT_PATH + template.format(**ids)
+
+
 def _execute_and_collect_runtime_evidence(
     *,
     config: ApiConfig,
     flow_id: str,
+    execution: CaseExecution,
     runtime_file_paths: tuple[Path, ...],
     timeout_seconds: int,
     artifact_output_dir: Path,
     case_id: str,
+    record: JsonObject,
 ) -> JsonObject:
+    """Run the applied Flow once, as the case declares, and keep what it made.
+
+    What the run itself does wrong — a review pause the case did not declare,
+    a declared one it never reaches, a refused edit, the deadline, a cancel
+    that fails — is written to `record`. Only an instrument or stack fault
+    raises. Scoring the output is the quality report's job.
+    """
+
     published_flow = _request_json(
         config=config,
         method="POST",
@@ -4298,65 +4612,76 @@ def _execute_and_collect_runtime_evidence(
         method="GET",
         path=f"/flows/{flow_id}/run-contract/",
     )
-    input_steps = contract.get("steps_requiring_input")
-    if not isinstance(input_steps, list) or len(input_steps) != 1:
+    published_version = _int_value(contract.get("published_flow_version"))
+    if (
+        published_version is None
+        or _int_value(published_flow.get("published_version")) != published_version
+    ):
         raise ValueError(
-            f"case {case_id} requires exactly one runtime file-input step."
+            f"case {case_id} Flow was not published; refusing to start a run."
         )
-    input_step = input_steps[0]
-    if not isinstance(input_step, Mapping):
-        raise ValueError(f"case {case_id} runtime input contract is malformed.")
-    step_id = _required_string(input_step, "step_id")
-    uploaded_files = [
-        _upload_runtime_file(
+    run_request: JsonObject = {
+        "expected_flow_version": published_version,
+        "input_payload_json": _run_input_payload(
+            contract=contract, inputs=execution.inputs, case_id=case_id
+        ),
+        "step_inputs": None,
+    }
+    uploaded_files: list[JsonObject] = []
+    if runtime_file_paths:
+        step_id = _runtime_file_step_id(contract, case_id=case_id)
+        uploaded_files = [
+            _upload_runtime_file(
+                config=config,
+                flow_id=flow_id,
+                step_id=step_id,
+                source_path=source_path,
+            )
+            for source_path in runtime_file_paths
+        ]
+        run_request["step_inputs"] = {
+            step_id: {
+                "file_ids": [
+                    _required_string(uploaded_file, "id")
+                    for uploaded_file in uploaded_files
+                ]
+            }
+        }
+    record["run_request"] = run_request
+    try:
+        created_run = _request_json(
+            config=config,
+            method="POST",
+            path=f"/flows/{flow_id}/runs/",
+            payload=run_request,
+        )
+    except HTTPError as error:
+        # The server owns run-request validation; keep its answer.
+        record["run_request_refused"] = _http_error_detail(error)
+        raise
+    run_id = _required_string(created_run, "id")
+    record["run_id"] = run_id
+    try:
+        run = _drive_run(
             config=config,
             flow_id=flow_id,
-            step_id=step_id,
-            source_path=source_path,
+            run_id=run_id,
+            checkpoints=execution.checkpoints,
+            timeout_seconds=timeout_seconds,
+            record=record,
         )
-        for source_path in runtime_file_paths
-    ]
-    uploaded_file_ids = [
-        _required_string(uploaded_file, "id") for uploaded_file in uploaded_files
-    ]
-    published_version = _int_value(contract.get("published_flow_version"))
-    if published_version is None:
-        raise ValueError(f"case {case_id} run contract has no published version.")
-    created_run = _request_json(
-        config=config,
-        method="POST",
-        path=f"/flows/{flow_id}/runs/",
-        payload={
-            "expected_flow_version": published_version,
-            "input_payload_json": None,
-            "step_inputs": {step_id: {"file_ids": uploaded_file_ids}},
-        },
-    )
-    run_id = _required_string(created_run, "id")
-    deadline = time.monotonic() + timeout_seconds
-    while True:
-        run = _request_json(
-            config=config,
-            method="GET",
-            path=f"/flows/{flow_id}/runs/{run_id}/",
-        )
-        status = _optional_string(run, "status")
-        if status in {"completed", "failed", "cancelled"}:
-            break
-        if status == "awaiting_review":
-            raise ValueError(
-                f"case {case_id} unexpectedly reached a runtime review checkpoint."
-            )
-        if time.monotonic() >= deadline:
-            raise TimeoutError(f"case {case_id} runtime execution timed out.")
-        time.sleep(RUNTIME_POLL_INTERVAL_SECONDS)
+    except Exception:
+        # Deleting the Flow does not stop a run it has, so an error must not
+        # leave the run paused or running; the error itself still propagates.
+        _cancel_run(config=config, flow_id=flow_id, run_id=run_id, record=record)
+        raise
     evidence = _request_json(
         config=config,
         method="GET",
         path=f"/flows/{flow_id}/runs/{run_id}/evidence/",
     )
     evidence["run"] = run
-    evidence["final_artifact"] = _download_final_artifact(
+    evidence["final_artifact"] = _read_final_file(
         config=config,
         flow_id=flow_id,
         run_id=run_id,
@@ -4367,7 +4692,235 @@ def _execute_and_collect_runtime_evidence(
     evidence["published_flow"] = published_flow
     evidence["run_contract"] = contract
     evidence["uploaded_files"] = uploaded_files
+    evidence["execution"] = record
     return evidence
+
+
+def _runtime_file_step_id(contract: Mapping[str, object], *, case_id: str) -> str:
+    input_steps = _mapping_list(contract.get("steps_requiring_input"))
+    if len(input_steps) != 1:
+        raise ValueError(
+            f"case {case_id} requires exactly one runtime file-input step."
+        )
+    return _required_string(input_steps[0], "step_id")
+
+
+def _run_input_payload(
+    *,
+    contract: Mapping[str, object],
+    inputs: ExecutionInputs,
+    case_id: str,
+) -> JsonObject | None:
+    """The run's `input_payload_json`, keyed as the published contract names it."""
+
+    declared = {
+        str(form_field.get("name"))
+        for form_field in _mapping_list(contract.get("form_fields"))
+    }
+    if inputs.text is not None:
+        # The run form offers free text only to a Flow without form fields.
+        if declared:
+            raise ValueError(
+                f"case {case_id} sends free text, but the published Flow asks for "
+                f"form fields: {', '.join(sorted(declared))}."
+            )
+        return {"text": inputs.text}
+    # The server keeps an unknown key without complaint, so a misnamed field
+    # would run the Flow with that field empty.
+    undeclared = sorted(set(inputs.form_fields) - declared)
+    if undeclared:
+        raise ValueError(
+            f"case {case_id} sets form field(s) the published Flow does not "
+            f"declare: {', '.join(undeclared)}; it declares "
+            f"{', '.join(sorted(declared)) or 'none'}."
+        )
+    return dict(inputs.form_fields) or None
+
+
+def _drive_run(
+    *,
+    config: ApiConfig,
+    flow_id: str,
+    run_id: str,
+    checkpoints: tuple[ExpectedCheckpoint, ...],
+    timeout_seconds: int,
+    record: JsonObject,
+) -> JsonObject:
+    """Poll one run to its end, acting on each review pause the case declared.
+
+    A run the harness stops — at an undeclared or failed checkpoint, or at the
+    deadline — is cancelled, so nothing is left paused or running behind the
+    observation. Returns the last run state; the story goes to `record`.
+    """
+
+    handled: list[JsonObject] = []
+    failures: list[JsonObject] = []
+    record.update(failures=failures, checkpoints=handled, cleanup_failures=[])
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        run = _request_json(
+            config=config,
+            method="GET",
+            path=_flow_api_path(FLOW_RUN_PATH, id=flow_id, run_id=run_id),
+        )
+        status = _optional_string(run, "status")
+        if status in TERMINAL_FLOW_RUN_STATUSES:
+            outcome = status
+            break
+        # Checked before a pause is acted on: nothing is changed on a run
+        # whose time is up.
+        if time.monotonic() >= deadline:
+            outcome = "timed_out"
+            break
+        if status == FlowRunStatus.AWAITING_REVIEW.value and (
+            failure := _resolve_review_pause(
+                config=config,
+                flow_id=flow_id,
+                run_id=run_id,
+                checkpoints=checkpoints,
+                handled=handled,
+                deadline=deadline,
+            )
+        ):
+            failures.append(failure)
+            timed_out = failure["kind"] == "deadline_reached"
+            outcome = "timed_out" if timed_out else "checkpoint_failure"
+            break
+        time.sleep(RUNTIME_POLL_INTERVAL_SECONDS)
+    if outcome in {"checkpoint_failure", "timed_out"}:
+        run = (
+            _cancel_run(config=config, flow_id=flow_id, run_id=run_id, record=record)
+            or run
+        )
+    else:
+        failures.extend(
+            {"kind": "declared_checkpoint_not_reached", "expected": asdict(checkpoint)}
+            for checkpoint in checkpoints[len(handled) :]
+        )
+    record.update(outcome=outcome, run_status=_optional_string(run, "status"))
+    return run
+
+
+def _cancel_run(
+    *,
+    config: ApiConfig,
+    flow_id: str,
+    run_id: str,
+    record: JsonObject,
+) -> JsonObject | None:
+    """Best-effort cancel of a run the harness abandons; a failure is recorded."""
+
+    try:
+        return _request_json(
+            config=config,
+            method="POST",
+            path=_flow_api_path(FLOW_RUN_CANCEL_PATH, id=flow_id, run_id=run_id),
+        )
+    except (OSError, ValueError, HTTPException) as error:
+        record.setdefault("cleanup_failures", []).append(
+            {
+                "action": "cancel_run",
+                **(
+                    _http_error_detail(error)
+                    if isinstance(error, HTTPError)
+                    else {"error": str(error)}
+                ),
+            }
+        )
+        return None
+
+
+def _resolve_review_pause(
+    *,
+    config: ApiConfig,
+    flow_id: str,
+    run_id: str,
+    checkpoints: tuple[ExpectedCheckpoint, ...],
+    handled: list[JsonObject],
+    deadline: float,
+) -> JsonObject | None:
+    """Act on the open checkpoint as declared; the failure when that is impossible.
+
+    The checkpoint is matched by its structure from the active-checkpoint
+    response. A refused edit or continuation (4xx) is the run's outcome; a
+    5xx is the stack's and raises like any other stack fault.
+    """
+
+    ids = {"id": flow_id, "run_id": run_id}
+    active = _request_json_or_null(
+        config=config,
+        method="GET",
+        path=_flow_api_path(FLOW_REVIEW_ACTIVE_PATH, **ids),
+    )
+    if active is None:
+        return {
+            "kind": "checkpoint_unavailable",
+            "error": "the run awaits review but has no active checkpoint",
+        }
+    checkpoint_id = _required_string(active, "id")
+    observed: JsonObject = {
+        key: active.get(key)
+        for key in ("id", "step_id", "step_order", "review_mode", "output_type")
+    }
+    if any(entry["checkpoint"]["id"] == checkpoint_id for entry in handled):
+        return {"kind": "checkpoint_not_resumed", "checkpoint": observed}
+    expected = checkpoints[len(handled)] if len(handled) < len(checkpoints) else None
+    if expected is None or not (
+        observed["review_mode"] == expected.review_mode
+        and expected.output_type in (None, observed["output_type"])
+    ):
+        return {
+            "kind": "undeclared_checkpoint",
+            "checkpoint": observed,
+            "expected": asdict(expected) if expected is not None else None,
+        }
+    ids["checkpoint_id"] = checkpoint_id
+    revision = active.get("revision")
+    # Each mutation first checks the deadline: a slow read can cross it.
+    deadline_reached = {"kind": "deadline_reached", "checkpoint": observed}
+    failed_kind = "checkpoint_edit_failed"
+    try:
+        if expected.action == "edit":
+            if time.monotonic() >= deadline:
+                return deadline_reached
+            revision = _request_json(
+                config=config,
+                method="PATCH",
+                path=_flow_api_path(FLOW_REVIEW_CHECKPOINT_PATH, **ids),
+                payload={
+                    "expected_checkpoint_revision": revision,
+                    "edited_value": expected.edited_value,
+                },
+            ).get("revision")
+        failed_kind = "checkpoint_continue_failed"
+        if time.monotonic() >= deadline:
+            return deadline_reached
+        _request_json(
+            config=config,
+            method="POST",
+            path=_flow_api_path(FLOW_REVIEW_APPROVE_AND_CONTINUE_PATH, **ids),
+            payload={"expected_checkpoint_revision": revision},
+            # The endpoint requires one; a stable key per continuation.
+            headers={"Idempotency-Key": f"battle-continue-{checkpoint_id}-{revision}"},
+        )
+    except HTTPError as error:
+        if error.code >= 500:
+            raise
+        return {
+            "kind": failed_kind,
+            "checkpoint": observed,
+            **_http_error_detail(error),
+        }
+    handled.append({"checkpoint": observed, "action": expected.action})
+    return None
+
+
+def _http_error_detail(error: HTTPError) -> JsonObject:
+    try:
+        body = error.read().decode("utf-8", errors="replace")
+    except (OSError, ValueError, HTTPException):
+        body = ""
+    return {"status_code": error.code, "error": body[:2000] or str(error)}
 
 
 def _upload_file(*, config: ApiConfig, source_path: Path) -> JsonObject:
@@ -4430,7 +4983,39 @@ def _post_multipart_file(
     return parsed
 
 
-def _download_final_artifact(
+# Bounds on reading a run's final file (a DOCX is also held to the product's
+# archive bounds): past any, the output is recorded as unmeasured instead of
+# being held in memory or in the bundle.
+_MAX_FINAL_FILE_BYTES = 20 * 1024 * 1024
+_MAX_FINAL_TEXT_CHARS = 200_000
+_MAX_FINAL_PDF_PAGES = 500
+_ARTIFACT_KIND_BY_MIMETYPE: Mapping[str, str] = {
+    "application/pdf": FlowOutputType.PDF.value,
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": (
+        FlowOutputType.DOCX.value
+    ),
+}
+
+
+def _result_output_kind(result: Mapping[str, Any]) -> str | None:
+    """The output type a run result delivered, read from the result itself."""
+
+    kind = result.get("kind")
+    if kind in {"inline_text", "file_backed_text"}:
+        return FlowOutputType.TEXT.value
+    if kind == "structured":
+        return FlowOutputType.JSON.value
+    files = _mapping_list(result.get("files"))
+    if kind == "artifact" and files:
+        return _ARTIFACT_KIND_BY_MIMETYPE.get(str(files[0].get("mimetype")))
+    return None
+
+
+class _OutputBoundExceeded(Exception):
+    """A final file past a read bound; the harness cannot measure it."""
+
+
+def _read_final_file(
     *,
     config: ApiConfig,
     flow_id: str,
@@ -4439,50 +5024,265 @@ def _download_final_artifact(
     output_dir: Path,
     case_id: str,
 ) -> JsonObject | None:
+    """Download and read the one file a completed run's result names.
+
+    Inline text and a structured value are already in `run.result`; this
+    covers file-backed text and a generated artifact. An unreadable file is
+    kept as such, for the output verdict to fail.
+    """
+
     result = run.get("result")
-    if not isinstance(result, Mapping) or result.get("kind") != "artifact":
+    if run.get("status") != FlowRunStatus.COMPLETED.value or not isinstance(
+        result, Mapping
+    ):
         return None
-    files = result.get("files")
+    result = cast(Mapping[str, Any], result)
+    files = (
+        [result.get("file")]
+        if result.get("kind") == "file_backed_text"
+        else result.get("files")
+        if result.get("kind") == "artifact"
+        else []
+    )
     if (
         not isinstance(files, list)
         or len(files) != 1
         or not isinstance(files[0], Mapping)
     ):
-        raise ValueError(f"case {case_id} expected exactly one final artifact.")
-    artifact = files[0]
-    file_id = _required_string(artifact, "file_id")
+        return None  # `output_file_count` scores an artifact result's count
+    file_id = _required_string(files[0], "file_id")
+    final_file: JsonObject = {"file_id": file_id, "name": files[0].get("name")}
+    kind = _result_output_kind(result)
+    reader = _FINAL_FILE_READERS.get(str(kind))
+    if reader is None:
+        return {**final_file, "unreadable": f"no reader for {files[0].get('mimetype')}"}
+    content = _download_run_file(
+        config=config, flow_id=flow_id, run_id=run_id, file_id=file_id
+    )
+    if len(content) > _MAX_FINAL_FILE_BYTES:
+        return {
+            **final_file,
+            "unmeasured": f"the file exceeds {_MAX_FINAL_FILE_BYTES} bytes",
+        }
+    safe_case_id, safe_run_id = (
+        "".join(char if char.isalnum() or char in "-_" else "-" for char in value)
+        for value in (case_id, run_id)
+    )
+    path = output_dir / f"{safe_case_id}-{safe_run_id}-final-artifact.{kind}"
+    _write_bytes_exclusive(path, content)
+    final_file.update(
+        path=str(path),
+        byte_count=len(content),
+        sha256=hashlib.sha256(content).hexdigest(),
+    )
+    try:
+        text = reader(content)
+        if len(text) > _MAX_FINAL_TEXT_CHARS:
+            raise _OutputBoundExceeded(
+                f"its text exceeds {_MAX_FINAL_TEXT_CHARS} characters"
+            )
+    except _OutputBoundExceeded as error:
+        return {**final_file, "unmeasured": str(error)}
+    except Exception as error:  # a parser failure on product output is a finding
+        return {**final_file, "unreadable": f"{type(error).__name__}: {error}"}
+    return {**final_file, "text": text}
+
+
+def _download_run_file(
+    *,
+    config: ApiConfig,
+    flow_id: str,
+    run_id: str,
+    file_id: str,
+) -> bytes:
+    """The file's bytes, read no further than one byte past the size bound."""
+
     signed_url = _request_json(
         config=config,
         method="POST",
-        path=f"/flows/{flow_id}/runs/{run_id}/artifacts/{file_id}/signed-url/",
+        path=_flow_api_path(
+            FLOW_RUN_ARTIFACT_SIGNED_URL_PATH,
+            id=flow_id,
+            run_id=run_id,
+            file_id=file_id,
+        ),
         payload={"expires_in": 3600, "content_disposition": "attachment"},
     )
     url = _required_string(signed_url, "url")
     with urlopen(url, timeout=config.timeout_seconds) as response:
-        content = response.read()
-    name = _optional_string(artifact, "name") or f"{file_id}.pdf"
-    suffix = Path(name).suffix.casefold()
-    if suffix != ".pdf":
-        raise ValueError(f"case {case_id} expected a PDF final artifact, got {name}.")
-    safe_case_id = "".join(
-        char if char.isalnum() or char in "-_" else "-" for char in case_id
-    )
-    safe_run_id = "".join(
-        char if char.isalnum() or char in "-_" else "-" for char in run_id
-    )
-    artifact_path = output_dir / f"{safe_case_id}-{safe_run_id}-final-artifact.pdf"
-    _write_bytes_exclusive(artifact_path, content)
-    import pdfplumber
+        return response.read(_MAX_FINAL_FILE_BYTES + 1)
 
+
+def _pdf_text(content: bytes) -> str:
+    """Page text; the page bound is checked before pdfplumber builds its page
+    list, and each page's characters before its text is extracted."""
+
+    import pdfplumber
+    from pdfminer.pdfdocument import PDFDocument
+    from pdfminer.pdfpage import PDFPage
+    from pdfminer.pdfparser import PDFParser
+
+    document = PDFDocument(PDFParser(io.BytesIO(content)))
+    counted = PDFPage.create_pages(document)
+    if sum(1 for _ in itertools.islice(counted, _MAX_FINAL_PDF_PAGES + 1)) > (
+        _MAX_FINAL_PDF_PAGES
+    ):
+        raise _OutputBoundExceeded(
+            f"the PDF has more than {_MAX_FINAL_PDF_PAGES} pages"
+        )
+    pages: list[str] = []
+    chars = 0
     with pdfplumber.open(io.BytesIO(content)) as pdf:
-        text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+        for page in pdf.pages:
+            chars += len(page.chars)
+            if chars > _MAX_FINAL_TEXT_CHARS:
+                raise _OutputBoundExceeded(
+                    f"its text exceeds {_MAX_FINAL_TEXT_CHARS} characters"
+                )
+            pages.append(page.extract_text() or "")
+    return "\n".join(pages)
+
+
+def _docx_text(content: bytes) -> str:
+    """Body text, once the product's archive bounds hold without expanding it."""
+
+    try:
+        docx_template_archive_metrics(content, filename="final.docx")
+    except BadRequestException as error:
+        if error.code == "flow_template_too_large":
+            raise _OutputBoundExceeded(str(error)) from error
+        raise
+    return extract_docx_text(content)
+
+
+_FINAL_FILE_READERS: Mapping[str, Callable[[bytes], str]] = {
+    FlowOutputType.TEXT.value: lambda content: content.decode("utf-8"),
+    FlowOutputType.PDF.value: _pdf_text,
+    FlowOutputType.DOCX.value: _docx_text,
+}
+
+
+def _normalized_output_text(value: str) -> str:
+    return _collapse_whitespace(unicodedata.normalize("NFKC", value).casefold())
+
+
+def _output_report(
+    expect: OutputExpectation | None,
+    runtime_evidence: Mapping[str, object] | None,
+    *,
+    runtime_checks: Sequence[Mapping[str, Any]],
+) -> JsonObject:
+    """The one verdict on what an executed run delivered.
+
+    It holds the case's final-output runtime predicates, as
+    `_runtime_evidence_checks` scored them, and its `expect` oracles: the
+    result must be the declared kind with readable content, and each literal
+    from the case's own fixtures must (or must not) appear in it after
+    normalization.
+    """
+
+    if expect is None or runtime_evidence is None:
+        return {}
+    record, run, contract, final_file = (
+        cast(Mapping[str, Any], value if isinstance(value, Mapping) else {})
+        for value in (
+            runtime_evidence.get("execution"),
+            runtime_evidence.get("run"),
+            runtime_evidence.get("run_contract"),
+            runtime_evidence.get("final_artifact"),
+        )
+    )
+    result, final_contract = (
+        cast(Mapping[str, Any], value if isinstance(value, Mapping) else {})
+        for value in (run.get("result"), contract.get("final_output"))
+    )
+    value = result.get("value")
+    raw_text = (
+        result.get("text")
+        if result.get("kind") == "inline_text"
+        else json.dumps(value, ensure_ascii=False, sort_keys=True)
+        if result.get("kind") == "structured" and value not in (None, "", [], {})
+        else final_file.get("text")
+    )
+    text = _normalized_output_text(raw_text) if isinstance(raw_text, str) else ""
+    outcome = record.get("outcome")
+    failure_kinds = [
+        str(failure["kind"]) for failure in _mapping_list(record.get("failures"))
+    ]
+    run_completed = outcome == FlowRunStatus.COMPLETED.value and not failure_kinds
+    declared = final_contract.get("output_type")
+    delivered = _result_output_kind(result)
+    wanted = expect.output_kind or declared
+    checks: list[JsonObject] = [
+        {
+            "name": "run_completed",
+            "passed": run_completed,
+            "reason": (
+                "the run completed through every declared checkpoint"
+                if run_completed
+                else f"the run ended {outcome}"
+                + (f" with {', '.join(failure_kinds)}" if failure_kinds else "")
+            ),
+        },
+        {
+            "name": "output_kind",
+            "expected": wanted,
+            "declared": declared,
+            "actual": delivered,
+            "passed": delivered is not None and delivered == declared == wanted,
+            "reason": (
+                f"the run delivered {delivered} as a {result.get('kind')} result; "
+                f"the published Flow declares {declared}, the case wants {wanted}"
+            ),
+        },
+        {
+            "name": "output_readable",
+            "passed": bool(text),
+            "reason": (
+                "the final output has readable content"
+                if text
+                else "the final output is empty or unreadable"
+                + (
+                    f": {final_file['unreadable']}"
+                    if "unreadable" in final_file
+                    else ""
+                )
+            ),
+        },
+    ]
+    if result.get("kind") == "artifact":
+        file_count = len(_mapping_list(result.get("files")))
+        checks.append(
+            {
+                "name": "output_file_count",
+                "passed": file_count == 1,
+                "reason": f"the run delivered {file_count} final file(s); one is read",
+            }
+        )
+    for name, key, literals, must_appear in (
+        ("required_fact", "fact", expect.required_facts, True),
+        ("forbidden_literal", "literal", expect.forbidden, False),
+    ):
+        for literal in literals:
+            present = bool(text) and _normalized_output_text(literal) in text
+            checks.append(
+                {
+                    "name": name,
+                    key: literal,
+                    "passed": bool(text) and present == must_appear,
+                    "reason": f"{literal!r} "
+                    + ("appears in" if present else "is missing from")
+                    + " the final output",
+                }
+            )
+    checks.extend(
+        check
+        for check in runtime_checks
+        if check.get("name") in _FINAL_OUTPUT_RUNTIME_CHECKS
+    )
     return {
-        "file_id": file_id,
-        "name": name,
-        "path": str(artifact_path),
-        "byte_count": len(content),
-        "sha256": hashlib.sha256(content).hexdigest(),
-        "text": text,
+        "output_checks": checks,
+        "output_success": all(check["passed"] is True for check in checks),
     }
 
 
@@ -6329,6 +7129,15 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
         observation_status = "completed"
         expectation_verdict = "fail" if raw_failed_checks else "pass"
     failed_checks = raw_failed_checks if expectation_verdict in {"pass", "fail"} else []
+    report = cast(Mapping[str, Any], report if isinstance(report, Mapping) else {})
+    output_success = report.get("output_success")
+    output_failed_checks = list(
+        dict.fromkeys(
+            check.get("name")
+            for check in _mapping_list(report.get("output_checks"))
+            if check.get("passed") is not True
+        )
+    )
     return {
         "artifact_mode": bundle.get("artifact_mode"),
         "case_identity": case_identity,
@@ -6363,6 +7172,9 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
         else None,
         "failed_expectation_check_count": len(failed_checks),
         "failed_checks": failed_checks,
+        "output_executed": _created_run(bundle),
+        "output_success": output_success if isinstance(output_success, bool) else None,
+        "output_failed_checks": output_failed_checks,
         "identity_failed_check_count": len(failed_identity_checks),
         "identity_failed_checks": failed_identity_checks,
         "warning_count": len(warnings) if isinstance(warnings, list) else 0,
@@ -6376,6 +7188,22 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
         if isinstance(bundle.get("failure_summary"), Mapping)
         else _failure_summary(event_summary),
     }
+
+
+def _created_run(bundle: Mapping[str, object]) -> bool:
+    """Whether the observation created a run, from its evidence or its failure."""
+
+    for owner in (bundle.get("runtime_evidence"), bundle.get("flow_lifecycle")):
+        record = (
+            cast(Mapping[str, Any], owner).get("execution")
+            if isinstance(owner, Mapping)
+            else None
+        )
+        if isinstance(record, Mapping) and isinstance(
+            cast(Mapping[str, Any], record).get("run_id"), str
+        ):
+            return True
+    return False
 
 
 def _failed_check_names(result: Mapping[str, Any]) -> list[str]:
@@ -6680,6 +7508,15 @@ def _reanalyze_bundles(
                     if isinstance(bundle.get("runtime_evidence"), Mapping)
                     else None
                 ),
+                output_expectation=(
+                    _output_expectation(
+                        case["execution"]["expect"],
+                        owner=f"{bundle_path} case.execution.expect",
+                    )
+                    if isinstance(case, Mapping)
+                    and isinstance(case.get("execution"), Mapping)
+                    else None
+                ),
             )
             provenance = bundle.get("live_execution_provenance")
             if not isinstance(provenance, Mapping):
@@ -6870,20 +7707,42 @@ def _request_json(
     method: str,
     path: str,
     payload: JsonObject | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> JsonObject:
+    parsed = _request_json_or_null(
+        config=config, method=method, path=path, payload=payload, headers=headers
+    )
+    if parsed is None:
+        raise ValueError(f"Expected object response from {path}.")
+    return parsed
+
+
+def _request_json_or_null(
+    *,
+    config: ApiConfig,
+    method: str,
+    path: str,
+    payload: JsonObject | None = None,
+    headers: Mapping[str, str] | None = None,
+) -> JsonObject | None:
+    """An object response, or None where the API answers a JSON null."""
+
     request = _request(
         config=config,
         method=method,
         path=path,
         payload=payload,
         accept="application/json",
+        headers=headers,
     )
     with urlopen(request, timeout=config.timeout_seconds) as response:
         body = response.read().decode("utf-8")
     parsed = json.loads(body)
+    if parsed is None:
+        return None
     if not isinstance(parsed, dict):
         raise ValueError(f"Expected object response from {path}.")
-    return parsed
+    return cast(JsonObject, parsed)
 
 
 def _request_no_content(
@@ -6910,17 +7769,19 @@ def _request(
     path: str,
     payload: JsonObject | None,
     accept: str,
+    headers: Mapping[str, str] | None = None,
 ) -> Request:
     url = f"{config.base_url}{path}"
     body = None
-    headers = {
+    request_headers = {
+        **(headers or {}),
         "Accept": accept,
         "X-API-Key": config.api_key,
     }
     if payload is not None:
         body = json.dumps(payload).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-    return Request(url, data=body, headers=headers, method=method)
+        request_headers["Content-Type"] = "application/json"
+    return Request(url, data=body, headers=request_headers, method=method)
 
 
 def _iter_sse_events(response: Any) -> Iterator[JsonObject]:
@@ -8281,6 +9142,7 @@ def _quality_report(
     attached_file_ids: tuple[str, ...] = (),
     applied_flow: Mapping[str, object] | None = None,
     runtime_evidence: Mapping[str, object] | None = None,
+    output_expectation: OutputExpectation | None = None,
 ) -> JsonObject:
     checks: list[JsonObject] = []
     warnings: list[str] = []
@@ -8627,13 +9489,18 @@ def _quality_report(
                 )
             )
     expected_runtime_evidence = expected.get("expected_runtime_evidence")
-    if isinstance(expected_runtime_evidence, Mapping):
-        checks.extend(
-            _runtime_evidence_checks(
-                evidence=runtime_evidence,
-                expected=expected_runtime_evidence,
-            )
+    runtime_checks = (
+        _runtime_evidence_checks(
+            evidence=runtime_evidence,
+            expected=expected_runtime_evidence,
         )
+        if isinstance(expected_runtime_evidence, Mapping)
+        else []
+    )
+    checks.extend(runtime_checks)
+    output_report = _output_report(
+        output_expectation, runtime_evidence, runtime_checks=runtime_checks
+    )
     if expected.get("expected_persisted_named_results") is True:
         persisted_named_results = _persisted_named_result_names(classifier_diagnostics)
         add_check(
@@ -8691,7 +9558,7 @@ def _quality_report(
             expected_invariants,
         )
     if plan is None:
-        return {"checks": checks, "warnings": warnings}
+        return {"checks": checks, "warnings": warnings, **output_report}
 
     if expected_primary_input_type := _optional_string(
         expected,
@@ -9035,6 +9902,7 @@ def _quality_report(
         "checks": checks,
         "warnings": warnings,
         "metrics": _source_context_metrics(summary),
+        **output_report,
     }
 
 
@@ -9396,6 +10264,20 @@ def _first_pass_review_policy_checks(
             "expected": "non-terminal producing steps only",
         },
     ]
+
+
+# The predicates of `_runtime_evidence_checks` that judge the final output
+# itself; the executed-output verdict holds them beside the case's oracles.
+_FINAL_OUTPUT_RUNTIME_CHECKS = frozenset(
+    {
+        "runtime_final_artifact",
+        "runtime_final_field_labels",
+        "runtime_per_source_artifact_fields",
+        "runtime_visible_degradation",
+        "runtime_degradation_source_association",
+        "runtime_source_display",
+    }
+)
 
 
 def _runtime_evidence_checks(

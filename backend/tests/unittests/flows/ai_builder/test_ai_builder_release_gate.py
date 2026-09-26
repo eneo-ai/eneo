@@ -484,6 +484,54 @@ def test_a_flawless_run_is_a_go(gate: ModuleType, receipts: ModuleType) -> None:
     assert [row.verdict for row in verdict.rows if row.gating] == ["pass"] * 13
 
 
+def test_executed_output_is_reported_without_moving_a_gate_row(
+    gate: ModuleType, receipts: ModuleType
+) -> None:
+    # Output success has no pre-registered threshold, so it is reported beside
+    # the fourteen rows and never folded into acceptance or conformance.
+    rows = _perfect_rows(80)
+    for row in rows[:7]:
+        row["output_executed"] = True
+    for row in rows[:5]:
+        row["output_success"] = True
+    rows[5]["output_success"] = False
+    baseline = _evaluate(gate, receipts, _perfect_rows(80))
+
+    verdict = _evaluate(gate, receipts, rows)
+
+    assert [row.as_json() for row in verdict.rows] == [
+        row.as_json() for row in baseline.rows
+    ]
+    assert verdict.release == "go"
+    reported = verdict.as_json()["executed_output"]
+    # A run that executed but was never scored is counted, as unmeasured.
+    assert (reported["executed"], reported["scored"], reported["unmeasured"]) == (
+        7,
+        6,
+        1,
+    )
+    assert reported["output_success"] == 5
+    assert reported["failed_observations"] == ["case_1 r1"]
+    assert reported["unmeasured_observations"] == ["case_1 r2"]
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"output_executed": True, "output_success": "yes"},
+        # A verdict on a run the observation never created is impossible.
+        {"output_executed": False, "output_success": True},
+    ],
+)
+def test_an_inconsistent_output_verdict_makes_the_receipt_unreadable(
+    receipts: ModuleType, fields: dict[str, object]
+) -> None:
+    rows = _perfect_rows(1)
+    rows[0].update(fields)
+    with pytest.raises(receipts.ReceiptError, match="output_success"):
+        _receipt(receipts, rows)
+
+
 def test_adverse_clustering_is_inconclusive_not_a_pass(
     gate: ModuleType, receipts: ModuleType
 ) -> None:

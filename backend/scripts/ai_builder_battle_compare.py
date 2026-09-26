@@ -48,6 +48,7 @@ if _SCRIPTS_DIR not in sys.path:
 
 from ai_builder_receipt import (  # noqa: E402
     ReceiptError,
+    executed_output_report,
     load_release_receipt,
     load_summary_receipt,
     receipt_membership_report,
@@ -90,7 +91,9 @@ _OUTCOME_RANK: dict[str, int] = {
 }
 
 
-def _load_rows(path: Path) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
+def _load_rows(
+    path: Path,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any], dict[str, Any]]:
     """Group every repetition per case.
 
     Discarding all but the last repetition threw away the only evidence that
@@ -110,7 +113,7 @@ def _load_rows(path: Path) -> tuple[dict[str, list[dict[str, Any]]], dict[str, A
         rows.setdefault(observation.case_id, []).append(dict(observation.row))
     for case_rows in rows.values():
         case_rows.sort(key=lambda item: item.get("repetition") or 0)
-    return rows, dict(receipt.summary)
+    return rows, dict(receipt.summary), executed_output_report(receipt.observations)
 
 
 def _failure_codes(row: dict[str, Any]) -> tuple[str, ...]:
@@ -468,8 +471,10 @@ def compare(
     allow_harness_change: bool = False,
     noise_margin: int | None = None,
 ) -> dict[str, Any]:
-    baseline_rows, baseline_summary = _load_rows(baseline_path)
-    current_rows, current_summary = _load_rows(current_path)
+    baseline_rows, baseline_summary, baseline_executed_output = _load_rows(
+        baseline_path
+    )
+    current_rows, current_summary, current_executed_output = _load_rows(current_path)
     incompatible = _incompatible_identity_fields(
         baseline_summary,
         current_summary,
@@ -576,6 +581,10 @@ def compare(
             baseline_rows, current_rows
         ),
         "mechanics_direction_counts": dict(mechanics_directions),
+        "executed_output": {
+            "baseline": baseline_executed_output,
+            "current": current_executed_output,
+        },
         "current_outcomes": dict(outcome_counts),
         "remaining_blockers_ranked": remaining_blockers.most_common(),
         "remaining_failed_checks_ranked": remaining_failed_checks.most_common(),
@@ -823,6 +832,11 @@ def _render_markdown(report: dict[str, Any], *, only_changed: bool) -> str:
     lines.append(f"Conformance direction (primary): {report['direction_counts']}")
     lines.append(f"Mechanics direction: {report['mechanics_direction_counts']}")
     lines.append(f"Current outcomes: {report['current_outcomes']}")
+    executed_output = cast(dict[str, dict[str, Any]], report["executed_output"])
+    lines.append(
+        f"Executed output: baseline {describe(executed_output['baseline'])}; "
+        f"current {describe(executed_output['current'])}"
+    )
     lines.append("")
     regressed = cast(list[str], report["conformance_regressed_cases"])
     if regressed:
@@ -906,6 +920,25 @@ def _render_markdown(report: dict[str, Any], *, only_changed: bool) -> str:
             if key in delta:
                 lines.append(f"  - {key}: {json.dumps(delta[key], ensure_ascii=False)}")
     return "\n".join(lines)
+
+
+def describe(report: dict[str, Any]) -> str:
+    """One build's `executed_output_report`, as one phrase."""
+
+    if not report.get("executed"):
+        return "no executed observations"
+    return (
+        f"{report['output_success']}/{report['scored']} scored passed, "
+        f"{report['unmeasured']} unmeasured, of {report['executed']} executed"
+        + "".join(
+            f"; {label}: {', '.join(cast(list[str], report[key]))}"
+            for label, key in (
+                ("failed", "failed_observations"),
+                ("unmeasured", "unmeasured_observations"),
+            )
+            if report.get(key)
+        )
+    )
 
 
 def _git(*arguments: str, cwd: Path) -> str:
@@ -1000,6 +1033,7 @@ def _render_release_markdown(report: dict[str, Any]) -> str:
         detail = row.get("detail")
         if detail:
             lines.append(f"  - {json.dumps(detail, ensure_ascii=False)}")
+    lines.append(f"Executed output (not gated): {describe(report['executed_output'])}")
     trajectory = cast(dict[str, Any], report["trajectory"])
     lines.append("")
     lines.append(

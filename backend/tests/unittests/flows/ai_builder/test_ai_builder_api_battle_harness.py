@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import io
 import json
 import subprocess
 import sys
 import time
 from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from threading import Barrier, Lock
 from types import ModuleType, SimpleNamespace
 from typing import Any, NoReturn, get_args
+from urllib.error import HTTPError
 from uuid import UUID
 
 from pytest import CaptureFixture, MonkeyPatch, mark, raises
@@ -1270,6 +1273,30 @@ def _empty_observation_input_identity(harness: ModuleType) -> dict[str, object]:
     }
 
 
+def _execution(
+    harness: ModuleType,
+    *,
+    inputs: Any = None,
+    checkpoints: tuple[Any, ...] = (),
+    output_kind: str | None = "text",
+    required_facts: tuple[str, ...] = ("Njurunda",),
+    forbidden: tuple[str, ...] = (),
+) -> Any:
+    return harness.CaseExecution(
+        inputs=inputs or harness.ExecutionInputs(text="Skriv beslutet."),
+        checkpoints=checkpoints,
+        expect=harness.OutputExpectation(
+            output_kind=output_kind, required_facts=required_facts, forbidden=forbidden
+        ),
+    )
+
+
+def _file_execution(harness: ModuleType, files: tuple[str, ...]) -> Any:
+    return _execution(
+        harness, inputs=harness.ExecutionInputs(files=files), output_kind="pdf"
+    )
+
+
 def _complete_reanalysis_bundle(
     harness: ModuleType,
     *,
@@ -1297,7 +1324,7 @@ def _complete_reanalysis_bundle(
             "domain": case.domain,
             "required": case.required,
             "apply_plan": case.apply_plan,
-            "execute_flow": case.execute_flow,
+            "execute_flow": case.execution is not None,
             "release_dimensions": [],
             "expected": dict(expected),
             "file_ids": [],
@@ -1385,7 +1412,7 @@ def _complete_live_case_bundle(
                 "domain": case.domain,
                 "required": case.required,
                 "apply_plan": case.apply_plan,
-                "execute_flow": case.execute_flow,
+                "execute_flow": case.execution is not None,
                 "release_dimensions": list(case.release_dimensions),
                 "expected": case.expected or {},
                 "file_ids": list(case.file_ids),
@@ -1411,15 +1438,18 @@ def _complete_live_case_bundle(
             },
         }
     )
+    if case.execution is not None:
+        bundle["case"]["execution"] = harness._execution_contract(case.execution)
     return bundle
 
 
 def test_cases_file_rejects_misspelled_classifier_expectation(tmp_path: Path) -> None:
+    harness = _battle_harness()
     cases_path = tmp_path / "cases.json"
     cases_path.write_text(
         json.dumps(
             {
-                "version": 8,
+                "version": harness.SUPPORTED_CASES_FILE_VERSION,
                 "cases": [
                     {
                         "id": "bad-classifier-expectation",
@@ -1440,18 +1470,21 @@ def test_cases_file_rejects_misspelled_classifier_expectation(tmp_path: Path) ->
     )
 
     with raises(ValueError, match="unknown keys: slot_nam"):
-        _battle_harness()._read_cases_file(cases_path)
+        harness._read_cases_file(cases_path)
 
 
 def test_cases_file_rejects_unsupported_version(tmp_path: Path) -> None:
+    harness = _battle_harness()
     cases_path = tmp_path / "cases.json"
     cases_path.write_text(
         json.dumps({"version": 3, "cases": []}),
         encoding="utf-8",
     )
 
-    with raises(ValueError, match="version must be 8"):
-        _battle_harness()._read_cases_file(cases_path)
+    with raises(
+        ValueError, match=f"version must be {harness.SUPPORTED_CASES_FILE_VERSION}"
+    ):
+        harness._read_cases_file(cases_path)
 
 
 def test_cases_file_rejects_duplicate_case_ids_and_prompts(tmp_path: Path) -> None:
@@ -1462,7 +1495,10 @@ def test_cases_file_rejects_duplicate_case_ids_and_prompts(tmp_path: Path) -> No
     ]
     cases_path = tmp_path / "cases.json"
     cases_path.write_text(
-        json.dumps({"version": 8, "cases": duplicate_cases}), encoding="utf-8"
+        json.dumps(
+            {"version": harness.SUPPORTED_CASES_FILE_VERSION, "cases": duplicate_cases}
+        ),
+        encoding="utf-8",
     )
 
     with raises(ValueError, match="duplicate prompt"):
@@ -1470,7 +1506,10 @@ def test_cases_file_rejects_duplicate_case_ids_and_prompts(tmp_path: Path) -> No
 
     duplicate_cases[1] = {"id": "case-a", "prompt": "Build another report."}
     cases_path.write_text(
-        json.dumps({"version": 8, "cases": duplicate_cases}), encoding="utf-8"
+        json.dumps(
+            {"version": harness.SUPPORTED_CASES_FILE_VERSION, "cases": duplicate_cases}
+        ),
+        encoding="utf-8",
     )
 
     with raises(ValueError, match="duplicate case id"):
@@ -1478,11 +1517,12 @@ def test_cases_file_rejects_duplicate_case_ids_and_prompts(tmp_path: Path) -> No
 
 
 def test_cases_file_rejects_misspelled_evidence_posture_key(tmp_path: Path) -> None:
+    harness = _battle_harness()
     cases_path = tmp_path / "cases.json"
     cases_path.write_text(
         json.dumps(
             {
-                "version": 8,
+                "version": harness.SUPPORTED_CASES_FILE_VERSION,
                 "cases": [
                     {
                         "id": "bad-posture-key",
@@ -1500,7 +1540,7 @@ def test_cases_file_rejects_misspelled_evidence_posture_key(tmp_path: Path) -> N
     )
 
     with raises(ValueError, match="unknown evidence-posture keys"):
-        _battle_harness()._read_cases_file(cases_path)
+        harness._read_cases_file(cases_path)
 
 
 def test_harness_checks_document_render_mode_and_renderer_binding() -> None:
@@ -3108,8 +3148,7 @@ def test_execute_flow_case_requires_matching_diagnostics_before_scoring_error(
         case_id="typed-builder-error",
         prompt="Build and run the Flow.",
         apply_plan=True,
-        execute_flow=True,
-        runtime_files=("05_lokalkalkyl.csv",),
+        execution=_file_execution(harness, ("05_lokalkalkyl.csv",)),
         expected={
             "expected_runtime_evidence": {
                 "source_file_count": 1,
@@ -3592,9 +3631,8 @@ def test_release_run_passes_when_a_required_case_dies_in_the_product(
         prompt="Build the required positive case.",
         required=True,
         apply_plan=True,
-        execute_flow=True,
         attachments=fixtures,
-        runtime_files=fixtures,
+        execution=_file_execution(harness, fixtures),
     )
     manifest = harness._fixture_manifest()
     provisioned = {
@@ -3763,9 +3801,8 @@ def test_terminal_input_identity_accepts_only_valid_classifier_phases(
         prompt="Build and run the Flow.",
         required=True,
         apply_plan=True,
-        execute_flow=True,
         attachments=attachments,
-        runtime_files=(runtime_fixture,),
+        execution=_file_execution(harness, (runtime_fixture,)),
     )
     manifest = harness._fixture_manifest()
     provisioned = (
@@ -3870,10 +3907,9 @@ def test_terminal_input_identity_rejects_unmapped_direct_attachment() -> None:
         prompt="Build and run the Flow.",
         required=True,
         apply_plan=True,
-        execute_flow=True,
         file_ids=("direct-file",),
         attachments=(fixture,),
-        runtime_files=(fixture,),
+        execution=_file_execution(harness, (fixture,)),
     )
     manifest = harness._fixture_manifest()
     provisioned = {
@@ -4142,7 +4178,7 @@ def test_release_receipt_version_defaults_to_v6_and_rejects_other_versions(
     cases_path.write_text(
         json.dumps(
             {
-                "version": 8,
+                "version": harness.SUPPORTED_CASES_FILE_VERSION,
                 "acquisition_contract": {
                     "artifact_schema_version": "ai-builder-live-release.unsupported",
                     "require_clean_source": False,
@@ -5315,7 +5351,7 @@ def test_observation_input_identity_distinguishes_fixture_bytes_from_runtime_con
         case_id="fixture-identity",
         prompt="Build it.",
         attachments=("generic_case_template.docx",),
-        runtime_files=(runtime_fixture,),
+        execution=_file_execution(harness, (runtime_fixture,)),
     )
     diagnostics = _classifier_diagnostics()
     classifier_runs = diagnostics["classifier_runs"]
@@ -6175,7 +6211,7 @@ def test_applied_flow_lifecycle_deletes_flow_when_runtime_times_out(
                 case_id="runtime-failure",
                 prompt="Build and run a Flow.",
                 apply_plan=True,
-                execute_flow=True,
+                execution=_file_execution(harness, ("05_lokalkalkyl.csv",)),
             ),
             config=config,
             plan_id="plan-1",
@@ -6988,7 +7024,7 @@ def test_runtime_evidence_collection_uses_published_contract(
     monkeypatch.setattr(harness, "_upload_runtime_file", upload_runtime_file)
     monkeypatch.setattr(
         harness,
-        "_download_final_artifact",
+        "_read_final_file",
         lambda **_: {
             "file_id": "artifact-1",
             "sha256": "d" * 64,
@@ -6999,10 +7035,12 @@ def test_runtime_evidence_collection_uses_published_contract(
     evidence = harness._execute_and_collect_runtime_evidence(
         config=config,
         flow_id="flow-1",
+        execution=_file_execution(harness, tuple(path.name for path in source_paths)),
         runtime_file_paths=source_paths,
         timeout_seconds=1,
         artifact_output_dir=tmp_path,
         case_id="six-file-case",
+        record={},
     )
 
     assert uploaded_paths == list(source_paths)
@@ -7056,13 +7094,13 @@ def test_release_inventory_owns_required_dimensions_and_named_cases() -> None:
 
     review_case = by_id["ordinary_language_human_review_policy"]
     assert review_case.apply_plan is True
-    assert review_case.execute_flow is False
+    assert review_case.execution is None
     assert review_case.expected is not None
     assert review_case.expected["expected_review_policy"]["mode"] == "view"
 
     six_file_case = by_id["six_file_document_report_release_gate"]
     assert six_file_case.apply_plan is True
-    assert six_file_case.execute_flow is True
+    assert six_file_case.execution is not None
     assert len(six_file_case.attachments) == 6
     assert len(six_file_case.runtime_files) == 6
     assert six_file_case.expected is not None
@@ -7103,7 +7141,7 @@ def test_complex_authoring_case_enforces_first_pass_topology_independently() -> 
 
     assert case.required is True
     assert case.apply_plan is True
-    assert case.execute_flow is False
+    assert case.execution is None
     assert case.expected is not None
     expected = case.expected["expected_first_pass_authoring"]
 
@@ -7262,7 +7300,7 @@ def test_release_expectation_typos_fail_closed(tmp_path: Path) -> None:
     cases_path.write_text(
         json.dumps(
             {
-                "version": 8,
+                "version": harness.SUPPORTED_CASES_FILE_VERSION,
                 "cases": [
                     {
                         "id": "typo",
@@ -7805,7 +7843,7 @@ def test_case_loader_merges_synthetic_user_profile_with_case_overrides(
     cases_path.write_text(
         json.dumps(
             {
-                "version": 8,
+                "version": harness.SUPPORTED_CASES_FILE_VERSION,
                 "synthetic_user_profiles": {
                     "document_report_owner": {
                         "description": "Owner building a report from documents.",
@@ -7874,7 +7912,7 @@ def test_case_loader_requires_answers_for_plan_required_question_paths(
     harness = _battle_harness()
     cases_path = tmp_path / "cases.json"
     payload = {
-        "version": 8,
+        "version": harness.SUPPORTED_CASES_FILE_VERSION,
         "synthetic_user_profiles": {
             "document_owner": {
                 "description": "Owner who uploads source documents.",
@@ -7974,7 +8012,7 @@ def test_case_loader_rejects_duplicate_json_keys(tmp_path: Path) -> None:
     cases_path = tmp_path / "cases.json"
     cases_path.write_text(
         """{
-          "version": 8,
+          "version": %d,
           "cases": [{
             "id": "duplicate-answer",
             "prompt": "Build a flow with one runtime field.",
@@ -7983,7 +8021,8 @@ def test_case_loader_rejects_duplicate_json_keys(tmp_path: Path) -> None:
               "runtime_metadata_fields": {"selected_option_id": "basic_runtime_metadata"}
             }
           }]
-        }""",
+        }"""
+        % harness.SUPPORTED_CASES_FILE_VERSION,
         encoding="utf-8",
     )
 
@@ -8386,11 +8425,12 @@ def test_cases_file_rejects_unauthorable_input_field_contracts(
 ) -> None:
     # Expected options are authored in the case, never inferred by the
     # evaluator, so a contract the evaluator would have to guess at is a bug.
+    harness = _battle_harness()
     cases_path = tmp_path / "cases.json"
     cases_path.write_text(
         json.dumps(
             {
-                "version": 8,
+                "version": harness.SUPPORTED_CASES_FILE_VERSION,
                 "cases": [
                     {
                         "id": "bad-input-field-contract",
@@ -8404,7 +8444,7 @@ def test_cases_file_rejects_unauthorable_input_field_contracts(
     )
 
     with raises(ValueError, match=message):
-        _battle_harness()._read_cases_file(cases_path)
+        harness._read_cases_file(cases_path)
 
 
 def test_cases_file_rejects_input_field_contracts_that_claim_the_same_field(
@@ -8413,11 +8453,12 @@ def test_cases_file_rejects_input_field_contracts_that_claim_the_same_field(
     # Each contract picks the first field its aliases match, so overlapping
     # alias sets would let one produced field satisfy two contracts and report
     # coverage the run never had.
+    harness = _battle_harness()
     cases_path = tmp_path / "cases.json"
     cases_path.write_text(
         json.dumps(
             {
-                "version": 8,
+                "version": harness.SUPPORTED_CASES_FILE_VERSION,
                 "cases": [
                     {
                         "id": "overlapping-input-field-contracts",
@@ -8446,7 +8487,7 @@ def test_cases_file_rejects_input_field_contracts_that_claim_the_same_field(
     )
 
     with raises(ValueError, match="shares alias"):
-        _battle_harness()._read_cases_file(cases_path)
+        harness._read_cases_file(cases_path)
 
 
 def test_corpus_input_field_contracts_cover_the_authorable_field_types() -> None:
@@ -9000,7 +9041,7 @@ def test_evaluator_identity_carries_measurement_semantics_versions() -> None:
     assert harness.QUESTION_RELEVANCE_SEMANTICS_VERSION == 3
     assert harness.OUTCOME_CLASSIFICATION_SEMANTICS_VERSION == 5
     assert harness.OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION == 3
-    assert harness.SUPPORTED_CASES_FILE_VERSION == 8
+    assert harness.SUPPORTED_CASES_FILE_VERSION == 9
     identity = harness._suite_evaluator_identity(
         release_identity={},
         run_context={},
@@ -9044,16 +9085,14 @@ def _demand_case(
     *,
     case_id: str,
     apply_plan: bool = False,
-    execute_flow: bool = False,
-    runtime_files: tuple[str, ...] = (),
+    execution: object | None = None,
     attachments: tuple[str, ...] = (),
 ) -> Any:
     return harness.BattleCase(
         case_id=case_id,
         prompt="p",
         apply_plan=apply_plan,
-        execute_flow=execute_flow,
-        runtime_files=runtime_files,
+        execution=execution,
         attachments=attachments,
     )
 
@@ -9066,8 +9105,7 @@ def test_observation_demand_charges_only_the_calls_a_case_makes() -> None:
         harness,
         case_id="executed",
         apply_plan=True,
-        execute_flow=True,
-        runtime_files=("a.pdf", "b.pdf"),
+        execution=_file_execution(harness, ("a.pdf", "b.pdf")),
     )
 
     plain_demand = harness.observation_request_demand(plain, timeout_seconds=900)
@@ -9078,8 +9116,21 @@ def test_observation_demand_charges_only_the_calls_a_case_makes() -> None:
     assert plain_demand == 17
     # The Flow lifecycle is charged only when the plan is applied.
     assert applied_demand == plain_demand + 3
-    # Runtime adds its fixed calls, one upload per file, and the poll bound.
-    assert executed_demand == applied_demand + 5 + 2 + 901
+    # Runtime adds its fixed calls, one upload per file, the poll bound, and
+    # the stop of a run that pauses where no checkpoint was declared.
+    assert executed_demand == applied_demand + 5 + 2 + 901 + 2
+    reviewed = replace(
+        executed,
+        execution=replace(
+            executed.execution,
+            checkpoints=(_edit_checkpoint(harness), _view_checkpoint(harness)),
+        ),
+    )
+    # Each declared checkpoint: the active read, the edit, the continuation.
+    assert (
+        harness.observation_request_demand(reviewed, timeout_seconds=900)
+        == executed_demand + 2 * 3
+    )
 
 
 def test_runtime_poll_bound_counts_the_first_poll_before_any_sleep() -> None:
@@ -9124,7 +9175,9 @@ def test_suite_demand_for_the_frozen_corpus_exceeds_the_default_ceilings() -> No
     # 2026-09-15: the saved-step edit cases add their seeding requests
     # (3 fixed + 2 per seeded step) on top of the shared per-observation cost;
     # the reference-rename case on the 10-step fixture added 120 (3 reps).
-    assert demand["total"] == 12_046
+    # 2026-09-26: the executed case charges the stop of a run that pauses
+    # undeclared (an active-checkpoint read and a cancel): 2 x 3 reps.
+    assert demand["total"] == 12_052
     assert demand["total"] > 10_000
 
 
@@ -9260,7 +9313,12 @@ def test_capacity_preflight_accepts_an_unlimited_key_under_a_fail_open_policy() 
 def test_required_runtime_slots_follows_the_executing_cases_and_concurrency() -> None:
     harness = _battle_harness()
     executing = [
-        _demand_case(harness, case_id=f"e{index}", apply_plan=True, execute_flow=True)
+        _demand_case(
+            harness,
+            case_id=f"e{index}",
+            apply_plan=True,
+            execution=_file_execution(harness, ("a.pdf",)),
+        )
         for index in range(3)
     ]
     plain = [_demand_case(harness, case_id="p")]
@@ -9312,7 +9370,12 @@ def test_capacity_refusal_makes_no_clean_space_or_fixture_calls(
     monkeypatch.setattr(harness, "_release_run_identity", lambda **_k: {})
     monkeypatch.setattr(harness, "_failure_execution_provenance", lambda _i: {})
 
-    case = _demand_case(harness, case_id="only", apply_plan=True, execute_flow=True)
+    case = _demand_case(
+        harness,
+        case_id="only",
+        apply_plan=True,
+        execution=_file_execution(harness, ("a.pdf",)),
+    )
     args = SimpleNamespace(
         repetitions=1,
         timeout_seconds=900,
@@ -10836,3 +10899,923 @@ def test_an_edit_case_deletes_its_seeded_flow_even_when_the_session_fails(
 
     assert deleted == ["DELETE /flows/flow-1/"]
     assert raised.value.flow_lifecycle == {"status": "deleted", "flow_id": "flow-1"}
+
+
+# --- Executed output: a run of the applied Flow, kept and scored ----------
+
+_RUN_PATH = "/flows/flow-1/runs/run-1"
+
+
+class _RuntimeApi:
+    """One applied Flow's API, answering the harness request by request."""
+
+    def __init__(
+        self,
+        *,
+        runs: list[dict[str, object]],
+        contract: dict[str, object] | None = None,
+        checkpoints: list[dict[str, object] | None] | None = None,
+        published_version: int | None = 2,
+        edit_error: Exception | None = None,
+        cancel_error: Exception | None = None,
+    ) -> None:
+        self.contract: dict[str, object] = {
+            "flow_id": "flow-1",
+            "published_flow_version": 2,
+            "final_output": {"output_type": "text"},
+            "form_fields": [],
+            "steps_requiring_input": [],
+            **(contract or {}),
+        }
+        self.runs = list(runs)
+        self.checkpoints = list(checkpoints or [])
+        self.published_version = published_version
+        self.edit_error = edit_error
+        self.cancel_error = cancel_error
+        self.calls: list[dict[str, Any]] = []
+
+    def install(self, harness: ModuleType, monkeypatch: MonkeyPatch) -> None:
+        monkeypatch.setattr(harness, "_request_json", self.request)
+        monkeypatch.setattr(harness, "_request_json_or_null", self.request)
+        monkeypatch.setattr(harness, "_request_no_content", self.request)
+        monkeypatch.setattr(harness, "RUNTIME_POLL_INTERVAL_SECONDS", 0)
+
+    def paths(self, method: str) -> list[str]:
+        return [call["path"] for call in self.calls if call["method"] == method]
+
+    def call(self, method: str, path: str) -> dict[str, Any]:
+        return next(
+            call
+            for call in self.calls
+            if call["method"] == method and call["path"] == path
+        )
+
+    def request(
+        self,
+        *,
+        method: str,
+        path: str,
+        payload: object = None,
+        headers: object = None,
+        **_: object,
+    ) -> object:
+        self.calls.append(
+            {"method": method, "path": path, "payload": payload, "headers": headers}
+        )
+        if path.endswith("/create"):
+            return {"flow_id": "flow-1"}
+        if path == "/flows/flow-1/":
+            return None if method == "DELETE" else {"id": "flow-1", "steps": []}
+        if path == "/flows/flow-1/publish/":
+            return {"id": "flow-1", "published_version": self.published_version}
+        if path == "/flows/flow-1/run-contract/":
+            return self.contract
+        if path == "/flows/flow-1/runs/" and method == "POST":
+            return {"id": "run-1", "status": "queued"}
+        if path == f"{_RUN_PATH}/":
+            return self.runs.pop(0) if len(self.runs) > 1 else self.runs[0]
+        if path == f"{_RUN_PATH}/review-checkpoints/active/":
+            return self.checkpoints.pop(0)
+        if path == f"{_RUN_PATH}/cancel/":
+            if self.cancel_error is not None:
+                raise self.cancel_error
+            return {"id": "run-1", "status": "cancelled"}
+        if path == f"{_RUN_PATH}/evidence/":
+            return {"run": {"id": "run-1"}, "step_results": []}
+        if path.endswith("/signed-url/"):
+            return {"url": f"https://signed.example/{path.split('/')[-3]}"}
+        assert isinstance(payload, dict)
+        if method == "PATCH":
+            if self.edit_error is not None:
+                raise self.edit_error
+            return {"revision": payload["expected_checkpoint_revision"] + 1}
+        if path.endswith("/approve-and-continue/"):
+            return {"run": {"id": "run-1", "status": "queued"}}
+        raise AssertionError((method, path, payload))
+
+
+def _execute(
+    harness: ModuleType,
+    execution: Any,
+    *,
+    tmp_path: Path,
+    runtime_file_paths: tuple[Path, ...] = (),
+    timeout_seconds: int = 5,
+    record: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Collect one run's evidence, then score it as the quality report does."""
+
+    evidence = harness._execute_and_collect_runtime_evidence(
+        config=harness.ApiConfig(
+            base_url="http://localhost:8123/api/v1",
+            api_key="test-key",
+            timeout_seconds=1,
+        ),
+        flow_id="flow-1",
+        execution=execution,
+        runtime_file_paths=runtime_file_paths,
+        timeout_seconds=timeout_seconds,
+        artifact_output_dir=tmp_path,
+        case_id="executed-case",
+        record={} if record is None else record,
+    )
+    return evidence, _scored(harness, execution, evidence)
+
+
+def _scored(harness: ModuleType, execution: Any, evidence: object) -> dict[str, Any]:
+    return harness._quality_report(
+        plan=None,
+        summary={},
+        expected={},
+        runtime_evidence=evidence,
+        output_expectation=execution.expect,
+    )
+
+
+def _completed_text_run(text: str) -> dict[str, object]:
+    return {
+        "id": "run-1",
+        "status": "completed",
+        "result": {"kind": "inline_text", "text": text},
+    }
+
+
+def _awaiting_review_run() -> dict[str, object]:
+    return {"id": "run-1", "status": "awaiting_review"}
+
+
+def _checkpoint(**overrides: object) -> dict[str, object]:
+    return {
+        "id": "cp-1",
+        "step_id": "step-2",
+        "step_order": 2,
+        "revision": 1,
+        "review_mode": "edit",
+        "output_type": "text",
+        **overrides,
+    }
+
+
+def _edit_checkpoint(
+    harness: ModuleType, edited_value: str = "Rättat underlag."
+) -> Any:
+    return harness.ExpectedCheckpoint(
+        review_mode="edit", output_type="text", action="edit", edited_value=edited_value
+    )
+
+
+def _view_checkpoint(harness: ModuleType) -> Any:
+    return harness.ExpectedCheckpoint(
+        review_mode="view", output_type=None, action="approve"
+    )
+
+
+def _http_error(code: int, body: str) -> HTTPError:
+    return HTTPError(
+        "http://localhost", code, "refused", hdrs=None, fp=io.BytesIO(body.encode())
+    )
+
+
+def _check_verdicts(report: Mapping[str, Any]) -> list[tuple[str, bool]]:
+    return [(check["name"], check["passed"]) for check in report["output_checks"]]
+
+
+@mark.parametrize(
+    ("contract", "inputs", "payload"),
+    [
+        # The run form's free text is the flow input's `text`, not a form field.
+        ({}, {"text": "Sammanfatta ärendet."}, {"text": "Sammanfatta ärendet."}),
+        (
+            {
+                "form_fields": [
+                    {"name": "kommun", "type": "text", "required": True},
+                    {"name": "antal_barn", "type": "number", "required": False},
+                ]
+            },
+            {"form_fields": {"kommun": "Sundsvall", "antal_barn": 42}},
+            {"kommun": "Sundsvall", "antal_barn": 42},
+        ),
+    ],
+)
+def test_execution_sends_its_inputs_under_the_run_contract_names(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    contract: dict[str, object],
+    inputs: dict[str, Any],
+    payload: dict[str, object],
+) -> None:
+    harness = _battle_harness()
+    api = _RuntimeApi(
+        contract=contract, runs=[_completed_text_run("Ärendet gäller Njurunda.")]
+    )
+    api.install(harness, monkeypatch)
+
+    _, report = _execute(
+        harness,
+        _execution(harness, inputs=harness.ExecutionInputs(**inputs)),
+        tmp_path=tmp_path,
+    )
+
+    assert api.call("POST", "/flows/flow-1/runs/")["payload"] == {
+        "expected_flow_version": 2,
+        "input_payload_json": payload,
+        "step_inputs": None,
+    }
+    assert report["output_success"] is True
+
+
+@mark.parametrize(
+    ("api_options", "inputs", "error"),
+    [
+        # The server keeps unknown payload keys without complaint, so a
+        # misnamed field would silently run the Flow with the field empty.
+        (
+            {"contract": {"form_fields": [{"name": "kommun", "type": "text"}]}},
+            {"form_fields": {"kommune": "Sundsvall"}},
+            "kommune",
+        ),
+        ({"published_version": None}, {"text": "Skriv beslutet."}, "not published"),
+    ],
+)
+def test_execution_refuses_to_start_a_run_it_cannot_measure(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    api_options: dict[str, Any],
+    inputs: dict[str, Any],
+    error: str,
+) -> None:
+    harness = _battle_harness()
+    api = _RuntimeApi(runs=[_completed_text_run("unused")], **api_options)
+    api.install(harness, monkeypatch)
+
+    with raises(ValueError, match=error):
+        _execute(
+            harness,
+            _execution(harness, inputs=harness.ExecutionInputs(**inputs)),
+            tmp_path=tmp_path,
+        )
+
+    assert "/flows/flow-1/runs/" not in api.paths("POST")
+
+
+def test_execution_edits_a_declared_checkpoint_then_continues_and_checks_output(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    harness = _battle_harness()
+    api = _RuntimeApi(
+        runs=[
+            _awaiting_review_run(),
+            _completed_text_run("Beslut: Klockarbergets förskola avvecklas."),
+        ],
+        checkpoints=[_checkpoint()],
+    )
+    api.install(harness, monkeypatch)
+    edited = "Rättat underlag om Klockarbergets förskola."
+    execution = _execution(
+        harness,
+        checkpoints=(_edit_checkpoint(harness, edited),),
+        required_facts=("klockarbergets förskola",),
+        forbidden=("{{",),
+    )
+
+    evidence, report = _execute(harness, execution, tmp_path=tmp_path)
+
+    checkpoint_path = f"{_RUN_PATH}/review-checkpoints/cp-1/"
+    assert api.call("PATCH", checkpoint_path)["payload"] == {
+        "expected_checkpoint_revision": 1,
+        "edited_value": edited,
+    }
+    resume = api.call("POST", f"{checkpoint_path}approve-and-continue/")
+    # Continue from the revision the edit returned, under the required key.
+    assert resume["payload"] == {"expected_checkpoint_revision": 2}
+    assert resume["headers"]["Idempotency-Key"]
+    assert f"{_RUN_PATH}/cancel/" not in api.paths("POST")
+    assert evidence["execution"]["outcome"] == "completed"
+    assert evidence["execution"]["failures"] == []
+    assert [entry["action"] for entry in evidence["execution"]["checkpoints"]] == [
+        "edit"
+    ]
+    assert _check_verdicts(report) == [
+        ("run_completed", True),
+        ("output_kind", True),
+        ("output_readable", True),
+        ("required_fact", True),
+        ("forbidden_literal", True),
+    ]
+    assert report["output_success"] is True
+
+
+def test_execution_records_an_undeclared_checkpoint_and_cancels_the_run(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    harness = _battle_harness()
+    api = _RuntimeApi(
+        runs=[_awaiting_review_run()],
+        checkpoints=[_checkpoint(review_mode="view")],
+    )
+    api.install(harness, monkeypatch)
+
+    evidence, report = _execute(harness, _execution(harness), tmp_path=tmp_path)
+
+    failures = evidence["execution"]["failures"]
+    assert [failure["kind"] for failure in failures] == ["undeclared_checkpoint"]
+    assert failures[0]["checkpoint"]["review_mode"] == "view"
+    assert f"{_RUN_PATH}/cancel/" in api.paths("POST")
+    assert api.paths("PATCH") == []
+    assert evidence["execution"]["run_status"] == "cancelled"
+    assert report["output_success"] is False
+    assert ("run_completed", False) in _check_verdicts(report)
+
+
+def test_execution_records_a_declared_checkpoint_the_run_never_reached(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    harness = _battle_harness()
+    api = _RuntimeApi(runs=[_completed_text_run("Ärendet gäller Njurunda.")])
+    api.install(harness, monkeypatch)
+    execution = _execution(harness, checkpoints=(_view_checkpoint(harness),))
+
+    evidence, report = _execute(harness, execution, tmp_path=tmp_path)
+
+    failures = evidence["execution"]["failures"]
+    assert [failure["kind"] for failure in failures] == [
+        "declared_checkpoint_not_reached"
+    ]
+    assert failures[0]["expected"]["review_mode"] == "view"
+    assert f"{_RUN_PATH}/cancel/" not in api.paths("POST")
+    assert report["output_success"] is False
+
+
+def test_a_failed_checkpoint_edit_and_a_failed_cancel_are_recorded_not_raised(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    harness = _battle_harness()
+    api = _RuntimeApi(
+        runs=[_awaiting_review_run()],
+        checkpoints=[_checkpoint()],
+        edit_error=_http_error(400, '{"code": "typed_io_validation_failed"}'),
+        cancel_error=_http_error(503, "unavailable"),
+    )
+    api.install(harness, monkeypatch)
+    execution = _execution(harness, checkpoints=(_edit_checkpoint(harness),))
+
+    evidence, report = _execute(harness, execution, tmp_path=tmp_path)
+
+    failures = evidence["execution"]["failures"]
+    assert [failure["kind"] for failure in failures] == ["checkpoint_edit_failed"]
+    assert failures[0]["status_code"] == 400
+    assert "typed_io_validation_failed" in failures[0]["error"]
+    assert [item["action"] for item in evidence["execution"]["cleanup_failures"]] == [
+        "cancel_run"
+    ]
+    assert report["output_success"] is False
+
+
+@mark.parametrize("measured", [True, False])
+def test_a_run_is_cancelled_at_its_deadline_and_its_record_kept(
+    tmp_path: Path, monkeypatch: MonkeyPatch, measured: bool
+) -> None:
+    # A timed-out run that consumed its files is a scoreable product outcome;
+    # one that never did has no runtime lineage and stays the re-measurable
+    # stack fault a timeout always was, with its record on the lifecycle.
+    harness = _battle_harness()
+    api = _RuntimeApi(
+        contract={"steps_requiring_input": [{"step_id": "reader"}]},
+        runs=[{"id": "run-1", "status": "running"}],
+    )
+    api.install(harness, monkeypatch)
+    monkeypatch.setattr(harness, "_upload_runtime_file", lambda **_: {"id": "up-1"})
+    monkeypatch.setattr(
+        harness,
+        "_runtime_lineage_sha256s",
+        lambda *_a, **_k: ([], "complete" if measured else "current_step_invalid"),
+    )
+    execution = _file_execution(harness, ("05_lokalkalkyl.csv",))
+
+    def apply() -> Any:
+        return harness._apply_execute_and_cleanup_flow(
+            case=harness.BattleCase(
+                case_id="deadline",
+                prompt="Build and run a Flow.",
+                apply_plan=True,
+                execution=execution,
+            ),
+            config=harness.ApiConfig(
+                base_url="http://localhost:8123/api/v1",
+                api_key="test-key",
+                timeout_seconds=1,
+            ),
+            plan_id="plan-1",
+            runtime_file_paths=(Path("05_lokalkalkyl.csv"),),
+            timeout_seconds=0,
+            artifact_output_dir=tmp_path,
+        )
+
+    if measured:
+        _, runtime_evidence, lifecycle = apply()
+        record = runtime_evidence["execution"]
+        assert _scored(harness, execution, runtime_evidence)["output_success"] is False
+    else:
+        with raises(harness.BattleFlowLifecycleError) as raised:
+            apply()
+        lifecycle = raised.value.flow_lifecycle
+        record = lifecycle["execution"]
+        assert harness.harness_failure_class(raised.value) == "dependency_stack"
+        # A run was created, so the failed observation counts as executed and
+        # unmeasured instead of dropping out of the output measure.
+        row = harness._observation_projection(
+            {
+                "artifact_mode": "live_execution_failure",
+                **harness._failure_error_fields(raised.value),
+            }
+        )
+        assert (row["output_executed"], row["output_success"]) == (True, None)
+    assert record["outcome"] == "timed_out"
+    assert f"{_RUN_PATH}/cancel/" in api.paths("POST")
+    assert lifecycle["status"] == "deleted"
+
+
+_DOCX_MIMETYPE = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
+
+
+def _docx_run(
+    harness: ModuleType, monkeypatch: MonkeyPatch
+) -> tuple[_RuntimeApi, bytes, list[str]]:
+    """A completed run whose final artifact is a DOCX, and its signed download."""
+
+    from docx import Document
+
+    document = Document()
+    document.add_paragraph("Beslutsrapport för Njurunda")
+    table = document.add_table(rows=1, cols=2)
+    table.rows[0].cells[0].text = "Diarienummer"
+    table.rows[0].cells[1].text = "BUN-2026-00037-1"
+    raw = io.BytesIO()
+    document.save(raw)
+    content = raw.getvalue()
+    api = _RuntimeApi(
+        contract={"final_output": {"output_type": "docx"}},
+        runs=[
+            {
+                "id": "run-1",
+                "status": "completed",
+                "result": {
+                    "kind": "artifact",
+                    "files": [
+                        {
+                            "file_id": "artifact-1",
+                            "name": "beslut.docx",
+                            "mimetype": _DOCX_MIMETYPE,
+                        }
+                    ],
+                },
+            }
+        ],
+    )
+    api.install(harness, monkeypatch)
+    downloads: list[str] = []
+
+    def signed_download(url: str, timeout: int) -> io.BytesIO:
+        downloads.append(url)
+        return io.BytesIO(content)
+
+    monkeypatch.setattr(harness, "urlopen", signed_download)
+    return api, content, downloads
+
+
+def test_execution_reads_and_checks_a_docx_final_artifact(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    harness = _battle_harness()
+    _, content, downloads = _docx_run(harness, monkeypatch)
+    execution = _execution(
+        harness,
+        output_kind="docx",
+        required_facts=("bun-2026-00037-1", "Njurunda"),
+        forbidden=("{{",),
+    )
+
+    evidence, report = _execute(harness, execution, tmp_path=tmp_path)
+
+    assert downloads == ["https://signed.example/artifact-1"]
+    # Table cells are read as well as paragraphs.
+    assert "BUN-2026-00037-1" in evidence["final_artifact"]["text"]
+    assert evidence["final_artifact"]["sha256"] == hashlib.sha256(content).hexdigest()
+    assert _check_verdicts(report) == [
+        ("run_completed", True),
+        ("output_kind", True),
+        ("output_readable", True),
+        ("output_file_count", True),
+        ("required_fact", True),
+        ("required_fact", True),
+        ("forbidden_literal", True),
+    ]
+    assert report["output_success"] is True
+
+
+@mark.parametrize(
+    ("bound", "limit"), [("_MAX_FINAL_FILE_BYTES", 10), ("_MAX_FINAL_TEXT_CHARS", 5)]
+)
+def test_an_output_past_a_read_bound_is_recorded_unmeasured(
+    tmp_path: Path, monkeypatch: MonkeyPatch, bound: str, limit: int
+) -> None:
+    harness = _battle_harness()
+    _docx_run(harness, monkeypatch)
+    monkeypatch.setattr(harness, bound, limit)
+
+    evidence, _ = _execute(
+        harness, _execution(harness, output_kind="docx"), tmp_path=tmp_path
+    )
+
+    assert str(limit) in evidence["final_artifact"]["unmeasured"]
+    assert "text" not in evidence["final_artifact"]
+
+
+def test_extraction_stops_at_its_bounds_before_reading_everything(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    import pdfplumber
+
+    from eneo.files import docx_template_validation
+
+    harness = _battle_harness()
+    pdf = (harness.FIXTURE_DIR / "01_protokoll_bun_2026_02_25.pdf").read_bytes()
+    with pdfplumber.open(io.BytesIO(pdf)) as document:
+        page_count = len(document.pages)
+        first_page = document.pages[0].extract_text()
+    monkeypatch.setattr(harness, "_MAX_FINAL_PDF_PAGES", page_count - 1)
+    opened: list[object] = []
+    real_open = pdfplumber.open
+    monkeypatch.setattr(
+        pdfplumber,
+        "open",
+        lambda *args, **kw: opened.append(args) or real_open(*args, **kw),
+    )
+    # The page bound holds before pdfplumber materializes any page.
+    with raises(harness._OutputBoundExceeded, match="pages"):
+        harness._pdf_text(pdf)
+    assert opened == []
+    monkeypatch.setattr(harness, "_MAX_FINAL_PDF_PAGES", page_count)
+    assert harness._pdf_text(pdf).startswith(first_page)
+    # A page whose characters pass the text bound is refused before extraction.
+    monkeypatch.setattr(harness, "_MAX_FINAL_TEXT_CHARS", 10)
+    with raises(harness._OutputBoundExceeded, match="characters"):
+        harness._pdf_text(pdf)
+    # A DOCX is held to the product's archive bounds before it is expanded.
+    docx = (harness.FIXTURE_DIR / "example_report.docx").read_bytes()
+    monkeypatch.setattr(docx_template_validation, "MAX_TEMPLATE_ARCHIVE_ENTRIES", 1)
+    with raises(harness._OutputBoundExceeded, match="too many entries"):
+        harness._docx_text(docx)
+
+
+_PDF_FILE = {"file_id": "artifact-1", "name": "a.pdf", "mimetype": "application/pdf"}
+
+
+@mark.parametrize(
+    ("contract", "result", "output_kind", "failed"),
+    [
+        # A kind alone must not pass on nothing.
+        ({}, {"kind": "inline_text", "text": ""}, "text", ["output_readable"]),
+        # The result's own kind decides, not the contract's claim.
+        (
+            {"final_output": {"output_type": "pdf"}},
+            {"kind": "inline_text", "text": "Njurunda"},
+            "pdf",
+            ["output_kind"],
+        ),
+        # Two final files are a failed output, not a harness error.
+        (
+            {"final_output": {"output_type": "pdf"}},
+            {"kind": "artifact", "files": [_PDF_FILE, _PDF_FILE]},
+            "pdf",
+            ["output_readable", "output_file_count"],
+        ),
+    ],
+)
+def test_output_success_needs_the_declared_kind_with_readable_content(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    contract: dict[str, object],
+    result: dict[str, object],
+    output_kind: str,
+    failed: list[str],
+) -> None:
+    harness = _battle_harness()
+    run = {"id": "run-1", "status": "completed", "result": result}
+    _RuntimeApi(contract=contract, runs=[run]).install(harness, monkeypatch)
+    execution = _execution(harness, output_kind=output_kind, required_facts=())
+
+    _, report = _execute(harness, execution, tmp_path=tmp_path)
+
+    assert [name for name, passed in _check_verdicts(report) if not passed] == failed
+    assert report["output_success"] is False
+
+
+def test_the_output_verdict_holds_the_final_output_runtime_checks() -> None:
+    # The six-file case passed its literals while its PDF lost the field
+    # labels and source names its runtime evidence checks demand.
+    harness = _battle_harness()
+    names = {
+        check["name"]
+        for check in harness._runtime_evidence_checks(evidence=None, expected={})
+    }
+    assert harness._FINAL_OUTPUT_RUNTIME_CHECKS <= names
+    report = harness._output_report(
+        _execution(harness, required_facts=()).expect,
+        {
+            "execution": {"outcome": "completed", "failures": []},
+            "run": {"result": {"kind": "inline_text", "text": "Rapport"}},
+            "run_contract": {"final_output": {"output_type": "text"}},
+        },
+        runtime_checks=[
+            {"name": "runtime_source_display", "passed": False},
+            {"name": "runtime_model_call_count", "passed": False},
+        ],
+    )
+
+    assert [check["name"] for check in report["output_checks"]][-1] == (
+        "runtime_source_display"
+    )
+    assert report["output_success"] is False
+
+
+def test_an_error_at_a_pause_cancels_the_run_and_keeps_the_error(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    # Deleting the Flow soft-deletes it and leaves its run paused, so the
+    # harness cancels the run itself, even when the cancel also fails.
+    harness = _battle_harness()
+    api = _RuntimeApi(
+        runs=[_awaiting_review_run()],
+        checkpoints=[_checkpoint()],
+        edit_error=_http_error(503, "stack down"),
+        cancel_error=_http_error(502, "gateway down"),
+    )
+    api.install(harness, monkeypatch)
+    record: dict[str, Any] = {}
+
+    with raises(HTTPError) as raised:
+        _execute(
+            harness,
+            _execution(harness, checkpoints=(_edit_checkpoint(harness),)),
+            tmp_path=tmp_path,
+            record=record,
+        )
+
+    assert raised.value.code == 503
+    assert f"{_RUN_PATH}/cancel/" in api.paths("POST")
+    assert [failure["status_code"] for failure in record["cleanup_failures"]] == [502]
+
+
+@mark.parametrize("slow_active_read", [False, True])
+def test_a_paused_run_past_its_deadline_is_cancelled_untouched(
+    tmp_path: Path, monkeypatch: MonkeyPatch, slow_active_read: bool
+) -> None:
+    # Expired before the pause is read, or crossed while reading it: either
+    # way nothing is changed on the run.
+    harness = _battle_harness()
+    api = _RuntimeApi(runs=[_awaiting_review_run()], checkpoints=[_checkpoint()])
+    api.install(harness, monkeypatch)
+    clock = [0.0]
+    monkeypatch.setattr(
+        harness,
+        "time",
+        SimpleNamespace(monotonic=lambda: clock[0], sleep=lambda _seconds: None),
+    )
+
+    def slow(**kwargs: Any) -> object:
+        clock[0] += 60
+        return api.request(**kwargs)
+
+    monkeypatch.setattr(harness, "_request_json_or_null", slow)
+    execution = _execution(harness, checkpoints=(_edit_checkpoint(harness),))
+
+    evidence, _ = _execute(
+        harness,
+        execution,
+        tmp_path=tmp_path,
+        timeout_seconds=30 if slow_active_read else 0,
+    )
+
+    assert evidence["execution"]["outcome"] == "timed_out"
+    assert api.paths("PATCH") == []
+    assert [path for path in api.paths("POST") if "review-checkpoints" in path] == []
+    assert (f"{_RUN_PATH}/review-checkpoints/active/" in api.paths("GET")) is (
+        slow_active_read
+    )
+    assert f"{_RUN_PATH}/cancel/" in api.paths("POST")
+
+
+def test_an_unmeasured_output_is_a_re_measurable_slot_not_a_verdict(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    # Past a read bound the six-file case's PDF cannot be judged, so neither
+    # its expectation checks nor the output verdict may score it.
+    harness = _battle_harness()
+    cases = harness._read_cases_file(harness.DEFAULT_CASES_FILE)
+    case = {case.case_id: case for case in cases}[
+        "six_file_document_report_release_gate"
+    ]
+    run = {"id": "run-1", "status": "completed", "result": {"kind": "artifact"}}
+    run["result"]["files"] = [_PDF_FILE]
+    api = _RuntimeApi(
+        contract={
+            "steps_requiring_input": [{"step_id": "reader"}],
+            "final_output": {"output_type": "pdf"},
+        },
+        runs=[run],
+    )
+    api.install(harness, monkeypatch)
+    monkeypatch.setattr(harness, "_upload_runtime_file", lambda **_: {"id": "up"})
+    monkeypatch.setattr(harness, "urlopen", lambda *_a, **_k: io.BytesIO(b"%" * 64))
+    monkeypatch.setattr(harness, "_MAX_FINAL_FILE_BYTES", 32)
+
+    with raises(harness.BattleFlowLifecycleError) as raised:
+        harness._apply_execute_and_cleanup_flow(
+            case=case,
+            config=harness.ApiConfig(
+                base_url="http://localhost:8123/api/v1",
+                api_key="test-key",
+                timeout_seconds=1,
+            ),
+            plan_id="plan-1",
+            runtime_file_paths=harness._case_runtime_file_paths(case),
+            timeout_seconds=5,
+            artifact_output_dir=tmp_path,
+        )
+    failure = {
+        "artifact_mode": "live_execution_failure",
+        "case_identity": harness._case_identity(case),
+        "case_contract_sha256": harness._case_contract_sha256(case),
+        "repetition": 1,
+        **harness._failure_error_fields(raised.value),
+    }
+    bundle_path = tmp_path / "unmeasured.json"
+    bundle_path.write_text(json.dumps(failure), encoding="utf-8")
+
+    row = harness._suite_result(harness.seal_observation(failure), bundle_path)
+
+    assert "exceeds 32 bytes" in row["error"]
+    assert row["observation_status"] == "execution_failure"
+    assert row["expectation_verdict"] == "not_evaluated"
+    assert row["failed_checks"] == []
+    assert (row["output_executed"], row["output_success"]) == (True, None)
+    observation = harness.observation_from_row(row, where="unmeasured output")
+    assert harness.observation_is_replacement_eligible(observation) is True
+
+
+def test_a_source_starved_run_fails_output_success_while_the_plan_stays_accepted(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    harness = _battle_harness()
+    api = _RuntimeApi(runs=[_completed_text_run("Förskolan i Kvissleby avvecklas.")])
+    api.install(harness, monkeypatch)
+    execution = _execution(harness, required_facts=("Kvissleby", "Njurunda"))
+    case = harness.BattleCase(
+        case_id="source-starved",
+        prompt="Build and run the Flow.",
+        apply_plan=True,
+        execution=execution,
+    )
+    plan_check = {"name": "plan_created", "passed": True, "actual": True}
+    bundle = _complete_live_case_bundle(
+        harness, case, quality_checks=[{**plan_check, "expected": True}]
+    )
+    evidence, report = _execute(harness, execution, tmp_path=tmp_path)
+    # Output checks are scored beside the expectation checks, never among them.
+    assert "required_fact" not in {check["name"] for check in report["checks"]}
+    bundle["journey"] = {"outcome_class": "plan_first_pass"}
+    bundle["runtime_evidence"] = evidence
+    bundle["quality_report"].update(
+        output_checks=report["output_checks"], output_success=report["output_success"]
+    )
+    bundle_path = tmp_path / "source-starved.json"
+    bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
+
+    result = harness._suite_result(harness.seal_observation(bundle), bundle_path)
+
+    missing = [check for check in report["output_checks"] if not check["passed"]]
+    assert [check["fact"] for check in missing] == ["Njurunda"]
+    assert "Njurunda" in missing[0]["reason"]
+    assert result["observation_status"] == "completed"
+    assert result["outcome_class"] == "plan_first_pass"
+    assert result["expectation_verdict"] == "pass"
+    assert result["output_success"] is False
+    assert result["output_failed_checks"] == ["required_fact"]
+    observation = harness.observation_from_row(result, where="source-starved")
+    assert observation.output_success is False
+
+    # Reanalysis scores the kept output again, from the case's own oracles.
+    output_dir = tmp_path / "reanalyzed"
+    assert (
+        harness._reanalyze_bundles(bundle_paths=[bundle_path], output_dir=output_dir)
+        == 0
+    )
+    reanalyzed = json.loads(next(output_dir.iterdir()).read_text())
+    assert reanalyzed["quality_report"]["output_checks"] == report["output_checks"]
+    assert reanalyzed["observation"]["output_success"] is False
+
+
+def test_a_maximal_run_stays_within_its_request_demand(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    # The demand arithmetic is only as good as the calls it bounds, so count
+    # them: an edited checkpoint, an undeclared pause, the cancel.
+    harness = _battle_harness()
+    files = (Path("a.pdf"), Path("b.pdf"))
+    execution = _execution(
+        harness,
+        inputs=harness.ExecutionInputs(files=tuple(path.name for path in files)),
+        checkpoints=(_edit_checkpoint(harness),),
+    )
+    case = harness.BattleCase(
+        case_id="maximal", prompt="p", apply_plan=True, execution=execution
+    )
+    runtime_demand = harness.observation_request_demand(
+        case, timeout_seconds=2
+    ) - harness.observation_request_demand(
+        replace(case, execution=None), timeout_seconds=2
+    )
+    api = _RuntimeApi(
+        contract={"steps_requiring_input": [{"step_id": "reader"}]},
+        runs=[_awaiting_review_run()],
+        checkpoints=[_checkpoint(), _checkpoint(id="cp-2", review_mode="view")],
+    )
+    api.install(harness, monkeypatch)
+    uploads: list[object] = []
+    monkeypatch.setattr(
+        harness,
+        "_upload_runtime_file",
+        lambda **kwargs: uploads.append(kwargs) or {"id": f"up-{len(uploads)}"},
+    )
+
+    evidence, _ = _execute(
+        harness,
+        execution,
+        tmp_path=tmp_path,
+        runtime_file_paths=files,
+        timeout_seconds=2,
+    )
+
+    assert evidence["execution"]["outcome"] == "checkpoint_failure"
+    assert f"{_RUN_PATH}/cancel/" in api.paths("POST")
+    assert len(api.calls) + len(uploads) <= runtime_demand
+
+
+def test_cases_file_reads_an_execution_block() -> None:
+    harness = _battle_harness()
+    cases = harness._read_cases_file(harness.DEFAULT_CASES_FILE)
+    case = {case.case_id: case for case in cases}[
+        "six_file_document_report_release_gate"
+    ]
+
+    assert case.execution is not None
+    assert len(case.execution.inputs.files) == 6
+    assert case.execution.checkpoints == ()
+    assert case.execution.expect.output_kind == "pdf"
+    assert case.execution.expect.required_facts
+    assert "{{" in case.execution.expect.forbidden
+
+
+@mark.parametrize(
+    ("execution", "error"),
+    [
+        (
+            {
+                "inputs": {"text": "Skriv beslutet.", "audio_stream": "mic"},
+                "expect": {"output_kind": "text"},
+            },
+            "unknown input kinds: audio_stream",
+        ),
+        (
+            {"inputs": {"text": "Skriv beslutet."}, "expect": {"forbidden": ["{{"]}},
+            "required_facts or an output_kind",
+        ),
+    ],
+)
+def test_cases_file_rejects_an_execution_block_it_cannot_measure(
+    tmp_path: Path, execution: dict[str, object], error: str
+) -> None:
+    harness = _battle_harness()
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(
+        json.dumps(
+            {
+                "version": harness.SUPPORTED_CASES_FILE_VERSION,
+                "cases": [
+                    {
+                        "id": "executed-case",
+                        "prompt": "Build and run a Flow.",
+                        "apply_plan": True,
+                        "execution": execution,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with raises(ValueError, match=error):
+        harness._read_cases_file(cases_path)

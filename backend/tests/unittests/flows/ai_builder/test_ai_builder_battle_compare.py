@@ -567,6 +567,48 @@ def test_failed_checks_aggregate_across_repetitions(tmp_path: Path) -> None:
     ]
 
 
+def test_executed_output_success_is_reported_beside_conformance(
+    tmp_path: Path,
+) -> None:
+    # A run whose output lacks a required fact is its own measurement: the
+    # plan conformance of the case, and so its direction, must not move.
+    module = _compare_module()
+    baseline = _write(
+        tmp_path,
+        "base.json",
+        [
+            {
+                **_row("case-a", "plan_first_pass"),
+                "output_executed": True,
+                "output_success": True,
+            },
+            _row("case-b", "plan_first_pass"),
+        ],
+    )
+    current = _write(
+        tmp_path,
+        "cur.json",
+        [
+            {
+                **_row("case-a", "plan_first_pass"),
+                "output_executed": True,
+                "output_success": False,
+            },
+            _row("case-b", "plan_first_pass"),
+        ],
+    )
+
+    report = module.compare(baseline, current)
+
+    assert report["direction_counts"] == {"unchanged": 2}
+    assert report["executed_output"]["baseline"]["executed"] == 1
+    assert report["executed_output"]["baseline"]["output_success"] == 1
+    assert report["executed_output"]["current"]["executed"] == 1
+    assert report["executed_output"]["current"]["output_success"] == 0
+    assert report["executed_output"]["current"]["failed_observations"] == ["case-a r1"]
+    assert "Executed output" in module._render_markdown(report, only_changed=True)
+
+
 def test_mixed_repetition_design_gets_no_margin_verdict(tmp_path: Path) -> None:
     # The margin is calibrated on same-design repetition movement. A repeated
     # baseline against a single-run candidate measures a different quantity,

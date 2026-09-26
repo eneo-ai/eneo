@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal, cast, get_args
@@ -288,6 +288,9 @@ class Observation:
     classifier_calls: int | None
     classifier_prompt_tokens: int | None
     classifier_total_tokens: int | None
+    # See `executed_output_report`.
+    output_executed: bool
+    output_success: bool | None
     # The row as written. The release gate reads only the typed fields above;
     # the comparator reports on the whole receipt, and giving it the raw row
     # here is what lets it drop its own tolerant loader instead of keeping a
@@ -401,6 +404,16 @@ def observation_from_row(raw_row: Any, *, where: str) -> Observation:
             f"{where}: observation_status {observation_status!r} requires an "
             f"acquisition failure class; got {failure_class!r}."
         )
+    output_executed = row.get("output_executed", False)
+    output_success = row.get("output_success")
+    if not isinstance(output_executed, bool) or (
+        output_success is not None
+        and (not isinstance(output_success, bool) or not output_executed)
+    ):
+        raise ReceiptError(
+            f"{where}: output_success must be null, or true or false for an "
+            "observation that executed its Flow."
+        )
     usage = _mapping(row.get("authoring_usage"), where=where, key="authoring_usage")
     raw_classifier_usage = journey.get("classifier_usage")
     classifier_usage = (
@@ -462,8 +475,44 @@ def observation_from_row(raw_row: Any, *, where: str) -> Observation:
             where=where,
             key="classifier_usage.total_tokens",
         ),
+        output_executed=output_executed,
+        output_success=output_success,
         row=row,
     )
+
+
+def executed_output_report(observations: Iterable[Observation]) -> JsonObject:
+    """Whether executed Flows produced the output their cases declare.
+
+    A separate measure: it never changes an outcome class, an expectation
+    verdict or a release-gate row, and it has no threshold because none was
+    pre-registered. Every observation that created a run is executed; one
+    whose output was never scored is unmeasured, never dropped. The gate and
+    the comparator both report it from here.
+    """
+
+    executed = [item for item in observations if item.output_executed]
+
+    def slots(verdict: bool | None) -> list[str]:
+        return sorted(
+            f"{item.case_id} r{item.repetition}"
+            for item in executed
+            if item.output_success is verdict
+        )
+
+    failed, unmeasured = slots(False), slots(None)
+    scored = len(executed) - len(unmeasured)
+    succeeded = scored - len(failed)
+    return {
+        "population": "observations that created a run of their Flow",
+        "executed": len(executed),
+        "scored": scored,
+        "unmeasured": len(unmeasured),
+        "output_success": succeeded,
+        "rate": round(succeeded / scored, 4) if scored else None,
+        "failed_observations": failed,
+        "unmeasured_observations": unmeasured,
+    }
 
 
 def receipt_from_summary(

@@ -81,7 +81,7 @@ def test_generator_is_deterministic_and_portable_with_pinned_protocol(
     assert _fixture_hashes(fixture_dir) == first_hashes
 
 
-def test_case_loader_rejects_runtime_bindings_without_execution(
+def test_case_loader_rejects_runtime_bindings_without_an_applied_plan(
     tmp_path: Path,
 ) -> None:
     harness = _load_module(
@@ -97,17 +97,17 @@ def test_case_loader_rejects_runtime_bindings_without_execution(
                     {
                         "id": "plan-only-with-runtime-files",
                         "prompt": "Build a plan-only flow.",
-                        "runtime_files": [PROTOCOL_NAME],
+                        "execution": {
+                            "inputs": {"files": [PROTOCOL_NAME]},
+                            "expect": {"output_kind": "pdf"},
+                        },
                     }
                 ],
             }
         ),
         encoding="utf-8",
     )
-    with raises(
-        ValueError,
-        match="cannot declare runtime_files without execute_flow=true",
-    ):
+    with raises(ValueError, match="cannot execute without apply_plan=true"):
         harness._read_cases_file(invalid_path)
 
 
@@ -121,8 +121,10 @@ def test_battle_cases_and_fixture_manifest_cannot_drift_apart() -> None:
     referenced = {
         name
         for case in payload["cases"]
-        for key in ("attachments", "runtime_files")
-        for name in case.get(key, ())
+        for name in (
+            *case.get("attachments", ()),
+            *case.get("execution", {}).get("inputs", {}).get("files", ()),
+        )
     }
     assert referenced
     assert referenced <= set(pinned)

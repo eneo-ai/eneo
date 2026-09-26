@@ -1,5 +1,5 @@
 {
-  "version": 8,
+  "version": 9,
   "description": "A Flow AI Builder benchmark for Swedish municipal work. It combines release and architecture coverage with curated cases grounded in municipal services, including Sundsvall's Open ePlatform catalogue, a plan-authoring tjänsteskrivelse family, and ten long-context municipal service prompts. The cases balance deliberately vague first requests, controlled single-gap interviews, scripted question-to-plan continuations, complete everyday requests, technically explicit contracts, applied human-review journeys, and realistic 6–9k-character instructions. Expectations measure structured questioning, topology, input ownership, output fields, delivery format, and review placement without relying on prompt-specific golden prose. Run repeated samples to distinguish model variance from product regressions.",
   "synthetic_user_profiles": {
     "audio_source": {
@@ -2481,7 +2481,6 @@
         "six_file_document_report"
       ],
       "apply_plan": true,
-      "execute_flow": true,
       "prompt": "Bygg ett flöde för exakt de sex bifogade källdokumenten. Läs varje källa uttömmande och skapa exakt en documents-post per källfil. För varje källa ska titel, år, kategori, typ, författare, slutsatser, sammanfattning, synligt källnamn och eventuell försämrad extraktionskvalitet bevaras. Skapa sedan en samlad översikt, komponera rapporten deterministiskt direkt från documents-posterna och rendera en PDF. Slut-PDF:en ska visa alla fält med tydliga etiketter. Saknade eller försämrade uppgifter ska visas som 'framgår ej' tillsammans med synlig degraderingsinformation; de får inte döljas eller gissas.",
       "expected": {
         "min_steps": 4,
@@ -2716,14 +2715,33 @@
         "05_lokalkalkyl.csv",
         "06_tidigare_beslut.pdf"
       ],
-      "runtime_files": [
-        "01_protokoll_bun_2026_02_25.pdf",
-        "02_tjansteskrivelse_underlag.docx",
-        "03_barnkonsekvensanalys.docx",
-        "04_remissvar.docx",
-        "05_lokalkalkyl.csv",
-        "06_tidigare_beslut.pdf"
-      ]
+      "execution": {
+        "inputs": {
+          "files": [
+            "01_protokoll_bun_2026_02_25.pdf",
+            "02_tjansteskrivelse_underlag.docx",
+            "03_barnkonsekvensanalys.docx",
+            "04_remissvar.docx",
+            "05_lokalkalkyl.csv",
+            "06_tidigare_beslut.pdf"
+          ]
+        },
+        "checkpoints": [],
+        "expect": {
+          "output_kind": "pdf",
+          "required_facts": [
+            "Njurunda",
+            "Klockarberget",
+            "Barnkonsekvensanalys",
+            "Remissvar",
+            "Lokalkalkyl"
+          ],
+          "forbidden": [
+            "{{",
+            "}}"
+          ]
+        }
+      }
     },
     {
       "id": "complex_authoring_spec_first_pass",

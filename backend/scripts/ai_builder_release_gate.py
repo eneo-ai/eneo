@@ -42,7 +42,11 @@ _SCRIPTS_DIR = str(Path(__file__).resolve().parent)
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
-from ai_builder_receipt import Observation, Receipt  # noqa: E402
+from ai_builder_receipt import (  # noqa: E402
+    Observation,
+    Receipt,
+    executed_output_report,
+)
 
 JsonObject = dict[str, Any]
 
@@ -252,6 +256,7 @@ class ReleaseVerdict:
     release: Literal["go", "no_go", "invalid"]
     trajectory: JsonObject
     diagnostics: JsonObject
+    executed_output: JsonObject
 
     def as_json(self) -> JsonObject:
         return {
@@ -261,6 +266,7 @@ class ReleaseVerdict:
             "rows": [row.as_json() for row in self.rows],
             "trajectory": self.trajectory,
             "diagnostics": self.diagnostics,
+            "executed_output": self.executed_output,
         }
 
 
@@ -820,6 +826,7 @@ def evaluate(
 ) -> ReleaseVerdict:
     invalidity = receipt_invalidity(receipt, matrix)
     diagnostics = _receipt_diagnostics(receipt)
+    executed_output = executed_output_report(receipt.observations)
     if invalidity:
         return ReleaseVerdict(
             receipt_valid=False,
@@ -828,6 +835,7 @@ def evaluate(
             release="invalid",
             trajectory={},
             diagnostics=diagnostics,
+            executed_output=executed_output,
         )
     rows = evaluate_rows(receipt, matrix, pin)
     gating = [row for row in rows if row.gating]
@@ -846,6 +854,7 @@ def evaluate(
             and bool(instability["within_ceiling"]),
         },
         diagnostics=diagnostics,
+        executed_output=executed_output,
     )
 
 
@@ -898,6 +907,8 @@ def perfect_receipt(receipt: Receipt) -> Receipt:
             classifier_prompt_tokens=0,
             classifier_total_tokens=0,
             elapsed_ms=0,
+            output_executed=observation.output_executed,
+            output_success=True if observation.output_executed else None,
             # Feasibility reads typed fields only. Keeping the measured seal
             # avoids manufacturing a second owner for the observation shape.
             row=observation.row,
