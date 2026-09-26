@@ -174,7 +174,7 @@ export function WebsiteDetail({
           {tab === "crawls" ? (
             <CrawlRunsTable runs={runs} />
           ) : (
-            <BlobTable blobs={blobs} canEdit={false} />
+            <BlobTable blobs={blobs} canEdit={false} labelledBy={tabId("blobs")} />
           )}
         </div>
       </div>

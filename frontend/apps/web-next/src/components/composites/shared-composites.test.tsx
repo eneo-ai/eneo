@@ -46,6 +46,23 @@ describe("PageHeader", () => {
     expect(trail.querySelector("[aria-current]")).toBeNull();
   });
 
+  it("gives the title the heading id, so a table can take it as its name", () => {
+    render(
+      <>
+        <PageHeader title="Promptbibliotek" headingId="page-title" />
+        <table aria-labelledby="page-title">
+          <tbody>
+            <tr>
+              <td>Sammanfatta</td>
+            </tr>
+          </tbody>
+        </table>
+      </>
+    );
+    expect(screen.getByRole("heading", { level: 1 }).id).toBe("page-title");
+    expect(screen.getByRole("table", { name: "Promptbibliotek" })).toBeTruthy();
+  });
+
   it("keeps the legacy children actions slot", () => {
     render(
       <PageHeader title="Appar">
