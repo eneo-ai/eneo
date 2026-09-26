@@ -181,6 +181,8 @@ export function SkillBindingsEditor({
   const [revisionMetadata, setRevisionMetadata] = useState<Preview[]>([]);
 
   function setDraft(next: Binding[] | ((current: Binding[]) => Binding[])) {
+    // What was announced (saved, nothing to save) no longer holds.
+    setAnnouncement("");
     if (resource === "personal_chat") {
       onChange?.(typeof next === "function" ? next(bindings ?? []) : next);
       return;
@@ -302,8 +304,14 @@ export function SkillBindingsEditor({
     }
   }
 
+  // Save and Discard stay enabled, so they keep focus: busy, a second press
+  // is ignored; with nothing changed they say so.
   async function saveDraft() {
-    if (!dirty || saving || !save) return;
+    if (saving || !save) return;
+    if (!dirty) {
+      setAnnouncement(t("form_nothing_to_save"));
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     const submitted = draft.map((binding) => ({ ...binding }));
@@ -317,6 +325,12 @@ export function SkillBindingsEditor({
     } finally {
       setSaving(false);
     }
+  }
+
+  function discardDraft() {
+    setAnnouncement(t(dirty ? "form_changes_discarded" : "form_nothing_to_discard"));
+    setEditing(null);
+    setSaveError(null);
   }
 
   async function createSkill(value: Schema<"SkillCreateRequest">) {
@@ -660,17 +674,14 @@ export function SkillBindingsEditor({
       )}
       {resource !== "personal_chat" && (
         <div className="flex flex-wrap items-center gap-2 border-t pt-4">
-          <Button disabled={!dirty || saving || !canEdit} onClick={() => void saveDraft()}>
+          <Button
+            disabled={!canEdit}
+            aria-busy={saving || undefined}
+            onClick={() => void saveDraft()}
+          >
             {saving ? t("saving") : t("skills_bindings_save")}
           </Button>
-          <Button
-            variant="ghost"
-            disabled={!dirty || saving}
-            onClick={() => {
-              setEditing(null);
-              setSaveError(null);
-            }}
-          >
+          <Button variant="ghost" disabled={saving} onClick={discardDraft}>
             {t("discard_changes")}
           </Button>
           {dirty && (

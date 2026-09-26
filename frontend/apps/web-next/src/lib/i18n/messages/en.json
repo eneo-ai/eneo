@@ -5607,5 +5607,7 @@
   "form_problem_choose_provider": "Choose a provider.",
   "form_problem_choose_target_model": "Choose a model to migrate to.",
   "form_problem_confirm_override": "Tick the box to force the migration.",
-  "storage_limit_invalid": "Enter a positive value, for example 10 MB."
+  "storage_limit_invalid": "Enter a positive value, for example 10 MB.",
+  "form_changes_discarded": "The changes were discarded.",
+  "form_nothing_to_discard": "No changes to discard."
 }

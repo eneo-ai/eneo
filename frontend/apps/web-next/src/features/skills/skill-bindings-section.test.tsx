@@ -151,6 +151,82 @@ describe("resource Skill bindings", () => {
     ).toBe(false);
   });
 
+  it("keeps focus on a busy Save, and says when there is nothing to save or discard", async () => {
+    get.mockImplementation(() =>
+      ok({
+        bindings: [summary("a", 1)],
+        runtime: {
+          fallback_reason: null,
+          effective_mode: "selective",
+          skill_context_tokens: 10,
+          skill_context_token_limit: 100
+        }
+      })
+    );
+    let resolve: (value: unknown) => void = () => {};
+    const save = vi.fn(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        })
+    );
+    show("assistant", save);
+    const saveButton = await screen.findByRole("button", { name: "skills_bindings_save" });
+    const discard = screen.getByRole("button", { name: "discard_changes" });
+
+    fireEvent.click(saveButton);
+    expect(screen.getByText("form_nothing_to_save").getAttribute("role")).toBe("status");
+    fireEvent.click(discard);
+    expect(discard.hasAttribute("disabled")).toBe(false);
+    expect(screen.getByText("form_nothing_to_discard")).toBeTruthy();
+
+    const mode = screen.getByLabelText("skills_activation_mode_label");
+    fireEvent.change(mode, { target: { value: "on_demand" } });
+    // What was announced no longer holds once the draft changes.
+    expect(screen.queryByText("form_nothing_to_discard")).toBeNull();
+    saveButton.focus();
+    fireEvent.click(saveButton);
+    const busy = await screen.findByRole("button", { name: "saving" });
+    expect(busy).toBe(saveButton);
+    expect(busy.getAttribute("aria-busy")).toBe("true");
+    expect(busy.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(busy);
+    fireEvent.click(busy);
+    expect(save).toHaveBeenCalledTimes(1);
+
+    resolve({});
+    expect(await screen.findByText("skills_bindings_saved")).toBeTruthy();
+    expect(document.activeElement).toBe(saveButton);
+  });
+
+  it("keeps focus on Discard after it discards the draft", async () => {
+    get.mockImplementation(() =>
+      ok({
+        bindings: [summary("a", 1)],
+        runtime: {
+          fallback_reason: null,
+          effective_mode: "selective",
+          skill_context_tokens: 10,
+          skill_context_token_limit: 100
+        }
+      })
+    );
+    show("assistant", vi.fn());
+    const mode = await screen.findByLabelText("skills_activation_mode_label");
+    fireEvent.change(mode, { target: { value: "on_demand" } });
+    const discard = screen.getByRole("button", { name: "discard_changes" });
+    discard.focus();
+
+    fireEvent.click(discard);
+
+    expect((screen.getByLabelText("skills_activation_mode_label") as HTMLSelectElement).value).toBe(
+      "always"
+    );
+    expect(discard.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(discard);
+    expect(screen.getByText("form_changes_discarded")).toBeTruthy();
+  });
+
   it("edits Personal Chat bindings inside the policy draft without saving separately", async () => {
     const onChange = vi.fn();
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

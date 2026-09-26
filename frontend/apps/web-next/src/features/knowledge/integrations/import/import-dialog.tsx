@@ -1,5 +1,6 @@
 "use client";
 
+import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { useQuery } from "@tanstack/react-query";
 import Image from "next/image";
@@ -46,44 +47,37 @@ export function useImportableIntegrations(): {
   return { integrations, isPending };
 }
 
-function IntegrationCard({
-  integration,
-  selected,
-  onSelect
-}: {
-  integration: UserIntegration;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  const t = useTranslations();
+/**
+ * One integration to import from, as a radio: the choice is exclusive. One
+ * that is not connected cannot be chosen, and says where to connect it.
+ */
+function integrationOption(integration: UserIntegration, t: ReturnType<typeof useTranslations>) {
   const vendor = VENDOR[integration.integration_type];
-  const disabled = !integration.connected;
-
   return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onSelect}
-      title={
-        disabled
-          ? t("enable_integration_in_account_settings", { name: integration.name })
-          : undefined
-      }
-      className={`flex items-center gap-4 rounded-lg border p-3 text-left transition-colors ${
-        selected ? "border-primary bg-accent" : "hover:bg-muted/50"
-      } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
-    >
-      <Image src={vendor.logo} alt="" width={32} height={32} className="shrink-0" />
-      <div className="flex min-w-0 flex-col">
+    <RadioListItem
+      key={integration.tenant_integration_id}
+      value={integration.tenant_integration_id}
+      isDisabled={!integration.connected}
+      startContent={<Image src={vendor.logo} alt="" width={32} height={32} className="shrink-0" />}
+      label={
         <span className="flex items-center gap-2">
           <span className="font-semibold">{integration.name}</span>
           <Badge variant={integration.auth_type === "tenant_app" ? "default" : "secondary"}>
             {integration.auth_type === "tenant_app" ? t("organization") : t("personal")}
           </Badge>
         </span>
-        <span className="text-muted-foreground line-clamp-2 text-sm">{t(vendor.importHint)}</span>
-      </div>
-    </button>
+      }
+      description={
+        <>
+          {t(vendor.importHint)}
+          {!integration.connected && (
+            <span className="block">
+              {t("enable_integration_in_account_settings", { name: integration.name })}
+            </span>
+          )}
+        </>
+      }
+    />
   );
 }
 
@@ -137,14 +131,14 @@ export function ImportKnowledgeDialog({
                 {t("no_integrations_available")}
               </p>
             ) : (
-              integrations.map((integration) => (
-                <IntegrationCard
-                  key={integration.tenant_integration_id}
-                  integration={integration}
-                  selected={selected?.tenant_integration_id === integration.tenant_integration_id}
-                  onSelect={() => setSelectedId(integration.tenant_integration_id)}
-                />
-              ))
+              <RadioList
+                label={t("integrations")}
+                isLabelHidden
+                value={selected?.tenant_integration_id ?? ""}
+                onChange={setSelectedId}
+              >
+                {integrations.map((integration) => integrationOption(integration, t))}
+              </RadioList>
             )}
           </div>
           <DialogFooter>
