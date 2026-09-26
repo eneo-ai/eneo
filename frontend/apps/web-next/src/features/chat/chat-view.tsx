@@ -259,8 +259,6 @@ export function ChatView({
         // Failed before the answer started: the question goes back to the
         // composer, attachments included. A first question takes the view back
         // to the start state; keep focus in the composer across that swap.
-        refocusComposer.current =
-          dockElement.current?.contains(document.activeElement ?? null) ?? false;
         setInput((current) => (current.trim() ? current : pending.text));
         attachments.restore(pending.attachments);
         setMessages((current) => {
@@ -269,6 +267,11 @@ export function ChatView({
             last?.role === "user" &&
             last.parts.some((part) => part.type === "text" && part.text === pending.text)
           ) {
+            // useChat applies this at once, before the view re-renders.
+            if (current.length === 1) {
+              refocusComposer.current =
+                dockElement.current?.contains(document.activeElement ?? null) ?? false;
+            }
             return current.slice(0, -1);
           }
           return current;
