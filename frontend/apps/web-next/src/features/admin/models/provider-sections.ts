@@ -3,6 +3,7 @@ import {
   formatCostPerMinute,
   getDeprecationStatus
 } from "@/features/ai-models/format-model-stats";
+import { type KeyExpiry, keyExpiry } from "./key-expiry";
 import { isApiKeyRequired, type ModelProvider, type ProviderCapabilities } from "./model-providers";
 import { type AdminModel, type ModelKind, type ModelsPresentation, modelLabel } from "./models";
 
@@ -193,16 +194,43 @@ export function modelLifecycle(model: AdminModel, today?: string): ModelLifecycl
   return { kind: "active" };
 }
 
+/** An active provider with something to fix. */
+export interface ProviderAttention {
+  section: ProviderSection;
+  /** The latest connection check failed. */
+  connectionFailed: boolean;
+  /** The key expires within the warning window or has expired. */
+  keyExpiry: KeyExpiry | null;
+}
+
 export interface ModelsAttention {
-  /** Providers whose required API key is missing (their models can't be called). */
-  missingKey: ProviderSection[];
+  /**
+   * Active providers, in page order, whose required key is missing (their
+   * models can't be called), whose latest connection check failed, or whose
+   * key expires soon or has expired.
+   */
+  providers: ProviderAttention[];
   /** Deprecated models that are still enabled and not yet migrated. */
   deprecated: KindedModel[];
 }
 
-/** Real problems the provider and model data expose, for the page banner. */
-export function modelsAttention(sections: ProviderSection[], today?: string): ModelsAttention {
-  const missingKey = sections.filter((section) => section.isActive && section.needsKey);
+/**
+ * Real problems the provider and model data expose, for the page banner.
+ * `today` dates model deprecation; key expiry is against `viewerToday`, the
+ * viewer's own date, and left out while that is unknown (before hydration).
+ */
+export function modelsAttention(
+  sections: ProviderSection[],
+  { today, viewerToday = null }: { today?: string; viewerToday?: string | null } = {}
+): ModelsAttention {
+  const providers = sections.flatMap((section): ProviderAttention[] => {
+    if (!section.isActive) return [];
+    const connectionFailed = section.provider.connection_check?.status === "failed";
+    const expiry = viewerToday ? keyExpiry(section.provider.key_expires_on, viewerToday) : null;
+    return section.needsKey || connectionFailed || expiry
+      ? [{ section, connectionFailed, keyExpiry: expiry }]
+      : [];
+  });
   const deprecated = sections.flatMap((section) =>
     section.models.filter(
       ({ model }) =>
@@ -211,7 +239,7 @@ export function modelsAttention(sections: ProviderSection[], today?: string): Mo
         modelLifecycle(model, today).kind === "deprecated"
     )
   );
-  return { missingKey, deprecated };
+  return { providers, deprecated };
 }
 
 export type ModelPrice =

@@ -4362,7 +4362,6 @@
   "api_credentials": "API-uppgifter",
   "api_credentials_hint": "Lagra leverantörens uppgift som används när modellen anropas.",
   "not_configured": "Inte konfigurerad",
-  "configured": "Konfigurerad",
   "migration_impact": "Migreringens påverkan",
   "migration_no_warnings": "Inga kompatibilitetsvarningar",
   "migration_warnings": "Migreringsvarningar",
@@ -4493,8 +4492,6 @@
   "admin_models_unclassified": "Ej klassad",
   "admin_models_results": "{count, plural, =0 {Inga modeller matchar filtren} one {# modell visas} other {# modeller visas}}",
   "admin_models_attention_title": "Några modeller behöver åtgärdas",
-  "admin_models_missing_key_title": "{count, plural, one {En leverantör saknar API-nyckel} other {# leverantörer saknar API-nyckel}}",
-  "admin_models_missing_key_description": "{providers}: modellerna kan inte användas förrän en nyckel har lagts till. Välj Redigera leverantör i leverantörens meny.",
   "admin_models_deprecated_title": "{count, plural, one {En utfasad modell är fortfarande aktiv} other {# utfasade modeller är fortfarande aktiva}}",
   "admin_models_deprecated_description": "{models}: flytta användningen till en annan modell med Migrera i modellens meny.",
   "admin_models_providers_load_failed": "Leverantörerna kunde inte läsas in",
@@ -5550,5 +5547,7 @@
   "provider_status_key_expiring": "Nyckeln går ut {date}",
   "provider_status_key_expired": "Nyckeln har gått ut {date}",
   "provider_status_key_expiry_label": "Nyckelns utgångsdatum",
-  "provider_status_key_expiry_description": "De flesta leverantörer visar inte när en nyckel går ut, så ange datumet själv. Leverantörens kort varnar {days} dagar innan."
+  "provider_status_key_expiry_description": "De flesta leverantörer visar inte när en nyckel går ut, så ange datumet själv. Leverantörens kort varnar {days} dagar innan.",
+  "provider_status_attention_title": "{count, plural, one {En leverantör behöver åtgärdas} other {# leverantörer behöver åtgärdas}}",
+  "provider_status_attention_hint": "Gå till leverantören för att testa anslutningen igen. Nyckel och utgångsdatum byter du under Redigera leverantör i leverantörens meny."
 }

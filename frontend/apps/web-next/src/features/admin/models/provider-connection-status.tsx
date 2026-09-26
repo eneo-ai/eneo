@@ -4,57 +4,15 @@ import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Text } from "@astryxdesign/core/Text";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useFormatter, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { ClientTime } from "@/components/composites/client-time";
-import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
+import { StatusLabel } from "@/components/composites/status-label";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { toast } from "@/lib/toast";
-import { keyExpiry, localIsoDate } from "./key-expiry";
-import {
-  checkProviderConnection,
-  type ConnectionCheckError,
-  type ModelProvider,
-  PROVIDERS_KEY
-} from "./model-providers";
-
-type Translate = ReturnType<typeof useTranslations>;
-
-/** The short reason that follows "Anslutningen misslyckades:". */
-function failureReason(t: Translate, error: ConnectionCheckError | null | undefined): string {
-  switch (error) {
-    case "authentication_failed":
-      return t("provider_status_reason_authentication_failed");
-    case "missing_credentials":
-      return t("provider_status_reason_missing_credentials");
-    case "not_found":
-      return t("provider_status_reason_not_found");
-    case "rate_limited":
-      return t("provider_status_reason_rate_limited");
-    case "rejected":
-      return t("provider_status_reason_rejected");
-    case "provider_error":
-      return t("provider_status_reason_provider_error");
-    case "timeout":
-      return t("provider_status_reason_timeout");
-    case "unreachable":
-      return t("provider_status_reason_unreachable");
-    default:
-      return t("provider_status_reason_unknown");
-  }
-}
-
-function connectionStatus(t: Translate, provider: ModelProvider): [StatusTone, string] {
-  const check = provider.connection_check;
-  if (check?.status === "ok") return ["success", t("provider_status_ok")];
-  if (check?.status === "failed") {
-    return ["error", t("provider_status_failed", { reason: failureReason(t, check.error) })];
-  }
-  return provider.connection_check_supported
-    ? ["neutral", t("provider_status_not_tested")]
-    : ["neutral", t("provider_status_unsupported")];
-}
+import { checkProviderConnection, type ModelProvider, PROVIDERS_KEY } from "./model-providers";
+import { useProviderNotices } from "./provider-notices";
 
 /**
  * A provider's connection line: the latest check ("Anslutningen fungerar",
@@ -64,9 +22,9 @@ function connectionStatus(t: Translate, provider: ModelProvider): [StatusTone, s
  */
 export function ProviderConnectionStatus({ provider }: { provider: ModelProvider }) {
   const t = useTranslations();
-  const format = useFormatter();
   const announce = useAnnounce();
   const queryClient = useQueryClient();
+  const notices = useProviderNotices();
   const hydrated = useHydrated();
 
   const check = useMutation({
@@ -86,7 +44,7 @@ export function ProviderConnectionStatus({ provider }: { provider: ModelProvider
         toast.error(
           t("provider_status_announce_failed", {
             name: provider.name,
-            reason: failureReason(t, result.error)
+            reason: notices.failureReason(result.error)
           })
         );
       }
@@ -94,24 +52,15 @@ export function ProviderConnectionStatus({ provider }: { provider: ModelProvider
     onError: (error) => toastApiError(error, t)
   });
 
-  const [tone, label] = connectionStatus(t, provider);
+  const connection = notices.connection(provider);
   const checkedAt = provider.connection_check?.checked_at;
-  const today = hydrated ? localIsoDate(new Date()) : null;
-  const expiry = today ? keyExpiry(provider.key_expires_on, today) : null;
-  const expiryDate = expiry
-    ? format.dateTime(new Date(`${expiry.date}T00:00:00Z`), {
-        day: "numeric",
-        month: "short",
-        // The year only when it isn't this one: "12 okt." but "12 jan. 2027".
-        year: expiry.date.slice(0, 4) === today?.slice(0, 4) ? undefined : "numeric",
-        timeZone: "UTC"
-      })
-    : null;
+  const expiry = notices.expiryOf(provider);
+  const expiryNotice = expiry ? notices.expiryNotice(expiry) : null;
 
   return (
     <div className="border-ax-border flex flex-wrap items-center gap-x-4 gap-y-2 border-b py-2 ps-4 pe-2.5">
       <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
-        <StatusLabel status={tone} label={label} />
+        <StatusLabel status={connection.tone} label={connection.label} />
         {hydrated && checkedAt ? (
           <Text type="supporting">
             {t.rich("provider_status_checked_at", {
@@ -119,15 +68,8 @@ export function ProviderConnectionStatus({ provider }: { provider: ModelProvider
             })}
           </Text>
         ) : null}
-        {expiry && expiryDate ? (
-          <StatusLabel
-            status={expiry.state === "expired" ? "error" : "warning"}
-            label={
-              expiry.state === "expired"
-                ? t("provider_status_key_expired", { date: expiryDate })
-                : t("provider_status_key_expiring", { date: expiryDate })
-            }
-          />
+        {expiryNotice ? (
+          <StatusLabel status={expiryNotice.tone} label={expiryNotice.label} />
         ) : null}
       </div>
       {provider.connection_check_supported ? (
