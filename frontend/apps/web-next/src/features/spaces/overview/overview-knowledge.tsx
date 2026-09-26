@@ -2,7 +2,8 @@
 
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { useCollator } from "@astryxdesign/core/i18n";
-import { pixel, proportional, Table, type TableColumn } from "@astryxdesign/core/Table";
+import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
+import { Table } from "@/components/astryx/table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { BookOpen, FolderClosed, Globe, Plug, Upload, type LucideIcon } from "lucide-react";
 import Link from "next/link";

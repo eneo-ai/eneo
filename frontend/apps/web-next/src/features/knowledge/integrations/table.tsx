@@ -4,13 +4,13 @@ import { Link as AstryxLink } from "@astryxdesign/core/Link";
 import {
   pixel,
   proportional,
-  Table,
   useTableSortable,
   useTableSortableState,
   type TableColumn,
   type TableSortComparator,
   type TableSortState
 } from "@astryxdesign/core/Table";
+import { Table } from "@/components/astryx/table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { Folder } from "lucide-react";
 import { useTranslations } from "next-intl";

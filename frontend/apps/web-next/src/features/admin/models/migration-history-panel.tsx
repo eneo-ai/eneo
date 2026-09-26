@@ -4,13 +4,13 @@ import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Selector } from "@astryxdesign/core/Selector";
 import {
-  Table,
   TableBody,
   TableCell,
   TableHeader,
   TableHeaderCell,
   TableRow
 } from "@astryxdesign/core/Table";
+import { Table } from "@/components/astryx/table";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Token } from "@astryxdesign/core/Token";
 import { useQuery } from "@tanstack/react-query";

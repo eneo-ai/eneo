@@ -8,7 +8,6 @@ import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import {
   pixel,
   proportional,
-  Table,
   useTableSelection,
   useTableSelectionState,
   useTableSortable,
@@ -16,6 +15,7 @@ import {
   type TableColumn,
   type UseTableSortableConfig
 } from "@astryxdesign/core/Table";
+import { Table } from "@/components/astryx/table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { FolderInput, Globe, Pencil, RefreshCw, SearchX, Trash2 } from "lucide-react";

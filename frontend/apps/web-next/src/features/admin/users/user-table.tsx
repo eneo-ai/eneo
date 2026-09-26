@@ -3,13 +3,13 @@
 import { Avatar } from "@astryxdesign/core/Avatar";
 import { Badge } from "@astryxdesign/core/Badge";
 import {
-  Table,
   TableBody,
   TableCell,
   TableHeader,
   TableHeaderCell,
   TableRow
 } from "@astryxdesign/core/Table";
+import { Table } from "@/components/astryx/table";
 import { Text } from "@astryxdesign/core/Text";
 import { useTranslations } from "next-intl";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";

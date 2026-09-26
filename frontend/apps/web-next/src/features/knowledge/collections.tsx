@@ -6,12 +6,12 @@ import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import {
   pixel,
   proportional,
-  Table,
   useTableSortable,
   useTableSortableState,
   type TableColumn,
   type UseTableSortableConfig
 } from "@astryxdesign/core/Table";
+import { Table } from "@/components/astryx/table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { FolderClosed, FolderInput, Pencil, SearchX, Trash2 } from "lucide-react";

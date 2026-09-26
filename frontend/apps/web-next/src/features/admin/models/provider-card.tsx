@@ -7,7 +7,8 @@ import {
   DropdownMenuItem
 } from "@astryxdesign/core/DropdownMenu";
 import { Heading } from "@astryxdesign/core/Heading";
-import { Table, TableBody, TableHeader, TableHeaderCell, TableRow } from "@astryxdesign/core/Table";
+import { TableBody, TableHeader, TableHeaderCell, TableRow } from "@astryxdesign/core/Table";
+import { Table } from "@/components/astryx/table";
 import { Text } from "@astryxdesign/core/Text";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";

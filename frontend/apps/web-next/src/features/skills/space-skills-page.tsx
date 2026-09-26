@@ -1,7 +1,8 @@
 "use client";
 
 import { IconButton } from "@astryxdesign/core/IconButton";
-import { pixel, proportional, Table, type TableColumn } from "@astryxdesign/core/Table";
+import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
+import { Table } from "@/components/astryx/table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { BookOpenCheck, Plus, Search, Trash2 } from "lucide-react";

@@ -8,13 +8,13 @@ import {
   paginateData,
   pixel,
   proportional,
-  Table,
   useTablePagination,
   useTableSortable,
   useTableSortableState,
   type TableColumn,
   type TableSortComparator
 } from "@astryxdesign/core/Table";
+import { Table } from "@/components/astryx/table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, FileText, Pencil, SearchX, Trash2 } from "lucide-react";

@@ -2,11 +2,11 @@
 
 import {
   proportional,
-  Table,
   useTableSortable,
   useTableSortableState,
   type TableColumn
 } from "@astryxdesign/core/Table";
+import { Table } from "@/components/astryx/table";
 import { SearchX } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";

@@ -111,6 +111,10 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
     `activity-sources.tsx` does).
   - A searchable Selector names its trigger by its label alone: give it an
     `aria-label` that includes the value (as `model-selector.tsx` does).
+  - Table names every scroll region "Tabell", and absolutely positioned
+    (screen-reader-only) cell content escaped its scroll box and widened the
+    page: `@/components/astryx/table` names the region, and `globals.css`
+    (section 9) makes the scroll box `relative`.
   - `CodeBlock`/`CodeEditor` inject runtime styles the CSP blocks (code fences
     in answers render through Streamdown's `@streamdown/code` in
     `MessageResponse`), `useClipboard` writes text/plain only (the chat's
@@ -222,10 +226,15 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
 
 ## Tables
 
-- Use Astryx `Table`, preferably data-driven (`data` + `columns`) with a width
-  on every column: `pixel(n)` for fixed columns, `proportional(n)` for text
-  (it keeps a 120 px minimum). Its plugins do sorting, filtering, pagination
-  and selection.
+- Use `Table` from `@/components/astryx/table` (lint enforces it; the other
+  parts still come from `@astryxdesign/core/Table`), preferably data-driven
+  (`data` + `columns`) with a width on every column: `pixel(n)` for fixed
+  columns, `proportional(n)` for text (it keeps a 120 px minimum). Its plugins
+  do sorting, filtering, pagination and selection.
+- Every table is named: `aria-labelledby` its visible heading, or a translated
+  `aria-label` (the wrapper's type requires one). The wrapper gives the
+  table's horizontal scroll region the same name; Astryx would call it just
+  "Tabell". Tables in answer content (Markdown) are the exception.
 - In children mode (`TableHeader` / `TableRow` / `TableHeaderCell`), header
   cells truncate with `max-width: 0`, which cancels a plain `w-*`: the column
   collapses to its padding. Give a fixed column its min width too
@@ -237,6 +246,8 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
   the table scrolls sideways in its own focusable region instead of squeezing
   the columns.
 - The page scans in `tests/a11y.spec.ts` fail on a column that collapsed.
+- Legacy shadcn tables (`@/components/ui/table`) get the same keyboard-scrollable,
+  named container from Astryx's `useScrollableArea`; name them the same way.
 
 ## Shared building blocks (`src/components/composites`)
 
