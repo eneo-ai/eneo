@@ -54,19 +54,23 @@ type SentFiles = NonNullable<NonNullable<EneoUIMessage["metadata"]>["files"]>;
 /** Which answer's activity is shown, on which tab, and which source to focus. */
 export type ActivityState = { messageId: string; tab: ActivityTab; source: number | null };
 
-/** Height of an element, tracked with a ResizeObserver (0 where unsupported). */
-function useElementHeight(ref: React.RefObject<HTMLElement | null>) {
+/**
+ * Height of an element, tracked with a ResizeObserver (0 where unsupported).
+ * Returns a callback ref, so an element that mounts after the view (the
+ * docked composer appears with the first question) is observed too.
+ */
+function useElementHeight<T extends HTMLElement>() {
+  const [element, setElement] = useState<T | null>(null);
   const [height, setHeight] = useState(0);
   useEffect(() => {
-    const element = ref.current;
     if (!element || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(([entry]) => {
       if (entry) setHeight(Math.ceil(entry.contentRect.height));
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [ref]);
-  return height;
+  }, [element]);
+  return [setElement, height] as const;
 }
 
 /**
@@ -463,8 +467,7 @@ export function ChatView({
     )
   };
 
-  const dockRef = useRef<HTMLDivElement>(null);
-  const dockHeight = useElementHeight(dockRef);
+  const [dockRef, dockHeight] = useElementHeight<HTMLDivElement>();
 
   const fileInputElement =
     attachments.maxFiles !== 0 ? (

@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { ChatView, type ActivityState } from "./chat-view";
-import { ChatTestProviders, installDomPolyfills } from "./testing";
+import { ChatTestProviders, installDomPolyfills, observedElements, reportResize } from "./testing";
 
 const spies = vi.hoisted(() => ({
   announce: vi.fn(),
@@ -124,6 +124,27 @@ describe("ChatView streaming an answer", () => {
     expect(spies.titled).toEqual(["session-1"]);
     // A new assistant-first send sends the assistant id, not a session.
     expect(spies.sent[0]?.body).toMatchObject({ assistant_id: "assistant-1", session_id: null });
+  });
+});
+
+describe("ChatView docked composer", () => {
+  // WCAG 2.4.11: the conversation scrolls focused elements above the docked
+  // composer. A new conversation mounts the dock only after the first
+  // question, and its height must still be tracked.
+  it("keeps focus clear of the dock that appears with the first question", async () => {
+    spies.mode = "answer";
+    render(<Harness />);
+    ask("Vilken gräns gäller?");
+
+    const log = await screen.findByRole("log", { name: "Konversation" });
+    const scroller = log.closest<HTMLElement>('[style*="scroll-padding-bottom"]');
+    expect(scroller?.style.scrollPaddingBottom).toBe("28px");
+
+    const textarea = screen.getByRole("textbox", { name: /Meddelande till/ });
+    const dock = observedElements().find((element) => element.contains(textarea));
+    expect(dock).toBeDefined();
+    act(() => reportResize(dock!, 150));
+    expect(scroller?.style.scrollPaddingBottom).toBe("178px");
   });
 });
 
