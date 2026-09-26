@@ -2,9 +2,9 @@ import { getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { getSession } from "@/lib/auth/session";
 import { pageTitle } from "@/lib/page-metadata";
+import { PublicPage } from "../public-page";
 import { provisionUser } from "./actions";
 
 export const generateMetadata = pageTitle("activate");
@@ -26,20 +26,11 @@ export default async function ActivatePage({
   const t = await getTranslations();
 
   return (
-    <main className="flex min-h-svh items-center justify-center p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle className="text-xl">{t("almost_there")}</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {error && (
-            <Alert variant="destructive">
-              <AlertDescription>{t("activation_failed")}</AlertDescription>
-            </Alert>
-          )}
-          <p className="text-muted-foreground text-sm">{t("account_not_activated")}</p>
-        </CardContent>
-        <CardFooter className="justify-end gap-2">
+    <PublicPage
+      title={t("almost_there")}
+      width="md"
+      footer={
+        <>
           <Button asChild variant="outline">
             {/* Plain <a>: /logout is a mutating route handler — keep Link
                 prefetch away from it. */}
@@ -48,8 +39,15 @@ export default async function ActivatePage({
           <form action={provisionUser}>
             <Button type="submit">{t("activate")}</Button>
           </form>
-        </CardFooter>
-      </Card>
-    </main>
+        </>
+      }
+    >
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{t("activation_failed")}</AlertDescription>
+        </Alert>
+      )}
+      <p className="text-muted-foreground text-sm">{t("account_not_activated")}</p>
+    </PublicPage>
   );
 }

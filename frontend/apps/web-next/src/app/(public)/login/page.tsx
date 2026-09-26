@@ -2,7 +2,6 @@ import { getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { loginDiagnosticsFromRecord } from "@/lib/auth/login-diagnostics";
 import { isOidcEnabled } from "@/lib/auth/oidc";
 import { DEFAULT_LANDING } from "@/lib/auth/safe-next";
@@ -10,6 +9,7 @@ import { getSession } from "@/lib/auth/session";
 import { env } from "@/lib/env";
 import type { Schema } from "@/lib/api/models";
 import { pageTitle } from "@/lib/page-metadata";
+import { PublicPage } from "../public-page";
 import { LoginDiagnosticsAlert } from "./login-diagnostics-alert";
 import { LoginForm } from "./login-form";
 import { TenantFederationLogin } from "./tenant-federation-login";
@@ -73,52 +73,33 @@ export default async function LoginPage({
     singleTenantFederationHref ??
     (next ? `/auth/login?next=${encodeURIComponent(next)}` : "/auth/login");
 
-  const accessibilityStatementUrl = env.ACCESSIBILITY_STATEMENT_URL;
-
   return (
-    <main className="flex min-h-svh flex-col items-center justify-center gap-4 p-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle className="text-xl">{t("welcome")}</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {diagnostics && <LoginDiagnosticsAlert diagnostics={diagnostics} t={t} />}
-          {message === "expired" && (
-            <Alert>
-              <AlertDescription>{t("session_expired_please_login_again")}</AlertDescription>
-            </Alert>
-          )}
-          {message === "logout" && (
-            <Alert>
-              <AlertDescription>{t("logout_success")}</AlertDescription>
-            </Alert>
-          )}
-          {multiTenantFederation ? (
-            <>
-              <TenantFederationLogin />
-              <div className="text-muted-foreground text-center text-xs uppercase">{t("or")}</div>
-            </>
-          ) : oidc ? (
-            <>
-              <Button asChild variant="default">
-                <a href={loginHref}>{t("login_with_sso")}</a>
-              </Button>
-              <div className="text-muted-foreground text-center text-xs uppercase">{t("or")}</div>
-            </>
-          ) : null}
-          <LoginForm next={next} />
-        </CardContent>
-      </Card>
-      {accessibilityStatementUrl && (
-        <p className="text-sm">
-          <a
-            href={accessibilityStatementUrl}
-            className="text-muted-foreground hover:text-foreground focus-visible:outline-ring inline-flex min-h-6 items-center rounded-sm underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2"
-          >
-            {t("a11y_statement_link")}
-          </a>
-        </p>
+    <PublicPage title={t("welcome")}>
+      {diagnostics && <LoginDiagnosticsAlert diagnostics={diagnostics} t={t} />}
+      {message === "expired" && (
+        <Alert>
+          <AlertDescription>{t("session_expired_please_login_again")}</AlertDescription>
+        </Alert>
       )}
-    </main>
+      {message === "logout" && (
+        <Alert>
+          <AlertDescription>{t("logout_success")}</AlertDescription>
+        </Alert>
+      )}
+      {multiTenantFederation ? (
+        <>
+          <TenantFederationLogin />
+          <div className="text-muted-foreground text-center text-xs uppercase">{t("or")}</div>
+        </>
+      ) : oidc ? (
+        <>
+          <Button asChild variant="default">
+            <a href={loginHref}>{t("login_with_sso")}</a>
+          </Button>
+          <div className="text-muted-foreground text-center text-xs uppercase">{t("or")}</div>
+        </>
+      ) : null}
+      <LoginForm next={next} />
+    </PublicPage>
   );
 }
