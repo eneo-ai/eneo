@@ -380,9 +380,17 @@ and `target-size`; the contrast test and the page scans cover those.
 
 `tests/a11y.spec.ts` opens each key route, waits for real content (no
 `aria-busy` skeletons left) and fails on any violation, in light and dark
-mode. Add a route when you add a screen. Locally, run it against a dev server
-with a seeded backend (see `playwright.config.ts`); in CI it runs on the
-isolated e2e stack.
+mode. Besides the WCAG 2.2 A/AA tags it enables `page-has-heading-one`,
+`landmark-one-main` and `heading-order`. It covers the public pages, the chat
+(start state, a docked conversation, the activity panel and sheet), the shell
+(catalog, collapsed rail, drawer, profile menu, ⌘K palette), spaces
+(overview, knowledge, websites, a create dialog) and admin, on desktop and at
+390 × 844 with touch. Two routes are skipped with the reason in the spec:
+`/deactivated` (needs a suspended tenant) and the collection detail page
+(the e2e stack seeds no embedding model yet). Add a route when you add a
+screen. Every e2e spec imports `test`/`expect` from `tests/csp.ts`, so a CSP
+violation fails the run. Locally, run it against a dev server with a seeded
+backend (see `playwright.config.ts`); in CI it runs on the isolated e2e stack.
 
 ## Manual test protocol
 
@@ -422,8 +430,10 @@ Radix bug, or a fix the product owner has deferred), open an issue labelled
 - ESLint: `// eslint-disable-next-line <rule> -- <reason> <issue link>` (in
   JSX: `{/* eslint-disable-next-line <rule> -- <reason> <issue link> */}`).
 - Vitest: `expectNoAxeViolations(container, { disableRules: { "<rule>": "<reason> <issue link>" } })`.
-- Playwright: `.exclude("<selector>")` or `.disableRules(["<rule>"])` on the
-  `AxeBuilder`, with a comment giving the reason and the issue link.
+- Playwright: the scan's `exclude` / `disableRules` options in
+  `tests/a11y.spec.ts` (`{ "<selector or rule>": "<reason> <issue link>" }`).
+  The helpers reject an empty reason or a missing issue link, in Vitest and
+  Playwright alike (`assertDocumented` in `src/test/wcag.ts`).
 
 Never lower a contrast threshold, add entries to `eslint-suppressions.json`, or
 switch a rule off in `eslint.config.mjs` without changing this file in the

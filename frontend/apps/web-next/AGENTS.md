@@ -287,12 +287,25 @@ loosen the policy.
   and guards the layer order, the theme import, the Streamdown `@source`
   paths and the touch-target rules; `src/theme/eneo-theme.contrast.test.ts`
   checks the colour pairs; axe tests check component markup. Component tests
-  opt into jsdom (`// @vitest-environment jsdom`), render with the app's
-  providers through `renderInApp` (`src/test/render.tsx`) and get what jsdom
-  lacks for Astryx (modal `<dialog>`, `CSS.escape`, …) from
-  `src/test/setup-dom.ts`.
-- `bun run test:e2e` — Playwright against a running backend, including the
-  axe page scans in `tests/a11y.spec.ts` (CI: "Frontend E2E (web-next)").
+  opt into jsdom (`// @vitest-environment jsdom`) and use one harness in
+  `src/test/`:
+  - `renderInApp(ui, { queryClient?, appContext?, shell?, route? })` renders
+    with the app's providers (next-intl in Swedish, Astryx, React Query with the
+    app's 30 s staleTime and no retries, app and shell context); also
+    `renderHookInApp` and `renderToHtml` (server render). Build app context with
+    `testAppContext({ permissions: ["admin"], settings: { … } })`; don't mock
+    `@/components/providers/app-context`.
+  - Navigation: `vi.mock("next/navigation", () => import("@/test/navigation"))`,
+    then the `route` option or `setRoute("/x?tab=y")`.
+  - `src/test/setup-dom.ts` fills in what jsdom lacks and behaves like Chromium:
+    `setViewport("phone" | "desktop" | {…})` drives `matchMedia`,
+    `reportResize(el, { height })` drives ResizeObserver, `<dialog>` focuses
+    its first focusable element on `showModal()`, nothing in a closed dialog
+    takes focus, and `close` fires in a later task (advance fake timers).
+- `bun run test:e2e` — Playwright against a running backend: the axe page scans
+  in `tests/a11y.spec.ts` (light and dark, desktop and 390 px touch, with
+  dialogs, menus and the palette open) and the flows in the other specs, all
+  under the CSP fixture from `tests/csp.ts` (CI: "Frontend E2E (web-next)").
 - Check new UI in light and dark mode, with the keyboard, and at phone width
   (the full manual protocol is in ACCESSIBILITY.md).
 
