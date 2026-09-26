@@ -5084,5 +5084,11 @@
   "ui_toast_close": "Close notification",
   "ui_website_tabs_label": "Crawls and content",
   "feedback_group_label": "Rate the answer",
-  "feedback_removed": "Your feedback was removed"
+  "feedback_removed": "Your feedback was removed",
+  "feedback_column": "Feedback",
+  "feedback_none": "No feedback",
+  "feedback_comment": "Comment",
+  "feedback_summary_title": "Feedback on answers",
+  "feedback_good_answers": "Good answers",
+  "feedback_bad_answers": "Bad answers"
 }

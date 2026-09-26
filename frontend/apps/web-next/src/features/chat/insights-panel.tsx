@@ -4,7 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { SendHorizontal } from "lucide-react";
+import { SendHorizontal, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -94,9 +94,10 @@ async function resolveInsightAnswer(response: unknown, signal: AbortSignal): Pro
 
 /**
  * Insikter for an assistant or group chat: the last 30 days' conversation and
- * question counts, and a question about those conversations. The answer is
- * announced when it is ready (it can take a while: the backend may run it as
- * a job); leaving the view stops waiting for it.
+ * question counts, how the answers were rated, and a question about those
+ * conversations. The answer is announced when it is ready (it can take a
+ * while: the backend may run it as a job); leaving the view stops waiting for
+ * it.
  */
 export function InsightsPanel({ partner }: { partner: ChatPartner & { type: InsightPartner } }) {
   const t = useTranslations();
@@ -177,6 +178,25 @@ export function InsightsPanel({ partner }: { partner: ChatPartner & { type: Insi
             <dt className="text-ax-text-secondary text-sm">{t("total_questions")}</dt>
             <dd className="mt-1 text-3xl font-semibold tabular-nums">
               {stats.data.total_questions}
+            </dd>
+          </div>
+          {/* Ratings of single answers; a rating of a whole conversation is not counted. */}
+          <div className="border-ax-border rounded-ax-container border p-4">
+            <dt className="text-ax-text-secondary inline-flex items-center gap-1.5 text-sm">
+              <ThumbsUp aria-hidden="true" className="text-ax-success size-4" />
+              {t("feedback_good_answers")}
+            </dt>
+            <dd className="mt-1 text-3xl font-semibold tabular-nums">
+              {stats.data.feedback.positive}
+            </dd>
+          </div>
+          <div className="border-ax-border rounded-ax-container border p-4">
+            <dt className="text-ax-text-secondary inline-flex items-center gap-1.5 text-sm">
+              <ThumbsDown aria-hidden="true" className="text-ax-error size-4" />
+              {t("feedback_bad_answers")}
+            </dt>
+            <dd className="mt-1 text-3xl font-semibold tabular-nums">
+              {stats.data.feedback.negative}
             </dd>
           </div>
         </dl>

@@ -21,7 +21,11 @@ vi.mock("@/lib/api/browser", () => ({
         return { data: { status: "running" }, response: new Response() };
       }
       return {
-        data: { total_conversations: 12, total_questions: 30 },
+        data: {
+          total_conversations: 12,
+          total_questions: 30,
+          feedback: { positive: 7, negative: 2 }
+        },
         response: new Response()
       };
     }),
@@ -63,6 +67,11 @@ describe("InsightsPanel", () => {
     renderPanel();
     expect(await screen.findByText("12")).toBeTruthy();
     expect(screen.getByText("30")).toBeTruthy();
+    // How the answers were rated, each count named by its term.
+    const good = screen.getByText("Bra svar").closest("div")!;
+    expect(good.querySelector("dd")?.textContent).toBe("7");
+    const bad = screen.getByText("Dåliga svar").closest("div")!;
+    expect(bad.querySelector("dd")?.textContent).toBe("2");
 
     ask("Vad frågar folk om?");
     const answer = await screen.findByText("De flesta frågor gäller LOU.");

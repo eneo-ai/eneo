@@ -35,6 +35,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { browserApi } from "@/lib/api/browser";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
 import { toast } from "@/lib/toast";
+import { AnswerFeedbackCell } from "./answer-feedback-cell";
+import { AnswerFeedbackSummary } from "./answer-feedback-summary";
 import {
   askAssistantInsightQuestion,
   assistantQuestionHistoryQueryOptions,
@@ -283,6 +285,7 @@ function QuestionsTab({
             <TableRow>
               <TableHead>{t("created")}</TableHead>
               <TableHead>{t("question")}</TableHead>
+              <TableHead>{t("feedback_column")}</TableHead>
               <TableHead>{t("session")}</TableHead>
             </TableRow>
           </TableHeader>
@@ -293,6 +296,9 @@ function QuestionsTab({
                   {dateFormatter.format(new Date(item.created_at))}
                 </TableCell>
                 <TableCell className="max-w-xl whitespace-normal">{item.question}</TableCell>
+                <TableCell className="max-w-xs whitespace-normal">
+                  <AnswerFeedbackCell feedback={item.feedback} />
+                </TableCell>
                 <TableCell>
                   <Button variant="ghost" size="sm" asChild>
                     <Link href={`/dashboard/${assistantId}/${item.session_id}`}>
@@ -357,6 +363,7 @@ export function AssistantInsightsPage({ assistantId }: { assistantId: string }) 
           value={filters.includeFollowups ? t("yes") : t("no")}
         />
       </div>
+      <AnswerFeedbackSummary assistantId={assistantId} filters={filters} />
 
       <FilterBar filters={filters} setFilters={setFilters} />
 

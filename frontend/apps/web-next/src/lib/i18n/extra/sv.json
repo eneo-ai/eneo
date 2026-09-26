@@ -575,5 +575,11 @@
   "ui_toast_close": "Stäng aviseringen",
   "ui_website_tabs_label": "Indexeringar och innehåll",
   "feedback_group_label": "Betygsätt svaret",
-  "feedback_removed": "Din återkoppling har tagits bort"
+  "feedback_removed": "Din återkoppling har tagits bort",
+  "feedback_column": "Återkoppling",
+  "feedback_none": "Ingen återkoppling",
+  "feedback_comment": "Kommentar",
+  "feedback_summary_title": "Återkoppling på svar",
+  "feedback_good_answers": "Bra svar",
+  "feedback_bad_answers": "Dåliga svar"
 }
