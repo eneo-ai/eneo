@@ -63,6 +63,21 @@ def _empty_catalog() -> AIBuilderResourceCatalog:
     )
 
 
+def _catalog_with_luna() -> AIBuilderResourceCatalog:
+    return build_ai_builder_resource_catalog(
+        available_models=[
+            {
+                "id": "model-uuid-1",
+                "ref": "model-uuid-1",
+                "name": "gpt-5.6-luna",
+                "display_name": "gpt-5.6-luna",
+                "provider": "openai",
+            }
+        ],
+        available_kbs=[],
+    )
+
+
 def _normalizer_hit_arguments() -> dict[str, dict[str, Any]]:
     base = {
         "flow_name": "Case assessment",
@@ -81,7 +96,7 @@ def _normalizer_hit_arguments() -> dict[str, dict[str, Any]]:
         },
         "_rehome_misplaced_create_children": {
             **deepcopy(base),
-            "model_ref": "model.default",
+            "citations_requested": True,
         },
         "_normalize_structured_field_children": {
             **deepcopy(base),
@@ -162,6 +177,24 @@ class TestBuildToolSchema:
         assert "final_output_type" not in properties
         assert "input_fields" not in properties
 
+    @pytest.mark.parametrize("is_pure_audio_transcription", [False, True])
+    def test_create_step_offers_no_model_or_source_text_flag(
+        self,
+        is_pure_audio_transcription: bool,
+    ) -> None:
+        # A new step runs on the space default model; its model picker, not
+        # the planner, chooses another one. Which earlier results a step
+        # reads is not a flag on the create step either.
+        schema = build_propose_flow_tool_schema(
+            resource_catalog=_catalog_with_luna(),
+            is_pure_audio_transcription=is_pure_audio_transcription,
+        )
+        properties = schema["function"]["parameters"]["properties"]
+
+        for withdrawn in ("model_ref", "needs_source_text"):
+            assert withdrawn not in properties["steps"]["items"]["properties"]
+            assert withdrawn not in properties
+
     def test_create_schema_requires_only_semantic_inputs_without_defaults(self) -> None:
         schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
         parameters = schema["function"]["parameters"]
@@ -187,7 +220,6 @@ class TestBuildToolSchema:
         assert intent.flow_description is None
         assert intent.assumptions == []
         assert intent.steps[0].output_fields is None
-        assert intent.steps[0].model_ref is None
         assert intent.steps[0].knowledge_refs == []
         assert intent.steps[0].citations_requested is False
 
@@ -245,7 +277,7 @@ class TestBuildToolSchema:
         schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
         arguments = _normalizer_hit_arguments()["_normalize_structured_field_children"]
         arguments["},{"] = ":"
-        arguments["model_ref"] = "model.default"
+        arguments["citations_requested"] = True
 
         without_telemetry = admit_propose_flow_tool_arguments(
             arguments=deepcopy(arguments),
@@ -267,6 +299,31 @@ class TestBuildToolSchema:
             "_rehome_misplaced_create_children",
             "_normalize_structured_field_children",
         ]
+
+    def test_create_admission_refuses_a_step_model_ref_by_name(self) -> None:
+        # Nothing offers a model on a new step. A payload that still writes
+        # one is refused with an error that names the key, which the repair
+        # turn hands back to the model.
+        schema = build_propose_flow_tool_schema(resource_catalog=_catalog_with_luna())
+        arguments = {
+            "flow_name": "Case assessment",
+            "plan_rationale": "Assess the submitted case.",
+            "steps": [
+                {
+                    "name": "Assess case",
+                    "instructions": "Assess the submitted case material.",
+                    "model_ref": "gpt-5.6-luna",
+                }
+            ],
+        }
+
+        with pytest.raises(
+            ProposalToolArgumentsError,
+            match=r"steps\.0: .*'model_ref' was unexpected",
+        ):
+            admit_propose_flow_tool_arguments(arguments=arguments, tool_schema=schema)
+        with pytest.raises(ProposalIntentArgumentError, match="model_ref"):
+            parse_create_flow_intent_arguments(arguments)
 
     @pytest.mark.parametrize("nested", [False, True])
     def test_string_field_is_rejected_with_required_object_properties(
@@ -519,11 +576,11 @@ class TestBuildToolSchema:
                 {
                     "name": "Assess material",
                     "instructions": "Assess only the supplied material.",
-                    "model_ref": "model.default",
+                    "citations_requested": True,
                     "output_fields": fields,
                 }
             ],
-            "model_ref": "model.default",
+            "citations_requested": True,
             "output_fields": fields,
         }
 
@@ -532,11 +589,11 @@ class TestBuildToolSchema:
             tool_schema=schema,
         )
 
-        assert "model_ref" not in admitted
+        assert "citations_requested" not in admitted
         assert "output_fields" not in admitted
-        assert admitted["steps"][-1]["model_ref"] == "model.default"
+        assert admitted["steps"][-1]["citations_requested"] is True
         assert admitted["steps"][-1]["output_fields"] == fields
-        assert "model_ref" in arguments
+        assert "citations_requested" in arguments
 
     def test_create_schema_projects_runtime_identity_without_argument_shape_change(
         self,
@@ -862,7 +919,6 @@ class TestBuildToolSchema:
                         "name": "Write",
                         "instructions": "Write the report.",
                         "output_fields": None,
-                        "model_ref": None,
                         "knowledge_refs": [],
                         "citations_requested": False,
                     }
@@ -886,7 +942,6 @@ class TestBuildToolSchema:
             "name": "Write",
             "instructions": "Write the report.",
             "output_fields": None,
-            "model_ref": None,
             "knowledge_refs": [],
             "citations_requested": False,
         }

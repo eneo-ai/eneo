@@ -18,6 +18,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     requirements_version_from_metadata,
     review_context_from_metadata,
     slot_classification_from_metadata,
+    text_status_from_metadata,
     tool_call_ids,
     tool_calls_from_message,
 )
@@ -310,7 +311,20 @@ def _required_message_indices(
     required_indices.update(_latest_question_interaction_indices(conversation))
     required_indices.update(_latest_tool_trace_indices(conversation))
     required_indices.update(_classifier_semantic_indices(conversation))
+    required_indices.update(_unsettled_text_indices(conversation))
     return required_indices
+
+
+def _unsettled_text_indices(conversation: list[ConversationMessage]) -> set[int]:
+    """User text still unread or unsettled, with the status that says so: the
+    user must still be able to see what to send again, and the next turn must
+    still hold."""
+
+    return {
+        index
+        for index, message in enumerate(conversation)
+        if text_status_from_metadata(message.metadata) not in {None, "settled"}
+    }
 
 
 def _latest_review_session_marker_index(

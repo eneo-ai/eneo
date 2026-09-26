@@ -16,9 +16,12 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationNamedResultEvidenceMetadata,
     SlotClassificationSourceMetadata,
     metadata_with_slot_classification,
+    metadata_with_text_status,
     question_response_from_metadata,
     slot_classification_from_metadata,
     slot_classification_metadata_from_attempt,
+    text_status_changes,
+    unsettled_user_text,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_edit_scope import build_active_request_window
@@ -59,6 +62,7 @@ from eneo.flows.ai_builder.planning_state import (
     ExampleOutputStyleConstraint,
     FileRoleEvidence,
     NamedResultEvidence,
+    PlanningState,
     named_result_location_id,
 )
 from eneo.flows.ai_builder.planning_state_builder import (
@@ -867,6 +871,54 @@ def test_exact_limits_do_not_mark_classifier_diagnostics_degraded() -> None:
     parsed = slot_classification_from_metadata(at_count_limit[0].metadata)
     assert parsed is not None
     assert parsed.diagnostics == []
+
+
+@pytest.mark.parametrize("limit", ["count", "bytes"])
+def test_compaction_keeps_unread_text_with_its_status(limit: str) -> None:
+    # gate it5 P1: compaction dropped unread text and what said it was unread,
+    # so the next turn went on as if it had been read.
+    unread = ConversationMessage(role="user", content="Jag vill namnge talarna.")
+    failed = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="output_limit_exceeded"),
+        prompt_hash="a" * 64,
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id=f"user_message:{unread.message_id}",
+                    kind="user_message",
+                    text="Jag vill namnge talarna.",
+                    message_id=unread.message_id,
+                ),
+            ),
+            current_user_message_id=unread.message_id,
+        ),
+        model="openai/test-model",
+        provider="openai:test",
+    )
+    [(message_id, status)] = text_status_changes(
+        [unread], failed, planning_state=PlanningState.empty()
+    ).items()
+    assert (message_id, status) == (unread.message_id, "unread")
+    unread = unread.model_copy(
+        update={"metadata": metadata_with_text_status(None, status)}
+    )
+    later = [
+        _msg("assistant", content=f"Svar {index}. " + "x" * 2_000)
+        for index in range(70)
+    ]
+
+    compacted = compact_ai_builder_conversation(
+        [unread, *later],
+        **(
+            {"max_conversation_bytes": 60_000}
+            if limit == "bytes"
+            else {"max_messages": 60, "tail_messages": 40}
+        ),
+    )
+
+    assert len(compacted) < 71
+    assert compacted[0].message_id == unread.message_id
+    assert unsettled_user_text(compacted) == "unread"
 
 
 def test_compaction_keeps_latest_requirements_summary_even_if_old() -> None:

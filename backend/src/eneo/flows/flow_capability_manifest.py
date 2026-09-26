@@ -444,8 +444,9 @@ _OUTPUT_MODE_CAPABILITY_SEED: Mapping[
 _NOT_EXPOSED_OUTPUT_MODES: Mapping[FlowOutputMode, str] = MappingProxyType(
     {
         FlowOutputMode.SPEAKER_MAPPING: (
-            "Manual authoring only: the planner has no participant-field "
-            "selection, review-forcing rule or speaker-mapping checkpoint kind."
+            "The planner never authors it: the Builder backend inserts it after "
+            "transcription when the user asks to name the speakers, and people "
+            "add it by hand in the editor."
         ),
     }
 )

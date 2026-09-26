@@ -23,6 +23,9 @@ from eneo.flows.ai_builder.ai_builder_assembly.document_report import (
     lower_document_report_topology,
 )
 from eneo.flows.ai_builder.ai_builder_assembly.plan import PlannedStep
+from eneo.flows.ai_builder.ai_builder_checkpoint_contract import (
+    checkpoint_intent_mismatches,
+)
 from eneo.flows.ai_builder.ai_builder_create_compile_context import (
     CreateCompileContext,
     create_compile_context_from_planning_state,
@@ -33,6 +36,7 @@ from eneo.flows.ai_builder.ai_builder_create_compiler import (
 from eneo.flows.ai_builder.ai_builder_critic_invariants import (
     evaluate_critic_invariants,
 )
+from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     schema_leaf_property_names,
 )
@@ -43,6 +47,7 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     extract_requested_output_sections,
 )
 from eneo.flows.ai_builder.ai_builder_plan_quality_critic import (
+    build_conversation_aware_quality_feedback,
     build_conversation_critic_context,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
@@ -66,6 +71,7 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_schema_evidence,
 )
+from eneo.flows.ai_builder.ai_builder_service import QUALITY_RETRY_WARNING_CODES
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import SourceCaptureField
 from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
     apply_template_attachment_contract,
@@ -105,14 +111,25 @@ from eneo.flows.ai_builder.planning_state_builder import (
     apply_policy_defaults_from_resolved_slots,
 )
 from eneo.flows.ai_builder.question_catalog import render_question
+from eneo.flows.application.flow_draft_materialization import (
+    compile_flow_draft_changeset,
+)
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
     OutputMode,
     OutputType,
+    metadata_json_from_authoring_form_fields,
+)
+from eneo.flows.flow_authoring_transcription import (
+    apply_audio_transcription_defaults,
+)
+from eneo.flows.flow_authoring_variable_rewriting import (
+    flow_step_validation_views_from_draft_spec,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.flow_validators import collect_step_graph_issues
 from eneo.flows.input_binding_contract_rules import (
     effective_question_binding,
     source_ref_bindings,
@@ -3726,6 +3743,353 @@ def test_structured_checkpoint_lands_on_terminal_json_producer_only() -> None:
     assert reviewed_refs == [terminal_json.plan_step_ref]
 
 
+def _speaker_naming_state(quote: str, *, speaker_naming: bool = True) -> PlanningState:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "audio"),
+        "terminal_output": _slot("terminal_output", "structured_text"),
+    }
+    state.checkpoint_intents = [
+        CheckpointIntent(
+            evidence_level="explicit",
+            producer_kind="transcript",
+            operation="set",
+            mode=FlowStepReviewMode.EDIT,
+            confidence="medium",
+            evidence=[f"quote:user_message:1:{quote}"],
+            speaker_naming=speaker_naming,
+        )
+    ]
+    _commit_architecture(state)
+    return state
+
+
+def test_a_request_to_name_the_speakers_compiles_the_speaker_naming_review() -> None:
+    # The owner's interview flow (2026-09-25): "name the speakers before the
+    # summary" became an AI step writing a speaker list, and nothing paused.
+    # The platform's naming form is the speaker_mapping step the editor adds
+    # from "Vill du granska transkriptet?".
+    state = _speaker_naming_state(
+        "Innan något sammanfattas vill jag kunna sätta rätt namn på talarna"
+    )
+    context = create_compile_context_from_planning_state(state, ui_language="sv")
+    assert context is not None
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Intervjusammanfattning",
+            "plan_rationale": "Sammanfatta vad varje person sa.",
+            "steps": [
+                {
+                    "name": "Sammanfatta per person",
+                    "instructions": "Gör en kort sammanfattning per person av vad hen sa.",
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(intent, context=context)
+
+    transcription, naming, summary = compiled.steps
+    assert transcription.output_mode is OutputMode.TRANSCRIBE_ONLY
+    assert transcription.review_policy is None
+    assert naming.output_mode is OutputMode.SPEAKER_MAPPING
+    assert (naming.input_source, naming.input_type, naming.output_type) == (
+        InputSource.PREVIOUS_STEP,
+        InputType.TEXT,
+        OutputType.JSON,
+    )
+    assert naming.output_contract is None
+    assert naming.assistant_spec.model_ref is None
+    assert naming.review_policy is not None
+    assert naming.review_policy.mode is FlowStepReviewMode.EDIT
+    assert naming.output_config == {
+        "speaker_mapping": {
+            "participants_field": "deltagare",
+            "speaker_count_field": None,
+            "infer_names": False,
+        }
+    }
+    [participants] = compiled.form_fields or []
+    assert (participants.name, participants.type, participants.required) == (
+        "deltagare",
+        "list",
+        False,
+    )
+    # The summary reads the reviewed transcript with names applied, never the
+    # mapping object.
+    assert summary.input_source is InputSource.PREVIOUS_STEP
+    assert summary.input_type is InputType.TEXT
+    assert not source_ref_bindings(summary.input_bindings)
+    validation = validate_spec(compiled)
+    assert validation.valid
+    # A quality warning here sends the planner into repairs it cannot make:
+    # the naming step and its pinned contract are the backend's.
+    assert not {warning.code for warning in validation.warnings} & (
+        QUALITY_RETRY_WARNING_CODES
+    )
+    # Publishable as compiled: the naming step names a real participants field.
+    assert not collect_step_graph_issues(
+        flow_step_validation_views_from_draft_spec(compiled.steps),
+        metadata_json=apply_audio_transcription_defaults(
+            metadata=metadata_json_from_authoring_form_fields(compiled.form_fields),
+            spec=compiled,
+            default_transcription_model_id=uuid4(),
+        ),
+        require_complete_template_fill_config=True,
+    )
+    assert not checkpoint_intent_mismatches(compiled, context.checkpoint_intents or ())
+    changeset = compile_flow_draft_changeset(
+        compiled, current_flow=None, default_transcription_model_id=uuid4()
+    )
+    naming_row = changeset.compiled_steps[1]
+    assert naming_row.output_mode == "speaker_mapping"
+    assert naming_row.output_config == naming.output_config
+    assert naming_row.review_policy == naming.review_policy
+    assert (
+        build_conversation_aware_quality_feedback(
+            [
+                ConversationMessage(
+                    role="user",
+                    content="Innan något sammanfattas vill jag kunna sätta rätt namn på talarna",
+                )
+            ],
+            compiled,
+            planning_state=state,
+            compile_context=context,
+        )
+        is None
+    )
+
+
+def _naming_intent(operation: str, mode: FlowStepReviewMode | None) -> CheckpointIntent:
+    return CheckpointIntent(
+        evidence_level="explicit",
+        producer_kind="transcript",
+        operation=operation,
+        mode=mode,
+        confidence="high",
+        evidence=["quote:user_message:1:namnge talarna"],
+        speaker_naming=mode is FlowStepReviewMode.EDIT,
+    )
+
+
+def test_the_naming_step_is_compared_with_the_requested_mode() -> None:
+    # gate it1 P1: the mapping step's edit review was skipped by projection and
+    # comparison, so a requested view could silently become edit.
+    state = _speaker_naming_state("sätta namn på talarna")
+    context = create_compile_context_from_planning_state(state, ui_language="sv")
+    assert context is not None
+    compiled = compile_create_intent_to_spec(
+        parse_create_flow_intent_arguments(
+            {
+                "flow_name": "Intervju",
+                "plan_rationale": "Sammanfatta.",
+                "steps": [{"name": "Sammanfatta", "instructions": "Sammanfatta."}],
+            }
+        ),
+        context=context,
+    )
+    assert compiled.steps[1].output_mode is OutputMode.SPEAKER_MAPPING
+
+    def kinds(intent: CheckpointIntent) -> list[str]:
+        return [
+            mismatch.kind
+            for mismatch in checkpoint_intent_mismatches(compiled, [intent])
+        ]
+
+    assert kinds(_naming_intent("set", FlowStepReviewMode.EDIT)) == []
+    assert kinds(_naming_intent("set", FlowStepReviewMode.VIEW)) == [
+        "review_mode_mismatch"
+    ]
+    assert kinds(_naming_intent("clear", None)) == ["unexpected_review"]
+
+
+def test_a_transcript_only_flow_that_names_the_speakers_compiles_the_naming_review() -> (
+    None
+):
+    # gate it3 P2: the transcript-only path compiled no naming step, so a
+    # typed naming request produced a flow with nobody naming the speakers.
+    state = _speaker_naming_state("Skriv ut intervjun och låt mig namnge talarna")
+    state.resolved_slots["post_processing_goal"] = _slot(
+        "post_processing_goal", "stop_after_primary_operation"
+    )
+    _commit_architecture(state)
+    context = create_compile_context_from_planning_state(state, ui_language="sv")
+    assert context is not None
+    assert context.is_pure_audio_transcription
+
+    compiled = compile_create_intent_to_spec(
+        parse_create_flow_intent_arguments(
+            {
+                "flow_name": "Intervjutranskript",
+                "plan_rationale": "Transkriptet är resultatet.",
+                "steps": [
+                    {
+                        "name": "Transkribera intervjun",
+                        "instructions": "Skriv ut intervjun ordagrant.",
+                    }
+                ],
+            }
+        ),
+        context=context,
+    )
+
+    transcription, naming, delivered = compiled.steps
+    assert transcription.output_mode is OutputMode.TRANSCRIBE_ONLY
+    assert transcription.review_policy is None
+    assert naming.output_mode is OutputMode.SPEAKER_MAPPING
+    # The reviewed transcript, not the name mapping, is the flow's result.
+    assert (delivered.output_type, delivered.output_mode) == (
+        OutputType.TEXT,
+        OutputMode.COMPOSE_TEXT,
+    )
+    assert delivered.assistant_spec.instructions == (
+        "Lämna transkriptet som det ser ut efter granskningen, med talarnas "
+        "namn på plats."
+    )
+    assert naming.review_policy is not None
+    assert naming.review_policy.mode is FlowStepReviewMode.EDIT
+    assert [field.name for field in compiled.form_fields or []] == ["deltagare"]
+    validation = validate_spec(compiled)
+    assert validation.valid
+    assert not {warning.code for warning in validation.warnings} & (
+        QUALITY_RETRY_WARNING_CODES
+    )
+    assert not checkpoint_intent_mismatches(compiled, context.checkpoint_intents or ())
+    request = [
+        ConversationMessage(
+            role="user", content="Skriv ut intervjun och låt mig namnge talarna"
+        )
+    ]
+    assert not evaluate_critic_invariants(
+        build_conversation_critic_context(request, compiled, planning_state=state)
+    )
+    assert (
+        build_conversation_aware_quality_feedback(
+            request, compiled, planning_state=state, compile_context=context
+        )
+        is None
+    )
+    # Publishable as compiled.
+    assert not collect_step_graph_issues(
+        flow_step_validation_views_from_draft_spec(compiled.steps),
+        metadata_json=apply_audio_transcription_defaults(
+            metadata=metadata_json_from_authoring_form_fields(compiled.form_fields),
+            spec=compiled,
+            default_transcription_model_id=uuid4(),
+        ),
+        require_complete_template_fill_config=True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("existing_type", "participants_field", "field_names"),
+    [
+        ("number", "deltagare_2", ["deltagare", "deltagare_2"]),
+        ("list", "deltagare", ["deltagare"]),
+    ],
+)
+def test_the_naming_step_maps_speakers_onto_a_participants_field_it_can_read(
+    existing_type: str, participants_field: str, field_names: list[str]
+) -> None:
+    # gate it3 P2: a confirmed number field named "deltagare" was reused as the
+    # participant list, and the flow failed only at publish. A field of a type
+    # the naming step reads is reused; any other keeps its name and the naming
+    # step gets the next free one.
+    state = _speaker_naming_state("sätta namn på talarna")
+    state.input_fields = [
+        _confirmed_runtime_field("deltagare", "Deltagare", field_type=existing_type)
+    ]
+    context = create_compile_context_from_planning_state(state, ui_language="sv")
+    assert context is not None
+
+    compiled = compile_create_intent_to_spec(
+        parse_create_flow_intent_arguments(
+            {
+                "flow_name": "Intervju",
+                "plan_rationale": "Sammanfatta.",
+                "steps": [{"name": "Sammanfatta", "instructions": "Sammanfatta."}],
+            }
+        ),
+        context=context,
+    )
+
+    naming = compiled.steps[1]
+    assert naming.output_mode is OutputMode.SPEAKER_MAPPING
+    assert naming.output_config is not None
+    assert (
+        naming.output_config["speaker_mapping"]["participants_field"]
+        == participants_field
+    )
+    assert [field.name for field in compiled.form_fields or []] == field_names
+    assert (compiled.form_fields or [])[0].type == existing_type
+    # Publishable as compiled.
+    assert not collect_step_graph_issues(
+        flow_step_validation_views_from_draft_spec(compiled.steps),
+        metadata_json=apply_audio_transcription_defaults(
+            metadata=metadata_json_from_authoring_form_fields(compiled.form_fields),
+            spec=compiled,
+            default_transcription_model_id=uuid4(),
+        ),
+        require_complete_template_fill_config=True,
+    )
+
+
+def test_speaker_naming_review_precedes_a_document_report() -> None:
+    state = _speaker_naming_state("Först vill jag sätta namn på talarna")
+    state.resolved_slots["terminal_output"] = _slot("terminal_output", "pdf_document")
+    _commit_architecture(state)
+    context = create_compile_context_from_planning_state(state, ui_language="sv")
+    assert context is not None
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Protokoll",
+            "plan_rationale": "Skriv protokollet.",
+            "steps": [
+                {
+                    "name": "Skriv protokoll",
+                    "instructions": "Skriv ett protokoll med vem som sa vad.",
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(intent, context=context)
+
+    modes = [step.output_mode for step in compiled.steps]
+    assert modes[:2] == [OutputMode.TRANSCRIBE_ONLY, OutputMode.SPEAKER_MAPPING]
+    assert modes[-1] is OutputMode.RENDER_VERBATIM
+    assert not source_ref_bindings(compiled.steps[2].input_bindings)
+    assert validate_spec(compiled).valid
+
+
+def test_a_transcript_review_that_names_no_speakers_stays_on_the_transcript() -> None:
+    state = _speaker_naming_state(
+        "Jag vill kunna rätta transkriptet innan analysen", speaker_naming=False
+    )
+    context = create_compile_context_from_planning_state(state, ui_language="sv")
+    assert context is not None
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Mötesanalys",
+            "plan_rationale": "Analysera mötet.",
+            "steps": [
+                {
+                    "name": "Analysera mötet",
+                    "instructions": "Analysera vad som sades på mötet.",
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(intent, context=context)
+
+    transcription, analysis = compiled.steps
+    assert transcription.review_policy is not None
+    assert transcription.review_policy.mode is FlowStepReviewMode.EDIT
+    assert analysis.output_mode is OutputMode.PASS_THROUGH
+
+
 def test_transcript_checkpoint_without_transcription_step_is_a_contradiction() -> None:
     state = PlanningState.empty()
     state.resolved_slots = {
@@ -5173,7 +5537,6 @@ def test_report_disposition_both_keeps_authored_section_transformer() -> None:
                 {
                     "name": "Sätt ihop slutrapport",
                     "instructions": "Sätt ihop slutrapporten.",
-                    "model_ref": "model.report-writer",
                     "knowledge_refs": ["knowledge.reporting-policy"],
                 },
             ],
@@ -5231,7 +5594,6 @@ def test_report_disposition_both_keeps_authored_section_transformer() -> None:
         "overall_overview",
     ]
     assert "Sätt ihop slutrapporten." in overview_step.assistant_spec.instructions
-    assert overview_step.assistant_spec.model_ref == "model.report-writer"
     assert overview_step.assistant_spec.knowledge_refs == ["knowledge.reporting-policy"]
     assert "{{ flow_input.case_number }}" in _question(overview_step.input_bindings)
 
@@ -5942,222 +6304,7 @@ def test_report_lowering_normalizes_canonical_field_shapes_and_overview_alias() 
     assert validation.valid, validation.errors
 
 
-def test_per_source_sections_combines_distinct_models_once_and_uses_terminal_model() -> (
-    None
-):
-    intent = parse_create_flow_intent_arguments(
-        {
-            "flow_name": "Conflicting report models",
-            "plan_rationale": "Combine report-writing semantics before composition.",
-            "steps": [
-                {
-                    "name": "Read source",
-                    "instructions": "Extract source evidence.",
-                    "output_fields": [
-                        {
-                            "name": "documents",
-                            "field_type": "array",
-                            "description": "Source evidence.",
-                            "children": [
-                                {
-                                    "name": "summary",
-                                    "field_type": "string",
-                                    "description": "Source summary.",
-                                }
-                            ],
-                        }
-                    ],
-                },
-                {
-                    "name": "Draft report",
-                    "instructions": "Draft the report.",
-                    "model_ref": "model.draft",
-                },
-                {
-                    "name": "Refine report",
-                    "instructions": "Refine the report.",
-                    "model_ref": "model.refine",
-                },
-                {
-                    "name": "Compose report",
-                    "instructions": "Compose the final report.",
-                    "model_ref": "model.body",
-                },
-            ],
-        }
-    )
-
-    diagnostics = []
-    compiled = compile_create_intent_to_spec(
-        intent,
-        context=CreateCompileContext(
-            runtime_input_type=InputType.DOCUMENT,
-            final_output_type=OutputType.PDF,
-            final_output_mode=OutputMode.RENDER_VERBATIM,
-            aggregation_intent="linear",
-            report_disposition="per_source_sections",
-            runtime_max_files=4,
-            ui_language="en",
-        ),
-        field_diagnostics=diagnostics,
-    )
-
-    assert compiled.steps[1].assistant_spec.model_ref == "model.body"
-    assert [warning.code for warning in diagnostics] == [
-        "document_report_model_selection_combined"
-    ]
-    assert [warning.message for warning in diagnostics] == [
-        "The steps specified different model selections; they were combined and "
-        "the combined report-writing step uses model selection model.body."
-    ]
-    validation = validate_spec(compiled)
-    assert validation.valid, validation.errors
-
-
-def test_report_disposition_both_preserves_distinct_producer_model_selections() -> None:
-    intent = parse_create_flow_intent_arguments(
-        {
-            "flow_name": "Report with sections and overview",
-            "plan_rationale": "Write source sections and a synthesized overview.",
-            "steps": [
-                {
-                    "name": "Read sources",
-                    "instructions": "Extract source evidence.",
-                    "output_fields": [
-                        {
-                            "name": "documents",
-                            "field_type": "array",
-                            "description": "Source evidence.",
-                            "children": [
-                                {
-                                    "name": "summary",
-                                    "field_type": "string",
-                                    "description": "Source summary.",
-                                }
-                            ],
-                        }
-                    ],
-                },
-                {
-                    "name": "Write source sections",
-                    "instructions": "Write one section per source.",
-                    "model_ref": "model.sections",
-                    "output_fields": [
-                        {
-                            "name": "section_text",
-                            "field_type": "string",
-                            "description": "Source section text.",
-                        }
-                    ],
-                },
-                {
-                    "name": "Draft overview",
-                    "instructions": "Draft the synthesized overview.",
-                    "model_ref": "model.draft",
-                    "output_fields": [
-                        {
-                            "name": "overview",
-                            "field_type": "string",
-                            "description": "Synthesized overview.",
-                        }
-                    ],
-                },
-                {
-                    "name": "Compose report",
-                    "instructions": "Compose the final report.",
-                    "model_ref": "model.overview",
-                },
-            ],
-        }
-    )
-
-    diagnostics = []
-    compiled = compile_create_intent_to_spec(
-        intent,
-        context=CreateCompileContext(
-            runtime_input_type=InputType.DOCUMENT,
-            final_output_type=OutputType.PDF,
-            final_output_mode=OutputMode.RENDER_VERBATIM,
-            aggregation_intent="aggregate",
-            report_disposition="both",
-            runtime_max_files=4,
-            ui_language="en",
-        ),
-        field_diagnostics=diagnostics,
-    )
-
-    assert compiled.steps[1].assistant_spec.model_ref == "model.sections"
-    assert compiled.steps[2].assistant_spec.model_ref == "model.overview"
-    assert [warning.code for warning in diagnostics] == [
-        "document_report_model_selection_combined"
-    ]
-    assert [warning.message for warning in diagnostics] == [
-        "The steps specified different model selections; they were combined and "
-        "the combined report-writing step uses model selection model.overview."
-    ]
-    validation = validate_spec(compiled)
-    assert validation.valid, validation.errors
-
-
-@pytest.mark.parametrize(
-    ("draft_model_ref", "body_model_ref"),
-    [
-        ("model.shared", "model.shared"),
-        (None, "model.only"),
-    ],
-)
-def test_report_lowering_does_not_warn_for_compatible_model_selections(
-    draft_model_ref: str | None,
-    body_model_ref: str,
-) -> None:
-    intent = parse_create_flow_intent_arguments(
-        {
-            "flow_name": "Compatible report models",
-            "plan_rationale": "Combine compatible report-writing semantics.",
-            "steps": [
-                {
-                    "name": "Read source",
-                    "instructions": "Extract source evidence.",
-                    "output_fields": [
-                        {
-                            "name": "summary",
-                            "field_type": "string",
-                            "description": "Source summary.",
-                        }
-                    ],
-                },
-                {
-                    "name": "Draft report",
-                    "instructions": "Draft the report.",
-                    "model_ref": draft_model_ref,
-                },
-                {
-                    "name": "Compose report",
-                    "instructions": "Compose the final report.",
-                    "model_ref": body_model_ref,
-                },
-            ],
-        }
-    )
-
-    diagnostics = []
-    compiled = compile_create_intent_to_spec(
-        intent,
-        context=CreateCompileContext(
-            runtime_input_type=InputType.DOCUMENT,
-            final_output_type=OutputType.PDF,
-            final_output_mode=OutputMode.RENDER_VERBATIM,
-            report_disposition="synthesized_overview",
-            ui_language="en",
-        ),
-        field_diagnostics=diagnostics,
-    )
-
-    assert compiled.steps[1].assistant_spec.model_ref == body_model_ref
-    assert diagnostics == []
-
-
-def test_report_lowering_emits_citation_and_model_selection_warnings() -> None:
+def test_report_lowering_emits_the_citation_warning() -> None:
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Cited source report",
@@ -6167,7 +6314,6 @@ def test_report_lowering_emits_citation_and_model_selection_warnings() -> None:
                     "name": "Extract cited evidence",
                     "instructions": "Extract evidence with citations.",
                     "citations_requested": True,
-                    "model_ref": "model.reader",
                     "output_fields": [
                         {
                             "name": "summary",
@@ -6180,12 +6326,10 @@ def test_report_lowering_emits_citation_and_model_selection_warnings() -> None:
                     "name": "Draft cited report",
                     "instructions": "Draft the report with citations.",
                     "citations_requested": True,
-                    "model_ref": "model.draft",
                 },
                 {
                     "name": "Write cited report",
                     "instructions": "Write the report with citations.",
-                    "model_ref": "model.body",
                 },
             ],
         }
@@ -6209,12 +6353,9 @@ def test_report_lowering_emits_citation_and_model_selection_warnings() -> None:
         for step in compiled.steps
     )
     assert [warning.code for warning in diagnostics] == [
-        "document_report_model_selection_combined",
         "citation_mode_unsupported",
     ]
     assert [warning.message for warning in diagnostics] == [
-        "The steps specified different model selections; they were combined and "
-        "the combined report-writing step uses model selection model.body.",
         "Source citations were disabled because the output cannot include "
         "inline citations.",
     ]

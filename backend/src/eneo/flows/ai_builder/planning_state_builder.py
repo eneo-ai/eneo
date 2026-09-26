@@ -9,7 +9,7 @@ and committed architecture state.
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import cast
 from uuid import UUID
 
@@ -88,6 +88,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     derive_freeform_schema_candidates,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    ClassifiedCheckpointUpdate,
     ClassifiedFileRole,
     ClassifiedFormIntake,
     ClassifiedNamedResultDelta,
@@ -922,6 +923,35 @@ def merge_llm_resolved_slots(
     )
 
 
+def _checkpoint_updates_naming_speakers_on_the_transcript(
+    state: PlanningState,
+    *,
+    classification_result: SlotClassificationResult,
+) -> tuple[ClassifiedCheckpointUpdate, ...]:
+    """Speaker naming reviews the transcript, whatever producer was chosen.
+
+    The classifier declares `speaker_naming`; in a recording the speakers are
+    named in the transcript. gemma4-31b-it filed "set the right names on the
+    speakers" under the structured result, which put the pause on an AI step
+    writing a speaker list. Anywhere else the flag has nothing to name. The
+    parser never admits such an update beside a transcript update.
+    """
+
+    updates = classification_result.checkpoint_updates
+    input_outcome = classification_result.slot_outcomes.get("primary_runtime_input")
+    committed_input = state.resolved_slots.get("primary_runtime_input")
+    audio = (
+        isinstance(input_outcome, ResolvedSlotClassificationOutcome)
+        and input_outcome.value == "audio"
+    ) or (committed_input is not None and committed_input.value == "audio")
+    return tuple(
+        replace(update, producer_kind="transcript")
+        if audio and update.speaker_naming and update.producer_kind != "transcript"
+        else update
+        for update in updates
+    )
+
+
 def _merge_model_checkpoint_updates(
     state: PlanningState,
     *,
@@ -935,7 +965,9 @@ def _merge_model_checkpoint_updates(
     intents_by_producer = {
         intent.producer_kind: intent for intent in state.checkpoint_intents
     }
-    for update in classification_result.checkpoint_updates:
+    for update in _checkpoint_updates_naming_speakers_on_the_transcript(
+        state, classification_result=classification_result
+    ):
         if update.confidence == "low" or not update.evidence:
             raise ValueError("checkpoint update requires supported cited evidence")
         if update.evidence_level != "explicit":
@@ -966,6 +998,8 @@ def _merge_model_checkpoint_updates(
             confidence=update.confidence,
             evidence=[item.planning_reference() for item in update.evidence],
             evidence_level=update.evidence_level,
+            speaker_naming=update.speaker_naming
+            and update.producer_kind == "transcript",
         )
     state.checkpoint_intents = sorted(
         intents_by_producer.values(),

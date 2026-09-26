@@ -42,6 +42,9 @@ from eneo.flows.ai_builder import (
     ai_builder_slot_classification_contract as classification_contract,
 )
 from eneo.flows.ai_builder import ai_builder_slot_classifier as classifier
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    slot_classification_metadata_from_attempt,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
@@ -52,12 +55,17 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTele
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_declared_schema_candidate,
 )
-from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
+from eneo.flows.ai_builder.ai_builder_settings import (
+    SLOT_CLASSIFICATION_ANSWER_CAP_TOKENS,
+    AIBuilderBudgetPolicy,
+)
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     NAMED_RESULT_DELTA_CITATION_MAX_ITEMS,
+    CheckpointUpdateDiagnostic,
     ClassifiedEvidence,
     ClassifiedSchemaDirection,
     ResolvedSlotClassificationOutcome,
+    SlotClassificationAttempt,
     SlotClassificationInput,
     SlotClassificationResult,
     SlotClassificationSource,
@@ -69,11 +77,14 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     slot_classification_prompt_hash as _slot_classification_prompt_hash,
 )
+from eneo.flows.ai_builder.ai_builder_slot_vocabulary import LLM_RESOLVABLE_SLOT_NAMES
 from eneo.flows.ai_builder.planning_state import (
     CheckpointProducerKind,
     ExactNamedResultPlacement,
     UnplacedNamedResultPlacement,
 )
+from eneo.flows.ai_builder.question_catalog import legal_slot_values
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.model_providers.infrastructure.litellm_provider import (
     ResolvedLiteLLMProvider,
 )
@@ -389,8 +400,8 @@ def test_non_strict_parser_refuses_malformed_and_duplicate_slot_entries() -> Non
             "outcome": "resolved",
             "value": "pdf_document",
             "confidence": "high",
+            "reason": "requested PDF",
             "evidence": [_evidence("I need a PDF")],
-            "evidence_level": "explicit",
         },
     ],
     ids=[
@@ -470,6 +481,272 @@ def test_a_slot_option_written_as_the_outcome_still_resolves(
     assert [item.code for item in result.diagnostics] == [
         "slot_outcome_value_as_outcome"
     ]
+
+
+def test_a_response_shaped_like_a_small_prompt_mode_model_keeps_its_reading() -> None:
+    # Captured from gemma4-31b-it in prompt-only structured-output mode
+    # (2026-09-25): slot entries written at the top level, a slot that was
+    # not offered, the optional top-level keys left out or an empty list
+    # written as an empty object, and no confidence or reason on any entry.
+    # All 22 captured classifications failed to parse, and the user's request
+    # to name speakers before the summary was lost.
+    request = "Innan något sammanfattas vill jag kunna sätta rätt namn på talarna."
+    content = json.dumps(
+        {
+            "terminal_output": {
+                "outcome": "resolved",
+                "value": "structured_text",
+                "evidence": [_evidence(request)],
+                "evidence_level": "explicit",
+            },
+            "report_disposition": {"outcome": "absent"},
+            "post_processing_goal": {
+                "outcome": "resolved",
+                "value": "summarize_or_overview",
+                "evidence": [_evidence(request)],
+                "evidence_level": "explicit",
+            },
+            "secondary_obligations": [],
+            "file_roles": {},
+            "checkpoint_updates": [
+                {
+                    "operation": "update",
+                    "producer_kind": "transcript",
+                    "mode": "edit",
+                    "evidence": [_evidence(request)],
+                    "evidence_level": "explicit",
+                }
+            ],
+        }
+    )
+
+    result = parse_slot_classification_response(
+        content,
+        allowed_slot_values={
+            "terminal_output": {"structured_text", "pdf_document"},
+            "report_disposition": {"per_source_sections", "synthesized_overview"},
+        },
+        classification_input=_classification_input(request),
+    )
+
+    assert result is not None
+    outcome = result.slot_outcomes["terminal_output"]
+    assert isinstance(outcome, ResolvedSlotClassificationOutcome)
+    assert outcome.value == "structured_text"
+    # An omitted grade reads as medium: explicit evidence still commits, an
+    # inferred reading does not.
+    assert outcome.confidence == "medium"
+    assert result.slot_outcomes["report_disposition"].kind == "absent"
+    assert "post_processing_goal" not in result.slot_outcomes
+    assert [(item.code, item.slot_name) for item in result.diagnostics] == [
+        ("slot_outcome_outside_slots", "report_disposition"),
+        ("slot_outcome_outside_slots", "terminal_output"),
+        ("slot_outcome_confidence_omitted", "terminal_output"),
+    ]
+    assert [
+        (update.producer_kind, update.mode, update.confidence)
+        for update in result.checkpoint_updates
+    ] == [("transcript", FlowStepReviewMode.EDIT, "medium")]
+
+
+@pytest.mark.parametrize(("declared", "naming"), [(True, True), (None, False)])
+def test_a_checkpoint_update_declares_whether_the_reviewer_names_the_speakers(
+    declared: bool | None,
+    naming: bool,
+) -> None:
+    # The form of the transcript review is the classifier's typed reading, not
+    # a word list over its quote; an omitted flag reads as no naming.
+    request = "Innan något sammanfattas vill jag kunna sätta rätt namn på talarna."
+    update: dict[str, object] = {
+        "operation": "update",
+        "producer_kind": "transcript",
+        "mode": "edit",
+        "confidence": "high",
+        "reason": "Namnge talarna.",
+        "evidence": [_evidence(request)],
+        "evidence_level": "explicit",
+    }
+    if declared is not None:
+        update["speaker_naming"] = declared
+    classification_input = _classification_input(request)
+
+    result = parse_slot_classification_response(
+        json.dumps({**_VALID_CLASSIFICATION_RESPONSE, "checkpoint_updates": [update]}),
+        allowed_slot_values={},
+        classification_input=classification_input,
+    )
+
+    assert result is not None
+    [parsed] = result.checkpoint_updates
+    assert parsed.speaker_naming is naming
+    persisted = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
+        prompt_hash="0" * 64,
+        classification_input=classification_input,
+        model="openai/test-model",
+        provider="openai:test",
+    )
+    [restored] = persisted.to_result().checkpoint_updates
+    assert restored.speaker_naming is naming
+
+
+@pytest.mark.parametrize(
+    ("operation", "mode", "evidence_level", "conflicts"),
+    [
+        ("update", "view", "explicit", 1),
+        ("clear", None, "explicit", 1),
+        # An inferred update never reaches planning, so there is nothing to settle.
+        ("update", "view", "inferred", 0),
+    ],
+    ids=["view", "clear", "inferred"],
+)
+def test_naming_the_speakers_without_an_edit_is_a_persisted_conflict(
+    operation: str, mode: str | None, evidence_level: str, conflicts: int
+) -> None:
+    # gate it4 P2: a view review that also declared naming was kept as a view
+    # with the naming dropped and only a log line to show for it. Naming edits
+    # the transcript, so the contradictory update is not taken at all (never
+    # upgraded to an edit), and the conflict is persisted with the reading, as
+    # a conflicting slot becomes absent with its diagnostic.
+    request = "Jag vill se transkriptet och vem som säger vad innan analysen."
+    update = {
+        "operation": operation,
+        "producer_kind": "transcript",
+        "mode": mode,
+        "confidence": "high",
+        "reason": "Transkriptet.",
+        "evidence": [_evidence(request)],
+        "evidence_level": evidence_level,
+        "speaker_naming": True,
+    }
+    classification_input = _classification_input(request)
+
+    result = parse_slot_classification_response(
+        json.dumps({**_VALID_CLASSIFICATION_RESPONSE, "checkpoint_updates": [update]}),
+        allowed_slot_values={},
+        classification_input=classification_input,
+    )
+
+    assert result is not None
+    assert result.checkpoint_updates == ()
+    conflict = CheckpointUpdateDiagnostic(
+        code="speaker_naming_without_edit", producer_kind="transcript"
+    )
+    assert result.checkpoint_diagnostics == (conflict,) * conflicts
+    persisted = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
+        prompt_hash="0" * 64,
+        classification_input=classification_input,
+        model="openai/test-model",
+        provider="openai:test",
+    )
+    assert persisted.to_result().checkpoint_diagnostics == (conflict,) * conflicts
+
+
+def test_a_slot_both_in_a_legacy_list_and_at_the_top_level_is_a_conflict() -> None:
+    # gate it1 P2: the top-level entry was ignored when `slots` was a legacy
+    # list, so one of two conflicting readings was accepted silently.
+    request = "I need a PDF"
+    content = json.dumps(
+        {
+            **_VALID_CLASSIFICATION_RESPONSE,
+            "slots": [
+                {
+                    "slot_name": "terminal_output",
+                    "value": "pdf_document",
+                    "confidence": "high",
+                    "reason": "requested PDF",
+                    "evidence": [_evidence(request)],
+                    "evidence_level": "explicit",
+                }
+            ],
+            "terminal_output": {
+                "outcome": "resolved",
+                "value": "docx_document",
+                "evidence": [_evidence(request)],
+                "evidence_level": "explicit",
+            },
+        }
+    )
+
+    result = parse_slot_classification_response(
+        content,
+        allowed_slot_values={"terminal_output": {"pdf_document", "docx_document"}},
+        classification_input=_classification_input(request),
+    )
+
+    assert result is not None
+    assert result.slot_outcomes["terminal_output"].kind == "absent"
+    assert [item.code for item in result.diagnostics] == ["slot_outcome_duplicate"]
+
+
+@pytest.mark.parametrize(
+    "declared", ["true", 1, None], ids=["string", "number", "null"]
+)
+def test_a_present_non_boolean_speaker_naming_is_rejected(declared: object) -> None:
+    # gate it2: a present flag that is not a boolean was read as false, so a
+    # garbled naming request silently became a plain transcript review.
+    request = "Innan något sammanfattas vill jag kunna sätta rätt namn på talarna."
+    update = {
+        "operation": "update",
+        "producer_kind": "transcript",
+        "mode": "edit",
+        "confidence": "high",
+        "reason": "Namnge talarna.",
+        "evidence": [_evidence(request)],
+        "evidence_level": "explicit",
+        "speaker_naming": declared,
+    }
+
+    assert (
+        parse_slot_classification_response(
+            json.dumps(
+                {**_VALID_CLASSIFICATION_RESPONSE, "checkpoint_updates": [update]}
+            ),
+            allowed_slot_values={},
+            classification_input=_classification_input(request),
+        )
+        is None
+    )
+
+
+def test_a_small_model_reading_of_every_slot_can_be_persisted() -> None:
+    # Every offered slot written at the top level without a confidence gives
+    # two diagnostics per slot; the persisted classification must hold them
+    # (the first lenient build refused 12 and failed the turn).
+    request = "Sammanfatta ljudet som text."
+    content = json.dumps(
+        {
+            slot_name: {
+                "outcome": "resolved",
+                "value": sorted(legal_slot_values(slot_name))[0],
+                "evidence": [_evidence(request)],
+                "evidence_level": "inferred",
+            }
+            for slot_name in sorted(LLM_RESOLVABLE_SLOT_NAMES)
+        }
+    )
+    classification_input = _classification_input(request)
+    result = parse_slot_classification_response(
+        content,
+        allowed_slot_values={
+            slot_name: legal_slot_values(slot_name)
+            for slot_name in LLM_RESOLVABLE_SLOT_NAMES
+        },
+        classification_input=classification_input,
+    )
+    assert result is not None
+    assert len(result.diagnostics) > len(LLM_RESOLVABLE_SLOT_NAMES)
+
+    metadata = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
+        prompt_hash="0" * 64,
+        classification_input=classification_input,
+        model="openai/test-model",
+        provider="openai:test",
+    )
+
+    assert len(metadata.diagnostics) == len(result.diagnostics)
 
 
 def test_a_slot_option_in_outcome_that_contradicts_value_stays_malformed() -> None:
@@ -766,6 +1043,29 @@ async def test_non_string_response_records_parse_failure_with_usage_telemetry() 
     assert attempt.outcome == "parse_failed"
     assert usage_tracker.llm_calls_made == 1
     assert usage_tracker.token_usages[0].source == "litellm_estimate"
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_classification_is_logged_not_dropped_silently() -> None:
+    litellm_client = MagicMock()
+    litellm_client.acompletion = AsyncMock(return_value=_make_response("{not-json"))
+
+    with patch.object(classifier.logger, "warning") as warning_log:
+        attempt = await classify_slots(
+            litellm_client=litellm_client,
+            completion_model_route=_route(model="gpt-test"),
+            classification_input=_classification_input("Build a text flow."),
+            allowed_slot_values={"primary_runtime_input": {"text"}},
+            tenant_id=uuid4(),
+        )
+
+    assert attempt.outcome == "parse_failed"
+    warning_log.assert_called_once()
+    message = warning_log.call_args.args[0]
+    extra = warning_log.call_args.kwargs["extra"]
+    assert message == "AI Builder slot classification response did not parse"
+    assert extra["slot_names"] == ("primary_runtime_input",)
+    assert extra["content_chars"] == len("{not-json")
 
 
 @pytest.mark.asyncio
@@ -2653,7 +2953,7 @@ async def test_classifier_timeout_does_not_repeat_provider_work(
 
     assert len(requests) == 1
     payload = json.loads(requests[0].content)
-    assert payload["max_completion_tokens"] == 128_000
+    assert payload["max_completion_tokens"] == SLOT_CLASSIFICATION_ANSWER_CAP_TOKENS
     assert "max_tokens" not in payload
     assert (
         exc_info.value.public_error.details["retry_scope"] == "acknowledged_same_turn"
@@ -4053,6 +4353,9 @@ async def test_classifier_targets_the_reviewed_value_before_a_document_artifact(
     assert "Choose the producer whose value the person reviews" in prompt
     assert "use structured_result" in prompt
     assert "does not turn that upstream field review into report_text" in prompt
+    # gpt-5.6-luna read "innan något sammanfattas vill jag kunna sätta rätt
+    # namn på talarna" as no checkpoint at all (2026-09-25 cohort).
+    assert "speaker_naming true" in prompt
 
 
 @pytest.mark.asyncio
@@ -4596,7 +4899,16 @@ async def test_classify_slots_sends_the_room_the_request_leaves_below_the_ceilin
 
 
 @pytest.mark.asyncio
-async def test_classify_slots_sends_the_models_full_output_ceiling() -> None:
+@pytest.mark.parametrize(
+    ("model_output_tokens", "sent_max_tokens"),
+    [
+        (16_000, 16_000),
+        (32_768, SLOT_CLASSIFICATION_ANSWER_CAP_TOKENS),
+    ],
+)
+async def test_classify_slots_sends_the_models_ceiling_up_to_the_answer_cap(
+    model_output_tokens: int, sent_max_tokens: int
+) -> None:
     litellm_client = AsyncMock()
     litellm_client.acompletion.return_value = _make_response(
         json.dumps(_VALID_CLASSIFICATION_RESPONSE)
@@ -4615,7 +4927,7 @@ async def test_classify_slots_sends_the_models_full_output_ceiling() -> None:
             classification_input=_classification_input("Return JSON with case_id."),
             allowed_slot_values={"terminal_output": {"structured_json"}},
             tenant_id=uuid4(),
-            capacity=ModelCapacity(100_000, 16_000),
+            capacity=ModelCapacity(100_000, model_output_tokens),
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=100,
                 minimum_conversation_budget_tokens=0,
@@ -4623,7 +4935,9 @@ async def test_classify_slots_sends_the_models_full_output_ceiling() -> None:
         )
 
     assert attempt.outcome == "resolved"
-    assert litellm_client.acompletion.await_args.kwargs["max_tokens"] == 16_000
+    assert litellm_client.acompletion.await_args.kwargs["max_tokens"] == (
+        sent_max_tokens
+    )
 
 
 @pytest.mark.asyncio

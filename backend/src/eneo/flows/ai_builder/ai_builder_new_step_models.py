@@ -198,7 +198,6 @@ class NewStepDraft(BaseModel):
     input_type: InputType = InputType.TEXT
     output_mode: OutputMode | None = None
     output_type: OutputType = OutputType.TEXT
-    model_ref: str | None = None
     knowledge_refs: list[str] = Field(default_factory=list)
     runtime_required: bool = False
     runtime_max_files: int | None = None
@@ -234,14 +233,6 @@ class NewStepDraft(BaseModel):
         if "{{" in value or "}}" in value:
             raise ValueError("Step instructions must not contain template variables.")
         return value
-
-    @field_validator("model_ref")
-    @classmethod
-    def _normalize_model_ref(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized = value.strip()
-        return normalized or None
 
     @field_validator(
         "knowledge_refs",

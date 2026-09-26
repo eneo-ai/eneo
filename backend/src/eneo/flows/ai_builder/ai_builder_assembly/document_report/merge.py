@@ -39,7 +39,6 @@ def _merge_report_writer_semantics(
             planned_step.semantic_origin_eligible
             or semantic_step.semantic_origin_eligible
         ),
-        model_ref=semantic_step.model_ref or planned_step.model_ref,
         knowledge_refs=tuple(
             dict.fromkeys((*planned_step.knowledge_refs, *semantic_step.knowledge_refs))
         ),

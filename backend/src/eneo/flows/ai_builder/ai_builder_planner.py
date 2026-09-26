@@ -22,7 +22,10 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     latest_user_edit_intent,
     metadata_for_user_message,
     metadata_with_slot_classification,
+    metadata_with_text_status,
     requirements_confirmation_from_question_answer,
+    text_status_changes,
+    unsettled_user_text,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -54,6 +57,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
 from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
     persist_non_plan_turn,
     stale_saved_step_revision_message,
+    unsettled_text_answer,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderEditContext,
@@ -606,12 +610,66 @@ class AIBuilderPlanner:
                 user_message.metadata,
                 prepared_request.slot_classification_metadata,
             )
+            # The classification boundary: every user message the reading
+            # covered keeps its reading status, older ones included.
+            status_changes = text_status_changes(
+                conversation,
+                prepared_request.slot_classification_metadata,
+                planning_state=prepared_request.planning_state,
+            )
+            restated = [
+                covered
+                for covered in conversation
+                if covered.message_id in status_changes
+            ]
+            for covered in restated:
+                covered.metadata = metadata_with_text_status(
+                    covered.metadata, status_changes[covered.message_id]
+                )
             await self.repo.append_session_messages(
                 session_id=session_id,
                 tenant_id=self.user.tenant_id,
-                conversation=[user_message],
+                conversation=[
+                    *(covered for covered in restated if covered is not user_message),
+                    user_message,
+                ],
                 lease=lease,
             )
+
+            unsettled = unsettled_user_text(conversation)
+            if unsettled is not None:
+                # Whatever this turn carries, a click or new text, deciding
+                # anything now would build on text the user wrote that is
+                # unread or unsettled.
+                try:
+                    events = await persist_non_plan_turn(
+                        repo=self.repo,
+                        turn=turn,
+                        conversation=conversation,
+                        new_messages_start=new_messages_start,
+                        message=unsettled_text_answer(
+                            unsettled, ui_language=ui_language
+                        ),
+                        base_assistant_metadata=build_assistant_message_metadata(
+                            conversation
+                        ),
+                        usage_tracker=usage_tracker,
+                        planning_state=prepared_request.planning_state,
+                        flow=flow,
+                    )
+                except PlanningStatePayloadTooLargeError as error:
+                    yield await self._complete_planning_state_payload_too_large(
+                        turn=turn,
+                        error=error,
+                        request_id=request_id,
+                    )
+                    yield build_done_event()
+                    return
+                await self.repo.complete_session_turn(turn=turn, error=None)
+                for event in events:
+                    yield event
+                yield build_done_event()
+                return
 
             match prepared_request:
                 case ProposalPrepared() as proposal_request:

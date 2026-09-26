@@ -5,38 +5,12 @@ from typing import NoReturn
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
-from eneo.flows.ai_builder.ai_builder_domain_models import LintWarning
 from eneo.flows.flow_authoring_spec import InputType, OutputMode, OutputType
 
 DOCUMENT_REPORT_COMPOSE_TOPOLOGY_MISSING_FEEDBACK = (
     "Document report flows with a committed report disposition must end with "
     "a deterministic compose_text body writer before the renderer."
 )
-
-
-def _append_combined_model_selection_diagnostics(
-    combined_producer_model_refs: list[str],
-    *,
-    field_diagnostics: list[LintWarning] | None,
-    ui_language: str | None,
-) -> None:
-    if field_diagnostics is not None:
-        for model_ref in combined_producer_model_refs:
-            field_diagnostics.append(
-                LintWarning(
-                    code="document_report_model_selection_combined",
-                    message=(
-                        "The steps specified different model selections; they were "
-                        "combined and the combined report-writing step uses model "
-                        "selection "
-                        f"{model_ref}."
-                        if ui_language == "en"
-                        else "Stegen angav olika modellval; de kombinerades och "
-                        "det kombinerade rapportskrivningssteget använder modellvalet "
-                        f"{model_ref}."
-                    ),
-                )
-            )
 
 
 def _raise_document_report_compose_topology_missing(
@@ -67,9 +41,6 @@ def _raise_document_report_compose_topology_missing(
     )
 
 
-append_combined_model_selection_diagnostics = (
-    _append_combined_model_selection_diagnostics
-)
 raise_document_report_compose_topology_missing = (
     _raise_document_report_compose_topology_missing
 )

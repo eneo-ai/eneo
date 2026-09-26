@@ -21,6 +21,13 @@ the candidate producer carries the requested mode (``set``) or no review
 baseline is the canonical Flow authoring snapshot
 (``current_flow_authoring_spec``), which reconstructs document body-writer
 identity, so baseline and candidate producer resolution share one owner.
+
+A ``speaker_mapping`` step directly after the transcription step is the
+transcript producer: its output is the transcript a person has reviewed, with
+names applied. Its review is always edit, and it is compared like any other
+producer, so a requested `view` or `clear` against it is a mismatch rather
+than a silent edit. Create compiles a transcript checkpoint that names the
+speakers (`CheckpointIntent.speaker_naming`) with mode edit as that step.
 """
 
 from __future__ import annotations
@@ -279,11 +286,16 @@ def _checkpoint_producer_step(
 ) -> StepSpec | None:
     if producer_kind == "transcript":
         producers = [
-            step
-            for step in spec.steps
+            index
+            for index, step in enumerate(spec.steps)
             if step.output_mode == OutputMode.TRANSCRIBE_ONLY
         ]
-        return producers[0] if len(producers) == 1 else None
+        if len(producers) != 1:
+            return None
+        following = spec.steps[producers[0] + 1 : producers[0] + 2]
+        if following and following[0].output_mode == OutputMode.SPEAKER_MAPPING:
+            return following[0]
+        return spec.steps[producers[0]]
     if producer_kind == "structured_result":
         return next(
             (

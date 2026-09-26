@@ -28,7 +28,6 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     AIBuilderSavedFlowStepEditContext,
     ResolvedAIBuilderEditContext,
-    _validate_target_step_model,
     build_plan_revision_prompt_block,
     names_same_edit_target,
     resolve_plan_edit_context,
@@ -1147,7 +1146,8 @@ def test_step_scoped_context_requires_a_stable_step_ref() -> None:
 
 
 def test_a_revision_that_can_decline_is_told_when_to_use_it() -> None:
-    """One directive, two cases: model only declines, mixed still edits."""
+    """A model-only request declines; what is said about a model otherwise is
+    the design rules'."""
     context = AIBuilderPlanEditContext(
         scope="step",
         plan_id=UUID("00000000-0000-0000-0000-000000000001"),
@@ -1166,7 +1166,6 @@ def test_a_revision_that_can_decline_is_told_when_to_use_it() -> None:
 
     assert declining is not None and proposing is not None
     assert "decline_flow_change" in declining
-    assert "model is chosen in the picker" in declining
     assert "decline_flow_change" not in proposing
 
 
@@ -1317,9 +1316,25 @@ def test_revision_prompt_names_the_target_step_and_prior_refs() -> None:
     assert "step_b (Create final result)" in prompt
     assert "step_a: Analyze input" in prompt
     assert "step_b: Create final result" in prompt
-    # The revision guidance is where the picker-only rule is explained, for both
-    # proposed-plan and saved-Flow revisions.
-    assert "modellväljare/model picker" in prompt
+
+
+@pytest.mark.parametrize("can_decline", [True, False])
+def test_revision_prompt_leaves_what_is_said_about_models_to_the_design_rules(
+    can_decline: bool,
+) -> None:
+    # One owner of what the planner says about a model: the design rule that
+    # sends it to assumptions. A revision only routes a model-only request to
+    # the decline tool when that tool is offered.
+    block = build_plan_revision_prompt_block(
+        context=_step_context(target_plan_step_ref="step_b"),
+        prior_spec=_model_revision_specs(proposed_model_ref=None)[0],
+        can_decline=can_decline,
+    )
+
+    assert block is not None
+    assert "model picker" not in block
+    assert "plan_rationale" not in block
+    assert ("`model_choice_belongs_to_step_editor`" in block) == can_decline
 
 
 @pytest.mark.parametrize("can_decline", [True, False])
@@ -1401,182 +1416,54 @@ def _model_revision_specs(
     return prior, proposed
 
 
-@pytest.mark.parametrize(
-    "proposed_model_ref, proposed_instructions",
-    [
-        ("model.gpt-5-4", None),
-        ("model.gpt-5-4", "Create final result with sources."),
-        (None, None),
-    ],
-)
-def test_step_scoped_edit_rejects_a_model_change_on_the_selected_step(
-    proposed_model_ref: str | None,
-    proposed_instructions: str | None,
-) -> None:
+def test_a_plan_stored_with_planner_chosen_models_revises_without_them() -> None:
+    # A plan stored while the planner still chose models: the revision cannot
+    # reproduce them, and that is not a change the revision made, neither on
+    # the selected step nor on the steps it must preserve.
     prior, proposed = _model_revision_specs(
-        proposed_model_ref=proposed_model_ref,
-        proposed_instructions=proposed_instructions,
-    )
-
-    rejection = validate_scoped_plan_revision(
-        target_kind=TargetKind.CREATE,
-        context=_step_context(target_plan_step_ref="step_b"),
-        prior_spec=prior,
-        proposed_spec=proposed,
-    )
-
-    assert rejection is not None
-    feedback = rejection.feedback
-    assert "step_b" in feedback
-    assert "model picker" in feedback
-
-
-def test_step_scoped_model_check_is_correct_when_the_step_order_also_drifted() -> None:
-    # Both guards are live on one proposal: a step was inserted AND the selected
-    # step's model changed. The model check pairs the target with itself by ref,
-    # so it is right either way; the structural complaint is the one the user
-    # needs, and it comes first.
-    prior = _edit_spec(
-        [
-            _edit_step(
-                "step_a",
-                "Analyze input",
-                output_type=OutputType.JSON,
-                model_ref="model.gpt-4o-mini",
-            ),
-            _edit_step(
-                "step_b",
-                "Create final result",
-                output_type=OutputType.TEXT,
-                model_ref="model.gpt-4o-mini",
-            ),
-        ]
-    )
-    proposed = _edit_spec(
-        [
-            prior.steps[0],
-            _edit_step(
-                "step_b",
-                "Create final result",
-                output_type=OutputType.TEXT,
-                model_ref="model.gpt-5-4",
-            ),
-            _edit_step(
-                "step_c",
-                "Summarize",
-                output_type=OutputType.TEXT,
-                model_ref="model.gpt-4o-mini",
-            ),
-        ]
-    )
-
-    rejection = validate_scoped_plan_revision(
-        target_kind=TargetKind.CREATE,
-        context=_step_context(target_plan_step_ref="step_b"),
-        prior_spec=prior,
-        proposed_spec=proposed,
-    )
-
-    assert rejection is not None
-    feedback = rejection.feedback
-    assert "must not add, remove, or reorder steps" in feedback
-
-    assert (
-        _validate_target_step_model(
-            prior_target=prior.steps[1],
-            proposed_target=proposed.steps[1],
-            target_ref="step_b",
-        )
-        is not None
-    )
-
-
-def test_step_scoped_model_check_does_not_accuse_a_step_after_an_insertion() -> None:
-    # Steps on different models, a step inserted at the front, and no model
-    # changed anywhere. Pairing by position would compare step_b against step_a
-    # and invent a model change; pairing by target ref cannot.
-    prior = _edit_spec(
-        [
-            _edit_step(
-                "step_a",
-                "Analyze input",
-                output_type=OutputType.JSON,
-                model_ref="model.gpt-4o-mini",
-            ),
-            _edit_step(
-                "step_b",
-                "Create final result",
-                output_type=OutputType.TEXT,
-                model_ref="model.gpt-5-4",
-            ),
-        ]
-    )
-    proposed = _edit_spec(
-        [
-            _edit_step(
-                "step_new",
-                "Collect sources",
-                output_type=OutputType.JSON,
-                model_ref="model.gpt-4o-mini",
-            ),
-            *prior.steps,
-        ]
-    )
-
-    assert (
-        _validate_target_step_model(
-            prior_target=prior.steps[1],
-            proposed_target=proposed.steps[2],
-            target_ref="step_b",
-        )
-        is None
-    )
-
-    rejection = validate_scoped_plan_revision(
-        target_kind=TargetKind.CREATE,
-        context=_step_context(target_plan_step_ref="step_b"),
-        prior_spec=prior,
-        proposed_spec=proposed,
-    )
-    assert rejection is not None
-    feedback = rejection.feedback
-    assert "model picker" not in feedback
-
-
-def test_whole_plan_outline_revision_is_not_model_guarded_yet() -> None:
-    # Recorded residual, not an endorsement: an outline step has no stable
-    # identity across a restructuring, so a whole-plan revision cannot tell a
-    # reorder apart from a model change. Guarding it needs stable carried-step
-    # identity (follow-up). A saved Flow does not rely on this: its modify
-    # contract carries no model_ref at all.
-    prior, proposed = _model_revision_specs(proposed_model_ref="model.gpt-5-4")
-
-    assert (
-        validate_scoped_plan_revision(
-            target_kind=TargetKind.CREATE,
-            context=_step_context(scope="whole_plan"),
-            prior_spec=prior,
-            proposed_spec=proposed,
-        )
-        is None
-    )
-
-
-def test_step_scoped_edit_accepts_an_instruction_change_that_keeps_the_model() -> None:
-    prior, proposed = _model_revision_specs(
-        proposed_model_ref="model.gpt-4o-mini",
+        proposed_model_ref=None,
         proposed_instructions="Create final result with sources.",
     )
-
-    assert (
-        validate_scoped_plan_revision(
-            target_kind=TargetKind.CREATE,
-            context=_step_context(target_plan_step_ref="step_b"),
-            prior_spec=prior,
-            proposed_spec=proposed,
-        )
-        is None
+    proposed = proposed.model_copy(
+        update={
+            "steps": [
+                proposed.steps[0].model_copy(
+                    update={
+                        "assistant_spec": proposed.steps[0].assistant_spec.model_copy(
+                            update={"model_ref": None}
+                        )
+                    }
+                ),
+                proposed.steps[1],
+            ]
+        }
     )
+    assert prior.steps[0].assistant_spec.model_ref is not None
+
+    for target_kind in (TargetKind.CREATE, TargetKind.EDIT):
+        assert (
+            validate_scoped_plan_revision(
+                target_kind=target_kind,
+                context=_step_context(target_plan_step_ref="step_b"),
+                prior_spec=prior,
+                proposed_spec=proposed,
+            )
+            is None
+        )
+
+
+def test_dropping_a_stored_model_alone_is_not_a_change_to_the_selected_step() -> None:
+    prior, proposed = _model_revision_specs(proposed_model_ref=None)
+
+    rejection = validate_scoped_plan_revision(
+        target_kind=TargetKind.CREATE,
+        context=_step_context(target_plan_step_ref="step_b"),
+        prior_spec=prior,
+        proposed_spec=proposed,
+    )
+
+    assert rejection is not None
+    assert rejection.reason == "target_step_unchanged"
 
 
 def _edit_spec(

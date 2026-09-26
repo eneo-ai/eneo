@@ -603,12 +603,12 @@ def _reference_material(
 
 
 class TestRenderResourceReferenceBlock:
-    def test_renders_every_resource_ref(self) -> None:
+    def test_renders_every_knowledge_ref_and_no_model(self) -> None:
         material = _reference_material(model_count=2, kb_count=2)
 
         rendered = render_resource_reference_block(material)
 
-        assert "model.model-0" in rendered.models
-        assert "model.model-1" in rendered.models
         assert "knowledge.knowledge-0" in rendered.knowledge_bases
         assert "knowledge.knowledge-1" in rendered.knowledge_bases
+        assert "model.model-0" not in rendered.knowledge_bases
+        assert not hasattr(material, "models")

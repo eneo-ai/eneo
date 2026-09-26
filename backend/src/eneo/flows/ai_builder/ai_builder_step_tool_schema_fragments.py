@@ -76,27 +76,6 @@ def build_previous_output_refs_schema() -> dict[str, Any]:
     }
 
 
-def build_model_ref_property_schema(
-    *,
-    model_refs: list[str] | None,
-) -> dict[str, Any]:
-    """Model slot property for a step this proposal creates.
-
-    An existing step's model belongs to the step's model picker, so the
-    modify-step schema deliberately offers no such property.
-    """
-    model_ref_schema: dict[str, Any] = {
-        "type": ["string", "null"],
-        "description": (
-            "Optional portable model slot ref to use for this step; null lets "
-            "the space default model apply."
-        ),
-    }
-    if model_refs is not None:
-        model_ref_schema["enum"] = [*model_refs, None]
-    return {"model_ref": model_ref_schema}
-
-
 def build_knowledge_refs_property_schema(
     *,
     kb_refs: list[str] | None,

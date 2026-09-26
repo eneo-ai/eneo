@@ -5,9 +5,6 @@ from dataclasses import replace
 from typing import NoReturn, assert_never
 
 from eneo.flows.ai_builder.ai_builder_assembly.document_report.diagnostics import (
-    append_combined_model_selection_diagnostics as _append_combined_model_selection_diagnostics,
-)
-from eneo.flows.ai_builder.ai_builder_assembly.document_report.diagnostics import (
     raise_document_report_compose_topology_missing as _raise_document_report_compose_topology_missing,
 )
 from eneo.flows.ai_builder.ai_builder_assembly.document_report.merge import (
@@ -36,7 +33,6 @@ from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     derive_underlag_channel,
     planned_step_is_source_reader,
 )
-from eneo.flows.ai_builder.ai_builder_domain_models import LintWarning
 from eneo.flows.ai_builder.ai_builder_field_identity import (
     fold_result_field_name,
 )
@@ -458,7 +454,6 @@ def lower_document_report_topology(
     result_contract_output_fields: tuple[StructuredFieldDraft, ...],
     requested_output_section_contracts: tuple[RequestedOutputSectionContract, ...],
     ui_language: str | None,
-    field_diagnostics: list[LintWarning] | None = None,
 ) -> tuple[tuple[PlannedStep, ...], DocumentReportSectionSource | None]:
     if report_disposition is None:
         return planned_steps, None
@@ -482,7 +477,6 @@ def lower_document_report_topology(
     ):
         fail_closed()
 
-    combined_producer_model_refs: list[str] = []
     renderer_step = planned_steps[-1]
     body_writer_step = planned_steps[-2]
     content_steps = list(planned_steps[:-2])
@@ -537,11 +531,6 @@ def lower_document_report_topology(
                 else:
                     section_step = _document_report_section_writer(
                         reader_step=content_steps[reader_index],
-                        model_ref=(
-                            section_semantic_step.model_ref
-                            if section_semantic_step is not None
-                            else body_writer_step.model_ref
-                        ),
                         ui_language=ui_language,
                     )
                     if section_semantic_step is not None:
@@ -607,15 +596,6 @@ def lower_document_report_topology(
                         after_index=section_index,
                     )
                 )
-                distinct_model_refs = {
-                    model_ref
-                    for model_ref in (
-                        content_steps[section_index].model_ref,
-                        *(step.model_ref for step in remaining_report_semantics),
-                        body_writer_step.model_ref,
-                    )
-                    if model_ref is not None
-                }
                 for semantic_step in remaining_report_semantics:
                     content_steps[section_index] = _merge_report_writer_semantics(
                         content_steps[section_index],
@@ -625,10 +605,6 @@ def lower_document_report_topology(
                     content_steps[section_index],
                     semantic_step=body_writer_step,
                 )
-                if len(distinct_model_refs) > 1:
-                    model_ref = content_steps[section_index].model_ref
-                    assert model_ref is not None
-                    combined_producer_model_refs.append(model_ref)
         case "synthesized_overview":
             section_index = reader_index
             section_field_name = None
@@ -637,7 +613,6 @@ def lower_document_report_topology(
 
     match report_disposition:
         case "synthesized_overview" | "both":
-            overview_original_steps = tuple(content_steps[section_index + 1 :])
             content_steps, overview_semantics = _without_report_text_semantics_after(
                 content_steps,
                 after_index=section_index,
@@ -663,20 +638,6 @@ def lower_document_report_topology(
                     "ai_builder_document_report_overview_writer_inserted",
                     extra={"previous_step_name": previous_step.name},
                 )
-            overview_step = content_steps[overview_index]
-            collapsed_model_refs = tuple(
-                step.model_ref
-                for step in overview_original_steps
-                if _step_outputs_report_text(step) or step is overview_step
-            ) + (body_writer_step.model_ref,)
-            terminal_model_ref = next(
-                (
-                    model_ref
-                    for model_ref in reversed(collapsed_model_refs)
-                    if model_ref is not None
-                ),
-                None,
-            )
             for semantic_step in overview_semantics:
                 content_steps[overview_index] = _merge_report_writer_semantics(
                     content_steps[overview_index],
@@ -702,32 +663,10 @@ def lower_document_report_topology(
                 content_steps[overview_index],
                 semantic_step=body_writer_step,
             )
-            content_steps[overview_index] = replace(
-                content_steps[overview_index],
-                model_ref=terminal_model_ref,
-            )
-            if (
-                len(
-                    {
-                        model_ref
-                        for model_ref in collapsed_model_refs
-                        if model_ref is not None
-                    }
-                )
-                > 1
-            ):
-                assert terminal_model_ref is not None
-                combined_producer_model_refs.append(terminal_model_ref)
         case "per_source_sections":
             pass
         case _ as unreachable:
             assert_never(unreachable)
-
-    _append_combined_model_selection_diagnostics(
-        combined_producer_model_refs,
-        field_diagnostics=field_diagnostics,
-        ui_language=ui_language,
-    )
 
     lowered_steps = _rederive_previous_step_underlag_channels(
         (
@@ -775,7 +714,6 @@ def _rederive_previous_step_underlag_channels(
 def _document_report_section_writer(
     *,
     reader_step: PlannedStep,
-    model_ref: str | None,
     ui_language: str | None,
 ) -> PlannedStep:
     return PlannedStep(
@@ -793,7 +731,6 @@ def _document_report_section_writer(
             previous_field_refs=(),
         ),
         output_fields=(_document_report_section_array_field(ui_language),),
-        model_ref=model_ref,
     )
 
 

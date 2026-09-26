@@ -1249,6 +1249,18 @@
                   </p>
                 {/if}
               {/if}
+              <!-- From the compiled steps, outside the tabs, so no planner prose
+                   can promise a pause the flow lacks, or hide one it has. -->
+              <p
+                class="mt-2 max-w-[70ch] text-[0.8125rem] leading-relaxed text-pretty {reviewCheckpointSteps.length >
+                0
+                  ? 'text-warning-stronger'
+                  : 'text-secondary'}"
+              >
+                {reviewCheckpointSteps.length > 0
+                  ? m.ai_builder_review_checkpoint_note({ count: reviewCheckpointSteps.length })
+                  : m.ai_builder_no_review_checkpoint_note()}
+              </p>
             </div>
             {#if tokenUsage}
               <TokenUsageBadge
@@ -1449,13 +1461,12 @@
                 {#snippet flowDiagram()}
                   {#if reviewCheckpointSteps.length > 0}
                     <div
+                      role="group"
+                      aria-label={m.ai_builder_review_checkpoint_note({
+                        count: reviewCheckpointSteps.length
+                      })}
                       class="border-warning-default/40 bg-warning-dimmer text-warning-stronger mx-auto mb-3 flex max-w-[47.5rem] flex-wrap items-baseline gap-1.5 rounded-lg border px-3 py-2 text-xs"
                     >
-                      <span class="text-pretty">
-                        {m.ai_builder_review_checkpoint_note({
-                          count: reviewCheckpointSteps.length
-                        })}
-                      </span>
                       {#each reviewCheckpointSteps as { step, index } (step.plan_step_ref)}
                         {#if isScopedStepReview && !isScopedTargetStep(step)}
                           <!-- A one-step review has no step list to open it in. -->

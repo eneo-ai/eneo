@@ -21,6 +21,9 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     parse_create_flow_intent_arguments,
 )
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
+    build_ai_builder_resource_catalog,
+)
 from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
 )
@@ -465,3 +468,54 @@ def test_prepare_compiled_spec_preserves_citation_validation_family() -> None:
     assert [error.code for error in result.validation.errors] == [
         "citation_mode_unsupported"
     ]
+
+
+def _spec_with_models(*steps: tuple[str | None, str | None]) -> FlowDraftSpecCore:
+    return FlowDraftSpecCore(
+        flow_name="Modellval",
+        steps=[
+            StepSpec(
+                plan_step_ref=f"step_{chr(ord('a') + index)}",
+                existing_step_ref=existing_step_ref,
+                name=f"Steg {index + 1}",
+                assistant_spec=AssistantSpec(
+                    instructions="Analysera underlaget.",
+                    model_ref=model_ref,
+                ),
+                input_source=(
+                    InputSource.FLOW_INPUT if index == 0 else InputSource.PREVIOUS_STEP
+                ),
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.TEXT,
+            )
+            for index, (model_ref, existing_step_ref) in enumerate(steps)
+        ],
+    )
+
+
+def test_an_existing_step_keeps_its_model() -> None:
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[
+            {
+                "id": "model-uuid-1",
+                "ref": "model-uuid-1",
+                "name": "gpt-5.6-luna",
+                "display_name": "gpt-5.6-luna",
+                "provider": "openai",
+            }
+        ],
+        available_kbs=[],
+    )
+    [luna_ref] = catalog.model_refs
+
+    result = prepare_compiled_spec_for_session(
+        spec=_spec_with_models((luna_ref, "step_1")),
+        target_kind=TargetKind.EDIT,
+        available_model_refs=catalog.model_refs,
+        available_kb_refs=None,
+        resource_catalog=catalog,
+    )
+
+    assert result.spec is not None
+    assert result.spec.steps[0].assistant_spec.model_ref == luna_ref

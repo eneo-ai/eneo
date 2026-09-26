@@ -1170,6 +1170,7 @@ class TestGetSessionEndpoint:
                     "diagnostics": [],
                     "file_roles": [],
                     "checkpoint_updates": [],
+                    "checkpoint_diagnostics": [],
                     "secondary_obligations": [],
                     "form_intake": None,
                     "named_result_evidence": None,

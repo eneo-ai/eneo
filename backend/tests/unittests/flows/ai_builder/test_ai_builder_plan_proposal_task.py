@@ -42,6 +42,7 @@ from eneo.flows.ai_builder.ai_builder_tools import (
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
+    CheckpointIntent,
     ExampleOutputCitation,
     ExampleOutputConstraintEvidence,
     ExampleOutputSchemaInferenceOutcome,
@@ -55,6 +56,7 @@ from eneo.flows.ai_builder.planning_state import (
     SlotSource,
     StepTriple,
 )
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 from tests.docx_template_fixtures import control_template_bytes
 
 
@@ -270,15 +272,57 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
     )
 
     assert "Available resources:" in prompt
-    assert "ref=`model.fast-model`" in prompt
+    # A step's model is its model picker's, so the planner is shown no models.
+    assert "Models:" not in prompt
+    assert "model.fast-model" not in prompt
     assert "ref=`knowledge.policy-kb`" in prompt
     assert (
-        "Exception: when the Available resources section gives portable resource slot refs"
+        "Exception: when the Available resources section gives portable knowledge slot refs"
         in prompt
     )
     assert "human-readable `flow_name`" in prompt
     assert "input_schema" not in prompt
     assert "assistant_ref" not in prompt
+
+
+def test_plan_proposal_prompt_leaves_each_steps_model_to_its_model_picker() -> None:
+    state = _planning_state_with_architecture(
+        StepTriple(
+            input_type="text",
+            output_type="text",
+            output_mode="pass_through",
+        ),
+    )
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[
+            {
+                "id": "model-luna",
+                "ref": "model-luna",
+                "name": "gpt-5.6-luna",
+                "display_name": "gpt-5.6-luna",
+                "provider": "openai",
+            },
+        ],
+        available_kbs=[],
+    )
+
+    for is_edit_mode in (False, True):
+        prompt = build_plan_proposal_system_prompt(
+            planning_state=state,
+            confirmed_requirements=_requirements(),
+            attachment_context=None,
+            flow_context=None,
+            is_edit_mode=is_edit_mode,
+            resource_catalog=catalog,
+        )
+
+        assert "model_ref" not in prompt
+        assert "needs_source_text" not in prompt
+        assert "do not claim it was set" in prompt
+        assert (
+            "each step's model is chosen in that step's modellväljare/model picker"
+            in prompt
+        )
 
 
 def test_plan_proposal_prompt_keeps_previous_refs_backend_owned() -> None:
@@ -985,6 +1029,59 @@ def test_plan_proposal_prompt_scopes_audio_transcription_to_backend():
     assert "Human review checkpoints are compiler-owned in create mode" in prompt
     assert "Do not set review_mode" in prompt
     assert "separate AI step" in prompt
+
+
+def test_plan_proposal_prompt_names_the_backend_speaker_naming_step() -> None:
+    # The planner modelled "name the speakers first" as an AI step writing a
+    # speaker list; it has to know the backend inserts the naming review.
+    def prompt_for(*, speaker_naming_review: bool) -> str:
+        return build_plan_proposal_system_prompt(
+            planning_state=PlanningState.empty(),
+            confirmed_requirements=_requirements(summary="Sammanfatta intervjun."),
+            attachment_context=None,
+            flow_context=None,
+            is_edit_mode=False,
+            speaker_naming_review=speaker_naming_review,
+            resource_catalog=_empty_catalog(),
+        )
+
+    naming_rule = "a review step where a person names the speakers"
+    assert naming_rule in prompt_for(speaker_naming_review=True)
+    assert naming_rule not in prompt_for(speaker_naming_review=False)
+
+
+def test_plan_proposal_prompt_states_the_confirmed_checkpoints() -> None:
+    # Plans described a pause the compiled flow did not have ("en mänsklig
+    # granskningspunkt ... kan användaren korrigera namnen"): the planner was
+    # never told which checkpoints are confirmed.
+    def prompt_for(planning_state: PlanningState) -> str:
+        return build_plan_proposal_system_prompt(
+            planning_state=planning_state,
+            confirmed_requirements=_requirements(summary="Sammanfatta intervjun."),
+            attachment_context=None,
+            flow_context=None,
+            is_edit_mode=False,
+            resource_catalog=_empty_catalog(),
+        )
+
+    reviewed = PlanningState.empty()
+    reviewed.checkpoint_intents = [
+        CheckpointIntent(
+            evidence_level="explicit",
+            producer_kind="transcript",
+            operation="set",
+            mode=FlowStepReviewMode.EDIT,
+            confidence="high",
+            evidence=["quote:user_message:1:Jag vill rätta transkriptet."],
+        )
+    ]
+
+    assert "Confirmed checkpoints for this flow: none." in prompt_for(
+        PlanningState.empty()
+    )
+    assert "Confirmed checkpoints for this flow: transcript (edit)." in prompt_for(
+        reviewed
+    )
 
 
 def test_pure_audio_prompt_requests_one_mechanics_free_transcription_step() -> None:

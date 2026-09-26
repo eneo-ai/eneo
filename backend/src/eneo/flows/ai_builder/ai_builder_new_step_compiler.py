@@ -26,6 +26,7 @@ from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     complete_runtime_source_output_contract,
     runtime_managed_source_field_names,
 )
+from eneo.flows.enums import flow_output_mode_uses_completion_model
 from eneo.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -34,7 +35,6 @@ from eneo.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
     StepSpec,
-    completion_model_ref_strip_log_extra,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from eneo.flows.flow_variable_definitions import form_field_reference_expression
@@ -47,9 +47,7 @@ from eneo.flows.input_binding_contract_rules import (
     source_ref_bindings,
     validate_source_refs_binding,
 )
-from eneo.main.logging import get_logger
 
-logger = get_logger(__name__)
 _FILE_INPUT_TYPES = {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
 
 
@@ -157,7 +155,6 @@ def compile_new_step_draft(
         name=step_draft.name,
         assistant_spec=AssistantSpec(
             instructions=assistant_instructions,
-            model_ref=step_draft.model_ref,
             knowledge_refs=list(step_draft.knowledge_refs),
         ),
         input_source=input_source,
@@ -173,11 +170,6 @@ def compile_new_step_draft(
     )
     step = step.model_copy(
         update={"input_config": resolve_runtime_input_config(step_spec=step)}
-    )
-    _log_transcribe_only_model_ref_stripped(
-        supplied_model_ref=step_draft.model_ref,
-        validated_step=step,
-        source="draft",
     )
     return step
 
@@ -209,22 +201,6 @@ def require_resolved_input_source(step_draft: NewStepDraft) -> InputSource:
     if step_draft.input_source is None:
         raise ValueError("New step input_source must be resolved before compilation.")
     return step_draft.input_source
-
-
-def _log_transcribe_only_model_ref_stripped(
-    *,
-    supplied_model_ref: str | None,
-    validated_step: StepSpec,
-    source: str,
-) -> None:
-    extra = completion_model_ref_strip_log_extra(
-        supplied_model_ref=supplied_model_ref,
-        validated_step=validated_step,
-        source=source,
-    )
-    if extra is None:
-        return
-    logger.info("ai_builder_transcribe_only_model_ref_stripped", extra=extra)
 
 
 def make_plan_step_ref(index: int) -> str:
@@ -418,6 +394,8 @@ def compile_step_input_bindings(
         and input_type.value == "text"
         and bool(prior_steps)
         and prior_steps[-1].output_type == OutputType.JSON
+        # A speaker-naming step's text output is the reviewed transcript.
+        and prior_steps[-1].output_mode != OutputMode.SPEAKER_MAPPING
     )
     needs_explicit_underlag = bool(
         explicit_previous_fields
@@ -572,7 +550,13 @@ def _actual_input_guidance(
     if (
         require_resolved_input_source(step_draft) != InputSource.PREVIOUS_STEP
         or not prior_steps
-        or prior_steps[-1].output_mode != OutputMode.TRANSCRIBE_ONLY
+        or prior_steps[-1].output_mode
+        not in {OutputMode.TRANSCRIBE_ONLY, OutputMode.SPEAKER_MAPPING}
+        # The guidance is prompt text; a step that runs no model reads none.
+        or (
+            step_draft.output_mode is not None
+            and not flow_output_mode_uses_completion_model(step_draft.output_mode.value)
+        )
     ):
         return None
     if input_bindings is not None:
@@ -582,6 +566,20 @@ def _actual_input_guidance(
             ref.step_ref == previous_step_ref and ref.output == "text" for ref in refs
         ):
             return None
+    if prior_steps[-1].output_mode == OutputMode.SPEAKER_MAPPING:
+        if _uses_english(ui_language):
+            return (
+                "Actual input: This step receives the complete transcript after a "
+                "person has reviewed it, with the speakers' names in place of the "
+                "speaker labels. Apply the task and result instructions below to "
+                "that transcript."
+            )
+        return (
+            "Faktiskt underlag: Det här steget får hela transkriptet efter att en "
+            "person har granskat det, med talarnas namn i stället för "
+            "talarbeteckningarna. Tillämpa uppgiften och resultatkraven nedan på "
+            "det transkriptet."
+        )
     if _uses_english(ui_language):
         return (
             "Actual input: This step receives the complete text transcript produced "

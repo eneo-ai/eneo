@@ -8,6 +8,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
 )
 from eneo.flows.ai_builder.ai_builder_settings import (
+    SLOT_CLASSIFICATION_ANSWER_CAP_TOKENS,
     AIBuilderBudgetPolicy,
     AIBuilderRequestBudget,
     apply_ai_builder_budget_policy_patch,
@@ -86,7 +87,9 @@ def _policy(**overrides: object) -> AIBuilderBudgetPolicy:
     )
 
 
-@pytest.mark.parametrize("operation", ["classification", "proposal", "review"])
+# Classification answers are capped below the model's ceiling
+# (test_a_classification_answer_never_gets_more_room_than_it_can_need).
+@pytest.mark.parametrize("operation", ["proposal", "review"])
 @pytest.mark.parametrize(
     ("context_window", "output_ceiling"),
     [(1_000_000, 128_000), (128_000, 16_384)],
@@ -112,7 +115,7 @@ def test_a_ceiling_within_half_the_room_is_reserved_whole(
     assert planned.resolve(input_tokens=input_limit + 1) is None
 
 
-@pytest.mark.parametrize("operation", ["classification", "proposal", "review"])
+@pytest.mark.parametrize("operation", ["proposal", "review"])
 def test_a_ceiling_at_or_above_the_window_shares_the_room_evenly(
     operation: str,
 ) -> None:
@@ -234,15 +237,42 @@ def test_classification_uses_model_capacity_and_the_shared_request_deadline(
     )
 
     budget = policy.classification_request_budget(
-        capacity=ModelCapacity(context_window, 32_000)
+        capacity=ModelCapacity(context_window, 8_000)
     )
     resolved = budget.resolve_whole(input_tokens=20_000)
 
     assert budget.request_budget_tokens == context_window
     assert budget.timeout_seconds == 240.0
     assert resolved is not None
-    assert resolved.model_output_ceiling_tokens == 32_000
-    assert resolved.provider_output_cap_tokens == 32_000
+    assert resolved.model_output_ceiling_tokens == 8_000
+    assert resolved.provider_output_cap_tokens == 8_000
+
+
+def test_a_classification_answer_never_gets_more_room_than_it_can_need() -> None:
+    # A gemma reading ran to the model's 32,768-token ceiling and returned
+    # nothing usable; the classification reply is small, so the room is its own.
+    policy = AIBuilderBudgetPolicy(
+        conversation_safety_buffer_tokens=2_000,
+        minimum_conversation_budget_tokens=4_000,
+    )
+
+    budget = policy.classification_request_budget(
+        capacity=ModelCapacity(1_000_000, 32_768)
+    )
+    planned = budget.plan(required_input_tokens=20_000)
+    assert planned is not None
+    resolved = planned.resolve(input_tokens=30_000)
+
+    assert resolved is not None
+    assert resolved.model_output_ceiling_tokens == 32_768
+    assert planned.reserved_output_tokens == SLOT_CLASSIFICATION_ANSWER_CAP_TOKENS
+    assert resolved.provider_output_cap_tokens == SLOT_CLASSIFICATION_ANSWER_CAP_TOKENS
+    # A proposal on the same model keeps the model's whole ceiling.
+    proposal = policy.proposal_request_budget(
+        capacity=ModelCapacity(1_000_000, 32_768)
+    ).resolve_whole(input_tokens=20_000)
+    assert proposal is not None
+    assert proposal.provider_output_cap_tokens == 32_768
 
 
 def test_classification_honors_an_explicit_deployment_deadline() -> None:

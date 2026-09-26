@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
+from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -42,7 +42,6 @@ ScopedRevisionRejectionReason = Literal[
     "runtime_form_fields_changed",
     "step_sequence_changed",
     "unrelated_compiled_step_changed",
-    "target_step_model_changed",
     "flow_metadata_changed",
 ]
 
@@ -545,18 +544,6 @@ def build_plan_revision_prompt_block(
     if context is None or prior_spec is None:
         return None
 
-    model_rule = (
-        "- A step's model is chosen in the step's modellväljare/model picker and is "
-        f"never part of this revision. When the model is all the user asks to "
-        f"change, call `{DECLINE_FLOW_CHANGE_TOOL_NAME}` with reason "
-        "`model_choice_belongs_to_step_editor`. When the message also asks for a "
-        "change you can make, make that change and say in plan_rationale that the "
-        "model is chosen in the picker."
-        if can_decline
-        else "- A step's model is chosen in the step's modellväljare/model picker and "
-        "is never part of this revision; when the user asks for another model, say "
-        "that in plan_rationale instead of changing the step's model."
-    )
     lines = [
         "Plan revision directive:",
         *(
@@ -565,7 +552,17 @@ def build_plan_revision_prompt_block(
             else ["- Current source: saved Flow draft."]
         ),
         "- Treat the user's latest message as a revision request for this flow.",
-        model_rule,
+        # What to say about a model is the design rules' (assumptions); a
+        # revision only routes a model-only request to the decline tool.
+        *(
+            [
+                "- When a different model is all the user asks for, call "
+                f"`{DECLINE_FLOW_CHANGE_TOOL_NAME}` with reason "
+                "`model_choice_belongs_to_step_editor`."
+            ]
+            if can_decline
+            else []
+        ),
     ]
     if (
         isinstance(context, ResolvedAIBuilderEditContext)
@@ -658,14 +655,10 @@ def validate_scoped_plan_revision(
     """Return repair feedback when a step-scoped plan edit drifts.
 
     Step edits are intentionally narrower than whole-plan edits. The selected
-    step may change freely except for its model, while runtime inputs and every
-    unrelated step are preserved. Broader rewrites should use whole-plan editing
-    so the user can review the wider intent explicitly.
-
-    Whole-plan revisions of an outline draft are not guarded here: an outline
-    step has no stable identity across a restructuring, so a reorder cannot be
-    told apart from a model change. Saved-Flow steps do not need the guard —
-    their modify contract has no `model_ref` at all.
+    step may change freely, while runtime inputs and every unrelated step are
+    preserved. Broader rewrites should use whole-plan editing so the user can
+    review the wider intent explicitly. A step's model is not compared: no
+    revision can set one (see `_step_dump_for_context`).
 
     A create-compiled revision exempts its terminal document renderer. That
     step is the compiler's own materialization of the committed output
@@ -743,7 +736,7 @@ def validate_scoped_plan_revision(
                 "Apply the user's requested change to that selected step, not only to the plan title, description, or another step.",
             )
 
-    preservation_feedback = _validate_non_target_preservation(
+    return _validate_non_target_preservation(
         context=context,
         prior_steps=[step for step in prior_spec.steps if step is not prior_renderer],
         proposed_steps=[
@@ -752,20 +745,6 @@ def validate_scoped_plan_revision(
         prior_form_fields=_runtime_form_fields_dump(prior_spec),
         proposed_form_fields=_runtime_form_fields_dump(proposed_spec),
         target_step_ref=_step_identity(prior_target, context),
-    )
-    if preservation_feedback is not None:
-        return preservation_feedback
-    if target_is_server_owned or proposed_target is None:
-        return None
-    model_feedback = _validate_target_step_model(
-        prior_target=prior_target,
-        proposed_target=proposed_target,
-        target_ref=target_ref,
-    )
-    return (
-        None
-        if model_feedback is None
-        else ScopedRevisionRejection("target_step_model_changed", model_feedback)
     )
 
 
@@ -792,32 +771,6 @@ def _server_owned_renderer_changed(
         return prior_renderer is not proposed_renderer
     return _step_dump_for_context(prior_renderer, context) != _step_dump_for_context(
         proposed_renderer, context
-    )
-
-
-def _validate_target_step_model(
-    *,
-    prior_target: StepSpec,
-    proposed_target: StepSpec,
-    target_ref: str,
-) -> str | None:
-    """Reject a model change on the step the user selected.
-
-    Both sides are the same step, each located by the ref the edit context
-    names, so this compares one identity against itself. It is therefore
-    correct whatever the proposal did to step order, and does not depend on
-    another check having run first. Unrelated steps keep their models through
-    `_validate_non_target_preservation`, which also compares them by ref.
-    """
-
-    prior_model_ref = prior_target.assistant_spec.model_ref
-    if proposed_target.assistant_spec.model_ref == prior_model_ref:
-        return None
-    return (
-        f"Step-scoped plan edits must keep step `{target_ref}` on its current "
-        f"model `{prior_model_ref}`. The model is chosen in the step's model "
-        "picker, never by an edit; apply the rest of the requested change and "
-        "say that in plan_rationale."
     )
 
 
@@ -908,10 +861,25 @@ def _step_dump_for_context(
     step: StepSpec,
     context: ScopedEditContext,
 ) -> dict[str, object]:
+    """A step as a revision is judged on it, without its model.
+
+    A saved step's model is its model picker's and a new step's is the space
+    default, so no revision sets one. A plan stored while the planner still
+    chose models revises without that model counting as a change.
+    """
+
     ignored_fields: set[str] = (
         {"plan_step_ref"} if _uses_existing_step_identity(context) else set()
     )
-    return _step_dump_except(step, ignored_fields)
+    dump = _step_dump_except(step, ignored_fields)
+    assistant_spec = dump.get("assistant_spec")
+    if isinstance(assistant_spec, dict):
+        dump["assistant_spec"] = {
+            key: value
+            for key, value in cast(dict[str, object], assistant_spec).items()
+            if key != "model_ref"
+        }
+    return dump
 
 
 def _duplicate_refs(refs: list[str]) -> list[str]:

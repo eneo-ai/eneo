@@ -50,12 +50,8 @@ def build_edit_flow_tool_schema(
 
     valid_refs = [existing_step_ref_for_order(s.step_order) for s in current_steps]
 
-    model_refs = resource_catalog.small_ref_enum_for_kind("model")
     kb_refs = resource_catalog.small_ref_enum_for_kind("knowledge_base")
-    step_payload_schema = build_semantic_step_schema(
-        model_refs=model_refs,
-        kb_refs=kb_refs,
-    )
+    step_payload_schema = build_semantic_step_schema(kb_refs=kb_refs)
     if permissions is None:
         modifiable_refs = valid_refs
     else:

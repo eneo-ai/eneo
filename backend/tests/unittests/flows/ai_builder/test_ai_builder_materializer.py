@@ -496,10 +496,12 @@ class TestCompileCreateFlow:
 
         assert changeset.metadata_json is not None
         wizard = changeset.metadata_json["wizard"]
+        # A language the user did not choose is the runtime default, not
+        # detection: "auto" guessed the language of short Swedish clips.
         assert wizard == {
             "transcription_enabled": True,
             "transcription_model": {"id": str(model_id)},
-            "transcription_language": "auto",
+            "transcription_language": "sv",
         }
 
     def test_audio_flow_input_preserves_existing_transcription_metadata(self) -> None:

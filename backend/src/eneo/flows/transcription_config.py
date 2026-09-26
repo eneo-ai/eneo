@@ -5,6 +5,8 @@ from typing import Any, cast
 from uuid import UUID
 
 _ALLOWED_TRANSCRIPTION_LANGUAGES = {"auto", "sv", "en"}
+# The language a run transcribes in when the flow names none.
+DEFAULT_TRANSCRIPTION_LANGUAGE = "sv"
 
 
 class FlowTranscriptionConfigError(ValueError):
@@ -51,10 +53,14 @@ def parse_transcription_config(
                     "wizard.transcription_model.id must be a valid UUID."
                 ) from exc
 
-    raw_language = wizard.get("transcription_language", "sv")
-    language = "sv" if raw_language is None else str(raw_language).strip().casefold()
+    raw_language = wizard.get("transcription_language", DEFAULT_TRANSCRIPTION_LANGUAGE)
+    language = (
+        DEFAULT_TRANSCRIPTION_LANGUAGE
+        if raw_language is None
+        else str(raw_language).strip().casefold()
+    )
     if language == "":
-        language = "sv"
+        language = DEFAULT_TRANSCRIPTION_LANGUAGE
     if language not in _ALLOWED_TRANSCRIPTION_LANGUAGES:
         raise FlowTranscriptionConfigError(
             "wizard.transcription_language must be one of: auto, sv, en."

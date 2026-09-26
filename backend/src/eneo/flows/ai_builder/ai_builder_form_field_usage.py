@@ -5,6 +5,9 @@ from __future__ import annotations
 from eneo.flows.ai_builder.ai_builder_validation_references import (
     iter_step_templates,
 )
+from eneo.flows.domain.speaker_mapping_config import (
+    speaker_mapping_participants_field,
+)
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     StepSpec,
@@ -45,6 +48,10 @@ def find_unused_form_fields(spec: FlowDraftSpecCore) -> list[str]:
 
     used_fields: set[str] = set()
     for step in spec.steps:
+        # A speaker-naming step reads its participant list by field name.
+        participants_field = speaker_mapping_participants_field(step.output_config)
+        if participants_field is not None:
+            used_fields.add(participants_field.strip())
         for template in iter_step_templates(step):
             refs = analyze_template(
                 template,

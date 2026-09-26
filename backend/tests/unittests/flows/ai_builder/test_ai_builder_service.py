@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator, Mapping
-from contextlib import asynccontextmanager
+from contextlib import AbstractContextManager, asynccontextmanager, nullcontext
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, cast
@@ -46,6 +47,7 @@ from eneo.completion_models.infrastructure.completion_service import (
     ResolvedCompletionModelRoute,
 )
 from eneo.files.file_models import File, FileType
+from eneo.flows.ai_builder import ai_builder_discovery_runtime as discovery_runtime
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
@@ -55,8 +57,14 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AI_BUILDER_MAX_ATTACHMENTS,
 )
+from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
+    MAX_SESSION_MESSAGES,
+    compact_ai_builder_conversation,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
+    requirements_summary_from_metadata,
+    requirements_summary_to_metadata,
     slot_classification_from_metadata,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
@@ -81,6 +89,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 from eneo.flows.ai_builder.ai_builder_events import (
     encode_ai_builder_stream_event,
 )
+from eneo.flows.ai_builder.ai_builder_non_plan_outcome import unsettled_text_answer
 from eneo.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
 from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     conversation_message_to_llm_message,
@@ -92,6 +101,7 @@ from eneo.flows.ai_builder.ai_builder_service import (
     QUALITY_RETRY_WARNING_CODES,
     SSE_EVENT_DONE,
     SSE_EVENT_ERROR,
+    SSE_EVENT_PLAN,
     SSE_EVENT_QUESTION,
     SSE_EVENT_TEXT,
     AIBuilderService,
@@ -106,7 +116,11 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionTurnPreparationBaseline,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    CheckpointUpdateDiagnostic,
     SlotClassificationAttempt,
+    SlotClassificationInput,
+    SlotClassificationResult,
+    parse_slot_classification_response,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
@@ -120,12 +134,14 @@ from eneo.flows.ai_builder.planning_state import (
 )
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
+    complete_planning_state,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
+    OutputMode,
     StepSpec,
 )
 from eneo.flows.flow_resource_bindings import (
@@ -134,6 +150,7 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotKind,
     ResourceSlotRef,
 )
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
 
 _TEST_CLIENT_TURN_ID = UUID("11111111-1111-4111-8111-111111111111")
@@ -452,6 +469,27 @@ def _make_committed_planning_state() -> PlanningState:
     state.architecture_commit = finalize_architecture_commit(
         architecture_draft,
         now=lambda: datetime(2026, 4, 24, tzinfo=timezone.utc),
+    )
+    return state
+
+
+def _audio_committed_planning_state() -> PlanningState:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        name: ResolvedSlot(
+            name=name, value=value, source="requirements_summary", confidence="high"
+        )
+        for name, value in (
+            ("primary_runtime_input", "audio"),
+            ("terminal_output", "structured_text"),
+            ("runtime_metadata_fields", "no_extra_metadata"),
+            ("post_processing_goal", "summarize_or_overview"),
+        )
+    }
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    state.architecture_commit = finalize_architecture_commit(
+        draft, now=lambda: datetime(2026, 9, 26, tzinfo=timezone.utc)
     )
     return state
 
@@ -2174,6 +2212,834 @@ class TestSendMessageToolCall:
 # ---------------------------------------------------------------------------
 
 
+_NAMING_REQUEST = (
+    "Innan något sammanfattas vill jag kunna sätta rätt namn på talarna, "
+    "alltså vem är vem."
+)
+
+
+def _make_answered_card_conversation(
+    committed: PlanningState | None = None,
+) -> list[ConversationMessage]:
+    """Every requirement answered and the requirements card shown."""
+
+    committed = committed or _make_committed_planning_state()
+    answers = [
+        _requirement_answer_message(
+            question_id=name, value=slot.value, content=slot.value
+        )
+        for name, slot in committed.resolved_slots.items()
+    ]
+    state = build_planning_state_from_conversation(answers)
+    complete_planning_state(state, freeform_text="")
+    state.architecture_commit = committed.architecture_commit
+    disclosure = build_requirements_disclosure(state, ui_language="sv")
+    return [
+        *answers,
+        ConversationMessage(
+            role="assistant",
+            content=disclosure.summary,
+            metadata=requirements_summary_to_metadata(disclosure),
+        ),
+    ]
+
+
+def _card_confirmation(conversation: list[ConversationMessage]) -> dict[str, object]:
+    summary = requirements_summary_from_metadata(conversation[-1].metadata)
+    assert summary is not None
+    return {
+        "requirements_confirmed": True,
+        "requirements_version": summary.requirements_version,
+    }
+
+
+def _make_post_plan_conversation() -> list[ConversationMessage]:
+    """Answered, confirmed and proposed: free text now revises the plan."""
+
+    card = _make_answered_card_conversation()
+    return [
+        *card,
+        ConversationMessage(role="user", content="", metadata=_card_confirmation(card)),
+        ConversationMessage(
+            role="assistant",
+            content="Här är planen.",
+            tool_calls=[
+                {
+                    "id": "call_plan",
+                    "name": PROPOSE_FLOW_TOOL_NAME,
+                    "arguments": {"flow_name": "Sammanfattning"},
+                }
+            ],
+        ),
+        ConversationMessage(
+            role="tool", content="Draft saved.", tool_call_id="call_plan"
+        ),
+    ]
+
+
+def _classifier_or_proposal_responses(classifier_response: MagicMock) -> AsyncMock:
+    """One provider: the classifier answers without tools, the proposal with."""
+
+    tool_call = MagicMock()
+    tool_call.id = "call_plan_2"
+    tool_call.function.name = PROPOSE_FLOW_TOOL_NAME
+    tool_call.function.arguments = json.dumps(
+        {
+            "flow_name": "Sammanfattning",
+            "plan_rationale": "Läs dokumentet och sammanfatta det kort.",
+            "steps": [
+                {
+                    "name": "Läs dokumentet",
+                    "instructions": "Hämta dokumentets huvudpunkter.",
+                    "output_fields": [
+                        {
+                            "name": "huvudpunkter",
+                            "field_type": "array",
+                            "description": "Dokumentets huvudpunkter.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Sammanfatta",
+                    "instructions": "Skriv en kort sammanfattning av huvudpunkterna.",
+                },
+            ],
+        }
+    )
+    proposal = _make_llm_response(content=None, tool_calls=[tool_call])
+
+    async def respond(**kwargs: Any) -> MagicMock:
+        return proposal if kwargs.get("tools") else classifier_response
+
+    return AsyncMock(side_effect=respond)
+
+
+def _output_limit_response() -> MagicMock:
+    response = _make_llm_response(content='{"slots": {"terminal_output": {"outc')
+    response.choices[0].finish_reason = "length"
+    return response
+
+
+def _parse_failed_response() -> MagicMock:
+    return _make_llm_response(content="{not-json")
+
+
+def _classifier_reading(
+    result: SlotClassificationResult,
+) -> AbstractContextManager[AsyncMock]:
+    return patch(
+        "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+        new=AsyncMock(
+            return_value=SlotClassificationAttempt(outcome="resolved", result=result)
+        ),
+    )
+
+
+_NAMING_CONFLICT = SlotClassificationResult(
+    checkpoint_diagnostics=(
+        CheckpointUpdateDiagnostic(
+            code="speaker_naming_without_edit", producer_kind="transcript"
+        ),
+    )
+)
+
+
+def _classifier_replying(
+    *updates: tuple[str, str, str | None, bool],
+    also_quoting: str | None = None,
+) -> AbstractContextManager[AsyncMock]:
+    """A classifier whose reply states these checkpoint updates, as
+    (producer, operation, mode, speaker naming), each quoting the user's
+    message and, when given, an earlier message too; the reply goes through
+    the real parser."""
+
+    async def read(**kwargs: Any) -> SlotClassificationAttempt:
+        classification_input = cast(
+            SlotClassificationInput, kwargs["classification_input"]
+        )
+        [reply] = [
+            source
+            for source in classification_input.sources
+            if source.message_id == classification_input.current_user_message_id
+        ]
+        quoted = [reply] + [
+            source
+            for source in classification_input.sources
+            if also_quoting is not None and source.text == also_quoting
+        ]
+        result = parse_slot_classification_response(
+            json.dumps(
+                {
+                    "slots": [],
+                    "file_roles": [],
+                    "checkpoint_updates": [
+                        {
+                            "operation": operation,
+                            "producer_kind": producer_kind,
+                            "mode": mode,
+                            "confidence": "high",
+                            "reason": "Svaret på frågan om granskningen.",
+                            "evidence": [
+                                {"source_id": source.source_id, "quote": source.text}
+                                for source in quoted
+                            ],
+                            "evidence_level": "explicit",
+                            "speaker_naming": speaker_naming,
+                        }
+                        for producer_kind, operation, mode, speaker_naming in updates
+                    ],
+                    "form_intake": None,
+                    "secondary_obligations": [],
+                }
+            ),
+            allowed_slot_values=kwargs["allowed_slot_values"],
+            classification_input=classification_input,
+        )
+        assert result is not None
+        return SlotClassificationAttempt(outcome="resolved", result=result)
+
+    return patch(
+        "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+        new=AsyncMock(side_effect=read),
+    )
+
+
+def _classifier_reads_nothing() -> AbstractContextManager[AsyncMock]:
+    """A classification that resolves with no reading, for turns whose
+    subject is what happens after the message was read."""
+
+    return _classifier_reading(SlotClassificationResult())
+
+
+def _older_text_packed_to_one_character() -> AbstractContextManager[Any]:
+    """Budget pressure: every earlier message reaches the classifier as a
+    one-character prefix, the way input packing shortens optional sources."""
+
+    admit = discovery_runtime.admit_slot_classification_input
+
+    def admit_under_pressure(**kwargs: Any) -> SlotClassificationInput:
+        admitted = admit(**kwargs)
+        return replace(
+            admitted,
+            sources=tuple(
+                replace(source, text=source.text[:1], truncated=True)
+                if source.kind == "user_message"
+                and source.message_id != admitted.current_user_message_id
+                else source
+                for source in admitted.sources
+            ),
+        )
+
+    return patch.object(
+        discovery_runtime,
+        "admit_slot_classification_input",
+        side_effect=admit_under_pressure,
+    )
+
+
+def _stored(
+    conversation: list[ConversationMessage], repo: AsyncMock
+) -> list[ConversationMessage]:
+    """The conversation as the repository holds it after a turn: every
+    message a write sent, merged by id over what was there."""
+
+    stored = list(conversation)
+    positions = {message.message_id: index for index, message in enumerate(stored)}
+    writes = [
+        *(
+            call.kwargs["conversation"]
+            for call in repo.append_session_messages.await_args_list
+        ),
+        repo.commit_turn.await_args.kwargs["new_messages"],
+    ]
+    for message in (message for batch in writes for message in batch):
+        if message.message_id in positions:
+            stored[positions[message.message_id]] = message
+        else:
+            positions[message.message_id] = len(stored)
+            stored.append(message)
+    return stored
+
+
+def _compacted_past_the_message_limit(
+    conversation: list[ConversationMessage],
+) -> list[ConversationMessage]:
+    """What the repository stores once a session outgrows the message limit."""
+
+    earlier_turns = [
+        ConversationMessage(role="assistant", content=f"Tidigare svar {index}.")
+        for index in range(MAX_SESSION_MESSAGES)
+    ]
+    compacted = compact_ai_builder_conversation([*earlier_turns, *conversation])
+    assert len(compacted) <= MAX_SESSION_MESSAGES
+    return compacted
+
+
+class TestUnreadMessage:
+    """A turn whose own text the classifier could not read answers honestly.
+
+    Discovery used to continue without the reading: a gemma turn asking to
+    name the speakers ran its classification to the output ceiling, and the
+    plan built from the questions that followed had no naming review.
+    """
+
+    async def _send(
+        self,
+        *,
+        conversation: list[ConversationMessage],
+        acompletion: AsyncMock,
+        message: str,
+        question_answer: dict[str, Any] | None = None,
+        planning_state: PlanningState | None = None,
+    ) -> tuple[list[dict[str, str]], AsyncMock]:
+        user = _make_user()
+        repo = _make_repo_mock()
+        session = _make_session(
+            status=SessionStatus.CHATTING,
+            tenant_id=user.tenant_id,
+            conversation=conversation,
+        )
+        repo.get_session.return_value = session
+        repo.create_plan.return_value = _make_plan(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+        service = _make_service(user=user, repo=repo)
+        repo.load_planning_state.return_value = planning_state
+        with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+            mock_litellm.acompletion = acompletion
+            events = await _collect_events(
+                service.send_message(
+                    acts_on_review=False,
+                    session_id=session.id,
+                    client_turn_id=_TEST_CLIENT_TURN_ID,
+                    request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                    request_snapshot=_test_request_snapshot(message),
+                    message=message,
+                    question_answer=question_answer,
+                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                    capacity=ModelCapacity(128_000, 16_384),
+                )
+            )
+        return events, repo
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("classifier_response", "outcome"),
+        [
+            (_output_limit_response, "output_limit_exceeded"),
+            (_parse_failed_response, "parse_failed"),
+        ],
+    )
+    async def test_an_unread_revision_is_answered_instead_of_proposed(
+        self,
+        classifier_response: Any,
+        outcome: str,
+        unset_mapped_deployment_default: None,
+    ) -> None:
+        acompletion = _classifier_or_proposal_responses(classifier_response())
+
+        events, repo = await self._send(
+            conversation=_make_post_plan_conversation(),
+            acompletion=acompletion,
+            message=_NAMING_REQUEST,
+            planning_state=_make_committed_planning_state(),
+        )
+
+        assert [event["event"] for event in events] == [SSE_EVENT_TEXT, SSE_EVENT_DONE]
+        assert json.loads(events[0]["data"])["text"] == unsettled_text_answer(
+            "unread", ui_language="sv"
+        )
+        repo.create_plan.assert_not_awaited()
+        assert not [
+            call for call in acompletion.await_args_list if call.kwargs.get("tools")
+        ]
+        committed = repo.commit_turn.await_args.kwargs
+        user_message, answer = committed["new_messages"]
+        assert user_message.content == _NAMING_REQUEST
+        classification = slot_classification_from_metadata(user_message.metadata)
+        assert classification is not None
+        assert classification.outcome == outcome
+        assert answer.role == "assistant"
+        assert answer.content == unsettled_text_answer("unread", ui_language="sv")
+        # Every answer the user already gave is still the state's.
+        committed_slots = committed["planning_state"].resolved_slots
+        for name, slot in _make_committed_planning_state().resolved_slots.items():
+            assert committed_slots[name].value == slot.value
+
+    @pytest.mark.anyio
+    async def test_an_unread_first_message_is_answered_instead_of_questioned(
+        self,
+    ) -> None:
+        # The observed turn: the reading failed and discovery asked what the
+        # flow should do with the material, as if the user had not said.
+        events, repo = await self._send(
+            conversation=[],
+            acompletion=AsyncMock(return_value=_output_limit_response()),
+            message=(
+                "Vi spelar in intervjuer och vill ha dem utskrivna. "
+                + _NAMING_REQUEST
+                + " Sedan en kort sammanfattning per person."
+            ),
+        )
+
+        assert [event["event"] for event in events] == [SSE_EVENT_TEXT, SSE_EVENT_DONE]
+        assert json.loads(events[0]["data"])["text"] == unsettled_text_answer(
+            "unread", ui_language="sv"
+        )
+        repo.create_plan.assert_not_awaited()
+
+    @pytest.mark.anyio
+    async def test_an_unread_request_holds_the_confirmation_that_follows_it(
+        self, unset_mapped_deployment_default: None
+    ) -> None:
+        # gate it4 P1: only the turn's own text was held, so a click after an
+        # unread request (here the card's confirm button) planned without it.
+        card = _make_answered_card_conversation()
+        acompletion = _classifier_or_proposal_responses(_output_limit_response())
+        _events, unread_repo = await self._send(
+            conversation=card,
+            acompletion=acompletion,
+            message=_NAMING_REQUEST,
+            planning_state=_make_committed_planning_state(),
+        )
+        unread_turn = unread_repo.commit_turn.await_args.kwargs["new_messages"]
+
+        events, repo = await self._send(
+            conversation=[*card, *unread_turn],
+            acompletion=acompletion,
+            message="",
+            question_answer=_card_confirmation(card),
+            planning_state=_make_committed_planning_state(),
+        )
+
+        assert [event["event"] for event in events] == [SSE_EVENT_TEXT, SSE_EVENT_DONE]
+        assert json.loads(events[0]["data"])["text"] == unsettled_text_answer(
+            "unread", ui_language="sv"
+        )
+        repo.create_plan.assert_not_awaited()
+        assert not [
+            call for call in acompletion.await_args_list if call.kwargs.get("tools")
+        ]
+
+    @pytest.mark.anyio
+    async def test_sending_the_unread_request_again_reads_it(
+        self, unset_mapped_deployment_default: None
+    ) -> None:
+        card = _make_answered_card_conversation()
+        _events, unread_repo = await self._send(
+            conversation=card,
+            acompletion=AsyncMock(return_value=_output_limit_response()),
+            message=_NAMING_REQUEST,
+            planning_state=_make_committed_planning_state(),
+        )
+        unread_turn = unread_repo.commit_turn.await_args.kwargs["new_messages"]
+
+        with _classifier_reads_nothing():
+            events, _repo = await self._send(
+                conversation=[*card, *unread_turn],
+                acompletion=AsyncMock(),
+                message=_NAMING_REQUEST,
+                planning_state=_make_committed_planning_state(),
+            )
+
+        # The reading covers the earlier message too, so the turn goes on.
+        assert unsettled_text_answer("unread", ui_language="sv") not in [
+            json.loads(event["data"]).get("text")
+            for event in events
+            if event["event"] == SSE_EVENT_TEXT
+        ]
+        assert SSE_EVENT_REQUIREMENTS_SUMMARY in [event["event"] for event in events]
+
+    @pytest.mark.anyio
+    async def test_a_truncated_reading_of_an_unread_request_does_not_settle_it(
+        self, unset_mapped_deployment_default: None
+    ) -> None:
+        # gate it5 P1: a reading that received only a prefix of the unread
+        # request counted as reading it, and the turn went on without it.
+        card = _make_answered_card_conversation()
+        _events, unread_repo = await self._send(
+            conversation=card,
+            acompletion=AsyncMock(return_value=_output_limit_response()),
+            message=_NAMING_REQUEST,
+            planning_state=_make_committed_planning_state(),
+        )
+        conversation = [
+            *card,
+            *unread_repo.commit_turn.await_args.kwargs["new_messages"],
+        ]
+
+        with _classifier_reads_nothing(), _older_text_packed_to_one_character():
+            events, repo = await self._send(
+                conversation=conversation,
+                acompletion=AsyncMock(),
+                message="Gör sammanfattningen kortare.",
+                planning_state=_make_committed_planning_state(),
+            )
+
+        assert [event["event"] for event in events] == [SSE_EVENT_TEXT, SSE_EVENT_DONE]
+        assert json.loads(events[0]["data"])["text"] == unsettled_text_answer(
+            "unread", ui_language="sv"
+        )
+        conversation = [
+            *conversation,
+            *repo.commit_turn.await_args.kwargs["new_messages"],
+        ]
+
+        # Sending the same text again reads it, however short the older copy.
+        with _classifier_reads_nothing(), _older_text_packed_to_one_character():
+            events, _repo = await self._send(
+                conversation=conversation,
+                acompletion=AsyncMock(),
+                message=_NAMING_REQUEST,
+                planning_state=_make_committed_planning_state(),
+            )
+
+        assert SSE_EVENT_REQUIREMENTS_SUMMARY in [event["event"] for event in events]
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("unsettled", ["unread", "speaker_naming_without_edit"])
+    async def test_compaction_keeps_unsettled_text_holding_the_confirmation(
+        self, unsettled: str, unset_mapped_deployment_default: None
+    ) -> None:
+        # gate it5 P1: compaction dropped the reading that kept the text
+        # unsettled, so the confirmation after it planned without the request.
+        card = _make_answered_card_conversation()
+        acompletion = _classifier_or_proposal_responses(_output_limit_response())
+        reading = (
+            _classifier_reading(
+                SlotClassificationResult(
+                    checkpoint_diagnostics=(
+                        CheckpointUpdateDiagnostic(
+                            code="speaker_naming_without_edit",
+                            producer_kind="transcript",
+                        ),
+                    )
+                )
+            )
+            if unsettled == "speaker_naming_without_edit"
+            else nullcontext()
+        )
+        with reading:
+            _events, first_repo = await self._send(
+                conversation=card,
+                acompletion=acompletion,
+                message=_NAMING_REQUEST,
+                planning_state=_make_committed_planning_state(),
+            )
+        stored = _compacted_past_the_message_limit(
+            [*card, *first_repo.commit_turn.await_args.kwargs["new_messages"]]
+        )
+
+        events, repo = await self._send(
+            conversation=stored,
+            acompletion=acompletion,
+            message="",
+            question_answer=_card_confirmation(card),
+            planning_state=_make_committed_planning_state(),
+        )
+
+        assert [event["event"] for event in events] == [SSE_EVENT_TEXT, SSE_EVENT_DONE]
+        assert json.loads(events[0]["data"])["text"] == unsettled_text_answer(
+            unsettled, ui_language="sv"
+        )
+        repo.create_plan.assert_not_awaited()
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("compacted", [False, True], ids=["kept", "compacted"])
+    async def test_a_failed_reading_never_reopens_text_that_was_settled(
+        self, compacted: bool, unset_mapped_deployment_default: None
+    ) -> None:
+        # gate it6 P1: settlement was recomputed from history, so a failed
+        # reading after an identical resend (or after compaction dropped the
+        # run that read it) marked the settled request unread again.
+        card = _make_answered_card_conversation()
+        _events, repo = await self._send(
+            conversation=card,
+            acompletion=AsyncMock(return_value=_output_limit_response()),
+            message=_NAMING_REQUEST,
+            planning_state=_make_committed_planning_state(),
+        )
+        conversation = _stored(card, repo)
+        # The resend is read whole; the older copy reaches the classifier as a
+        # prefix, so only the resend settles it.
+        with _classifier_reads_nothing(), _older_text_packed_to_one_character():
+            _events, repo = await self._send(
+                conversation=conversation,
+                acompletion=AsyncMock(),
+                message=_NAMING_REQUEST,
+                planning_state=_make_committed_planning_state(),
+            )
+        conversation = _stored(conversation, repo)
+        if compacted:
+            conversation = _compacted_past_the_message_limit(conversation)
+        follow_up = "Gör sammanfattningen kortare."
+        _events, repo = await self._send(
+            conversation=conversation,
+            acompletion=AsyncMock(return_value=_output_limit_response()),
+            message=follow_up,
+            planning_state=_make_committed_planning_state(),
+        )
+        conversation = _stored(conversation, repo)
+
+        with _classifier_reads_nothing(), _older_text_packed_to_one_character():
+            events, _repo = await self._send(
+                conversation=conversation,
+                acompletion=AsyncMock(),
+                message=follow_up,
+                planning_state=_make_committed_planning_state(),
+            )
+
+        assert SSE_EVENT_REQUIREMENTS_SUMMARY in [event["event"] for event in events]
+
+    @pytest.mark.anyio
+    async def test_a_contradictory_naming_reading_is_asked_about_not_planned(
+        self, unset_mapped_deployment_default: None
+    ) -> None:
+        # gate it4 P2: a reading that declared naming on a view review was
+        # planned as a view review with the naming silently gone. gate it7 P1:
+        # any reply read whole released it, whatever the reply said.
+        conversation = _make_post_plan_conversation()
+        acompletion = _classifier_or_proposal_responses(_parse_failed_response())
+        with _classifier_reading(_NAMING_CONFLICT):
+            events, repo = await self._send(
+                conversation=conversation,
+                acompletion=acompletion,
+                message=_NAMING_REQUEST,
+                planning_state=_make_committed_planning_state(),
+            )
+
+        conflict_answer = unsettled_text_answer(
+            "speaker_naming_without_edit", ui_language="sv"
+        )
+        assert [event["event"] for event in events] == [SSE_EVENT_TEXT, SSE_EVENT_DONE]
+        assert json.loads(events[0]["data"])["text"] == conflict_answer
+        repo.create_plan.assert_not_awaited()
+        assert not repo.commit_turn.await_args.kwargs[
+            "planning_state"
+        ].checkpoint_intents
+        conversation = _stored(conversation, repo)
+
+        # A reply that says nothing about the review does not answer it.
+        with _classifier_reads_nothing():
+            events, repo = await self._send(
+                conversation=conversation,
+                acompletion=acompletion,
+                message="Gör sammanfattningen kortare.",
+                planning_state=_make_committed_planning_state(),
+            )
+
+        assert [event["event"] for event in events] == [SSE_EVENT_TEXT, SSE_EVENT_DONE]
+        assert json.loads(events[0]["data"])["text"] == conflict_answer
+        repo.create_plan.assert_not_awaited()
+
+    async def _conflict_then_reply(
+        self,
+        *updates: tuple[str, str, str | None, bool],
+        earlier_view_request: str | None = None,
+    ) -> tuple[list[dict[str, str]], AsyncMock, list[ConversationMessage]]:
+        """An audio flow's naming request read as a conflict, then the user's
+        reply read with these updates. With `earlier_view_request`, an earlier
+        message first set a view review of the transcript, and the reply's
+        updates quote it too."""
+
+        committed = _audio_committed_planning_state()
+        conversation = _make_answered_card_conversation(committed)
+        acompletion = _classifier_or_proposal_responses(_parse_failed_response())
+        if earlier_view_request is not None:
+            with _classifier_replying(("transcript", "update", "view", False)):
+                _events, repo = await self._send(
+                    conversation=conversation,
+                    acompletion=acompletion,
+                    message=earlier_view_request,
+                    planning_state=committed,
+                )
+            conversation = _stored(conversation, repo)
+        with _classifier_reading(_NAMING_CONFLICT):
+            _events, repo = await self._send(
+                conversation=conversation,
+                acompletion=acompletion,
+                message=_NAMING_REQUEST,
+                planning_state=committed,
+            )
+        conversation = _stored(conversation, repo)
+        with _classifier_replying(*updates, also_quoting=earlier_view_request):
+            events, repo = await self._send(
+                conversation=conversation,
+                acompletion=acompletion,
+                message="Så här ska transkriptet granskas.",
+                planning_state=committed,
+            )
+        return events, repo, _stored(conversation, repo)
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "updates",
+        [
+            # An edit that names nobody does not answer the naming question.
+            (("transcript", "update", "edit", False),),
+            # Naming filed on another step beside a transcript update would be
+            # dropped when planning keeps the transcript update.
+            (
+                ("transcript", "update", "view", False),
+                ("structured_result", "update", "edit", True),
+            ),
+        ],
+        ids=["edit without naming", "naming beside a transcript update"],
+    )
+    async def test_a_naming_conflict_holds_until_the_plan_would_honour_it(
+        self,
+        updates: tuple[tuple[str, str, str | None, bool], ...],
+        unset_mapped_deployment_default: None,
+    ) -> None:
+        # gate it8 P1: the raw reply settled the conflict, while the planning
+        # state it builds had no speaker naming.
+        events, repo, _conversation = await self._conflict_then_reply(*updates)
+        self._assert_still_asked_about_naming(events, repo)
+
+    @pytest.mark.anyio
+    async def test_an_earlier_transcript_review_does_not_answer_the_naming_question(
+        self, unset_mapped_deployment_default: None
+    ) -> None:
+        # gate it9 P1: an unrelated update quoting both the reply and the older
+        # view request matched the older transcript review by that quote.
+        events, repo, _conversation = await self._conflict_then_reply(
+            ("structured_result", "update", "view", False),
+            earlier_view_request="Jag vill kunna läsa transkriptet innan analysen.",
+        )
+        self._assert_still_asked_about_naming(events, repo)
+
+    def _assert_still_asked_about_naming(
+        self, events: list[dict[str, str]], repo: AsyncMock
+    ) -> None:
+        assert [event["event"] for event in events] == [SSE_EVENT_TEXT, SSE_EVENT_DONE]
+        assert json.loads(events[0]["data"])["text"] == unsettled_text_answer(
+            "speaker_naming_without_edit", ui_language="sv"
+        )
+        repo.create_plan.assert_not_awaited()
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("decision", "review_modes", "naming_step"),
+        [
+            (
+                ("transcript", "update", "edit", True),
+                {OutputMode.SPEAKER_MAPPING: FlowStepReviewMode.EDIT},
+                True,
+            ),
+            (
+                ("transcript", "update", "view", False),
+                {OutputMode.TRANSCRIBE_ONLY: FlowStepReviewMode.VIEW},
+                False,
+            ),
+            (("transcript", "clear", None, False), {}, False),
+            # gate it10: naming filed on another step is moved onto the
+            # transcript by planning, and that committed review answers it.
+            (
+                ("structured_result", "update", "edit", True),
+                {OutputMode.SPEAKER_MAPPING: FlowStepReviewMode.EDIT},
+                True,
+            ),
+        ],
+        ids=["name the speakers", "view only", "no review", "naming filed elsewhere"],
+    )
+    async def test_a_naming_conflict_is_settled_by_the_decision_it_asked_for(
+        self,
+        decision: tuple[str, str, str | None, bool],
+        review_modes: dict[OutputMode, FlowStepReviewMode],
+        naming_step: bool,
+        unset_mapped_deployment_default: None,
+    ) -> None:
+        events, repo, conversation = await self._conflict_then_reply(decision)
+
+        assert SSE_EVENT_REQUIREMENTS_SUMMARY in [event["event"] for event in events]
+        decided = repo.commit_turn.await_args.kwargs["planning_state"]
+        [intent] = decided.checkpoint_intents
+        assert (
+            intent.producer_kind,
+            intent.operation,
+            intent.mode.value if intent.mode is not None else None,
+            intent.speaker_naming,
+        ) == (
+            "transcript",
+            "set" if decision[1] == "update" else "clear",
+            *decision[2:],
+        )
+
+        _events, repo = await self._send(
+            conversation=conversation,
+            acompletion=_classifier_or_proposal_responses(_parse_failed_response()),
+            message="",
+            question_answer=_card_confirmation(conversation),
+            planning_state=decided,
+        )
+
+        repo.create_plan.assert_awaited_once()
+        steps = repo.create_plan.await_args.kwargs["proposal"].content.spec.steps
+        assert {
+            step.output_mode: step.review_policy.mode
+            for step in steps
+            if step.review_policy is not None
+        } == review_modes
+        assert (
+            OutputMode.SPEAKER_MAPPING in {step.output_mode for step in steps}
+        ) is naming_step
+
+    @pytest.mark.anyio
+    async def test_a_read_revision_still_proposes(
+        self, unset_mapped_deployment_default: None
+    ) -> None:
+        with _classifier_reads_nothing():
+            events, repo = await self._send(
+                conversation=_make_post_plan_conversation(),
+                acompletion=_classifier_or_proposal_responses(_parse_failed_response()),
+                message="Gör sammanfattningen kortare.",
+                planning_state=_make_committed_planning_state(),
+            )
+
+        repo.create_plan.assert_awaited_once()
+        assert SSE_EVENT_PLAN in [event["event"] for event in events]
+
+    @pytest.mark.anyio
+    async def test_an_option_click_waits_for_older_text_it_could_not_read(
+        self,
+    ) -> None:
+        # A degraded conversation can hold free text no classification has read.
+        # The click turn tries to read it; when that fails, the click is not
+        # taken past it (gate it4: the click used to go on to the next question).
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Bygg ett flöde som sammanfattar dokument",
+                metadata={"ui_language": "sv"},
+            ),
+            ConversationMessage(
+                role="assistant",
+                content="Hur många dokument per körning?",
+                metadata={"question_id": "document_material_scope"},
+            ),
+        ]
+        acompletion = AsyncMock(return_value=_parse_failed_response())
+
+        events, _repo = await self._send(
+            conversation=conversation,
+            acompletion=acompletion,
+            # The click sends the option's own label: no text beside the answer.
+            message="Ett huvuddokument per körning",
+            question_answer={
+                "question_id": "document_material_scope",
+                "selected_option_ids": ["single_document_case"],
+                "selected_values": ["single_document_case"],
+                "ui_language": "sv",
+            },
+        )
+
+        acompletion.assert_awaited_once()
+        assert [event["event"] for event in events] == [SSE_EVENT_TEXT, SSE_EVENT_DONE]
+        assert json.loads(events[0]["data"])["text"] == unsettled_text_answer(
+            "unread", ui_language="sv"
+        )
+
+
 class TestApprovePlan:
     @pytest.mark.anyio
     async def test_approve_proposed_plan(self):
@@ -2369,10 +3235,7 @@ class TestSendMessageStructuredQuestion:
         service = _make_service(user=user, repo=repo)
         repo.load_planning_state.return_value = persisted_state
 
-        with patch(
-            "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
-            new=AsyncMock(return_value=SlotClassificationAttempt(outcome="no_content")),
-        ):
+        with _classifier_reads_nothing():
             events = await _collect_events(
                 service.send_message(
                     acts_on_review=False,
@@ -2606,7 +3469,10 @@ class TestSendMessageStructuredQuestion:
             completion_service=completion_service,
         )
 
-        with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with (
+            patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm,
+            _classifier_reads_nothing(),
+        ):
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(content=None, tool_calls=[tc])
             )
@@ -2714,7 +3580,10 @@ class TestSendMessageStructuredQuestion:
             completion_service=completion_service,
         )
 
-        with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with (
+            patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm,
+            _classifier_reads_nothing(),
+        ):
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(
                     content=None, tool_calls=[repeated_question]
@@ -2779,7 +3648,10 @@ class TestSendMessageStructuredQuestion:
             completion_service=completion_service,
         )
 
-        with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+        with (
+            patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm,
+            _classifier_reads_nothing(),
+        ):
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response(content=None, tool_calls=[tc])
             )

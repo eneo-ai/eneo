@@ -64,6 +64,26 @@ from eneo.flows.runtime.document_rendering.guidance import (
 _MAX_VISIBLE_EXAMPLE_EVIDENCE = 8
 
 
+def _confirmed_checkpoints_sentence(planning_state: PlanningState) -> str:
+    """The confirmed pauses, stated so plan text describes only those."""
+
+    confirmed = [
+        f"{intent.producer_kind} ({intent.mode.value})"
+        for intent in planning_state.checkpoint_intents
+        if intent.operation == "set" and intent.mode is not None
+    ]
+    if confirmed:
+        return (
+            f"Confirmed checkpoints for this flow: {', '.join(confirmed)}. "
+            "Describe no other pause in plan_rationale or flow_description."
+        )
+    return (
+        "Confirmed checkpoints for this flow: none. The flow does not pause for "
+        "a person, so plan_rationale, flow_description and step names must not "
+        "describe a review, approval or pause by a person."
+    )
+
+
 def build_plan_proposal_system_prompt(
     *,
     planning_state: PlanningState,
@@ -72,6 +92,7 @@ def build_plan_proposal_system_prompt(
     flow_context: str | None,
     is_edit_mode: bool,
     is_pure_audio_transcription: bool = False,
+    speaker_naming_review: bool = False,
     resource_catalog: AIBuilderResourceCatalog,
     plan_revision_context: str | None = None,
     requested_output_sections: RequestedOutputSections | None = None,
@@ -91,12 +112,22 @@ def build_plan_proposal_system_prompt(
         "transcription/upload step; start propose_flow steps with the analysis, "
         "structuring, or synthesis work after transcription. Transcript review is "
         "compiler-owned and stays on that backend-inserted step."
+        + (
+            " The user asked to name the speakers, so the backend also inserts, "
+            "right after transcription, a review step where a person names the "
+            "speakers and corrects the transcript; your first step already reads "
+            "that reviewed transcript with the names in place. Do not add steps "
+            "that identify, list, or name speakers."
+            if speaker_naming_review
+            else ""
+        )
     )
     create_mode_rules = (
         [
             "- In create mode, describe semantic flow intent in propose_flow; do not choose Flow mechanics.",
             audio_create_rule,
-            "- Human review checkpoints are compiler-owned in create mode: the backend places confirmed review intents on their producing steps. Do not set review_mode, and do not model human review as a separate AI step or as instruction prose.",
+            "- Human review checkpoints are compiler-owned in create mode: the backend places confirmed review intents on their producing steps. Do not set review_mode, and do not model human review as a separate AI step or as instruction prose. "
+            + _confirmed_checkpoints_sentence(planning_state),
             "- Do not author field-level previous-step paths or text-output refs in create mode; the backend owns those underlag channels from the proposed step outputs and committed architecture.",
             "- The backend compiles step topology, backend-owned refs, underlag/input_bindings, runtime input, step refs, output modes, and document delivery.",
         ]
@@ -173,7 +204,8 @@ def build_plan_proposal_system_prompt(
         *([terminal_document_rule] if terminal_document_rule is not None else []),
         "- Describe each step's semantic work; the backend derives runtime input and final output mechanics from the committed architecture.",
         "- Do not write template variables, raw JSON Schema, raw input bindings, IDs, hashes, timestamps, step refs, or backend mechanics.",
-        "- Exception: when the Available resources section gives portable resource slot refs, use those refs only in their dedicated fields (`model_ref`, `knowledge_refs`).",
+        "- Exception: when the Available resources section gives portable knowledge slot refs, use those refs only in `knowledge_refs`.",
+        "- When the user asks for a particular model, do not claim it was set; say in assumptions that each step's model is chosen in that step's modellväljare/model picker.",
         "- The backend will compile, validate, and persist the plan for user approval.",
         *create_mode_rules,
         "",
@@ -485,9 +517,6 @@ def _resource_context_block(
 ) -> str:
     rendered = render_resource_reference_block(material)
     sections: list[str] = []
-    if rendered.models:
-        sections.append("Models:")
-        sections.append(rendered.models)
     if rendered.knowledge_bases:
         sections.append("Knowledge bases:")
         sections.append(rendered.knowledge_bases)

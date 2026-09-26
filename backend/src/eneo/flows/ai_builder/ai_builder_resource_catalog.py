@@ -78,7 +78,8 @@ class AIBuilderResourceReferenceEntry:
 
 @dataclass(frozen=True, slots=True)
 class AIBuilderResourceReferenceMaterial:
-    models: tuple[AIBuilderResourceReferenceEntry, ...]
+    # No models: a step's model is chosen in its model picker, not by the
+    # planner the material is shown to.
     knowledge_bases: tuple[AIBuilderResourceReferenceEntry, ...]
 
 
@@ -309,7 +310,6 @@ def build_ai_builder_resource_reference_material(
     catalog: AIBuilderResourceCatalog,
 ) -> AIBuilderResourceReferenceMaterial:
     return AIBuilderResourceReferenceMaterial(
-        models=tuple(_resource_reference_entry(entry) for entry in catalog.models),
         knowledge_bases=tuple(
             _resource_reference_entry(entry) for entry in catalog.knowledge_bases
         ),
@@ -318,7 +318,6 @@ def build_ai_builder_resource_reference_material(
 
 @dataclass(frozen=True, slots=True)
 class RenderedResourceReferences:
-    models: str
     knowledge_bases: str
 
 
@@ -330,9 +329,6 @@ def render_resource_reference_block(
     Phases share the per-kind bullet formatting and add their own headings/copy.
     """
     return RenderedResourceReferences(
-        models="\n".join(
-            f"- {entry.prompt_fields(ref_label='ref')}" for entry in material.models
-        ),
         knowledge_bases="\n".join(
             f"- {entry.prompt_fields(ref_label='ref')}"
             for entry in material.knowledge_bases

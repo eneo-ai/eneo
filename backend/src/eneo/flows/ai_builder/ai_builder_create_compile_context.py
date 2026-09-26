@@ -168,6 +168,16 @@ class CreateCompileContext:
             and self.final_output_mode is OutputMode.TRANSCRIBE_ONLY
         )
 
+    @property
+    def speaker_naming_review(self) -> bool:
+        """Whether the speaker-naming review follows the transcription step.
+
+        The typed transcript checkpoint says the reviewer names the speakers;
+        `CheckpointIntent` admits that only as an edit of the transcript.
+        """
+
+        return any(intent.speaker_naming for intent in self.checkpoint_intents or ())
+
 
 def create_compile_context_from_planning_state(
     planning_state: PlanningState | None,

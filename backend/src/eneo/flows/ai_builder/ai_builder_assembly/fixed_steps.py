@@ -106,6 +106,69 @@ def fixed_audio_transcription_step(
     )
 
 
+def speaker_naming_review_step(*, ui_language: str | None) -> PlannedStep:
+    """The editor's "review the transcript" step: the AI proposes who each
+    speaker is and a person confirms the names and corrects the transcript
+    before later steps read it."""
+
+    if _uses_english(ui_language):
+        name = "Review transcript"
+        instructions = (
+            "Suggest who each speaker in the transcript is, so a person can name "
+            "the speakers and correct the transcript before the flow continues."
+        )
+    else:
+        name = "Granska transkript"
+        instructions = (
+            "Föreslå vem varje talare i transkriptet är, så att en person kan "
+            "namnge talarna och rätta transkriptet innan flödet fortsätter."
+        )
+    return PlannedStep(
+        role="speaker_naming",
+        name=name,
+        instructions=instructions,
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        output_type=OutputType.JSON,
+        output_mode=OutputMode.SPEAKER_MAPPING,
+        underlag_channel="implicit_previous",
+        review_mode=FlowStepReviewMode.EDIT,
+    )
+
+
+def reviewed_transcript_step(*, ui_language: str | None) -> PlannedStep:
+    """The reviewed transcript as the flow's text result.
+
+    A speaker-naming step's typed result is the name mapping; its text channel
+    carries the transcript a person reviewed, with the names in place. When
+    that transcript is the flow's result, this step hands the text on without
+    a model call, so the run delivers text rather than the mapping.
+    """
+
+    if _uses_english(ui_language):
+        name = "Reviewed transcript"
+        instructions = (
+            "Deliver the transcript as it stands after the review, with the "
+            "speakers' names in place."
+        )
+    else:
+        name = "Granskat transkript"
+        instructions = (
+            "Lämna transkriptet som det ser ut efter granskningen, med talarnas "
+            "namn på plats."
+        )
+    return PlannedStep(
+        role="renderer",
+        name=name,
+        instructions=instructions,
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        output_type=OutputType.TEXT,
+        output_mode=OutputMode.COMPOSE_TEXT,
+        underlag_channel="implicit_previous",
+    )
+
+
 def render_verbatim_step(
     *,
     output_type: OutputType,

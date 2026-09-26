@@ -37,6 +37,7 @@ from eneo.flows.flow_authoring_spec import (
 from eneo.flows.flow_capability_manifest import (
     is_chain_compatible,
     resolve_capability_for_tuple,
+    supports_step_io_tuple,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.json_types import JsonObject
@@ -47,6 +48,7 @@ PlannedStepRole = Literal[
     "body_writer",
     "renderer",
     "transcription",
+    "speaker_naming",
     "template_fill",
 ]
 UnderlagChannel = Literal[
@@ -78,7 +80,6 @@ class PlannedStep:
     previous_field_refs: tuple[PreviousFieldRef, ...] = ()
     previous_output_refs: tuple[PreviousOutputRef, ...] = ()
     output_fields: tuple[StructuredFieldDraft, ...] = ()
-    model_ref: str | None = None
     knowledge_refs: tuple[str, ...] = ()
     citations_requested: bool = False
     # Create review placement is projected from typed checkpoint intents after assembly.
@@ -223,13 +224,23 @@ def derive_underlag_channel(
     if (
         previous_step is not None
         and previous_step.output_type == OutputType.JSON
+        and previous_step.output_mode != OutputMode.SPEAKER_MAPPING
         and input_type == InputType.TEXT
     ):
         return "whole_object"
+    # A speaker-naming step's text output is the reviewed transcript.
     return "implicit_previous"
 
 
 def _step_capabilities_are_supported(step: PlannedStep) -> bool:
+    if step.role == "speaker_naming":
+        # Exposure governs what the planner may author; the backend inserts
+        # this step itself, so only engine legality applies.
+        return supports_step_io_tuple(
+            input_type=FlowInputType(step.input_type.value),
+            output_type=FlowOutputType(step.output_type.value),
+            output_mode=FlowOutputMode(step.output_mode.value),
+        )
     return (
         resolve_capability_for_tuple(
             input_source=FlowInputSource(step.input_source.value),

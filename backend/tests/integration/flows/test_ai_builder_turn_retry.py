@@ -7,7 +7,7 @@ import signal
 import subprocess
 import sys
 from collections.abc import AsyncIterator, Iterator
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import AbstractContextManager, asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -44,6 +44,10 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import AIBuilderPlanEditContext
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    SlotClassificationAttempt,
+    SlotClassificationResult,
+)
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.planning_state import (
     PLANNING_STATE_PAYLOAD_CAP_BYTES,
@@ -255,6 +259,20 @@ def _deterministic_provider(
         yield
 
 
+def _classifier_reading_nothing() -> AbstractContextManager[AsyncMock]:
+    """The turn is read and nothing is found in it: the scripted provider
+    answers proposals, so its reply would leave the classifier unread."""
+
+    return patch(
+        "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+        new=AsyncMock(
+            return_value=SlotClassificationAttempt(
+                outcome="resolved", result=SlotClassificationResult()
+            )
+        ),
+    )
+
+
 @contextmanager
 def _provider_must_not_run() -> Iterator[None]:
     async def fail_provider(**_kwargs: object) -> NoReturn:
@@ -431,7 +449,6 @@ def _proposal_response(*, flow_name: str) -> MagicMock:
                             "required": True,
                         }
                     ],
-                    "model_ref": None,
                     "knowledge_refs": [],
                     "citations_requested": False,
                 }
@@ -710,10 +727,13 @@ async def test_oversized_planning_state_is_committed_once_and_replayed(
         bearer_token=bearer_token,
         space_id=space_id,
     )
-    with _deterministic_provider(
-        marker_path=marker_path,
-        marker="setup_provider",
-        response=_proposal_response(flow_name="Första planen"),
+    with (
+        _deterministic_provider(
+            marker_path=marker_path,
+            marker="setup_provider",
+            response=_proposal_response(flow_name="Första planen"),
+        ),
+        _classifier_reading_nothing(),
     ):
         setup_response = await _progress_session_to_plan(
             client=client,
@@ -778,6 +798,7 @@ async def test_oversized_planning_state_is_committed_once_and_replayed(
             marker="oversized_state_provider",
             response=_proposal_response(flow_name="Reviderad plan"),
         ),
+        _classifier_reading_nothing(),
     ):
         first_response = await _send_message(
             client=client,

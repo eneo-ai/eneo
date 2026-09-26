@@ -38,7 +38,6 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
 )
 from eneo.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
     build_knowledge_refs_property_schema,
-    build_model_ref_property_schema,
     build_previous_field_refs_schema,
     build_previous_output_refs_schema,
     build_proposal_structured_field_schema,
@@ -463,7 +462,6 @@ class SemanticStepIntent(BaseModel):
     uses_previous_outputs: list[PreviousOutputRef] = Field(
         default_factory=lambda: cast(list[PreviousOutputRef], [])
     )
-    model_ref: str | None = None
     knowledge_refs: list[str] = Field(default_factory=list)
     citations_requested: bool = False
     review_mode: FlowStepReviewMode | None = None
@@ -503,14 +501,6 @@ class SemanticStepIntent(BaseModel):
     def _normalize_string_list(cls, values: list[str]) -> list[str]:
         return normalize_authoring_string_list(values)
 
-    @field_validator("model_ref")
-    @classmethod
-    def _normalize_optional_ref(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized = value.strip()
-        return normalized or None
-
     @model_validator(mode="after")
     def _validate_resource_mode(self) -> "SemanticStepIntent":
         if self.output_fields:
@@ -526,7 +516,6 @@ class _CreateSemanticStepArguments(BaseModel):
     name: str
     instructions: str
     output_fields: list["ProposalStructuredFieldIntent"] | None = None
-    model_ref: str | None = None
     # Null on the wire (strict makes the property required) means none.
     knowledge_refs: list[str] | None = None
     citations_requested: bool = False
@@ -879,13 +868,11 @@ def build_create_flow_tool_schema(
     is_pure_audio_transcription: bool = False,
     confirmed_runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = (),
 ) -> dict[str, Any]:
-    model_refs = resource_catalog.small_ref_enum_for_kind("model")
     kb_refs = resource_catalog.small_ref_enum_for_kind("knowledge_base")
     step_schema = build_semantic_step_schema(
         include_output_type=False,
         include_review_mode=False,
         include_form_field_refs=False,
-        model_refs=model_refs,
         kb_refs=kb_refs,
     )
     if is_pure_audio_transcription:
@@ -972,7 +959,6 @@ def build_semantic_step_schema(
     include_review_mode: bool = True,
     include_form_field_refs: bool = True,
     include_previous_refs: bool = False,
-    model_refs: list[str] | None = None,
     kb_refs: list[str] | None = None,
 ) -> dict[str, Any]:
     schema: dict[str, Any] = {
@@ -1032,7 +1018,6 @@ def build_semantic_step_schema(
                 if include_previous_refs
                 else {}
             ),
-            **build_model_ref_property_schema(model_refs=model_refs),
             **build_knowledge_refs_property_schema(kb_refs=kb_refs),
             "citations_requested": {"type": "boolean", "default": False},
             **(

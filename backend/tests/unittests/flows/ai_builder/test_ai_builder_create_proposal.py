@@ -9,6 +9,9 @@ import pytest
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
+from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    derive_architecture_commit_draft,
+)
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
     ArchitectureRepairDisposition,
@@ -58,10 +61,17 @@ from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     CheckpointIntent,
     ConfirmedRuntimeMetadataField,
-    MappedFileLimit,
     PlanningState,
     ResolvedSlot,
     StepTriple,
+)
+from eneo.flows.enums import (
+    FlowOutputDelivery,
+    FlowOutputMode,
+    FlowOutputType,
+    final_output_delivery,
+    final_step_output_type,
+    flow_output_mode_uses_completion_model,
 )
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -73,6 +83,7 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.input_binding_contract_rules import source_ref_bindings
 from tests.unittests.flows.ai_builder.authoring_command_assertions import (
     assert_create_spec_prepares_through_authoring_command_async,
 )
@@ -242,6 +253,91 @@ async def test_create_terminal_uses_committed_architecture_despite_negated_file_
 
 
 @pytest.mark.asyncio
+async def test_a_transcript_only_flow_that_names_the_speakers_delivers_the_reviewed_transcript() -> (
+    None
+):
+    # gate it4 P1: the naming step ended the flow, so its result was the speaker
+    # mapping (JSON) while the committed result is text, and admission refused
+    # the plan as a server defect. The run's final result must be the transcript
+    # the reviewer corrected, with the names in place, delivered as text.
+    request = "Skriv ut intervjun och låt mig namnge talarna."
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        name: ResolvedSlot(
+            name=name, value=value, source="structured_answer", confidence="high"
+        )
+        for name, value in (
+            ("primary_runtime_input", "audio"),
+            ("terminal_output", "structured_text"),
+            ("post_processing_goal", "stop_after_primary_operation"),
+        )
+    }
+    state.checkpoint_intents = [
+        CheckpointIntent(
+            producer_kind="transcript",
+            operation="set",
+            mode=FlowStepReviewMode.EDIT,
+            confidence="high",
+            evidence=[f"quote:user_message:1:{request}"],
+            evidence_level="explicit",
+            speaker_naming=True,
+        )
+    ]
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    state.architecture_commit = finalize_architecture_commit(draft)
+
+    result = await process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=[ConversationMessage(role="user", content=request)],
+        arguments={
+            "flow_name": "Intervjutranskript",
+            "plan_rationale": "Transkriptet är resultatet.",
+            "steps": [
+                {
+                    "name": "Transkribera intervjun",
+                    "instructions": "Skriv ut intervjun ordagrant.",
+                }
+            ],
+        },
+        tool_call_id="call-transcript-naming",
+        available_model_refs=None,
+        available_kb_refs=None,
+        planning_state=state,
+    )
+
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.validation.valid
+    steps = result.compiled.content.spec.steps
+    assert [step.output_mode for step in steps] == [
+        OutputMode.TRANSCRIBE_ONLY,
+        OutputMode.SPEAKER_MAPPING,
+        OutputMode.COMPOSE_TEXT,
+    ]
+    naming, delivered = steps[1:]
+    assert naming.review_policy is not None
+    assert naming.review_policy.mode is FlowStepReviewMode.EDIT
+    # The last step reads the naming step's text channel, which is the
+    # reviewed transcript, and hands it on without a model call.
+    assert (delivered.input_source, delivered.input_type) == (
+        InputSource.PREVIOUS_STEP,
+        InputType.TEXT,
+    )
+    assert not source_ref_bindings(delivered.input_bindings)
+    assert delivered.review_policy is None
+    assert not flow_output_mode_uses_completion_model(delivered.output_mode.value)
+    output_type = final_step_output_type([step.output_type.value for step in steps])
+    assert output_type is FlowOutputType.TEXT
+    assert (
+        final_output_delivery(
+            output_type=output_type,
+            output_mode=FlowOutputMode(delivered.output_mode.value),
+        )
+        is FlowOutputDelivery.PAYLOAD
+    )
+
+
+@pytest.mark.asyncio
 async def test_create_terminal_postcondition_treats_mismatch_as_compiler_defect() -> (
     None
 ):
@@ -308,13 +404,13 @@ async def test_outline_processing_reports_unknown_resource_from_compiled_spec() 
         turn=_make_turn(),
         conversation=[ConversationMessage(role="user", content="Bygg ett textflöde.")],
         arguments={
-            "flow_name": "Unknown model flow",
-            "plan_rationale": "Use a missing model ref.",
+            "flow_name": "Unknown knowledge flow",
+            "plan_rationale": "Use a missing knowledge ref.",
             "steps": [
                 {
                     "name": "Analysera",
                     "instructions": "Analysera texten.",
-                    "model_ref": "missing-fast-model",
+                    "knowledge_refs": ["missing-policy"],
                 }
             ],
         },
@@ -324,11 +420,12 @@ async def test_outline_processing_reports_unknown_resource_from_compiled_spec() 
         resource_catalog=catalog,
     )
 
+    # An unrequested model ref is cleared before resolution (see
+    # test_an_invented_unrequested_model_is_cleared_before_resolution); an
+    # unknown knowledge ref is still reported.
     assert isinstance(result, CorrectableFailure)
     assert result.kind == "validation"
-    assert "Unknown model reference 'missing-fast-model'" in result.feedback
-    assert "step 'step_a'.assistant_spec.model_ref" in result.feedback
-    assert "model.gpt-5-4-nano" in result.feedback
+    assert "Unknown knowledge base reference 'missing-policy'" in result.feedback
 
 
 @pytest.mark.asyncio
@@ -703,107 +800,6 @@ async def test_report_citations_degrade_to_one_user_visible_warning() -> None:
         (warning.code, warning.severity.value)
         for warning in stored.content.lint_warnings
     ] == [("citation_mode_unsupported", "warning")]
-
-
-@pytest.mark.asyncio
-async def test_combined_report_models_surface_warning_on_stored_plan() -> None:
-    state = PlanningState.empty()
-    state.mapped_file_limit = MappedFileLimit(
-        proposed_value=4,
-        accepted_value=4,
-        provenance="authored",
-    )
-    state.architecture_commit = finalize_architecture_commit(
-        ArchitectureCommitDraft(
-            tuples_chain=[
-                StepTriple(
-                    input_type="document",
-                    output_type="pdf",
-                    output_mode="render_verbatim",
-                )
-            ],
-            chosen_patterns=["document_to_pdf_report"],
-            aggregation_intent="linear",
-            report_disposition="synthesized_overview",
-        )
-    )
-
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[
-            _model_resource("draft-model-id", "draft"),
-            _model_resource("body-model-id", "body"),
-        ],
-        available_kbs=[],
-    )
-    result = await process_create_intent_arguments(
-        turn=_make_turn(),
-        conversation=[
-            ConversationMessage(
-                role="user",
-                content="Use the selected models to build the source report.",
-                metadata={"ui_language": "sv"},
-            )
-        ],
-        arguments={
-            "flow_name": "Model-specific source report",
-            "plan_rationale": "Extract evidence and write the final report.",
-            "steps": [
-                {
-                    "name": "Read source",
-                    "instructions": "Extract source evidence.",
-                    "output_fields": [
-                        {
-                            "name": "documents",
-                            "field_type": "array",
-                            "description": "Source evidence.",
-                            "children": [
-                                {
-                                    "name": "summary",
-                                    "field_type": "string",
-                                    "description": "Source summary.",
-                                }
-                            ],
-                        }
-                    ],
-                },
-                {
-                    "name": "Draft report",
-                    "instructions": "Draft the report.",
-                    "model_ref": "model.draft",
-                },
-                {
-                    "name": "Compose report",
-                    "instructions": "Compose the final report.",
-                    "model_ref": "model.body",
-                },
-            ],
-        },
-        tool_call_id="call-combined-report-models",
-        available_model_refs=catalog.model_refs,
-        available_kb_refs=None,
-        resource_catalog=catalog,
-        planning_state=state,
-    )
-
-    assert isinstance(result, ProposalReady)
-    compiled = result.compiled
-    assert compiled.content.spec.steps[1].assistant_spec.model_ref == "model.body"
-    warnings = [
-        warning
-        for warning in compiled.validation.warnings
-        if warning.code == "document_report_model_selection_combined"
-    ]
-    assert len(warnings) == 1
-    assert warnings[0].message == (
-        "Stegen angav olika modellval; de kombinerades och det kombinerade "
-        "rapportskrivningssteget använder modellvalet model.body."
-    )
-
-    stored = build_flow_builder_proposal(compiled)
-    assert [
-        (warning.code, warning.severity.value)
-        for warning in stored.content.lint_warnings
-    ] == [("document_report_model_selection_combined", "warning")]
 
 
 @pytest.mark.asyncio

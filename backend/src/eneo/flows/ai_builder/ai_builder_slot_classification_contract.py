@@ -22,6 +22,7 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
 )
 from eneo.flows.ai_builder.planning_state import (
     NAMED_RESULT_EVIDENCE_MAX_ITEMS,
+    SPEAKER_NAMING_REVIEW_MODE,
     AttachmentCoverage,
     CheckpointProducerKind,
     ExactNamedResultPlacement,
@@ -46,11 +47,18 @@ SlotClassificationAttemptOutcome = Literal[
     "skipped_context_budget",
     "skipped_no_resolvable_slots",
 ]
+# A provider reply that carries no reading: the free text it was given has
+# not been read, however the reply failed.
+UNREAD_CLASSIFICATION_OUTCOMES: frozenset[SlotClassificationAttemptOutcome] = frozenset(
+    {"no_content", "parse_failed", "output_limit_exceeded"}
+)
 SlotClassificationDiagnosticCode = Literal[
     "slot_outcome_duplicate",
     "slot_outcome_malformed",
     "slot_outcome_omitted",
     "slot_outcome_value_as_outcome",
+    "slot_outcome_outside_slots",
+    "slot_outcome_confidence_omitted",
 ]
 SlotClassificationSourceKind = Literal[
     "user_message",
@@ -284,6 +292,17 @@ def _empty_slot_classification_outcomes() -> dict[
     return {}
 
 
+# A checkpoint update that contradicts itself is not taken; the conflict is
+# kept with the reading, as a conflicting slot becomes absent with its code.
+CheckpointUpdateDiagnosticCode = Literal["speaker_naming_without_edit"]
+
+
+@dataclass(frozen=True, slots=True)
+class CheckpointUpdateDiagnostic:
+    code: CheckpointUpdateDiagnosticCode
+    producer_kind: CheckpointProducerKind
+
+
 @dataclass(frozen=True, slots=True)
 class SlotClassificationDiagnostic:
     code: SlotClassificationDiagnosticCode
@@ -319,6 +338,9 @@ class ClassifiedCheckpointUpdate:
     reason: str
     evidence: tuple[ClassifiedEvidence, ...]
     evidence_level: SlotClassificationEvidenceLevel = "inferred"
+    # The reviewer names the speakers of the recording (who is who). Declared
+    # by the classifier; decides the form of the transcript review.
+    speaker_naming: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -386,6 +408,7 @@ class SlotClassificationResult:
     diagnostics: tuple[SlotClassificationDiagnostic, ...] = ()
     file_roles: tuple[ClassifiedFileRole, ...] = ()
     checkpoint_updates: tuple[ClassifiedCheckpointUpdate, ...] = ()
+    checkpoint_diagnostics: tuple[CheckpointUpdateDiagnostic, ...] = ()
     form_intake: ClassifiedFormIntake | None = None
     named_result_evidence: ClassifiedNamedResultDelta | None = None
     example_output_constraints: ExampleOutputConstraintEvidence | None = None
@@ -478,7 +501,19 @@ def parse_slot_classification_response(
 
     if raw is None:
         return None
-    raw_dict = raw
+    slot_values = normalize_slot_classification_values(allowed_slot_values)
+    lenient = _top_level_read_leniently(
+        raw,
+        properties=_slot_classification_top_level_properties(
+            allowed_slot_values,
+            schema_candidate_fingerprints=schema_candidate_fingerprints,
+        ),
+        allowed_slot_names=frozenset(slot_values),
+    )
+    if lenient is None:
+        return None
+    raw_dict, relocated_entries = lenient
+    relocated_slot_names = frozenset(name for name, _ in relocated_entries)
     if not _slot_classification_top_level_contract_is_valid(
         raw_dict,
         allowed_slot_values=allowed_slot_values,
@@ -486,11 +521,18 @@ def parse_slot_classification_response(
     ):
         return None
 
-    slot_values = normalize_slot_classification_values(allowed_slot_values)
     raw_slot_entries = _raw_slot_entries_by_name(
         raw_dict["slots"],
         allowed_slot_names=frozenset(slot_values),
     )
+    # An entry written beside `slots` joins the entries read from it, so one
+    # also present inside (keyed or legacy list) is a duplicate, never a
+    # silently chosen reading.
+    for slot_name, value in relocated_entries:
+        raw_slot_entries[slot_name] = (
+            *raw_slot_entries.get(slot_name, ()),
+            _RawSlotEntry(value=value, legacy_entry=False),
+        )
     slot_outcomes: dict[str, SlotClassificationOutcome] = {}
     diagnostics: list[SlotClassificationDiagnostic] = []
     for slot_name in slot_values:
@@ -513,6 +555,13 @@ def parse_slot_classification_response(
                 )
             )
             continue
+        if slot_name in relocated_slot_names:
+            diagnostics.append(
+                SlotClassificationDiagnostic(
+                    code="slot_outcome_outside_slots",
+                    slot_name=slot_name,
+                )
+            )
         raw_entry = entries[0].value
         normalized = _slot_value_written_as_outcome(
             raw_entry, allowed_values=slot_values[slot_name]
@@ -522,6 +571,15 @@ def parse_slot_classification_response(
             diagnostics.append(
                 SlotClassificationDiagnostic(
                     code="slot_outcome_value_as_outcome",
+                    slot_name=slot_name,
+                )
+            )
+        graded = _resolved_entry_with_omitted_grades(raw_entry)
+        if graded is not None:
+            raw_entry = graded
+            diagnostics.append(
+                SlotClassificationDiagnostic(
+                    code="slot_outcome_confidence_omitted",
                     slot_name=slot_name,
                 )
             )
@@ -547,12 +605,13 @@ def parse_slot_classification_response(
         raw_dict.get("file_roles", []),
         classification_input=classification_input,
     )
-    checkpoint_updates = _parse_checkpoint_updates(
+    parsed_checkpoints = _parse_checkpoint_updates(
         raw_dict["checkpoint_updates"],
         classification_input=classification_input,
     )
-    if checkpoint_updates is None:
+    if parsed_checkpoints is None:
         return None
+    checkpoint_updates, checkpoint_diagnostics = parsed_checkpoints
     form_intake = _parse_form_intake(
         raw_dict.get("form_intake"),
         classification_input=classification_input,
@@ -584,6 +643,7 @@ def parse_slot_classification_response(
         diagnostics=tuple(diagnostics),
         file_roles=file_roles,
         checkpoint_updates=checkpoint_updates,
+        checkpoint_diagnostics=checkpoint_diagnostics,
         form_intake=form_intake,
         named_result_evidence=named_result_evidence,
         example_output_constraints=example_output_constraints,
@@ -679,6 +739,43 @@ def _slot_classification_top_level_contract_is_valid(
     return True
 
 
+def _top_level_read_leniently(
+    raw: Mapping[str, object],
+    *,
+    properties: Mapping[str, Mapping[str, object]],
+    allowed_slot_names: frozenset[str],
+) -> tuple[dict[str, object], tuple[tuple[str, object], ...]] | None:
+    """The response's top level as the contract names it, and the offered
+    slot entries written beside `slots`.
+
+    Models without provider-enforced structure (prompt-only mode) write an
+    offered slot beside `slots` instead of inside it, add slots they were not
+    offered, leave out the optional keys and write an empty list as `{}`. Each
+    entry is still validated on its own, so relocating it, dropping the
+    unknown keys and reading a missing or `{}` list as empty keeps the reading
+    without admitting anything unchecked. A response with none of the
+    contract's keys is not a reading at all.
+    """
+
+    relocated = tuple(
+        (key, value)
+        for key, value in raw.items()
+        if key in allowed_slot_names and key not in properties
+    )
+    if not relocated and not any(key in properties for key in raw):
+        return None
+    slots = raw.get("slots")
+    normalized: dict[str, object] = {
+        key: raw.get(key, [] if schema.get("type") == "array" else None)
+        for key, schema in properties.items()
+    }
+    for key, schema in properties.items():
+        if schema.get("type") == "array" and normalized[key] == {}:
+            normalized[key] = []
+    normalized["slots"] = slots if slots is not None else _KeyedSlotObject(())
+    return normalized, relocated
+
+
 def _raw_slot_entries_by_name(
     raw_value: object,
     *,
@@ -736,6 +833,37 @@ def _slot_value_written_as_outcome(
     return {**item, "outcome": "resolved", "value": outcome}
 
 
+_RESOLVED_SLOT_ENTRY_KEYS = frozenset(
+    {"outcome", "value", "confidence", "reason", "evidence", "evidence_level"}
+)
+_OMITTABLE_RESOLVED_SLOT_ENTRY_KEYS = frozenset({"confidence", "reason"})
+_OMITTED_CONFIDENCE: SlotClassificationConfidence = "medium"
+
+
+def _resolved_entry_with_omitted_grades(
+    raw_value: object,
+) -> dict[str, object] | None:
+    """Read a resolved entry that left out its confidence.
+
+    An omitted confidence reads as medium: explicit evidence still commits
+    the slot, an inferred reading is still confirmed with the user. (An
+    omitted reason is admitted by the entry parser itself.)
+    """
+
+    if not isinstance(raw_value, dict):
+        return None
+    item = cast(dict[str, object], raw_value)
+    keys = frozenset(item)
+    if (
+        item.get("outcome") != "resolved"
+        or "confidence" in item
+        or not keys <= _RESOLVED_SLOT_ENTRY_KEYS
+        or not _RESOLVED_SLOT_ENTRY_KEYS - _OMITTABLE_RESOLVED_SLOT_ENTRY_KEYS <= keys
+    ):
+        return None
+    return {**item, "confidence": _OMITTED_CONFIDENCE}
+
+
 def _parse_slot_outcome(
     *,
     slot_name: str,
@@ -779,14 +907,9 @@ def _parse_slot_outcome(
         return ExplicitlyUncertainSlotClassificationOutcome(quote=evidence[0])
     if outcome_kind != "resolved" and not (legacy_entry and outcome_kind is None):
         return None
-    if not legacy_entry and set(item) != {
-        "outcome",
-        "value",
-        "confidence",
-        "reason",
-        "evidence",
-        "evidence_level",
-    }:
+    if not legacy_entry and not (
+        _RESOLVED_SLOT_ENTRY_KEYS - {"reason"} <= set(item) <= _RESOLVED_SLOT_ENTRY_KEYS
+    ):
         return None
     value = item.get("value")
     confidence = item.get("confidence")
@@ -821,10 +944,14 @@ def _parse_slot_outcome(
         structured_question_id=slot_name,
     )
     reason = item.get("reason")
-    if not legacy_entry and (
-        not isinstance(reason, str)
-        or not reason.strip()
-        or len(reason) > CLASSIFICATION_REASON_MAX_LENGTH
+    if (
+        not legacy_entry
+        and reason is not None
+        and (
+            not isinstance(reason, str)
+            or not reason.strip()
+            or len(reason) > CLASSIFICATION_REASON_MAX_LENGTH
+        )
     ):
         return None
     return ResolvedSlotClassificationOutcome(
@@ -984,7 +1111,12 @@ def _parse_checkpoint_updates(
     raw_value: object,
     *,
     classification_input: SlotClassificationInput,
-) -> tuple[ClassifiedCheckpointUpdate, ...] | None:
+) -> (
+    tuple[
+        tuple[ClassifiedCheckpointUpdate, ...], tuple[CheckpointUpdateDiagnostic, ...]
+    ]
+    | None
+):
     if not isinstance(raw_value, list):
         return None
     producer_kinds = set(get_args(CheckpointProducerKind))
@@ -997,6 +1129,7 @@ def _parse_checkpoint_updates(
     }
     current_user_message_id = classification_input.current_user_message_id
     updates: list[ClassifiedCheckpointUpdate] = []
+    diagnostics: list[CheckpointUpdateDiagnostic] = []
     seen_producers: set[str] = set()
     for item in cast(list[object], raw_value):
         if not isinstance(item, dict):
@@ -1011,7 +1144,7 @@ def _parse_checkpoint_updates(
         if producer_kind in seen_producers:
             return None
         seen_producers.add(producer_kind)
-        confidence = payload.get("confidence")
+        confidence = payload.get("confidence", _OMITTED_CONFIDENCE)
         if confidence not in {"high", "medium"}:
             return None
         raw_mode = payload.get("mode")
@@ -1035,9 +1168,36 @@ def _parse_checkpoint_updates(
             for cited in evidence
         ):
             return None
-        reason = payload.get("reason")
+        reason = payload.get("reason", "checkpoint classification")
         if not isinstance(reason, str) or not reason.strip():
             return None
+        # Absent reads as no naming; a present value must be a boolean.
+        if "speaker_naming" in payload and not isinstance(
+            payload["speaker_naming"], bool
+        ):
+            return None
+        evidence_level = _validated_evidence_level(
+            payload.get("evidence_level", "inferred"),
+            evidence,
+            classification_input=classification_input,
+            structured_question_id=None,
+        )
+        speaker_naming = payload.get("speaker_naming") is True
+        if speaker_naming and (
+            operation != "update" or mode is not SPEAKER_NAMING_REVIEW_MODE
+        ):
+            # Naming edits the transcript, so this update contradicts itself.
+            # It is not taken (a view is never upgraded to an edit), and a
+            # stated one stays as a conflict for the user to settle; an
+            # inferred one would never have reached planning anyway.
+            if evidence_level == "explicit":
+                diagnostics.append(
+                    CheckpointUpdateDiagnostic(
+                        code="speaker_naming_without_edit",
+                        producer_kind=cast(CheckpointProducerKind, producer_kind),
+                    )
+                )
+            continue
         updates.append(
             ClassifiedCheckpointUpdate(
                 operation=cast(CheckpointUpdateOperation, operation),
@@ -1046,15 +1206,27 @@ def _parse_checkpoint_updates(
                 confidence=cast(SlotClassificationConfidence, confidence),
                 reason=reason.strip(),
                 evidence=evidence,
-                evidence_level=_validated_evidence_level(
-                    payload.get("evidence_level", "inferred"),
-                    evidence,
-                    classification_input=classification_input,
-                    structured_question_id=None,
-                ),
+                evidence_level=evidence_level,
+                speaker_naming=speaker_naming,
             )
         )
-    return tuple(updates)
+    if any(update.producer_kind == "transcript" for update in updates):
+        # Naming filed on another step belongs on the transcript, which this
+        # reply already reviews another way; neither reading is kept silently.
+        for update in [
+            update
+            for update in updates
+            if update.speaker_naming and update.producer_kind != "transcript"
+        ]:
+            updates.remove(update)
+            if update.evidence_level == "explicit":
+                diagnostics.append(
+                    CheckpointUpdateDiagnostic(
+                        code="speaker_naming_without_edit",
+                        producer_kind=update.producer_kind,
+                    )
+                )
+    return tuple(updates), tuple(diagnostics)
 
 
 def _parse_cited_named_result_locations(
@@ -2644,6 +2816,7 @@ def _classified_checkpoint_update_schema() -> dict[str, object]:
                     "reason",
                     "evidence",
                     "evidence_level",
+                    "speaker_naming",
                 ],
                 "properties": {
                     "operation": {"type": "string", "enum": ["update"]},
@@ -2652,6 +2825,7 @@ def _classified_checkpoint_update_schema() -> dict[str, object]:
                         "type": "string",
                         "enum": [mode.value for mode in FlowStepReviewMode],
                     },
+                    "speaker_naming": {"type": "boolean"},
                 },
             },
             {

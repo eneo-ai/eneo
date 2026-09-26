@@ -1,10 +1,12 @@
 """Turns that answer the user without proposing a plan.
 
-Two of them exist. The model can decline a change the edit contract cannot
-carry — a step's model lives in the step editor and nowhere else — and the
-server can refuse a scoped revision it knows the model cannot satisfy. Both
-own their user-visible sentence here, and both are stored like an accepted
-proposal, so the conversation records what was asked and what was answered.
+The model can decline a change the edit contract cannot carry — a step's
+model lives in the step editor and nowhere else. The server answers instead
+of planning when it knows no plan can be made this turn: a scoped revision
+the model cannot satisfy, a selected step that changed under the proposal,
+or text the user wrote that could not be read. Each owns its user-visible
+sentence here, and each is stored like an accepted proposal, so the
+conversation records what was asked and what was answered.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Final, Literal, cast, get_args
 
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     PersistedAssistantToolCall,
+    UnsettledUserText,
     make_persisted_assistant_tool_call,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
@@ -136,6 +139,40 @@ _STALE_SAVED_STEP_REVISION_MESSAGES: Final[dict[str, str]] = {
 
 def stale_saved_step_revision_message(*, ui_language: str | None) -> str:
     return _STALE_SAVED_STEP_REVISION_MESSAGES[
+        "en" if _uses_english(ui_language) else "sv"
+    ]
+
+
+# The unread answer holds on the turn that could not read the text and on any
+# later turn (a click included) that waits for it to be sent again.
+_UNSETTLED_TEXT_ANSWERS: Final[dict[UnsettledUserText, dict[str, str]]] = {
+    "unread": {
+        "sv": "Jag kunde inte läsa det du skrev. Skicka det igen, så fortsätter vi.",
+        "en": (
+            "I couldn't read what you wrote. Please send it again, and we'll continue."
+        ),
+    },
+    "speaker_naming_without_edit": {
+        "sv": (
+            "Jag är osäker på hur transkriptet ska granskas: ska den som granskar "
+            "kunna ändra talarnas namn, eller bara läsa transkriptet? Skriv vilket "
+            "du menar, så fortsätter vi."
+        ),
+        "en": (
+            "I'm not sure how the transcript should be reviewed: should the "
+            "reviewer be able to change the speakers' names, or only read the "
+            "transcript? Tell me which, and we'll continue."
+        ),
+    },
+}
+
+
+def unsettled_text_answer(
+    unsettled: UnsettledUserText, *, ui_language: str | None
+) -> str:
+    """What the user is told while text they wrote cannot be built on yet."""
+
+    return _UNSETTLED_TEXT_ANSWERS[unsettled][
         "en" if _uses_english(ui_language) else "sv"
     ]
 

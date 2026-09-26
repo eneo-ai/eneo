@@ -14,6 +14,10 @@ from eneo.flows.flow_authoring_spec import (
 from eneo.flows.flow_authoring_transcription import (
     apply_audio_transcription_defaults,
 )
+from eneo.flows.transcription_config import (
+    DEFAULT_TRANSCRIPTION_LANGUAGE,
+    parse_transcription_config,
+)
 
 
 def _step(
@@ -51,6 +55,11 @@ class TestTranscriptionSetup:
         assert result is not None
         wizard = result["wizard"]
         assert wizard["transcription_enabled"] is True
+        assert wizard["transcription_language"] == DEFAULT_TRANSCRIPTION_LANGUAGE
+        assert (
+            parse_transcription_config(result).language
+            == wizard["transcription_language"]
+        )
 
     def test_non_audio_leaves_metadata_unchanged(self) -> None:
         result = apply_audio_transcription_defaults(

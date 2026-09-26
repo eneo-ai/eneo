@@ -38,6 +38,7 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationNamedResultEvidenceMetadata,
+    metadata_with_text_status,
     requirements_summary_to_metadata,
     slot_classification_metadata_from_attempt,
 )
@@ -260,11 +261,36 @@ def _test_request_snapshot(message: str) -> FlowPersistedJsonObject:
     }
 
 
+def _empty_classification_response() -> MagicMock:
+    """A classifier reply that reads nothing: every slot omitted, no updates."""
+
+    message = MagicMock()
+    message.content = json.dumps(
+        {
+            "slots": [],
+            "file_roles": [],
+            "checkpoint_updates": [],
+            "form_intake": None,
+            "named_result_evidence": None,
+            "example_output_constraints": None,
+            "schema_direction": None,
+            "secondary_obligations": [],
+        }
+    )
+    message.tool_calls = None
+    choice = MagicMock(message=message, finish_reason="stop")
+    return MagicMock(choices=[choice])
+
+
 def _make_planner() -> AIBuilderPlanner:
+    # Unless a test scripts the provider, the classifier reads the turn and
+    # finds nothing: a turn it could not read is answered, never planned.
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _empty_classification_response()
     planner = AIBuilderPlanner(
         user=MagicMock(tenant_id=uuid4()),
         repo=AsyncMock(),
-        litellm_client=AsyncMock(),
+        litellm_client=litellm_client,
         planner_temperature=0.1,
         self_correction_temperature=0.1,
         forced_proposal_temperature=0.1,
@@ -663,7 +689,6 @@ def test_prepared_create_schema_has_a_native_strict_transport_projection() -> No
                         ],
                     }
                 ],
-                "model_ref": None,
                 "knowledge_refs": [
                     " knowledge.policy ",
                     "knowledge.policy",
@@ -3073,6 +3098,42 @@ async def test_send_message_commits_planning_state_payload_too_large_error(
 
 
 @pytest.mark.asyncio
+async def test_an_unread_message_that_cannot_be_saved_commits_the_typed_error(
+    monkeypatch: pytest.MonkeyPatch,
+    send_lock_release: SendLockReleaseSpy,
+) -> None:
+    planner = _make_planner()
+    session_id = uuid4()
+    _configure_minimal_send_message(planner, monkeypatch, _server_output_prepared())
+    planner.repo.get_session.return_value.conversation = [
+        ConversationMessage(
+            role="user",
+            content="Namnge talarna.",
+            metadata=metadata_with_text_status(None, "unread"),
+        )
+    ]
+    planner.repo.commit_turn.side_effect = PlanningStatePayloadTooLargeError(
+        byte_size=131_073,
+        cap_bytes=131_072,
+    )
+
+    events = await _collect_send_message_events(planner, session_id=session_id)
+
+    assert [event["event"] for event in events] == ["error", "done"]
+    error = json.loads(events[0]["data"])
+    assert error["code"] == "planning_state_payload_too_large"
+    planner.repo.complete_session_turn.assert_awaited_once()
+    assert (
+        planner.repo.complete_session_turn.await_args.kwargs["error"].model_dump(
+            mode="json",
+            exclude_none=True,
+        )
+        == error
+    )
+    send_lock_release.assert_released_once()
+
+
+@pytest.mark.asyncio
 async def test_send_message_emits_lease_lost_when_refresh_fails_during_server_dispatch(
     monkeypatch: pytest.MonkeyPatch,
     send_lock_release: SendLockReleaseSpy,
@@ -3591,7 +3652,11 @@ async def test_send_message_requires_one_template_before_proposal_without_provid
     )
     monkeypatch.setattr(
         "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
-        AsyncMock(return_value=SlotClassificationAttempt(outcome="no_content")),
+        AsyncMock(
+            return_value=SlotClassificationAttempt(
+                outcome="resolved", result=SlotClassificationResult()
+            )
+        ),
     )
 
     events = [

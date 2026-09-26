@@ -39,7 +39,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Literal, TypeAlias, assert_never, cast
+from typing import Annotated, Final, Literal, TypeAlias, assert_never, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -307,6 +307,10 @@ class SlotUncertainty(_PlanningModel):
 
 CheckpointIntentOperation = Literal["set", "clear"]
 
+# Naming the speakers edits the transcript's speaker names, so a naming
+# review is an edit review of the transcript and never a view.
+SPEAKER_NAMING_REVIEW_MODE: Final = FlowStepReviewMode.EDIT
+
 
 class CheckpointIntent(_PlanningModel):
     """One requested checkpoint change per producer kind.
@@ -330,6 +334,9 @@ class CheckpointIntent(_PlanningModel):
     confidence: SlotConfidence
     evidence: list[str] = Field(min_length=1, max_length=3)
     evidence_level: SlotEvidenceLevel
+    # The reviewer names the speakers (who is who): the transcript review takes
+    # the speaker-naming form, always as SPEAKER_NAMING_REVIEW_MODE.
+    speaker_naming: bool = False
 
     @model_validator(mode="after")
     def require_commit_grade_evidence(self) -> CheckpointIntent:
@@ -345,6 +352,12 @@ class CheckpointIntent(_PlanningModel):
             raise ValueError(
                 "checkpoint intent requires an explicitly stated checkpoint change"
             )
+        if self.speaker_naming and (
+            self.producer_kind != "transcript"
+            or self.operation != "set"
+            or self.mode is not SPEAKER_NAMING_REVIEW_MODE
+        ):
+            raise ValueError("speaker naming is an edit review of the transcript")
         return self
 
 

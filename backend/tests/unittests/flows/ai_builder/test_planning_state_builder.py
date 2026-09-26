@@ -463,6 +463,60 @@ def _model_evidence(
     )
 
 
+@pytest.mark.parametrize(
+    ("audio", "producer"),
+    [(True, "transcript"), (False, "structured_result")],
+    ids=["audio", "not-audio"],
+)
+def test_naming_the_speakers_of_a_recording_is_a_transcript_checkpoint(
+    audio: bool,
+    producer: str,
+) -> None:
+    # gemma4-31b-it filed "set the right names on the speakers before the
+    # summary" under the structured result, so the review landed on an AI
+    # step writing a speaker list. Speakers are named in the transcript; with
+    # no recording there is nothing to name.
+    quote = "Innan något sammanfattas vill jag kunna sätta rätt namn på talarna"
+    state = _state()
+
+    merge_llm_resolved_slots(
+        state,
+        slot_classification_result(
+            slots=(
+                (
+                    _classified(
+                        "primary_runtime_input",
+                        "audio",
+                        "high",
+                        evidence_level="explicit",
+                    ),
+                )
+                if audio
+                else ()
+            ),
+            checkpoint_updates=(
+                ClassifiedCheckpointUpdate(
+                    operation="update",
+                    producer_kind="structured_result",
+                    mode=FlowStepReviewMode.EDIT,
+                    confidence="medium",
+                    reason="checkpoint classification",
+                    evidence=_model_evidence(quote),
+                    evidence_level="explicit",
+                    speaker_naming=True,
+                ),
+            ),
+        ),
+        prompt_hash="a" * 64,
+        freeform_text=quote,
+    )
+
+    assert [
+        (intent.producer_kind, intent.operation, intent.speaker_naming)
+        for intent in state.checkpoint_intents
+    ] == [(producer, "set", audio)]
+
+
 def test_model_uncertainty_and_resolution_remain_disjoint() -> None:
     state = _state()
     quote = ClassifiedEvidence(

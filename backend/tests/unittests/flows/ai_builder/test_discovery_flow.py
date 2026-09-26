@@ -553,6 +553,29 @@ def _make_turn(
     )
 
 
+def _classifier_reading_nothing() -> AsyncMock:
+    """A provider whose classification reply reads nothing from the turn."""
+
+    message = MagicMock()
+    message.content = json.dumps(
+        {
+            "slots": [],
+            "file_roles": [],
+            "checkpoint_updates": [],
+            "form_intake": None,
+            "named_result_evidence": None,
+            "example_output_constraints": None,
+            "schema_direction": None,
+            "secondary_obligations": [],
+        }
+    )
+    client = AsyncMock()
+    client.acompletion.return_value = MagicMock(
+        choices=[MagicMock(message=message, finish_reason="stop")]
+    )
+    return client
+
+
 def _configure_turn_acceptance(repo: AsyncMock) -> None:
     async def accept_turn(**kwargs: object) -> SessionTurnClaim:
         acceptance = cast(SessionTurnAcceptance, kwargs["acceptance"])
@@ -3541,7 +3564,7 @@ class TestPlannerDiscoveryQuestionDispatch:
         planner = AIBuilderPlanner(
             user=MagicMock(tenant_id=uuid4()),
             repo=repo,
-            litellm_client=AsyncMock(),
+            litellm_client=_classifier_reading_nothing(),
             planner_temperature=0.1,
             self_correction_temperature=0.1,
             forced_proposal_temperature=0.1,
@@ -3602,7 +3625,7 @@ class TestPlannerDiscoveryQuestionDispatch:
         planner = AIBuilderPlanner(
             user=MagicMock(tenant_id=uuid4()),
             repo=repo,
-            litellm_client=AsyncMock(),
+            litellm_client=_classifier_reading_nothing(),
             planner_temperature=0.1,
             self_correction_temperature=0.1,
             forced_proposal_temperature=0.1,

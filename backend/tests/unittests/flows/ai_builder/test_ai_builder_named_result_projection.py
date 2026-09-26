@@ -180,7 +180,6 @@ def _arguments(
                 "name": "Förbered underlag",
                 "instructions": "Sammanställ underlaget inför granskningen.",
                 "output_fields": leading_step_output_fields,
-                "model_ref": None,
                 "knowledge_refs": [],
                 "citations_requested": False,
             }
@@ -199,7 +198,6 @@ def _arguments(
                 "name": "Läs handlingar",
                 "instructions": "Läs handlingarna och peka ut kandidater.",
                 "output_fields": model_output_fields,
-                "model_ref": None,
                 "knowledge_refs": [],
                 "citations_requested": False,
             },

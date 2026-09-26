@@ -12,6 +12,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from typing import (
+    TYPE_CHECKING,
     Annotated,
     Any,
     Literal,
@@ -66,7 +67,10 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     CLASSIFICATION_EVIDENCE_MAX_LENGTH,
     CLASSIFICATION_REASON_MAX_LENGTH,
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
+    UNREAD_CLASSIFICATION_OUTCOMES,
     AbsentSlotClassificationOutcome,
+    CheckpointUpdateDiagnostic,
+    CheckpointUpdateDiagnosticCode,
     CheckpointUpdateOperation,
     ClassifiedCheckpointUpdate,
     ClassifiedEvidence,
@@ -86,6 +90,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationSource,
     SlotClassificationSourceKind,
     classification_evidence_has_user_owned_source,
+    planning_reference_cites_source,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     LLM_RESOLVABLE_SLOT_NAMES,
@@ -100,6 +105,7 @@ from eneo.flows.ai_builder.planning_state import (
     ExampleOutputConstraintEvidence,
     FileRole,
     NamedResultEvidence,
+    PlanningState,
     RuntimeMetadataFieldPurpose,
     is_named_content_fields_edit_reference,
     is_named_result_location_id,
@@ -108,6 +114,9 @@ from eneo.flows.ai_builder.question_catalog import legal_slot_values
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.main.logging import get_logger
+
+if TYPE_CHECKING:
+    from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 
 logger = get_logger(__name__)
 
@@ -138,6 +147,7 @@ REVIEW_SESSION_METADATA_KEY = "acts_on_review"
 ASSISTANT_QUESTION_ID_METADATA_KEY = "question_id"
 ASSISTANT_QUESTION_INDEX_METADATA_KEY = "question_index"
 SLOT_CLASSIFICATION_METADATA_KEY = "slot_classification"
+TEXT_STATUS_METADATA_KEY = "text_status"
 NAMED_CONTENT_FIELDS_EDIT_METADATA_KEY = "named_content_fields_edit"
 REOPEN_QUESTION_METADATA_KEY = "reopen_question"
 PROVIDER_TOOL_CALL_ID_MAX_LENGTH = 64
@@ -281,6 +291,7 @@ class SlotClassificationCheckpointUpdateMetadata(BaseModel):
         max_length=CLASSIFICATION_EVIDENCE_MAX_ITEMS,
     )
     evidence_level: SlotClassificationEvidenceLevel = "inferred"
+    speaker_naming: bool = False
 
     @model_validator(mode="after")
     def validate_update_contract(self) -> SlotClassificationCheckpointUpdateMetadata:
@@ -299,6 +310,7 @@ class SlotClassificationCheckpointUpdateMetadata(BaseModel):
             reason=self.reason,
             evidence=tuple(item.to_classified_evidence() for item in self.evidence),
             evidence_level=self.evidence_level,
+            speaker_naming=self.speaker_naming,
         )
 
 
@@ -386,6 +398,18 @@ SlotClassificationOutcomeMetadata: TypeAlias = Annotated[
     | AbsentSlotClassificationOutcomeMetadata,
     Field(discriminator="outcome"),
 ]
+
+
+class SlotClassificationCheckpointDiagnosticMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: CheckpointUpdateDiagnosticCode
+    producer_kind: CheckpointProducerKind
+
+    def to_diagnostic(self) -> CheckpointUpdateDiagnostic:
+        return CheckpointUpdateDiagnostic(
+            code=self.code, producer_kind=self.producer_kind
+        )
 
 
 class SlotClassificationDiagnosticMetadata(BaseModel):
@@ -581,6 +605,12 @@ def _empty_slot_classification_file_roles() -> list[SlotClassificationFileRoleMe
     return []
 
 
+def _empty_slot_classification_checkpoint_diagnostics() -> list[
+    SlotClassificationCheckpointDiagnosticMetadata
+]:
+    return []
+
+
 def _empty_slot_classification_checkpoint_updates() -> list[
     SlotClassificationCheckpointUpdateMetadata
 ]:
@@ -622,9 +652,12 @@ class SlotClassificationMetadata(BaseModel):
             max_length=len(LLM_RESOLVABLE_SLOT_NAMES),
         )
     )
+    # A slot can carry one diagnostic of each code (a slot written outside
+    # `slots` without a confidence carries two).
     diagnostics: list[SlotClassificationDiagnosticMetadata] = Field(
         default_factory=_empty_slot_classification_diagnostics,
-        max_length=len(LLM_RESOLVABLE_SLOT_NAMES),
+        max_length=len(LLM_RESOLVABLE_SLOT_NAMES)
+        * len(get_args(SlotClassificationDiagnosticCode)),
     )
     file_roles: list[SlotClassificationFileRoleMetadata] = Field(
         default_factory=_empty_slot_classification_file_roles,
@@ -633,6 +666,12 @@ class SlotClassificationMetadata(BaseModel):
     checkpoint_updates: list[SlotClassificationCheckpointUpdateMetadata] = Field(
         default_factory=_empty_slot_classification_checkpoint_updates,
         max_length=len(get_args(CheckpointProducerKind)),
+    )
+    checkpoint_diagnostics: list[SlotClassificationCheckpointDiagnosticMetadata] = (
+        Field(
+            default_factory=_empty_slot_classification_checkpoint_diagnostics,
+            max_length=len(get_args(CheckpointProducerKind)),
+        )
     )
     secondary_obligations: list[ResultObligation] = Field(
         default_factory=_empty_result_obligations,
@@ -727,6 +766,7 @@ class SlotClassificationMetadata(BaseModel):
                 self.diagnostics,
                 self.file_roles,
                 self.checkpoint_updates,
+                self.checkpoint_diagnostics,
                 self.secondary_obligations,
                 self.form_intake is not None,
                 self.named_result_evidence is not None,
@@ -911,6 +951,9 @@ class SlotClassificationMetadata(BaseModel):
             checkpoint_updates=tuple(
                 update.to_classified_checkpoint_update()
                 for update in self.checkpoint_updates
+            ),
+            checkpoint_diagnostics=tuple(
+                item.to_diagnostic() for item in self.checkpoint_diagnostics
             ),
             form_intake=self.form_intake.to_classified_form_intake()
             if self.form_intake is not None
@@ -1847,6 +1890,10 @@ def slot_classification_metadata_from_attempt(
             ],
             "file_roles": file_role_payloads,
             "checkpoint_updates": checkpoint_update_payloads,
+            "checkpoint_diagnostics": [
+                {"code": item.code, "producer_kind": item.producer_kind}
+                for item in result.checkpoint_diagnostics
+            ],
             "secondary_obligations": secondary_obligations,
             "form_intake": form_intake_payload,
             "named_result_evidence": (
@@ -1965,6 +2012,7 @@ def _slot_classification_checkpoint_update_payload(
         ),
         "evidence": _slot_classification_evidence_payloads(update.evidence),
         "evidence_level": update.evidence_level,
+        "speaker_naming": update.speaker_naming,
     }
 
 
@@ -2032,6 +2080,144 @@ def slot_classification_from_metadata(
     except ValidationError as error:
         _warn_invalid_persisted_metadata(SLOT_CLASSIFICATION_METADATA_KEY, error)
         return None
+
+
+# Why text the user wrote cannot be built on yet: it was never read, or its
+# reading carried a checkpoint conflict only the user can settle.
+UnsettledUserText: TypeAlias = Literal["unread"] | CheckpointUpdateDiagnosticCode
+# A user message's durable reading status, kept on the message itself.
+TextStatus: TypeAlias = Literal["settled"] | UnsettledUserText
+_TEXT_STATUSES: frozenset[str] = frozenset(
+    ("settled", "unread", *get_args(CheckpointUpdateDiagnosticCode))
+)
+
+
+def text_status_from_metadata(metadata: object) -> TextStatus | None:
+    metadata_map = _metadata_mapping(metadata)
+    value = metadata_map.get(TEXT_STATUS_METADATA_KEY) if metadata_map else None
+    return cast(TextStatus, value) if value in _TEXT_STATUSES else None
+
+
+def metadata_with_text_status(
+    metadata: FlowPersistedJsonObject | None, status: TextStatus
+) -> FlowPersistedJsonObject:
+    return {**(metadata or {}), TEXT_STATUS_METADATA_KEY: status}
+
+
+def text_status_changes(
+    conversation: Sequence[ConversationMessage],
+    classification: SlotClassificationMetadata | None,
+    *,
+    planning_state: PlanningState,
+) -> dict[str, TextStatus]:
+    """How the classification of the latest user message moves the status of
+    each user message it covers. Recorded where the classification is stored,
+    with `planning_state` the state planning builds from it and commits.
+
+    A reply with no reading leaves each covered message unread unless it
+    already has a status; a failed reading never undoes a settled message. A
+    resolved reading settles each unread message it received whole (a prefix
+    packed under budget pressure reads nothing). When it reads the latest
+    message whole, that message is the user's answer to what they were told:
+    it settles earlier unread copies of the same text, and earlier naming
+    conflicts only when planning took from it a transcript review that answers
+    the naming question. A reading with a checkpoint conflict leaves its own
+    message in conflict.
+    """
+
+    if classification is None:
+        return {}
+    statuses = {
+        message.message_id: text_status_from_metadata(message.metadata)
+        for message in conversation
+        if message.role == "user"
+    }
+    current_message_id = next(reversed(statuses), None)
+    covered = [
+        (source.message_id, source.truncated)
+        for source in classification.source_inventory
+        if source.kind == "user_message" and source.message_id is not None
+    ]
+    changes: dict[str, TextStatus] = {}
+    if classification.outcome in UNREAD_CLASSIFICATION_OUTCOMES:
+        for message_id, _truncated in covered:
+            if statuses.get(message_id) is None:
+                changes[message_id] = "unread"
+        return changes
+    if classification.outcome != "resolved" or current_message_id is None:
+        return changes
+    for message_id, truncated in covered:
+        if not truncated and statuses.get(message_id) in {None, "unread"}:
+            changes[message_id] = "settled"
+    if changes.get(current_message_id) == "settled":
+        texts = {
+            message.message_id: (message.content or "").strip()
+            for message in conversation
+            if message.role == "user"
+        }
+        naming_decided = not classification.checkpoint_diagnostics and (
+            _transcript_review_decided(
+                planning_state,
+                classification,
+                current_message_id=current_message_id,
+            )
+        )
+        for message_id, status in statuses.items():
+            if (
+                status == "unread" and texts[message_id] == texts[current_message_id]
+            ) or (status == "speaker_naming_without_edit" and naming_decided):
+                changes[message_id] = "settled"
+    if classification.checkpoint_diagnostics:
+        changes[current_message_id] = classification.checkpoint_diagnostics[0].code
+    return changes
+
+
+def _transcript_review_decided(
+    planning_state: PlanningState,
+    classification: SlotClassificationMetadata,
+    *,
+    current_message_id: str,
+) -> bool:
+    """Whether planning committed, from the current message, a transcript
+    review that answers the naming question: the naming form, a view, or no
+    review. An edit that names nobody leaves it open."""
+
+    current_sources = [
+        source.source_id
+        for source in classification.source_inventory
+        if source.message_id == current_message_id
+    ]
+    return any(
+        intent.producer_kind == "transcript"
+        and (
+            intent.operation == "clear"
+            or intent.speaker_naming
+            or intent.mode is FlowStepReviewMode.VIEW
+        )
+        and any(
+            planning_reference_cites_source(reference, source_id=source_id)
+            for reference in intent.evidence
+            for source_id in current_sources
+        )
+        for intent in planning_state.checkpoint_intents
+    )
+
+
+def unsettled_user_text(
+    conversation: Sequence[ConversationMessage],
+) -> UnsettledUserText | None:
+    """Whether text the user wrote still waits to be read or settled, and why."""
+
+    unsettled = [
+        status
+        for message in conversation
+        if message.role == "user"
+        and (status := text_status_from_metadata(message.metadata))
+        not in {None, "settled"}
+    ]
+    if "unread" in unsettled:
+        return "unread"
+    return cast(UnsettledUserText | None, next(iter(unsettled), None))
 
 
 def metadata_with_slot_classification(

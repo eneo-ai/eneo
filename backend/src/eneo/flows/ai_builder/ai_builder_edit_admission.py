@@ -40,7 +40,6 @@ _ADD_KEEP_NULL = (
     "output_type",
     "output_fields",
     "uses_form_fields",
-    "model_ref",
     "knowledge_refs",
     "review_mode",
 )

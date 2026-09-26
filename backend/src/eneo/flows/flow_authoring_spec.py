@@ -165,39 +165,6 @@ def strip_inapplicable_completion_model(step: StepSpec) -> StepSpec:
     return step
 
 
-def completion_model_ref_was_stripped(
-    *,
-    supplied_model_ref: str | None,
-    validated_step: StepSpec,
-) -> bool:
-    return (
-        supplied_model_ref is not None
-        and validated_step.assistant_spec.model_ref is None
-        and not requires_completion_model(
-            FlowOutputMode(validated_step.output_mode.value)
-        )
-    )
-
-
-def completion_model_ref_strip_log_extra(
-    *,
-    supplied_model_ref: str | None,
-    validated_step: StepSpec,
-    source: str,
-) -> dict[str, str | None] | None:
-    if not completion_model_ref_was_stripped(
-        supplied_model_ref=supplied_model_ref,
-        validated_step=validated_step,
-    ):
-        return None
-    return {
-        "plan_step_ref": validated_step.plan_step_ref,
-        "existing_step_ref": validated_step.existing_step_ref,
-        "source": source,
-        "output_mode": validated_step.output_mode.value,
-    }
-
-
 _VALID_FORM_FIELD_TYPES = {"text", "number", "date", "select", "multiselect", "list"}
 
 _FORM_FIELD_TYPE_COERCIONS: dict[str, str] = {
@@ -320,8 +287,6 @@ __all__ = [
     "OutputMode",
     "OutputType",
     "StepSpec",
-    "completion_model_ref_strip_log_extra",
-    "completion_model_ref_was_stripped",
     "has_flow_mcp_unsupported_error",
     "metadata_json_from_authoring_form_fields",
     "strip_inapplicable_completion_model",

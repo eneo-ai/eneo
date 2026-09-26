@@ -735,6 +735,9 @@ def build_proposal_prepared(
             ),
             is_edit_mode=is_edit_mode,
             is_pure_audio_transcription=is_pure_audio_transcription,
+            speaker_naming_review=(
+                compile_context is not None and compile_context.speaker_naming_review
+            ),
             resource_catalog=resource_catalog,
             requested_output_sections=requested_output_sections,
             plan_revision_context=plan_revision_context,

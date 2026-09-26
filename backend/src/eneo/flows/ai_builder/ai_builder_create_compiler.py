@@ -186,6 +186,9 @@ def compile_create_intent_to_spec(
         terminal_obligation_instructions=terminal_obligation_instructions,
         field_provenance=field_provenance,
         field_diagnostics=field_diagnostics,
+        speaker_naming_review=(
+            context.speaker_naming_review if context is not None else False
+        ),
     )
     if isinstance(assembly_spec, CreateAssemblyRejection):
         raise AIBuilderArchitectureError(

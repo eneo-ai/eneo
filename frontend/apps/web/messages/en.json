@@ -7095,6 +7095,7 @@
   "ai_builder_node_updated": "Updated",
   "ai_builder_node_unchanged": "Unchanged",
   "ai_builder_review_checkpoint_note": "{count} steps pause for review. The flow waits for you before it goes on.",
+  "ai_builder_no_review_checkpoint_note": "No step pauses for review. The flow runs through without waiting for you.",
   "ai_builder_step_change_previous_label": "Before",
   "ai_builder_step_change_current_label": "Now",
   "ai_builder_step_change_previous_instructions_label": "Previous instructions",

@@ -11,6 +11,7 @@ from eneo.flows.ai_builder.ai_builder_form_field_usage import (
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
+    OutputMode,
     OutputType,
     StepSpec,
 )
@@ -48,6 +49,8 @@ def lint_json_output_without_contract(
             step.output_type == OutputType.JSON
             and step.output_contract is None
             and has_downstream_steps
+            # The runtime pins a speaker-mapping step's contract.
+            and step.output_mode != OutputMode.SPEAKER_MAPPING
         ):
             result.add_warning(
                 step_ref=step.plan_step_ref,

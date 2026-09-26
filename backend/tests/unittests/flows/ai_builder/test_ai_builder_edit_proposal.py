@@ -1035,7 +1035,7 @@ async def test_ordered_submission_reports_unknown_resource_refs() -> None:
                     "step": {
                         "name": "Write report",
                         "instructions": "Write a concise report.",
-                        "model_ref": "model.missing",
+                        "knowledge_refs": ["knowledge.missing"],
                     },
                 },
             ],
@@ -1047,7 +1047,7 @@ async def test_ordered_submission_reports_unknown_resource_refs() -> None:
     )
 
     assert result.kind == "validation"
-    assert "model.missing" in result.feedback
+    assert "knowledge.missing" in result.feedback
 
 
 @pytest.mark.asyncio
@@ -3436,6 +3436,114 @@ async def test_a_spilled_edit_payload_is_re_homed_and_then_told_what_it_still_la
     assert "existing_step_4" in result.feedback and "existing_step_5" in result.feedback
 
 
+@pytest.mark.asyncio
+async def test_an_edit_keeps_every_saved_steps_model_and_adds_a_step_on_the_space_default():
+    """The user names a model while asking for a change and a new step.
+    Through admission and the real edit processor, each saved step keeps the
+    model its picker holds, whether the edit modifies it or keeps it, and the
+    added step runs on the space default."""
+    summary_id, report_id = uuid4(), uuid4()
+    gpt_id = "11111111-1111-4111-8111-111111111111"
+    luna_id = "33333333-3333-4333-8333-333333333333"
+    flow = _flow(
+        _flow_step(
+            step_order=1, assistant_id=summary_id, user_description="Sammanfatta"
+        ),
+        _flow_step(
+            step_order=2,
+            assistant_id=report_id,
+            user_description="Rapport",
+            input_source="previous_step",
+        ),
+    )
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[
+            {
+                "id": gpt_id,
+                "ref": gpt_id,
+                "name": "GPT",
+                "display_name": "GPT",
+                "provider": "test",
+            },
+            {
+                "id": luna_id,
+                "ref": luna_id,
+                "name": "gpt-5.6-luna",
+                "display_name": "gpt-5.6-luna",
+                "provider": "openai",
+            },
+        ],
+        available_kbs=[],
+    )
+    arguments = admit_propose_flow_tool_arguments(
+        arguments={
+            "plan_rationale": "Kortare sammanfattning och en översättning.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "assistant_spec": {
+                        "instructions": "Sammanfatta mötet i tre meningar."
+                    },
+                },
+                {"kind": "keep", "existing_step_ref": "existing_step_2"},
+                {
+                    "kind": "add",
+                    "step": {
+                        "name": "Översätt",
+                        "instructions": "Översätt rapporten till engelska.",
+                    },
+                },
+            ],
+            "assumptions": [
+                "Varje stegs modell väljs i stegets modellväljare.",
+            ],
+        },
+        tool_schema=build_edit_flow_tool_schema(  # type: ignore[arg-type]
+            list(flow.steps),
+            resource_catalog=catalog,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+        ),
+    )
+
+    result = await _process(
+        flow=flow,
+        arguments=arguments,
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Korta ner sammanfattningen och lägg till en översättning. "
+                    "Använd gpt-5.6-luna."
+                ),
+            )
+        ],
+        assistant_snapshots={
+            summary_id: AssistantAuthoringSnapshot(
+                instructions="Sammanfatta mötet.",
+                model=AssistantAuthoringResourceRef(local_ref=gpt_id, label="GPT"),
+            ),
+            report_id: AssistantAuthoringSnapshot(
+                instructions="Skriv rapporten.",
+                model=AssistantAuthoringResourceRef(
+                    local_ref=luna_id, label="gpt-5.6-luna"
+                ),
+            ),
+        },
+        resource_catalog=catalog,
+    )
+
+    assert isinstance(result, ProposalReady)
+    modified, kept, added = result.compiled.content.spec.steps
+    assert modified.existing_step_ref == "existing_step_1"
+    assert modified.assistant_spec.instructions == "Sammanfatta mötet i tre meningar."
+    assert modified.assistant_spec.model_ref == "model.gpt"
+    assert kept.existing_step_ref == "existing_step_2"
+    assert kept.assistant_spec.model_ref == "model.gpt-5-6-luna"
+    assert added.existing_step_ref is None
+    assert added.assistant_spec.model_ref is None
+
+
 def _strict_review_modify(ref: str, **changes: object) -> dict[str, object]:
     """A modify item as a strict provider writes it: every property present."""
     return {
@@ -5041,7 +5149,6 @@ _TARGET_ONLY_FRAGMENT = {
         ("runtime_form_fields_changed", TerminalFailure),
         ("flow_metadata_changed", TerminalFailure),
         ("target_step_unchanged", CorrectableFailure),
-        ("target_step_model_changed", CorrectableFailure),
     ],
 )
 async def test_saved_step_drift_outside_the_selected_step_is_a_server_defect(

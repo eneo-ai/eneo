@@ -23,6 +23,8 @@ from eneo.flows.ai_builder.ai_builder_assembly.document_report import (
 from eneo.flows.ai_builder.ai_builder_assembly.fixed_steps import (
     fixed_audio_transcription_step,
     render_verbatim_step,
+    reviewed_transcript_step,
+    speaker_naming_review_step,
     template_fill_step,
     template_variable_reader_step,
 )
@@ -349,6 +351,7 @@ def try_compile_create_intent_with_assembly(
     terminal_obligation_instructions: str | None = None,
     field_provenance: dict[str, FlowInputFieldProvenance] | None = None,
     field_diagnostics: list[LintWarning] | None = None,
+    speaker_naming_review: bool = False,
 ) -> FlowDraftSpecCore | CreateAssemblyRejection:
     try:
         plan = _assemble_create_intent(
@@ -375,6 +378,7 @@ def try_compile_create_intent_with_assembly(
             terminal_obligation_instructions=terminal_obligation_instructions,
             field_provenance=field_provenance,
             field_diagnostics=field_diagnostics,
+            speaker_naming_review=speaker_naming_review,
         )
         if isinstance(plan, CreateAssemblyRejection):
             return plan
@@ -408,6 +412,7 @@ def _assemble_create_intent(
     terminal_obligation_instructions: str | None = None,
     field_provenance: dict[str, FlowInputFieldProvenance] | None = None,
     field_diagnostics: list[LintWarning] | None = None,
+    speaker_naming_review: bool = False,
 ) -> FlowAssemblyPlan | CreateAssemblyRejection:
     if runtime_input_type == InputType.JSON and final_output_type == OutputType.TEXT:
         return _reject("unsupported_runtime_output_tuple")
@@ -492,6 +497,7 @@ def _assemble_create_intent(
             runtime_required=runtime_required,
             runtime_max_files=runtime_max_files,
             ui_language=ui_language,
+            speaker_naming_review=speaker_naming_review,
         )
     semantic_output_mode = OutputMode.PASS_THROUGH
     if (
@@ -576,6 +582,8 @@ def _assemble_create_intent(
             ui_language=ui_language,
         )
         planned_steps.append(transcription_step)
+        if speaker_naming_review:
+            planned_steps.append(speaker_naming_review_step(ui_language=ui_language))
         previous_output_type = OutputType.TEXT
         has_source_prefix = True
     for index, semantic_step in enumerate(semantic_steps):
@@ -723,7 +731,6 @@ def _assemble_create_intent(
             previous_field_refs=previous_field_refs,
             previous_output_refs=previous_output_refs,
             output_fields=tuple(semantic_step.output_fields or ()),
-            model_ref=semantic_step.model_ref,
             knowledge_refs=tuple(semantic_step.knowledge_refs),
             citations_requested=semantic_step.citations_requested,
         )
@@ -766,7 +773,6 @@ def _assemble_create_intent(
         result_contract_output_fields=result_contract_output_fields,
         requested_output_section_contracts=section_contracts,
         ui_language=ui_language,
-        field_diagnostics=field_diagnostics,
     )
     section_writer_material = _resolve_section_writer_structured_sources(
         completed_steps
@@ -1326,7 +1332,6 @@ def _assemble_docx_template_fill(
             ),
             semantic_origin_eligible=True,
             output_fields=tuple(semantic_step.output_fields or ()),
-            model_ref=semantic_step.model_ref,
             knowledge_refs=tuple(semantic_step.knowledge_refs),
             citations_requested=semantic_step.citations_requested,
         )
@@ -1536,6 +1541,7 @@ def _assemble_pure_audio_transcription(
     runtime_required: bool,
     runtime_max_files: int | None,
     ui_language: str | None,
+    speaker_naming_review: bool,
 ) -> FlowAssemblyPlan | CreateAssemblyRejection:
     if len(intent.steps) != 1:
         return _reject("pure_audio_transcription_shape_unsupported")
@@ -1550,15 +1556,22 @@ def _assemble_pure_audio_transcription(
             "pure_audio_transcription_shape_unsupported",
             step_index=1,
         )
-    planned_step = fixed_audio_transcription_step(
-        name=semantic_step.name,
-        instructions=semantic_step.instructions,
-        runtime_required=runtime_required,
-        runtime_max_files=runtime_max_files,
-        ui_language=ui_language,
+    planned_steps = (
+        fixed_audio_transcription_step(
+            name=semantic_step.name,
+            instructions=semantic_step.instructions,
+            runtime_required=runtime_required,
+            runtime_max_files=runtime_max_files,
+            ui_language=ui_language,
+        ),
     )
+    if speaker_naming_review:
+        planned_steps += (
+            speaker_naming_review_step(ui_language=ui_language),
+            reviewed_transcript_step(ui_language=ui_language),
+        )
     placement = _place_runtime_form_fields(
-        planned_steps=(planned_step,),
+        planned_steps=planned_steps,
         form_fields=tuple(form_fields),
         runtime_input_fields=runtime_input_fields,
         template_form_field_names=template_form_field_names,

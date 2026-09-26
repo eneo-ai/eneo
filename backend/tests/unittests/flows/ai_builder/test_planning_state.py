@@ -564,6 +564,28 @@ class TestFileRoleEvidenceValidation:
                 evidence_level="explicit",
             )
 
+    @pytest.mark.parametrize(
+        ("producer_kind", "operation", "mode"),
+        [
+            ("transcript", "set", "view"),
+            ("transcript", "clear", None),
+            ("report_text", "set", "edit"),
+        ],
+    )
+    def test_naming_the_speakers_is_only_an_edit_of_the_transcript(
+        self, producer_kind: str, operation: str, mode: str | None
+    ) -> None:
+        with pytest.raises(ValidationError, match="edit review of the transcript"):
+            CheckpointIntent(
+                producer_kind=producer_kind,
+                operation=operation,
+                mode=mode,
+                confidence="high",
+                evidence=["quote:user_message:user-1:namnge talarna"],
+                evidence_level="explicit",
+                speaker_naming=True,
+            )
+
     def test_checkpoint_intent_requires_evidence_that_states_the_change(self) -> None:
         for operation, mode in (("set", "edit"), ("clear", None)):
             with pytest.raises(

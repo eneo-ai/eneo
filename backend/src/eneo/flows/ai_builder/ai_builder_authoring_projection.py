@@ -161,7 +161,6 @@ def _new_step_draft_from_semantic_intent(
         input_type=input_type,
         output_type=step.output_type or OutputType.TEXT,
         runtime_required=primary_runtime_required if is_primary_runtime_step else False,
-        model_ref=step.model_ref,
         knowledge_refs=list(step.knowledge_refs),
         uses_form_fields=list(step.uses_form_fields),
         uses_previous_fields=list(step.uses_previous_fields),

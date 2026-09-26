@@ -2294,7 +2294,11 @@ async def test_runtime_persists_exact_admitted_source_inventory(
         ("   ", "no_content", False),
         ("{not-json", "parse_failed", False),
         ([{"unexpected": "content"}], "parse_failed", False),
-        (json.dumps({"slots": []}), "parse_failed", False),
+        (
+            json.dumps({"slots": [], "checkpoint_updates": "none"}),
+            "parse_failed",
+            False,
+        ),
     ],
     ids=[
         "valid-empty",

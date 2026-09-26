@@ -320,6 +320,20 @@ async def classify_slots(
         schema_candidate_fingerprints=schema_candidate_fingerprints,
     )
     if result is None:
+        # The turn continues without this reading (discovery asks instead), so
+        # the model's unreadable reply must at least leave a trace.
+        logger.warning(
+            "AI Builder slot classification response did not parse",
+            extra={
+                **_log_context(
+                    tenant_id=tenant_id,
+                    model=litellm_model,
+                    slot_names=slot_names,
+                    cached=False,
+                ),
+                "content_chars": len(content),
+            },
+        )
         return SlotClassificationAttempt(outcome="parse_failed")
 
     _remember_cache(cache_key, result)
@@ -931,7 +945,11 @@ def _build_slot_classification_prompt(
         "produced, use structured_result. Use report_text only when the reviewed "
         "value is the wording or body of readable narrative text itself. A downstream "
         "DOCX, PDF, or template does not turn that upstream field review into "
-        "report_text. Use mode view when "
+        "report_text. Set speaker_naming true on an update when the person will "
+        "name the speakers of the recording (who is who), else false. A wish to "
+        "name the speakers before later steps use the recording is an explicit "
+        "transcript update with mode edit and speaker_naming true, even without "
+        "the words review or pause. Use mode view when "
         "approval is required without changing the result, and edit when the reviewer "
         "must be able to replace the result before downstream work continues. Do not "
         "invent step names or classify an unsupported producer. Emit at most one "

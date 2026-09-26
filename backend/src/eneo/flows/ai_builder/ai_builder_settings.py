@@ -31,6 +31,16 @@ from eneo.main.config import (
 
 AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS = 300.0
 
+# The most a slot classification answer may take, reasoning included, whatever
+# the model allows. The reply itself is a small bounded object: the largest of
+# 82 captured replies (2026-09-26, gpt-5.6-luna and gemma4-31b-it) was 4,785
+# characters, about 1,500 tokens. A reasoning model spends more than it writes:
+# across 276 receipted classification calls the largest that resolved used
+# 7,340 completion tokens (gemma4-31b-it), while the 7 calls that ran to the
+# model's 32,768-token ceiling all ended output_limit_exceeded. The cap keeps
+# twice the largest resolved call; re-measure before lowering it.
+SLOT_CLASSIFICATION_ANSWER_CAP_TOKENS = 16_384
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AIBuilderRequestBudget:
@@ -42,7 +52,8 @@ class AIBuilderRequestBudget:
     required input leaves, otherwise that share, so optional input never
     crowds the answer out and the answer never crowds optional input out.
     ``resolve`` then measures the packed request whole and sends the model the
-    most it may write in the room that remains, never a fixed number.
+    most it may write in the room that remains, never a fixed number, unless
+    the call's answer has a known bound of its own (``answer_cap_tokens``).
     """
 
     capacity: ModelCapacity
@@ -57,6 +68,9 @@ class AIBuilderRequestBudget:
     request_id: str | None = None
     # Bounds the complete input only; the answer is never charged to it.
     input_cap_tokens: int | None = None
+    # The most this kind of call's answer can need, below the model's own
+    # ceiling. None leaves the answer bounded by the model alone.
+    answer_cap_tokens: int | None = None
 
     def __post_init__(self) -> None:
         missing = self.capacity.missing_dimensions()
@@ -64,6 +78,8 @@ class AIBuilderRequestBudget:
             raise UnknownModelCapacityError(missing)
         if self.input_cap_tokens is not None and self.input_cap_tokens < 1:
             raise ValueError("AI Builder input cap must be positive")
+        if self.answer_cap_tokens is not None and self.answer_cap_tokens < 1:
+            raise ValueError("AI Builder answer cap must be positive")
         if self.safety_buffer_tokens < 0:
             raise ValueError("AI Builder safety buffer cannot be negative")
         if not (
@@ -88,6 +104,14 @@ class AIBuilderRequestBudget:
     @property
     def model_output_ceiling_tokens(self) -> int:
         return self.capacity.require_output_tokens()
+
+    @property
+    def answer_ceiling_tokens(self) -> int:
+        """The most the answer may take: the model's ceiling or the call's cap."""
+
+        if self.answer_cap_tokens is None:
+            return self.model_output_ceiling_tokens
+        return min(self.model_output_ceiling_tokens, self.answer_cap_tokens)
 
     @property
     def usable_request_budget_tokens(self) -> int:
@@ -116,7 +140,7 @@ class AIBuilderRequestBudget:
         if room < 1:
             return None
         reserved_output_tokens = min(
-            self.model_output_ceiling_tokens,
+            self.answer_ceiling_tokens,
             math.ceil(room * self.answer_reserve_share),
         )
         available_input_tokens = self.capacity.input_allowance(
@@ -133,6 +157,7 @@ class AIBuilderRequestBudget:
             timeout_seconds=self.timeout_seconds,
             request_id=self.request_id,
             input_cap_tokens=self.input_cap_tokens,
+            answer_cap_tokens=self.answer_cap_tokens,
             required_input_tokens=required_input_tokens,
             reserved_output_tokens=reserved_output_tokens,
             available_input_tokens=available_input_tokens,
@@ -186,6 +211,7 @@ class AIBuilderPlannedRequestBudget(AIBuilderRequestBudget):
             timeout_seconds=self.timeout_seconds,
             request_id=self.request_id,
             input_cap_tokens=self.input_cap_tokens,
+            answer_cap_tokens=self.answer_cap_tokens,
         )
 
     def resolve(self, *, input_tokens: int) -> AIBuilderResolvedRequestBudget | None:
@@ -201,7 +227,9 @@ class AIBuilderPlannedRequestBudget(AIBuilderRequestBudget):
         if input_tokens > self.available_input_tokens:
             return None
         provider_output_cap_tokens = self.capacity.resolve_output_cap(
-            input_tokens=input_tokens, safety_tokens=self.safety_buffer_tokens
+            input_tokens=input_tokens,
+            safety_tokens=self.safety_buffer_tokens,
+            caller_cap=self.answer_cap_tokens,
         )
         if isinstance(provider_output_cap_tokens, ModelCapacityNoFit):
             return None
@@ -213,6 +241,7 @@ class AIBuilderPlannedRequestBudget(AIBuilderRequestBudget):
             timeout_seconds=self.timeout_seconds,
             request_id=self.request_id,
             input_cap_tokens=self.input_cap_tokens,
+            answer_cap_tokens=self.answer_cap_tokens,
             required_input_tokens=self.required_input_tokens,
             reserved_output_tokens=self.reserved_output_tokens,
             available_input_tokens=self.available_input_tokens,
@@ -298,6 +327,7 @@ class AIBuilderBudgetPolicy:
                 else self.proposal_timeout_seconds
             ),
             request_id=request_id,
+            answer_cap_tokens=SLOT_CLASSIFICATION_ANSWER_CAP_TOKENS,
         )
 
     def review_request_budget(

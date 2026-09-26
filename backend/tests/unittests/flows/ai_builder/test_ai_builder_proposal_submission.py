@@ -147,6 +147,8 @@ async def test_scoped_instruction_edit_keeps_unrelated_saved_quality_warning(
     context_kind,
 ):
     prior = _saved_spec()
+    # An unrelated saved step carries a retry-grade quality warning.
+    prior.steps[3].name = "steg"
     original = _bytes(prior)
     flow = _flow(prior)
     context = (
@@ -169,7 +171,7 @@ async def test_scoped_instruction_edit_keeps_unrelated_saved_quality_warning(
         ],
     }
     submission = _make_submission(
-        quality_retry_warning_codes=frozenset({"json_output_no_contract"})
+        quality_retry_warning_codes=frozenset({"vague_step_name"})
     )
     config = submission._proposal_retry_config(
         target_kind=TargetKind.EDIT,
@@ -222,7 +224,7 @@ async def test_scoped_instruction_edit_keeps_unrelated_saved_quality_warning(
     store.assert_awaited_once()
     compiled = store.await_args.kwargs["compiled"]
     assert any(
-        warning.step_ref == "step_b" and warning.code == "json_output_no_contract"
+        warning.step_ref == "step_d" and warning.code == "vague_step_name"
         for warning in compiled.validation.warnings
     )
     expected = prior.model_copy(deep=True)
@@ -234,7 +236,7 @@ async def test_scoped_instruction_edit_keeps_unrelated_saved_quality_warning(
     warning = next(
         warning
         for warning in event.data.proposal.lint_warnings
-        if warning.step_ref == "step_b" and warning.code == "json_output_no_contract"
+        if warning.step_ref == "step_d" and warning.code == "vague_step_name"
     )
     assert warning.severity == LintSeverity.INFO
 
@@ -427,7 +429,6 @@ def _decision_report_proposal_arguments() -> dict[str, object]:
                         "required": False,
                     },
                 ],
-                "model_ref": None,
                 "knowledge_refs": [],
                 "citations_requested": False,
             },
@@ -438,7 +439,6 @@ def _decision_report_proposal_arguments() -> dict[str, object]:
                     "facts, risks, and actions."
                 ),
                 "output_fields": None,
-                "model_ref": None,
                 "knowledge_refs": [],
                 "citations_requested": False,
             },

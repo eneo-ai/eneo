@@ -22,7 +22,6 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     saved_step_operation_permissions,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
-    AddStep,
     OrderedEditProposal,
     SemanticStepIntent,
 )
@@ -155,7 +154,7 @@ class TestBuildEditFlowToolSchema:
         assert assistant_schema["additionalProperties"] is False
         assert "required" not in assistant_schema
 
-    def test_modify_step_cannot_carry_a_model_ref_but_added_steps_can(self) -> None:
+    def test_neither_a_modified_nor_an_added_step_offers_a_model_ref(self) -> None:
         catalog = _catalog_with_models(
             [
                 {
@@ -205,10 +204,14 @@ class TestBuildEditFlowToolSchema:
                 }
             ],
         }
-        jsonschema.validate(added_with_model, parameters)
-        added = OrderedEditProposal.model_validate(added_with_model).steps[0]
-        assert isinstance(added, AddStep)
-        assert added.step.model_ref == "model.model-a"
+        # A new step runs on the space default model; its model picker, not
+        # the planner, chooses another one. Both layers refuse it: the tool
+        # schema admission applies and the proposal model behind it.
+        assert "model_ref" not in _add_step_payload_schema(schema)["properties"]
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(added_with_model, parameters)
+        with pytest.raises(ValidationError, match="model_ref"):
+            OrderedEditProposal.model_validate(added_with_model)
 
     @pytest.mark.parametrize(
         "arguments",
@@ -317,59 +320,6 @@ class TestBuildEditFlowToolSchema:
             "existing_step_2",
         ]
 
-    def test_model_refs_injected_when_small(self):
-        catalog = _catalog_with_models(
-            [
-                {
-                    "id": "model_a",
-                    "ref": "model_a",
-                    "name": "model_a",
-                    "display_name": "model_a",
-                    "provider": "test",
-                },
-                {
-                    "id": "model_b",
-                    "ref": "model_b",
-                    "name": "model_b",
-                    "display_name": "model_b",
-                    "provider": "test",
-                },
-            ]
-        )
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1)],
-            resource_catalog=catalog,
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-
-        add_payload = _add_step_payload_schema(schema)
-        model_ref = add_payload["properties"]["model_ref"]
-        assert "enum" in model_ref
-        assert "model.model-a" in model_ref["enum"]
-
-    def test_model_refs_not_injected_when_large(self):
-        catalog = _catalog_with_models(
-            [
-                {
-                    "id": f"model_{i}",
-                    "ref": f"model_{i}",
-                    "name": f"model_{i}",
-                    "display_name": f"model_{i}",
-                    "provider": "test",
-                }
-                for i in range(20)
-            ]
-        )
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1)],
-            resource_catalog=catalog,
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-
-        add_payload = _add_step_payload_schema(schema)
-        model_ref = add_payload["properties"]["model_ref"]
-        assert "enum" not in model_ref
-
     def test_step_kind_variants_are_modify_keep_and_add(self):
         schema = build_edit_flow_tool_schema(
             [_make_step(1)],
@@ -466,6 +416,7 @@ class TestBuildEditFlowToolSchema:
         add_payload = _add_step_payload_schema(schema)
 
         assert set(add_payload["properties"]) < set(SemanticStepIntent.model_fields)
+        # Edit authors its wiring as explicit refs.
         assert set(SemanticStepIntent.model_fields) - set(
             add_payload["properties"]
         ) == {

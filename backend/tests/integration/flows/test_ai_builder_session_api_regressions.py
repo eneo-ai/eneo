@@ -4,7 +4,7 @@ import asyncio
 import io
 import json
 from collections.abc import AsyncGenerator, AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractContextManager, asynccontextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, NoReturn, cast
@@ -108,6 +108,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     build_ai_builder_error,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
+from eneo.flows.ai_builder.ai_builder_non_plan_outcome import unsettled_text_answer
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
@@ -249,6 +250,20 @@ def _make_llm_response(
     return response
 
 
+def _classifier_reading_nothing() -> AbstractContextManager[AsyncMock]:
+    """The turn is read and nothing is found in it, for tests whose provider
+    script answers the proposal and would leave the classifier unread."""
+
+    return patch(
+        "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+        new=AsyncMock(
+            return_value=SlotClassificationAttempt(
+                outcome="resolved", result=SlotClassificationResult()
+            )
+        ),
+    )
+
+
 def _make_tool_call(
     *,
     tool_call_id: str = "call_123",
@@ -293,7 +308,6 @@ def _semantic_create_proposal_step(
     name: str,
     instructions: str,
     output_fields: list[dict[str, object]] | None = None,
-    model_ref: str | None = None,
     knowledge_refs: list[str] | None = None,
     citations_requested: bool = False,
 ) -> dict[str, object]:
@@ -308,7 +322,6 @@ def _semantic_create_proposal_step(
         "name": name,
         "instructions": instructions,
         "output_fields": output_fields,
-        "model_ref": model_ref,
         "knowledge_refs": list(knowledge_refs or []),
         "citations_requested": citations_requested,
     }
@@ -2977,17 +2990,18 @@ async def test_ai_builder_known_provider_rejection_commits_and_replays_without_r
             )
             # The rejected turn's message was accepted without a classification
             # and nothing is cached for a rejected attempt, so the new turn reads
-            # the conversation again. The prose answer resolves no slot, turn
-            # control asks a server-owned question, and no proposal call follows.
+            # the conversation again. Prose is not a reading of the message, so
+            # the user is asked to send it again and no proposal call follows.
             assert request_kinds == ["slot_classification", "slot_classification"]
             assert completion.await_count == calls_after_rejection + 1
             assert [
                 event["event"]
                 for event in new_turn_events
                 if event["event"] != "status"
-            ] == ["text", "question", "usage", "done"], _builder_event_outline(
-                new_turn_events
-            )
+            ] == ["text", "usage", "done"], _builder_event_outline(new_turn_events)
+            assert next(
+                event["data"] for event in new_turn_events if event["event"] == "text"
+            ) == {"text": unsettled_text_answer("unread", ui_language="sv")}
 
             new_turn_session = await client.get(
                 f"/api/v1/flows/ai-builder/sessions/{session_id}",
@@ -8034,9 +8048,12 @@ async def test_ai_builder_api_repeated_output_question_after_freeform_label_reco
         ]
     )
 
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
-        new=mock_completion,
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+            new=mock_completion,
+        ),
+        _classifier_reading_nothing(),
     ):
         with patch(
             "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
@@ -8517,9 +8534,12 @@ async def test_ai_builder_api_edit_apply_replays_committed_output_change_once(
     )
     mock_completion = AsyncMock(return_value=_make_llm_response(tool_calls=[edit_flow]))
 
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
-        new=mock_completion,
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+            new=mock_completion,
+        ),
+        _classifier_reading_nothing(),
     ):
         with patch(
             "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
@@ -8796,9 +8816,12 @@ async def test_ai_builder_api_edit_mode_transcription_insert_clears_stale_runtim
     )
     mock_completion = AsyncMock(return_value=_make_llm_response(tool_calls=[edit_flow]))
 
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
-        new=mock_completion,
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+            new=mock_completion,
+        ),
+        _classifier_reading_nothing(),
     ):
         with patch(
             "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
@@ -8970,6 +8993,7 @@ async def test_ai_builder_api_edit_mode_keeps_a_transcription_only_flow_at_one_s
             "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
             new=AsyncMock(return_value=_make_llm_response(tool_calls=[edit_flow])),
         ),
+        _classifier_reading_nothing(),
         patch(
             "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
             new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
@@ -9079,9 +9103,12 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
         return_value=_make_llm_response(tool_calls=[outline_flow])
     )
 
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
-        new=mock_completion,
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+            new=mock_completion,
+        ),
+        _classifier_reading_nothing(),
     ):
         with patch(
             "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
@@ -9513,6 +9540,7 @@ async def test_ai_builder_api_audio_text_post_processing_reaches_a_two_step_plan
             "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
             new=AsyncMock(return_value=_make_llm_response(tool_calls=[outline_flow])),
         ),
+        _classifier_reading_nothing(),
         patch(
             "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
             new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
@@ -10556,9 +10584,12 @@ async def test_ai_builder_api_edit_of_template_fill_flow_inherits_its_template(
             ],
         },
     )
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
-        new=AsyncMock(return_value=_make_llm_response(tool_calls=[edit_flow])),
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+            new=AsyncMock(return_value=_make_llm_response(tool_calls=[edit_flow])),
+        ),
+        _classifier_reading_nothing(),
     ):
         with patch(
             "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",

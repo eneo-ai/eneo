@@ -172,7 +172,6 @@ def test_an_added_step_keeps_its_edit_only_fields_and_drops_keep_nulls() -> None
                     }
                 ],
                 "uses_form_fields": ["case_id"],
-                "model_ref": None,
                 "knowledge_refs": None,
                 "citations_requested": False,
                 "review_mode": "view",
@@ -191,7 +190,7 @@ def test_an_added_step_keeps_its_edit_only_fields_and_drops_keep_nulls() -> None
     assert added.step.output_type == "json"
     assert added.step.uses_form_fields == ["case_id"]
     assert added.step.review_mode == "view"
-    assert added.step.model_ref is None and added.step.knowledge_refs == []
+    assert added.step.knowledge_refs == []
     assert added.step.output_fields == [
         StructuredFieldDraft(
             name="summary", field_type="string", description="Sammanfattning"

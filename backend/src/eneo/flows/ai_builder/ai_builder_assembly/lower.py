@@ -24,9 +24,14 @@ from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_step_citation_mode,
     supports_inline_inref_citation,
 )
+from eneo.flows.domain.speaker_mapping_config import (
+    SPEAKER_MAPPING_CONFIG_KEY,
+    SPEAKER_MAPPING_PARTICIPANT_FIELD_TYPES,
+)
 from eneo.flows.flow_authoring_name import normalize_flow_name
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
+    FormFieldSpec,
     OutputMode,
     StepSpec,
 )
@@ -63,6 +68,11 @@ def lower_assembly_plan(
             )
         )
     form_fields = list(plan.form_fields)
+    participants_field: str | None = None
+    if any(step.output_mode == OutputMode.SPEAKER_MAPPING for step in plan.steps):
+        participants_field = _speaker_naming_participants_field(
+            form_fields, ui_language=plan.ui_language
+        )
     source_capture_fields_by_index = source_capture_fields_by_step_index(
         steps=step_drafts,
         terminal_output_schema=plan.terminal_output_schema,
@@ -104,6 +114,18 @@ def lower_assembly_plan(
                 message=citation_change.message,
                 severity=LintSeverity(citation_change.severity),
             )
+        if planned_step.output_mode == OutputMode.SPEAKER_MAPPING:
+            compiled_step = compiled_step.model_copy(
+                update={
+                    "output_config": {
+                        SPEAKER_MAPPING_CONFIG_KEY: {
+                            "participants_field": participants_field,
+                            "speaker_count_field": None,
+                            "infer_names": False,
+                        }
+                    }
+                }
+            )
         if planned_step.output_mode == OutputMode.COMPOSE_TEXT:
             compiled_step = bind_document_report_compose_inputs(
                 step=compiled_step,
@@ -136,6 +158,41 @@ def lower_assembly_plan(
     )
 
 
+def _speaker_naming_participants_field(
+    form_fields: list[FormFieldSpec],
+    *,
+    ui_language: str | None,
+) -> str:
+    """The optional run-time participant list the naming step maps speakers
+    onto, the field the editor adds with the same step. Names are never
+    inferred from the audio, so a run without participants leaves every name
+    to the reviewer. Another run-time field is never reused: its values are
+    not names. A field already holding the name is reused only when the
+    naming step can read it; otherwise the list takes the next free name."""
+
+    english = ui_language is not None and ui_language.casefold().startswith("en")
+    base_name = "participants" if english else "deltagare"
+    field_types = {field.name: field.type for field in form_fields}
+    name = base_name
+    suffix = 2
+    while (
+        name in field_types
+        and field_types[name] not in SPEAKER_MAPPING_PARTICIPANT_FIELD_TYPES
+    ):
+        name = f"{base_name}_{suffix}"
+        suffix += 1
+    if name not in field_types:
+        form_fields.append(
+            FormFieldSpec(
+                name=name,
+                label="Participants" if english else "Deltagare",
+                type="list",
+                required=False,
+            )
+        )
+    return name
+
+
 def _new_step_draft_from_planned_step(
     step: PlannedStep,
     *,
@@ -148,7 +205,6 @@ def _new_step_draft_from_planned_step(
         input_type=step.input_type,
         output_mode=step.output_mode,
         output_type=step.output_type,
-        model_ref=step.model_ref,
         knowledge_refs=list(step.knowledge_refs),
         runtime_required=step.runtime_required,
         runtime_max_files=step.runtime_max_files,

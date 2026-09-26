@@ -90,3 +90,26 @@ def test_find_unused_form_fields_scans_all_steps() -> None:
     )
 
     assert find_unused_form_fields(spec) == ["priority"]
+
+
+def test_a_speaker_naming_participants_field_is_used() -> None:
+    # The naming step reads its participant list by field name from its
+    # config, not through a template.
+    spec = FlowDraftSpecCore(
+        flow_name="Speaker naming",
+        form_fields=[_field("deltagare")],
+        steps=[
+            _step(
+                "Föreslå vem varje talare är.",
+                output_config={
+                    "speaker_mapping": {
+                        "participants_field": "deltagare",
+                        "speaker_count_field": None,
+                        "infer_names": False,
+                    }
+                },
+            )
+        ],
+    )
+
+    assert find_unused_form_fields(spec) == []

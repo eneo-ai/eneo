@@ -12,6 +12,7 @@ from eneo.flows.flow_authoring_spec import (
     InputType,
     StepSpec,
 )
+from eneo.flows.transcription_config import DEFAULT_TRANSCRIPTION_LANGUAGE
 
 
 def apply_audio_transcription_defaults(
@@ -39,7 +40,7 @@ def apply_audio_transcription_defaults(
 
     raw_language = wizard_config.get("transcription_language")
     if raw_language is None or str(raw_language).strip() == "":
-        wizard_config["transcription_language"] = "auto"
+        wizard_config["transcription_language"] = DEFAULT_TRANSCRIPTION_LANGUAGE
 
     updated_metadata["wizard"] = wizard_config
     return updated_metadata

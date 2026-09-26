@@ -579,6 +579,25 @@ describe("BuilderReviewScreen plan document", () => {
       screen.getAllByText(new RegExp(`${m.ai_builder_answer_pdf_phrase()}$`)).length
     ).toBeGreaterThan(0);
     expect(screen.getByText(m.ai_builder_review_checkpoint_note({ count: 1 }))).toBeTruthy();
+    expect(screen.queryByText(m.ai_builder_no_review_checkpoint_note())).toBeNull();
+  });
+
+  it("says from the compiled steps that the flow does not pause, whatever the rationale claims", async () => {
+    // The planner's prose may promise a caseworker review; only the steps decide.
+    const proposal = makeProposal({
+      plan_rationale: "Analysen granskas av handläggaren innan svaret skickas."
+    });
+    proposal.spec.steps = [makeTranscribeStep({ review_policy: null }), makeRenderStep()];
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: { ...makeCreateState(), currentPlan: makePlan({ proposal }) }
+    });
+
+    expect(screen.getByText(m.ai_builder_no_review_checkpoint_note())).toBeTruthy();
+    expect(screen.queryByText(m.ai_builder_review_checkpoint_note({ count: 1 }))).toBeNull();
+    // The compiled statement is not a diagram detail: the details view keeps it.
+    await fireEvent.click(screen.getByRole("tab", { name: m.ai_builder_canvas_tab_details() }));
+    expect(screen.getByText(m.ai_builder_no_review_checkpoint_note())).toBeTruthy();
   });
 
   it("presents informational lint as notes, not as quality warnings to fix", () => {
