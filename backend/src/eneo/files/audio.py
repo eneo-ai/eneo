@@ -5,12 +5,18 @@ import math
 import tempfile
 import threading
 import wave
-from collections.abc import AsyncGenerator, AsyncIterator, Callable, Generator
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Callable,
+    Generator,
+)
 from contextlib import (
     AbstractContextManager,
     aclosing,
     asynccontextmanager,
     closing,
+    contextmanager,
     suppress,
 )
 from dataclasses import dataclass
@@ -127,10 +133,11 @@ async def _read_decoded_audio(
     *,
     limits: AudioDecodeLimits,
     writer: wave.Wave_write | None,
+    decoded_before: int,
 ) -> float:
     stdout = cast(asyncio.StreamReader, process.stdout)
     pending = b""
-    decoded_bytes = 0
+    decoded_bytes = decoded_before
     duration_bytes = limits.max_duration_seconds * _DECODE_BYTES_PER_SECOND
     while data := await stdout.read(_DECODE_BLOCK_BYTES):
         next_bytes = decoded_bytes + len(data)
@@ -157,7 +164,7 @@ async def _read_decoded_audio(
         raise ValueError(f"Audio decoder exited with status {returncode}")
     if pending:
         raise ValueError("Audio decoder returned an incomplete PCM frame")
-    return decoded_bytes / _DECODE_BYTES_PER_SECOND
+    return (decoded_bytes - decoded_before) / _DECODE_BYTES_PER_SECOND
 
 
 async def _terminate_decoder(process: asyncio.subprocess.Process) -> None:
@@ -190,6 +197,7 @@ async def _decode_audio(
     *,
     limits: AudioDecodeLimits,
     writer: wave.Wave_write | None = None,
+    decoded_before: int = 0,
 ) -> float:
     process = await asyncio.create_subprocess_exec(
         "ffmpeg",
@@ -212,7 +220,9 @@ async def _decode_audio(
         limit=_DECODE_BLOCK_BYTES,
     )
     try:
-        return await _read_decoded_audio(process, limits=limits, writer=writer)
+        return await _read_decoded_audio(
+            process, limits=limits, writer=writer, decoded_before=decoded_before
+        )
     finally:
         cleanup = asyncio.create_task(_terminate_decoder(process))
         cancelled = False
@@ -226,15 +236,34 @@ async def _decode_audio(
             raise asyncio.CancelledError
 
 
-async def _to_wav(
-    filepath: str, target: IO[bytes], *, limits: AudioDecodeLimits
-) -> None:
-    logger.debug(f"Converting {filepath} to wav")
+class JoinedWav:
+    """Files decoded in order into one WAV under one budget: the limits bound
+    the joined audio, not each file."""
+
+    def __init__(self, writer: wave.Wave_write, limits: AudioDecodeLimits) -> None:
+        self._writer = writer
+        self._limits = limits
+        self._decoded = 0
+
+    async def append(self, filepath: str) -> float:
+        """Decode one more file onto the end; returns its decoded length."""
+        seconds = await _decode_audio(
+            filepath,
+            limits=self._limits,
+            writer=self._writer,
+            decoded_before=self._decoded,
+        )
+        self._decoded += round(seconds * _DECODE_BYTES_PER_SECOND)
+        return seconds
+
+
+@contextmanager
+def joined_wav(target: IO[bytes], *, limits: AudioDecodeLimits) -> Generator[JoinedWav]:
     with wave.open(target, "w") as writer:
         writer.setframerate(_DECODE_SAMPLE_RATE)
         writer.setnchannels(_DECODE_CHANNELS)
         writer.setsampwidth(_DECODE_SAMPLE_WIDTH)
-        await _decode_audio(filepath, limits=limits, writer=writer)
+        yield JoinedWav(writer, limits)
 
 
 async def measure_duration(
@@ -251,9 +280,10 @@ async def to_wav(
 ) -> AsyncGenerator["AudioFile", None]:
     tmp_file = tempfile.NamedTemporaryFile(suffix=".wav")
     try:
-        await _to_wav(
-            filepath, tmp_file, limits=limits or AudioDecodeLimits.from_settings()
-        )
+        with joined_wav(
+            tmp_file, limits=limits or AudioDecodeLimits.from_settings()
+        ) as joined:
+            await joined.append(filepath)
         tmp_file.flush()
         yield AudioFile(tmp_file.name)
     finally:

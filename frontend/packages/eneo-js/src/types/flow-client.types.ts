@@ -43,6 +43,12 @@ flows.runs.create({
   idempotencyKey: "flow-run:request-2",
   step_inputs: { "step-1": { file_ids: ["file-1"], live_transcript_id: "transcript-1" } }
 });
+// The parts of one recording, in recording order.
+flows.runs.create({
+  flow: { id: "flow-1" },
+  idempotencyKey: "flow-run:request-3",
+  step_inputs: { "step-1": { file_ids: ["part-1", "part-2"], single_recording: true } }
+});
 flows.runs.list({ flowId: "flow-1", status: ["completed", "running"] });
 flows.runs.list({ flowId: "flow-1", mine: true });
 flows.runs.redispatch({

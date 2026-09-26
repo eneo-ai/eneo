@@ -73,6 +73,7 @@ class RuntimeStepInputSpec:
 class FlowRunStepInputFiles:
     file_ids: tuple[UUID, ...] = ()
     live_transcript_id: UUID | None = None
+    single_recording: bool = False
 
 
 class FlowRunStepInputFileProjection(TypedDict):
@@ -200,6 +201,29 @@ def validate_live_transcript_inputs(
             )
         live_ids[step_id] = submitted.live_transcript_id
     return live_ids
+
+
+def validate_single_recording_inputs(
+    *,
+    step_inputs: FlowRunStepInputs,
+    specs: dict[UUID, RuntimeStepInputSpec],
+) -> frozenset[UUID]:
+    """The steps whose files are the parts of one recording: audio steps only."""
+    steps: set[UUID] = set()
+    for step_id, submitted in step_inputs.items():
+        if not submitted.single_recording:
+            continue
+        spec = specs.get(step_id)
+        if (
+            spec is None
+            or spec.runtime_input.input_format is not FlowRuntimeInputFormat.AUDIO
+        ):
+            raise FlowBadRequestException(
+                "Only an audio step can hold the parts of one recording.",
+                code=FlowApiErrorCode.RUN_SINGLE_RECORDING_REQUIRES_AUDIO_STEP,
+            )
+        steps.add(step_id)
+    return frozenset(steps)
 
 
 async def validate_submitted_step_inputs(

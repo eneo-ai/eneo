@@ -26,6 +26,7 @@ from eneo.flows.flow_run_input_envelope import (
     FlowRunInputEnvelopePatch,
     read_live_transcript_ids,
     read_max_speakers,
+    read_single_recording_steps,
     read_speaker_labels_choice,
 )
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
@@ -267,6 +268,8 @@ async def resolve_transcribe_and_attach_audio_input(
         source_preparation=request.source_preparation,
         live_transcript=live_transcript,
         live_transcript_requested=live_id is not None,
+        single_recording=request.step.step_id
+        in read_single_recording_steps(request.run.input_payload_json),
     )
     metadata = transcription_result.to_metadata()
     reference = TranscriptSourceReference(

@@ -11,17 +11,19 @@ Signed-URL submission awaits verification of the Vemsa-to-Eneo route in eneo-hy7
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import tempfile
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TypeAlias
+from typing import TypeAlias, TypeVar
 from uuid import UUID
 
 from eneo.files import audio
 from eneo.files.file_service import FileDownload
 
 OpenAudioDownload: TypeAlias = Callable[[UUID], Awaitable[FileDownload]]
+_Part = TypeVar("_Part")
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,3 +140,52 @@ async def spool_audio(
         if path is not None:
             path.unlink(missing_ok=True)
         raise
+
+
+async def spool_recording(
+    parts: Sequence[_Part],
+    spool: Callable[[_Part], Awaitable[SpooledAudio]],
+    *,
+    limits: audio.AudioDecodeLimits | None = None,
+) -> tuple[tuple[SpooledAudio, ...], SpooledAudio, tuple[float, ...]]:
+    """The parts of one recording, each spooled and decoded onto one 16 kHz WAV
+    before the next is fetched, so a recording over the decode limit stops at
+    the part that crosses it. Returns the part spools, the joined WAV (digest
+    taken once its header has its final lengths) and each part's length."""
+    spooled: list[SpooledAudio] = []
+    durations: list[float] = []
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as target:
+        path = Path(target.name)
+    try:
+        with (
+            path.open("wb") as target,
+            audio.joined_wav(
+                target, limits=limits or audio.AudioDecodeLimits.from_settings()
+            ) as joined,
+        ):
+            for part in parts:
+                spooled.append(await spool(part))
+                durations.append(await joined.append(str(spooled[-1].path)))
+        digest = await asyncio.to_thread(_sha256_of, path)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        for part_spool in spooled:
+            await part_spool.aclose()
+        raise
+    recording = SpooledAudio(
+        path=path,
+        digest=digest,
+        byte_size=path.stat().st_size,
+        mimetype="audio/wav",
+        filename="recording.wav",
+    )
+    recording.cache_duration(sum(durations))
+    return tuple(spooled), recording, tuple(durations)
+
+
+def _sha256_of(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while block := source.read(1024 * 1024):
+            digest.update(block)
+    return digest.hexdigest()

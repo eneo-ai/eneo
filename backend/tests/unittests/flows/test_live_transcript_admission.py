@@ -7,6 +7,7 @@ import pytest
 
 from eneo.database.tables.flow_tables import FlowLiveTranscripts
 from eneo.flows.api.flow_models import StepRunInput
+from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from eneo.main.exceptions import (
     BadRequestException,
     ConflictException,
@@ -110,7 +111,7 @@ async def _submit(case, *, file_ids=None, transcript_id=None, key=None):
         input_payload_json=None,
         idempotency_key=key,
         step_inputs={
-            case.step.id: SimpleNamespace(
+            case.step.id: FlowRunStepInputFiles(
                 file_ids=tuple(
                     file_ids if file_ids is not None else [case.files[0].id]
                 ),

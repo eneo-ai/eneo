@@ -7,8 +7,13 @@ from uuid import uuid4
 import pytest
 
 from eneo.files.transcriber import TranscribedAudio
+from eneo.flows.runtime.audio_spool import SpooledAudio
 from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
-from eneo.flows.runtime.remote_transcription import RemoteTranscriptionResult
+from eneo.flows.runtime.recording_parts import PartBounds, RecordingAudio
+from eneo.flows.runtime.remote_transcription import (
+    RemoteFlowTranscriber,
+    RemoteTranscriptionResult,
+)
 from eneo.flows.runtime.speaker_enrichment import DIARIZATION_SKIPPED_EMPTY_TRANSCRIPT
 from eneo.main.exceptions import ProviderRejectedRequestException
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
@@ -144,3 +149,79 @@ async def test_service_failure_after_transcription_fails_the_call(
 
     with pytest.raises(ProviderRejectedRequestException):
         await transcriber.transcribe(spool, MODEL, file_id=FILE.id, diarize=True)  # type: ignore[arg-type]
+
+
+def _recording(tmp_path) -> RecordingAudio:
+    def spool(name: str) -> SpooledAudio:
+        return SpooledAudio(tmp_path / name, "0" * 64, 1, "audio/webm", name)
+
+    return RecordingAudio(
+        parts=(spool("a.webm"), spool("b.webm")),
+        file_ids=(uuid4(), uuid4()),
+        joined=spool("recording.wav"),
+        bounds=(PartBounds(0.0, 10.0), PartBounds(10.0, 5.0)),
+    )
+
+
+async def test_a_recording_is_transcribed_per_part_and_labelled_once(tmp_path) -> None:
+    recording = _recording(tmp_path)
+    registry = SimpleNamespace(
+        transcribe_from_filepath=AsyncMock(
+            side_effect=[
+                TranscribedAudio(
+                    "hej", 10.0, segments=(TranscriptSegment("hej", 0.0, 10.0),)
+                ),
+                TranscribedAudio(
+                    "då", 5.0, segments=(TranscriptSegment("då", 0.0, 5.0),)
+                ),
+            ]
+        )
+    )
+    remote = _remote()
+    transcriber = DiarizingFlowTranscriber(registry, remote)  # type: ignore[arg-type]
+
+    result = await transcriber.transcribe_recording(
+        recording,
+        MODEL,
+        language="sv",
+        observer=None,
+        max_speakers=3,  # type: ignore[arg-type]
+    )
+
+    assert [
+        call.kwargs["filepath"]
+        for call in registry.transcribe_from_filepath.await_args_list
+    ] == [part.path for part in recording.parts]
+    remote.label_speakers.assert_awaited_once()
+    labelled = remote.label_speakers.await_args
+    assert labelled.args[0] is recording.joined
+    assert labelled.kwargs["segments"] == (
+        TranscriptSegment("hej", 0.0, 10.0),
+        TranscriptSegment("då", 10.0, 15.0),
+    )
+    assert labelled.kwargs["max_speakers"] == 3
+    assert result.diarization == "external"
+    assert result.duration_seconds == 15.0
+
+
+async def test_the_full_service_transcribes_a_recording_in_one_job(tmp_path) -> None:
+    recording = _recording(tmp_path)
+    remote = RemoteFlowTranscriber.__new__(RemoteFlowTranscriber)
+    remote.transcribe = AsyncMock(  # type: ignore[method-assign]
+        return_value=TranscribedAudio("x", 15.0, diarization="external")
+    )
+
+    result = await remote.transcribe_recording(
+        recording,
+        MODEL,
+        language="sv",
+        observer=None,
+        max_speakers=None,  # type: ignore[arg-type]
+    )
+
+    remote.transcribe.assert_awaited_once()
+    call = remote.transcribe.await_args
+    assert call.args[0] is recording.joined
+    assert call.kwargs["diarize"] is True
+    assert call.kwargs["file_id"] == recording.file_ids[0]
+    assert result.duration_seconds == 15.0

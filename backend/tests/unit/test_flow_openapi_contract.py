@@ -1942,7 +1942,12 @@ def test_openapi_documents_transcription_options_and_the_run_speaker_choice(
         "live",
         "speaker_labels",
         "max_speakers",
+        "single_recording",
     }
+    assert (
+        "Send the flag only when"
+        in transcription["properties"]["single_recording"]["description"]
+    )
     assert set(schemas["FlowMaxSpeakersOptionPublic"]["properties"]) == {
         "form_field",
         "participants_field",
@@ -3017,7 +3022,8 @@ def test_openapi_flow_run_create_schema_documents_step_file_routing(
     create_properties = schemas.get("FlowRunCreateRequest", {}).get("properties", {})
     step_run_input = schemas.get("StepRunInput", {}).get("properties", {})
 
-    assert set(step_run_input) == {"file_ids", "live_transcript_id"}
+    assert set(step_run_input) == {"file_ids", "live_transcript_id", "single_recording"}
+    assert "one recording" in step_run_input["single_recording"]["description"]
     assert {"type": "string", "format": "uuid"} in step_run_input["live_transcript_id"][
         "anyOf"
     ]

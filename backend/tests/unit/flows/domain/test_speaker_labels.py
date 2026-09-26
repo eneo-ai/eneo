@@ -9,6 +9,7 @@ from eneo.flows.domain.speaker_labels import (
     build_label_renumbering,
     build_opening_excerpt,
     build_speaker_inventory,
+    merge_speaker_inventories,
     parse_participants,
     renumber_segment_speakers,
     renumber_speaker_labels,
@@ -152,3 +153,55 @@ def test_opening_excerpt_keeps_the_handover_at_the_end_of_a_long_line() -> None:
     excerpt = build_opening_excerpt(transcript)
     assert excerpt[0].endswith(handover)
     assert excerpt[1] == "SPEAKER_01: Ja, jag står här i kommunhuset."
+
+
+def test_inventories_of_one_recording_merge_per_label():
+    first = [
+        {
+            "label": "SPEAKER_00",
+            "file_index": 0,
+            "file_id": "a",
+            "line_count": 2,
+            "samples": ["Hej.", "Välkomna."],
+            "clean_example_available": False,
+        },
+        {
+            "label": "SPEAKER_01",
+            "file_index": 0,
+            "file_id": "a",
+            "line_count": 1,
+            "samples": ["Tack."],
+            "clean_example_available": True,
+        },
+    ]
+    second = [
+        {
+            "label": "SPEAKER_00",
+            "file_index": 1,
+            "file_id": "b",
+            "line_count": 3,
+            "samples": ["Punkt två.", "Beslut.", "Klart."],
+            "clean_example_available": True,
+        },
+    ]
+
+    merged = merge_speaker_inventories([*first, *second])
+
+    assert merged == [
+        {
+            "label": "SPEAKER_00",
+            "file_index": 0,
+            "file_id": "a",
+            "line_count": 5,
+            "samples": ["Hej.", "Välkomna.", "Punkt två."],
+            "clean_example_available": True,
+        },
+        {
+            "label": "SPEAKER_01",
+            "file_index": 0,
+            "file_id": "a",
+            "line_count": 1,
+            "samples": ["Tack."],
+            "clean_example_available": True,
+        },
+    ]

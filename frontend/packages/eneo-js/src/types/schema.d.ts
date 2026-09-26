@@ -16931,6 +16931,7 @@ export interface components {
       | "flow_live_transcription_unavailable"
       | "flow_run_live_transcript_requires_one_audio_file"
       | "flow_run_live_transcript_not_found"
+      | "flow_run_single_recording_requires_audio_step"
       | "flow_run_live_transcript_already_bound"
       | "flow_evidence_audit_logging_failed"
       | "flow_evidence_export_reason_required"
@@ -25292,6 +25293,12 @@ export interface components {
       live: components["schemas"]["FlowLiveTranscriptionAvailabilityPublic"];
       /** @description Whether a run may bound the speaker count with `max_speakers`: present whenever a transcription service labels speakers, including when a speaker-mapping step requires labels. Null when no service labels speakers. */
       max_speakers?: components["schemas"]["FlowMaxSpeakersOptionPublic"] | null;
+      /**
+       * Single Recording
+       * @description Whether a run may mark an audio step's files as the parts of one recording with the step input's `single_recording`, so speakers are labelled once across the parts. True whenever a transcription service labels speakers. Send the flag only when this is true.
+       * @default false
+       */
+      single_recording?: boolean;
       speaker_labels: components["schemas"]["FlowSpeakerLabelsOptionPublic"];
     };
     /** FormFieldChange */
@@ -33662,6 +33669,12 @@ export interface components {
        * @description Clean live-session transcript for this step's single audio file. It must match the run's user, flow, published version, step, and model. Admission binds it to that file; execution uses it when timing and decoded duration permit, otherwise it transcribes the file.
        */
       live_transcript_id?: string | null;
+      /**
+       * Single Recording
+       * @description The step's audio files, in the order of `file_ids`, are consecutive parts of one recording, such as a recorder that starts a new file every 20 minutes. Speakers are then labelled once across all parts, so one voice keeps one label. Only for audio steps; with one file it changes nothing. Leave it false for separate recordings.
+       * @default false
+       */
+      single_recording?: boolean;
     };
     /**
      * StepShareFact

@@ -82,6 +82,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Submit one audio file for the step or omit live_transcript_id.",
         user_action="Use one recording or transcribe the uploaded files again.",
     ),
+    FlowApiErrorCode.RUN_SINGLE_RECORDING_REQUIRES_AUDIO_STEP: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="single_recording was set on a step that does not take audio.",
+        consumer_action="Set single_recording only on audio steps.",
+        user_action="Start the run again; if it keeps failing, contact support.",
+    ),
     FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_NOT_FOUND: _entry(
         category="Run input",
         surfaced_through="API error response",

@@ -558,3 +558,18 @@ async def test_imported_review_fact_controls_required_review(context, establishe
     context.service.access_policy.load_run.assert_awaited_once_with(
         flow_id=context.source.flow_id, run_id=context.source.id, access_kind="content"
     )
+
+
+async def test_retry_keeps_the_steps_that_hold_one_recording(context):
+    completed, failed = context.results[0], context.results[2]
+    context.files[completed.id] = [uuid4(), uuid4()]
+    context.files[failed.id] = [uuid4(), uuid4()]
+    context.source.input_payload_json["step_inputs"] = {
+        str(failed.step_id): {"single_recording": True},
+    }
+
+    await context.service.retry_from_failed_step(**context.request)
+
+    args = context.service.run_service.create_run.await_args.kwargs
+    assert args["step_inputs"][failed.step_id].single_recording is True
+    assert args["step_inputs"][completed.step_id].single_recording is False

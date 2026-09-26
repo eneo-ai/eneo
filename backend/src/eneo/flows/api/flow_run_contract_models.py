@@ -537,6 +537,15 @@ class FlowTranscriptionContractPublic(BaseModel):
             "labels speakers."
         ),
     )
+    single_recording: bool = Field(
+        default=False,
+        description=(
+            "Whether a run may mark an audio step's files as the parts of one "
+            "recording with the step input's `single_recording`, so speakers are "
+            "labelled once across the parts. True whenever a transcription service "
+            "labels speakers. Send the flag only when this is true."
+        ),
+    )
 
 
 class FlowSecurityClassificationPublic(BaseModel):

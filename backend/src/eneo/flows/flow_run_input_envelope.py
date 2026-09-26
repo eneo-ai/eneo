@@ -28,11 +28,25 @@ SPEAKER_LABELS_KEY = "speaker_labels"
 MAX_SPEAKERS_KEY = "max_speakers"
 
 
-class LiveTranscriptStepInput(TypedDict):
+class StepInputFacts(TypedDict):
+    """What a run settled about one step's submitted files."""
+
     live_transcript_id: NotRequired[UUID]
+    # The step's files are the ordered parts of one recording.
+    single_recording: NotRequired[bool]
 
 
-_LIVE_TRANSCRIPT_INPUTS = TypeAdapter(dict[UUID, LiveTranscriptStepInput])
+_STEP_INPUT_FACTS = TypeAdapter(dict[UUID, StepInputFacts])
+
+
+def _read_step_input_facts(
+    input_payload_json: FlowPersistedJsonObject | None,
+) -> dict[UUID, StepInputFacts]:
+    values = (input_payload_json or {}).get(STEP_INPUTS_KEY)
+    if not isinstance(values, dict):
+        return {}
+    return _STEP_INPUT_FACTS.validate_python(values)
+
 
 _REMOVED_TOP_LEVEL_RUNTIME_FILE_IDS_KEY = "file_ids"
 _PERSISTED_RUNTIME_INPUT_KEYS = frozenset(
@@ -102,14 +116,21 @@ def read_speaker_labels_choice(
 def read_live_transcript_ids(
     input_payload_json: FlowPersistedJsonObject | None,
 ) -> dict[UUID, UUID]:
-    values = (input_payload_json or {}).get(STEP_INPUTS_KEY)
-    if not isinstance(values, dict):
-        return {}
     return {
-        step_id: value["live_transcript_id"]
-        for step_id, value in _LIVE_TRANSCRIPT_INPUTS.validate_python(values).items()
-        if "live_transcript_id" in value
+        step_id: facts["live_transcript_id"]
+        for step_id, facts in _read_step_input_facts(input_payload_json).items()
+        if "live_transcript_id" in facts
     }
+
+
+def read_single_recording_steps(
+    input_payload_json: FlowPersistedJsonObject | None,
+) -> frozenset[UUID]:
+    return frozenset(
+        step_id
+        for step_id, facts in _read_step_input_facts(input_payload_json).items()
+        if facts.get("single_recording")
+    )
 
 
 def read_max_speakers_decision(
@@ -138,6 +159,7 @@ def build_initial_run_input_envelope(
     speaker_labels: bool | None = None,
     max_speakers: int | None | NotProvided = NOT_PROVIDED,
     live_transcript_ids: dict[UUID, UUID] | None = None,
+    single_recording_steps: frozenset[UUID] = frozenset(),
 ) -> FlowPersistedJsonObject:
     payload = dict(normalized_inline_payload or {})
     payload[EXPECTED_FLOW_VERSION_KEY] = flow_version
@@ -145,9 +167,13 @@ def build_initial_run_input_envelope(
         payload[SPEAKER_LABELS_KEY] = speaker_labels
     if not isinstance(max_speakers, NotProvided):
         payload[MAX_SPEAKERS_KEY] = max_speakers
-    if live_transcript_ids:
-        payload[STEP_INPUTS_KEY] = {
-            str(step_id): {"live_transcript_id": str(transcript_id)}
-            for step_id, transcript_id in live_transcript_ids.items()
-        }
+    step_facts: dict[str, dict[str, object]] = {}
+    for step_id, transcript_id in (live_transcript_ids or {}).items():
+        step_facts.setdefault(str(step_id), {})["live_transcript_id"] = str(
+            transcript_id
+        )
+    for step_id in single_recording_steps:
+        step_facts.setdefault(str(step_id), {})["single_recording"] = True
+    if step_facts:
+        payload[STEP_INPUTS_KEY] = step_facts
     return payload

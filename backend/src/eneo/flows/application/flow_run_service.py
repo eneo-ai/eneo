@@ -72,6 +72,7 @@ from eneo.flows.flow_run_input_envelope import (
     build_initial_run_input_envelope,
     read_live_transcript_ids,
     read_semantic_flow_input_payload,
+    read_single_recording_steps,
     read_speaker_labels_choice,
 )
 from eneo.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
@@ -86,6 +87,7 @@ from eneo.flows.flow_run_step_inputs import (
     normalize_step_inputs_payload,
     runtime_file_not_bound_to_flow_error,
     validate_live_transcript_inputs,
+    validate_single_recording_inputs,
     validate_submitted_step_inputs,
 )
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
@@ -474,6 +476,9 @@ class FlowRunService:
                 live_transcript_ids=read_live_transcript_ids(
                     prepared.input_payload_json
                 ),
+                single_recording_steps=read_single_recording_steps(
+                    prepared.input_payload_json
+                ),
                 max_speakers=settle_max_speakers(
                     max_speakers,
                     steps=steps,
@@ -598,6 +603,7 @@ class FlowRunService:
         ]
         step_input_file_projections: list[FlowRunStepInputFileProjection] = []
         live_transcript_ids: dict[UUID, UUID] = {}
+        single_recording_steps: frozenset[UUID] = frozenset()
         if step_inputs is not None or definition.has_required_runtime_input():
             runtime_steps = definition.runtime_steps()
             limits = await self._resolve_flow_input_limits()
@@ -613,6 +619,9 @@ class FlowRunService:
                 step_inputs=step_inputs or {},
                 normalized_step_inputs=normalized_step_inputs,
                 specs=runtime_specs,
+            )
+            single_recording_steps = validate_single_recording_inputs(
+                step_inputs=step_inputs or {}, specs=runtime_specs
             )
             await validate_submitted_step_inputs(
                 flow_id=flow_id,
@@ -644,6 +653,7 @@ class FlowRunService:
             speaker_labels=speaker_labels,
             max_speakers=max_speakers,
             live_transcript_ids=live_transcript_ids,
+            single_recording_steps=single_recording_steps,
         )
         request_fingerprint = self._build_idempotency_fingerprint(
             tenant_id=self.user.tenant_id,

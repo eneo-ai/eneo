@@ -452,6 +452,7 @@ async def create_flow_run(
                         step_id: FlowRunStepInputFiles(
                             file_ids=tuple(step_input.file_ids),
                             live_transcript_id=step_input.live_transcript_id,
+                            single_recording=step_input.single_recording,
                         )
                         for step_id, step_input in run_in.step_inputs.items()
                     }

@@ -306,6 +306,8 @@ async def test_a_step_that_maps_speakers_requires_labels_so_a_run_cannot_choose(
         "required": True,
         "default": True,
     }
+    # A speaker service labels a multi-part recording as one.
+    assert contract.transcription.single_recording is True
 
 
 @pytest.mark.asyncio

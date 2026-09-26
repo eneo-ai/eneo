@@ -299,3 +299,26 @@ async def test_live_enrichment_failure_keeps_batch_error_mapping_without_asr(
         is TranscriptionFailureKind.INPUT
     )
     assert error.value.run_error_details.transcription_service_reason == "invalid_audio"
+
+
+@pytest.mark.parametrize("marked", [True, False])
+async def test_the_run_tells_transcription_whether_the_files_are_one_recording(
+    live_audio, monkeypatch, marked
+):
+    from eneo.flows.runtime import transcription_runtime
+
+    step_id = str(live_audio.request.step.step_id)
+    live_audio.request.run.input_payload_json["step_inputs"] = (
+        {step_id: {"single_recording": True}} if marked else {}
+    )
+    transcribe = AsyncMock(side_effect=RuntimeError("stop here"))
+    monkeypatch.setattr(
+        transcription_runtime, "resolve_and_transcribe_audio_for_step", transcribe
+    )
+
+    with pytest.raises(RuntimeError, match="stop here"):
+        await resolve_transcribe_and_attach_audio_input(
+            request=live_audio.request, deps=live_audio.deps
+        )
+
+    assert transcribe.await_args.kwargs["single_recording"] is marked

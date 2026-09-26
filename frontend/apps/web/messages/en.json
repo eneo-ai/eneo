@@ -5542,6 +5542,7 @@
   "flow_error_flow_runtime_file_attached": "This file is already part of a saved run and cannot be deleted.",
   "flow_error_flow_live_transcription_unavailable": "Live transcription is not available for this flow.",
   "flow_error_flow_run_live_transcript_requires_one_audio_file": "A live transcript requires exactly one audio file for the step. Remove the transcript ID to transcribe the uploaded files.",
+  "flow_error_flow_run_single_recording_requires_audio_step": "Only an audio step can hold the parts of one recording. Remove single_recording from the other steps.",
   "flow_error_flow_run_live_transcript_not_found": "The live transcript is unavailable for this run. Remove its ID to transcribe the uploaded audio.",
   "flow_error_flow_run_live_transcript_already_bound": "This live transcript belongs to another uploaded file. Use that file, or remove the transcript ID.",
   "flow_error_flow_runtime_file_empty": "The uploaded file is empty. Choose a file with content and upload it again.",

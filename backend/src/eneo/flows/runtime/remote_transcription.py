@@ -90,6 +90,7 @@ from eneo.transcription_models.infrastructure.adapters.litellm_transcription imp
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from eneo.flows.runtime.recording_parts import RecordingAudio
     from eneo.main.config import Settings
     from eneo.model_providers.domain.provider_call_observer import (
         ProviderCallObserver,
@@ -707,6 +708,27 @@ class RemoteFlowTranscriber:
             diarization="external" if diarize else None,
             alignment=result.alignment if diarize else None,
             speaker_review=result.speaker_review,
+        )
+
+    async def transcribe_recording(
+        self,
+        recording: RecordingAudio,
+        transcription_model: TranscriptionModel,
+        *,
+        language: str | None,
+        observer: ProviderCallObserver | None,
+        max_speakers: int | None,
+    ) -> TranscribedAudio:
+        """The joined recording in one job: one transcript, one set of speakers."""
+        return await self.transcribe(
+            recording.joined,
+            transcription_model,
+            file_id=recording.file_ids[0],
+            language=language,
+            diarize=True,
+            persist_cache_to_file=False,
+            observer=observer,
+            max_speakers=max_speakers,
         )
 
     async def enrich(

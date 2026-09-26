@@ -170,6 +170,28 @@ def build_speaker_inventory(
     return list(entries.values())
 
 
+def merge_speaker_inventories(
+    entries: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """One entry per label for a recording whose parts share labels: the first
+    part that heard the speaker, all their lines, and the first samples."""
+    merged: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        current = merged.get(entry["label"])
+        if current is None:
+            merged[entry["label"]] = {**entry, "samples": list(entry["samples"])}
+            continue
+        current["line_count"] += entry["line_count"]
+        current["samples"].extend(
+            entry["samples"][: INVENTORY_SAMPLE_LINES - len(current["samples"])]
+        )
+        if "clean_example_available" in current:
+            current["clean_example_available"] |= bool(
+                entry.get("clean_example_available")
+            )
+    return list(merged.values())
+
+
 def build_opening_excerpt(text: str) -> list[str]:
     """The first diarized lines in order as ``LABEL: text`` (no timestamps),
     where introductions and greetings usually reveal who is who. Bounded by

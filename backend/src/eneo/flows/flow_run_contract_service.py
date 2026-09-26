@@ -154,6 +154,7 @@ class FlowRunContractService:
                 speaker_labels=speaker_labels,
                 service_configured=self.settings.flow_transcription_service_configured,
             ),
+            single_recording=self.settings.flow_transcription_service_configured,
         )
 
     async def _template_readiness(

@@ -874,6 +874,16 @@ class StepRunInput(BaseModel):
             "decoded duration permit, otherwise it transcribes the file."
         ),
     )
+    single_recording: bool = Field(
+        default=False,
+        description=(
+            "The step's audio files, in the order of `file_ids`, are consecutive "
+            "parts of one recording, such as a recorder that starts a new file "
+            "every 20 minutes. Speakers are then labelled once across all parts, "
+            "so one voice keeps one label. Only for audio steps; with one file it "
+            "changes nothing. Leave it false for separate recordings."
+        ),
+    )
     file_ids: list[UUID] = Field(
         default_factory=lambda: cast(list[UUID], []),
         description=(

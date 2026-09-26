@@ -19,6 +19,7 @@ from uuid import UUID
 
 from eneo.files.transcriber import TranscribedAudio, Transcriber
 from eneo.flows.runtime.audio_spool import SpooledAudio
+from eneo.flows.runtime.recording_parts import RecordingAudio, join_part_windows
 from eneo.flows.runtime.remote_transcription import RemoteFlowTranscriber
 from eneo.flows.runtime.speaker_enrichment import enrich_transcript
 
@@ -131,6 +132,39 @@ class DiarizingFlowTranscriber(RegistryFlowTranscriber):
             transcription_model,
             transcribed=transcribed,
             file_id=file_id,
+            language=language,
+            observer=observer,
+            max_speakers=max_speakers,
+        )
+
+    async def transcribe_recording(
+        self,
+        recording: RecordingAudio,
+        transcription_model: TranscriptionModel,
+        *,
+        language: str | None,
+        observer: ProviderCallObserver | None,
+        max_speakers: int | None,
+    ) -> TranscribedAudio:
+        """Each part transcribed on its own, the speakers labelled once on the
+        joined audio so one voice keeps one label across the parts."""
+        parts = [
+            await RegistryFlowTranscriber.transcribe(
+                self,
+                part,
+                transcription_model,
+                file_id=file_id,
+                language=language,
+                persist_cache_to_file=False,
+                observer=observer,
+            )
+            for part, file_id in zip(recording.parts, recording.file_ids, strict=True)
+        ]
+        return await self.enrich(
+            recording.joined,
+            transcription_model,
+            transcribed=join_part_windows(parts, recording.bounds),
+            file_id=recording.file_ids[0],
             language=language,
             observer=observer,
             max_speakers=max_speakers,
