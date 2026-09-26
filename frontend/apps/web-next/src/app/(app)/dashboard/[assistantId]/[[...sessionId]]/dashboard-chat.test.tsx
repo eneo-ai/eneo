@@ -66,7 +66,10 @@ function renderRoute() {
 describe("DashboardChat", () => {
   it("says the chat could not be opened instead of loading forever, and retries", async () => {
     const { container } = renderRoute();
-    expect(await screen.findByText("Det gick inte att öppna chatten")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Laddar assistenten…" })).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Det gick inte att öppna chatten" })
+    ).toBeTruthy();
     // A missing assistant is not retried behind the user's back.
     expect(api.assistantCalls).toBe(1);
     await expectNoAxeViolations(container);

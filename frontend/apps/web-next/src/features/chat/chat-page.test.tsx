@@ -253,10 +253,24 @@ describe("ChatPage", () => {
   it("says once, next to the conversation, that it could not be loaded", async () => {
     renderPage("s-missing");
     const message = await screen.findByText("Konversationen kunde inte laddas.");
+    // The message is the page's one h1; the header has no title.
+    expect(h1Texts()).toEqual(["Konversationen kunde inte laddas."]);
     expect(spies.toastError).not.toHaveBeenCalled();
     expect(
       within(message.parentElement!).getByRole("button", { name: "Ny konversation" })
     ).toBeTruthy();
+  });
+
+  it("keeps an h1 while a conversation loads", async () => {
+    const held = deferred();
+    spies.heldDetails.set("s-1", held.promise);
+    renderPage("s-1");
+    // Desktop and phone headers (one of them is hidden by CSS).
+    expect(h1Texts()).toEqual(["Laddar konversationen…", "Laddar konversationen…"]);
+
+    await act(async () => held.resolve());
+    await screen.findByRole("log", { name: "Konversation" });
+    expect(h1Texts()).toEqual(["Samtal s-1", "Samtal s-1"]);
   });
 
   it("titles an untitled conversation instead of rendering an empty heading", async () => {

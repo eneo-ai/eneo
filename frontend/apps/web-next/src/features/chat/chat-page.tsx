@@ -255,8 +255,16 @@ export function ChatPage({
   const effectiveTab = insightPartner ? tab : "chat";
   const sessionId = active?.sessionId ?? null;
   const started = Boolean(active?.started);
-  // The conversation title is the page's h1; the start state's greeting is h1 instead.
-  const title = active && started ? (active.title ?? t("new_conversation")) : null;
+  // The page has one h1: the conversation title in the header, the start
+  // state's greeting (no title here), the loading label while a conversation
+  // loads, or the error that it could not be loaded (rendered below).
+  const title = active
+    ? started
+      ? (active.title ?? t("new_conversation"))
+      : null
+    : detail.isError
+      ? null
+      : t("chat_loading_conversation");
   const isPersonal = partner.type === "default-assistant";
 
   const menuItems: HeaderMenuItem[] = [
@@ -339,7 +347,7 @@ export function ChatPage({
               />
             ) : detail.isError ? (
               <div className="flex flex-col items-center gap-3 p-6 text-center">
-                <p className="text-ax-error text-sm">{t("chat_conversation_load_failed")}</p>
+                <h1 className="text-ax-error text-sm">{t("chat_conversation_load_failed")}</h1>
                 <Button
                   label={t("new_conversation")}
                   variant="secondary"

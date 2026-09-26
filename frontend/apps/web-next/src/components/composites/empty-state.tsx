@@ -12,8 +12,11 @@ export type EmptyStateProps = {
   actions?: React.ReactNode;
   /** Legacy actions slot — same as `actions`, which wins when both are set. */
   children?: React.ReactNode;
-  /** Heading tag for the title (document outline only; the size is fixed). */
-  headingLevel?: 2 | 3 | 4;
+  /**
+   * Heading tag for the title (document outline only; the size is fixed). 1
+   * when the state is the whole page, such as a route that failed to load.
+   */
+  headingLevel?: 1 | 2 | 3 | 4;
   /** Tighter spacing for cards, side panels and table bodies. */
   isCompact?: boolean;
   /** Dashed placeholder frame (default). Turn off inside an already framed surface. */

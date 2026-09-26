@@ -17,11 +17,12 @@ export function retryPartnerQuery(failureCount: number, error: unknown): boolean
   return failureCount < 3;
 }
 
-/** A chat route while its assistant or group chat loads. */
+/** A chat route while its assistant or group chat loads; the page's h1 says so. */
 export function ChatPartnerLoading() {
   const t = useTranslations();
   return (
     <div className="mx-auto w-full max-w-[712px] p-6">
+      <h1 className="sr-only">{t("chat_partner_loading")}</h1>
       <LoadingState rows={4} label={t("chat_partner_loading")} />
     </div>
   );
@@ -29,14 +30,16 @@ export function ChatPartnerLoading() {
 
 /**
  * A chat route whose assistant or group chat could not be loaded: what
- * happened and, when it can help, a retry. Without a chat header on the page
- * the shell shows its own top bar, so phones keep the navigation menu.
+ * happened (the page's h1) and, when it can help, a retry. Without a chat
+ * header on the page the shell shows its own top bar, so phones keep the
+ * navigation menu.
  */
 export function ChatPartnerError({ onRetry }: { onRetry?: () => void }) {
   const t = useTranslations();
   return (
     <div className="mx-auto w-full max-w-[712px] p-6">
       <EmptyState
+        headingLevel={1}
         icon={<CircleAlert />}
         title={t("chat_partner_load_failed")}
         description={t("chat_partner_load_failed_description")}

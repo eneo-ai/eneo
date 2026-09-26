@@ -223,7 +223,11 @@ export type HeaderMenuItem = {
 export type ChatHeaderProps = {
   partner: ChatPartner;
   switcherItems?: ChatPartnerSwitcherItem[];
-  /** Conversation title (the page's h1); null in the start state, whose greeting is the h1. */
+  /**
+   * The page's h1: the conversation title, or what is happening while one
+   * loads. null when the h1 is elsewhere: the start state's greeting, or the
+   * message that a conversation could not be loaded.
+   */
   title: string | null;
   /** A fixed model, shown under the partner's name ("space · model"). */
   modelName?: string | null;
