@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
@@ -9,31 +8,27 @@ from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     FlowCapabilityProfile,
     build_flow_capability_profile,
 )
-from eneo.flows.ai_builder.ai_builder_validation_references import (
-    iter_step_template_expressions,
+from eneo.flows.ai_builder.ai_builder_step_reads import (
+    ReadChannel,
+    ReadSite,
+    StepRead,
+    step_reads,
 )
 from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
     AssistantAuthoringSnapshots,
 )
 from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
-from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
-    InputSource,
     OutputMode,
     StepSpec,
 )
-from eneo.flows.flow_variable_definitions import PREVIOUS_STEP_TEXT_ALIAS
 from eneo.flows.input_binding_contract_rules import (
+    SourceRefBinding,
     effective_question_binding,
-    source_ref_bindings,
 )
 from eneo.flows.step_lineage import existing_step_ref_for_order
-from eneo.flows.template_reference_analyzer import (
-    analyze_template,
-    referenced_form_fields,
-)
 
 if TYPE_CHECKING:
     from eneo.flows.ai_builder.ai_builder_edit_scope import EditScopeResolution
@@ -69,22 +64,6 @@ def build_flow_context(
     )
 
 
-@dataclass(slots=True)
-class _AuthoringDependency:
-    source_refs: list[dict[str, object]] = field(
-        default_factory=list[dict[str, object]]
-    )
-    template_expressions: list[str] = field(default_factory=list[str])
-    implicit_input: bool = False
-
-    def payload(self) -> dict[str, object]:
-        return {
-            "source_refs": self.source_refs,
-            "template_expressions": self.template_expressions,
-            "implicit_input": self.implicit_input,
-        }
-
-
 def _authoring_dependencies(
     step: StepSpec,
     *,
@@ -92,64 +71,36 @@ def _authoring_dependencies(
     step_refs: dict[str, int],
     form_field_names: set[str],
     only_producer_order: int | None,
-) -> tuple[dict[int, _AuthoringDependency], set[str]]:
-    dependencies: dict[int, _AuthoringDependency] = {}
+) -> tuple[dict[int, list[StepRead]], set[str]]:
+    dependencies: dict[int, list[StepRead]] = {}
     forms: set[str] = set()
-    for source in source_ref_bindings(step.input_bindings):
-        producer_order = step_refs.get(source.step_ref)
-        if producer_order is not None and (
-            only_producer_order is None or only_producer_order == producer_order
-        ):
-            dependencies.setdefault(
-                producer_order, _AuthoringDependency()
-            ).source_refs.append(source.binding_payload())
-    references = [
-        reference
-        for expression in iter_step_template_expressions(step)
-        for reference in analyze_template(
-            "{{ " + expression + " }}",
-            step_refs=step_refs,
-            form_field_names=form_field_names,
-        )
-    ]
-    forms.update(referenced_form_fields(references, form_field_names=form_field_names))
-    for reference in references:
-        producer_order = reference.step_order
-        if reference.head == PREVIOUS_STEP_TEXT_ALIAS and order > 1:
-            producer_order = order - 1
-        if producer_order is not None and (
-            only_producer_order is None or only_producer_order == producer_order
-        ):
-            dependency = dependencies.setdefault(producer_order, _AuthoringDependency())
-            if reference.expression not in dependency.template_expressions:
-                dependency.template_expressions.append(reference.expression)
-    runtime_input = build_runtime_input_config(step.input_config)
-    replaces_chain = (
-        runtime_input.enabled
-        and runtime_input.required
-        and runtime_input.input_format == "audio"
-        and step.output_mode == OutputMode.TRANSCRIBE_ONLY
-    )
-    if effective_question_binding(step.input_bindings) is None and not replaces_chain:
-        if step.input_source == InputSource.FLOW_INPUT:
+    for read in step_reads(
+        step, order=order, step_refs=step_refs, form_field_names=form_field_names
+    ):
+        if read.channel is ReadChannel.FORM_FIELD:
+            forms.add(read.path[0])
+        elif read.reads_whole_run_input:
             forms.update(form_field_names)
-        prior_orders = (
-            range(1, order)
-            if step.input_source == InputSource.ALL_PREVIOUS_STEPS
-            else range(max(1, order - 1), order)
-            if step.input_source == InputSource.PREVIOUS_STEP
-            else range(0)
-        )
-        relevant_orders = (
-            prior_orders
-            if only_producer_order is None
-            else ((only_producer_order,) if only_producer_order in prior_orders else ())
-        )
-        for producer_order in relevant_orders:
-            dependencies.setdefault(
-                producer_order, _AuthoringDependency()
-            ).implicit_input = True
+        elif read.producer_order is not None and only_producer_order in (
+            None,
+            read.producer_order,
+        ):
+            dependencies.setdefault(read.producer_order, []).append(read)
     return dependencies, forms
+
+
+def _dependency_payload(reads: list[StepRead]) -> dict[str, object]:
+    return {
+        "source_refs": [
+            read.origin.binding_payload()
+            for read in reads
+            if isinstance(read.origin, SourceRefBinding)
+        ],
+        "template_expressions": list(
+            dict.fromkeys(read.origin for read in reads if isinstance(read.origin, str))
+        ),
+        "implicit_input": any(read.site is ReadSite.IMPLICIT for read in reads),
+    }
 
 
 def _build_saved_step_authoring_context(
@@ -188,7 +139,7 @@ def _build_saved_step_authoring_context(
         if ref is not None
     }
     forms = {field.name for field in spec.form_fields or []}
-    target_dependencies: dict[int, _AuthoringDependency] = {}
+    target_dependencies: dict[int, list[StepRead]] = {}
     target_forms: set[str] = set()
     consumers: list[dict[str, object]] = []
     consumer_orders: set[int] = set()
@@ -214,7 +165,7 @@ def _build_saved_step_authoring_context(
                     "input_type": step.input_type,
                     "output_mode": step.output_mode,
                     "input_contract": step.input_contract,
-                    **dependencies[target_order].payload(),
+                    **_dependency_payload(dependencies[target_order]),
                 }
             )
             uses_template = (
@@ -249,7 +200,7 @@ def _build_saved_step_authoring_context(
                 "name": step.name,
                 "output_type": step.output_type,
                 "output_contract": step.output_contract,
-                **target_dependencies[order].payload(),
+                **_dependency_payload(target_dependencies[order]),
             }
             for order, step in enumerate(spec.steps, 1)
             if order in target_dependencies

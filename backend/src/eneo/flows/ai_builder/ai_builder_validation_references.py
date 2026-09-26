@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import json
 from difflib import get_close_matches
-from typing import Any
 
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     missing_structured_output_path,
     schema_property_names,
 )
+from eneo.flows.ai_builder.ai_builder_step_reads import ReadSite, step_template_sites
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -33,23 +32,20 @@ def validate_variable_references(
     form_field_names = {
         field.name.strip() for field in (spec.form_fields or []) if field.name.strip()
     }
+    payload_variables = runtime_variables_for_step()
 
     for index, step in enumerate(spec.steps, start=1):
         prompt_variables = runtime_variables_for_step(step.input_config)
         expressions = [
-            (expression, prompt_variables)
-            for expression in iter_template_expressions(
-                step.assistant_spec.instructions
+            (
+                expression,
+                prompt_variables
+                if site is ReadSite.INSTRUCTIONS
+                else payload_variables,
             )
+            for site, template in step_template_sites(step)
+            for expression in iter_template_expressions(template)
         ]
-        expressions.extend(
-            (expression, runtime_variables_for_step())
-            for payload in (step.input_bindings, step.output_config)
-            if payload is not None
-            for expression in iter_template_expressions(
-                _stringify_template_payload(payload)
-            )
-        )
         for expression, runtime_variables in expressions:
             allowed_roots = {*runtime_variables, *form_field_names}
             reference = _parse_reference_expression(
@@ -174,17 +170,7 @@ def validate_variable_references(
 
 
 def iter_step_templates(step: StepSpec) -> list[str]:
-    """The step's three template carriers: instructions, input bindings, output config.
-
-    One owner, so a reader of a step's references never misses a carrier that
-    was added here.
-    """
-
-    templates = [step.assistant_spec.instructions]
-    for payload in (step.input_bindings, step.output_config):
-        if payload is not None:
-            templates.append(_stringify_template_payload(payload))
-    return templates
+    return [template for _, template in step_template_sites(step)]
 
 
 def iter_step_template_expressions(step: StepSpec) -> list[str]:
@@ -210,14 +196,6 @@ def _uses_structured_output(reference: TemplateReference) -> bool:
     return reference.tail == "output.structured" or reference.tail.startswith(
         "output.structured."
     )
-
-
-def _stringify_template_payload(payload: Any) -> str:
-    if isinstance(payload, str):
-        return payload
-    if isinstance(payload, (dict, list)):
-        return json.dumps(payload, ensure_ascii=False)
-    return str(payload)
 
 
 def _parse_reference_expression(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from uuid import uuid4
 
@@ -886,3 +887,152 @@ def test_saved_step_authoring_projection_keeps_complete_facts_as_quoted_data():
     }
     assert "PRIVATE-INSTRUCTION" not in rendered
     assert "\u2028" not in rendered
+
+
+def _saved_step_read_channels_fixture():
+    """Each implicit channel, source ref, and template site a saved step can read."""
+
+    shapes = [
+        ("flow_input", "text", "pass_through", "json"),
+        ("previous_step", "json", "pass_through", "json"),
+        ("all_previous_steps", "text", "pass_through", "text"),
+        ("flow_input", "audio", "transcribe_only", "text"),
+        ("previous_step", "text", "pass_through", "text"),
+        ("previous_step", "text", "template_fill", "docx"),
+    ]
+    steps = [
+        _make_step(
+            step_order=n,
+            user_description=f"Channel {n}",
+            input_source=source,
+            input_type=input_type,
+            output_mode=mode,
+            output_type=output_type,
+        )
+        for n, (source, input_type, mode, output_type) in enumerate(shapes, 1)
+    ]
+    steps[0].output_contract = {
+        "type": "object",
+        "properties": {
+            "documents": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"title": {"type": "string"}},
+                },
+            }
+        },
+    }
+    steps[1].output_contract = {
+        "type": "object",
+        "properties": {
+            "beslut": {"type": "object", "properties": {"ansvarig": {"type": "string"}}}
+        },
+    }
+    steps[3].input_config = {
+        "runtime_input": {"enabled": True, "required": True, "input_format": "audio"}
+    }
+    steps[4].input_bindings = {
+        "question": "{{ flow.input }} {{ flow_input.audience }} {{ indata_text }} "
+        "{{ step_2.status }} {{ step_99.output.text }} {{ föregående_steg }}",
+        "source_refs": [
+            {
+                "step_ref": "step_1",
+                "output": "structured",
+                "field_path": "documents.*.title",
+                "label": "Titlar",
+            },
+            {
+                "step_ref": "step_2",
+                "output": "structured",
+                "field_path": "beslut.ansvarig",
+            },
+            {"step_ref": "step_3", "output": "text"},
+        ],
+    }
+    steps[5].output_config = {
+        "bindings": {
+            "brodtext": "{{ föregående_steg }}",
+            "ansvarig": "{{ step_2.output.structured.beslut.ansvarig }}",
+        }
+    }
+    instructions = {
+        1: "Start {{ föregående_steg }} {{ indata_text }}",
+        3: "Sammanfatta {{ föregående_steg }} och {{ step_1.output.structured }}",
+    }
+    snapshots = {
+        step.assistant_id: AssistantAuthoringSnapshot(
+            instructions=instructions.get(n, f"Steg {n}")
+        )
+        for n, step in enumerate(steps, 1)
+    }
+    flow = _make_flow(
+        steps=steps,
+        metadata_json={
+            "form_schema": {
+                "fields": [
+                    {"name": name, "label": name, "type": "text", "required": False}
+                    for name in ("audience", "subject")
+                ]
+            }
+        },
+    )
+    return flow, snapshots
+
+
+@pytest.mark.parametrize(
+    ("fixture", "digest"),
+    [
+        (
+            lambda: _saved_step_authoring_fixture(total_steps=12),
+            "d7f1b98b462b59a5999250167549a4bb33c774d08c6ccb323a1fa64ce3584b07",
+        ),
+        (
+            _saved_step_read_channels_fixture,
+            "02465b002cf2d55162695d8e0068c23fd8df8c89feb7bece225efae95c3d8854",
+        ),
+    ],
+    ids=["authoring_fixture", "read_channels"],
+)
+def test_saved_step_authoring_context_is_byte_identical_for_every_target(
+    fixture, digest
+):
+    """Pinned from the renderer before the typed step-read reader owned the reads."""
+
+    from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
+        AIBuilderSavedFlowStepEditContext,
+        ResolvedAIBuilderEditContext,
+    )
+    from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
+        _prior_spec_for_revision,
+    )
+    from eneo.flows.ai_builder.ai_builder_resource_catalog import (
+        build_ai_builder_resource_catalog,
+    )
+
+    flow, snapshots = fixture()
+    spec = _prior_spec_for_revision(
+        context=ResolvedAIBuilderEditContext(
+            request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[0].id),
+            scope="step",
+            target_existing_step_ref="existing_step_1",
+        ),
+        prior_plan=None,
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=None, available_kbs=None
+        ),
+    )
+    assert spec is not None
+    rendered = "\n".join(
+        build_flow_context(
+            flow,
+            is_edit_mode=True,
+            authoring_spec=spec,
+            target_existing_step_ref=f"existing_step_{order}",
+            selected_template_placeholders=("brodtext", "ansvarig"),
+        )
+        for order in range(1, len(spec.steps) + 1)
+    )
+    assert hashlib.sha256(rendered.encode()).hexdigest() == digest
