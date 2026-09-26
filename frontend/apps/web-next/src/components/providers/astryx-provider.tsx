@@ -16,6 +16,16 @@ import { eneoTheme } from "@/theme/eneo";
 const ASTRYX_MESSAGES: MessagesByLocale = { sv: astryxSv };
 
 /**
+ * next/link for Astryx links. Astryx passes the target as both `href` and
+ * `to` (for routers that read `to`); next/link would leave `to` on the <a>
+ * as an invalid attribute.
+ */
+function NextLink({ children, ...props }: React.ComponentProps<typeof Link> & { to?: string }) {
+  delete props.to;
+  return <Link {...props}>{children}</Link>;
+}
+
+/**
  * Root of the Astryx component library: the (pre-built) Eneo theme, Astryx
  * strings in the active next-intl locale, and next/link for Astryx links.
  *
@@ -34,7 +44,7 @@ export function AstryxProvider({ children }: { children: React.ReactNode }) {
   return (
     <Theme theme={eneoTheme} mode={mode}>
       <InternationalizationProvider locale={locale} messages={ASTRYX_MESSAGES}>
-        <LinkProvider component={Link}>{children}</LinkProvider>
+        <LinkProvider component={NextLink}>{children}</LinkProvider>
       </InternationalizationProvider>
     </Theme>
   );
