@@ -21,14 +21,16 @@ it("builds a strict production script policy with a request nonce", () => {
   expect(script).not.toContain("'unsafe-inline'");
   expect(script).not.toContain("'unsafe-eval'");
   expect(directive(csp, "script-src-attr")).toBe("script-src-attr 'none'");
+  expect(directive(csp, "style-src")).toBe("style-src 'self' 'nonce-test-nonce'");
   expect(csp).toContain("upgrade-insecure-requests");
 });
 
-it("allows React dev eval without weakening production script-src", () => {
+it("allows React dev eval and the dev tools' inline styles without weakening production", () => {
   const csp = buildContentSecurityPolicy("dev-nonce", "development");
 
   expect(directive(csp, "script-src")).toContain("'unsafe-eval'");
-  expect(directive(csp, "style-src")).toContain("'unsafe-inline'");
+  // No nonce: with one, browsers ignore 'unsafe-inline'.
+  expect(directive(csp, "style-src")).toBe("style-src 'self' 'unsafe-inline'");
   expect(csp).not.toContain("upgrade-insecure-requests");
 });
 
