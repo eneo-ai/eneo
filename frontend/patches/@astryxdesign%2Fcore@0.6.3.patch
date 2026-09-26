@@ -14,6 +14,41 @@ index 5db3254e026f63afb18b93f3998b1dfd2e9a800a..c9e19fbfd8d13e1de92fdcdfc46b21b2
      "aria-disabled": isDisabled || undefined,
      "data-value": value,
      onClick: composeEventHandlers(onClickProp, handleClick),
+diff --git a/dist/DateInput/DateInput.js b/dist/DateInput/DateInput.js
+index 7eff22ea4eb17182ad8bbeacef36d484d8447ed4..7f3999b6b5eb9953752d88e6481bd6579f169b93 100644
+--- a/dist/DateInput/DateInput.js
++++ b/dist/DateInput/DateInput.js
+@@ -578,19 +578,25 @@ PointerDateField.displayName = 'PointerDateField';
+  */
+ export function DateInput(props) {
+   const isTouch = useMediaQuery(TOUCH_POINTER_QUERY);
+-  const nativePicker = props.nativePicker ?? 'touch';
++  // Eneo patch: `nativePicker` only picks the field here; passed on, it ends
++  // up on the field's <div> and React warns about an unknown DOM prop.
++  const {
++    nativePicker: nativePickerProp,
++    ...fieldProps
++  } = props;
++  const nativePicker = nativePickerProp ?? 'touch';
+ 
+   // The platform's picker, where the consumer asked for it — see the
+   // `nativePicker` prop for what that trades away.
+   if (nativePicker === 'always' || nativePicker === 'touch' && isTouch) {
+     return /*#__PURE__*/_jsx(NativeDateField, {
+-      ...props
++      ...fieldProps
+     });
+   }
+   return isTouch ? /*#__PURE__*/_jsx(TouchDateField, {
+-    ...props
++    ...fieldProps
+   }) : /*#__PURE__*/_jsx(PointerDateField, {
+-    ...props
++    ...fieldProps
+   });
+ }
+ DateInput.displayName = 'DateInput';
+\ No newline at end of file
 diff --git a/src/CommandPalette/CommandPaletteItem.tsx b/src/CommandPalette/CommandPaletteItem.tsx
 index 7d615f4101bba9a006a4c9cb94eab71a368ad9fd..7dd24dc2a0d694928ea1367a5c7e06b900e067b9 100644
 --- a/src/CommandPalette/CommandPaletteItem.tsx
@@ -30,3 +65,32 @@ index 7d615f4101bba9a006a4c9cb94eab71a368ad9fd..7dd24dc2a0d694928ea1367a5c7e06b9
        aria-disabled={isDisabled || undefined}
        data-value={value}
        onClick={composeEventHandlers(onClickProp, handleClick)}
+diff --git a/src/DateInput/DateInput.tsx b/src/DateInput/DateInput.tsx
+index c60fdd00d4ef151a62217f263cc535bb1bb4f715..3e65c692f5f79eedccedf5556bddbb779d31e4e4 100644
+--- a/src/DateInput/DateInput.tsx
++++ b/src/DateInput/DateInput.tsx
+@@ -948,17 +948,20 @@ PointerDateField.displayName = 'PointerDateField';
+  */
+ export function DateInput(props: DateInputProps) {
+   const isTouch = useMediaQuery(TOUCH_POINTER_QUERY);
+-  const nativePicker = props.nativePicker ?? 'touch';
++  // Eneo patch: `nativePicker` only picks the field here; passed on, it ends
++  // up on the field's <div> and React warns about an unknown DOM prop.
++  const {nativePicker: nativePickerProp, ...fieldProps} = props;
++  const nativePicker = nativePickerProp ?? 'touch';
+ 
+   // The platform's picker, where the consumer asked for it — see the
+   // `nativePicker` prop for what that trades away.
+   if (nativePicker === 'always' || (nativePicker === 'touch' && isTouch)) {
+-    return <NativeDateField {...props} />;
++    return <NativeDateField {...fieldProps} />;
+   }
+   return isTouch ? (
+-    <TouchDateField {...props} />
++    <TouchDateField {...fieldProps} />
+   ) : (
+-    <PointerDateField {...props} />
++    <PointerDateField {...fieldProps} />
+   );
+ }
+ 

@@ -88,8 +88,7 @@ function FilterBar({
   const t = useTranslations();
   // Astryx's own calendar everywhere: the native picker it uses on touch
   // probes the engine with a <style> element, which the production CSP blocks
-  // (AGENTS.md → CSP). Astryx 0.6.3 also passes `nativePicker` on to the
-  // field's <div>, so React warns about the prop in development.
+  // (AGENTS.md → CSP).
   const dateField = (boundary: "start" | "end") => (
     <DateInput
       label={boundary === "start" ? t("from") : t("to")}
