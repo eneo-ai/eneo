@@ -30,6 +30,13 @@
         "plugins/fixtures/**"
       ]
     },
+    "apps/web-next": {
+      "entry": [
+        "src/lib/i18n/request.ts",
+        "src/theme/eneo-theme.ts",
+        "scripts/*.mjs"
+      ]
+    },
     "packages/ui": {
       "entry": [
         "src/lib/index.ts"

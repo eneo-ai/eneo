@@ -38,26 +38,6 @@ export function formatDateTime(value: string | null | undefined): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-const RELATIVE_STEPS: [Intl.RelativeTimeFormatUnit, number][] = [
-  ["year", 1000 * 60 * 60 * 24 * 365],
-  ["month", 1000 * 60 * 60 * 24 * 30],
-  ["week", 1000 * 60 * 60 * 24 * 7],
-  ["day", 1000 * 60 * 60 * 24],
-  ["hour", 1000 * 60 * 60],
-  ["minute", 1000 * 60]
-];
-
-/** "3 days ago" / "om 3 dagar" — between the given date and now. */
-export function formatRelativeTime(value: string | Date, locale: string): string {
-  const target = typeof value === "string" ? new Date(value) : value;
-  const delta = target.getTime() - Date.now();
-  const format = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
-  for (const [unit, ms] of RELATIVE_STEPS) {
-    if (Math.abs(delta) >= ms) return format.format(Math.round(delta / ms), unit);
-  }
-  return format.format(Math.round(delta / 1000), "second");
-}
-
 /** Whole days elapsed since the given instant. */
 export function daysSince(value: string | Date): number {
   const target = typeof value === "string" ? new Date(value) : value;

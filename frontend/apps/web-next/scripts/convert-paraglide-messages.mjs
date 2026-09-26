@@ -13,7 +13,14 @@
  * Keys that exist only in web-next live in src/lib/i18n/extra/{locale}.json
  * and are merged last (they win over converted keys).
  *
- * Usage: node scripts/convert-paraglide-messages.mjs
+ * Usage: bun run i18n:convert
+ *
+ * DRIFT: do not run this until the catalogs are reconciled. About 750
+ * web-next keys were added to messages/*.json directly instead of to
+ * extra/*.json, so a run drops them (and changes some values and adds keys
+ * from apps/web). Until they move into extra/, add new keys to all four
+ * catalogs (extra/ and messages/, sv and en) by hand; `bun run lint` checks
+ * that the locales match.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
