@@ -1,0 +1,147 @@
+{
+  "kontroll": {
+    "kontroll_id": "LK-2026-0917-03",
+    "typ": "Planerad offentlig kontroll",
+    "aviserad": false,
+    "datum": "2026-09-17",
+    "tid": {
+      "start": "09:30",
+      "slut": "11:45"
+    },
+    "inspektor": {
+      "namn": "Hanna Öberg",
+      "titel": "Livsmedelsinspektör",
+      "enhet": "Miljökontoret, livsmedelskontrollen"
+    },
+    "narvarande_fran_verksamheten": [
+      {
+        "namn": "Dragan Ilić",
+        "roll": "Köksmästare"
+      },
+      {
+        "namn": "Sanna Lövgren",
+        "roll": "Restaurangchef"
+      }
+    ]
+  },
+  "anlaggning": {
+    "namn": "Restaurang Kajkrogen",
+    "registreringsnummer": "LIV-2019-00318",
+    "besoksadress": "Hamngatan 7, 852 30 Sundsvall",
+    "verksamhet": "Restaurang med lunchservering och à la carte, cirka 180 portioner per dag",
+    "livsmedelsforetagare": "Kajkrogen i Sundsvall AB"
+  },
+  "kontrollomraden": [
+    {
+      "omrade": "Lokaler och utrustning",
+      "lagkrav": "Förordning (EG) nr 852/2004 bilaga II kapitel I och V",
+      "status": "Avvikelse",
+      "iakttagelser": [
+        {
+          "text": "Tätningslisten på dörren till kylrum 2 var trasig i nederkant och dörren slöt inte tätt.",
+          "foton": [
+            "IMG_0412.jpg"
+          ]
+        }
+      ]
+    },
+    {
+      "omrade": "Rengöring och skadedjur",
+      "lagkrav": "Förordning (EG) nr 852/2004 bilaga II kapitel I",
+      "status": "Följs",
+      "iakttagelser": []
+    },
+    {
+      "omrade": "Temperaturer",
+      "lagkrav": "Förordning (EG) nr 852/2004 bilaga II kapitel IX",
+      "status": "Avvikelse",
+      "iakttagelser": [
+        {
+          "text": "Kylrum 2 höll för hög temperatur. Kokt potatis, skivad skinka och gräddsås förvarades där.",
+          "matvarden": [
+            {
+              "plats": "Kylrum 2, mitthylla",
+              "vara": "Skivad skinka",
+              "temperatur_c": 9.4,
+              "verksamhetens_gransvarde_c": 8
+            },
+            {
+              "plats": "Kylrum 2, nederhylla",
+              "vara": "Gräddsås",
+              "temperatur_c": 10.1,
+              "verksamhetens_gransvarde_c": 8
+            },
+            {
+              "plats": "Kylrum 1",
+              "vara": "Rå kycklingfilé",
+              "temperatur_c": 3.2,
+              "verksamhetens_gransvarde_c": 4
+            }
+          ],
+          "foton": [
+            "IMG_0413.jpg",
+            "IMG_0414.jpg"
+          ]
+        }
+      ]
+    },
+    {
+      "omrade": "Egenkontroll enligt HACCP-principerna",
+      "lagkrav": "Förordning (EG) nr 852/2004 artikel 5",
+      "status": "Avvikelse",
+      "iakttagelser": [
+        {
+          "text": "Temperaturloggen för kylrum 2 saknade anteckningar 2026-09-03 – 2026-09-14. Rutinen anger daglig kontroll och åtgärd över 8 °C.",
+          "foton": [
+            "IMG_0415.jpg"
+          ]
+        }
+      ]
+    },
+    {
+      "omrade": "Allergener och information till konsument",
+      "lagkrav": "Förordning (EU) nr 1169/2011",
+      "status": "Avvikelse",
+      "iakttagelser": [
+        {
+          "text": "Personalen kunde inte visa vilka allergener dagens rätt, fisksoppa med aioli, innehöll. Receptet för aiolin saknades i receptpärmen.",
+          "foton": []
+        }
+      ]
+    },
+    {
+      "omrade": "Spårbarhet och märkning",
+      "lagkrav": "Förordning (EG) nr 178/2002 artikel 18",
+      "status": "Följs",
+      "iakttagelser": [
+        {
+          "text": "Egentillverkade såser var märkta med tillverkningsdatum.",
+          "foton": []
+        }
+      ]
+    },
+    {
+      "omrade": "Personlig hygien och utbildning",
+      "lagkrav": "Förordning (EG) nr 852/2004 bilaga II kapitel VIII och XII",
+      "status": "Ej kontrollerat",
+      "iakttagelser": []
+    }
+  ],
+  "atgarder_pa_plats": [
+    "Gräddsåsen och den skivade skinkan från kylrum 2 kasserades i närvaro av inspektören.",
+    "Varorna i kylrum 2 flyttades till kylrum 1."
+  ],
+  "uppfoljning": {
+    "extra_offentlig_kontroll": true,
+    "planerad_senast": "2026-10-15",
+    "kontrollomraden": [
+      "Temperaturer",
+      "Egenkontroll enligt HACCP-principerna",
+      "Allergener och information till konsument"
+    ]
+  },
+  "diktat": {
+    "fil": "diktat_LK-2026-0917-03.m4a",
+    "langd_sekunder": 94
+  }
+}

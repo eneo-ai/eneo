@@ -1,0 +1,63 @@
+{
+  "file": "oms01_riksnorm_2026.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "OMS-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/180"},
+  "description": "Förvaltningens normtabell för beräkning av försörjningsstöd: riksnormen 2026 per post och hushållsstorlek och vilka kostnader som beräknas utanför normen.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Individ- och arbetsmarknadsförvaltningen, Försörjningsstöd", "address": "851 85 Sundsvall"},
+  "date": "2026-01-02",
+  "diarienummer": "IAN-2025-03310",
+  "title": "Riksnormen för försörjningsstöd 2026 – normtabell för handläggare",
+  "blocks": [
+    {"paragraph": "Regeringen anger en norm (riksnorm) för hur de skäliga kostnaderna för livsmedel, kläder och skor, lek och fritid, förbrukningsvaror, hälsa och hygien samt dagstidning och telefon ska beräknas (socialtjänstlagen (2025:400) 12 kap. 7 §). För 2026 har samtliga poster räknats upp med 0,7 procent jämfört med 2025. Beloppen gäller från och med 2026-01-01."},
+    {"paragraph": "Barnets ålder räknas i den månad som ansökan avser. Beloppen är kronor per månad."},
+    {"heading": "Personliga kostnader"},
+    {
+      "table": {
+        "columns": ["Hushållsmedlem", "Livsmedel", "Kläder och skor", "Lek och fritid", "Hygien", "Barn- och ungdomsförsäkring", "Summa"],
+        "rows": [
+          ["Barn under 1 år", "1 238", "654", "80", "668", "100", "2 740"],
+          ["Barn 1–2 år", "1 409", "754", "181", "616", "100", "3 060"],
+          ["Barn 3 år", "1 410", "785", "242", "183", "100", "2 720"],
+          ["Barn 4–6 år", "1 671", "784", "413", "92", "100", "3 060"],
+          ["Barn 7–10 år", "1 980", "795", "823", "122", "100", "3 820"],
+          ["Barn 11–14 år", "2 326", "846", "925", "193", "100", "4 390"],
+          ["Ungdom 15–18 år", "2 746", "896", "955", "263", "100", "4 960"],
+          ["Ungdom 19–20 år", "2 776", "906", "955", "263", "100", "5 000"],
+          ["Ensamstående vuxen", "2 477", "660", "480", "323", "0", "3 940"],
+          ["Sammanboende vuxna (två)", "4 244", "1 250", "960", "646", "0", "7 100"]
+        ]
+      }
+    },
+    {"heading": "Gemensamma hushållskostnader"},
+    {"paragraph": "Förbrukningsvaror, dagstidning, telefon och liknande beräknas per hushåll efter antalet personer i hushållet."},
+    {
+      "table": {
+        "columns": ["Antal personer i hushållet", "1", "2", "3", "4", "5", "6", "7"],
+        "rows": [
+          ["Belopp per månad", "1 280", "1 410", "1 790", "2 030", "2 330", "2 640", "2 830"]
+        ]
+      }
+    },
+    {"heading": "Kostnader utanför riksnormen"},
+    {"paragraph": "Följande kostnader beräknas till skäliga faktiska kostnader enligt socialtjänstlagen 12 kap. 7 § första stycket 2 och ska styrkas med underlag:"},
+    {
+      "list": [
+        "boende (hyra enligt hyresavi; parkering och garage ingår inte i boendekostnaden),",
+        "hushållsel,",
+        "arbetsresor,",
+        "hemförsäkring,",
+        "medlemskap i fackförening och arbetslöshetskassa."
+      ]
+    },
+    {"heading": "Beräkningsordning"},
+    {
+      "list": [
+        "Summera personliga kostnader för varje hushållsmedlem och gemensamma hushållskostnader efter hushållets storlek.",
+        "Lägg till skäliga kostnader utanför riksnormen.",
+        "Dra av hushållets samtliga inkomster för månaden, till exempel barnbidrag, bostadsbidrag, underhållsstöd eller underhållsbidrag och andra insättningar.",
+        "Ett underskott är det försörjningsstöd som kan beviljas för månaden."
+      ]
+    },
+    {"paragraph": "Socialnämnden ska i ett enskilt fall beräkna kostnaderna till en högre nivå om det finns särskilda skäl för det och får beräkna dem till en lägre nivå om det finns särskilda skäl. Avvikelser från normen ska motiveras i beslutet."}
+  ]
+}

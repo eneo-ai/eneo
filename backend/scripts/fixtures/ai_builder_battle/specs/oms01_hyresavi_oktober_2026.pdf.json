@@ -1,0 +1,43 @@
+{
+  "file": "oms01_hyresavi_oktober_2026.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "OMS-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/180"},
+  "description": "Hyresvärdens hyresavi för en månad, bilaga till en ansökan om ekonomiskt bistånd; specificerar bostadshyra, varmvatten och en parkeringsplats på eget kontrakt.",
+  "letterhead": {"organisation": "Bostads AB Kvarnbäcken", "unit": "Hyresavi", "address": "Box 211, 851 04 Sundsvall"},
+  "date": "2026-09-15",
+  "title": "Hyresavi oktober 2026",
+  "blocks": [
+    {"paragraph": "Hyresgäst: Sofia Berglund, Kvarnbäcksvägen 12 lgh 1102, 856 44 Sundsvall"},
+    {
+      "table": {
+        "columns": ["Uppgift", "Värde"],
+        "rows": [
+          ["Kontraktsnummer bostad", "4402-1102-01"],
+          ["Objekt", "Lägenhet 1102, 3 rum och kök, 74 m², plan 1"],
+          ["Kontraktsnummer parkering", "4402-P014"],
+          ["Hyresperiod", "2026-10-01 – 2026-10-31"],
+          ["Avinummer", "2026-10-4402110201"]
+        ]
+      }
+    },
+    {"heading": "Specifikation"},
+    {
+      "table": {
+        "columns": ["Avser", "Period", "Belopp"],
+        "rows": [
+          ["Hyra bostad", "2026-10-01 – 2026-10-31", "8 120,00"],
+          ["Varmvatten enligt mätning, 3,1 m³ à 60,00 kr", "2026-07-01 – 2026-08-31", "186,00"],
+          ["Parkeringsplats P-14, utomhus", "2026-10-01 – 2026-10-31", "330,00"],
+          ["Att betala", "", "8 636,00"]
+        ]
+      }
+    },
+    {"heading": "Betalning"},
+    {
+      "list": ["Att betala: 8 636,00 kr", "Förfallodag: 2026-09-30", "Bankgiro: 5412-7733", "OCR-nummer: 44021102010265"]
+    },
+    {"paragraph": "Hyran ska vara betald senast sista vardagen före månadens början. Vid försenad betalning debiteras dröjsmålsränta och en påminnelseavgift på 60 kr."},
+    {"paragraph": "Varmvatten debiteras i efterskott varannan månad enligt avläst förbrukning i lägenheten. Nästa debitering sker på hyresavin för december 2026."},
+    {"paragraph": "Frågor om avin besvaras av kundtjänst vardagar 8–16. Ange kontraktsnummer när du kontaktar oss."}
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "file": "nar07_lonesystem_export.csv",
+  "format": "csv",
+  "source": {"catalogue_id": "NAR-07", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/178"},
+  "description": "Export ur lönesystemet med arbetad tid, frånvaro och lön per månad och anställning, underlag för ett arbetsgivarintyg till a-kassan; två parallella anställningar och en månad utan attesterad tid.",
+  "sheets": [
+    {
+      "name": "Lönesystemexport",
+      "columns": ["personnummer", "namn", "anstallningsnummer", "arbetsstalle", "befattning", "anstallningsform", "loneform", "period", "arbetad_tid_timmar", "overtid_timmar", "sjukfranvaro_timmar", "semester_dagar", "tjanstledighet_timmar", "bruttolon_kr", "semesterersattning_kr", "kommentar"],
+      "rows": [
+        ["19790412-2384", "Anna Sjöberg", "104417", "Hemtjänst Norr", "Undersköterska", "Timavlönad, intermittent", "Timlön", "2025-09", 96.5, 0, 0, 0, 0, 17023, 2043, ""],
+        ["19790412-2384", "Anna Sjöberg", "104417", "Hemtjänst Norr", "Undersköterska", "Timavlönad, intermittent", "Timlön", "2025-10", 112, 0, 0, 0, 0, 19757, 2371, ""],
+        ["19790412-2384", "Anna Sjöberg", "104417", "Hemtjänst Norr", "Undersköterska", "Timavlönad, intermittent", "Timlön", "2025-11", 88.25, 0, 0, 0, 0, 15567, 1868, ""],
+        ["19790412-2384", "Anna Sjöberg", "104417", "Hemtjänst Norr", "Undersköterska", "Timavlönad, intermittent", "Timlön", "2025-12", 131.5, 6, 0, 0, 0, 25102, 3012, ""],
+        ["19790412-2384", "Anna Sjöberg", "104417", "Hemtjänst Norr", "Undersköterska", "Timavlönad, intermittent", "Timlön", "2026-01", 42, 0, 0, 0, 0, 7409, 889, ""],
+        ["19790412-2384", "Anna Sjöberg", "108263", "Kvarnbäckens skola", "Elevassistent", "Särskild visstidsanställning, 75 %", "Månadslön", "2026-01", 118, 0, 0, 0, 0, 19800, 0, ""],
+        ["19790412-2384", "Anna Sjöberg", "104417", "Hemtjänst Norr", "Undersköterska", "Timavlönad, intermittent", "Timlön", "2026-02", 38.5, 0, 0, 0, 0, 6791, 815, ""],
+        ["19790412-2384", "Anna Sjöberg", "108263", "Kvarnbäckens skola", "Elevassistent", "Särskild visstidsanställning, 75 %", "Månadslön", "2026-02", 121.5, 0, 0, 0, 0, 19800, 0, ""],
+        ["19790412-2384", "Anna Sjöberg", "104417", "Hemtjänst Norr", "Undersköterska", "Timavlönad, intermittent", "Timlön", "2026-03", 24, 0, 0, 0, 0, 4234, 508, ""],
+        ["19790412-2384", "Anna Sjöberg", "108263", "Kvarnbäckens skola", "Elevassistent", "Särskild visstidsanställning, 75 %", "Månadslön", "2026-03", 104, 0, 18, 0, 0, 18456, 0, "Sjuk 2026-03-09 – 2026-03-11, karensavdrag dag 1"],
+        ["19790412-2384", "Anna Sjöberg", "104417", "Hemtjänst Norr", "Undersköterska", "Timavlönad, intermittent", "Timlön", "2026-04", null, 0, 0, 0, 0, null, null, "Tidrapport ej attesterad av chef, lön ej utbetald"],
+        ["19790412-2384", "Anna Sjöberg", "108263", "Kvarnbäckens skola", "Elevassistent", "Särskild visstidsanställning, 75 %", "Månadslön", "2026-04", 112.5, 0, 0, 0, 8, 18520, 0, "Tjänstledig utan lön 2026-04-17, 8 timmar"],
+        ["19790412-2384", "Anna Sjöberg", "104417", "Hemtjänst Norr", "Undersköterska", "Timavlönad, intermittent", "Timlön", "2026-05", 36, 0, 0, 0, 0, 6350, 762, ""],
+        ["19790412-2384", "Anna Sjöberg", "108263", "Kvarnbäckens skola", "Elevassistent", "Särskild visstidsanställning, 75 %", "Månadslön", "2026-05", 119, 0, 0, 0, 0, 19800, 0, ""],
+        ["19790412-2384", "Anna Sjöberg", "104417", "Hemtjänst Norr", "Undersköterska", "Timavlönad, intermittent", "Timlön", "2026-06", 118.75, 0, 0, 0, 0, 20948, 2514, ""],
+        ["19790412-2384", "Anna Sjöberg", "108263", "Kvarnbäckens skola", "Elevassistent", "Särskild visstidsanställning, 75 %", "Månadslön", "2026-06", 63, 0, 0, 0, 0, 8100, 4118, "Anställningen upphörde 2026-06-12. Semesterersättning för ej uttagna dagar."],
+        ["19790412-2384", "Anna Sjöberg", "104417", "Hemtjänst Norr", "Undersköterska", "Timavlönad, intermittent", "Timlön", "2026-07", 154, 9.5, 0, 0, 0, 30182, 3622, "Arbetat heltid under semesterperioden"],
+        ["19790412-2384", "Anna Sjöberg", "104417", "Hemtjänst Norr", "Undersköterska", "Timavlönad, intermittent", "Timlön", "2026-08", 127.5, 0, 0, 0, 0, 22491, 2699, ""]
+      ]
+    }
+  ]
+}

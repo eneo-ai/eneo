@@ -1,0 +1,38 @@
+{
+  "file": "int08_yttrande_lansstyrelsen.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "INT-08", "url": "https://e-tjanster.kristianstad.se/oversikt/overview/58"},
+  "description": "Länsstyrelsens samrådsyttrande över ett detaljplaneförslag enligt 5 kap. 14 § PBL, med frågor som kan leda till prövning enligt 11 kap. 10 § PBL och råd enligt 2 kap. PBL.",
+  "letterhead": {"organisation": "Länsstyrelsen Västernorrland", "unit": "Samhällsbyggnadsenheten", "address": "871 86 Härnösand"},
+  "date": "2026-06-10",
+  "diarienummer": "402-4711-2026",
+  "title": "Samråd om detaljplan för Björkängen etapp 2 i Sundsvalls kommun",
+  "blocks": [
+    {"paragraph": "Mottagare: Sundsvalls kommun, stadsbyggnadsnämnden. Er beteckning: SBN-2025-00412."},
+    {"heading": "Planförslaget"},
+    {"paragraph": "Planförslaget, daterat 2026-05-12, möjliggör cirka 65 bostäder i radhus och flerbostadshus i högst fyra våningar, en förskola med sex avdelningar, en mobilitetshubb och ett sammanhängande grönstråk. Dagvatten ska fördröjas i öppna dagvattenytor innan det leds till Björkbäcken. Björkallén förlängs in i området. Planförslaget handläggs med utökat förfarande och har varit tillgängligt för samråd 2026-05-18 – 2026-06-12."},
+    {"heading": "Länsstyrelsens roll"},
+    {"paragraph": "Under samrådet ska Länsstyrelsen enligt 5 kap. 14 § plan- och bygglagen (2010:900), PBL, särskilt ta till vara och samordna statens intressen, verka för att riksintressen tillgodoses och att miljökvalitetsnormer följs, och verka för att bebyggelse inte blir olämplig med hänsyn till människors hälsa eller säkerhet eller till risken för olyckor, översvämning eller erosion. Länsstyrelsen ska också ge råd om tillämpningen av 2 kap. PBL."},
+    {"heading": "Sammanfattande bedömning"},
+    {"paragraph": "Länsstyrelsen bedömer att planförslaget i sin nuvarande utformning inte visar att bebyggelsen blir lämplig med hänsyn till risken för översvämning vid skyfall, och inte visar att miljökvalitetsnormerna för Björkbäcken kan följas. Om dessa frågor inte hanteras inför granskningen kan kommunens beslut att anta planen komma att prövas av Länsstyrelsen enligt 11 kap. 10 § PBL."},
+    {"heading": "Frågor som kan leda till prövning enligt 11 kap. 10 § PBL"},
+    {"heading": "Hälsa och säkerhet – översvämning vid skyfall"},
+    {"paragraph": "Skyfallskarteringen i planbeskrivningen visar vattendjup på 0,3–0,5 meter vid ett regn med 100 års återkomsttid i lågpunkten där förskolan placeras. Kommunen behöver visa hur vattnet avleds ytligt utan att skada byggnader och överväga planbestämmelser om lägsta nivå för färdigt golv och om höjdsättning av mark."},
+    {"heading": "Miljökvalitetsnormer för vatten"},
+    {"paragraph": "Björkbäcken ingår i en vattenförekomst som inte uppnår god ekologisk status. Planbeskrivningen saknar en beräkning av föroreningsbelastningen före och efter exploateringen. Kommunen behöver redovisa att planen inte försvårar möjligheten att följa miljökvalitetsnormerna enligt 5 kap. miljöbalken."},
+    {"heading": "Råd enligt 2 kap. PBL"},
+    {
+      "list": [
+        "Buller: Bullerutredningen redovisar 61 dBA ekvivalent ljudnivå vid fasad mot Björkallén för de närmaste flerbostadshusen. Riktvärdet i 3 § förordningen (2015:216) om trafikbuller vid bostadsbyggnader är 60 dBA. Planen bör säkerställa att minst hälften av bostadsrummen i varje bostad vänds mot en sida där 55 dBA ekvivalent ljudnivå inte överskrids.",
+        "Geoteknik: Den geotekniska utredningen är översiktlig. Stabiliteten i slänten mot Björkbäcken bör utredas innan planen går ut på granskning.",
+        "Förskolegården: Friytan för lek och utevistelse bör redovisas i förhållande till antalet barn och avståndet till Björkallén."
+      ]
+    },
+    {"heading": "Övrigt"},
+    {"paragraph": "Länsstyrelsen vill ta del av samrådsredogörelsen och det reviderade planförslaget inför granskningen."},
+    {"paragraph": "Beslut i detta ärende har fattats av enhetschef Johan Sandberg med planhandläggare Maria Holm som föredragande."},
+    {"signature": {"name": "Johan Sandberg", "role": "Enhetschef, samhällsbyggnadsenheten"}},
+    {"signature": {"name": "Maria Holm", "role": "Planhandläggare"}},
+    {"paragraph": "Kopia till: Lantmäteriet, Trafikverket och Myndigheten för civilt försvar."}
+  ]
+}

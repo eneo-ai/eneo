@@ -1,0 +1,48 @@
+{
+  "file": "utb10_beslut_mottagande_antagning.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "UTB-10", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/285"},
+  "description": "Vuxenutbildningens beslut om mottagande och antagning till komvux på gymnasial nivå, med skäl per ämnesnivå (Gy25) och överklagandehänvisning; ursprungsbeslutet i ett överklagandeärende.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Individ- och arbetsmarknadsförvaltningen, Vuxenutbildningen", "address": "Vuxenutbildningen, 851 85 Sundsvall"},
+  "date": "2026-08-12",
+  "diarienummer": "IAN-2026-01184",
+  "title": "Beslut om mottagande och antagning till kommunal vuxenutbildning på gymnasial nivå",
+  "blocks": [
+    {"paragraph": "Sökande: Sara Lindqvist, 19940316-2382, Lingonstigen 4, 857 31 Sundsvall"},
+    {"paragraph": "Ansökan kom in: 2026-05-12. Sökt studieperiod: 2026-08-24 – 2027-01-17."},
+    {"heading": "Beslut"},
+    {"paragraph": "Vuxenutbildningen har prövat din ansökan. Beslutet gäller varje sökt ämnesnivå för sig enligt tabellen. Utbildning som påbörjas efter den 30 juni 2025 läses som ämnen och nivåer (Gy25)."},
+    {
+      "table": {
+        "columns": ["Ämnesnivå", "Nivåkod", "Poäng", "Studieform", "Mottagande", "Antagning"],
+        "rows": [
+          ["Matematik, nivå 2c", "MATE2C00X", "100", "Distans", "Mottagen", "Antagen"],
+          ["Fysik, nivå 1b", "FYSK1B00X", "150", "Klassrum, dagtid", "Mottagen", "Ej antagen, reserv 4 av 11"],
+          ["Kemi, nivå 1", "KEMI1000X", "100", "Klassrum, dagtid", "Ej mottagen", "–"]
+        ]
+      }
+    },
+    {"heading": "Skäl för beslutet"},
+    {"paragraph": "Matematik, nivå 2c: Du uppfyller villkoren för behörighet i skollagen (2010:800) 20 kap. 20 § och har därför tagits emot och antagits till nivån."},
+    {"paragraph": "Fysik, nivå 1b: Du uppfyller villkoren för behörighet och har tagits emot till nivån enligt skollagen 20 kap. 22 §. Antalet mottagna sökande var större än antalet platser, och ett urval har gjorts enligt 3 kap. 7 § förordningen (2011:1108) om vuxenutbildning. Du har en gymnasieexamen och har i din ansökan angett att du behöver nivån för ett planerat yrkesval. Sökande med högre företräde har antagits först. Du står som reserv och kan erbjudas plats om någon tackar nej före 2026-09-07."},
+    {"paragraph": "Kemi, nivå 1: Enligt ditt slutbetyg från gymnasieskolan (2013) har du betyget E i den dåvarande kursen Kemi 1 (KEMKEM01), som motsvarar Kemi, nivå 1. Du saknar därför inte sådana kunskaper som utbildningen syftar till att ge och uppfyller inte villkoret i skollagen 20 kap. 20 § första stycket 2. Du kan inte tas emot till nivån."},
+    {"heading": "Beslutet har fattats av"},
+    {
+      "signature": {"name": "Maria Eklund", "role": "Rektor, Vuxenutbildningen, enligt delegation från individ- och arbetsmarknadsnämnden"}
+    },
+    {"paragraph": "Beslutet har skickats som vanligt brev till din folkbokföringsadress 2026-08-12."},
+    {"page_break": true},
+    {"heading": "Hur man överklagar"},
+    {"paragraph": "Beslutet om mottagande kan överklagas till Skolväsendets överklagandenämnd (skollagen 28 kap. 12 § första stycket 9). Det gäller i ditt fall beslutet att inte ta emot dig till Kemi, nivå 1."},
+    {"paragraph": "Beslut om antagning efter urval (Fysik, nivå 1b) räknas inte upp bland de beslut som får överklagas enligt skollagen 28 kap. och kan därför inte överklagas till Skolväsendets överklagandenämnd."},
+    {
+      "list": [
+        "Skriv vilket beslut du överklagar och hur du vill att beslutet ska ändras (förvaltningslagen 43 §).",
+        "Skicka överklagandet till Vuxenutbildningen, inte direkt till Skolväsendets överklagandenämnd. Du kan använda e-tjänsten Överklaga beslut fattat av Vuxenutbildningen.",
+        "Överklagandet ska ha kommit in till Vuxenutbildningen inom tre veckor från den dag du fick del av beslutet (förvaltningslagen 44 §).",
+        "Vuxenutbildningen prövar först om överklagandet har kommit in i rätt tid (förvaltningslagen 45 §). Om beslutet inte ändras skickas överklagandet och övriga handlingar till Skolväsendets överklagandenämnd (förvaltningslagen 46 §)."
+      ]
+    },
+    {"paragraph": "Har du frågor om beslutet kan du kontakta Vuxenutbildningens studie- och yrkesvägledare via kommunens kontaktcenter. Ange diarienummer IAN-2026-01184."}
+  ]
+}

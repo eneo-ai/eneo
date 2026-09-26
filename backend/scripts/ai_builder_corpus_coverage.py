@@ -333,6 +333,19 @@ def _smoke_problems(rows: Mapping[str, CaseCoverage], policy: Policy) -> list[st
     return problems
 
 
+def pinned_source_problem(
+    owner: str, catalogue_id: str, url: str, pinned: Mapping[str, frozenset[str]]
+) -> str | None:
+    """Why a claimed source is not pinned evidence, or None. Cases and fixture specs share this rule."""
+
+    urls = pinned.get(catalogue_id)
+    if urls is None:
+        return f"{owner}: source '{catalogue_id}' is not in the pinned sources"
+    if url not in urls:
+        return f"{owner}: url {url} is not a pinned url of '{catalogue_id}'"
+    return None
+
+
 def _source_problems(
     cases: Sequence[Any], pinned: Mapping[str, frozenset[str]]
 ) -> list[str]:
@@ -341,15 +354,11 @@ def _source_problems(
         if case.source is None:
             problems.append(f"case '{case.case_id}' has no source")
             continue
-        urls = pinned.get(case.source.catalogue_id)
-        if urls is None:
-            problems.append(
-                f"case '{case.case_id}': source '{case.source.catalogue_id}' is not in the pinned sources"
-            )
-        elif case.source.url not in urls:
-            problems.append(
-                f"case '{case.case_id}': url {case.source.url} is not a pinned url of '{case.source.catalogue_id}'"
-            )
+        problem = pinned_source_problem(
+            f"case '{case.case_id}'", case.source.catalogue_id, case.source.url, pinned
+        )
+        if problem is not None:
+            problems.append(problem)
     return problems
 
 

@@ -1,0 +1,74 @@
+{
+  "file": "oms01_ssbtek_registersvar.json",
+  "format": "json",
+  "source": {"catalogue_id": "OMS-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/180"},
+  "description": "Registersvar från SSBTEK (Sammansatt bastjänst ekonomiskt bistånd) i verksamhetssystemets JSON-export: en förfrågan per hushåll och ett svar per källa, med utbetalningar, pågående ärenden och tomma svar.",
+  "data": {
+    "forfragan": {
+      "id": "SSBTEK-2281-20260921-000731",
+      "tjanst": "Sammansatt bastjänst ekonomiskt bistånd (SSBTEK)",
+      "stalld": "2026-09-21T09:14:05+02:00",
+      "kommun": {"namn": "Sundsvalls kommun", "kommunkod": "2281"},
+      "handlaggare": "Socialsekreterare, försörjningsstöd, enhet Norr",
+      "arende": {"diarienummer": "IAN-2026-04418", "ansokan_avser_manad": "2026-10", "typ": "Fortsatt ansökan"},
+      "personer": [
+        {"personnummer": "19880521-2381", "roll": "Sökande"},
+        {"personnummer": "20160904-2385", "roll": "Barn i hushållet"},
+        {"personnummer": "20230218-2395", "roll": "Barn i hushållet"}
+      ]
+    },
+    "svar": [
+      {
+        "kalla": "Försäkringskassan",
+        "status": "Svar",
+        "personnummer": "19880521-2381",
+        "utbetalningar": [
+          {"forman": "Barnbidrag inklusive flerbarnstillägg", "avser_period": "2026-08", "utbetalningsdag": "2026-08-20", "belopp_kr": 2650},
+          {"forman": "Bostadsbidrag", "avser_period": "2026-08", "utbetalningsdag": "2026-08-25", "belopp_kr": 2184},
+          {"forman": "Barnbidrag inklusive flerbarnstillägg", "avser_period": "2026-09", "utbetalningsdag": "2026-09-18", "belopp_kr": 2650},
+          {"forman": "Bostadsbidrag", "avser_period": "2026-09", "utbetalningsdag": "2026-09-25", "belopp_kr": 2184}
+        ],
+        "kommande_utbetalningar": [
+          {"forman": "Barnbidrag inklusive flerbarnstillägg", "avser_period": "2026-10", "utbetalningsdag": "2026-10-20", "belopp_kr": 2650},
+          {"forman": "Bostadsbidrag", "avser_period": "2026-10", "utbetalningsdag": "2026-10-23", "belopp_kr": 2184}
+        ],
+        "pagaende_arenden": [
+          {
+            "forman": "Underhållsstöd",
+            "ansokan_inkom": "2026-08-20",
+            "status": "Under handläggning",
+            "avser_barn": ["20160904-2385", "20230218-2395"]
+          }
+        ]
+      },
+      {
+        "kalla": "Arbetsförmedlingen",
+        "status": "Svar",
+        "personnummer": "19880521-2381",
+        "inskrivning": {"inskriven": true, "inskriven_fran": "2026-03-02", "sokandekategori": "Arbetslös", "senaste_aktivitetsrapport": "2026-09-14", "aktivitetsrapport_godkand": true},
+        "atgarder": [
+          {"typ": "Arbetsmarknadsutbildning, lager och logistik", "fran": "2026-10-12", "till": "2027-01-29", "status": "Beslutad"}
+        ]
+      },
+      {"kalla": "Arbetslöshetskassorna", "status": "Inga uppgifter", "personnummer": "19880521-2381", "meddelande": "Ingen arbetslöshetskassa har registrerade uppgifter om personen."},
+      {"kalla": "Centrala studiestödsnämnden", "status": "Inga uppgifter", "personnummer": "19880521-2381", "meddelande": "Inga beslut om studiestöd för perioden."},
+      {"kalla": "Pensionsmyndigheten", "status": "Inga uppgifter", "personnummer": "19880521-2381", "meddelande": null},
+      {
+        "kalla": "Skatteverket",
+        "status": "Svar",
+        "personnummer": "19880521-2381",
+        "folkbokforing": {
+          "adress": "Kvarnbäcksvägen 12 lgh 1102",
+          "postnummer": "856 44",
+          "postort": "Sundsvall",
+          "folkbokford_pa_adressen_fran": "2021-04-01",
+          "personer_pa_lagenheten": ["19880521-2381", "20160904-2385", "20230218-2395"]
+        },
+        "beskattningsbeslut": [
+          {"inkomstar": 2025, "overskott_av_tjanst_kr": 142300, "overskott_av_kapital_kr": 0, "slutlig_skatt_kr": 21874}
+        ]
+      }
+    ],
+    "sammanfattning": {"kallor_med_svar": 3, "kallor_utan_uppgifter": 3, "kallor_med_fel": 0}
+  }
+}

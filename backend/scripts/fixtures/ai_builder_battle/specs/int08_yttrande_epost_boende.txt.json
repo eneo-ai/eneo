@@ -1,0 +1,35 @@
+{
+  "file": "int08_yttrande_epost_boende.txt",
+  "format": "txt",
+  "source": {"catalogue_id": "INT-08", "url": "https://e-tjanster.kristianstad.se/oversikt/overview/58"},
+  "description": "Ett diariefört e-postmeddelande med synpunkter på ett detaljplanesamråd från en boende som inte anger fastighetsbeteckning; kom in efter samrådstidens slut och anger ett annat slutdatum.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Stadsbyggnadskontoret, registratur"},
+  "date": "2026-06-15",
+  "diarienummer": "SBN-2025-00412",
+  "title": "Inkommen e-post: Synpunkter på bygget vid Björkallén",
+  "blocks": [
+    {
+      "list": [
+        "Från: Per-Olof Nyström <po.nystrom@example.com>",
+        "Till: Stadsbyggnadsnämndens funktionsbrevlåda",
+        "Skickat: måndag 15 juni 2026 06:52",
+        "Ämne: Synpunkter på bygget vid Björkallén"
+      ]
+    },
+    {"paragraph": "Hej!"},
+    {"paragraph": "Enligt lappen vi fick i brevlådan pågår samrådet till den 15 juni, så jag hoppas att det här kommer med."},
+    {"paragraph": "Vi har bott vid Björkallén sedan 1987. Redan i dag kör många genom Björkallén för att slippa rondellen vid Birsta. Om gatan förlängs in i det nya området med 65 bostäder och en förskola kommer det att bli köer morgon och eftermiddag precis utanför vår infart."},
+    {"paragraph": "Vår tomt sluttar ner mot Björkallén. Vid skyfallet i augusti 2023 rann vattnet från åkern rakt in i vårt garage. Nu ska åkern asfalteras och bebyggas. Vart ska vattnet ta vägen?"},
+    {"paragraph": "Jag vill också säga att vi inte fick något brev om planen, bara en lapp i brevlådan. Är det verkligen rätt sätt att informera oss som bor närmast?"},
+    {"paragraph": "Jag begär:"},
+    {
+      "list": [
+        "att Björkallén inte förlängs utan att området får en egen infart från Tallmovägen,",
+        "att kommunen visar hur dagvattnet från området ska ledas bort från fastigheterna längs Björkallén,",
+        "att vi som bor längs Björkallén får brev när planen ställs ut nästa gång."
+      ]
+    },
+    {"paragraph": "Med vänlig hälsning"},
+    {"signature": {"name": "Per-Olof Nyström", "role": "Björkallén 23"}}
+  ]
+}

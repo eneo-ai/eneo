@@ -1,0 +1,42 @@
+{
+  "file": "utb01_veckomeny_v41.xlsx",
+  "format": "xlsx",
+  "source": {"catalogue_id": "UTB-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/133"},
+  "description": "Skolrestaurangens veckomeny med allergenmatris enligt förordning (EU) nr 1169/2011 bilaga II, kökets referens när en anpassad specialkostmeny tas fram.",
+  "sheets": [
+    {
+      "name": "Meny v.41",
+      "columns": ["Dag", "Datum", "Huvudrätt", "Vegetariskt alternativ", "Tillbehör", "Efterrätt"],
+      "rows": [
+        ["Måndag", "2026-10-05", "Köttbullar med potatismos och lingon", "Vegobullar med potatismos och lingon", "Råkostsallad, knäckebröd, mjölk", "–"],
+        ["Tisdag", "2026-10-06", "Fiskgratäng med dillsås och kokt potatis", "Linsbiffar med dillsås och kokt potatis", "Ärtor och majs, knäckebröd, mjölk", "–"],
+        ["Onsdag", "2026-10-07", "Kycklingwok med jordnötssås och jasminris", "Tofuwok med jordnötssås och jasminris", "Asiatisk kålsallad med sesamdressing", "–"],
+        ["Torsdag", "2026-10-08", "Ärtsoppa med skinka", "Vegetarisk ärtsoppa", "Senap, knäckebröd", "Pannkakor med sylt"],
+        ["Fredag", "2026-10-09", "Pasta bolognese", "Pasta med tomat- och bönsås", "Riven ost, grönsallad", "Äppelkaka med mandelbotten och vaniljsås"]
+      ]
+    },
+    {
+      "name": "Allergener v.41",
+      "columns": ["Rätt", "Gluten", "Kräftdjur", "Ägg", "Fisk", "Jordnötter", "Sojabönor", "Mjölk", "Nötter", "Selleri", "Senap", "Sesamfrön", "Svaveldioxid och sulfit", "Lupin", "Blötdjur"],
+      "rows": [
+        ["Köttbullar med potatismos och lingon", "X", "–", "X", "–", "–", "–", "X", "–", "–", "–", "–", "–", "–", "–"],
+        ["Vegobullar med potatismos och lingon", "X", "–", "–", "–", "–", "X", "X", "–", "–", "–", "–", "–", "–", "–"],
+        ["Fiskgratäng med dillsås och kokt potatis", "X", "–", "–", "X", "–", "–", "X", "–", "–", "–", "–", "–", "–", "–"],
+        ["Linsbiffar med dillsås och kokt potatis", "X", "–", "X", "–", "–", "–", "X", "–", "X", "–", "–", "–", "–", "–"],
+        ["Kycklingwok med jordnötssås och jasminris", "X", "–", "–", "–", "X", "X", "–", "–", "–", "–", "X", "–", "–", "–"],
+        ["Tofuwok med jordnötssås och jasminris", "X", "–", "–", "–", "X", "X", "–", "–", "–", "–", "X", "–", "–", "–"],
+        ["Asiatisk kålsallad med sesamdressing", "–", "–", "–", "–", "–", "X", "–", "–", "–", "–", "X", "–", "–", "–"],
+        ["Ärtsoppa med skinka", "–", "–", "–", "–", "–", "–", "–", "–", "X", "–", "–", "–", "–", "–"],
+        ["Vegetarisk ärtsoppa", "–", "–", "–", "–", "–", "–", "–", "–", "X", "–", "–", "–", "–", "–"],
+        ["Knäckebröd", "X", "–", "–", "–", "–", "–", "–", "–", "–", "–", "–", "–", "–", "–"],
+        ["Mjölk", "–", "–", "–", "–", "–", "–", "X", "–", "–", "–", "–", "–", "–", "–"],
+        ["Senap", "–", "–", "–", "–", "–", "–", "–", "–", "–", "X", "–", "X", "–", "–"],
+        ["Pannkakor med sylt", "X", "–", "X", "–", "–", "–", "X", "–", "–", "–", "–", "–", "–", "–"],
+        ["Pasta bolognese", "X", "–", "–", "–", "–", "–", "–", "–", "X", "–", "–", "–", "–", "–"],
+        ["Pasta med tomat- och bönsås", "X", "–", "–", "–", "–", "–", "–", "–", "X", "–", "–", "–", "–", "–"],
+        ["Riven ost", "–", "–", "–", "–", "–", "–", "X", "–", "–", "–", "–", "–", "–", "–"],
+        ["Äppelkaka med mandelbotten och vaniljsås", "X", "–", "X", "–", "–", "–", "X", "X", "–", "–", "–", "–", "–", "–"]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "file": "utb01_lakarintyg_specialkost.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "UTB-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/133"},
+  "description": "Läkarintyg om behov av specialkost i skolan, bilaga till ansökan om specialkost; anger diagnos, livsmedel som ska undvikas, spårmängder och giltighet för läsåret.",
+  "letterhead": {"organisation": "Region Västernorrland", "unit": "Barn- och ungdomsmedicinska mottagningen Sundsvall"},
+  "date": "2026-08-19",
+  "title": "Läkarintyg – behov av specialkost i förskola och skola",
+  "blocks": [
+    {"paragraph": "Intyget har utfärdats på begäran av vårdnadshavare och är avsett för skolans kostenhet. Det innehåller uppgifter om barnets hälsa."},
+    {"heading": "Barnets uppgifter"},
+    {
+      "table": {
+        "columns": ["Uppgift", "Värde"],
+        "rows": [
+          ["Namn", "Ella Nordin"],
+          ["Personnummer", "20180611-2387"],
+          ["Skola och klass", "Kvarnbäckens skola, klass 2B"],
+          ["Vårdnadshavare", "Jonas Nordin, 19860927-2391, 070-174 06 47"]
+        ]
+      }
+    },
+    {"heading": "Diagnos"},
+    {
+      "list": [
+        "Nötallergi. Anafylaktisk reaktion i november 2024 efter att ha ätit en kaka som innehöll nötter.",
+        "Laktosintolerans."
+      ]
+    },
+    {"heading": "Kost som ska undvikas"},
+    {
+      "table": {
+        "columns": ["Livsmedel", "Ska undvikas", "Tål spår", "Kommentar"],
+        "rows": [
+          ["Nötter", "Ja", "Nej", "Även produkter märkta ”kan innehålla spår av nötter”."],
+          ["Laktos", "Ja", "Ja", "Laktosfria mejeriprodukter går bra. Tål hårdost och smör."]
+        ]
+      }
+    },
+    {"heading": "Vid allergisk reaktion"},
+    {"paragraph": "Ella har ordinerats adrenalin i autoinjektor, 150 mikrogram, och antihistamin. Skolan har fått en skriftlig handlingsplan från mottagningen. Vid tecken på allergisk reaktion efter en måltid ska handlingsplanen följas och 112 larmas."},
+    {"heading": "Intygets giltighet"},
+    {"paragraph": "Intyget gäller läsåret 2026/2027, till och med 2027-06-30. Ett nytt intyg behövs inför varje läsår."},
+    {"signature": {"name": "Karin Wallin", "role": "Leg. läkare, specialist i barn- och ungdomsmedicin"}}
+  ]
+}

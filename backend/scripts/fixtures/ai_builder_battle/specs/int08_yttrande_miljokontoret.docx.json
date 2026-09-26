@@ -1,0 +1,36 @@
+{
+  "file": "int08_yttrande_miljokontoret.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "INT-08", "url": "https://e-tjanster.kristianstad.se/oversikt/overview/58"},
+  "description": "Miljökontorets tjänsteskrivelse med förslag till miljönämndens yttrande över ett detaljplanesamråd: buller, förorenad mark, dagvatten och förskolans utemiljö.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Miljökontoret", "address": "851 85 Sundsvall"},
+  "date": "2026-06-04",
+  "diarienummer": "MN-2026-00731",
+  "title": "Tjänsteskrivelse – Yttrande över samrådshandling för detaljplan för Björkängen etapp 2",
+  "blocks": [
+    {"heading": "Förslag till beslut"},
+    {"paragraph": "Miljönämnden lämnar yttrande till stadsbyggnadsnämnden i ärende SBN-2025-00412 enligt miljökontorets förslag i denna tjänsteskrivelse."},
+    {"heading": "Ärendet"},
+    {"paragraph": "Stadsbyggnadsnämnden har skickat samrådshandlingar för detaljplan för Björkängen etapp 2 på remiss till miljönämnden. Synpunkter ska ha kommit in senast 2026-06-12. Planen möjliggör cirka 65 bostäder, en förskola med sex avdelningar och en mobilitetshubb."},
+    {"heading": "Bedömning"},
+    {"heading": "Buller"},
+    {"paragraph": "Bullerutredningen redovisar 61 dBA ekvivalent ljudnivå vid de fasader som vetter mot Björkallén. Det överskrider riktvärdet 60 dBA i förordningen (2015:216) om trafikbuller vid bostadsbyggnader. Miljökontoret anser att planen ska innehålla bestämmelser om att bostäderna ska ha tillgång till en ljuddämpad sida."},
+    {"heading": "Förorenad mark"},
+    {"paragraph": "Inom planområdet fanns en plantskola mellan 1962 och 1988. Rester av bekämpningsmedel kan finnas i marken. Miljökontoret bedömer att en översiktlig markundersökning behövs före granskning, särskilt för den yta där förskolan och förskolegården planeras."},
+    {"heading": "Dagvatten"},
+    {"paragraph": "Miljökontoret delar planbeskrivningens inriktning med öppna dagvattenytor, men saknar en beräkning av hur mycket föroreningar som når Björkbäcken före och efter exploateringen."},
+    {"heading": "Förskolans utemiljö"},
+    {"paragraph": "Förskolegården ligger cirka 40 meter från Björkallén. Enligt Naturvårdsverkets vägledning om buller på skolgårdar bör den ekvivalenta ljudnivån inte överstiga 50 dBA på de delar av gården som är avsedda för lek, vila och pedagogisk verksamhet. Bullerutredningen behöver kompletteras med beräkningar för gården."},
+    {"heading": "Förslag till yttrande"},
+    {
+      "list": [
+        "Planen bör reglera att bostäder mot Björkallén har en ljuddämpad sida.",
+        "En översiktlig markundersökning ska göras före granskning.",
+        "Dagvattenutredningen bör kompletteras med en föroreningsberäkning för Björkbäcken.",
+        "Bullerutredningen bör kompletteras med ljudnivåer på förskolegården."
+      ]
+    },
+    {"signature": {"name": "Lina Forsberg", "role": "Miljöinspektör"}},
+    {"signature": {"name": "Henrik Ahl", "role": "Miljöchef"}}
+  ]
+}

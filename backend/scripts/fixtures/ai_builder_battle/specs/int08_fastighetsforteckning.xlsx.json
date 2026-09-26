@@ -1,0 +1,33 @@
+{
+  "file": "int08_fastighetsforteckning.xlsx",
+  "format": "xlsx",
+  "source": {"catalogue_id": "INT-08", "url": "https://e-tjanster.kristianstad.se/oversikt/overview/58"},
+  "description": "Fastighetsförteckning till en detaljplan (sakägarkretsen): lagfarna ägare per fastighet inom och utanför planområdet, och rättigheter och gemensamhetsanläggningar som berörs.",
+  "sheets": [
+    {
+      "name": "Fastigheter",
+      "columns": ["Fastighet", "Läge", "Lagfaren ägare", "Andel", "Postadress", "Berörs av planen"],
+      "rows": [
+        ["Sundsvall Björkängen 1:1", "Inom planområdet", "Sundsvalls kommun", "1/1", "851 85 Sundsvall", "Kvartersmark för bostäder och förskola, gata och park"],
+        ["Sundsvall Björkängen 1:14", "Inom planområdet", "Ann-Sofie Holmgren", "1/2", "Tallmovägen 3, 856 52 Sundsvall", "Del av fastigheten blir gata när Björkallén förlängs"],
+        ["Sundsvall Björkängen 1:14", "Inom planområdet", "Tomas Holmgren", "1/2", "Tallmovägen 3, 856 52 Sundsvall", "Del av fastigheten blir gata när Björkallén förlängs"],
+        ["Sundsvall Björkängen 1:18", "Utanför planområdet", "Bostadsrättsföreningen Björkängen 1", "1/1", "c/o Styrelsen, Björkallén 12, 856 52 Sundsvall", "Gränsar mot kvarter med bostäder i högst fyra våningar"],
+        ["Sundsvall Björkängen 2:3", "Utanför planområdet", "Per-Olof Nyström", "1/2", "Björkallén 23, 856 52 Sundsvall", "Gränsar mot förlängd Björkallén"],
+        ["Sundsvall Björkängen 2:3", "Utanför planområdet", "Gunilla Nyström", "1/2", "Björkallén 23, 856 52 Sundsvall", "Gränsar mot förlängd Björkallén"],
+        ["Sundsvall Björkängen 2:4", "Utanför planområdet", "Leila Moradi", "1/1", "Björkallén 25, 856 52 Sundsvall", "Gränsar mot förlängd Björkallén"],
+        ["Sundsvall Björkängen 2:7", "Utanför planområdet", "Norrbacka Fastigheter AB", "1/1", "Box 118, 851 02 Sundsvall", "Gränsar mot park och dagvattenyta"],
+        ["Sundsvall Tallmon 3:9", "Utanför planområdet", "Erik Lundqvist", "1/1", "Tallmovägen 9, 856 52 Sundsvall", "Nedströms dagvattenavledningen mot Björkbäcken"]
+      ]
+    },
+    {
+      "name": "Rättigheter",
+      "columns": ["Rättighet", "Beteckning", "Belastar", "Till förmån för", "Ändamål", "Påverkan av planen"],
+      "rows": [
+        ["Ledningsrätt", "2281-09/112", "Sundsvall Björkängen 1:1", "Kustnät Elnät AB", "Starkströmsledning, markkabel", "Ledningen ligger i blivande gata; u-område säkerställs i plankartan"],
+        ["Avtalsservitut", "2281IM-87/4410.1", "Sundsvall Björkängen 1:14", "Sundsvall Björkängen 1:18", "Väg", "Vägen ersätts av förlängd Björkallén; servitutet kan upphävas vid fastighetsbildning"],
+        ["Gemensamhetsanläggning", "Sundsvall Björkängen ga:2", "Sundsvall Björkängen 2:1–2:9", "Delägande fastigheter", "Enskild väg, Björkallén norra delen", "Björkallén blir allmän gata med kommunalt huvudmannaskap; anläggningen omprövas"],
+        ["Ledningsrätt", "2281-14/57", "Sundsvall Björkängen 1:1", "Sundsvalls kommun som VA-huvudman", "Vatten och avlopp", "Berörs inte"]
+      ]
+    }
+  ]
+}

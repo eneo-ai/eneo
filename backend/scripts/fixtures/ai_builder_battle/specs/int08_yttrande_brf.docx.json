@@ -1,0 +1,62 @@
+{
+  "file": "int08_yttrande_brf.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "INT-08", "url": "https://e-tjanster.kristianstad.se/oversikt/overview/58"},
+  "description": "En bostadsrättsförenings samrådsyttrande som sakägare, med krav per sakfråga och en namnlista som bilaga; anger ett annat datum på planförslaget än samrådshandlingarna.",
+  "letterhead": {"organisation": "Bostadsrättsföreningen Björkängen 1", "unit": "Styrelsen", "address": "Björkallén 12, 856 52 Sundsvall"},
+  "date": "2026-06-08",
+  "diarienummer": "SBN-2025-00412",
+  "title": "Yttrande över samrådsförslag till detaljplan för Björkängen etapp 2",
+  "blocks": [
+    {"paragraph": "Till: Sundsvalls kommun, stadsbyggnadsnämnden, 851 85 Sundsvall"},
+    {"paragraph": "Bostadsrättsföreningen Björkängen 1 äger fastigheten Sundsvall Björkängen 1:18 med 48 lägenheter och gränsar mot planområdet i norr. Föreningen har tagit del av planförslaget daterat 10 maj 2026 och lämnar följande synpunkter som sakägare."},
+    {"heading": "1. Byggnadshöjd och insyn"},
+    {"paragraph": "Flerbostadshusen i fyra våningar placeras cirka 18 meter från vår gavel. Våra lägenheter mot söder får sämre ljus och full insyn från balkongerna. Föreningen motsätter sig fyra våningar i kvarteret närmast vår fastighet och begär att husen där begränsas till två våningar."},
+    {"heading": "2. Trafik på Björkallén"},
+    {"paragraph": "Björkallén saknar trottoar på norra delen och används redan i dag av barn på väg till Kvarnbäckens skola. När gatan förlängs och en förskola med sex avdelningar byggs ökar trafiken med hämtning och lämning morgon och eftermiddag. Planbeskrivningen redovisar ingen trafikprognos för Björkallén."},
+    {"heading": "3. Parkering"},
+    {"paragraph": "Planen ersätter parkering vid bostäderna med en mobilitetshubb. Vi befarar att nya boende och besökare kommer att parkera längs Björkallén och på vår gästparkering."},
+    {"heading": "4. Dagvatten"},
+    {"paragraph": "Vid skyfallet i augusti 2023 fick föreningen vatten i källarförråden i hus B. Åkermarken som nu ska bebyggas tar i dag upp mycket regn. Föreningen vill veta hur kommunen säkerställer att vattnet inte leds mot vår fastighet."},
+    {"heading": "Föreningens krav"},
+    {
+      "list": [
+        "Högst två våningar i kvarteret närmast Sundsvall Björkängen 1:18.",
+        "En trafikutredning för Björkallén och trottoar längs hela gatan innan området byggs ut.",
+        "Redovisning av hur parkering för nya boende och besökare löses inom planområdet.",
+        "En skyfallsutredning som visar vattnets väg förbi vår fastighet."
+      ]
+    },
+    {"paragraph": "Yttrandet beslutades vid styrelsemöte 2026-06-02 och stöds av de medlemmar som har skrivit under i bilaga 1. Föreningen vill bli underrättad när planförslaget går ut på granskning."},
+    {"signature": {"name": "Karin Åström", "role": "Ordförande"}},
+    {"signature": {"name": "Mikael Rönnberg", "role": "Sekreterare"}},
+    {"page_break": true},
+    {"heading": "Bilaga 1 – Medlemmar som står bakom yttrandet"},
+    {
+      "table": {
+        "columns": ["Namn", "Lägenhet", "Adress"],
+        "rows": [
+          ["Karin Åström", "1103", "Björkallén 12"],
+          ["Mikael Rönnberg", "1201", "Björkallén 12"],
+          ["Siv Nordqvist", "1002", "Björkallén 12"],
+          ["Ahmed Yusuf", "1004", "Björkallén 12"],
+          ["Maja Lindgren", "1101", "Björkallén 12"],
+          ["Jukka Heikkinen", "1202", "Björkallén 12"],
+          ["Britt-Marie Söderström", "1301", "Björkallén 14"],
+          ["Oskar Hellström", "1302", "Björkallén 14"],
+          ["Elin Hellström", "1302", "Björkallén 14"],
+          ["Goran Petrović", "1003", "Björkallén 14"],
+          ["Ingrid Östlund", "1104", "Björkallén 14"],
+          ["Farah Karimi", "1203", "Björkallén 14"],
+          ["Lars-Göran Berg", "1304", "Björkallén 16"],
+          ["Anneli Berg", "1304", "Björkallén 16"],
+          ["Tove Sandström", "1001", "Björkallén 16"],
+          ["Kent Bäckström", "1102", "Björkallén 16"],
+          ["Marianne Öhman", "1204", "Björkallén 16"],
+          ["Sven-Erik Wikström", "1303", "Björkallén 16"],
+          ["Per-Olof Nyström", "–", "Björkallén 23"]
+        ]
+      }
+    }
+  ]
+}

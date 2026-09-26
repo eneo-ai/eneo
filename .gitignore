@@ -56,6 +56,8 @@ CLAUDE.md
 install-claude.sh
 devcontainer.json
 specs/
+# The Builder benchmark's fixture content specs are tracked data, not spec-kit specs.
+!/backend/scripts/fixtures/ai_builder_battle/specs/
 .serena/
 .speckit/
 .playwright-mcp/

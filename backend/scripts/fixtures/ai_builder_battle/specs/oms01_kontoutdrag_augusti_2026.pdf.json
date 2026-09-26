@@ -1,0 +1,70 @@
+{
+  "file": "oms01_kontoutdrag_augusti_2026.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "OMS-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/180"},
+  "description": "Bankens kontoutdrag för en månad, bilaga till en ansökan om ekonomiskt bistånd; transaktionstabellen löper över sidbrytningen och visar återkommande Swish-insättningar från privatpersoner.",
+  "letterhead": {"organisation": "Kustlandets Bank AB", "unit": "Kontoutdrag privatkonto", "address": "Box 314, 851 05 Sundsvall"},
+  "date": "2026-09-01",
+  "title": "Kontoutdrag 2026-08-01 – 2026-08-31",
+  "blocks": [
+    {"paragraph": "Kontohavare: Sofia Berglund, Kvarnbäcksvägen 12 lgh 1102, 856 44 Sundsvall"},
+    {"paragraph": "Konto: Privatkonto 7777-12 345 678. Valuta: SEK. Kontot har ingen kredit."},
+    {
+      "table": {
+        "columns": ["Ingående saldo 2026-08-01", "Summa insättningar", "Summa uttag", "Utgående saldo 2026-08-31"],
+        "rows": [
+          ["5 480,30", "24 691,00", "-20 211,80", "9 959,50"]
+        ]
+      }
+    },
+    {"heading": "Transaktioner"},
+    {
+      "table": {
+        "columns": ["Bokföringsdag", "Text", "Belopp", "Saldo"],
+        "rows": [
+          ["2026-08-03", "Kortköp 260801 LIVS HAGA", "-145,20", "5 335,10"],
+          ["2026-08-03", "Swish från A NORBERG 070-174 06 58", "400,00", "5 735,10"],
+          ["2026-08-03", "Kortköp 260803 MATBODEN KVARNBÄCKEN", "-612,40", "5 122,70"],
+          ["2026-08-04", "Autogiro HEMFÖRSÄKRING NORRA", "-189,00", "4 933,70"],
+          ["2026-08-05", "Kortköp 260805 APOTEK STENSTAN", "-214,50", "4 719,20"],
+          ["2026-08-06", "Kortköp 260806 LIVS HAGA", "-387,90", "4 331,30"],
+          ["2026-08-07", "Uttag bankomat SUNDSVALL C", "-500,00", "3 831,30"],
+          ["2026-08-10", "Kortköp 260808 LEKLAND BIRSTA", "-120,00", "3 711,30"],
+          ["2026-08-10", "Swish från A NORBERG 070-174 06 58", "400,00", "4 111,30"],
+          ["2026-08-10", "Kortköp 260810 MATBODEN KVARNBÄCKEN", "-845,20", "3 266,10"],
+          ["2026-08-11", "E-faktura ELHANDEL NORR juli", "-612,00", "2 654,10"],
+          ["2026-08-12", "Kortköp 260812 BARNKLÄDER GALLERIAN", "-449,00", "2 205,10"],
+          ["2026-08-13", "Kortköp 260813 LIVS HAGA", "-256,35", "1 948,75"],
+          ["2026-08-14", "Swish till IFK KVARNBÄCKEN F10 höstavgift", "-300,00", "1 648,75"],
+          ["2026-08-17", "Kortköp 260815 LIVS HAGA", "-233,10", "1 415,65"],
+          ["2026-08-17", "Kortköp 260816 CAFÉ STORTORGET", "-86,00", "1 329,65"],
+          ["2026-08-17", "Swish från A NORBERG 070-174 06 58", "400,00", "1 729,65"],
+          ["2026-08-17", "Kortköp 260817 MATBODEN KVARNBÄCKEN", "-731,85", "997,80"],
+          ["2026-08-18", "E-faktura MOBILOPERATÖR augusti", "-249,00", "748,80"],
+          ["2026-08-19", "Kortköp 260819 KOLLEKTIVTRAFIK MÅNADSBILJETT", "-540,00", "208,80"],
+          ["2026-08-20", "Insättning FÖRSÄKRINGSKASSAN BARNBIDRAG", "2 650,00", "2 858,80"],
+          ["2026-08-20", "Kortköp 260820 LIVS HAGA", "-198,70", "2 660,10"],
+          ["2026-08-21", "Kortköp 260821 MATBODEN KVARNBÄCKEN", "-904,10", "1 756,00"],
+          ["2026-08-24", "Kortköp 260822 LIVS HAGA", "-312,80", "1 443,20"],
+          ["2026-08-24", "Swish från A NORBERG 070-174 06 58", "400,00", "1 843,20"],
+          ["2026-08-24", "Kortköp 260824 APOTEK STENSTAN", "-89,00", "1 754,20"],
+          ["2026-08-25", "Insättning FÖRSÄKRINGSKASSAN BOSTADSBIDRAG", "2 184,00", "3 938,20"],
+          ["2026-08-25", "Autogiro HANDELSKREDIT delbetalning 7 av 24", "-450,00", "3 488,20"],
+          ["2026-08-26", "Insättning SUNDSVALLS KOMMUN IAF", "16 357,00", "19 845,20"],
+          ["2026-08-26", "Kortköp 260826 MATBODEN KVARNBÄCKEN", "-1 124,60", "18 720,60"],
+          ["2026-08-27", "Swish från M BERGLUND underhåll aug", "1 500,00", "20 220,60"],
+          ["2026-08-27", "Kortköp 260827 SKOR OCH KLÄDER STENSTAN", "-799,00", "19 421,60"],
+          ["2026-08-28", "Bankgiro BOSTADS AB KVARNBÄCKEN hyra sept", "-8 450,00", "10 971,60"],
+          ["2026-08-28", "Kortköp 260828 LIVS HAGA", "-342,25", "10 629,35"],
+          ["2026-08-31", "Kortköp 260829 PIZZERIA KVARNBÄCKEN", "-189,00", "10 440,35"],
+          ["2026-08-31", "Kortköp 260830 LIVS HAGA", "-167,45", "10 272,90"],
+          ["2026-08-31", "Swish från A NORBERG 070-174 06 58", "400,00", "10 672,90"],
+          ["2026-08-31", "Kortköp 260831 MATBODEN KVARNBÄCKEN", "-688,40", "9 984,50"],
+          ["2026-08-31", "Årsavgift bankkort 1/12", "-25,00", "9 959,50"]
+        ]
+      }
+    },
+    {"paragraph": "Utgående saldo 2026-08-31: 9 959,50 kr."},
+    {"paragraph": "Granska kontoutdraget. Om du upptäcker en felaktig transaktion ska du anmäla den till banken utan onödigt dröjsmål."}
+  ]
+}

@@ -66,6 +66,11 @@ def test_generator_is_deterministic_and_portable_with_pinned_protocol(
 
     assert second_content_hashes == first_content_hashes
     assert _fixture_hashes(fixture_dir) == first_hashes
+    # The hand-built fixtures render without fonts, so their tracked bytes reproduce on any machine.
+    tracked = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))["fixtures"]
+    assert {
+        name: first_content_hashes[name] for name in generator.GENERATED_FIXTURE_NAMES
+    } == {name: tracked[name] for name in generator.GENERATED_FIXTURE_NAMES}
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["version"] == generator.MANIFEST_VERSION
     assert manifest["fixtures"] == first_content_hashes
