@@ -340,7 +340,12 @@ function AssistantMessage({
             if (!part.text.trim()) return null;
             const streamingThis = isStreaming && part === textParts.at(-1);
             return (
-              <CitationSourcesProvider key={index} value={sources} onOpenSource={openSource}>
+              <CitationSourcesProvider
+                key={index}
+                value={sources}
+                prefix={message.id}
+                onOpenSource={openSource}
+              >
                 <MessageResponse
                   className="font-voice text-ax-text text-base leading-[1.62]"
                   remarkPlugins={remarkPlugins}

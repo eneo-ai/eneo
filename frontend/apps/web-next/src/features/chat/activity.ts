@@ -1,4 +1,5 @@
 import type { Schema } from "@/lib/api/models";
+import { asString, hostOf } from "@/lib/chat/metadata";
 import type { EneoUIMessage, KnowledgeOrigin } from "@/lib/chat/types";
 import { mcpReferencesFromParts, mergeSources, type SourceChip } from "./message-parts";
 import { eneoToolMetadata, isSkillCall } from "./tool-presentation";
@@ -71,10 +72,6 @@ function eneoMetadata(value: unknown): Record<string, unknown> {
   return eneo && typeof eneo === "object" ? (eneo as Record<string, unknown>) : {};
 }
 
-function asString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
 function toolStatus(part: ToolPart): StepStatus {
   switch (part.state) {
     case "input-streaming":
@@ -129,15 +126,6 @@ function sourceDocumentOrigin(part: Extract<Part, { type: "source-document" }>):
 } {
   const eneo = eneoMetadata(part.providerMetadata);
   return { groupId: asString(eneo.group_id), websiteId: asString(eneo.website_id) };
-}
-
-function hostOf(url: string | undefined): string | null {
-  if (!url || !/^https?:\/\//i.test(url)) return null;
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return null;
-  }
 }
 
 function knowledgeStep(

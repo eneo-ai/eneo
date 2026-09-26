@@ -84,7 +84,7 @@ describe("ChatMessage", () => {
     expect(article.querySelector("table")).not.toBeNull();
     expect(within(article).getByRole("heading", { level: 3, name: "Sammanfattning" })).toBeTruthy();
 
-    const citation = within(article).getByRole("link", { name: "Källa 1: LOU 19 kap." });
+    const citation = within(article).getByRole("button", { name: "Källa 1: LOU 19 kap." });
     fireEvent.click(citation);
     expect(onActivityToggle).toHaveBeenCalledWith(citation, { tab: "sources", source: 0 });
 

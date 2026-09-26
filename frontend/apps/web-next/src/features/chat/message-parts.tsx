@@ -21,6 +21,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
+import { asString, hostOf } from "@/lib/chat/metadata";
 import type { EneoUIMessage, SessionData, ToolApprovalData } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import { AttachmentPreviewDialog, FileTypeTile, useSignedUrl } from "./attachments";
@@ -51,24 +52,12 @@ type McpMeta = {
   section?: unknown;
 };
 
-function asString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function hostFromUri(uri: string): string {
-  try {
-    return new URL(uri).hostname || uri;
-  } catch {
-    return uri;
-  }
-}
-
 function mcpMeta(ref: McpToolReference): McpMeta {
   return (ref.meta ?? {}) as McpMeta;
 }
 
 function mcpReferenceTitle(ref: McpToolReference): string {
-  return asString(mcpMeta(ref).title) ?? hostFromUri(ref.uri);
+  return asString(mcpMeta(ref).title) ?? hostOf(ref.uri) ?? ref.uri;
 }
 
 function mcpSourceLabel(ref: McpToolReference): string {

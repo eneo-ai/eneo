@@ -7,27 +7,28 @@ import {
   useMemo,
   useRef,
   type ComponentProps,
-  type MouseEvent,
   type ReactNode
 } from "react";
 
 import { Tooltip } from "@astryxdesign/core/Tooltip";
+import { hostOf } from "@/lib/chat/metadata";
 
 /**
  * Inline citations. A remark plugin rewrites `[N]` markers in the answer text
- * (N a 1-based index into the message's merged sources) into anchor links, and
- * the `a` component override renders those as small numbered chips named
- * "Källa N: <titel>". Operating on the markdown AST (not a string regex) means
- * code blocks and existing links are left untouched.
+ * (N a 1-based index into the message's merged sources) into `#<prefix>-cite-N`
+ * link nodes, and the `a` component override renders exactly those (the
+ * message's own prefix, N within its sources) as small numbered chips named
+ * "Källa N: <titel>". Any other link stays a plain link, so a link in the
+ * model's output can never pose as a source. Operating on the markdown AST
+ * (not a string regex) means code blocks and existing links are left untouched.
  *
  * Real backend answers cite via `<inref id="…"/>` tags; lib/chat/inref.ts
  * rewrites those to `[N]` before the text reaches this plugin.
  *
- * The chip is a real link (keyboard reachable, WCAG 2.1.1) with the look of the
- * Astryx `Citation` number badge. It is not the Astryx component itself: that
- * one forces `target="_blank"` on every link and adds a native `title`, which
- * would open the chat in a new tab for these in-page references and double the
- * tooltip below.
+ * The chip is a real button (keyboard reachable, WCAG 2.1.1): it opens the
+ * source in the activity panel instead of navigating. It has the look of the
+ * Astryx `Citation` number badge but is not that component, which renders a
+ * link that forces `target="_blank"` and a native `title`.
  */
 
 type MdNode = {
@@ -96,88 +97,94 @@ export type CitationSource = { title: string; url?: string };
 
 type CitationContextValue = {
   sources: CitationSource[];
+  /** The message's citation link prefix (the `prefix` given to remarkCitations). */
+  prefix: string;
   /**
    * Opens source `index` (0-based), e.g. in the activity panel's source list.
-   * `trigger` is the citation link, for returning focus when that view closes.
+   * `trigger` is the citation chip, for returning focus when that view closes.
    */
-  onOpenSource?: (index: number, trigger: HTMLElement) => void;
+  onOpenSource: (index: number, trigger: HTMLElement) => void;
 };
 
-const CitationSourcesContext = createContext<CitationContextValue>({ sources: [] });
+const CitationSourcesContext = createContext<CitationContextValue | null>(null);
 
 /** Provides the message's ordered sources so inline citations can name and open them. */
 export function CitationSourcesProvider({
   value,
+  prefix,
   onOpenSource,
   children
 }: {
   value: CitationSource[];
-  onOpenSource?: (index: number, trigger: HTMLElement) => void;
+  prefix: string;
+  onOpenSource: (index: number, trigger: HTMLElement) => void;
   children: ReactNode;
 }) {
-  const context = useMemo(() => ({ sources: value, onOpenSource }), [value, onOpenSource]);
+  const context = useMemo(
+    () => ({ sources: value, prefix, onOpenSource }),
+    [value, prefix, onOpenSource]
+  );
   return (
     <CitationSourcesContext.Provider value={context}>{children}</CitationSourcesContext.Provider>
   );
 }
 
-export function hostOf(url?: string): string | undefined {
-  if (!url || !/^https?:\/\//i.test(url)) return undefined;
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return undefined;
-  }
+/**
+ * The 1-based source number a citation link generated for this message points
+ * at: exactly `#<prefix>-cite-N`, N within the sources. Null for anything else.
+ */
+export function citationNumber(
+  href: string | undefined,
+  prefix: string,
+  sourceCount: number
+): number | null {
+  const marker = `#${prefix}-cite-`;
+  if (!href?.startsWith(marker)) return null;
+  const digits = href.slice(marker.length);
+  if (!/^\d{1,3}$/.test(digits)) return null;
+  const number = Number(digits);
+  return number >= 1 && number <= sourceCount ? number : null;
 }
 
 const CHIP_CLASS =
-  "bg-ax-accent-muted text-ax-text-accent hover:bg-ax-hover focus-visible:outline-ring mx-0.5 inline-flex h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-ax-inner px-1 align-[0.15em] font-sans text-[11px] leading-none font-bold no-underline focus-visible:outline-2 focus-visible:outline-offset-2";
+  "bg-ax-accent-muted text-ax-text-accent hover:bg-ax-hover focus-visible:outline-ring mx-0.5 inline-flex h-[1.125rem] min-w-[1.125rem] cursor-pointer items-center justify-center rounded-ax-inner px-1 align-[0.15em] font-sans text-[11px] leading-none font-bold focus-visible:outline-2 focus-visible:outline-offset-2";
 
 function CitationChip({
-  href,
   number,
   source,
+  onOpen,
   children
 }: {
-  href: string;
   number: number;
-  source: CitationSource | undefined;
+  source: CitationSource;
+  onOpen: (index: number, trigger: HTMLElement) => void;
   children: ReactNode;
 }) {
   const t = useTranslations();
-  const { onOpenSource } = useContext(CitationSourcesContext);
-  const ref = useRef<HTMLAnchorElement>(null);
-  const title = source?.title ?? String(number);
-  const host = hostOf(source?.url);
-  const open = (event: MouseEvent<HTMLAnchorElement>) => {
-    if (!onOpenSource || !source) return;
-    event.preventDefault();
-    onOpenSource(number - 1, event.currentTarget);
-  };
+  const ref = useRef<HTMLButtonElement>(null);
+  const host = hostOf(source.url);
   return (
     <>
-      <a
+      <button
         ref={ref}
-        href={href}
-        aria-label={t("chat_citation_label", { number, title })}
-        onClick={open}
+        type="button"
+        aria-label={t("chat_citation_label", { number, title: source.title })}
+        onClick={(event) => onOpen(number - 1, event.currentTarget)}
         className={CHIP_CLASS}
       >
         {children}
-      </a>
+      </button>
       {/* Sibling mode: the tooltip portals out, so nothing block-level lands
           inside the answer's <p>. */}
-      {source && (
-        <Tooltip
-          anchorRef={ref}
-          content={
-            <span className="flex max-w-xs flex-col">
-              <span className="font-medium">{source.title}</span>
-              {host && <span>{host}</span>}
-            </span>
-          }
-        />
-      )}
+      <Tooltip
+        anchorRef={ref}
+        content={
+          <span className="flex max-w-xs flex-col">
+            <span className="font-medium">{source.title}</span>
+            {host && <span>{host}</span>}
+          </span>
+        }
+      />
     </>
   );
 }
@@ -188,13 +195,18 @@ function CitationLink({
   node: _node,
   ...props
 }: ComponentProps<"a"> & { node?: unknown }) {
-  const { sources } = useContext(CitationSourcesContext);
-  const match = href?.match(/-cite-(\d+)$/);
+  const citations = useContext(CitationSourcesContext);
+  const number = citations
+    ? citationNumber(href, citations.prefix, citations.sources.length)
+    : null;
 
-  if (href && match) {
-    const number = Number(match[1]);
+  if (citations && number !== null) {
     return (
-      <CitationChip href={href} number={number} source={sources[number - 1]}>
+      <CitationChip
+        number={number}
+        source={citations.sources[number - 1]!}
+        onOpen={citations.onOpenSource}
+      >
         {children}
       </CitationChip>
     );
