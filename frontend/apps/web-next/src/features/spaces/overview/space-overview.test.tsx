@@ -216,6 +216,12 @@ describe("SpaceOverview", () => {
       "Kkarin@example.comVisare"
     ]);
     expect(rows[0]!.querySelector("[aria-hidden='true']")?.textContent).toBe("A");
+    // An email wraps before its "@" and dots, in balanced lines, not mid-word;
+    // the text stays whole.
+    const email = within(rows[0]!).getByText("anna.lind@example.com");
+    expect(email.innerHTML).toBe("anna<wbr>.lind<wbr>@example<wbr>.com");
+    expect(email.className).toContain("text-balance");
+    expect(email.className).not.toContain("break-all");
     expect(
       within(members).getByRole("link", { name: "Hantera medlemmar" }).getAttribute("href")
     ).toBe("/spaces/space-1/members");

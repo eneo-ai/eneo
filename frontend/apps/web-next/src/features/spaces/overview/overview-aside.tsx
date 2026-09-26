@@ -9,7 +9,7 @@ import { Icon } from "@astryxdesign/core/Icon";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useId } from "react";
+import { Fragment, useId } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { cn } from "@/lib/utils";
 import {
@@ -142,6 +142,20 @@ function AboutPanel() {
   );
 }
 
+/**
+ * An email with line-break opportunities before its "@" and each dot, so it
+ * can wrap at its parts ("anna.lind" / "@sundsvall.se") instead of mid-word.
+ * The text itself is unchanged for copying and screen readers.
+ */
+function EmailText({ email }: { email: string }) {
+  return email.split(/(?=[@.])/).map((part, index) => (
+    <Fragment key={index}>
+      {index > 0 ? <wbr /> : null}
+      {part}
+    </Fragment>
+  ));
+}
+
 /** Up to four members, admins first, with their role; the tab has the rest. */
 function MembersPanel() {
   const t = useTranslations();
@@ -167,8 +181,10 @@ function MembersPanel() {
                 aria-hidden="true"
                 className={personToneClass(member.id)}
               />
-              <span className="min-w-0 flex-1 text-sm font-semibold break-all">
-                {memberDisplayName(member)}
+              {/* Balanced lines keep an email's domain together; a part wider
+                  than the line still breaks (wrap-anywhere). */}
+              <span className="min-w-0 flex-1 text-sm font-semibold text-balance wrap-anywhere">
+                <EmailText email={memberDisplayName(member)} />
               </span>
               <span
                 className={cn(
