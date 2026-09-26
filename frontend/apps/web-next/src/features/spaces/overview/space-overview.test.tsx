@@ -118,7 +118,8 @@ describe("SpaceOverview", () => {
     expect(within(assistants).queryByRole("link", { name: "Äldst" })).toBeNull();
 
     const knowledge = screen.getByRole("region", { name: "Kunskap" });
-    const table = within(knowledge).getByRole("table");
+    // Named by the section heading, like the tables on the knowledge page.
+    const table = within(knowledge).getByRole("table", { name: "Kunskap" });
     expect(
       within(table)
         .getAllByRole("columnheader")

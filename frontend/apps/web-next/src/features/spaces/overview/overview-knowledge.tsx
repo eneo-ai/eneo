@@ -28,6 +28,8 @@ import {
 import { OverviewLink, OverviewSection } from "./overview-section";
 
 const VISIBLE_ROWS = 5;
+/** The section heading's id; it also names the table. */
+const HEADING_ID = "overview-knowledge";
 
 const TYPE_KEYS: Record<KnowledgeKind, string> = {
   collection: "space_knowledge_type_collection",
@@ -181,7 +183,7 @@ function KnowledgeTable({ rows }: { rows: KnowledgeRow[] }) {
 
   return (
     <SpaceTableFrame>
-      <Table data={rows} columns={columns} idKey="key" />
+      <Table data={rows} columns={columns} idKey="key" aria-labelledby={HEADING_ID} />
     </SpaceTableFrame>
   );
 }
@@ -198,7 +200,7 @@ export function OverviewKnowledge() {
 
   return (
     <OverviewSection
-      id="overview-knowledge"
+      id={HEADING_ID}
       title={t("knowledge")}
       end={
         <>
