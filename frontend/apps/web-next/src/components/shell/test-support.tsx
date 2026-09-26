@@ -102,7 +102,8 @@ export function appContext({
 
 export const noopShell: ShellContextValue = {
   openPalette: () => {},
-  openCreateSpace: () => {}
+  openCreateSpace: () => {},
+  registerMobileHeader: () => () => {}
 };
 
 type ProviderOptions = {

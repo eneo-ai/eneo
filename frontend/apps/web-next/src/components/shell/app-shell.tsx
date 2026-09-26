@@ -9,6 +9,7 @@ import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
 import { MobileTopBar } from "./mobile-top-bar";
 import { isAdminRoute, isChatRoute, OPEN_NAV_EVENT, type NavVariant } from "./routes";
@@ -31,9 +32,9 @@ const MOBILE_QUERY = "(width < 48rem)";
  * tests/a11y.spec.ts). Its parts (SideNav, MobileNav, MobileNavToggle and the
  * AppShell mobile context they share) are used as they are.
  *
- * Contract with the chat: chat routes render their own compact mobile header
- * (no top bar here) and open the drawer with
- * `window.dispatchEvent(new CustomEvent("eneo:open-nav"))`.
+ * Contract with the chat: its header replaces the phone top bar while it is
+ * mounted (`useOwnMobileHeader()`) and opens the drawer by dispatching
+ * `OPEN_NAV_EVENT` on the window.
  */
 export function AppShellFrame({
   children,
@@ -46,6 +47,7 @@ export function AppShellFrame({
   const t = useTranslations();
   const pathname = usePathname();
   const isMobile = useMediaQuery(MOBILE_QUERY);
+  const isHydrated = useHydrated();
   const navId = useId();
   const drawerId = useId();
   const variant: NavVariant = isAdminRoute(pathname) ? "admin" : "main";
@@ -54,9 +56,11 @@ export function AppShellFrame({
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteMounted, setPaletteMounted] = useState(false);
   const [createSpaceOpen, setCreateSpaceOpen] = useState(false);
+  const [ownMobileHeaders, setOwnMobileHeaders] = useState(0);
 
   // Navigating (from any link, not only nav items) or leaving the phone
-  // layout closes the drawer.
+  // layout closes the drawer. A palette result can stay on the same path
+  // (another conversation): the palette closes the drawer itself (onNavigate).
   const [seen, setSeen] = useState({ pathname, isMobile });
   if (seen.pathname !== pathname || seen.isMobile !== isMobile) {
     setSeen({ pathname, isMobile });
@@ -89,10 +93,21 @@ export function AppShellFrame({
   ]);
 
   const openCreateSpace = useCallback(() => setCreateSpaceOpen(true), []);
+  const closeNav = useCallback(() => setNavOpen(false), []);
+  const registerMobileHeader = useCallback(() => {
+    setOwnMobileHeaders((count) => count + 1);
+    return () => setOwnMobileHeaders((count) => count - 1);
+  }, []);
   const shell = useMemo<ShellContextValue>(
-    () => ({ openPalette, openCreateSpace }),
-    [openPalette, openCreateSpace]
+    () => ({ openPalette, openCreateSpace, registerMobileHeader }),
+    [openPalette, openCreateSpace, registerMobileHeader]
   );
+
+  // The phone top bar gives way to a page's own header (the chat's) only
+  // while that header is mounted, so a chat route that is loading or failed
+  // keeps the menu. Before hydration no header has registered yet: there the
+  // route decides, so chat routes don't flash the bar on first paint.
+  const showTopBar = isHydrated ? ownMobileHeaders === 0 : !isChatRoute(pathname);
 
   // Astryx's mobile-nav context: MobileNavToggle opens the drawer, SideNavItems
   // in it close it, and SideNav's collapse control stays away on phones.
@@ -120,7 +135,7 @@ export function AppShellFrame({
           >
             {t("skip_to_content")}
           </a>
-          {!isChatRoute(pathname) && <MobileTopBar />}
+          {showTopBar && <MobileTopBar />}
           <div className="hidden min-h-0 shrink-0 md:flex md:flex-col">
             <DesktopSideNav variant={variant} navId={navId} defaultCollapsed={sideNavCollapsed} />
           </div>
@@ -141,6 +156,7 @@ export function AppShellFrame({
               isOpen={paletteOpen}
               onOpenChange={setPaletteOpen}
               onCreateSpace={openCreateSpace}
+              onNavigate={closeNav}
             />
           )}
           <CreateSpaceDialog open={createSpaceOpen} onOpenChange={setCreateSpaceOpen} />

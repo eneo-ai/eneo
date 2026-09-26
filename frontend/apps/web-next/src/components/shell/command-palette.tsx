@@ -170,11 +170,14 @@ function Hint({ keys, keyName, label }: { keys: string[]; keyName: string; label
 export default function ShellCommandPalette({
   isOpen,
   onOpenChange,
-  onCreateSpace
+  onCreateSpace,
+  onNavigate
 }: {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   onCreateSpace: () => void;
+  /** A result was opened (the shell closes the drawer the palette may sit on). */
+  onNavigate?: () => void;
 }) {
   const t = useTranslations();
   const router = useRouter();
@@ -230,13 +233,15 @@ export default function ShellCommandPalette({
   function run(id: string) {
     const entry = entriesById.current.get(id);
     if (!entry) return;
+    // Both wait until the palette has closed and returned focus: the dialog
+    // then returns focus to the same place, and the drawer (when the palette
+    // was opened from it) hands focus back to its menu button.
     if (entry.action.type === "create-space") {
-      // Open once the palette has closed and returned focus, so the dialog
-      // returns focus to the same place when it closes.
       window.setTimeout(onCreateSpace, 0);
       return;
     }
     router.push(entry.action.href);
+    if (onNavigate) window.setTimeout(onNavigate, 0);
   }
 
   return (

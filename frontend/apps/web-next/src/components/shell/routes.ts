@@ -1,12 +1,13 @@
 /**
  * Route knowledge the shell needs, kept pure so it can be unit tested: which
- * routes render their own mobile header, which navigation item a URL selects,
- * and the links the shell builds.
+ * routes usually render their own mobile header, which navigation item a URL
+ * selects, and the links the shell builds.
  */
 
 /**
- * Window event the chat's compact mobile header dispatches from its menu
- * button; the shell answers by opening the navigation drawer.
+ * Window event a page's own phone header (the chat's) dispatches from its
+ * menu button; the shell answers by opening the navigation drawer. The one
+ * definition: import it, don't repeat the string.
  *
  * @example window.dispatchEvent(new CustomEvent(OPEN_NAV_EVENT))
  */
@@ -26,9 +27,10 @@ function segmentsOf(pathname: string): string[] {
 
 /**
  * Chat routes render their own compact mobile header (menu, assistant, new
- * conversation), so the shell must not add its mobile top bar there:
- * `/spaces/[spaceId]/chat…` and `/dashboard/[assistantId]…` (not the
- * `/dashboard` catalog or `/dashboard/app/…`).
+ * conversation): `/spaces/[spaceId]/chat…` and `/dashboard/[assistantId]…`
+ * (not the `/dashboard` catalog or `/dashboard/app/…`). The shell only uses
+ * this before hydration, to leave its top bar out of the server render there;
+ * afterwards the mounted header decides (`useOwnMobileHeader`).
  */
 export function isChatRoute(pathname: string): boolean {
   const [first, second, third] = segmentsOf(pathname);
