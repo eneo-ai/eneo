@@ -158,6 +158,15 @@ const onFill = (fg: string, fill: string, min: number): Pair => ({
   min
 });
 
+/** A tint (hover overlay) painted over an opaque fill (a filled button). */
+const onTintOverFill = (fg: string, tint: string, fill: string, min: number): Pair => ({
+  fg,
+  on: `${tint} over ${fill}`,
+  background: (mode: Mode) =>
+    over(color(tint, mode), over(color(fill, mode), surface("surface", mode))),
+  min
+});
+
 const STATUS = ["success", "warning", "error"] as const;
 // Eneo categorical hues plus the Neutral cyan/gray that Badge variants use.
 const HUES = ["blue", "teal", "purple", "orange", "pink", "green", "yellow", "red", "cyan", "gray"];
@@ -189,6 +198,14 @@ const GROUPS: Record<string, Pair[]> = {
       onFill(`--color-on-${status}`, `--astryx-theme-neutral-color-status-fill-${status}`, TEXT)
     ]),
     onFill("--color-on-accent", "--astryx-theme-neutral-color-status-fill-accent", TEXT)
+  ],
+  // Legacy shadcn Button/Badge fills hover with the overlay painted over the
+  // fill (bg-ax-hover-overlay, globals.css), never a faded fill: a 90% accent
+  // drops white text to 4.15:1.
+  "on-colours on hovered fills (1.4.3)": [
+    onTintOverFill("--color-on-accent", HOVER, "--color-accent", TEXT),
+    onTintOverFill("--color-on-error", HOVER, "--color-error", TEXT),
+    onTintOverFill("--color-text-primary", HOVER, "--color-background-muted", TEXT)
   ],
   "status and accent text on their muted fills (1.4.3)": [
     ...STATUS.flatMap((status) =>
