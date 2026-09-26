@@ -113,7 +113,11 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
 - **Packages** (beta, pinned exactly; upgrade together, then run
   `bunx astryx upgrade` and `bun run theme:build`): `@astryxdesign/core`,
   `@astryxdesign/theme-neutral`, `@stylexjs/stylex` (runtime only), dev
-  `@astryxdesign/cli`.
+  `@astryxdesign/cli`. `frontend/patches/@astryxdesign%2Fcore@0.6.3.patch`
+  makes CommandPalette mark the highlighted option as selected. After an
+  upgrade bun silently skips the stale patch and
+  `src/components/astryx/command-palette-selection.test.tsx` fails: recreate
+  it with `bun patch @astryxdesign/core`, or delete it if Astryx has fixed it.
 - **Theme**: `src/theme/eneo-theme.ts` extends Astryx Neutral with the Eneo
   palette, radii, shadows and fonts; it is the single source of truth.
   `bun run theme:build` compiles it to `src/theme/eneo.{css,js,d.ts}`

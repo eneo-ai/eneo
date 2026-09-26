@@ -226,6 +226,7 @@
   ],
   "patchedDependencies": {
     "sonner@2.0.8": "patches/sonner@2.0.8.patch",
+    "@astryxdesign/core@0.6.3": "patches/@astryxdesign%2Fcore@0.6.3.patch",
     "nextra-theme-docs@4.6.1": "patches/nextra-theme-docs@4.6.1.patch",
   },
   "overrides": {

@@ -1,0 +1,32 @@
+diff --git a/dist/CommandPalette/CommandPaletteItem.js b/dist/CommandPalette/CommandPaletteItem.js
+index 5db3254e026f63afb18b93f3998b1dfd2e9a800a..c9e19fbfd8d13e1de92fdcdfc46b21b2f1526910 100644
+--- a/dist/CommandPalette/CommandPaletteItem.js
++++ b/dist/CommandPalette/CommandPaletteItem.js
+@@ -139,7 +139,10 @@ export function CommandPaletteItem({
+     ...props,
+     id: ctx && itemIndex >= 0 ? ctx.getItemId(itemIndex) : undefined,
+     role: "option",
+-    "aria-selected": isSelected,
++    // Eneo patch: selection follows the highlight (APG combobox pattern). Astryx
++    // marks only the picked value, so every highlighted option was exposed as
++    // "not selected" (NVDA says so on each arrow key).
++    "aria-selected": controlledSelected ?? isHighlighted,
+     "aria-disabled": isDisabled || undefined,
+     "data-value": value,
+     onClick: composeEventHandlers(onClickProp, handleClick),
+diff --git a/src/CommandPalette/CommandPaletteItem.tsx b/src/CommandPalette/CommandPaletteItem.tsx
+index 7d615f4101bba9a006a4c9cb94eab71a368ad9fd..7dd24dc2a0d694928ea1367a5c7e06b900e067b9 100644
+--- a/src/CommandPalette/CommandPaletteItem.tsx
++++ b/src/CommandPalette/CommandPaletteItem.tsx
+@@ -187,7 +187,10 @@ export function CommandPaletteItem({
+       {...props}
+       id={ctx && itemIndex >= 0 ? ctx.getItemId(itemIndex) : undefined}
+       role="option"
+-      aria-selected={isSelected}
++      // Eneo patch: selection follows the highlight (APG combobox pattern). Astryx
++      // marks only the picked value, so every highlighted option was exposed as
++      // "not selected" (NVDA says so on each arrow key).
++      aria-selected={controlledSelected ?? isHighlighted}
+       aria-disabled={isDisabled || undefined}
+       data-value={value}
+       onClick={composeEventHandlers(onClickProp, handleClick)}
