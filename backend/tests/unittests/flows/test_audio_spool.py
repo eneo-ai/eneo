@@ -244,7 +244,7 @@ async def test_inline_payload_is_released_before_measurement(tmp_path, monkeypat
             _close=close,
         )
 
-    async def measure(filepath):
+    async def measure(filepath, *, limits=None):
         assert retained[0]() is None
         return 1.0
 
@@ -269,7 +269,7 @@ async def test_cancellation_finishes_duration_reader_before_removing_spool(
     started = asyncio.Event()
     finished = []
 
-    async def measure(filepath):
+    async def measure(filepath, *, limits=None):
         from pathlib import Path
 
         started.set()
@@ -380,7 +380,7 @@ async def test_duration_is_lazy_and_cached(tmp_path, monkeypatch):
             spool.measure_duration(), spool.measure_duration()
         ) == [12.5, 12.5]
         assert await spool.measure_duration() == 12.5
-        measure.assert_awaited_once_with(str(spool.path))
+        measure.assert_awaited_once_with(str(spool.path), limits=None)
     finally:
         await spool.aclose()
     downloads.assert_finished()

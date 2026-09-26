@@ -28,11 +28,7 @@ import {
   liveSession
 } from "$lib/features/audio/live/liveTranscriptTestFakes";
 import { PCM16_FLUSH, PCM16_FLUSHED } from "$lib/features/audio/live/pcm16-worklet.js";
-import {
-  RETRY_BACKOFF_MS,
-  ROTATION_OVERLAP_MS,
-  SEGMENT_ROTATION_MS
-} from "$lib/features/audio/recordingSession";
+import { RETRY_BACKOFF_MS, ROTATION_OVERLAP_MS } from "$lib/features/audio/recordingSession";
 import type { SegmentRecord, SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
 import { toast } from "$lib/components/toast";
 import { m } from "$lib/paraglide/messages";
@@ -47,6 +43,13 @@ const recordingMocks = vi.hoisted(() => ({
   purgeSession: vi.fn(async () => true),
   readSessionRecords: vi.fn(async () => []),
   scanRecoverableSessionsForSteps: vi.fn(async () => ({}))
+}));
+
+// Recorded time runs on the recording clock; here it follows the faked Date,
+// since faking performance would also stop the dialog's own animations.
+vi.mock("$lib/features/audio/recordingLimits", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("$lib/features/audio/recordingLimits")>()),
+  monotonicNow: () => Date.now()
 }));
 
 vi.mock("$lib/features/audio/flowRunRecordingSession", async (importOriginal) => {
@@ -304,6 +307,78 @@ describe("FlowRunDialog recording rotation", () => {
       expect(media.recorders).toHaveLength(3);
     }
   );
+
+  it("stops before Eneo's longest recording, counting every part, and refuses another start, saying why", async () => {
+    const upload = vi.fn(() => new Promise<UploadedFile>(() => undefined));
+    await openDialogAndStartRecording(upload, {
+      steps: [{ ...audioStep, max_recording_seconds: 30 * 60 }]
+    });
+
+    await rotate();
+    await endOverlap();
+    media.recorders[0]?.finish();
+    await flush();
+    expect(media.recorders).toHaveLength(2);
+
+    // 20 minutes recorded: a minute's room and one handover's second leave 8:59 for the second part.
+    vi.advanceTimersByTime(8 * 60_000 + 59_000 - ROTATION_OVERLAP_MS - 1);
+    await flush();
+    expect(persistedSegments()).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    media.recorders[1]?.finish();
+    await flush();
+
+    expect(persistedSegments().map(({ reason }) => reason)).toEqual(["rotation", "length"]);
+    expect(screen.getByText(m.recording_length_reached({ duration: "30 min" }))).toBeTruthy();
+    const start = screen.getByLabelText(m.start_recording()) as HTMLButtonElement;
+    expect(start.disabled).toBe(true);
+    expect(media.recorders).toHaveLength(2);
+  });
+
+  it("stops at the step's last file slot and refuses another start, saying why", async () => {
+    const upload = vi.fn(() => new Promise<UploadedFile>(() => undefined));
+    await openDialogAndStartRecording(upload, { steps: [{ ...audioStep, max_files: 2 }] });
+
+    await rotate();
+    await endOverlap();
+    media.recorders[0]?.finish();
+    await flush();
+    await rotate();
+    media.recorders[1]?.finish();
+    await flush();
+
+    expect(persistedSegments().map(({ reason }) => reason)).toEqual(["rotation", "files"]);
+    expect(screen.getByText(m.recording_files_reached({ count: "2" }))).toBeTruthy();
+    const start = screen.getByLabelText(m.start_recording()) as HTMLButtonElement;
+    expect(start.disabled).toBe(true);
+    expect(media.recorders).toHaveLength(2);
+  });
+
+  it("a file chosen during the recording takes a slot, and the recording stops at the last one", async () => {
+    // The chosen file's upload never settles: it holds its slot all along. Recorded parts wait too.
+    const upload = vi.fn(() => new Promise<UploadedFile>(() => undefined));
+    await openDialogAndStartRecording(upload, { steps: [{ ...audioStep, max_files: 3 }] });
+
+    // While recording, the upload area is folded under "upload a file instead".
+    await fireEvent.click(screen.getByRole("button", { name: m.recording_upload_file_instead() }));
+    await flush();
+    await fireEvent.drop(screen.getByRole("button", { name: /Audio input/ }), {
+      dataTransfer: { files: [new File(["audio"], "chosen.webm", { type: "audio/webm" })] }
+    });
+    await flush();
+    await rotate();
+    await endOverlap();
+    media.recorders[0]?.finish();
+    await flush();
+    // Three slots: the chosen file, the first part, the running one. No fourth part.
+    await rotate();
+    media.recorders[1]?.finish();
+    await flush();
+
+    expect(persistedSegments().map(({ reason }) => reason)).toEqual(["rotation", "files"]);
+    expect(media.recorders).toHaveLength(2);
+    expect(screen.getByText(m.recording_files_reached({ count: "3" }))).toBeTruthy();
+  });
 
   it("gives a recording started while the last segment uploads its own rotation schedule", async () => {
     const upload = vi.fn(() => new Promise<UploadedFile>(() => undefined));
@@ -1365,6 +1440,9 @@ function installFakeMedia() {
   };
 }
 
+// Eneo's part length for the audio step (recording_part_seconds), and its longest recording.
+const SEGMENT_ROTATION_MS = 20 * 60 * 1000;
+
 const audioStep: FlowRunContractStepInput = {
   step_id: "step-audio",
   step_order: 1,
@@ -1373,7 +1451,9 @@ const audioStep: FlowRunContractStepInput = {
   input_format: "audio",
   accepted_mimetypes: ["audio/webm"],
   max_files: 10,
-  max_file_size_bytes: 1_000_000
+  max_file_size_bytes: 1_000_000,
+  max_recording_seconds: 5 * 60 * 60,
+  recording_part_seconds: SEGMENT_ROTATION_MS / 1000
 };
 
 const firstAudioStep: FlowRunContractStepInput = {

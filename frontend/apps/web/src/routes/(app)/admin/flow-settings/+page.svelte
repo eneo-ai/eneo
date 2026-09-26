@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { formatRecordingLength } from "$lib/features/audio/recordingLimits";
   import { beforeNavigate } from "$app/navigation";
   import ChevronDown from "lucide-svelte/icons/chevron-down";
   import TriangleAlert from "lucide-svelte/icons/triangle-alert";
@@ -80,6 +81,13 @@
     min: 1,
     max: 100
   });
+  // Edited in minutes, stored in seconds; the deployment sets the ceiling.
+  const audioMaxDuration = new NumberField({
+    initial: initial.flowInputLimits.audio_max_duration_seconds,
+    scale: 60,
+    min: 60,
+    max: initial.flowInputLimits.audio_max_duration_ceiling_seconds
+  });
   const defaultStepTimeout = new NumberField({
     initial: initial.flowRuntimePolicy.default_step_timeout_seconds,
     min: 1,
@@ -158,6 +166,7 @@
     maxFilesPerRun,
     audioMaxSize,
     audioMaxFiles,
+    audioMaxDuration,
     defaultStepTimeout,
     maxStepTimeout,
     builderMaxAttachments,
@@ -191,12 +200,9 @@
     return { active: true, label: m.flow_retention_status_upload_eligible_days({ days }) };
   });
 
+  // "45 s", "20 min" or "7 h 59 min": whole units, as the rest of the page says time.
   function formatSeconds(value: number): string {
-    if (value < 60) return `${value} s`;
-    const minutes = value / 60;
-    if (minutes < 60) return `${Number.isInteger(minutes) ? minutes : minutes.toFixed(1)} min`;
-    const hours = minutes / 60;
-    return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} h`;
+    return value < 60 ? `${value} s` : formatRecordingLength(value * 1000);
   }
 
   function timeoutHint(field: NumberField): string {
@@ -236,6 +242,18 @@
     });
   }
 
+  // The minutes as hours, as the value is typed, then the deployment's ceiling.
+  const audioDurationHint = $derived.by(() => {
+    const ceilingSeconds = initial.flowInputLimits.audio_max_duration_ceiling_seconds;
+    const ceiling = m.flow_input_limits_ceiling_hint({
+      ceiling: `${Math.floor(ceilingSeconds / 60)} min (${formatRecordingLength(ceilingSeconds * 1000)})`
+    });
+    const seconds = audioMaxDuration.value;
+    if (seconds == null || seconds < 3600) return ceiling;
+    const duration = formatRecordingLength(seconds * 1000);
+    return [m.flow_input_limits_audio_duration_equivalent({ duration }), ceiling];
+  });
+
   const audioCeilingHint = $derived.by(() => {
     const ceiling = m.flow_input_limits_ceiling_hint({
       ceiling: `${Math.floor(initial.flowInputLimits.audio_max_size_ceiling_bytes / MB)} MiB`
@@ -243,7 +261,7 @@
     // While the entry is invalid there is no size to describe; showing the
     // ceiling's running time next to an error would read as if it applied.
     if (audioMaxSize.value === undefined) return ceiling;
-    return `${audioRunningTime(audioMaxSize.value)} ${ceiling}`;
+    return [audioRunningTime(audioMaxSize.value), ceiling];
   });
 
   // `value` is undefined while an entry is invalid, and `?? 0` turned that into
@@ -287,6 +305,7 @@
     if (audioMaxSize.dirty) inputLimits.audio_max_size_bytes = audioMaxSize.value;
     if (maxFilesPerRun.dirty) inputLimits.max_files_per_run = maxFilesPerRun.value;
     if (audioMaxFiles.dirty) inputLimits.audio_max_files_per_run = audioMaxFiles.value;
+    if (audioMaxDuration.dirty) inputLimits.audio_max_duration_seconds = audioMaxDuration.value;
 
     const runtimePolicy: FlowAdminSettingsUpdates["runtimePolicy"] = {};
     if (defaultStepTimeout.dirty) {
@@ -354,6 +373,7 @@
       audioMaxSize.commit(updated.inputLimits.audio_max_size_bytes);
       maxFilesPerRun.commit(updated.inputLimits.max_files_per_run);
       audioMaxFiles.commit(updated.inputLimits.audio_max_files_per_run);
+      audioMaxDuration.commit(updated.inputLimits.audio_max_duration_seconds);
     }
     if (updated.runtimePolicy) {
       defaultStepTimeout.commit(updated.runtimePolicy.default_step_timeout_seconds);
@@ -547,6 +567,15 @@
             placeholder={m.flow_input_limits_deployment_default_hint()}
             info={m.flow_input_limits_audio_max_files_info()}
             field={audioMaxFiles}
+          />
+          <Settings.NumberRow
+            title={m.flow_input_limits_audio_duration_title()}
+            description={m.flow_input_limits_audio_duration_description()}
+            placeholder={m.flow_input_limits_deployment_default_hint()}
+            unit="min"
+            info={m.flow_input_limits_audio_duration_info()}
+            hint={audioDurationHint}
+            field={audioMaxDuration}
           />
         </Settings.Group>
 

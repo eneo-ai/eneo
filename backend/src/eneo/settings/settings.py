@@ -32,12 +32,14 @@ from eneo.flows.flow_ai_builder_budget_settings import (
 )
 from eneo.flows.flow_document_limits import FLOW_DOCUMENT_RENDER_HARD_LIMITS
 from eneo.flows.flow_input_limits import (
+    FLOW_AUDIO_MIN_DURATION_SECONDS,
     FLOW_INPUT_MAX_AUDIO_FILES_COUNT,
     FLOW_INPUT_MAX_FILES_COUNT,
     FLOW_INPUT_MAX_LIMIT_BYTES,
     FLOW_INPUT_MIN_LIMIT_BYTES,
 )
 from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
+from eneo.main.config import FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS
 from eneo.main.models import InDB
 from eneo.skills.domain.skill import (
     MAX_SKILL_ACTIVATIONS_PER_TURN,
@@ -120,6 +122,8 @@ FLOW_INPUT_LIMITS_PUBLIC_EXAMPLE: JsonDict = {
     "audio_max_files_per_run": 5,
     "file_max_size_ceiling_bytes": 52428800,
     "audio_max_size_ceiling_bytes": 209715200,
+    "audio_max_duration_seconds": 18000,
+    "audio_max_duration_ceiling_seconds": 28800,
 }
 
 FLOW_INPUT_LIMITS_UPDATE_EXAMPLE: JsonDict = {
@@ -127,6 +131,7 @@ FLOW_INPUT_LIMITS_UPDATE_EXAMPLE: JsonDict = {
     "audio_max_size_bytes": None,
     "max_files_per_run": 20,
     "audio_max_files_per_run": None,
+    "audio_max_duration_seconds": 18000,
 }
 
 FLOW_DOCUMENT_RENDER_LIMITS_EXAMPLE: JsonDict = {
@@ -250,6 +255,24 @@ class FlowInputLimitsPublic(BaseModel):
             "Tenant values above it are rejected on write and clamped on read."
         ),
     )
+    # Any positive value reads back: a deployment may set less than the minute
+    # an admin can write (FlowInputLimitsUpdate).
+    audio_max_duration_seconds: int = Field(
+        ge=1,
+        le=FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS,
+        description=(
+            "The longest recording a flow takes, in seconds: one audio file, and "
+            "the parts of one recording together. Resetting the stored override "
+            "to null restores the deployment default."
+        ),
+    )
+    audio_max_duration_ceiling_seconds: int = Field(
+        ge=1,
+        description=(
+            "The deployment's ceiling for audio_max_duration_seconds. Tenant "
+            "values above it are rejected on write and clamped on read."
+        ),
+    )
 
 
 class FlowInputLimitsUpdate(BaseModel):
@@ -281,6 +304,15 @@ class FlowInputLimitsUpdate(BaseModel):
         ge=1,
         le=FLOW_INPUT_MAX_AUDIO_FILES_COUNT,
         description="Set the tenant ceiling, or send null to use the default audio ceiling.",
+    )
+    audio_max_duration_seconds: int | None = Field(
+        default=None,
+        ge=FLOW_AUDIO_MIN_DURATION_SECONDS,
+        le=FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS,
+        description=(
+            "Set the longest recording in seconds (up to the deployment ceiling), "
+            "or send null to use the deployment default."
+        ),
     )
 
 

@@ -5,7 +5,10 @@
 // after the user pressed Stop, or stop after every rotation tick.
 // "backlog" is a rotation that stopped instead, because too many finished
 // segments were still waiting for upload.
-export type RecordingStopReason = "manual" | "limit" | "stall" | "error" | "rotation" | "backlog";
+// "limit": a file's size limit; "length": Eneo's longest recording; "files":
+// the step's last file slot.
+export type RecordingStopReason =
+  "manual" | "limit" | "length" | "files" | "stall" | "error" | "rotation" | "backlog";
 
 function inferRecordedAudioExtension(mimeType: string): string {
   const normalized = mimeType.split(";")[0]?.trim().toLowerCase() ?? "";

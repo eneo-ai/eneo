@@ -14,6 +14,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.principal_types import PrincipalType
+from eneo.files.audio import AudioDecodeLimits
 from eneo.files.file_models import File, FileInfo, FileType
 from eneo.files.file_service import FileService
 from eneo.files.transcriber import TranscribedAudio, Transcriber
@@ -60,7 +61,7 @@ def _chunked_transcriber(monkeypatch, tmp_path, chunk_texts):
     files = iter(chunk_texts)
 
     @asynccontextmanager
-    async def to_wav(filepath):
+    async def to_wav(filepath, *, limits=None):
         texts = next(files)
         yield _audio(tmp_path, [300.7] * (len(texts) - 1) + [60.0], monkeypatch)
 
@@ -1462,6 +1463,9 @@ async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
         requested_ids=[],
         max_audio_files=10,
         max_inline_text_bytes=1024,
+        decode_limits=AudioDecodeLimits(
+            max_duration_seconds=3600, max_decoded_bytes=2**31
+        ),
     )
     deps = AudioRuntimeDeps(
         stage_transcript_source=lambda reference, source: None,
@@ -1481,6 +1485,8 @@ async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
     )
 
     assert result.text == "transcribed text"
+    # The tenant's longest recording reaches the decoder.
+    assert resolver.await_args.kwargs["decode_limits"] == request.decode_limits
     assert result.transcription_metadata["language"] == "sv"
     assert result.near_inline_limit_message is not None
     assert (

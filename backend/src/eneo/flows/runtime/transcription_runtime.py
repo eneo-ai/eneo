@@ -46,6 +46,7 @@ from .transcription import (
 
 if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
+    from eneo.files.audio import AudioDecodeLimits
     from eneo.files.file_models import FileInfo
     from eneo.flows.domain.flow import FlowRun
     from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
@@ -85,6 +86,8 @@ class AudioRuntimeRequest:
     max_inline_text_bytes: int
     attempt_no: int = 1
     source_preparation: TranscriptSourcePreparation | None = None
+    # The tenant's longest recording; None decodes under the deployment's.
+    decode_limits: "AudioDecodeLimits | None" = None
 
 
 @dataclass(frozen=True)
@@ -270,6 +273,7 @@ async def resolve_transcribe_and_attach_audio_input(
         live_transcript_requested=live_id is not None,
         single_recording=request.step.step_id
         in read_single_recording_steps(request.run.input_payload_json),
+        decode_limits=request.decode_limits,
     )
     metadata = transcription_result.to_metadata()
     reference = TranscriptSourceReference(

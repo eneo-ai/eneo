@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 from uuid import UUID
 
 from eneo.completion_models.infrastructure.context_builder import count_tokens
-from eneo.files.audio import AudioDecodeLimitExceeded, AudioMimeTypes
+from eneo.files.audio import AudioDecodeLimitExceeded, AudioDecodeLimits, AudioMimeTypes
 from eneo.files.transcriber import TranscribedAudio
 from eneo.flows.domain.speaker_labels import (
     build_label_renumbering,
@@ -657,10 +657,14 @@ def _transcription_failures(step_order: int, subject: str) -> Generator[None]:
 
 
 async def _spool_file(
-    file: "FileInfo", open_audio_download: OpenAudioDownload
+    file: "FileInfo",
+    open_audio_download: OpenAudioDownload,
+    limits: AudioDecodeLimits,
 ) -> SpooledAudio:
     try:
-        return await spool_audio(file.id, open_audio_download=open_audio_download)
+        return await spool_audio(
+            file.id, open_audio_download=open_audio_download, limits=limits
+        )
     except NotFoundException as exc:
         # A file can disappear between being identified and being read.
         # Report it as the missing file it is, not a transcription fault.
@@ -679,13 +683,16 @@ async def _transcribe_recording(
     open_audio_download: OpenAudioDownload,
     observer: "ProviderCallObserver | None",
     max_speakers: int | None,
+    limits: AudioDecodeLimits,
 ) -> list[TranscribedAudio]:
     """The parts of one recording labelled together, returned per part.
 
     The joined decode is checked against the audio limits part by part, before
     any provider is paid."""
     parts, joined, durations = await spool_recording(
-        files, lambda file: _spool_file(file, open_audio_download)
+        files,
+        lambda file: _spool_file(file, open_audio_download, limits),
+        limits=limits,
     )
     try:
         recording = RecordingAudio(
@@ -725,11 +732,15 @@ async def transcribe_audio_input(
     live_transcript: FlowLiveTranscripts | None = None,
     live_transcript_requested: bool = False,
     single_recording: bool = False,
+    decode_limits: AudioDecodeLimits | None = None,
 ) -> FlowTranscriptionResult:
     """Transcribe files in request order, closing each spool on every exit.
 
     Files marked as one recording have their speakers labelled once across
-    all parts when the engine labels speakers."""
+    all parts when the engine labels speakers, and take the longest recording
+    together whether or not they are joined. `decode_limits` is the tenant's
+    (flow_audio_decode_limits); None decodes under the deployment's."""
+    limits = decode_limits or AudioDecodeLimits.from_settings()
     if not files:
         raise TypedIOValidationException(
             f"Step {step_order}: audio input requires at least one audio file.",
@@ -777,6 +788,7 @@ async def transcribe_audio_input(
     live_fallback_reason: LiveFallbackReason | None = None
     recording_parts: list[TranscribedAudio] | None = None
     recording_labels: dict[str, str] | None = None
+    recorded_seconds = 0.0
     if (
         single_recording
         and diarize
@@ -792,6 +804,7 @@ async def transcribe_audio_input(
                 open_audio_download=open_audio_download,
                 observer=transcription_call_observer,
                 max_speakers=max_speakers,
+                limits=limits,
             )
         # One recording, one speaker namespace across its parts.
         recording_labels = build_label_renumbering(
@@ -813,8 +826,19 @@ async def transcribe_audio_input(
             with _transcription_failures(
                 step_order, f"'{getattr(file, 'name', 'unknown')}'"
             ):
-                audio_file = await _spool_file(file, open_audio_download)
+                audio_file = await _spool_file(file, open_audio_download, limits)
                 try:
+                    if single_recording:
+                        # Not joined (labels off, or an engine that labels no
+                        # speakers): the parts still take the longest recording
+                        # together, checked before this part is paid for.
+                        recorded_seconds += await audio_file.measure_duration()
+                        if recorded_seconds > limits.longest_audio_seconds:
+                            raise AudioDecodeLimitExceeded(
+                                limit="duration_seconds",
+                                measured=recorded_seconds,
+                                ceiling=limits.longest_audio_seconds,
+                            )
                     transcribed = None
                     if live_transcript_requested:
                         if (
@@ -1073,6 +1097,7 @@ async def resolve_and_transcribe_audio_for_step(
     live_transcript: FlowLiveTranscripts | None = None,
     live_transcript_requested: bool = False,
     single_recording: bool = False,
+    decode_limits: AudioDecodeLimits | None = None,
 ) -> FlowTranscriptionResult:
     try:
         transcription_config = parse_transcription_config(version_metadata)
@@ -1124,4 +1149,5 @@ async def resolve_and_transcribe_audio_for_step(
         live_transcript=live_transcript,
         live_transcript_requested=live_transcript_requested,
         single_recording=single_recording,
+        decode_limits=decode_limits,
     )

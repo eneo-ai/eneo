@@ -224,6 +224,8 @@ _SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS = frozenset(
 # a dimensionless allocation policy: the model's own limits decide the window
 # and the ceiling, and this value only splits what is left. Even split when
 # nothing is known about the answer.
+# A flow's longest recording, as stored and as a deployment ceiling: whole seconds within a day.
+FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS = 24 * 60 * 60
 AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT = 0.5
 # The whole of one AI Builder provider call, whatever it keeps producing; the
 # silence deadline is what detects a dead call, this only bounds a runaway one.
@@ -358,6 +360,10 @@ class Settings(BaseSettings):
     flow_http_allow_private_networks: bool = False
     flow_audio_max_duration_seconds: int = 5 * 60 * 60
     flow_audio_max_decoded_bytes: int = 2 * 1024 * 1024 * 1024
+    # The longest recording a tenant admin may let flows take (the flow-settings
+    # page; its default is flow_audio_max_duration_seconds). Flow-only: other
+    # transcription keeps flow_audio_max_duration_seconds.
+    flow_audio_max_duration_ceiling_seconds: int = 8 * 60 * 60
     # Live transcription preview. A recording streams audio, silence included,
     # the whole time, so the idle timeout only ends a paused or stalled client.
     # The final-text wait covers the audio the model server has not decoded yet
@@ -790,7 +796,37 @@ class Settings(BaseSettings):
             )
             sys.exit(1)
 
-        for name in ("flow_audio_max_duration_seconds", "flow_audio_max_decoded_bytes"):
+        # The admin's shortest setting is a minute: the ceiling, as the decoded-byte
+        # bound (16 kHz mono 16-bit, 32 000 bytes a second) holds it, must reach one.
+        if (
+            min(
+                self.flow_audio_max_duration_ceiling_seconds,
+                self.flow_audio_max_decoded_bytes // 32_000,
+            )
+            < 60
+        ):
+            logging.error(
+                "FLOW_AUDIO_MAX_DURATION_CEILING_SECONDS and FLOW_AUDIO_MAX_DECODED_BYTES must "
+                "allow at least a minute of audio. Current values: %s s, %s bytes",
+                self.flow_audio_max_duration_ceiling_seconds,
+                self.flow_audio_max_decoded_bytes,
+            )
+            sys.exit(1)
+        if (
+            self.flow_audio_max_duration_ceiling_seconds
+            > FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS
+        ):
+            logging.error(
+                "FLOW_AUDIO_MAX_DURATION_CEILING_SECONDS must be at most %s. Current value: %s",
+                FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS,
+                self.flow_audio_max_duration_ceiling_seconds,
+            )
+            sys.exit(1)
+        for name in (
+            "flow_audio_max_duration_seconds",
+            "flow_audio_max_decoded_bytes",
+            "flow_audio_max_duration_ceiling_seconds",
+        ):
             if getattr(self, name) <= 0:
                 logging.error(
                     "%s must be greater than zero. Current value: %s",

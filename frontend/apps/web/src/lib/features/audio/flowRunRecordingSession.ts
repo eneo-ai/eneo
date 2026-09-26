@@ -20,6 +20,8 @@ export { segmentExtensionFromMime } from "./recordingSession";
 export type RecordingSessionState = {
   sessionIdsByStepId: Record<string, string>;
   segmentCountsByStepId: Record<string, number>;
+  // Recorded time of the step's recording so far, over its finished segments.
+  recordedMsByStepId: Record<string, number>;
   resumeHintsByStepId: Record<string, SessionRecoveryHint[]>;
   resumePromptStepId: string | null;
   resumeBusyStepId: string | null;
@@ -30,6 +32,7 @@ export function emptyRecordingSessionState(): RecordingSessionState {
   return {
     sessionIdsByStepId: {},
     segmentCountsByStepId: {},
+    recordedMsByStepId: {},
     resumeHintsByStepId: {},
     resumePromptStepId: null,
     resumeBusyStepId: null,
@@ -126,10 +129,12 @@ export function clearStepSessionInState(
     ...state,
     sessionIdsByStepId: { ...state.sessionIdsByStepId },
     segmentCountsByStepId: { ...state.segmentCountsByStepId },
+    recordedMsByStepId: { ...state.recordedMsByStepId },
     resumeHintsByStepId: { ...state.resumeHintsByStepId }
   };
   delete next.sessionIdsByStepId[stepId];
   delete next.segmentCountsByStepId[stepId];
+  delete next.recordedMsByStepId[stepId];
   delete next.resumeHintsByStepId[stepId];
   if (next.resumePromptStepId === stepId) next.resumePromptStepId = null;
   if (next.resumeBusyStepId === stepId) next.resumeBusyStepId = null;

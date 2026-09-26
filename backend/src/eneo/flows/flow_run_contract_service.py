@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
-from eneo.files.audio import AudioDecodeLimits
 from eneo.flows.api.flow_live_transcription_models import (
     FlowLiveTranscriptionAvailabilityPublic,
 )
@@ -43,6 +42,7 @@ from eneo.flows.enums import (
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowValidationException
+from eneo.flows.flow_input_limits import flow_audio_decode_limits
 from eneo.flows.flow_metadata import form_field_display_position
 from eneo.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
 from eneo.flows.flow_run_step_inputs import (
@@ -108,8 +108,8 @@ class FlowRunContractService:
             form_fields=_published_form_fields(runtime_inputs.definition),
             steps_requiring_input=_runtime_input_contracts(
                 runtime_inputs.input_specs,
-                audio_max_duration_seconds=AudioDecodeLimits.from_settings(
-                    self.settings
+                audio_max_duration_seconds=flow_audio_decode_limits(
+                    runtime_inputs.limits, self.settings
                 ).longest_audio_seconds,
             ),
             runtime_upload_policy=default_runtime_upload_policy_public(),
@@ -155,7 +155,8 @@ class FlowRunContractService:
                 speaker_labels=speaker_labels,
                 service_configured=self.settings.flow_transcription_service_configured,
             ),
-            single_recording=self.settings.flow_transcription_service_configured,
+            # Eneo takes the parts of one recording together whatever labels them.
+            single_recording=True,
         )
 
     async def _template_readiness(
@@ -427,28 +428,38 @@ def _runtime_input_contracts(
     audio_max_duration_seconds: int,
 ) -> list[FlowRuntimeInputContractPublic]:
     return [
-        FlowRuntimeInputContractPublic(
-            step_id=spec.step.step_id,
-            step_order=spec.step.step_order,
-            label=spec.runtime_input.label,
-            description=spec.runtime_input.description,
-            required=spec.runtime_input.required,
-            input_format=spec.runtime_input.input_format,
-            max_files=spec.max_files,
-            max_file_size_bytes=spec.max_file_size_bytes,
-            # The decoder refuses longer audio per file.
-            max_duration_seconds=(
-                audio_max_duration_seconds
-                if spec.runtime_input.input_format is FlowRuntimeInputFormat.AUDIO
-                else None
-            ),
-            accepted_mimetypes=spec.accepted_mimetypes,
-        )
+        _runtime_input_contract(spec, audio_max_duration_seconds)
         for spec in sorted(
             specs.values(),
             key=lambda item: (item.step.step_order, str(item.step.step_id)),
         )
     ]
+
+
+def _runtime_input_contract(
+    spec: RuntimeStepInputSpec, audio_max_duration_seconds: int
+) -> FlowRuntimeInputContractPublic:
+    audio = spec.runtime_input.input_format is FlowRuntimeInputFormat.AUDIO
+    # One limit per file and for a recording's parts together: the decoder
+    # refuses longer audio either way.
+    longest = audio_max_duration_seconds if audio else None
+    return FlowRuntimeInputContractPublic(
+        step_id=spec.step.step_id,
+        step_order=spec.step.step_order,
+        label=spec.runtime_input.label,
+        description=spec.runtime_input.description,
+        required=spec.runtime_input.required,
+        input_format=spec.runtime_input.input_format,
+        max_files=spec.max_files,
+        max_file_size_bytes=spec.max_file_size_bytes,
+        max_duration_seconds=longest,
+        max_recording_seconds=longest,
+        # Parts that spread the recording over every file slot.
+        recording_part_seconds=(
+            -(-longest // spec.max_files) if longest and spec.max_files else longest
+        ),
+        accepted_mimetypes=spec.accepted_mimetypes,
+    )
 
 
 def _text_processing_contracts(

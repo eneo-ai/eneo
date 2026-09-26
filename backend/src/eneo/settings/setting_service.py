@@ -52,7 +52,9 @@ from eneo.flows.flow_evidence_policy import (
 from eneo.flows.flow_input_limits import (
     FlowInputLimits,
     apply_flow_input_limits_patch,
+    audio_duration_ceiling_seconds,
     effective_upload_ceiling_bytes,
+    flow_audio_decode_limits,
     resolve_flow_input_limits,
 )
 from eneo.flows.flow_retention_policy import (
@@ -560,6 +562,10 @@ class SettingService:
             audio_max_size_bytes=limits.audio_max_size_bytes,
             max_files_per_run=limits.max_files_per_run,
             audio_max_files_per_run=limits.audio_max_files_per_run,
+            audio_max_duration_seconds=flow_audio_decode_limits(
+                limits
+            ).longest_audio_seconds,
+            audio_max_duration_ceiling_seconds=audio_duration_ceiling_seconds(),
             # The admission ceiling is the writable bound; exposing it lets the
             # admin UI validate inline instead of surfacing a save-time error.
             file_max_size_ceiling_bytes=effective_upload_ceiling_bytes(
@@ -602,6 +608,18 @@ class SettingService:
                         "maximum_bytes": ceiling,
                     },
                 )
+        requested_seconds = patch.get("audio_max_duration_seconds")
+        ceiling_seconds = audio_duration_ceiling_seconds()
+        if requested_seconds is not None and requested_seconds > ceiling_seconds:
+            raise BadRequestException(
+                f"audio_max_duration_seconds cannot exceed the deployment ceiling of {ceiling_seconds} seconds.",
+                code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
+                context={
+                    "field": "audio_max_duration_seconds",
+                    "requested_seconds": requested_seconds,
+                    "maximum_seconds": ceiling_seconds,
+                },
+            )
         previous = await self.get_flow_input_limits()
         remove_keys = {key for key, value in patch.items() if value is None}
         updated_values = {

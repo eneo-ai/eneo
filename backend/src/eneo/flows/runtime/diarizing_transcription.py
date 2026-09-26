@@ -55,6 +55,7 @@ class RegistryFlowTranscriber:
             transcription_model=transcription_model,
             language=language,
             observer=observer,
+            limits=file.limits,
         )
         if transcribed.duration_seconds is not None:
             file.cache_duration(transcribed.duration_seconds)

@@ -47,6 +47,8 @@ async def test_get_flow_input_limits_delegates_to_service() -> None:
         audio_max_files_per_run=10,
         file_max_size_ceiling_bytes=52_428_800,
         audio_max_size_ceiling_bytes=209_715_200,
+        audio_max_duration_seconds=18_000,
+        audio_max_duration_ceiling_seconds=28_800,
     )
     container.settings_service.return_value = service
     container.user.return_value = SimpleNamespace(
@@ -73,6 +75,8 @@ async def test_patch_flow_input_limits_delegates_to_service() -> None:
         audio_max_files_per_run=10,
         file_max_size_ceiling_bytes=52_428_800,
         audio_max_size_ceiling_bytes=209_715_200,
+        audio_max_duration_seconds=18_000,
+        audio_max_duration_ceiling_seconds=28_800,
     )
     container.settings_service.return_value = service
     container.user.return_value = SimpleNamespace(
@@ -97,6 +101,8 @@ async def test_get_includes_file_count_fields() -> None:
         audio_max_files_per_run=20,
         file_max_size_ceiling_bytes=52_428_800,
         audio_max_size_ceiling_bytes=209_715_200,
+        audio_max_duration_seconds=18_000,
+        audio_max_duration_ceiling_seconds=28_800,
     )
     container.settings_service.return_value = service
     container.user.return_value = SimpleNamespace(
@@ -120,6 +126,8 @@ async def test_patch_with_file_count_fields() -> None:
         audio_max_files_per_run=30,
         file_max_size_ceiling_bytes=52_428_800,
         audio_max_size_ceiling_bytes=209_715_200,
+        audio_max_duration_seconds=18_000,
+        audio_max_duration_ceiling_seconds=28_800,
     )
     container.settings_service.return_value = service
     container.user.return_value = SimpleNamespace(

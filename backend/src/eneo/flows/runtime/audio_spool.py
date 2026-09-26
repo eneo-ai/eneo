@@ -33,6 +33,9 @@ class SpooledAudio:
     byte_size: int
     mimetype: str
     filename: str
+    # The limits the audio was admitted under (the tenant's longest recording);
+    # None decodes under the deployment's.
+    limits: audio.AudioDecodeLimits | None = None
     _duration: asyncio.Future[float] | None = field(
         default=None, init=False, repr=False, compare=False
     )
@@ -46,7 +49,9 @@ class SpooledAudio:
     async def measure_duration(self) -> float:
         task = self._duration
         if task is None:
-            task = asyncio.create_task(audio.measure_duration(str(self.path)))
+            task = asyncio.create_task(
+                audio.measure_duration(str(self.path), limits=self.limits)
+            )
             object.__setattr__(self, "_duration", task)
         return await task
 
@@ -90,7 +95,10 @@ async def _close_download(download: FileDownload) -> None:
 
 
 async def spool_audio(
-    file_id: UUID, *, open_audio_download: OpenAudioDownload
+    file_id: UUID,
+    *,
+    open_audio_download: OpenAudioDownload,
+    limits: audio.AudioDecodeLimits | None = None,
 ) -> SpooledAudio:
     download = await open_audio_download(file_id)
     path: Path | None = None
@@ -135,6 +143,7 @@ async def spool_audio(
             byte_size=byte_size,
             mimetype=mimetype,
             filename=filename,
+            limits=limits,
         )
     except BaseException:
         if path is not None:
@@ -178,6 +187,7 @@ async def spool_recording(
         byte_size=path.stat().st_size,
         mimetype="audio/wav",
         filename="recording.wav",
+        limits=limits,
     )
     recording.cache_duration(sum(durations))
     return tuple(spooled), recording, tuple(durations)

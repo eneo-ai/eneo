@@ -36,6 +36,9 @@ export class FlowRunFileInputState {
   #recordingNoticesByStepId = $state<Record<string, string | null>>({});
   #skippedMessagesByStepId = $state<Record<string, string | null>>({});
   #activeUploadCountByStepId = $state<Record<string, number>>({});
+  // File slots chosen files hold from the moment they are accepted until their
+  // upload settles, so a recording cannot promise them to a part meanwhile.
+  #reservedSlotsByStepId = $state<Record<string, number>>({});
   // Steps whose recorder captures or has yet to hand over its last segment.
   #recordingStepIds = $state<string[]>([]);
   #draggingStepId = $state<string | null>(null);
@@ -106,6 +109,19 @@ export class FlowRunFileInputState {
     return (this.#pendingSegmentsByStepId[stepId] ?? []).filter(
       (segment) => segment.state === "failed"
     );
+  }
+
+  reservedSlots(stepId: string): number {
+    return this.#reservedSlotsByStepId[stepId] ?? 0;
+  }
+
+  // `count` is added while the upload runs and taken back (negative) when it settles.
+  reserveSlots(stepId: string, count: number): void {
+    if (count === 0) return;
+    this.#reservedSlotsByStepId = {
+      ...this.#reservedSlotsByStepId,
+      [stepId]: Math.max(0, this.reservedSlots(stepId) + count)
+    };
   }
 
   isStepRecording(stepId: string): boolean {
@@ -250,16 +266,26 @@ export class FlowRunFileInputState {
     this.#recordingStepIds = this.#recordingStepIds.filter((id) => id !== stepId);
   }
 
-  prepareRecordedSegment(stepId: string): PreparedRecordedSegment {
+  // The step's recording so far: its finished segments and their recorded time.
+  recordingSoFar(stepId: string): { parts: number; recordedMs: number } {
+    return {
+      parts: this.#recordingSessionState.segmentCountsByStepId[stepId] ?? 0,
+      recordedMs: this.#recordingSessionState.recordedMsByStepId[stepId] ?? 0
+    };
+  }
+
+  prepareRecordedSegment(stepId: string, durationMs = 0): PreparedRecordedSegment {
     const ensured = ensureSessionIdInState(this.#recordingSessionState.sessionIdsByStepId, stepId);
     const bumped = bumpSegmentCountInState(
       this.#recordingSessionState.segmentCountsByStepId,
       stepId
     );
+    const recordedMs = this.#recordingSessionState.recordedMsByStepId;
     this.#recordingSessionState = {
       ...this.#recordingSessionState,
       sessionIdsByStepId: ensured.sessionIdsByStepId,
-      segmentCountsByStepId: bumped.segmentCountsByStepId
+      segmentCountsByStepId: bumped.segmentCountsByStepId,
+      recordedMsByStepId: { ...recordedMs, [stepId]: (recordedMs[stepId] ?? 0) + durationMs }
     };
     return { sessionId: ensured.sessionId, segmentIndex: bumped.segmentIndex };
   }
@@ -369,6 +395,10 @@ export class FlowRunFileInputState {
         ...this.#recordingSessionState.segmentCountsByStepId,
         [stepId]: Math.max(-1, ...records.map((record) => record.segmentIndex)) + 1
       },
+      recordedMsByStepId: {
+        ...this.#recordingSessionState.recordedMsByStepId,
+        [stepId]: records.reduce((sum, record) => sum + record.durationMs, 0)
+      },
       resumeHintsByStepId: {
         ...this.#recordingSessionState.resumeHintsByStepId,
         [stepId]: []
@@ -423,6 +453,7 @@ export class FlowRunFileInputState {
     this.#recordingNoticesByStepId = {};
     this.#skippedMessagesByStepId = {};
     this.#activeUploadCountByStepId = {};
+    this.#reservedSlotsByStepId = {};
     this.#recordingStepIds = [];
     this.#draggingStepId = null;
     this.#recordingSessionState = emptyRecordingSessionState();

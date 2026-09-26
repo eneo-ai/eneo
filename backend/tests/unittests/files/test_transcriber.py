@@ -173,7 +173,7 @@ async def test_transcribe_from_filepath_passes_language_to_adapter(
     wav_file = SimpleNamespace(name="converted.wav", duration=42.0)
 
     @asynccontextmanager
-    async def fake_to_wav(_filepath):
+    async def fake_to_wav(_filepath, *, limits=None):
         yield wav_file
 
     monkeypatch.setattr("eneo.files.transcriber.audio.to_wav", fake_to_wav)

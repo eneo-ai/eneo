@@ -1586,3 +1586,66 @@ def test_settings_write_model_accepts_an_echoed_public_response() -> None:
 
     assert writable == SettingsBase(chatbot_widget={"colour": "blue"})
     assert "object_content_enabled" not in writable.model_dump()
+
+
+def _flow_limits_service(tenant_repo: "MockTenantRepo") -> SettingService:
+    return SettingService(
+        repo=MockRepo(),
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+        upload_admission=_upload_admission(),
+    )
+
+
+async def test_the_longest_recording_is_an_admin_setting_under_the_flow_ceiling():
+    settings = get_app_settings()
+    service = _flow_limits_service(MockTenantRepo())
+
+    limits = await service.get_flow_input_limits()
+    assert limits.audio_max_duration_seconds == min(
+        settings.flow_audio_max_duration_seconds,
+        settings.flow_audio_max_duration_ceiling_seconds,
+    )
+    assert (
+        limits.audio_max_duration_ceiling_seconds
+        == settings.flow_audio_max_duration_ceiling_seconds
+    )
+
+    longer = settings.flow_audio_max_duration_ceiling_seconds
+    updated = await service.update_flow_input_limits(
+        FlowInputLimitsUpdate(audio_max_duration_seconds=longer)
+    )
+    assert updated.audio_max_duration_seconds == longer
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.update_flow_input_limits(
+            FlowInputLimitsUpdate(audio_max_duration_seconds=longer + 1)
+        )
+    assert exc_info.value.code == "flow_settings_invalid_payload"
+    assert exc_info.value.context == {
+        "field": "audio_max_duration_seconds",
+        "requested_seconds": longer + 1,
+        "maximum_seconds": longer,
+    }
+
+    reset = await service.update_flow_input_limits(
+        FlowInputLimitsUpdate(audio_max_duration_seconds=None)
+    )
+    assert reset.audio_max_duration_seconds == limits.audio_max_duration_seconds
+
+
+async def test_a_default_below_a_minute_still_reads_back(monkeypatch):
+    # The shared env default may be shorter than the minute an admin can write.
+    settings = get_app_settings().model_copy(
+        update={"flow_audio_max_duration_seconds": 30}
+    )
+    monkeypatch.setattr("eneo.flows.flow_input_limits.get_settings", lambda: settings)
+
+    limits = await _flow_limits_service(MockTenantRepo()).get_flow_input_limits()
+
+    assert limits.audio_max_duration_seconds == 30

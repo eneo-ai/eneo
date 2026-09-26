@@ -10,6 +10,7 @@ from uuid import UUID
 from eneo.flows.enums import FlowRuntimeInputFormat
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_input_limits import flow_audio_decode_limits
 from eneo.flows.published_runtime import (
     FlowRuntimeFlowSource,
     FlowRuntimePublicationIntent,
@@ -94,7 +95,10 @@ class LiveTranscriptionSessionService:
                 context={"reason": availability.reason},
             )
 
-        max_seconds = self.settings.flow_audio_max_duration_seconds
+        # A live session is one file: the tenant's longest recording bounds it.
+        max_seconds = flow_audio_decode_limits(
+            runtime_inputs.limits, self.settings
+        ).longest_audio_seconds
         ticket, expires_at = await self.ticket_store.issue(
             LiveTranscriptionGrant(
                 tenant_id=self.user.tenant_id,

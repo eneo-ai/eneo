@@ -214,6 +214,7 @@ class Transcriber:
         transcription_model: "TranscriptionModel",
         language: str | None = None,
         observer: "ProviderCallObserver | None" = None,
+        limits: audio.AudioDecodeLimits | None = None,
     ) -> TranscribedAudio:
         adapter = await self.prepare_transcription(transcription_model)
         return await self.transcribe_prepared_from_filepath(
@@ -221,6 +222,7 @@ class Transcriber:
             adapter=adapter,
             language=language,
             observer=observer,
+            limits=limits,
         )
 
     async def prepare_transcription(
@@ -236,8 +238,9 @@ class Transcriber:
         adapter: LiteLLMTranscriptionAdapter,
         language: str | None = None,
         observer: "ProviderCallObserver | None" = None,
+        limits: audio.AudioDecodeLimits | None = None,
     ) -> TranscribedAudio:
-        async with audio.to_wav(str(filepath)) as wav_file:
+        async with audio.to_wav(str(filepath), limits=limits) as wav_file:
             transcription = await adapter.get_text_from_file(
                 wav_file, language=language, observer=observer
             )

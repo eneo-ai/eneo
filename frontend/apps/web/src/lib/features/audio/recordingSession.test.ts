@@ -5,7 +5,7 @@ import {
   RETRY_BACKOFF_MS,
   RETRY_WALL_CLOCK_CAP_MS,
   RecordingSession,
-  SEGMENT_ROTATION_MS,
+  canStartRecording,
   buildSegmentFilenameBase,
   parseSegmentFilename,
   diffContractSnapshot,
@@ -23,14 +23,36 @@ const baseSnapshot: ContractSnapshot = {
   inputFormat: "audio"
 };
 
+// Eneo's part length for these tests (recording_part_seconds), with no longest recording.
+const SEGMENT_ROTATION_MS = 20 * 60 * 1000;
+
 function makeDeps(overrides: Partial<RecordingSessionDeps> = {}): RecordingSessionDeps {
-  return {
+  const deps = {
     startSegment: vi.fn(async () => ({ ok: true })) as RecordingSessionDeps["startSegment"],
     stopSegment: vi.fn() as RecordingSessionDeps["stopSegment"],
     segmentsAwaitingUpload: () => 0,
+    recordingLimits: () => ({
+      partMs: SEGMENT_ROTATION_MS,
+      maxRecordingMs: null,
+      recordedMs: 0,
+      parts: 0,
+      filesLeft: Infinity
+    }),
     ...overrides
   };
+  // The dialog's admission rule, here the upload backlog alone.
+  return { canStartSegment: () => canStartRecording(deps.segmentsAwaitingUpload()), ...deps };
 }
+
+// Recorded time runs on the monotonic clock, faked with the timers.
+const FAKED_CLOCK = [
+  "setTimeout",
+  "clearTimeout",
+  "setInterval",
+  "clearInterval",
+  "Date",
+  "performance"
+] as const;
 
 afterEach(() => {
   vi.useRealTimers();
@@ -153,6 +175,130 @@ describe("RecordingSession lifecycle", () => {
     expect(session.summary().state).toBe("recording");
     expect(states).toEqual(["recording"]);
     expect(startSegment).not.toHaveBeenCalled();
+    session.dispose();
+  });
+
+  it("rotates at Eneo's part length and stops before the longest recording, counting the parts before it", () => {
+    vi.useFakeTimers({ toFake: [...FAKED_CLOCK] });
+    const stopSegment = vi.fn();
+    const MINUTE = 60_000;
+    const session = new RecordingSession(
+      makeDeps({
+        stopSegment,
+        // One 20-minute part recorded before this session began.
+        recordingLimits: () => ({
+          partMs: 30 * MINUTE,
+          maxRecordingMs: 60 * MINUTE,
+          recordedMs: 20 * MINUTE,
+          parts: 1,
+          filesLeft: Infinity
+        })
+      }),
+      {}
+    );
+
+    session.beginRecordingExternal();
+    vi.advanceTimersByTime(30 * MINUTE);
+    expect(stopSegment.mock.calls).toEqual([["rotation"]]);
+
+    // 50 minutes over three parts: a minute's room and two handovers' seconds leave 8:58.
+    vi.advanceTimersByTime(8 * MINUTE + 58_000 - 1);
+    expect(stopSegment).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1);
+    expect(stopSegment).toHaveBeenLastCalledWith("length");
+    vi.advanceTimersByTime(60 * MINUTE);
+    expect(stopSegment).toHaveBeenCalledTimes(2);
+    session.dispose();
+  });
+
+  it("stops at the step's last file slot instead of starting a part that cannot be sent", () => {
+    vi.useFakeTimers({ toFake: [...FAKED_CLOCK] });
+    // Room for the running part and one more; each handed-over part then holds a slot.
+    let filesLeft = 2;
+    const stopSegment = vi.fn((reason: string) => {
+      if (reason === "rotation") filesLeft -= 1;
+    });
+    const session = new RecordingSession(
+      makeDeps({
+        stopSegment,
+        recordingLimits: () => ({
+          partMs: SEGMENT_ROTATION_MS,
+          maxRecordingMs: null,
+          recordedMs: 0,
+          parts: 0,
+          filesLeft
+        })
+      }),
+      {}
+    );
+    session.beginRecordingExternal();
+    vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
+    vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
+    expect(stopSegment.mock.calls).toEqual([["rotation"], ["files"]]);
+    session.dispose();
+  });
+
+  it("a timer that fires late, past the recording's end, stops rather than starting another part", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const MINUTE = 60_000;
+    let now = 0;
+    const stopSegment = vi.fn();
+    const session = new RecordingSession(
+      makeDeps({
+        stopSegment,
+        recordingLimits: () => ({
+          partMs: 20 * MINUTE,
+          maxRecordingMs: 30 * MINUTE,
+          recordedMs: 0,
+          parts: 0,
+          filesLeft: Infinity
+        })
+      }),
+      {},
+      { now: () => now }
+    );
+    session.beginRecordingExternal();
+    // A throttled tab: the 20-minute timer runs 15 minutes late.
+    now = 35 * MINUTE;
+    vi.advanceTimersByTime(20 * MINUTE);
+    expect(stopSegment.mock.calls).toEqual([["length"]]);
+    session.dispose();
+  });
+
+  it("does not retry a failed start the dialog would refuse", async () => {
+    vi.useFakeTimers();
+    const startSegment = vi.fn(async () => ({ ok: true as const }));
+    const session = new RecordingSession(
+      makeDeps({ startSegment, canStartSegment: () => false }),
+      {}
+    );
+    session.beginRecordingExternal();
+    session.notifyHardFailure();
+    await vi.advanceTimersByTimeAsync(RETRY_BACKOFF_MS[0]);
+    expect(startSegment).not.toHaveBeenCalled();
+    expect(session.summary().state).toBe("idle");
+    session.dispose();
+  });
+
+  it("neither rotates nor stops by the clock when Eneo sets no part length or longest recording", () => {
+    vi.useFakeTimers();
+    const stopSegment = vi.fn();
+    const session = new RecordingSession(
+      makeDeps({
+        stopSegment,
+        recordingLimits: () => ({
+          partMs: null,
+          maxRecordingMs: null,
+          recordedMs: 0,
+          parts: 0,
+          filesLeft: Infinity
+        })
+      }),
+      {}
+    );
+    session.beginRecordingExternal();
+    vi.advanceTimersByTime(24 * 60 * 60 * 1000);
+    expect(stopSegment).not.toHaveBeenCalled();
     session.dispose();
   });
 

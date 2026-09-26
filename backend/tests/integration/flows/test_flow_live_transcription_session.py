@@ -321,6 +321,21 @@ async def live_stack(
         yield LiveStack(client, headers, flow, model_server, base_url, server)
 
 
+async def test_a_session_takes_the_longest_recording_the_tenant_admin_set(
+    live_stack: LiveStack, db_container
+):
+    patched = await live_stack.client.patch(
+        "/api/v1/settings/flow-input-limits",
+        json={"audio_max_duration_seconds": 3600},
+        headers=live_stack.headers,
+    )
+    assert patched.status_code == 200, patched.text
+
+    session = await live_stack.open_session()
+
+    assert session["max_seconds"] == 3600
+
+
 async def test_an_admitted_session_streams_the_preview_through_the_flows_model(
     live_stack: LiveStack, db_container
 ):

@@ -319,8 +319,8 @@ def test_effective_runtime_upload_policy_exposes_client_timeout_formula() -> Non
 @pytest.mark.parametrize(
     "locale,ceiling_word,unlimited_word",
     [
-        ("en", "deployment ceiling", "unlimited"),
-        ("sv", "driftsättningens gräns", "obegränsat"),
+        ("en", "deployment limit", "unlimited"),
+        ("sv", "driftmiljöns gräns", "obegränsat"),
     ],
 )
 def test_admin_empty_file_limit_copy_names_deployment_ceiling(
@@ -338,3 +338,94 @@ def test_admin_empty_file_limit_copy_names_deployment_ceiling(
     ):
         assert ceiling_word in messages[key].lower()
         assert unlimited_word not in messages[key].lower()
+
+
+# The longest recording a flow takes: the admin's value on the flow-settings page, below the deployment's flow
+# ceiling, and by default the deployment's audio duration.
+
+
+def _durations(default: int, ceiling: int) -> SimpleNamespace:
+    return SimpleNamespace(
+        flow_audio_max_duration_seconds=default,
+        flow_audio_max_duration_ceiling_seconds=ceiling,
+        flow_audio_max_decoded_bytes=2 * 1024**3,
+    )
+
+
+def test_resolve_audio_duration_defaults_to_the_deployment_value(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "eneo.flows.flow_input_limits.get_settings", lambda: _durations(18_000, 28_800)
+    )
+    limits = resolve_flow_input_limits(
+        None, defaults=_app_settings(upload=10_000_000, transcription=25_000_000)
+    )
+    assert limits.audio_max_duration_seconds == 18_000
+
+
+def test_resolve_audio_duration_default_stays_under_the_flow_ceiling(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "eneo.flows.flow_input_limits.get_settings", lambda: _durations(36_000, 28_800)
+    )
+    limits = resolve_flow_input_limits(
+        None, defaults=_app_settings(upload=10_000_000, transcription=25_000_000)
+    )
+    assert limits.audio_max_duration_seconds == 28_800
+
+
+@pytest.mark.parametrize(
+    ("tenant", "expected"), [(21_600, 21_600), (3_600, 3_600), (40_000, 28_800)]
+)
+def test_resolve_uses_the_tenant_audio_duration_up_to_the_flow_ceiling(
+    monkeypatch, tenant: int, expected: int
+) -> None:
+    monkeypatch.setattr(
+        "eneo.flows.flow_input_limits.get_settings", lambda: _durations(18_000, 28_800)
+    )
+    limits = resolve_flow_input_limits(
+        {"input_limits": {"audio_max_duration_seconds": tenant}},
+        defaults=_app_settings(upload=10_000_000, transcription=25_000_000),
+    )
+    assert limits.audio_max_duration_seconds == expected
+
+
+def test_apply_patch_sets_and_removes_the_audio_duration() -> None:
+    patched = apply_flow_input_limits_patch(None, audio_max_duration_seconds=21_600)
+    assert patched["input_limits"] == {"audio_max_duration_seconds": 21_600}
+    removed = apply_flow_input_limits_patch(
+        patched, remove_keys={"audio_max_duration_seconds"}
+    )
+    assert removed["input_limits"] == {}
+
+
+@pytest.mark.parametrize("value", [0, -1, True, 1.5, 59, 24 * 60 * 60 + 1])
+def test_the_audio_duration_is_whole_seconds_from_a_minute_to_a_day(value) -> None:
+    assert validate_flow_input_limits_object({"audio_max_duration_seconds": 3600}) == {
+        "audio_max_duration_seconds": 3600
+    }
+    with pytest.raises(BadRequestException):
+        validate_flow_input_limits_object({"audio_max_duration_seconds": value})
+
+
+def test_flow_decode_limits_take_the_tenant_duration_and_the_deployment_bytes(
+    monkeypatch,
+) -> None:
+    from eneo.flows.flow_input_limits import FlowInputLimits, flow_audio_decode_limits
+
+    monkeypatch.setattr(
+        "eneo.flows.flow_input_limits.get_settings", lambda: _durations(18_000, 28_800)
+    )
+    limits = FlowInputLimits(
+        file_max_size_bytes=1,
+        audio_max_size_bytes=1,
+        audio_max_duration_seconds=21_600,
+    )
+    decode = flow_audio_decode_limits(limits)
+    assert decode.max_duration_seconds == 21_600
+    assert decode.max_decoded_bytes == 2 * 1024**3
+    # A limits object built without the field reads the deployment default.
+    unset = flow_audio_decode_limits(
+        FlowInputLimits(file_max_size_bytes=1, audio_max_size_bytes=1)
+    )
+    assert unset.max_duration_seconds == 18_000

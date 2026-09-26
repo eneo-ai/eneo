@@ -201,6 +201,26 @@ class FlowRuntimeInputContractPublic(BaseModel):
             "and decoded-size limits. Set only for audio inputs."
         ),
     )
+    max_recording_seconds: int | None = Field(
+        default=None,
+        description=(
+            "The longest recording this input takes when its files are sent as "
+            "the parts of one recording (`single_recording`): the parts' lengths "
+            "together, overlaps included, in whole seconds. A tenant admin sets "
+            "it on the flow-settings page. Stop recording before it. Set only "
+            "for audio inputs."
+        ),
+    )
+    recording_part_seconds: int | None = Field(
+        default=None,
+        description=(
+            "How long each part of a recording should be for the input's file "
+            "slots (`max_files`) to hold a recording of `max_recording_seconds`: "
+            "start a new part at this length, or earlier when a part nears "
+            "`max_duration_seconds` or `max_file_size_bytes`. Set only for audio "
+            "inputs."
+        ),
+    )
     accepted_mimetypes: list[str] = Field(default_factory=list)
 
 
@@ -541,9 +561,10 @@ class FlowTranscriptionContractPublic(BaseModel):
         default=False,
         description=(
             "Whether a run may mark an audio step's files as the parts of one "
-            "recording with the step input's `single_recording`, so speakers are "
-            "labelled once across the parts. True whenever a transcription service "
-            "labels speakers. Send the flag only when this is true."
+            "recording with the step input's `single_recording`: the parts then take "
+            "the step's `max_recording_seconds` together, and a transcription service "
+            "that labels speakers labels them once across the parts. Send the flag "
+            "only when this is true."
         ),
     )
 

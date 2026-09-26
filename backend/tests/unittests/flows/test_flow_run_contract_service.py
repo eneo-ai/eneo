@@ -309,26 +309,49 @@ async def test_a_step_that_maps_speakers_requires_labels_so_a_run_cannot_choose(
     # A speaker service labels a multi-part recording as one.
     assert contract.transcription.single_recording is True
 
+    # Without one, the parts are still one recording: they take the longest recording together.
+    without_service = get_settings().model_copy(
+        update={
+            "flow_transcription_service_url": None,
+            "flow_transcription_service_api_key": None,
+        }
+    )
+    unlabelled = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=versions,
+        settings=without_service,
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
+    assert unlabelled.transcription is not None
+    assert unlabelled.transcription.single_recording is True
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("max_duration_seconds", "max_decoded_bytes", "longest"),
+    ("tenant_seconds", "max_duration_seconds", "max_decoded_bytes", "longest"),
     [
-        (7200, 2 * 2**30, 7200),
+        (None, 7200, 2 * 2**30, 7200),
+        # The admin's longest recording, not the deployment default.
+        (21_600, 18000, 2 * 2**30, 21_600),
         # 16 kHz mono 16-bit decodes to 32 000 bytes a second: this size
         # ceiling binds at one hour although the duration setting says five.
-        (18000, 115_200_000, 3600),
+        (None, 18000, 115_200_000, 3600),
     ],
 )
-async def test_an_audio_input_states_the_longest_file_eneo_transcribes(
-    max_duration_seconds: int, max_decoded_bytes: int, longest: int
+async def test_an_audio_input_states_the_longest_file_and_recording_eneo_transcribes(
+    tenant_seconds: int | None,
+    max_duration_seconds: int,
+    max_decoded_bytes: int,
+    longest: int,
 ) -> None:
     audio_step = _step(step_order=1, input_type="audio")
     flow = _flow(step=audio_step).model_copy(update={"published_version": 1})
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     settings_service = AsyncMock()
-    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    settings_service.get_flow_input_limits_resolved.return_value = replace(
+        _limits(), audio_max_duration_seconds=tenant_seconds
+    )
     versions = AsyncMock()
     versions.get.return_value = _published_version(
         version=1,
@@ -367,7 +390,13 @@ async def test_an_audio_input_states_the_longest_file_eneo_transcribes(
         settings=limits,
     ).get_run_contract(flow_id=flow.id, space=_SPACE)
 
-    assert contract.steps_requiring_input[0].max_duration_seconds == longest
+    step = contract.steps_requiring_input[0]
+    assert step.max_duration_seconds == longest
+    # The parts of one recording together (single_recording) take the same.
+    assert step.max_recording_seconds == longest
+    # Parts long enough that the step's file slots hold the whole recording.
+    assert step.max_files is not None
+    assert step.recording_part_seconds == -(-longest // step.max_files)
 
 
 @pytest.mark.asyncio
@@ -592,6 +621,8 @@ async def test_get_run_contract_returns_published_inputs_final_output_and_templa
     assert contract.steps_requiring_input[0].max_files == 2
     assert contract.steps_requiring_input[0].max_file_size_bytes == 12_000_000
     assert contract.steps_requiring_input[0].max_duration_seconds is None
+    assert contract.steps_requiring_input[0].max_recording_seconds is None
+    assert contract.steps_requiring_input[0].recording_part_seconds is None
     assert contract.runtime_upload_policy.min_timeout_seconds == 120
     assert contract.runtime_upload_policy.seconds_per_mebibyte == 8
     assert contract.runtime_upload_policy.max_timeout_seconds == 600

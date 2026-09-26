@@ -17599,6 +17599,8 @@ export interface components {
     /**
      * FlowInputLimitsPublic
      * @example {
+     *       "audio_max_duration_ceiling_seconds": 28800,
+     *       "audio_max_duration_seconds": 18000,
      *       "audio_max_files_per_run": 5,
      *       "audio_max_size_bytes": 104857600,
      *       "audio_max_size_ceiling_bytes": 209715200,
@@ -17608,6 +17610,16 @@ export interface components {
      *     }
      */
     FlowInputLimitsPublic: {
+      /**
+       * Audio Max Duration Ceiling Seconds
+       * @description The deployment's ceiling for audio_max_duration_seconds. Tenant values above it are rejected on write and clamped on read.
+       */
+      audio_max_duration_ceiling_seconds: number;
+      /**
+       * Audio Max Duration Seconds
+       * @description The longest recording a flow takes, in seconds: one audio file, and the parts of one recording together. Resetting the stored override to null restores the deployment default.
+       */
+      audio_max_duration_seconds: number;
       /**
        * Audio Max Files Per Run
        * @description Effective tenant-level audio file count ceiling for each Flow run. Resetting the stored override to null restores the default; this response always returns the resolved positive integer.
@@ -17636,11 +17648,17 @@ export interface components {
     /**
      * FlowInputLimitsUpdate
      * @example {
+     *       "audio_max_duration_seconds": 18000,
      *       "file_max_size_bytes": 52428800,
      *       "max_files_per_run": 20
      *     }
      */
     FlowInputLimitsUpdate: {
+      /**
+       * Audio Max Duration Seconds
+       * @description Set the longest recording in seconds (up to the deployment ceiling), or send null to use the deployment default.
+       */
+      audio_max_duration_seconds?: number | null;
       /**
        * Audio Max Files Per Run
        * @description Set the tenant ceiling, or send null to use the default audio ceiling.
@@ -23631,6 +23649,16 @@ export interface components {
       max_file_size_bytes?: number | null;
       /** Max Files */
       max_files?: number | null;
+      /**
+       * Max Recording Seconds
+       * @description The longest recording this input takes when its files are sent as the parts of one recording (`single_recording`): the parts' lengths together, overlaps included, in whole seconds. A tenant admin sets it on the flow-settings page. Stop recording before it. Set only for audio inputs.
+       */
+      max_recording_seconds?: number | null;
+      /**
+       * Recording Part Seconds
+       * @description How long each part of a recording should be for the input's file slots (`max_files`) to hold a recording of `max_recording_seconds`: start a new part at this length, or earlier when a part nears `max_duration_seconds` or `max_file_size_bytes`. Set only for audio inputs.
+       */
+      recording_part_seconds?: number | null;
       /** Required */
       required: boolean;
       /**
@@ -25302,7 +25330,7 @@ export interface components {
       max_speakers?: components["schemas"]["FlowMaxSpeakersOptionPublic"] | null;
       /**
        * Single Recording
-       * @description Whether a run may mark an audio step's files as the parts of one recording with the step input's `single_recording`, so speakers are labelled once across the parts. True whenever a transcription service labels speakers. Send the flag only when this is true.
+       * @description Whether a run may mark an audio step's files as the parts of one recording with the step input's `single_recording`: the parts then take the step's `max_recording_seconds` together, and a transcription service that labels speakers labels them once across the parts. Send the flag only when this is true.
        * @default false
        */
       single_recording?: boolean;

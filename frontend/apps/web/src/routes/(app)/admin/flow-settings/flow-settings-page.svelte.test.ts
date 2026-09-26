@@ -13,12 +13,14 @@ const getFlowRunRetentionPolicy = vi.hoisted(() => vi.fn());
 const listOrganizationFlowRunRetentionReviewQueue = vi.hoisted(() => vi.fn());
 const listFlowRunRetentionSpaceTargets = vi.hoisted(() => vi.fn());
 const listFlowRunRetentionFlowTargets = vi.hoisted(() => vi.fn());
+const updateFlowInputLimits = vi.hoisted(() => vi.fn());
 const toastSuccess = vi.hoisted(() => vi.fn());
 const toastErrorMock = vi.hoisted(() => vi.fn());
 
 vi.mock("$lib/core/Eneo", () => ({
   getEneo: () => ({
     settings: {
+      updateFlowInputLimits,
       updateMappedExecutionPolicy,
       updateAIBuilderBudgetSettings,
       getFlowRetentionPolicy,
@@ -175,7 +177,9 @@ function pageData(
       max_files_per_run: null,
       audio_max_files_per_run: 10,
       file_max_size_ceiling_bytes: 10 * 1024 * 1024,
-      audio_max_size_ceiling_bytes: 200 * 1024 * 1024
+      audio_max_size_ceiling_bytes: 200 * 1024 * 1024,
+      audio_max_duration_seconds: 5 * 60 * 60,
+      audio_max_duration_ceiling_seconds: 8 * 60 * 60
     },
     flowRuntimePolicy: {
       default_step_timeout_seconds: 600,
@@ -546,14 +550,58 @@ describe("flow settings page — mapped restore lifecycle", () => {
 
     // 200 MiB of 128 kbit/s MP3 is roughly 3 h 38 min of speech.
     await expect
-      .element(page.getByText("Räcker till ungefär 3 h 38 min tal.", { exact: false }))
+      .element(page.getByText("Räcker till ungefär 3 h 38 min tal i MP3.", { exact: false }))
       .toBeVisible();
 
     await page.getByRole("textbox", { name: "Största ljudfil" }).fill("60");
 
     await expect
-      .element(page.getByText("Räcker till ungefär 1 h 6 min tal.", { exact: false }))
+      .element(page.getByText("Räcker till ungefär 1 h 6 min tal i MP3.", { exact: false }))
       .toBeVisible();
+  });
+
+  test("the longest recording is set in minutes, up to the deployment's ceiling", async () => {
+    render(FlowSettingsPage, pageProps());
+    await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
+
+    const field = page.getByRole("textbox", { name: "Längsta inspelning" });
+    await expect.element(field).toHaveValue("300");
+    // The minutes read as hours, then the deployment's ceiling: one line each.
+    await expect.element(page.getByText("Motsvarar 5 h.", { exact: true })).toBeVisible();
+    await expect
+      .element(page.getByText("Högsta tillåtna värde: 480 min (8 h).", { exact: true }))
+      .toBeVisible();
+    await field.fill("90");
+    await expect.element(page.getByText("Motsvarar 1 h 30 min.", { exact: false })).toBeVisible();
+
+    await field.fill("481");
+    // An invalid entry has no hours to state: only the ceiling and the error describe it.
+    await expect.element(field).not.toHaveAccessibleDescription(/Motsvarar/);
+    await expect
+      .element(field)
+      .toHaveAccessibleDescription(/Högsta tillåtna värde: 480 min \(8 h\)/);
+    await expect.element(field).toHaveAttribute("aria-invalid", "true");
+  });
+
+  test("the longest recording saves in seconds, and an empty field returns to the deployment default", async () => {
+    const limits = pageData().flowInputLimits;
+    updateFlowInputLimits.mockResolvedValueOnce({
+      ...limits,
+      audio_max_duration_seconds: 6 * 60 * 60
+    });
+    render(FlowSettingsPage, pageProps());
+    await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
+
+    const field = page.getByRole("textbox", { name: "Längsta inspelning" });
+    await field.fill("360");
+    await page.getByRole("button", { name: "Spara ändringar" }).click();
+    expect(updateFlowInputLimits).toHaveBeenLastCalledWith({ audio_max_duration_seconds: 21_600 });
+    await expect.element(field).toHaveValue("360");
+
+    updateFlowInputLimits.mockResolvedValueOnce(limits);
+    await field.fill("");
+    await page.getByRole("button", { name: "Spara ändringar" }).click();
+    expect(updateFlowInputLimits).toHaveBeenLastCalledWith({ audio_max_duration_seconds: null });
   });
 
   test("hides the running time while the audio size is invalid", async () => {

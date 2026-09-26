@@ -14,6 +14,7 @@
   import { onDestroy, onMount } from "svelte";
 
   import dayjs from "dayjs";
+  import { monotonicNow } from "./recordingLimits";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import {
@@ -609,7 +610,7 @@
     const recorder = new MediaRecorder(stream, recordingOptions);
     const initialMimeType = recorder.mimeType || recordingOptions.mimeType || "";
     const chunks: Blob[] = [];
-    const segmentStartedAt = dayjs();
+    const segmentStartedAt = monotonicNow();
     const handOver = reportTo.onRecordingDone;
     const isReplaced = () => replacedRecorders.has(recorder);
     let stopHandled = () => {};
@@ -628,7 +629,7 @@
       return {
         blob: new Blob(chunks, { type: mimeType }),
         mimeType,
-        durationMs: Math.max(0, dayjs().diff(segmentStartedAt, "millisecond"))
+        durationMs: Math.max(0, monotonicNow() - segmentStartedAt)
       };
     };
 

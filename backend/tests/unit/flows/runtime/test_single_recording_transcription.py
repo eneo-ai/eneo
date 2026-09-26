@@ -213,3 +213,86 @@ async def test_a_result_that_cannot_return_to_its_parts_fails_the_step(
 
     assert failed.value.code == FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED.value
     spool_contract.assert_finished()
+
+
+# The tenant's longest recording (the flow-settings page) is the limit, not the deployment default.
+TENANT_LIMITS = audio.AudioDecodeLimits(
+    max_duration_seconds=15, max_decoded_bytes=2 * 1024**3
+)
+
+
+async def test_the_tenant_limit_binds_a_joined_recording(spool_contract, ffmpeg):
+    files = [_part("del-1.wav", 10), _part("del-2.wav", 10)]
+    engine = _engine()
+
+    with pytest.raises(TypedIOValidationException) as refused:
+        await transcribe_audio_input(
+            files=files,
+            transcriber=engine,
+            transcription_model=SimpleNamespace(id=uuid4(), name="whisper-1"),
+            language="sv",
+            step_order=1,
+            max_files=5,
+            max_inline_text_bytes=100_000,
+            open_audio_download=spool_contract.downloads(files),
+            diarize=True,
+            single_recording=True,
+            decode_limits=TENANT_LIMITS,
+        )
+
+    assert refused.value.code == FlowApiErrorCode.TYPED_IO_AUDIO_EXCEEDS_LIMIT.value
+    engine.transcribe_recording.assert_not_awaited()
+    spool_contract.assert_finished()
+
+
+async def test_a_marked_recording_without_speaker_labels_is_one_recording_too(
+    spool_contract, ffmpeg
+):
+    spool_contract.duration_seconds = None  # the parts' real lengths
+    files = [_part("del-1.wav", 10), _part("del-2.wav", 10), _part("del-3.wav", 10)]
+    engine = _engine()
+    downloads = spool_contract.downloads(files)
+
+    with pytest.raises(TypedIOValidationException) as refused:
+        await transcribe_audio_input(
+            files=files,
+            transcriber=engine,
+            transcription_model=SimpleNamespace(id=uuid4(), name="whisper-1"),
+            language="sv",
+            step_order=1,
+            max_files=5,
+            max_inline_text_bytes=100_000,
+            open_audio_download=downloads,
+            diarize=False,
+            single_recording=True,
+            decode_limits=TENANT_LIMITS,
+        )
+
+    assert refused.value.code == FlowApiErrorCode.TYPED_IO_AUDIO_EXCEEDS_LIMIT.value
+    # It stops at the part that crosses the limit, before an engine is paid for it.
+    assert downloads.calls == [files[0].id, files[1].id]
+    assert engine.transcribe.await_count == 1
+    spool_contract.assert_finished()
+
+
+async def test_each_file_is_decoded_under_the_tenant_limit(spool_contract, ffmpeg):
+    files = [_part("a.wav", 1), _part("b.wav", 1)]
+    engine = _engine()
+
+    await transcribe_audio_input(
+        files=files,
+        transcriber=engine,
+        transcription_model=SimpleNamespace(id=uuid4(), name="whisper-1"),
+        language="sv",
+        step_order=1,
+        max_files=5,
+        max_inline_text_bytes=100_000,
+        open_audio_download=spool_contract.downloads(files),
+        diarize=True,
+        decode_limits=TENANT_LIMITS,
+    )
+
+    assert [call.args[0].limits for call in engine.transcribe.await_args_list] == [
+        TENANT_LIMITS,
+        TENANT_LIMITS,
+    ]

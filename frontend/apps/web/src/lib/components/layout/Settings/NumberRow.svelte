@@ -26,7 +26,8 @@
     unit?: string;
     placeholder?: string;
     /** Extra helper line under the input (e.g. ceiling or effective value). */
-    hint?: string;
+    // One fact per line: a sentence never breaks across two facts.
+    hint?: string | string[];
     /** Tooltip with secondary explanation, rendered next to the title. */
     info?: string;
     /** Cross-field error owned by the page (e.g. ordering between fields). */
@@ -79,7 +80,9 @@
       {/if}
     </InputGroup.Root>
     {#if hint}
-      <p id={hintId} class="text-secondary text-xs">{hint}</p>
+      <p id={hintId} class="text-secondary text-xs">
+        {#each [hint].flat() as line (line)}<span class="block">{line}</span>{/each}
+      </p>
     {/if}
     {#if shownError}
       <Field.Error id={errorId} class="text-xs">{shownError}</Field.Error>

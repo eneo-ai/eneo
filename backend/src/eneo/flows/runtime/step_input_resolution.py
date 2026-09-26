@@ -55,6 +55,7 @@ from eneo.flows.flow_input_limits import (
     FLOW_INPUT_MAX_FILES_COUNT,
     FlowInputLimits,
     effective_upload_ceiling_bytes,
+    flow_audio_decode_limits,
 )
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
@@ -303,6 +304,11 @@ async def resolve_step_input(
                 max_audio_files=deps.max_audio_files,
                 max_inline_text_bytes=deps.max_inline_text_bytes,
                 source_preparation=deps.transcript_source_preparation,
+                decode_limits=(
+                    flow_audio_decode_limits(deps.input_limits)
+                    if deps.input_limits is not None
+                    else None
+                ),
             )
             audio_deps = AudioRuntimeDeps(
                 apply_output_cap=deps.apply_output_cap,

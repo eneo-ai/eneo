@@ -3,6 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
+from eneo.files.audio import AudioDecodeLimits
+from eneo.main.config import (
+    FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS,
+    Settings,
+    get_settings,
+)
 from eneo.main.exceptions import BadRequestException
 
 FLOW_INPUT_MIN_LIMIT_BYTES = 1
@@ -11,6 +17,9 @@ FLOW_INPUT_MAX_FILES_COUNT = 1000
 FLOW_INPUT_MAX_AUDIO_FILES_COUNT = 100
 
 DEFAULT_MAX_AUDIO_FILES_PER_RUN = 10
+# The shortest longest-recording an admin can set: a minute, the page's unit and
+# room for a recorder's margin below it.
+FLOW_AUDIO_MIN_DURATION_SECONDS = 60
 
 
 @dataclass(frozen=True)
@@ -19,6 +28,8 @@ class FlowInputLimits:
     audio_max_size_bytes: int
     max_files_per_run: int | None = FLOW_INPUT_MAX_FILES_COUNT
     audio_max_files_per_run: int = DEFAULT_MAX_AUDIO_FILES_PER_RUN
+    # The longest recording, in seconds; None reads the deployment default.
+    audio_max_duration_seconds: int | None = None
 
 
 FLOW_INPUT_LIMIT_KEYS = frozenset(FlowInputLimits.__dataclass_fields__)
@@ -30,6 +41,36 @@ class FlowRuntimeUploadPolicy:
     seconds_per_mebibyte: int = 8
     max_timeout_seconds: int = 600
     idle_timeout_seconds: int = 120
+
+
+def audio_duration_ceiling_seconds(settings: Settings | None = None) -> int:
+    """The longest recording a tenant admin may set for flows: the deployment's
+    flow ceiling, or less when the decoded-byte bound holds less."""
+    settings = settings or get_settings()
+    return AudioDecodeLimits(
+        max_duration_seconds=settings.flow_audio_max_duration_ceiling_seconds,
+        max_decoded_bytes=settings.flow_audio_max_decoded_bytes,
+    ).longest_audio_seconds
+
+
+def _default_audio_duration_seconds(settings: Settings | None = None) -> int:
+    settings = settings or get_settings()
+    return min(
+        settings.flow_audio_max_duration_seconds,
+        audio_duration_ceiling_seconds(settings),
+    )
+
+
+def flow_audio_decode_limits(
+    limits: FlowInputLimits, settings: Settings | None = None
+) -> AudioDecodeLimits:
+    """What a flow's audio may decode to: the tenant's longest recording and
+    the deployment's decoded-byte bound."""
+    return AudioDecodeLimits(
+        max_duration_seconds=limits.audio_max_duration_seconds
+        or _default_audio_duration_seconds(settings),
+        max_decoded_bytes=(settings or get_settings()).flow_audio_max_decoded_bytes,
+    )
 
 
 class FlowInputLimitsSource(Protocol):
@@ -73,7 +114,22 @@ def _default_limits(defaults: FlowInputLimitDefaults | None) -> FlowInputLimits:
         ),
         max_files_per_run=FLOW_INPUT_MAX_FILES_COUNT,
         audio_max_files_per_run=DEFAULT_MAX_AUDIO_FILES_PER_RUN,
+        audio_max_duration_seconds=_default_audio_duration_seconds(),
     )
+
+
+def _parse_duration(value: Any, field_name: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise BadRequestException(f"{field_name} must be an integer.")
+    if (
+        value < FLOW_AUDIO_MIN_DURATION_SECONDS
+        or value > FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS
+    ):
+        raise BadRequestException(
+            f"{field_name} must be between {FLOW_AUDIO_MIN_DURATION_SECONDS} and "
+            f"{FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS} seconds."
+        )
+    return value
 
 
 def _parse_limit(value: Any, field_name: str) -> int:
@@ -126,6 +182,11 @@ def validate_flow_input_limits_object(input_limits: Any) -> dict[str, Any]:
         if key not in input_limits_dict:
             continue
         _parse_limit(input_limits_dict[key], key)
+    if "audio_max_duration_seconds" in input_limits_dict:
+        _parse_duration(
+            input_limits_dict["audio_max_duration_seconds"],
+            "audio_max_duration_seconds",
+        )
 
     count_bounds = {
         "max_files_per_run": FLOW_INPUT_MAX_FILES_COUNT,
@@ -185,11 +246,21 @@ def resolve_flow_input_limits(
                 raw, "audio_max_files_per_run", FLOW_INPUT_MAX_AUDIO_FILES_COUNT
             )
 
+    audio_duration = resolved_defaults.audio_max_duration_seconds
+    if "audio_max_duration_seconds" in input_limits:
+        audio_duration = min(
+            _parse_duration(
+                input_limits["audio_max_duration_seconds"], "audio_max_duration_seconds"
+            ),
+            audio_duration_ceiling_seconds(),
+        )
+
     return FlowInputLimits(
         file_max_size_bytes=file_limit,
         audio_max_size_bytes=audio_limit,
         max_files_per_run=max_files,
         audio_max_files_per_run=audio_max_files,
+        audio_max_duration_seconds=audio_duration,
     )
 
 
@@ -200,6 +271,7 @@ def apply_flow_input_limits_patch(
     audio_max_size_bytes: int | None = None,
     max_files_per_run: int | None = None,
     audio_max_files_per_run: int | None = None,
+    audio_max_duration_seconds: int | None = None,
     remove_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     """Apply validated partial updates while preserving unrelated flow settings keys.
@@ -231,6 +303,11 @@ def apply_flow_input_limits_patch(
             audio_max_files_per_run,
             "audio_max_files_per_run",
             FLOW_INPUT_MAX_AUDIO_FILES_COUNT,
+        )
+
+    if audio_max_duration_seconds is not None:
+        next_input_limits["audio_max_duration_seconds"] = _parse_duration(
+            audio_max_duration_seconds, "audio_max_duration_seconds"
         )
 
     for key in remove_keys or ():

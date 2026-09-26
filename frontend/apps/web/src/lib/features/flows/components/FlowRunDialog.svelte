@@ -27,6 +27,11 @@
     type RecordingSessionDeps,
     type SessionState
   } from "$lib/features/audio/recordingSession";
+  import {
+    formatRecordingLength,
+    recordingLimitsForStep,
+    recordingTimeLeftMs
+  } from "$lib/features/audio/recordingLimits";
   import type {
     SegmentRecord,
     SessionRecoveryHint
@@ -310,11 +315,10 @@
       ? fileInputState.failedRecordedSegments(currentRuntimeStep.step_id).length > 0
       : false
   );
-  const currentStepCanStartRecording = $derived(
-    currentRuntimeStep
-      ? canStartRecording(fileInputState.segmentsAwaitingUpload(currentRuntimeStep.step_id))
-      : true
+  const currentStepRecordingRefusal = $derived(
+    currentRuntimeStep ? recordingRefusal(currentRuntimeStep) : null
   );
+  const currentStepCanStartRecording = $derived(currentStepRecordingRefusal === null);
   // No recorder captures or has yet to hand over its last segment, and every
   // segment is in the local store. Until then no page change (leaving the
   // step unmounts its recorder, which drops the segment in progress) and no
@@ -327,9 +331,7 @@
   );
   const currentStepFileCount = $derived(currentStepUploadedFiles.length);
   const currentStepRemainingSlots = $derived(
-    currentRuntimeStep?.max_files != null
-      ? currentRuntimeStep.max_files - currentStepFileCount
-      : Infinity
+    currentRuntimeStep ? slotsForNewFiles(currentRuntimeStep) : Infinity
   );
   const currentStepIsUploading = $derived(
     currentRuntimeStep ? fileInputState.isStepUploading(currentRuntimeStep.step_id) : false
@@ -337,12 +339,11 @@
   const currentStepUploadError = $derived(
     currentRuntimeStep ? fileInputState.getUploadError(currentRuntimeStep.step_id) : null
   );
-  // A full upload backlog refuses new recordings; the notice says why.
+  // A refused new recording says why; otherwise the last stop's notice stands.
   const currentStepRecordingNotice = $derived(
     currentRuntimeStep
-      ? currentStepCanStartRecording
-        ? fileInputState.getRecordingNotice(currentRuntimeStep.step_id)
-        : m.recording_stopped_upload_backlog()
+      ? (currentStepRecordingRefusal ??
+          fileInputState.getRecordingNotice(currentRuntimeStep.step_id))
       : null
   );
   const currentStepSkippedMessage = $derived(
@@ -660,6 +661,10 @@
       isStale(operationGeneration, operationFlowId) ||
       (discardsByStepId[step.step_id] ?? 0) !== discards;
     fileInputState.beginStepUpload(step.step_id, options);
+    // Chosen files hold their slots from now on, even while an earlier upload runs.
+    const reserved =
+      options.publish === false ? 0 : Math.max(0, Math.min(files.length, slotsForNewFiles(step)));
+    fileInputState.reserveSlots(step.step_id, reserved);
     const previousTail = uploadTailsByStepId.get(step.step_id) ?? Promise.resolve();
     let releaseTail = () => {};
     const currentTail = new Promise<void>((resolve) => {
@@ -675,8 +680,12 @@
       if (isOutdated()) {
         return staleResult;
       }
-      const currentFileCount = fileInputState.getUploadedFiles(step.step_id).length;
-      const remainingSlots = step.max_files == null ? Infinity : step.max_files - currentFileCount;
+      // A recorded segment is one of the waiting files it counts; a chosen file
+      // leaves the waiting segments and the running recording their slots.
+      const remainingSlots =
+        options.publish === false
+          ? (step.max_files ?? Infinity) - fileInputState.getUploadedFiles(step.step_id).length
+          : slotsForNewFiles(step) + reserved;
       const toUpload =
         remainingSlots !== Infinity ? files.slice(0, Math.max(remainingSlots, 0)) : files;
 
@@ -729,7 +738,9 @@
       }
       return { uploadedCount, uploadedFiles, failed };
     } finally {
+      // A reset dialog dropped this upload's reservation with the rest.
       if (!isStale(operationGeneration, operationFlowId)) {
+        fileInputState.reserveSlots(step.step_id, -reserved);
         fileInputState.finishStepUpload(step.step_id);
         if (uploadTailsByStepId.get(step.step_id) === currentTail) {
           uploadTailsByStepId.delete(step.step_id);
@@ -783,6 +794,55 @@
     ensureRecordingSessionForStep(stepId);
   }
 
+  // File slots a chosen file may take: the uploaded ones, the recorded segments
+  // waiting for upload and a running recording's part hold theirs.
+  function slotsForNewFiles(step: FlowRunContractStepInput): number {
+    if (step.max_files == null) return Infinity;
+    const held =
+      fileInputState.getUploadedFiles(step.step_id).length +
+      fileInputState.segmentsAwaitingUpload(step.step_id) +
+      fileInputState.reservedSlots(step.step_id) +
+      (fileInputState.isStepRecording(step.step_id) ? 1 : 0);
+    return step.max_files - held;
+  }
+
+  // Eneo's part length and longest recording for the step, the recording so far,
+  // and the file slots its uploaded and waiting files leave.
+  function recordingLimitsFor(step: FlowRunContractStepInput) {
+    const files =
+      fileInputState.getUploadedFiles(step.step_id).length +
+      fileInputState.segmentsAwaitingUpload(step.step_id) +
+      fileInputState.reservedSlots(step.step_id);
+    return {
+      ...recordingLimitsForStep(step),
+      ...fileInputState.recordingSoFar(step.step_id),
+      filesLeft: step.max_files == null ? Infinity : step.max_files - files
+    };
+  }
+
+  // Why a new segment may not start now, or null: one rule for the record
+  // button, the session's retries and a manual retry.
+  function recordingRefusal(step: FlowRunContractStepInput): string | null {
+    if (!canStartRecording(fileInputState.segmentsAwaitingUpload(step.step_id))) {
+      return m.recording_stopped_upload_backlog();
+    }
+    const limits = recordingLimitsFor(step);
+    if (limits.filesLeft < 1) return recordingFilesNotice(step);
+    if (recordingTimeLeftMs(limits.maxRecordingMs, limits.parts + 1, limits.recordedMs) <= 0) {
+      return recordingLengthNotice(step);
+    }
+    return null;
+  }
+
+  function recordingFilesNotice(step: FlowRunContractStepInput): string {
+    return m.recording_files_reached({ count: String(step.max_files ?? 0) });
+  }
+
+  function recordingLengthNotice(step: FlowRunContractStepInput): string {
+    const { maxRecordingMs } = recordingLimitsForStep(step);
+    return m.recording_length_reached({ duration: formatRecordingLength(maxRecordingMs ?? 0) });
+  }
+
   function makeRecordingSessionDeps(stepId: string): RecordingSessionDeps {
     return {
       // Retry: the session calls this after a backoff. We delegate to
@@ -802,7 +862,22 @@
       stopSegment: (reason) => {
         void recorderRefsByStepId[stepId]?.stopExternal(reason);
       },
-      segmentsAwaitingUpload: () => fileInputState.segmentsAwaitingUpload(stepId)
+      segmentsAwaitingUpload: () => fileInputState.segmentsAwaitingUpload(stepId),
+      recordingLimits: () => {
+        const step = stepsRequiringInput.find((s) => s.step_id === stepId);
+        return step
+          ? recordingLimitsFor(step)
+          : {
+              partMs: null,
+              maxRecordingMs: null,
+              filesLeft: Infinity,
+              ...fileInputState.recordingSoFar(stepId)
+            };
+      },
+      canStartSegment: () => {
+        const step = stepsRequiringInput.find((s) => s.step_id === stepId);
+        return step !== undefined && recordingRefusal(step) === null;
+      }
     };
   }
 
@@ -879,7 +954,8 @@
     const operationFlowId = flow.id;
     disposeRecordingSession(stepId);
     const ref = recorderRefsByStepId[stepId];
-    if (!ref || !canStartRecording(fileInputState.segmentsAwaitingUpload(stepId))) return;
+    const step = stepsRequiringInput.find((s) => s.step_id === stepId);
+    if (!ref || !step || recordingRefusal(step) !== null) return;
     // The recorder reports this start as external, which never creates a
     // session; without one the recording would never rotate.
     void ref
@@ -896,10 +972,16 @@
     disposeRecordingSession(stepId);
   }
 
-  function recordingNoticeForReason(reason: RecordingStopReason): string | null {
+  function recordingNoticeForReason(stepId: string, reason: RecordingStopReason): string | null {
     switch (reason) {
       case "limit":
         return m.recording_limit_reached();
+      case "length":
+      case "files": {
+        const step = stepsRequiringInput.find((s) => s.step_id === stepId);
+        if (!step) return null;
+        return reason === "length" ? recordingLengthNotice(step) : recordingFilesNotice(step);
+      }
       case "stall":
         return m.recording_stalled();
       case "error":
@@ -1027,7 +1109,7 @@
     }
     if (!params.blob) return;
     const prepared = {
-      ...fileInputState.prepareRecordedSegment(step.step_id),
+      ...fileInputState.prepareRecordedSegment(step.step_id, params.durationMs),
       liveRecordingId: params.reason === "rotation" ? null : livePreview.recordingId
     };
     const capturedAt = Date.now();
@@ -1064,7 +1146,7 @@
     fileInputState.recordSegmentPersistence({
       stepId: step.step_id,
       segment: prepared,
-      notice: recordingNoticeForReason(params.reason),
+      notice: recordingNoticeForReason(step.step_id, params.reason),
       degraded: persistResult.degraded
     });
     await uploadRecordedSegment(step, { ...prepared, file }, operationGeneration, operationFlowId);
