@@ -24,6 +24,7 @@ from eneo.completion_models.infrastructure.completion_service import (
     ResolvedCompletionModelRoute,
 )
 from eneo.files.file_models import File, FileType
+from eneo.flows.ai_builder import ai_builder_discovery
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
@@ -46,6 +47,9 @@ from eneo.flows.ai_builder.ai_builder_create_compiler import (
     compile_create_intent_to_spec,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
+from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
+    build_discovery_profile,
+)
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
@@ -125,8 +129,12 @@ from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
     ServerDecisionDispatchResult,
     ServerDecisionProposalContinuation,
+    ServerDecisionTelemetry,
+    dispatch_server_decision,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import (
+    SessionSendLease,
+    SessionSendTurn,
     SessionTurnClaim,
     SessionTurnClaimDisposition,
     SessionTurnPreflight,
@@ -1744,6 +1752,179 @@ async def test_prepare_reopen_command_dispatches_canonical_question_without_clas
     )
     assert build_runtime.await_args.kwargs["allow_classification"] is False
     planner.litellm_client.acompletion.assert_not_awaited()
+
+
+_ASK_TURN_REQUEST = (
+    "Jag vill bygga ett flöde som läser protokoll från nämndens möten och "
+    "sammanfattar besluten, vem som ansvarar och vilka frågor som är öppna."
+)
+
+
+def _ask_turn_classification_response(source_id: str) -> MagicMock:
+    message = MagicMock()
+    message.content = json.dumps(
+        {
+            "slots": {
+                "primary_runtime_input": {
+                    "outcome": "resolved",
+                    "value": "documents",
+                    "confidence": "high",
+                    "reason": "Protokoll läses in.",
+                    "evidence": [
+                        {
+                            "source_id": source_id,
+                            "quote": "läser protokoll från nämndens möten",
+                        }
+                    ],
+                    "evidence_level": "explicit",
+                },
+            },
+            "file_roles": [],
+            "checkpoint_updates": [],
+            "form_intake": None,
+            "named_result_evidence": None,
+            "example_output_constraints": None,
+            "schema_direction": None,
+            "secondary_obligations": [],
+        },
+        ensure_ascii=False,
+    )
+    message.tool_calls = None
+    return MagicMock(choices=[MagicMock(message=message, finish_reason="stop")])
+
+
+async def _dispatched_ask_turn(
+    *, share_discovery_profile: bool
+) -> list[FlowPersistedJsonObject]:
+    """One real first turn that ends in a server question, prepared and
+    dispatched as the planner does, returning the question events."""
+
+    planner = _make_planner()
+    conversation = [
+        ConversationMessage(
+            role="user", content=_ASK_TURN_REQUEST, metadata={"ui_language": "sv"}
+        )
+    ]
+    planner.litellm_client.acompletion.return_value = _ask_turn_classification_response(
+        f"user_message:{conversation[0].message_id}"
+    )
+    prepared = await _prepare_planner_request_for_test(
+        planner,
+        conversation=conversation,
+        completion_model_route=_route(),
+    )
+    assert isinstance(prepared, ServerOutputPrepared)
+    assert isinstance(prepared.server_decision, AskCanonicalQuestion)
+    assert prepared.server_decision.question is None
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 1
+    result = await dispatch_server_decision(
+        ServerDecisionDispatchRequest(
+            repo=repo,
+            turn=SessionSendTurn(
+                session_id=uuid4(),
+                tenant_id=planner.user.tenant_id,
+                lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
+                base_planning_state_version=0,
+            ),
+            decision=prepared.server_decision,
+            conversation=conversation,
+            new_messages_start=1,
+            flow=None,
+            confirmed_requirements_version=None,
+            ui_language="sv",
+            telemetry=ServerDecisionTelemetry(
+                request_id="req-ask-turn",
+                litellm_model="server",
+                usage_tracker=ProposalTurnTelemetry(
+                    request_id="req-ask-turn",
+                    model="server",
+                    target_kind=TargetKind.CREATE,
+                ),
+            ),
+            planning_state=prepared.planning_state,
+            selected_discovery_question_ids=(
+                prepared.discovery_analysis.selected_question_ids
+            ),
+            requirements_confirmation_required=(
+                prepared.requirements_confirmation_required
+            ),
+            attachment_context=prepared.attachment_context,
+            schema_candidates=prepared.schema_candidates,
+            schema_direction_pending=prepared.schema_direction_pending,
+            discovery_profile=(
+                prepared.discovery_analysis.profile if share_discovery_profile else None
+            ),
+        )
+    )
+    assert result.action_kind == "ask_question"
+    return [event.model_dump(mode="json") for event in result.events]
+
+
+@pytest.mark.asyncio
+async def test_an_ask_turn_builds_its_discovery_profile_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The turn's own analysis reads the profile; the question it then renders
+    # reads the same one instead of building it twice more.
+    builds = MagicMock(wraps=ai_builder_discovery._build_discovery_profile)  # noqa: SLF001
+    monkeypatch.setattr(ai_builder_discovery, "_build_discovery_profile", builds)
+
+    events = await _dispatched_ask_turn(share_discovery_profile=True)
+
+    assert [event["event"] for event in events] == ["text", "question"]
+    assert builds.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_sharing_the_discovery_profile_leaves_the_asked_question_unchanged() -> (
+    None
+):
+    shared = await _dispatched_ask_turn(share_discovery_profile=True)
+    # The question as the follow-up rendered it on its own, before sharing.
+    rebuilt = await _dispatched_ask_turn(share_discovery_profile=False)
+
+    assert json.dumps(shared, ensure_ascii=False, sort_keys=True) == json.dumps(
+        rebuilt, ensure_ascii=False, sort_keys=True
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_message_hands_the_turns_discovery_profile_to_the_question(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    conversation = [ConversationMessage(role="user", content=_ASK_TURN_REQUEST)]
+    profile = build_discovery_profile(conversation)
+    _configure_minimal_send_message(
+        planner,
+        monkeypatch,
+        replace(
+            _server_output_prepared(),
+            discovery_analysis=DiscoveryAnalysis(issues=(), profile=profile),
+        ),
+    )
+    captured: list[ServerDecisionDispatchRequest] = []
+
+    async def fake_dispatch(
+        request: ServerDecisionDispatchRequest,
+    ) -> ServerDecisionDispatchResult:
+        captured.append(request)
+        return ServerDecisionDispatchResult(
+            action_kind="ask_question",
+            events=(),
+            new_planning_state_version=2,
+        )
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
+        fake_dispatch,
+    )
+
+    await _collect_send_message_events(planner, session_id=uuid4())
+
+    assert len(captured) == 1
+    assert captured[0].discovery_profile is profile
 
 
 @pytest.mark.asyncio

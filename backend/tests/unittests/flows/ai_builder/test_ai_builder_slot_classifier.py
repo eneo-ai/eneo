@@ -4589,6 +4589,89 @@ def test_classification_prompt_uses_typed_outcomes_without_json_shape_echo() -> 
     assert '"contradictions"' not in prompt
 
 
+def _classification_input_with_upload(text: str) -> SlotClassificationInput:
+    file_id = UUID("00000000-0000-0000-0000-000000000222")
+    return SlotClassificationInput(
+        sources=(
+            *_classification_input(text).sources,
+            SlotClassificationSource(
+                source_id=f"uploaded_file:{file_id}",
+                kind="uploaded_file",
+                text="filename: mall.docx\nfile_type: document",
+                file_id=file_id,
+                coverage="inventory_only",
+            ),
+        ),
+        current_user_message_id="user-1",
+    )
+
+
+# Each rule reads an uploaded file: one sentence from every gated block.
+_UPLOAD_ONLY_CLASSIFIER_RULES = (
+    "Sources with kind uploaded_file are unconfirmed uploaded-file evidence",
+    "emit one example_output_constraints object only for those file ids",
+    "An example guides structure and style but does not promise exact visual",
+    "If the conversation and uploaded-file evidence show that an upload is an",
+    "Do not wait for deterministic inferred_role example_output",
+)
+_TEMPLATE_WITHOUT_A_FILE_RULE = (
+    "when no template file is attached, emit that terminal_output at medium "
+    "confidence so the Builder asks instead of assuming the template."
+)
+_UPLOAD_ONLY_RESPONSE_PROPERTIES = ("file_roles", "example_output_constraints")
+
+
+async def _classifier_request_for(
+    classification_input: SlotClassificationInput,
+) -> dict[str, Any]:
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(json.dumps({}))
+    await classify_slots(
+        litellm_client=litellm_client,
+        completion_model_route=_route(),
+        classification_input=classification_input,
+        allowed_slot_values={
+            "terminal_output": {"docx_document", "structured_text"},
+        },
+        tenant_id=uuid4(),
+    )
+    return litellm_client.acompletion.await_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_a_request_without_uploads_carries_no_upload_only_rules_or_schema() -> (
+    None
+):
+    request = await _classifier_request_for(
+        _classification_input("Ett utkast i kommunens mall, tack.")
+    )
+
+    system_prompt = request["messages"][0]["content"]
+    for rule in _UPLOAD_ONLY_CLASSIFIER_RULES:
+        assert rule not in system_prompt
+    # A template named but not attached is exactly the case without a file.
+    assert _TEMPLATE_WITHOUT_A_FILE_RULE in system_prompt
+    schema = request["response_format"]["json_schema"]["schema"]
+    for name in _UPLOAD_ONLY_RESPONSE_PROPERTIES:
+        assert name not in schema["properties"]
+    assert schema["required"] == list(schema["properties"])
+
+
+@pytest.mark.asyncio
+async def test_a_request_with_an_upload_carries_the_upload_rules_and_schema() -> None:
+    request = await _classifier_request_for(
+        _classification_input_with_upload("Ett utkast i kommunens mall, tack.")
+    )
+
+    system_prompt = request["messages"][0]["content"]
+    for rule in _UPLOAD_ONLY_CLASSIFIER_RULES:
+        assert rule in system_prompt
+    assert _TEMPLATE_WITHOUT_A_FILE_RULE in system_prompt
+    schema = request["response_format"]["json_schema"]["schema"]
+    for name in _UPLOAD_ONLY_RESPONSE_PROPERTIES:
+        assert name in schema["required"]
+
+
 def test_classification_prompt_includes_unconfirmed_uploaded_file_evidence() -> None:
     file_id = uuid4()
     messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
@@ -4681,7 +4764,9 @@ def test_schema_candidate_prompt_maps_file_source_to_candidate_fingerprint() -> 
 
 def test_classification_prompt_places_evidence_bounds_in_model_contract() -> None:
     messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
-        classification_input=_classification_input("Jag vill ha en PDF-rapport."),
+        classification_input=_classification_input_with_upload(
+            "Jag vill ha en PDF-rapport."
+        ),
         allowed_slot_values={"terminal_output": frozenset({"pdf_document"})},
         ui_language="sv",
     )
@@ -4958,7 +5043,10 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
     await classify_slots(
         litellm_client=litellm_client,
         completion_model_route=_route(),
-        classification_input=_classification_input(f"json-format-target-{uuid4()}"),
+        # With an upload, so the whole contract is requested.
+        classification_input=_classification_input_with_upload(
+            f"json-format-target-{uuid4()}"
+        ),
         allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
         tenant_id=uuid4(),
         ui_language="sv",
@@ -5303,7 +5391,7 @@ def test_slot_classification_prompt_defines_every_file_role_by_its_place_in_the_
     None
 ):
     messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
-        classification_input=_classification_input(
+        classification_input=_classification_input_with_upload(
             "De bifogade handlingarna är underlaget."
         ),
         allowed_slot_values={"primary_runtime_input": frozenset({"documents"})},

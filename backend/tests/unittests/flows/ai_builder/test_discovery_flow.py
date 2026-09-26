@@ -26,6 +26,9 @@ from eneo.flows.ai_builder.ai_builder_architecture_commit import (
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
+from eneo.flows.ai_builder.ai_builder_backend_question_persistence import (
+    persist_backend_question,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_for_assistant_question,
     question_answer_from_metadata,
@@ -3485,6 +3488,100 @@ class TestPlannerConversationEncoding:
         assert payload["role"] == "user"
         assert "Structured answer metadata" in payload["content"]
         assert "primary_runtime_input" in payload["content"]
+
+    @pytest.mark.asyncio
+    async def test_answered_questions_replay_their_options_as_labels_only(
+        self,
+    ) -> None:
+        # The option descriptions and examples were written for the person
+        # choosing. The planner reads the choice: the question, the ids and
+        # labels it was made between, and the answer, in the Swedish it was
+        # written in rather than as \u escapes.
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Vi spelar in våra nämndmöten. Ljudfilen ska skrivas ut och "
+                    "bli ett protokoll med besluten."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+        repo = AsyncMock()
+        repo.commit_turn.return_value = 1
+        asked = []
+        for question_id, option_id in (
+            ("post_processing_goal", "action_followup"),
+            ("terminal_output", "pdf_document"),
+        ):
+            question = build_registry_question_followup(
+                question_id,
+                conversation,
+                planning_state=PlanningState.empty(),
+            )
+            assert question is not None
+            await persist_backend_question(
+                repo=repo,
+                turn=_make_turn(),
+                conversation=conversation,
+                new_messages_start=len(conversation),
+                question=question,
+                planning_state=PlanningState.empty(),
+            )
+            chosen = next(
+                option
+                for option in question.question_data.options
+                if option.id == option_id
+            )
+            conversation.append(
+                ConversationMessage(
+                    role="user",
+                    content=chosen.label,
+                    metadata={
+                        "question_answer": {
+                            "question_id": question_id,
+                            "selected_option_ids": [option_id],
+                            "selected_values": [option_id],
+                        },
+                        "ui_language": "sv",
+                    },
+                )
+            )
+            asked.append((question.question_data, chosen))
+
+        rendered = [
+            conversation_message_to_llm_message(message) for message in conversation
+        ]
+        replayed_arguments = [
+            tool_call["function"]["arguments"]
+            for message in rendered
+            for tool_call in message.get("tool_calls") or []
+        ]
+        answers = [
+            message["content"]
+            for message in rendered
+            if message["role"] == "user" and "Structured answer" in message["content"]
+        ]
+
+        assert len(replayed_arguments) == 2
+        for arguments, answer, (question_data, chosen) in zip(
+            replayed_arguments, answers, asked, strict=True
+        ):
+            assert json.loads(arguments) == {
+                "question_id": question_data.question_id,
+                "question": question_data.question,
+                "options": [
+                    {"id": option.id, "label": option.label}
+                    for option in question_data.options
+                ],
+            }
+            for option in question_data.options:
+                for guidance in (option.description, option.example):
+                    assert not guidance or guidance not in arguments
+            assert any(letter in arguments for letter in "åäö")
+            assert "\\u00" not in arguments
+            assert answer.startswith(chosen.label)
+            assert f'"selected_option_ids": ["{chosen.id}"]' in answer
 
     def test_unexpected_conversation_role_fails_loud_for_llm_context(self) -> None:
         with pytest.raises(

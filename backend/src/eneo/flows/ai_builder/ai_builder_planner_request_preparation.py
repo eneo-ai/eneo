@@ -4,7 +4,7 @@ import json
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias, cast
 from uuid import UUID
 
 from eneo.completion_models.domain.model_capacity import ModelCapacity
@@ -135,6 +135,9 @@ from eneo.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
     AIBuilderPlannedRequestBudget,
     AIBuilderRequestBudget,
+)
+from eneo.flows.ai_builder.ai_builder_tool_names import (
+    ASK_STRUCTURED_QUESTION_TOOL_NAME,
 )
 from eneo.flows.ai_builder.ai_builder_tools import (
     ProposalToolSchema,
@@ -1314,7 +1317,12 @@ def conversation_message_to_llm_message(msg: ConversationMessage) -> LLMMessageP
                 "type": "function",
                 "function": {
                     "name": tool_call.name,
-                    "arguments": json.dumps(tool_call.arguments),
+                    "arguments": json.dumps(
+                        _replayed_tool_call_arguments(
+                            tool_call.name, tool_call.arguments
+                        ),
+                        ensure_ascii=False,
+                    ),
                 },
             }
             for tool_call in tool_calls
@@ -1322,6 +1330,44 @@ def conversation_message_to_llm_message(msg: ConversationMessage) -> LLMMessageP
     if msg.tool_call_id:
         payload["tool_call_id"] = provider_safe_tool_call_id(msg.tool_call_id)
     return payload
+
+
+def _replayed_tool_call_arguments(
+    name: str, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    """What the planner reads back of an earlier tool call.
+
+    A question put to the person replays as its id, its text and the ids and
+    labels it offered. The choice itself reaches the planner in the answer's
+    structured metadata and again in the resolved slots; the descriptions and
+    examples were written to help a person choose. The persisted row keeps the
+    whole payload.
+    """
+
+    if name != ASK_STRUCTURED_QUESTION_TOOL_NAME:
+        return arguments
+    replayed = {
+        key: arguments[key] for key in ("question_id", "question") if key in arguments
+    }
+    options = arguments.get("options")
+    if isinstance(options, list):
+        replayed["options"] = [
+            _replayed_question_option(option) for option in cast(list[object], options)
+        ]
+    return replayed
+
+
+def _replayed_question_option(option: object) -> object:
+    if not isinstance(option, dict):
+        return option
+    option_map = cast(dict[str, object], option)
+    replayed = {key: option_map[key] for key in ("id", "label") if key in option_map}
+    # An answer names its choice by id, or by value; the value is replayed
+    # only when it is not the id already shown.
+    value = option_map.get("value")
+    if value is not None and value != option_map.get("id"):
+        replayed["value"] = value
+    return replayed
 
 
 def _llm_message_role(role: str) -> LLMMessageRole:

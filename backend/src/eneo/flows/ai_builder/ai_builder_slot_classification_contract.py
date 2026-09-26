@@ -2523,15 +2523,34 @@ def _classification_file_ids(
     )
 
 
+_UPLOADED_FILE_RESPONSE_PROPERTIES = frozenset(
+    {"file_roles", "example_output_constraints"}
+)
+
+
 def slot_classification_json_schema(
     allowed_slot_values: Mapping[str, Collection[str]],
     *,
     schema_candidate_fingerprints: Collection[str] = (),
+    has_uploaded_files: bool = True,
 ) -> dict[str, object]:
+    """The response schema sent to the provider.
+
+    Without an uploaded-file source there is nothing to give a file role or an
+    example's form, so those two properties are not requested. The parser
+    still reads the whole contract and treats either one as empty when absent.
+    """
+
     properties = _slot_classification_top_level_properties(
         allowed_slot_values,
         schema_candidate_fingerprints=schema_candidate_fingerprints,
     )
+    if not has_uploaded_files:
+        properties = {
+            name: schema
+            for name, schema in properties.items()
+            if name not in _UPLOADED_FILE_RESPONSE_PROPERTIES
+        }
     return {
         "type": "object",
         "additionalProperties": False,

@@ -77,6 +77,7 @@ if TYPE_CHECKING:
     from eneo.flows.ai_builder.ai_builder_attachment_context import (
         AIBuilderAttachmentContext,
     )
+    from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryProfile
     from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
     from eneo.flows.ai_builder.ai_builder_schema_evidence import (
         DeclaredSchemaCandidate,
@@ -119,6 +120,9 @@ class ServerDecisionDispatchRequest:
     attachment_context: AIBuilderAttachmentContext | None
     schema_candidates: tuple[DeclaredSchemaCandidate, ...]
     schema_direction_pending: bool
+    # The profile this turn's discovery analysis read from `planning_state`,
+    # so a question rendered from the registry does not build it again.
+    discovery_profile: DiscoveryProfile | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,6 +206,7 @@ async def _dispatch_question(
         request.conversation,
         flow=request.flow,
         planning_state=request.planning_state,
+        profile=request.discovery_profile,
     )
     if followup is not None:
         followup = replace(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from functools import lru_cache
 
 _NON_WORD_RE = re.compile(r"[^\w]+", re.UNICODE)
 _SWEDISH_ARTIFACT_COMPOUND_PREFIXES: tuple[str, ...] = (
@@ -32,7 +33,31 @@ _SWEDISH_ARTIFACT_COMPOUND_SUFFIX_CANONICALS: tuple[tuple[str, str], ...] = (
 )
 
 
+# Discovery normalises the same fixed phrases, and the same request text,
+# tens of thousands of times in one turn. Normalising is pure (a string in, a
+# string out, nothing else read), so both are cached. Request text has its own
+# small cache: a turn re-reads only its own few texts, and user text runs to
+# tens of thousands of characters, so it must not pile up beside the phrases.
+_SHORT_TEXT_MAX_CHARS = 256
+
+
 def normalize_discovery_text(value: str) -> str:
+    if len(value) <= _SHORT_TEXT_MAX_CHARS:
+        return _normalize_short_text(value)
+    return _normalize_long_text(value)
+
+
+@lru_cache(maxsize=4096)
+def _normalize_short_text(value: str) -> str:
+    return _normalize(value)
+
+
+@lru_cache(maxsize=16)
+def _normalize_long_text(value: str) -> str:
+    return _normalize(value)
+
+
+def _normalize(value: str) -> str:
     collapsed = _NON_WORD_RE.sub(" ", value.casefold()).strip()
     tokens = [
         split_token

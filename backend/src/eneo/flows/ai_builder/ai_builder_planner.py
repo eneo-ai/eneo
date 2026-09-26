@@ -725,6 +725,9 @@ class AIBuilderPlanner:
                                 schema_direction_pending=(
                                     planner_turn_request.schema_direction_pending
                                 ),
+                                discovery_profile=(
+                                    planner_turn_request.discovery_analysis.profile
+                                ),
                             )
                         )
                     except PlanningStatePayloadTooLargeError as error:

@@ -120,6 +120,21 @@ def analyze_discovery(
         flow=flow,
         planning_state=planning_state,
     )
+    return _analyze_discovery_profile(
+        conversation,
+        profile,
+        planning_state=planning_state,
+        slot_classification_result=slot_classification_result,
+    )
+
+
+def _analyze_discovery_profile(
+    conversation: list[ConversationMessage],
+    profile: DiscoveryProfile,
+    *,
+    planning_state: PlanningState | None,
+    slot_classification_result: SlotClassificationResult | None,
+) -> DiscoveryAnalysis:
     mvs_met = _has_minimum_viable_specification(profile)
     raw_issues = _build_raw_discovery_issues(
         conversation,
@@ -176,6 +191,7 @@ def analyze_discovery(
         issues=tuple(selected_issues),
         mvs_met=mvs_met,
         selected_question_ids=tuple(selected_question_ids),
+        profile=profile,
     )
 
 
@@ -521,13 +537,27 @@ def build_registry_question_followup(
     *,
     flow: Flow | None = None,
     planning_state: PlanningState | None = None,
+    profile: DiscoveryProfile | None = None,
 ) -> BackendQuestion | None:
+    """The question for one registry slot, rendered from the issue that asks it.
+
+    ``profile`` is the turn's own discovery profile. It is read only when it
+    was built from this same planning state and flow; otherwise the profile
+    is built here. The issue is looked up in an analysis without the turn's
+    classifier result, as it always has been.
+    """
+
     canonical_id = canonical_question_id(question_id)
-    profile = _build_discovery_profile(
-        conversation,
-        flow=flow,
-        planning_state=planning_state,
-    )
+    if (
+        profile is None
+        or profile.planning_state is not planning_state
+        or profile.flow is not flow
+    ):
+        profile = _build_discovery_profile(
+            conversation,
+            flow=flow,
+            planning_state=planning_state,
+        )
     suggestion = question_suggestion_for_id(canonical_id, language=profile.language)
     if suggestion is None or suggestion.exposure != "user_requirement":
         return None
@@ -535,10 +565,11 @@ def build_registry_question_followup(
     issue = next(
         (
             issue
-            for issue in analyze_discovery(
+            for issue in _analyze_discovery_profile(
                 conversation,
-                flow=flow,
+                profile,
                 planning_state=planning_state,
+                slot_classification_result=None,
             ).issues
             if issue.suggestion is not None
             and issue.suggestion.question_id == canonical_id

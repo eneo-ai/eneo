@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
@@ -92,6 +92,9 @@ class DiscoveryAnalysis:
     issues: tuple[DiscoveryIssue, ...]
     mvs_met: bool = True
     selected_question_ids: tuple[str, ...] = ()
+    # The profile this analysis read, so the question the turn then renders
+    # reads it too instead of building it again. Not part of the result.
+    profile: DiscoveryProfile | None = field(default=None, compare=False, repr=False)
 
     @property
     def blocking_issues(self) -> tuple[DiscoveryIssue, ...]:
