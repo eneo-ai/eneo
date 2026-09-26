@@ -576,5 +576,6 @@
   "ui_copy_failed_copy_by_hand": "Det gick inte att kopiera. Markera nyckeln och kopiera den själv.",
   "ui_toast_close": "Stäng aviseringen",
   "ui_website_tabs_label": "Indexeringar och innehåll",
-  "legacy_result_tabs_label": "Resultat och transkription"
+  "legacy_result_tabs_label": "Resultat och transkription",
+  "legacy_insights_tabs_label": "Analys och frågehistorik"
 }
