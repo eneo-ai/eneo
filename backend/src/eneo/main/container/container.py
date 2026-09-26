@@ -70,6 +70,9 @@ from eneo.completion_models.infrastructure.completion_service import CompletionS
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.completion_models.presentation import CompletionModelAssembler
 from eneo.conversations.application.conversation_service import ConversationService
+from eneo.conversations.application.recent_conversations_service import (
+    RecentConversationsService,
+)
 from eneo.crawler.crawler import Crawler
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
@@ -1592,6 +1595,12 @@ class Container(containers.DeclarativeContainer):
         completion_service=completion_service,
         space_service=space_service,
         file_service=file_service,
+    )
+    recent_conversations_service = providers.Factory(
+        RecentConversationsService,
+        user=user,
+        session_repo=session_repo,
+        actor_manager=actor_manager,
     )
 
     # Token Usage

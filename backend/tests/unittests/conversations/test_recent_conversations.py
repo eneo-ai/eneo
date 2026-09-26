@@ -19,6 +19,9 @@ from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
 from eneo.conversations.application.recent_conversations_service import (
     RecentConversationsService,
 )
+from eneo.conversations.conversations_router import (
+    list_recent_conversations,
+)
 from eneo.conversations.conversations_router import router as conversations_router
 from eneo.roles.permissions import Permission
 from eneo.sessions.sessions_repo import ChatPartnerAccess, RecentSessionRow
@@ -218,6 +221,20 @@ def test_the_route_is_matched_before_the_conversation_route():
         if "GET" in getattr(route, "methods", set())
     ]
     assert paths.index("/recent/") < paths.index("/{session_id}/")
+
+
+async def test_the_route_lists_through_the_container_service():
+    recent = [SimpleNamespace(id=uuid4())]
+    service = SimpleNamespace(list_recent=AsyncMock(return_value=recent))
+    container = SimpleNamespace(recent_conversations_service=lambda: service)
+
+    response = await list_recent_conversations(
+        container=container,  # pyright: ignore[reportArgumentType]
+        limit=7,
+    )
+
+    service.list_recent.assert_awaited_once_with(limit=7)
+    assert response.items == recent
 
 
 async def test_nothing_to_open_skips_the_conversation_query():

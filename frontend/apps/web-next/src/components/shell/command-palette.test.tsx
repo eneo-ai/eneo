@@ -16,14 +16,25 @@ import ShellCommandPalette from "./command-palette";
 const PERSONAL_SPACE = { id: "p", name: "Personal", personal: true, organization: false };
 const UPPHANDLING = { id: "s1", name: "Upphandling", personal: false, organization: false };
 
+/** A conversation last active `minutesAgo` minutes before the test runs. */
 function conversation(
   id: string,
   name: string,
   partner: RecentConversation["partner"] = { type: "default-assistant", id: "d", name: "Eneo" },
-  space: RecentConversation["space"] = PERSONAL_SPACE
+  space: RecentConversation["space"] = PERSONAL_SPACE,
+  minutesAgo = 5
 ): RecentConversation {
-  const at = "2026-09-26T10:00:00Z";
+  const at = new Date(Date.now() - minutesAgo * 60_000).toISOString();
   return { id, name, created_at: at, last_activity_at: at, partner, space };
+}
+
+/** The accessible description: the text of the elements aria-describedby names. */
+function descriptionOf(element: Element | null) {
+  return (element?.getAttribute("aria-describedby") ?? "")
+    .split(" ")
+    .filter(Boolean)
+    .map((id) => document.getElementById(id)?.textContent)
+    .join(" ");
 }
 
 const recentKey = recentConversationsQueryOptions(browserApi).queryKey;
@@ -66,7 +77,8 @@ function seededClient() {
       "c2",
       "Leverantörsbedömning",
       { type: "assistant", id: "a2", name: "Avtalsgranskaren" },
-      UPPHANDLING
+      UPPHANDLING,
+      3 * 60
     )
   ]);
   queryClient.setQueryData(["spaces", "s1"], {
@@ -150,6 +162,35 @@ describe("ShellCommandPalette", () => {
     const inSpace = screen.getByRole("option", { name: /Leverantörsbedömning/ });
     expect(inSpace.textContent).toContain("Avtalsgranskaren i Upphandling");
     fireEvent.click(inSpace);
+    expect(router.push).toHaveBeenCalledWith("/spaces/s1/chat?type=assistant&id=a2&session_id=c2");
+  });
+
+  it("shows when each conversation was last active, as its description", async () => {
+    renderPalette();
+    const personal = await screen.findByRole("option", { name: /Upphandlingsanalys mot LOU/ });
+
+    // At the row's end, and not part of the option's name: search, grouping
+    // and names stay what they were.
+    expect(personal.textContent).toMatch(/för 5 minuter sedan$/);
+    expect(
+      screen.getByRole("option", { name: /^Upphandlingsanalys mot LOU ?Personlig assistent$/ })
+    ).toBe(personal);
+    expect(descriptionOf(personal)).toBe("för 5 minuter sedan");
+    // Other results have no time.
+    const assistant = screen.getByRole("option", { name: /Upphandlingsassistenten/ });
+    expect(assistant.hasAttribute("aria-describedby")).toBe(false);
+
+    // Arrowing to a conversation makes it the active option, time included.
+    search("leverantör");
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(1));
+    const combobox = screen.getByRole("combobox");
+    fireEvent.keyDown(combobox, { key: "ArrowDown" });
+    const active = document.getElementById(combobox.getAttribute("aria-activedescendant") ?? "");
+    expect(active?.textContent).toMatch(/^Leverantörsbedömning/);
+    expect(descriptionOf(active)).toBe("för 3 timmar sedan");
+    await expectNoAxeViolations(document.body);
+
+    fireEvent.keyDown(combobox, { key: "Enter" });
     expect(router.push).toHaveBeenCalledWith("/spaces/s1/chat?type=assistant&id=a2&session_id=c2");
   });
 

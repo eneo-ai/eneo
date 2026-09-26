@@ -135,6 +135,10 @@ describe("buildPaletteEntries", () => {
   it("opens conversations in their chat, says who they are with and names untitled ones", () => {
     const entries = buildPaletteEntries(data, member, t);
     const conversations = entries.filter((entry) => entry.group === "conversations");
+    // Each carries when it was last active, for the row's time.
+    expect(conversations.map((entry) => entry.activeAt)).toEqual(
+      data.conversations.map((conversation) => conversation.last_activity_at)
+    );
     expect(conversations.map((entry) => [entry.label, entry.subtitle, entry.action])).toEqual([
       [
         "Upphandlingsanalys mot LOU",

@@ -22,7 +22,8 @@ import {
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useMemo, useRef } from "react";
+import { useId, useLayoutEffect, useMemo, useRef } from "react";
+import { ClientTime } from "@/components/composites/client-time";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
@@ -129,6 +130,35 @@ function EntryVisual({ entry }: { entry: PaletteEntry }) {
   );
 }
 
+/**
+ * When a result was last active ("för 5 minuter sedan"), at the row's end.
+ * It describes the option rather than naming it: hidden from the name that
+ * search and grouping produced, and wired up as the option's description.
+ * The data-driven palette renders the option around our content and takes
+ * no props for it, hence the attribute on the nearest option.
+ */
+function EntryTime({ value }: { value: string }) {
+  const id = useId();
+  const ref = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const option = ref.current?.closest('[role="option"]');
+    if (!option) return;
+    option.setAttribute("aria-describedby", id);
+    return () => option.removeAttribute("aria-describedby");
+  }, [id]);
+
+  return (
+    <span
+      ref={ref}
+      id={id}
+      aria-hidden="true"
+      className="text-ax-text-secondary ms-auto shrink-0 text-xs whitespace-nowrap"
+    >
+      <ClientTime value={value} format="relative" />
+    </span>
+  );
+}
+
 function EntryContent({ entry }: { entry: PaletteEntry }) {
   const query = useCommandPaletteContext()?.search ?? "";
   return (
@@ -144,6 +174,7 @@ function EntryContent({ entry }: { entry: PaletteEntry }) {
           </span>
         ) : null}
       </span>
+      {entry.activeAt ? <EntryTime value={entry.activeAt} /> : null}
     </span>
   );
 }

@@ -20,9 +20,6 @@ from eneo.authentication.auth_dependencies import (
     require_resource_permission_for_method,
     require_session_auth,
 )
-from eneo.conversations.application.recent_conversations_service import (
-    RecentConversationsService,
-)
 from eneo.conversations.conversation_models import (
     ChatTurnDiagnostics,
     ConversationRenameRequest,
@@ -634,11 +631,7 @@ async def list_recent_conversations(
     client can label and link it without further requests. Session-only: the
     list serves the signed-in user's own navigation.
     """
-    service = RecentConversationsService(
-        user=container.user(),
-        session_repo=container.session_repo(),
-        actor_manager=container.actor_manager(),
-    )
+    service = container.recent_conversations_service()
     return PaginatedResponse(items=await service.list_recent(limit=limit))
 
 
