@@ -73,10 +73,11 @@ function modelFacts(model: CompletionModel, showPricing: boolean, t: Translate):
 
 /**
  * The composer's footer cannot shrink its send actions, so the compact
- * trigger caps the model's name (the full name is in the trigger's name and
- * the list) to keep the footer inside a 320 px screen.
+ * trigger caps the model's name, and below 360 px shows only the provider's
+ * logo, to keep the send button inside a 320 px screen. The full name stays
+ * in the trigger's accessible name and in the list.
  */
-const COMPACT_NAME = "max-w-[min(12rem,30vw)]";
+const COMPACT_NAME = "max-w-[min(12rem,30vw)] max-[359px]:hidden";
 
 function ModelValue({ model, compact }: { model: ModelRef; compact: boolean }) {
   return (
