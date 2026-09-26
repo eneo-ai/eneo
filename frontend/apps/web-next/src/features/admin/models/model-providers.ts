@@ -5,6 +5,7 @@ import type { Schema } from "@/lib/api/models";
 
 export type ModelProvider = Schema<"ModelProviderPublic">;
 export type ModelProviderUpdate = Schema<"ModelProviderUpdate">;
+export type ConnectionCheckError = Schema<"ConnectionCheckError">;
 
 /**
  * The `/capabilities/` endpoint is free-form (`{[key]: unknown}`) in the
@@ -58,9 +59,22 @@ export function createProvider(
     provider_type: string;
     credentials: Record<string, string>;
     config: Record<string, string>;
+    key_expires_on?: string | null;
   }
 ) {
   return unwrap(api.POST("/api/v1/admin/model-providers/", { body }));
+}
+
+/**
+ * Checks the provider's connection with its stored key (a cheap model-list
+ * call) and returns the provider with the result stored on it.
+ */
+export function checkProviderConnection(api: EneoClient, id: string) {
+  return unwrap(
+    api.POST("/api/v1/admin/model-providers/{provider_id}/connection-check/", {
+      params: { path: { provider_id: id } }
+    })
+  );
 }
 
 /** Update a custom model provider (name / active / credentials). */

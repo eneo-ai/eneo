@@ -82,6 +82,9 @@ const provider = (id: string, name: string, type: string, key: string | null) =>
   config: {},
   is_active: true,
   masked_api_key: key,
+  key_expires_on: null,
+  connection_check: null,
+  connection_check_supported: true,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z"
 });
@@ -174,7 +177,10 @@ describe("ModelsPage", () => {
 
     const anthropic = screen.getByRole("region", { name: "Anthropic" });
     expect(within(anthropic).getByText("2 modeller · nyckel ...4f2a")).toBeTruthy();
-    expect(within(anthropic).getByText("Konfigurerad")).toBeTruthy();
+    expect(within(anthropic).getByText("Inte testad")).toBeTruthy();
+    expect(
+      within(anthropic).getByRole("button", { name: "Testa anslutning till Anthropic" })
+    ).toBeTruthy();
     expect(within(anthropic).getByText("claude-opus-4-7")).toBeTruthy();
     expect(within(anthropic).getByText("Standard")).toBeTruthy();
     expect(within(anthropic).getByText("Utfasad")).toBeTruthy();
@@ -185,7 +191,8 @@ describe("ModelsPage", () => {
 
     // A self-hosted provider without a key is fine; OpenAI has no models yet.
     const vllm = screen.getByRole("region", { name: "vLLM" });
-    expect(within(vllm).getByText("Konfigurerad")).toBeTruthy();
+    expect(within(vllm).queryByText("Nyckel saknas")).toBeNull();
+    expect(within(vllm).getByText("Inte testad")).toBeTruthy();
     expect(screen.queryByRole("region", { name: "OpenAI" })).toBeNull();
 
     await expectNoAxeViolations(document.body);

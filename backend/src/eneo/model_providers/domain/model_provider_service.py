@@ -1,43 +1,41 @@
-from datetime import datetime
-from typing import TYPE_CHECKING, Any, Optional
+from datetime import date, datetime, timezone
+from enum import Enum
+from typing import Any, Literal, Optional
 from uuid import UUID, uuid4
 
 from eneo.main.exceptions import BadRequestException, NameCollisionException
+from eneo.model_providers.domain.connection_check import (
+    ConnectionCheck,
+    ConnectionCheckError,
+)
 from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
 from eneo.model_providers.domain.model_provider import ModelProvider
+from eneo.model_providers.domain.provider_api import (
+    configured_endpoint,
+    connection_check_request,
+    models_list_request,
+)
 from eneo.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
 )
+from eneo.model_providers.infrastructure.provider_connection_probe import (
+    probe_connection,
+)
 from eneo.settings.encryption_service import EncryptionService
-
-if TYPE_CHECKING:
-    pass
+from eneo.tenants.provider_field_config import is_field_required
 
 
-# Default base URLs for providers that don't ask the user for one.
-# Any provider configured with its own ``endpoint`` wins over the default.
-_DEFAULT_ENDPOINTS: dict[str, str] = {
-    "openai": "https://api.openai.com",
-    "anthropic": "https://api.anthropic.com",
-}
+class Unchanged(Enum):
+    """An update argument the caller did not send, where None means "clear"."""
+
+    UNCHANGED = "unchanged"
 
 
-def _auth_headers_for(provider_type: str, api_key: str) -> dict[str, str]:
-    """Auth header set per provider. Bearer for everyone except Anthropic,
-    which uses its own header pair."""
-    if provider_type == "anthropic":
-        return {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
-    return {"Authorization": f"Bearer {api_key}"}
+UNCHANGED = Unchanged.UNCHANGED
 
 
-def _normalize_endpoint_base(base: str) -> str:
-    """Strip a trailing slash and an optional ``/v1`` suffix so users can
-    paste either ``https://api.example.com`` or ``https://api.example.com/v1``
-    without us producing ``/v1/v1/models``."""
-    s = base.rstrip("/")
-    if s.endswith("/v1"):
-        s = s[:-3].rstrip("/")
-    return s
+class ConnectionCheckNotSupportedException(BadRequestException):
+    """No cheap authenticated call is known for this provider."""
 
 
 def _coerce_to_epoch(value: Any) -> float:
@@ -332,6 +330,7 @@ class ModelProviderService:
         credentials: dict[str, Any],
         config: dict[str, Any],
         is_active: bool = True,
+        key_expires_on: date | None = None,
     ) -> ModelProvider:
         """Create a new provider."""
         # Check for duplicate names
@@ -346,8 +345,6 @@ class ModelProviderService:
         encrypted_credentials = self._encrypt_credentials(credentials)
 
         # Create domain entity
-        from datetime import datetime, timezone
-
         now = datetime.now(timezone.utc)
         provider = ModelProvider(
             id=uuid4(),
@@ -359,6 +356,7 @@ class ModelProviderService:
             is_active=is_active,
             created_at=now,
             updated_at=now,
+            key_expires_on=key_expires_on,
         )
 
         return await self.repository.create(provider)
@@ -370,10 +368,16 @@ class ModelProviderService:
         credentials: Optional[dict[str, Any]] = None,
         config: Optional[dict[str, Any]] = None,
         is_active: Optional[bool] = None,
+        key_expires_on: date | None | Literal[Unchanged.UNCHANGED] = UNCHANGED,
     ) -> ModelProvider:
-        """Update an existing provider."""
+        """Update an existing provider.
+
+        New credentials or a changed config clear the stored connection check:
+        it describes settings the provider no longer has.
+        """
         # Get existing provider
         provider = await self.repository.get_by_id(provider_id)
+        connection_settings_changed = False
 
         # Check for duplicate names if name is being changed
         if name is not None and name != provider.name:
@@ -386,16 +390,23 @@ class ModelProviderService:
 
         if credentials is not None:
             provider.credentials = self._encrypt_credentials(credentials)
+            connection_settings_changed = True
 
         if config is not None:
             # Merge with existing config so unchanged fields are preserved
             merged = {**provider.config, **config}
+            connection_settings_changed |= merged != provider.config
             provider.config = merged
 
         if is_active is not None:
             provider.is_active = is_active
 
-        return await self.repository.update(provider)
+        if key_expires_on is not UNCHANGED:
+            provider.key_expires_on = key_expires_on
+
+        return await self.repository.update(
+            provider, clear_connection_check=connection_settings_changed
+        )
 
     async def delete(self, provider_id: UUID) -> None:
         """Delete a provider.
@@ -493,32 +504,24 @@ class ModelProviderService:
 
         Most providers expose ``GET /v1/models`` returning
         ``{"data": [{"id": ...}]}``. The two things that vary are the auth
-        header and the base URL — captured by ``_auth_headers_for`` and
-        ``_DEFAULT_ENDPOINTS``. Fields beyond ``id`` are pulled
-        opportunistically through fallback chains in ``_normalize_live_model``
-        so providers with richer responses get more metadata, while
-        minimal-shape providers still work.
+        header and the base URL — captured by ``models_list_request``, which
+        also skips providers without a usable list (see there). Fields beyond
+        ``id`` are pulled opportunistically through fallback chains in
+        ``_normalize_live_model`` so providers with richer responses get more
+        metadata, while minimal-shape providers still work.
 
         Returns entries with ``id``, optional ``display_name``, a
         ``created_at`` epoch-seconds value used to sort newest-first, and
         an optional ``mode_hint`` from provider-supplied capability fields.
-        Azure is skipped — its ``/openai/models`` returns every model in
-        the region, not deployed ones.
         """
         import httpx
 
-        if provider_type == "azure":
-            return []
-
-        base = endpoint or _DEFAULT_ENDPOINTS.get(provider_type)
-        if not base:
+        request = models_list_request(provider_type, api_key, endpoint)
+        if request is None:
             return []
 
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"{_normalize_endpoint_base(base)}/v1/models",
-                headers=_auth_headers_for(provider_type, api_key),
-            )
+            resp = await client.get(request.url, headers=request.headers)
             resp.raise_for_status()
             return [_normalize_live_model(m) for m in resp.json().get("data", [])]
 
@@ -542,7 +545,7 @@ class ModelProviderService:
         decrypted_creds = self._decrypt_credentials(provider.credentials)
         api_key = decrypted_creds.get("api_key", "")
         provider_type = provider.provider_type.lower()
-        endpoint = provider.config.get("endpoint", "")
+        endpoint = configured_endpoint(provider.config)
 
         try:
             items = await self._fetch_live_models(provider_type, api_key, endpoint)
@@ -575,100 +578,37 @@ class ModelProviderService:
             enriched.append(entry)
         return enriched
 
-    async def test_connection(self, provider_id: UUID) -> dict[str, Any]:
-        """Test connectivity to a model provider by making a minimal LiteLLM call.
+    async def check_connection(
+        self, provider_id: UUID
+    ) -> tuple[ModelProvider, ConnectionCheck]:
+        """Call the provider with its stored credentials and store the result.
 
-        Tries multiple test models per provider as fallback in case older models
-        have been deprecated.
+        The call lists the provider's models: authenticated, cheap and free of
+        token costs. Returns the provider as stored afterwards (the result is
+        dropped if its credentials changed during the call) and the result.
+
+        Raises:
+            ConnectionCheckNotSupportedException: No such call is known for
+                this provider type without an endpoint.
         """
-        import litellm
-
-        acompletion: Any = getattr(litellm, "acompletion")
-
         provider = await self.repository.get_by_id(provider_id)
-        decrypted_creds = self._decrypt_credentials(provider.credentials)
-        api_key = decrypted_creds.get("api_key", "")
-
         provider_type = provider.provider_type.lower()
-        base_kwargs: dict[str, Any] = {
-            "messages": [{"role": "user", "content": "hi"}],
-            "max_tokens": 1,
-            "api_key": api_key,
-        }
-
-        # Multiple candidates per provider, ordered from cheapest/newest to oldest.
-        # If a model is retired, the next one in the list is tried.
-        test_model_candidates: dict[str, list[str]] = {
-            "openai": [
-                "openai/gpt-4o-mini",
-                "openai/gpt-4.1-nano",
-                "openai/gpt-3.5-turbo",
-            ],
-            "anthropic": [
-                "anthropic/claude-3-5-haiku-20241022",
-                "anthropic/claude-3-haiku-20240307",
-                "anthropic/claude-3-5-sonnet-20241022",
-            ],
-            "gemini": [
-                "gemini/gemini-2.0-flash",
-                "gemini/gemini-1.5-flash",
-                "gemini/gemini-pro",
-            ],
-            "cohere": [
-                "cohere/command-r",
-                "cohere/command-r-plus",
-                "cohere/command",
-            ],
-            "mistral": [
-                "mistral/mistral-small-latest",
-                "mistral/mistral-tiny",
-                "mistral/open-mistral-7b",
-            ],
-        }
-
-        # Azure and vLLM use provider config, not a candidate list
-        if provider_type == "azure":
-            deployment = provider.config.get("deployment_name", "gpt-4o-mini")
-            base_kwargs["model"] = f"azure/{deployment}"
-            base_kwargs["api_base"] = provider.config.get("endpoint", "")
-            base_kwargs["api_version"] = provider.config.get(
-                "api_version", "2024-02-15-preview"
+        api_key = str(
+            self._decrypt_credentials(provider.credentials).get("api_key") or ""
+        )
+        request = connection_check_request(
+            provider_type, api_key, configured_endpoint(provider.config)
+        )
+        if request is None:
+            raise ConnectionCheckNotSupportedException(
+                f"Connection checks are not supported for provider type "
+                f"'{provider.provider_type}' without an endpoint."
             )
-            candidates = [base_kwargs["model"]]
-        elif provider_type == "vllm":
-            base_kwargs["api_base"] = provider.config.get("endpoint", "")
-            candidates = ["openai/test"]
-        elif provider_type in test_model_candidates:
-            candidates = test_model_candidates[provider_type]
+
+        if not api_key and is_field_required(provider_type, "api_key"):
+            check = ConnectionCheck.failed(ConnectionCheckError.MISSING_CREDENTIALS)
         else:
-            model_name = provider.config.get("model_name", "test")
-            if provider.config.get("endpoint"):
-                base_kwargs["api_base"] = provider.config["endpoint"]
-            candidates = [f"openai/{model_name}"]
-
-        for model in candidates:
-            kwargs = {**base_kwargs, "model": model}
-            try:
-                await acompletion(**kwargs)
-                return {"success": True, "message": "Connection successful"}
-            except Exception as e:
-                error_name = e.__class__.__name__
-                if error_name == "AuthenticationError":
-                    return {"success": False, "error": "Invalid API key"}
-                if error_name == "APIConnectionError":
-                    return {"success": False, "error": "Could not connect to the API"}
-                if error_name == "NotFoundError":
-                    # Model not found — try next candidate
-                    continue
-                # For non-model errors, no point retrying with a different model
-                return {"success": False, "error": f"Connection test failed: {str(e)}"}
-
-        # All candidates returned NotFound
-        return {
-            "success": False,
-            "error": (
-                "None of the test models could be found. "
-                "The provider may not support completion models, "
-                "or the API endpoint may be misconfigured."
-            ),
-        }
+            check = await probe_connection(
+                request, provider_label=f"{provider.id} ({provider_type})"
+            )
+        return await self.repository.record_connection_check(provider, check), check
