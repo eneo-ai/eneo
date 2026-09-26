@@ -29,14 +29,21 @@ export function SourceList({
   const itemRefs = useRef<Map<number, HTMLLIElement>>(new Map());
 
   // A citation opened the panel: move focus to that source (WCAG 2.4.3). In
-  // the bottom sheet this runs before the sheet's dialog opens (nothing in a
-  // closed dialog takes focus); the sheet then focuses the item marked
-  // data-autofocus instead.
+  // the bottom sheet this runs before the sheet's dialog opens, and nothing in
+  // a closed dialog takes focus; opening it then focuses the sheet's panel
+  // (browsers focus a dialog's first focusable element), so the sheet would
+  // skip a data-autofocus item. The sheet opens in its own effect, which runs
+  // after this one in the same task: focus the source right after that.
   useEffect(() => {
     if (focusIndex === null) return;
     const item = itemRefs.current.get(focusIndex);
-    item?.focus();
-    item?.scrollIntoView({ block: "nearest" });
+    if (!item) return;
+    const focus = () => {
+      item.focus();
+      item.scrollIntoView({ block: "nearest" });
+    };
+    if (item.closest("dialog:not([open])")) queueMicrotask(focus);
+    else focus();
   }, [focusIndex, messageId]);
 
   if (sources.length === 0) {
@@ -66,7 +73,6 @@ export function SourceList({
               else itemRefs.current.delete(index);
             }}
             tabIndex={-1}
-            data-autofocus={index === focusIndex ? "" : undefined}
             className="focus-visible:outline-ring rounded-ax-element focus:bg-ax-selected flex gap-2.5 p-2 focus-visible:outline-2 focus-visible:outline-offset-2"
           >
             <span
