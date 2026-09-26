@@ -992,6 +992,8 @@ function expectFlowPackageFile(file, expected) {
 }
 
 describe("flows transcript corrections endpoints", () => {
+  const segmentsHash = "a".repeat(64);
+
   it("lists transcript corrections from the run-level route", async () => {
     const fetch = vi.fn(async () => []);
     const flows = initFlows({ fetch });
@@ -1034,7 +1036,8 @@ describe("flows transcript corrections endpoints", () => {
       runId: "run-1",
       stepId: "step-1",
       expectedRevision: 1,
-      occurrences
+      occurrences,
+      segmentsHash
     });
 
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -1048,7 +1051,9 @@ describe("flows transcript corrections endpoints", () => {
     expect(fetch.mock.calls[0][1].requestBody["application/json"]).toEqual({
       expected_revision: 1,
       occurrences,
-      speaker_edits: []
+      speaker_edits: [],
+      schema_version: 3,
+      segments_hash: segmentsHash
     });
   });
 
@@ -1060,13 +1065,16 @@ describe("flows transcript corrections endpoints", () => {
       flowId: "flow-1",
       runId: "run-1",
       stepId: "step-1",
-      occurrences: []
+      occurrences: [],
+      segmentsHash
     });
 
     expect(fetch.mock.calls[0][1].requestBody["application/json"]).toEqual({
       expected_revision: null,
       occurrences: [],
-      speaker_edits: []
+      speaker_edits: [],
+      schema_version: 3,
+      segments_hash: segmentsHash
     });
   });
 
@@ -1090,13 +1098,16 @@ describe("flows transcript corrections endpoints", () => {
       stepId: "step-1",
       expectedRevision: 1,
       occurrences: [],
-      speakerEdits
+      speakerEdits,
+      segmentsHash
     });
 
     expect(fetch.mock.calls[0][1].requestBody["application/json"]).toEqual({
       expected_revision: 1,
       occurrences: [],
-      speaker_edits: speakerEdits
+      speaker_edits: speakerEdits,
+      schema_version: 3,
+      segments_hash: segmentsHash
     });
   });
 });
