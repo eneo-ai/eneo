@@ -17,13 +17,25 @@ import { expect, test as base, type Page } from "@playwright/test";
  * `import { expect, test } from "./csp";`
  */
 export const test = base.extend<{ cspViolations: string[] }>({
-  // The server's HTML shows before React attaches its handlers, so a click
-  // right after a load could go nowhere: goto and reload wait until the page
-  // is hydrated (src/components/providers/hydration-mark.tsx).
+  // The server's HTML shows before React attaches its handlers: the shell
+  // hydrates first and the page (the (app) loading boundary) after it, and a
+  // click on the page before that goes nowhere (React can't hydrate a part
+  // whose code hasn't loaded yet, so it drops the click). goto and reload wait
+  // until the page's first element, or the body's on a page without the
+  // shell, carries the `__reactFiber$…` property React DOM gives the elements
+  // it has hydrated.
   // `run`, not `use`: the React hooks lint rule reads `use(page)` as a hook call.
   page: async ({ page }, run) => {
     const hydrated = () =>
-      page.locator("html[data-hydrated]").waitFor({ state: "attached", timeout: 15_000 });
+      page.waitForFunction(
+        () => {
+          const first =
+            document.querySelector("#main-content > *") ?? document.body.firstElementChild;
+          return !!first && Object.keys(first).some((key) => key.startsWith("__reactFiber$"));
+        },
+        undefined,
+        { timeout: 15_000 }
+      );
     const goto = page.goto.bind(page);
     const reload = page.reload.bind(page);
     page.goto = async (...args: Parameters<Page["goto"]>) => {
