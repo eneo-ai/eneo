@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { AppContextProvider, type AppContextData } from "@/components/providers/app-context";
 import { AppShellFrame } from "@/components/shell/app-shell";
 import { unwrap } from "@/lib/api/errors";
@@ -8,6 +9,18 @@ import { WhatsNewProvider } from "@/features/whats-new/whats-new-provider";
 import { TourProvider } from "@/features/whats-new/tour-provider";
 import { WhatsNewAnnouncement } from "@/features/whats-new/announcement";
 import packageJson from "../../../package.json";
+
+/** Every app page can be added to the home screen (public/manifest.json). */
+export const metadata: Metadata = {
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    title: "Eneo"
+  },
+  other: {
+    "mobile-web-app-capable": "yes"
+  }
+};
 
 export default async function AppLayout({
   children
