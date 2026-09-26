@@ -72,6 +72,8 @@ export function ProfileMenu() {
 
   const name = profileDisplayName(user);
   const organisation = tenant.display_name?.trim() || tenant.name;
+  // Starts with the visible name and organisation (WCAG 2.5.3).
+  const buttonLabel = t("shell_profile_button_label", { name, organisation });
 
   function switchLocale(next: string) {
     startTransition(async () => {
@@ -93,8 +95,9 @@ export function ProfileMenu() {
   return (
     <DropdownMenu
       button={{
-        // Starts with the visible name and organisation (WCAG 2.5.3).
-        label: t("shell_profile_button_label", { name, organisation }),
+        label: buttonLabel,
+        // The icon rail shows only the avatar: the tooltip names it on hover.
+        tooltip: isCollapsed ? buttonLabel : undefined,
         variant: "ghost",
         size: "lg",
         className: isCollapsed

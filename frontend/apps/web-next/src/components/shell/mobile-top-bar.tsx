@@ -28,7 +28,7 @@ export function MobileTopBar() {
         aria-label={t("shell_home_link")}
         className="rounded-ax-inner focus-visible:outline-ring flex h-11 items-center px-1 focus-visible:outline-2 focus-visible:outline-offset-2"
       >
-        <EneoWordMark decorative className="h-5 w-auto" />
+        <EneoWordMark className="h-5 w-auto" />
       </Link>
       <div className="flex-1" />
       <div className="flex items-center">

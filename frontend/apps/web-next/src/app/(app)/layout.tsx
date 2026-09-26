@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { AppContextProvider, type AppContextData } from "@/components/providers/app-context";
 import { AppShellFrame } from "@/components/shell/app-shell";
+import {
+  isSideNavCollapsed,
+  SIDE_NAV_COLLAPSED_COOKIE
+} from "@/components/shell/side-nav-preference";
 import { unwrap } from "@/lib/api/errors";
 import { eneoApi } from "@/lib/api/server";
 import { env } from "@/lib/env";
@@ -28,6 +33,9 @@ export default async function AppLayout({
   children: React.ReactNode;
 }>) {
   const api = eneoApi();
+  const sideNavCollapsed = isSideNavCollapsed(
+    (await cookies()).get(SIDE_NAV_COLLAPSED_COOKIE)?.value
+  );
   const [user, tenant, settings, federationStatus, limits, backendVersion, whatsNewState] =
     await Promise.all([
       unwrap(api.GET("/api/v1/users/me/")),
@@ -70,7 +78,7 @@ export default async function AppLayout({
             {/* Viewport-locked shell: pages scroll inside the page panel
                 (main#main-content), so full-height surfaces (chat) can pin
                 their input to the bottom. */}
-            <AppShellFrame>{children}</AppShellFrame>
+            <AppShellFrame sideNavCollapsed={sideNavCollapsed}>{children}</AppShellFrame>
           </JobsProvider>
         </TourProvider>
       </WhatsNewProvider>

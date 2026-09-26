@@ -35,7 +35,14 @@ const MOBILE_QUERY = "(width < 48rem)";
  * (no top bar here) and open the drawer with
  * `window.dispatchEvent(new CustomEvent("eneo:open-nav"))`.
  */
-export function AppShellFrame({ children }: { children: React.ReactNode }) {
+export function AppShellFrame({
+  children,
+  sideNavCollapsed = false
+}: {
+  children: React.ReactNode;
+  /** The stored SideNav preference, read from its cookie by the server layout. */
+  sideNavCollapsed?: boolean;
+}) {
   const t = useTranslations();
   const pathname = usePathname();
   const isMobile = useMediaQuery(MOBILE_QUERY);
@@ -115,7 +122,7 @@ export function AppShellFrame({ children }: { children: React.ReactNode }) {
           </a>
           {!isChatRoute(pathname) && <MobileTopBar />}
           <div className="hidden min-h-0 shrink-0 md:flex md:flex-col">
-            <DesktopSideNav variant={variant} navId={navId} />
+            <DesktopSideNav variant={variant} navId={navId} defaultCollapsed={sideNavCollapsed} />
           </div>
           {/* tabIndex -1: the skip link moves focus here, not just the scroll
               position (WCAG 2.4.1); tests/a11y.spec.ts checks it. */}

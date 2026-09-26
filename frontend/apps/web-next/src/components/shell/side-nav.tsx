@@ -4,6 +4,7 @@ import { MobileNav } from "@astryxdesign/core/MobileNav";
 import { SideNav, SideNavRenderContext } from "@astryxdesign/core/SideNav";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { AdminSections, AdminTopContent } from "./admin-nav";
 import { EneoWordMark } from "./eneo-logo";
@@ -13,7 +14,7 @@ import { NavHeader } from "./nav-header";
 import { NotificationBells } from "./notification-bells";
 import type { NavVariant } from "./routes";
 import { DRAWER_MARKER } from "./shell-context";
-import { useSideNavCollapsed } from "./shell-state";
+import { storeSideNavCollapsed } from "./side-nav-preference";
 
 function navLabelKey(variant: NavVariant) {
   return variant === "admin" ? "shell_administration" : "shell_nav_label";
@@ -21,17 +22,31 @@ function navLabelKey(variant: NavVariant) {
 
 /**
  * The desktop SideNav (md and up): a named `nav` landmark that collapses to an
- * icon rail. The collapsed state is a per-browser preference (localStorage).
+ * icon rail. The collapsed state is a per-browser preference: the server
+ * layout reads it (`defaultCollapsed`) and a change stores it again.
  */
-export function DesktopSideNav({ variant, navId }: { variant: NavVariant; navId: string }) {
+export function DesktopSideNav({
+  variant,
+  navId,
+  defaultCollapsed = false
+}: {
+  variant: NavVariant;
+  navId: string;
+  defaultCollapsed?: boolean;
+}) {
   const t = useTranslations();
-  const [collapsed, setCollapsed] = useSideNavCollapsed();
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+
+  function changeCollapsed(next: boolean) {
+    setCollapsed(next);
+    storeSideNavCollapsed(next);
+  }
 
   return (
     <SideNav
       id={navId}
       aria-label={t(navLabelKey(variant))}
-      collapsible={{ isCollapsed: collapsed, onCollapsedChange: setCollapsed, hasButton: false }}
+      collapsible={{ isCollapsed: collapsed, onCollapsedChange: changeCollapsed, hasButton: false }}
       header={<NavHeader navId={navId} />}
       topContent={variant === "admin" ? <AdminTopContent /> : <MainTopContent />}
       footer={<NavFooter variant={variant} />}
@@ -74,7 +89,7 @@ export function MobileNavDrawer({
             onClick={() => onOpenChange(false)}
             className="rounded-ax-inner focus-visible:outline-ring ms-2 flex h-11 items-center focus-visible:outline-2 focus-visible:outline-offset-2"
           >
-            <EneoWordMark decorative className="h-5 w-auto" />
+            <EneoWordMark className="h-5 w-auto" />
           </Link>
           <div className="flex items-center">
             <NotificationBells />

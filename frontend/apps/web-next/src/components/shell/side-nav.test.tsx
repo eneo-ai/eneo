@@ -5,12 +5,14 @@ import { browserApi } from "@/lib/api/browser";
 import type { Permission } from "@/lib/auth/permissions";
 import { expectNoAxeViolations } from "@/test/axe";
 import { recentConversationsQueryOptions } from "./nav-data";
-import { resetSideNavCollapsedForTest, SIDE_NAV_COLLAPSED_KEY } from "./shell-state";
 import type { NavVariant } from "./routes";
 import { DesktopSideNav } from "./side-nav";
+import { SIDE_NAV_COLLAPSED_COOKIE } from "./side-nav-preference";
 import {
   appContext,
   installBrowserMocks,
+  noopShell,
+  renderToHtml,
   renderWithProviders,
   testQueryClient
 } from "./test-support";
@@ -61,7 +63,7 @@ function renderNav({
   variant = "main" as NavVariant,
   permissions = [] as Permission[],
   conversations = true,
-  shell = { openPalette: vi.fn(), openCreateSpace: vi.fn() }
+  shell = { ...noopShell, openPalette: vi.fn(), openCreateSpace: vi.fn() }
 } = {}) {
   const utils = renderWithProviders(<DesktopSideNav variant={variant} navId="side-nav" />, {
     queryClient: seededClient({ conversations }),
@@ -79,8 +81,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  window.localStorage.clear();
-  resetSideNavCollapsedForTest();
+  document.cookie = `${SIDE_NAV_COLLAPSED_COOKIE}=; max-age=0; path=/`;
 });
 
 describe("DesktopSideNav (main)", () => {
@@ -194,12 +195,39 @@ describe("DesktopSideNav (main)", () => {
 
     const expand = screen.getByRole("button", { name: "Fäll ut sidomenyn" });
     expect(expand.getAttribute("aria-expanded")).toBe("false");
-    expect(window.localStorage.getItem(SIDE_NAV_COLLAPSED_KEY)).toBe("1");
+    expect(document.cookie).toContain(`${SIDE_NAV_COLLAPSED_COOKIE}=1`);
     // Icon rail: titles-only rows (Senaste) and the section actions are gone,
     // icon rows keep their names.
     expect(screen.queryByRole("group", { name: "Senaste" })).toBeNull();
     expect(screen.getByRole("link", { name: "Upphandling" })).toBeTruthy();
     await expectNoAxeViolations(container);
+
+    fireEvent.click(expand);
+    expect(document.cookie).toContain(`${SIDE_NAV_COLLAPSED_COOKIE}=0`);
+  });
+
+  it("keeps focus on the toggle while it collapses and expands the nav", () => {
+    renderNav();
+    const toggle = screen.getByRole("button", { name: "Fäll ihop sidomenyn" });
+    toggle.focus();
+
+    fireEvent.click(toggle);
+    // The same element, renamed: focus did not drop to <body> (WCAG 2.4.3).
+    expect(screen.getByRole("button", { name: "Fäll ut sidomenyn" })).toBe(toggle);
+    expect(document.activeElement).toBe(toggle);
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(document.activeElement).toBe(toggle);
+  });
+
+  it("renders the stored preference on the server, so the nav does not jump", () => {
+    // What the server layout sends when the cookie says "collapsed".
+    const html = renderToHtml(<DesktopSideNav variant="main" navId="side-nav" defaultCollapsed />, {
+      queryClient: seededClient()
+    });
+    expect(html).toContain('aria-label="Fäll ut sidomenyn"');
+    expect(html).not.toContain("Fäll ihop sidomenyn");
   });
 });
 

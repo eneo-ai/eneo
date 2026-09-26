@@ -7,6 +7,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
+import { renderToString } from "react-dom/server";
 import { vi } from "vitest";
 import { AppContextProvider, type AppContextData } from "@/components/providers/app-context";
 import messages from "@/lib/i18n/messages/sv.json";
@@ -104,19 +105,17 @@ export const noopShell: ShellContextValue = {
   openCreateSpace: () => {}
 };
 
-export function renderWithProviders(
-  ui: React.ReactNode,
-  {
-    queryClient = testQueryClient(),
-    context = appContext(),
-    shell = noopShell
-  }: {
-    queryClient?: QueryClient;
-    context?: AppContextData;
-    shell?: ShellContextValue;
-  } = {}
-) {
-  // A wrapper (not a wrapped tree) so `rerender(ui)` keeps the providers.
+type ProviderOptions = {
+  queryClient?: QueryClient;
+  context?: AppContextData;
+  shell?: ShellContextValue;
+};
+
+function providers({
+  queryClient = testQueryClient(),
+  context = appContext(),
+  shell = noopShell
+}: ProviderOptions) {
   function Providers({ children }: { children: React.ReactNode }) {
     return (
       <NextIntlClientProvider locale="sv" messages={messages} timeZone="Europe/Stockholm">
@@ -128,5 +127,17 @@ export function renderWithProviders(
       </NextIntlClientProvider>
     );
   }
+  return { queryClient, Providers };
+}
+
+export function renderWithProviders(ui: React.ReactNode, options: ProviderOptions = {}) {
+  const { queryClient, Providers } = providers(options);
+  // A wrapper (not a wrapped tree) so `rerender(ui)` keeps the providers.
   return { queryClient, ...render(ui, { wrapper: Providers }) };
+}
+
+/** The HTML the server sends for `ui` (no effects, no client-only values). */
+export function renderToHtml(ui: React.ReactNode, options: ProviderOptions = {}) {
+  const { Providers } = providers(options);
+  return renderToString(<Providers>{ui}</Providers>);
 }

@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { AppShellFrame } from "./app-shell";
 import { OPEN_NAV_EVENT } from "./routes";
-import { resetSideNavCollapsedForTest } from "./shell-state";
 import {
   appContext,
   installBrowserMocks,
@@ -49,8 +48,6 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  window.localStorage.clear();
-  resetSideNavCollapsedForTest();
 });
 
 describe("AppShellFrame", () => {
