@@ -28,6 +28,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     semantic_conversation,
     slot_classification_from_metadata,
     slot_classification_metadata_from_attempt,
+    text_status_from_metadata,
 )
 from eneo.flows.ai_builder.ai_builder_discovery import analyze_discovery
 from eneo.flows.ai_builder.ai_builder_discovery_models import (
@@ -326,6 +327,13 @@ def build_slot_classification_input(
     return SlotClassificationInput(
         sources=tuple(sources),
         current_user_message_id=current_user_message_id,
+        unread_user_message_ids=frozenset(
+            message.message_id
+            for message in conversation
+            if message.role == "user"
+            and message.message_id != current_user_message_id
+            and text_status_from_metadata(message.metadata) == "unread"
+        ),
     )
 
 

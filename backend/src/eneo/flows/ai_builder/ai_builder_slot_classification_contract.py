@@ -114,6 +114,10 @@ class SlotClassificationSource:
 class SlotClassificationInput:
     sources: tuple[SlotClassificationSource, ...]
     current_user_message_id: str | None = None
+    # Earlier user messages no reading has read yet (their text status is
+    # unread). Parsing only: a reply citing one for a checkpoint change is
+    # refused, so the unread hold keeps it. It never changes the prompt.
+    unread_user_message_ids: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1144,9 +1148,6 @@ def _parse_checkpoint_updates(
         producer_kind = payload.get("producer_kind")
         if not isinstance(producer_kind, str) or producer_kind not in producer_kinds:
             return None
-        if producer_kind in seen_producers:
-            return None
-        seen_producers.add(producer_kind)
         confidence = payload.get("confidence", _OMITTED_CONFIDENCE)
         if confidence not in {"high", "medium"}:
             return None
@@ -1159,17 +1160,21 @@ def _parse_checkpoint_updates(
             if raw_mode is not None:
                 return None
             mode = None
+        raw_evidence: object = payload.get("evidence", [])
+        # Fail closed before any quote is validated or dropped: an update that
+        # cites unread earlier text at all, even with an inexact quote or past
+        # the item limit, refuses the reply, so the unread hold keeps that text.
+        if _cites_any_message(
+            raw_evidence,
+            source_message_ids,
+            classification_input.unread_user_message_ids,
+        ):
+            return None
         evidence = _parse_classification_evidence(
-            payload.get("evidence", []),
+            raw_evidence,
             classification_input=classification_input,
         )
         if not evidence or current_user_message_id is None:
-            return None
-        if not any(
-            source_kinds[cited.source_id] in _USER_OWNED_CLASSIFICATION_SOURCE_KINDS
-            and source_message_ids[cited.source_id] == current_user_message_id
-            for cited in evidence
-        ):
             return None
         reason = payload.get("reason", "checkpoint classification")
         if not isinstance(reason, str) or not reason.strip():
@@ -1179,6 +1184,21 @@ def _parse_checkpoint_updates(
             payload["speaker_naming"], bool
         ):
             return None
+        cited_message_ids = {
+            source_message_ids[cited.source_id]
+            for cited in evidence
+            if source_kinds[cited.source_id] in _USER_OWNED_CLASSIFICATION_SOURCE_KINDS
+        }
+        # Only the current message's changes are taken. One citing only settled
+        # messages or uploads restates a review: it is not taken and the rest of
+        # the reading stands, because updates are deltas and the earlier
+        # message's own reading holds what it asked for (eneo-ywpt: refusing it
+        # told the user their message was unreadable).
+        if current_user_message_id not in cited_message_ids:
+            continue
+        if producer_kind in seen_producers:
+            return None
+        seen_producers.add(producer_kind)
         evidence_level = _validated_evidence_level(
             payload.get("evidence_level", "inferred"),
             evidence,
@@ -2343,6 +2363,25 @@ def _parse_form_intake(
         evidence=evidence,
         evidence_level=evidence_level,
     )
+
+
+def _cites_any_message(
+    raw_value: object,
+    source_message_ids: Mapping[str, str | None],
+    message_ids: frozenset[str],
+) -> bool:
+    """Whether a raw evidence list names a source of one of these messages, quote unchecked."""
+
+    if not isinstance(raw_value, list):
+        return False
+    for item in cast(list[object], raw_value):
+        if isinstance(item, dict):
+            source_id = cast(dict[str, object], item).get("source_id")
+            if isinstance(source_id, str) and (
+                source_message_ids.get(source_id.strip()) in message_ids
+            ):
+                return True
+    return False
 
 
 def _parse_classification_evidence(

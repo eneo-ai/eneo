@@ -46,9 +46,17 @@ from eneo.flows.ai_builder import (
 )
 from eneo.flows.ai_builder import ai_builder_slot_classifier as classifier
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    metadata_with_text_status,
     slot_classification_metadata_from_attempt,
+    text_status_changes,
 )
-from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
+from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
+    build_slot_classification_input,
+)
+from eneo.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+    TargetKind,
+)
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderKnownProviderRejectionException,
@@ -85,6 +93,7 @@ from eneo.flows.ai_builder.ai_builder_tools import validate_native_strict_schema
 from eneo.flows.ai_builder.planning_state import (
     CheckpointProducerKind,
     ExactNamedResultPlacement,
+    PlanningState,
     UnplacedNamedResultPlacement,
 )
 from eneo.flows.ai_builder.question_catalog import legal_slot_values
@@ -984,7 +993,13 @@ def test_checkpoint_updates_require_current_user_owned_evidence() -> None:
     assert len(mixed.checkpoint_updates) == 1
     assert mixed.checkpoint_updates[0].mode is not None
     assert mixed.checkpoint_updates[0].mode.value == "edit"
-    assert parse([_evidence(attachment_quote, source_id=attachment_source_id)]) is None
+    # Attachment-only evidence is not a change the user asked for: the update
+    # is not taken, and the rest of the reading stands.
+    attachment_only = parse(
+        [_evidence(attachment_quote, source_id=attachment_source_id)]
+    )
+    assert attachment_only is not None
+    assert attachment_only.checkpoint_updates == ()
     assert parse([_evidence(user_quote)], confidence="low") is None
 
 
@@ -1023,6 +1038,182 @@ def test_parser_accepts_cited_clear_and_rejects_duplicate_checkpoint_producer() 
     assert accepted.checkpoint_updates[0].operation == "clear"
     assert accepted.checkpoint_updates[0].mode is None
     assert duplicate is None
+
+
+_RESTATED_CHECKPOINT_FIXTURE = json.loads(
+    (
+        Path(__file__).parents[3]
+        / "fixtures/ai_builder_classifier_restated_checkpoint.json"
+    ).read_text(encoding="utf-8")
+)
+
+
+@pytest.mark.parametrize(
+    "reply",
+    _RESTATED_CHECKPOINT_FIXTURE["replies"],
+    ids=[reply["capture"] for reply in _RESTATED_CHECKPOINT_FIXTURE["replies"]],
+)
+def test_a_follow_up_reading_that_restates_an_earlier_review_request_is_read(
+    reply: dict[str, Any],
+) -> None:
+    # eneo-ywpt (md_lang_prompt, gpt-5.6-luna, 2026-09-27): after a pasted
+    # kravlista that asks for a review, the user answered the field question
+    # and the classifier restated that review as a checkpoint update citing
+    # only the kravlista. The whole reply was refused, so the Builder told the
+    # user their answer was unreadable and never planned. A restatement is not
+    # a change this message asks for; the rest of the reading stands.
+    fixture = _RESTATED_CHECKPOINT_FIXTURE
+    earlier_id, current_id = reply["earlier_message_id"], reply["current_message_id"]
+    classification_input = SlotClassificationInput(
+        sources=(
+            SlotClassificationSource(
+                source_id=f"user_message:{earlier_id}",
+                kind="user_message",
+                text=fixture["request"],
+                message_id=earlier_id,
+            ),
+            SlotClassificationSource(
+                source_id=f"user_message:{current_id}",
+                kind="user_message",
+                text=fixture["answer"],
+                message_id=current_id,
+                question_id=fixture["answer_question_id"],
+            ),
+        ),
+        current_user_message_id=current_id,
+    )
+
+    result = parse_slot_classification_response(
+        reply["content"],
+        allowed_slot_values={
+            slot_name: legal_slot_values(slot_name) for slot_name in reply["slot_names"]
+        },
+        classification_input=classification_input,
+    )
+
+    assert result is not None
+    assert {
+        slot_name: outcome.kind for slot_name, outcome in result.slot_outcomes.items()
+    } == dict.fromkeys(reply["slot_names"], "resolved")
+    assert result.diagnostics == ()
+    assert result.checkpoint_updates == ()
+    assert result.checkpoint_diagnostics == ()
+
+
+@pytest.mark.parametrize("earlier_status", ["unread", "settled"])
+def test_a_review_request_cited_only_from_earlier_text_is_never_taken(
+    earlier_status: str,
+) -> None:
+    # gate it3 (eneo-ywpt): no checkpoint change is taken from an earlier
+    # message. Cited from settled text it is a restatement: skipped, reading
+    # kept. Cited from unread text the reply is refused, so the unread hold
+    # keeps that text and its request is read when it is read, never lost.
+    request = "Innan dokumentet skapas vill jag granska och ändra sammanställningen."
+    earlier = ConversationMessage(
+        role="user",
+        content=request,
+        metadata=metadata_with_text_status(None, earlier_status),
+    )
+    current = ConversationMessage(role="user", content="Ärendenummer och datum.")
+    conversation = [
+        earlier,
+        ConversationMessage(role="assistant", content="Vilka fält?"),
+        current,
+    ]
+    classification_input = build_slot_classification_input(conversation, None)
+
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "checkpoint_updates": [
+                    {
+                        "operation": "update",
+                        "producer_kind": "structured_result",
+                        "mode": "edit",
+                        "confidence": "high",
+                        "reason": "Granskning före dokumentet.",
+                        "evidence": [
+                            _evidence(
+                                request,
+                                source_id=f"user_message:{earlier.message_id}",
+                            )
+                        ],
+                        "evidence_level": "explicit",
+                    }
+                ],
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=classification_input,
+    )
+
+    if earlier_status == "settled":
+        assert result is not None
+        assert result.checkpoint_updates == ()
+        return
+    assert result is None
+    refused = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="parse_failed"),
+        prompt_hash="a" * 64,
+        classification_input=classification_input,
+        model="openai/test-model",
+        provider="openai:test",
+    )
+    changes = text_status_changes(
+        conversation, refused, planning_state=PlanningState.empty()
+    )
+    assert earlier.message_id not in changes
+    assert changes[current.message_id] == "unread"
+
+
+def test_a_restated_checkpoint_beside_the_current_change_keeps_the_change() -> None:
+    # The restatement is not a second reading of the producer, so the update
+    # the current message asks for is taken, not refused as a duplicate.
+    earlier = "Innan dokumentet skapas vill jag granska sammanställningen."
+    current = "Jag vill bara se sammanställningen, inte ändra den."
+    classification_input = SlotClassificationInput(
+        sources=(
+            SlotClassificationSource(
+                source_id="user_message:user-0",
+                kind="user_message",
+                text=earlier,
+                message_id="user-0",
+            ),
+            *_classification_input(current).sources,
+        ),
+        current_user_message_id="user-1",
+    )
+
+    def update(mode: str, evidence: dict[str, str]) -> dict[str, object]:
+        return {
+            "operation": "update",
+            "producer_kind": "structured_result",
+            "mode": mode,
+            "confidence": "high",
+            "reason": "Granskning.",
+            "evidence": [evidence],
+            "evidence_level": "explicit",
+        }
+
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "checkpoint_updates": [
+                    update("edit", _evidence(earlier, source_id="user_message:user-0")),
+                    update("view", _evidence(current)),
+                ],
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=classification_input,
+    )
+
+    assert result is not None
+    assert [(item.producer_kind, item.mode) for item in result.checkpoint_updates] == [
+        ("structured_result", FlowStepReviewMode.VIEW)
+    ]
 
 
 @pytest.mark.asyncio
@@ -6544,3 +6735,102 @@ async def test_strict_classifier_reserves_outbound_tools_in_admission_and_dispat
     assert record.request_budget.required_input_tokens == 350
     assert record.request_budget.fixed_input_tokens == 450
     assert record.request_budget.reserved_output_tokens == sent["max_tokens"] == 200
+
+
+@pytest.mark.parametrize("earlier_status", ["unread", "settled"])
+def test_an_update_citing_unread_earlier_text_beside_the_current_message_is_refused(
+    earlier_status: str,
+) -> None:
+    # gate it4 (eneo-ywpt): the fail-closed rule holds for mixed citations too.
+    request = "Innan dokumentet skapas vill jag granska och ändra sammanställningen."
+    earlier = ConversationMessage(
+        role="user",
+        content=request,
+        metadata=metadata_with_text_status(None, earlier_status),
+    )
+    current = ConversationMessage(
+        role="user", content="Ja, granska den i redigeringsläge."
+    )
+    conversation = [
+        earlier,
+        ConversationMessage(role="assistant", content="Vilka fält?"),
+        current,
+    ]
+    classification_input = build_slot_classification_input(conversation, None)
+
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "checkpoint_updates": [
+                    {
+                        "operation": "update",
+                        "producer_kind": "structured_result",
+                        "mode": "edit",
+                        "confidence": "high",
+                        "reason": "Granskning före dokumentet.",
+                        "evidence": [
+                            _evidence(
+                                request, source_id=f"user_message:{earlier.message_id}"
+                            ),
+                            _evidence(
+                                current.content,
+                                source_id=f"user_message:{current.message_id}",
+                            ),
+                        ],
+                        "evidence_level": "explicit",
+                    }
+                ],
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=classification_input,
+    )
+
+    if earlier_status == "unread":
+        assert result is None
+    else:
+        assert result is not None
+        assert len(result.checkpoint_updates) == 1
+
+
+def test_an_inexact_citation_of_unread_text_still_refuses_the_update() -> None:
+    # gate it5 (eneo-ywpt): the unread guard runs before quotes are validated, so a
+    # citation the evidence parser would drop cannot hide the unread source.
+    earlier = ConversationMessage(
+        role="user",
+        content="Innan dokumentet skapas vill jag granska och ändra sammanställningen.",
+        metadata=metadata_with_text_status(None, "unread"),
+    )
+    current = ConversationMessage(
+        role="user", content="Ja, granska den i redigeringsläge."
+    )
+    conversation = [
+        earlier,
+        ConversationMessage(role="assistant", content="Vilka fält?"),
+        current,
+    ]
+    classification_input = build_slot_classification_input(conversation, None)
+    update = {
+        "operation": "update",
+        "producer_kind": "structured_result",
+        "mode": "edit",
+        "confidence": "high",
+        "reason": "Granskning före dokumentet.",
+        "evidence": [
+            _evidence(current.content, source_id=f"user_message:{current.message_id}"),
+            {
+                "source_id": f"user_message:{earlier.message_id}",
+                "quote": "granska innan dokumentet skapas",
+            },
+        ],
+        "evidence_level": "explicit",
+    }
+
+    result = parse_slot_classification_response(
+        json.dumps({**_VALID_CLASSIFICATION_RESPONSE, "checkpoint_updates": [update]}),
+        allowed_slot_values={},
+        classification_input=classification_input,
+    )
+
+    assert result is None
