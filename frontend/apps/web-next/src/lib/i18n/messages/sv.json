@@ -4608,7 +4608,7 @@
   "organization_skills_removed_description": "Borttagna skills sparas som referens och för granskning. Du kan läsa versionerna, men inte redigera, publicera eller återställa dem. Skapa en ny skill för att använda instruktionerna igen.",
   "organization_skills_removed_empty": "Inga borttagna skills",
   "organization_skills_removed_at": "Borttagen {time}",
-  "skills": "Förmågor",
+  "skills": "Skills",
   "skills_display_name_label": "Namn",
   "skills_display_name_description": "Använd ett kort namn som beskriver förmågan.",
   "skills_description_label": "Beskrivning",

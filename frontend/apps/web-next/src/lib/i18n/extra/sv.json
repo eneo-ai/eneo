@@ -373,7 +373,6 @@
   "shell_catalog_card_label": "{name}, {space}",
   "shell_catalog_app_in_space": "App i {space}",
   "spaces": "Ytor",
-  "skills": "Förmågor",
   "space_sections_label": "Ytans innehåll",
   "space_section_with_count": "{label} ({count})",
   "space_security_classification_prefix": "Säkerhetsklass:",

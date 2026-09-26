@@ -373,7 +373,6 @@
   "shell_catalog_card_label": "{name}, {space}",
   "shell_catalog_app_in_space": "App in {space}",
   "spaces": "Spaces",
-  "skills": "Skills",
   "space_sections_label": "Space sections",
   "space_section_with_count": "{label} ({count})",
   "space_security_classification_prefix": "Security class:",

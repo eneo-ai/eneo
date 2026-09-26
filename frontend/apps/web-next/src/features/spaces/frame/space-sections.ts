@@ -2,7 +2,7 @@ import type { ResourcePermission, Space, SpaceResource, SpaceRouteId } from "../
 
 /**
  * The space tabs, in display order. Each id is also the route segment and the
- * translation key of the tab label (web-next overrides `skills` to "Förmågor").
+ * translation key of the tab label.
  */
 export const SPACE_SECTION_IDS = [
   "overview",

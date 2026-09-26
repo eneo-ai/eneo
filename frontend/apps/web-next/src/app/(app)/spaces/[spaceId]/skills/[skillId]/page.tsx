@@ -8,7 +8,7 @@ import { pageTitle } from "@/lib/page-metadata";
 
 type Props = { params: Promise<{ spaceId: string; skillId: string }> };
 
-// The space layout's title template adds the space name: "Förmågor · Upphandling · Eneo".
+// The space layout's title template adds the space name: "Skills · Upphandling · Eneo".
 export const generateMetadata = pageTitle("skills");
 
 export default async function SkillDetailRoute({ params }: Props) {

@@ -106,7 +106,7 @@ describe("SpaceFrame", () => {
       "true"
     );
     expect(within(tabs).getByRole("link", { name: "Assistenter (2)" })).toBeTruthy();
-    expect(within(tabs).getByRole("link", { name: "Förmågor" })).toBeTruthy();
+    expect(within(tabs).getByRole("link", { name: "Skills" })).toBeTruthy();
 
     expect(screen.getByRole("group", { name: "4 medlemmar" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Lägg till medlem" })).toBeTruthy();
@@ -184,7 +184,7 @@ describe("SpaceFrame", () => {
       "/spaces/organization/services",
       "/spaces/organization/settings"
     ]);
-    expect(within(tabs).getByRole("link", { name: "Förmågor" }).getAttribute("aria-current")).toBe(
+    expect(within(tabs).getByRole("link", { name: "Skills" }).getAttribute("aria-current")).toBe(
       "true"
     );
   });
@@ -217,7 +217,7 @@ describe("SpaceFrame", () => {
 
     current.focus();
     fireEvent.keyDown(current, { key: "ArrowRight" });
-    expect(document.activeElement).toBe(within(tabs).getByRole("link", { name: "Förmågor" }));
+    expect(document.activeElement).toBe(within(tabs).getByRole("link", { name: "Skills" }));
   });
 
   it("leaves adding members to the members tab's own button there", () => {
