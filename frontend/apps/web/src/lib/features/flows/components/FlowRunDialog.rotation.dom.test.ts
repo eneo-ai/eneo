@@ -295,51 +295,87 @@ describe("FlowRunDialog recording rotation", () => {
     expect(media.recorders[2]?.state).toBe("recording");
   });
 
-  it("keeps the run blocked until Retry uploads an earlier segment, then submits in segment order", async () => {
+  it.each([
+    { transcription: null, marked: {} },
+    { transcription: oneRecordingOffered, marked: { single_recording: true } }
+  ])(
+    "keeps the run blocked until Retry uploads an earlier segment, then submits in segment order ($marked)",
+    async ({ transcription, marked }) => {
+      const pendingUploads: PendingUpload[] = [];
+      const upload = vi.fn(({ file }: { file: File }) => pendingUpload(pendingUploads, file));
+      const create = vi.fn(async () => ({ id: "run-1" }));
+      await openDialogAndStartRecording(upload, { create, transcription });
+
+      await rotate();
+      await endOverlap();
+      media.recorders[0]?.finish();
+      await flush();
+      pendingUploads[0]?.reject(new Error("Network down"));
+      await flush();
+      await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+      media.recorders[1]?.finish();
+      await flush();
+      pendingUploads[1]?.resolve(uploadedFile("segment-1", pendingUploads[1].file.name));
+      await flush();
+
+      expect(screen.getByText(/-seg01-/)).toBeTruthy();
+      expect(nextButton().disabled).toBe(true);
+      expect(screen.getByText(LOCAL_RECORDING_BLOCKER)).toBeTruthy();
+
+      await fireEvent.click(retryInFailedRecordingAlert());
+      await flush();
+      expect(pendingUploads[2]?.file.name).toMatch(/-seg00-/);
+      pendingUploads[2]?.resolve(uploadedFile("segment-0", pendingUploads[2].file.name));
+      await flush();
+
+      expect(markedSegments()).toEqual([
+        [1, "segment-1"],
+        [0, "segment-0"]
+      ]);
+      expect(failedRecordingAlert()).toBeNull();
+      // The retried segment 0 uploaded last but is listed and submitted first.
+      expect(screen.getAllByText(/-seg0\d-/).map(({ textContent }) => textContent)).toEqual([
+        pendingUploads[2]?.file.name,
+        pendingUploads[1]?.file.name
+      ]);
+      await fireEvent.click(nextButton());
+      await flush();
+      await fireEvent.click(screen.getByRole("button", { name: m.flow_run_trigger_confirm() }));
+      await flush();
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          step_inputs: { "step-audio": { file_ids: ["segment-0", "segment-1"], ...marked } }
+        })
+      );
+    }
+  );
+
+  it("sends a rotated recording's parts as one recording where Eneo offers it", async () => {
     const pendingUploads: PendingUpload[] = [];
     const upload = vi.fn(({ file }: { file: File }) => pendingUpload(pendingUploads, file));
     const create = vi.fn(async () => ({ id: "run-1" }));
-    await openDialogAndStartRecording(upload, { create });
+    await openDialogAndStartRecording(upload, { create, transcription: oneRecordingOffered });
 
     await rotate();
-    await endOverlap();
-    media.recorders[0]?.finish();
-    await flush();
-    pendingUploads[0]?.reject(new Error("Network down"));
-    await flush();
     await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
     media.recorders[1]?.finish();
+    await flush();
+    await endOverlap();
+    pendingUploads[0]?.resolve(uploadedFile("segment-0", pendingUploads[0].file.name));
     await flush();
     pendingUploads[1]?.resolve(uploadedFile("segment-1", pendingUploads[1].file.name));
     await flush();
-
-    expect(screen.getByText(/-seg01-/)).toBeTruthy();
-    expect(nextButton().disabled).toBe(true);
-    expect(screen.getByText(LOCAL_RECORDING_BLOCKER)).toBeTruthy();
-
-    await fireEvent.click(retryInFailedRecordingAlert());
-    await flush();
-    expect(pendingUploads[2]?.file.name).toMatch(/-seg00-/);
-    pendingUploads[2]?.resolve(uploadedFile("segment-0", pendingUploads[2].file.name));
-    await flush();
-
-    expect(markedSegments()).toEqual([
-      [1, "segment-1"],
-      [0, "segment-0"]
-    ]);
-    expect(failedRecordingAlert()).toBeNull();
-    // The retried segment 0 uploaded last but is listed and submitted first.
-    expect(screen.getAllByText(/-seg0\d-/).map(({ textContent }) => textContent)).toEqual([
-      pendingUploads[2]?.file.name,
-      pendingUploads[1]?.file.name
-    ]);
     await fireEvent.click(nextButton());
     await flush();
     await fireEvent.click(screen.getByRole("button", { name: m.flow_run_trigger_confirm() }));
     await flush();
+
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
-        step_inputs: { "step-audio": { file_ids: ["segment-0", "segment-1"] } }
+        step_inputs: {
+          "step-audio": { file_ids: ["segment-0", "segment-1"], single_recording: true }
+        }
       })
     );
   });
@@ -569,6 +605,58 @@ describe("FlowRunDialog recording rotation", () => {
     expect(markedSegments().map(([segmentIndex]) => segmentIndex)).toEqual([1, 2, 3]);
     await waitFor(() => expect(start.disabled).toBe(false));
     expect(failedRecordingAlert()).toBeNull();
+  });
+
+  it("submits a recovered recording's parts as one recording where Eneo offers it", async () => {
+    vi.mocked(scanRecoverableSessionsForSteps).mockResolvedValue({
+      "step-audio": [recoveryHint()]
+    });
+    vi.mocked(readSessionRecords).mockResolvedValue([
+      segmentRecord(0, "recovered-0"),
+      segmentRecord(1)
+    ]);
+    const upload = vi.fn(async ({ file }: { file: File }) =>
+      uploadedFile("reuploaded-1", file.name)
+    );
+    const create = vi.fn(async () => ({ id: "run-1" }));
+    renderDialog(upload, { create, transcription: oneRecordingOffered });
+
+    await fireEvent.click(
+      await screen.findByRole("button", { name: m.recording_resume_continue_recording() })
+    );
+    await waitFor(() => expect(markSegmentUploaded).toHaveBeenCalledOnce());
+    vi.useFakeTimers({ toFake: [...FAKED_CLOCK] });
+    await fireEvent.click(nextButton());
+    await flush();
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_run_trigger_confirm() }));
+    await flush();
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step_inputs: {
+          "step-audio": { file_ids: ["recovered-0", "reuploaded-1"], single_recording: true }
+        }
+      })
+    );
+  });
+
+  it("lists a recorded part only once its ledger entry is written, so it cannot be removed before", async () => {
+    let finishLedger: () => void = () => undefined;
+    vi.mocked(markSegmentUploaded).mockImplementationOnce(
+      () => new Promise<void>((resolve) => (finishLedger = resolve))
+    );
+    const upload = vi.fn(async ({ file }: { file: File }) => uploadedFile("segment-0", file.name));
+    await openDialogAndStartRecording(upload);
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+    const name = upload.mock.calls[0]?.[0].file.name;
+    expect(screen.queryByRole("button", { name: `${m.delete()} ${name}` })).toBeNull();
+
+    finishLedger();
+    await flush();
+
+    expect(screen.getByRole("button", { name: `${m.delete()} ${name}` })).toBeTruthy();
   });
 
   it("keeps one live text session across a rotation and ends it with the recording", async () => {
@@ -985,6 +1073,12 @@ describe("FlowRunDialog live transcript in the run", () => {
     expect(toast.success).toHaveBeenCalledWith(m.flow_run_started_toast());
   });
 });
+
+const oneRecordingOffered: FlowRunContractTranscription = {
+  live: { available: false, reason: "model_not_realtime" },
+  speaker_labels: { selectable: true, required: false, default: true },
+  single_recording: true
+};
 
 const liveText: DialogOptions = {
   createSession: vi.fn(async () => liveSession),

@@ -33677,7 +33677,7 @@ export interface components {
       live_transcript_id?: string | null;
       /**
        * Single Recording
-       * @description The step's audio files, in the order of `file_ids`, are consecutive parts of one recording, such as a recorder that starts a new file every 20 minutes. Speakers are then labelled once across all parts, so one voice keeps one label. Only for audio steps; with one file it changes nothing. Leave it false for separate recordings.
+       * @description The step's audio files are the parts of one recording, listed in recording order in `file_ids`, such as a recorder that starts a new file every 20 minutes or again after a break; a break between parts is fine. Speakers are then labelled once across all parts, so one voice keeps one label. Only for audio steps; with one file it changes nothing. Leave it false for separate recordings.
        * @default false
        */
       single_recording?: boolean;

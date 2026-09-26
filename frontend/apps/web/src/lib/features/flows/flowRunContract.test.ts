@@ -53,6 +53,19 @@ describe("flowRunContract helpers", () => {
     });
   });
 
+  it("marks a step's recorded parts as one recording", () => {
+    expect(
+      buildStepInputsPayload(
+        { "step-audio": [{ id: "part-1" }, { id: "part-2" }], "step-other": [{ id: "file-3" }] },
+        {},
+        ["step-audio"]
+      )
+    ).toEqual({
+      "step-audio": { file_ids: ["part-1", "part-2"], single_recording: true },
+      "step-other": { file_ids: ["file-3"] }
+    });
+  });
+
   it("builds a canonical flow run intent payload", () => {
     expect(
       buildFlowRunIntent({

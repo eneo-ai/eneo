@@ -164,6 +164,20 @@ describe("FlowRunFileInputState", () => {
     expect(tied.runtimeFilesSnapshot["step-a"]?.map(({ id }) => id)).toEqual(["tie-0", "tie-1"]);
   });
 
+  it("orders one session's parts by their index even when the clock went back", () => {
+    const state = new FlowRunFileInputState();
+    const a = "0a1b2c3d-0000-4000-8000-000000000003";
+    const b = "0b1b2c3d-0000-4000-8000-000000000004";
+    const at = (seconds: number) => Date.UTC(2026, 4, 1, 8, 0, seconds);
+    // Session a's clock was set back between its parts; session b started in between.
+    state.recordUploadedFile("step-a", uploadedSegment("b-0", b, 0, at(50)));
+    state.recordUploadedFile("step-a", uploadedSegment("a-1", a, 1, at(0)));
+    state.recordUploadedFile("step-a", uploadedSegment("a-0", a, 0, at(100)));
+
+    // Each session in index order, the sessions by when they first captured.
+    expect(state.getUploadedFiles("step-a").map((file) => file.id)).toEqual(["a-0", "a-1", "b-0"]);
+  });
+
   it("keeps a step active until all of its uploads finish", () => {
     const state = new FlowRunFileInputState();
 
@@ -348,6 +362,57 @@ describe("FlowRunFileInputState", () => {
     expect(state.getResumeHint("step-b")).toBeNull();
     expect(state.isResumePromptForStep("step-b")).toBe(false);
     expect(state.isResumeBusyForStep("step-b")).toBe(false);
+  });
+
+  it("names the steps whose files are all parts of one recording", () => {
+    const state = new FlowRunFileInputState();
+    for (const id of ["part-0", "part-1"]) {
+      const segment = persistedSegment(state, "step-a");
+      state.recordUploadedFile("step-a", uploadedFile(id), segment.sessionId);
+      state.recordedSegmentUploaded("step-a", segment);
+    }
+    // A step with one recorded file, and one mixing a recording with a picked file.
+    const lone = persistedSegment(state, "step-b");
+    state.recordUploadedFile("step-b", uploadedFile("lone"), lone.sessionId);
+    const mixed = persistedSegment(state, "step-c");
+    state.recordUploadedFile("step-c", uploadedFile("recorded"), mixed.sessionId);
+    state.recordUploadedFile("step-c", uploadedFile("picked"));
+
+    expect(state.singleRecordingStepIds()).toEqual(["step-a"]);
+
+    state.removeUploadedFile("step-a", "part-1");
+    expect(state.singleRecordingStepIds()).toEqual([]);
+  });
+
+  it("forgets a discarded recording's parts", () => {
+    const state = new FlowRunFileInputState();
+    for (const id of ["part-0", "part-1"]) {
+      const segment = persistedSegment(state, "step-a");
+      state.recordUploadedFile("step-a", uploadedFile(id), segment.sessionId);
+      state.recordedSegmentUploaded("step-a", segment);
+    }
+
+    state.discardStepRecording("step-a");
+    // The same ids come back as picked files: nothing recorded remains to vouch for them.
+    state.recordUploadedFile("step-a", uploadedFile("part-0"));
+    state.recordUploadedFile("step-a", uploadedFile("part-1"));
+
+    expect(state.singleRecordingStepIds()).toEqual([]);
+  });
+
+  it("counts recovered parts that were already uploaded as parts of their recording", () => {
+    const state = new FlowRunFileInputState();
+    state.attachRecoveredSession("step-a", "session-a", [
+      segmentRecord(0, "file-0"),
+      segmentRecord(1, "file-1")
+    ]);
+    state.recordUploadedFile("step-a", uploadedFile("file-0"), "session-a");
+    state.recordUploadedFile("step-a", uploadedFile("file-1"), "session-a");
+
+    expect(state.singleRecordingStepIds()).toEqual(["step-a"]);
+
+    state.resetForDialogClose();
+    expect(state.singleRecordingStepIds()).toEqual([]);
   });
 
   it("resets all in-memory state between dialog opens and after accepted runs", () => {

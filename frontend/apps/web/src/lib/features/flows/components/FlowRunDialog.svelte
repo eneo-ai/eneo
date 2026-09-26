@@ -637,7 +637,8 @@
   async function uploadFilesForStep(
     step: FlowRunContractStepInput,
     files: File[],
-    options: { clearRecordingNotice?: boolean } = {},
+    // `publish: false` leaves listing the uploaded files to the caller.
+    options: { clearRecordingNotice?: boolean; publish?: boolean } = {},
     operationGeneration: number = dialogGeneration,
     operationFlowId: string = flow.id
   ): Promise<StepUploadResult> {
@@ -711,7 +712,7 @@
           }
           uploadedCount += 1;
           uploadedFiles.push(uploaded);
-          fileInputState.recordUploadedFile(step.step_id, uploaded);
+          if (options.publish ?? true) fileInputState.recordUploadedFile(step.step_id, uploaded);
         } catch (error) {
           if (isOutdated()) {
             return staleResult;
@@ -954,18 +955,21 @@
     }
   }
 
-  // Uploads one pending recorded segment and settles it: gone once uploaded
+  // Uploads one pending recorded segment and settles it: listed once uploaded
   // and marked in the local store, otherwise failed, where Retry picks it up.
+  // Listed only after the mark, so it cannot be removed while the store still
+  // records it as uploaded.
   async function uploadRecordedSegment(
     step: FlowRunContractStepInput,
     segment: PreparedRecordedSegment & { file: File },
     operationGeneration: number,
     operationFlowId: string
   ) {
+    const discards = discardsByStepId[step.step_id] ?? 0;
     const result = await uploadFilesForStep(
       step,
       [segment.file],
-      { clearRecordingNotice: false },
+      { clearRecordingNotice: false, publish: false },
       operationGeneration,
       operationFlowId
     );
@@ -982,7 +986,13 @@
       segmentIndex: segment.segmentIndex,
       uploadedFileId: uploaded.id
     });
-    if (isStale(operationGeneration, operationFlowId)) return;
+    if (
+      isStale(operationGeneration, operationFlowId) ||
+      (discardsByStepId[step.step_id] ?? 0) !== discards
+    ) {
+      return;
+    }
+    fileInputState.recordUploadedFile(step.step_id, uploaded, segment.sessionId);
     if (segment.liveRecordingId) {
       livePreviewFor(step.step_id).recordingUploaded(segment.liveRecordingId, uploaded.id);
     }
@@ -1178,7 +1188,7 @@
         if (isStale(operationGeneration, operationFlowId)) return;
         if (record.uploadedFileId) {
           const synthesized = synthesizeUploadedFileFromRecord(record);
-          fileInputState.recordUploadedFile(stepId, synthesized);
+          fileInputState.recordUploadedFile(stepId, synthesized, record.sessionId);
           continue;
         }
         await uploadRecordedSegment(
@@ -1259,6 +1269,9 @@
       const speakerLabels = launchInputState.speakerLabels(runContract.transcription);
       const files = fileInputState.runtimeFilesSnapshot;
       const liveTranscriptIds = liveTranscriptIdsFor(files);
+      const singleRecordingStepIds = runContract.transcription?.single_recording
+        ? fileInputState.singleRecordingStepIds()
+        : [];
       // What this request asks, a repeat asks: a final text that comes after
       // it is never used.
       for (const [stepId, preview] of livePreviewsByStepId) {
@@ -1269,7 +1282,7 @@
         const runIntent = buildFlowRunIntent({
           publishedFlowVersion,
           inputPayloadJson: payload,
-          stepInputs: buildStepInputsPayload(files, withLiveTranscripts),
+          stepInputs: buildStepInputsPayload(files, withLiveTranscripts, singleRecordingStepIds),
           speakerLabels
         });
         // The key covers the whole intent: the API fingerprints every field of it.

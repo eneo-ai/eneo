@@ -1,4 +1,5 @@
 import type { UploadedFile } from "@eneo/eneo-js";
+import { SvelteMap } from "svelte/reactivity";
 import { parseSegmentFilename, type SessionState } from "$lib/features/audio/recordingSession";
 import type { SegmentRecord, SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
 import {
@@ -40,6 +41,8 @@ export class FlowRunFileInputState {
   #draggingStepId = $state<string | null>(null);
   #recordingSessionState = $state<RecordingSessionState>(emptyRecordingSessionState());
   #sessionPhaseByStepId = $state<Record<string, FlowRunRecordingSessionPhase>>({});
+  // The recorder session each uploaded recorded file came from; picked files have none.
+  #recorderSessionByFileId = new SvelteMap<string, string>();
 
   get runtimeFilesSnapshot(): Record<string, UploadedFile[]> {
     return Object.fromEntries(
@@ -168,7 +171,8 @@ export class FlowRunFileInputState {
     };
   }
 
-  recordUploadedFile(stepId: string, file: UploadedFile): void {
+  recordUploadedFile(stepId: string, file: UploadedFile, recorderSessionId?: string): void {
+    if (recorderSessionId) this.#recorderSessionByFileId.set(file.id, recorderSessionId);
     this.#runtimeFilesByStepId = {
       ...this.#runtimeFilesByStepId,
       [stepId]: inSegmentOrder([...(this.#runtimeFilesByStepId[stepId] ?? []), file])
@@ -202,7 +206,19 @@ export class FlowRunFileInputState {
     this.#activeUploadCountByStepId = next;
   }
 
+  // Steps whose files are all parts of one recorder session: more than one
+  // file, every one recorded, and by the same session.
+  singleRecordingStepIds(): string[] {
+    return Object.entries(this.#runtimeFilesByStepId)
+      .filter(([, files]) => {
+        const [first, ...rest] = files.map((file) => this.#recorderSessionByFileId.get(file.id));
+        return first !== undefined && rest.length > 0 && rest.every((session) => session === first);
+      })
+      .map(([stepId]) => stepId);
+  }
+
   removeUploadedFile(stepId: string, fileId: string): string | null {
+    this.#recorderSessionByFileId.delete(fileId);
     this.#runtimeFilesByStepId = {
       ...this.#runtimeFilesByStepId,
       [stepId]: (this.#runtimeFilesByStepId[stepId] ?? []).filter((file) => file.id !== fileId)
@@ -293,6 +309,9 @@ export class FlowRunFileInputState {
   }
 
   discardStepRecording(stepId: string): void {
+    for (const file of this.#runtimeFilesByStepId[stepId] ?? []) {
+      this.#recorderSessionByFileId.delete(file.id);
+    }
     this.#setPendingSegments(stepId, []);
     this.#recorderResetTokensByStepId = {
       ...this.#recorderResetTokensByStepId,
@@ -408,6 +427,7 @@ export class FlowRunFileInputState {
     this.#draggingStepId = null;
     this.#recordingSessionState = emptyRecordingSessionState();
     this.#sessionPhaseByStepId = {};
+    this.#recorderSessionByFileId.clear();
   }
 
   #setPendingSegmentState(
@@ -438,17 +458,23 @@ function addUnique(values: string[], value: string): string[] {
 // A step's files go to the run in list order and the backend joins their
 // transcripts in that order, so recorded segments take their slots in capture
 // order whatever order their uploads finished in (a retried segment must not
-// follow a later one); within a session the segment index breaks a tie. Other
-// files keep their places.
+// follow a later one). Sessions go by when each first captured, and a session's
+// segments by their index, since a wall clock can be set back. Other files keep
+// their places.
 function inSegmentOrder(files: UploadedFile[]): UploadedFile[] {
   const segments = files.flatMap((file, slot) => {
     const segment = parseSegmentFilename(file.name ?? "");
     return segment ? [{ file, slot, ...segment }] : [];
   });
+  const sessionStart: Record<string, number> = {};
+  for (const { sessionId, capturedAt } of segments) {
+    sessionStart[sessionId] = Math.min(sessionStart[sessionId] ?? Infinity, capturedAt);
+  }
   const sorted = segments.toSorted(
     (a, b) =>
-      a.capturedAt - b.capturedAt ||
-      (a.sessionId === b.sessionId ? a.segmentIndex - b.segmentIndex : 0)
+      (sessionStart[a.sessionId] ?? 0) - (sessionStart[b.sessionId] ?? 0) ||
+      a.sessionId.localeCompare(b.sessionId) ||
+      a.segmentIndex - b.segmentIndex
   );
   const ordered = [...files];
   segments.forEach(({ slot }, position) => {

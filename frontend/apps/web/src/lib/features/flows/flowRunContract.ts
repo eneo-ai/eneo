@@ -45,10 +45,12 @@ export function getBlockingTemplateReadinessItems(
 }
 
 // `liveTranscriptIdsByStepId` names the step's stored live transcript, used
-// instead of transcribing its one audio file again.
+// instead of transcribing its one audio file again. `singleRecordingStepIds`
+// are steps whose files are the parts of one recording.
 export function buildStepInputsPayload(
   filesByStepId: Record<string, FileLike[]>,
-  liveTranscriptIdsByStepId: Readonly<Record<string, string>> = {}
+  liveTranscriptIdsByStepId: Readonly<Record<string, string>> = {},
+  singleRecordingStepIds: readonly string[] = []
 ): FlowRunStepInputs | undefined {
   const payloadEntries = Object.entries(filesByStepId)
     .map(([stepId, files]) => [stepId, files.map((file) => file.id).filter(Boolean)] as const)
@@ -57,9 +59,11 @@ export function buildStepInputsPayload(
       const liveTranscriptId = liveTranscriptIdsByStepId[stepId];
       return [
         stepId,
-        liveTranscriptId
-          ? { file_ids: fileIds, live_transcript_id: liveTranscriptId }
-          : { file_ids: fileIds }
+        {
+          file_ids: fileIds,
+          ...(liveTranscriptId ? { live_transcript_id: liveTranscriptId } : {}),
+          ...(singleRecordingStepIds.includes(stepId) ? { single_recording: true } : {})
+        }
       ] as const;
     });
 
