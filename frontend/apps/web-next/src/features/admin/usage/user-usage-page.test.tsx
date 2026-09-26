@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 
 const model = {
@@ -59,5 +60,16 @@ describe("UserUsagePage", () => {
 
     const table = await screen.findByRole("table", { name: "Fullständig modelluppdelning" });
     expect(within(table).getByText("GPT-5")).toBeTruthy();
+  });
+
+  it("names each usage bar after its provider or model", async () => {
+    const { container } = renderInApp(
+      <UserUsagePage userId="user-1" initialRange={{ from: "2026-09-01", to: "2026-09-25" }} />
+    );
+
+    await screen.findByRole("table", { name: "Fullständig modelluppdelning" });
+    expect(screen.getByRole("progressbar", { name: "Azure" })).toBeTruthy();
+    expect(screen.getByRole("progressbar", { name: "GPT-5" })).toBeTruthy();
+    await expectNoAxeViolations(container);
   });
 });
