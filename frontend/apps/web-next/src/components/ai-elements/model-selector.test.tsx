@@ -203,7 +203,8 @@ describe("ModelSelector", () => {
     // On a phone the list opens as a bottom sheet named by the field.
     const sheet = await screen.findByRole("dialog", { name: "Completion-modell" });
     const option = within(sheet).getAllByRole("option")[0]!;
-    // The row pads the content: at least 32 + 2 × 6 px.
-    expect(option.querySelector(".pointer-coarse\\:min-h-8")).not.toBeNull();
+    // The theme gives this Astryx part 44 px on a coarse pointer
+    // (eneo-theme.ts → adaptations; globals-css.test.ts checks the CSS).
+    expect(option.closest(".astryx-selector-option-row")).not.toBeNull();
   });
 });

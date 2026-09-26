@@ -640,6 +640,16 @@ export const eneoTheme = {
               "base": {
                 "minHeight": "44px"
               }
+            },
+            "selector-search": {
+              "base": {
+                "minHeight": "44px"
+              }
+            },
+            "selector-option-row": {
+              "base": {
+                "minHeight": "44px"
+              }
             }
           }
         }

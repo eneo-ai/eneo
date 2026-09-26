@@ -237,8 +237,9 @@ export const eneoTheme = defineTheme({
   // Touch layouts: 44×44 px targets (ACCESSIBILITY.md → Target size, the
   // Eneo standard above WCAG 2.5.8's 24 px). The element sizes drive buttons
   // (icon-only ones are square), menu triggers, tabs, nav items, inputs and
-  // selectors; segmented items sit 4 px inside theirs, and checkbox, radio
-  // and switch rows get the height their enlarged inputs need (globals.css).
+  // selectors; segmented items sit 4 px inside theirs, checkbox, radio and
+  // switch rows get the height their enlarged inputs need (globals.css), and
+  // a Selector's search field and option rows get 44 px of their own.
   adaptations: {
     rules: [
       {
@@ -253,7 +254,9 @@ export const eneoTheme = defineTheme({
             "segmented-control-item": { base: { minHeight: "44px" } },
             "checkbox-input": { base: { minHeight: "44px" } },
             "radio-list-item": { base: { minHeight: "44px" } },
-            "switch-field": { base: { minHeight: "44px" } }
+            "switch-field": { base: { minHeight: "44px" } },
+            "selector-search": { base: { minHeight: "44px" } },
+            "selector-option-row": { base: { minHeight: "44px" } }
           }
         }
       }

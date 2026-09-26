@@ -791,6 +791,14 @@
     .astryx-switch-field {
       min-height: 44px;
     }
+
+    .astryx-selector-search {
+      min-height: 44px;
+    }
+
+    .astryx-selector-option-row {
+      min-height: 44px;
+    }
   }
 }
 }

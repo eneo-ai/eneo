@@ -239,9 +239,8 @@ export function ModelSelector({
             label={<span>{modelName(model)}</span>}
             description={option.description ? <span>{option.description}</span> : undefined}
             // A readable width even under a narrow trigger (the popup takes
-            // the width of its rows) that still fits a 320 px screen, and
-            // 44 px rows on touch with the row's padding (ACCESSIBILITY.md → 4).
-            className="min-w-[min(18rem,calc(100vw_-_4rem))] pointer-coarse:min-h-8"
+            // the width of its rows) that still fits a 320 px screen.
+            className="min-w-[min(18rem,calc(100vw_-_4rem))]"
           />
         );
       }}

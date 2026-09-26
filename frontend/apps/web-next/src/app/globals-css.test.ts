@@ -107,7 +107,9 @@ describe("globals.css", () => {
       "segmented-control-item",
       "checkbox-input",
       "radio-list-item",
-      "switch-field"
+      "switch-field",
+      "selector-search",
+      "selector-option-row"
     ]) {
       expect(coarse.get(`.astryx-${component}`)).toMatchObject({ "min-height": "44px" });
     }
