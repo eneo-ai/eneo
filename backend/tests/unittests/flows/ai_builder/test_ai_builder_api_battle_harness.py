@@ -1406,25 +1406,7 @@ def _complete_live_case_bundle(
                 prompt=case.prompt,
                 requested_model_id=requested_model_id,
             ),
-            "case": {
-                "id": case.case_id,
-                "prompt": case.prompt,
-                "complexity": case.complexity,
-                "domain": case.domain,
-                "required": case.required,
-                "apply_plan": case.apply_plan,
-                "execute_flow": case.execution is not None,
-                "release_dimensions": list(case.release_dimensions),
-                "expected": case.expected or {},
-                "file_ids": list(case.file_ids),
-                "direct_file_slot_count": len(case.file_ids),
-                "attachments": harness._fixture_contract(case.attachments),
-                "runtime_files": harness._fixture_contract(case.runtime_files),
-                "synthetic_user_profile": case.synthetic_user_profile,
-                "cohorts": list(case.cohorts),
-                "configured_question_answers": (case.configured_question_answers or {}),
-                "question_answer_sources": case.question_answer_sources or {},
-            },
+            "case": harness._case_record(case, file_ids=case.file_ids),
             "case_identity": harness._case_identity(case),
             "case_contract": case_contract,
             "case_contract_sha256": harness._canonical_sha256(case_contract),
@@ -1439,8 +1421,6 @@ def _complete_live_case_bundle(
             },
         }
     )
-    if case.execution is not None:
-        bundle["case"]["execution"] = harness._execution_contract(case.execution)
     return bundle
 
 
@@ -2959,6 +2939,24 @@ def test_evidence_report_recomputes_attachment_identity_from_classifier() -> Non
 
     assert report["valid"] is False
     assert "observation_input_identity_consistent" in {
+        check["name"] for check in report["failed_checks"]
+    }
+
+
+def test_a_case_with_a_source_is_recorded_so_its_observation_stays_valid() -> None:
+    harness = _battle_harness()
+    case = harness.BattleCase(
+        case_id="sourced",
+        prompt="Build it.",
+        source=harness.CaseSource("BYG-01", "https://e-tjanster.sundsvall.se/bygglov"),
+    )
+    bundle = _complete_live_case_bundle(harness, case)
+
+    assert harness._observation_evidence_report(bundle)["valid"] is True
+
+    bundle["case"]["source"]["url"] = "https://e-tjanster.sundsvall.se/annan"
+    report = harness._observation_evidence_report(bundle)
+    assert "observation_case_contract_consistent" in {
         check["name"] for check in report["failed_checks"]
     }
 

@@ -39,6 +39,7 @@ separate repository.
 |---|---|
 | `backend/scripts/ai_builder_api_battle_test.py`, `ai_builder_receipt.py`, `ai_builder_release_gate.py`, `ai_builder_battle_compare.py`, `ai_builder_edit_expectation.py`, `ai_builder_edit_capability.py` (+ `_manifest.json`) | The harness and its gates. |
 | `backend/scripts/ai_builder_*_cases.json`, `backend/scripts/fixtures/ai_builder_battle/` | Case corpora and fixtures. |
+| `backend/scripts/ai_builder_corpus_coverage.py`, `ai_builder_municipal_policy.json`, `ai_builder_municipal_sources.json` (+ `test_ai_builder_corpus_coverage.py`) | Tier coverage validator, the municipal policy, and pinned real-world sources. |
 | `backend/scripts/ai_builder_failure_summary.py` | Referenced by the docs-site `ai-builder.mdx`; update the page if it goes. |
 | `backend/scripts/check_flow_run_evidence_acceptance.py` | Evidence acceptance checker. |
 | `backend/tests/unittests/flows/ai_builder/test_ai_builder_api_battle_harness.py`, `test_ai_builder_battle_*`, `test_ai_builder_edit_capability.py`, `test_ai_builder_edit_expectation.py`, `test_ai_builder_release_gate.py` | Tests of the tooling; they follow the tooling's decision. |

@@ -16,6 +16,7 @@ import json
 import math
 import mimetypes
 import os
+import re
 import subprocess
 import sys
 import time
@@ -396,6 +397,14 @@ class CaseExecution:
 
 
 @dataclass(frozen=True, slots=True)
+class CaseSource:
+    """Where a case comes from: a catalogued real service or process and its public page."""
+
+    catalogue_id: str
+    url: str
+
+
+@dataclass(frozen=True, slots=True)
 class BattleCase:
     case_id: str
     prompt: str
@@ -413,6 +422,7 @@ class BattleCase:
     question_answer_sources: JsonObject | None = None
     edit: EditCase | None = None
     execution: CaseExecution | None = None
+    source: CaseSource | None = None
 
     @property
     def executes(self) -> bool:
@@ -457,6 +467,38 @@ def _execution_contract(execution: CaseExecution) -> JsonObject:
     }
 
 
+def _source_contract(source: CaseSource) -> JsonObject:
+    return {"catalogue_id": source.catalogue_id, "url": source.url}
+
+
+def _case_record(case: BattleCase, *, file_ids: Sequence[str]) -> JsonObject:
+    """The case as a bundle records it; `_observed_case_contract_payload` projects it back onto the contract."""
+    record: JsonObject = {
+        "id": case.case_id,
+        "complexity": case.complexity,
+        "domain": case.domain,
+        "required": case.required,
+        "apply_plan": case.apply_plan,
+        "execute_flow": case.executes,
+        "release_dimensions": list(case.release_dimensions),
+        "prompt": case.prompt,
+        "expected": case.expected or {},
+        "file_ids": list(file_ids),
+        "direct_file_slot_count": len(case.file_ids),
+        "attachments": _fixture_contract(case.attachments),
+        "runtime_files": _fixture_contract(case.runtime_files),
+        "synthetic_user_profile": case.synthetic_user_profile,
+        "cohorts": list(case.cohorts),
+        "configured_question_answers": case.configured_question_answers or {},
+        "question_answer_sources": case.question_answer_sources or {},
+    }
+    if case.source is not None:
+        record["source"] = _source_contract(case.source)
+    if case.execution is not None:
+        record["execution"] = _execution_contract(case.execution)
+    return record
+
+
 def _case_contract_payload(case: BattleCase) -> JsonObject:
     """Return the portable behavior contract for one selected benchmark case."""
     payload: JsonObject = {
@@ -487,6 +529,8 @@ def _case_contract_payload(case: BattleCase) -> JsonObject:
         "configured_question_answers": case.configured_question_answers or {},
         "question_answer_sources": case.question_answer_sources or {},
     }
+    if case.source is not None:
+        payload["source"] = _source_contract(case.source)
     if case.edit is not None:
         payload["edit"] = _edit_contract(case.edit)
     if case.execution is not None:
@@ -537,6 +581,9 @@ def _observed_case_contract_payload(case: Mapping[str, object]) -> JsonObject:
             dict(answer_sources) if isinstance(answer_sources, Mapping) else None
         ),
     }
+    raw_source = case.get("source")
+    if isinstance(raw_source, Mapping):
+        payload["source"] = dict(cast(Mapping[str, Any], raw_source))
     raw_edit = case.get("edit")
     if isinstance(raw_edit, Mapping):
         edit = cast(Mapping[str, Any], raw_edit)
@@ -1503,6 +1550,7 @@ _CASE_KEYS = frozenset(
         "question_answer_overrides",
         "cohorts",
         "edit",
+        "source",
     }
 )
 _EXPECTATION_KEYS = frozenset(
@@ -1549,6 +1597,38 @@ _EXPECTATION_KEYS = frozenset(
         "terminal_output_types",
     }
 )
+_COUNT_EXPECTATION_KEYS = frozenset(
+    {
+        "expected_question_event_count",
+        "max_all_previous_steps",
+        "max_post_json_text_cleanup_steps",
+        "max_question_event_count",
+        "max_reopened_question_count",
+        "max_steps",
+        "min_form_field_count",
+        "min_json_steps",
+        "min_question_event_count",
+        "min_source_ref_steps",
+        "min_steps",
+    }
+)
+
+
+def _has_question_oracle(expected: Mapping[str, object]) -> bool:
+    """Whether a case's question expectations can fail: a pinned or forbidden question, or a count bound.
+
+    Counts are parse-validated integers, so a minimum of 0 is the only vacuous one.
+    """
+
+    return (
+        bool(expected.get("expected_question_event_ids"))
+        or bool(expected.get("forbidden_question_event_ids"))
+        or bool(expected.get("min_question_event_count"))
+        or "expected_question_event_count" in expected
+        or "max_question_event_count" in expected
+    )
+
+
 _INPUT_FIELD_CONTRACT_KEYS = frozenset({"name_groups", "type", "required", "options"})
 # The authorable type vocabulary itself comes from
 # `builder_form_field_type_values()`. Only which of those types carry an option
@@ -1598,6 +1678,38 @@ def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
             raise ValueError(f"Duplicate JSON key: {key}")
         value[key] = item
     return value
+
+
+_CATALOGUE_ID = re.compile(r"^[A-Z]{3}-[0-9]{2}$")
+
+
+def _is_https_url(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    parsed = urlsplit(value)
+    try:
+        parsed.port  # noqa: B018 - reading it validates the port
+    except ValueError:
+        return False
+    return parsed.scheme == "https" and bool(parsed.hostname)
+
+
+def _case_source(raw: object, *, path: Path, case_id: str) -> CaseSource | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping) or set(raw) != {"catalogue_id", "url"}:
+        raise ValueError(
+            f"{path} case {case_id} source must be an object with exactly "
+            "catalogue_id and url."
+        )
+    catalogue_id, url = raw["catalogue_id"], raw["url"]
+    if not isinstance(catalogue_id, str) or not _CATALOGUE_ID.fullmatch(catalogue_id):
+        raise ValueError(
+            f"{path} case {case_id} source catalogue_id must look like BYG-01."
+        )
+    if not _is_https_url(url):
+        raise ValueError(f"{path} case {case_id} source url must be an https URL.")
+    return CaseSource(catalogue_id=catalogue_id, url=url)
 
 
 def _read_cases_file(path: Path) -> list[BattleCase]:
@@ -1752,6 +1864,7 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             question_answer_sources=answer_sources,
             edit=edit,
             execution=execution,
+            source=_case_source(raw_case.get("source"), path=path, case_id=case_id),
         )
         if case.edit is not None and case.file_ids:
             raise ValueError(
@@ -2118,6 +2231,14 @@ def _validate_release_expectations(
             f"{path} case {case_id}.expected has unknown expectation keys: "
             + ", ".join(sorted(str(key) for key in unknown_keys))
         )
+    # A null expectation or a non-integer count is skipped by the scorer, so it would check nothing.
+    for key, value in expected.items():
+        if value is None:
+            raise ValueError(f"{path} case {case_id}.{key} must not be null.")
+        if key in _COUNT_EXPECTATION_KEYS and (type(value) is not int or value < 0):
+            raise ValueError(
+                f"{path} case {case_id}.{key} must be a non-negative integer."
+            )
     expected_primary_input_type = expected.get("expected_primary_input_type")
     if expected_primary_input_type is not None and (
         not isinstance(expected_primary_input_type, str)
@@ -2135,6 +2256,7 @@ def _validate_release_expectations(
             raise ValueError(f"{path} case {case_id}.{key} must be true.")
     relevance_sets: dict[str, set[str]] = {}
     for key in (
+        "expected_question_event_ids",
         "preferred_question_event_ids",
         "allowed_question_event_ids",
         "forbidden_question_event_ids",
@@ -4640,25 +4762,7 @@ def _run_case_session(
         "app_version": LOCAL_APP_VERSION,
         "base_url": config.base_url,
         "space_id": args.space_id,
-        "case": {
-            "id": case.case_id,
-            "complexity": case.complexity,
-            "domain": case.domain,
-            "required": case.required,
-            "apply_plan": case.apply_plan,
-            "execute_flow": case.executes,
-            "release_dimensions": list(case.release_dimensions),
-            "prompt": case.prompt,
-            "expected": case.expected or {},
-            "file_ids": list(file_ids),
-            "direct_file_slot_count": len(case.file_ids),
-            "attachments": _fixture_contract(case.attachments),
-            "runtime_files": _fixture_contract(case.runtime_files),
-            "synthetic_user_profile": case.synthetic_user_profile,
-            "cohorts": list(case.cohorts),
-            "configured_question_answers": case.configured_question_answers or {},
-            "question_answer_sources": case.question_answer_sources or {},
-        },
+        "case": _case_record(case, file_ids=file_ids),
         "session_id": session_id,
         "plan_id": final_interaction.get("plan_id"),
         "initial_session": initial_session,
@@ -4677,8 +4781,6 @@ def _run_case_session(
         "runtime_metrics": _runtime_metrics_from_quality_report(quality_report),
         "quality_report": quality_report,
     }
-    if case.execution is not None:
-        bundle["case"]["execution"] = _execution_contract(case.execution)
     if case.edit is not None and seeded_flow is not None:
         bundle["case"]["edit"] = _edit_contract(case.edit)
         bundle["edit_evidence"] = edit_evidence
