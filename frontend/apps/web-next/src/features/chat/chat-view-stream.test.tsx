@@ -2,8 +2,10 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { browserApi } from "@/lib/api/browser";
+import { recentConversationsQueryOptions } from "@/lib/api/conversations";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
-import { renderInApp, testAppContext } from "@/test/render";
+import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { observedElements, reportResize } from "@/test/setup-dom";
 import { ChatView, type ActivityState } from "./chat-view";
 
@@ -151,6 +153,20 @@ describe("ChatView streaming an answer", () => {
     expect(spies.titled).toEqual(["session-1"]);
     // A new assistant-first send sends the assistant id, not a session.
     expect(spies.sent[0]?.body).toMatchObject({ assistant_id: "assistant-1", session_id: null });
+  });
+
+  it("refreshes the partner's history and the recent list once the answer is saved", async () => {
+    spies.mode = "answer";
+    const queryClient = testQueryClient();
+    const history = ["conversations", "assistant", "assistant-1"];
+    const recent = recentConversationsQueryOptions(browserApi).queryKey;
+    queryClient.setQueryData(history, { pages: [], pageParams: [] });
+    queryClient.setQueryData(recent, []);
+    renderInApp(<Harness />, { queryClient });
+    ask("Vilken gräns gäller?");
+
+    await waitFor(() => expect(queryClient.getQueryState(recent)?.isInvalidated).toBe(true));
+    expect(queryClient.getQueryState(history)?.isInvalidated).toBe(true);
   });
 });
 

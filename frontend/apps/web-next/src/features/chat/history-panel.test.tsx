@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { browserApi } from "@/lib/api/browser";
+import { recentConversationsQueryOptions } from "@/lib/api/conversations";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testQueryClient } from "@/test/render";
 import { HistoryAside } from "./history-panel";
 import { RenameSessionDialog } from "./session-actions";
 
@@ -79,7 +81,8 @@ function renderHistory({
   onClose = vi.fn(),
   onSelect = vi.fn(),
   onDeleted = vi.fn(),
-  onRated = vi.fn()
+  onRated = vi.fn(),
+  queryClient = testQueryClient()
 } = {}) {
   renderInApp(
     <HistoryAside
@@ -90,7 +93,8 @@ function renderHistory({
       onDeleted={onDeleted}
       onRated={onRated}
       onClose={onClose}
-    />
+    />,
+    { queryClient }
   );
   return { onClose, onSelect, onDeleted, onRated };
 }
@@ -154,6 +158,26 @@ describe("HistoryAside", () => {
     await waitFor(() =>
       expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Historik" }))
     );
+  });
+
+  it("refreshes the recent list (Senaste, ⌘K) after renaming or deleting", async () => {
+    const queryClient = testQueryClient();
+    const recent = recentConversationsQueryOptions(browserApi).queryKey;
+    queryClient.setQueryData(recent, []);
+    const { onDeleted } = renderHistory({ queryClient });
+
+    fireEvent.click(await rowMenuItem("Upphandlingsanalys", "Byt namn"));
+    const input = await screen.findByLabelText("Namn");
+    fireEvent.change(input, { target: { value: "Direktupphandling" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(queryClient.getQueryState(recent)?.isInvalidated).toBe(true));
+
+    queryClient.setQueryData(recent, []);
+    fireEvent.click(await rowMenuItem("Protokoll KS", "Ta bort"));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort konversationen" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Bekräfta borttagning" }));
+    await waitFor(() => expect(onDeleted).toHaveBeenCalledWith("s2"));
+    expect(queryClient.getQueryState(recent)?.isInvalidated).toBe(true);
   });
 
   it("confirms a rating and reports it", async () => {
