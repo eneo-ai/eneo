@@ -265,7 +265,8 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
   `entityTone()` / `entityAccent()` in `src/lib/entity-accent.ts`.
 - `StatusLabel` — Astryx `StatusDot` plus text: `status`, `label`, `isPulsing?`.
 - `ClientTime` — the one way to show a date: `value`, `format: "date" |
-"date_long" | "date_time" | "relative"`. It renders in the viewer's time zone
+"date_long" | "date_time" | "relative" | "auto"` (`auto`, for lists: relative
+  for the last week, then date and time). It renders in the viewer's time zone
   after hydration, so server and client HTML never disagree. Where the text
   must go into a label (an accessible name), `useClientTimeText` returns the
   same string.

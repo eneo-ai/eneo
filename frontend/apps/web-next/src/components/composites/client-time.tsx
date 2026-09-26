@@ -4,9 +4,9 @@ import { useLocale } from "@astryxdesign/core/i18n";
 import { Timestamp } from "@astryxdesign/core/Timestamp";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 
-export type ClientTimeFormat = "date" | "date_long" | "date_time" | "relative";
+export type ClientTimeFormat = "date" | "date_long" | "date_time" | "relative" | "auto";
 
-type AbsoluteFormat = Exclude<ClientTimeFormat, "relative">;
+type AbsoluteFormat = Exclude<ClientTimeFormat, "relative" | "auto">;
 
 /**
  * Timestamp's options for the absolute formats. Astryx exports no formatter,
@@ -26,7 +26,9 @@ const TEXT_OPTIONS: Record<AbsoluteFormat, Intl.DateTimeFormatOptions> = {
  * the server renders with its own, so server output would not match; until
  * hydration the cell stays empty. No hover card, so no extra tab stop: an
  * absolute format is the full information, and a relative one ("för 3
- * minuter sedan", kept current) is read out as its absolute time.
+ * minuter sedan", kept current) is read out as its absolute time. "auto" is
+ * Astryx's choice for lists: relative for the last week, the date and time
+ * after that.
  *
  * @example
  * {run.created_at ? <ClientTime value={run.created_at} format="date_time" /> : "—"}
@@ -41,7 +43,7 @@ export function ClientTime({ value, format }: { value: string; format: ClientTim
       type="inherit"
       color="inherit"
       hasTooltip={false}
-      isLive={format === "relative"}
+      isLive={format === "relative" || format === "auto"}
     />
   );
 }

@@ -154,7 +154,7 @@ function EntryTime({ value }: { value: string }) {
       aria-hidden="true"
       className="text-ax-text-secondary ms-auto shrink-0 text-xs whitespace-nowrap"
     >
-      <ClientTime value={value} format="relative" />
+      <ClientTime value={value} format="auto" />
     </span>
   );
 }

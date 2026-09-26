@@ -194,6 +194,22 @@ describe("ShellCommandPalette", () => {
     expect(router.push).toHaveBeenCalledWith("/spaces/s1/chat?type=assistant&id=a2&session_id=c2");
   });
 
+  it("dates a conversation that was last active more than a week ago", async () => {
+    // Astryx's "auto" format: relative for the last week, then the date.
+    const queryClient = seededClient();
+    queryClient.setQueryData(recentKey, [
+      conversation("c9", "Budgetprotokoll", undefined, undefined, 30 * 24 * 60)
+    ]);
+    renderInApp(<ShellCommandPalette isOpen onOpenChange={vi.fn()} onCreateSpace={vi.fn()} />, {
+      queryClient,
+      appContext: testAppContext()
+    });
+
+    const old = await screen.findByRole("option", { name: /Budgetprotokoll/ });
+    expect(descriptionOf(old)).not.toMatch(/sedan/);
+    expect(descriptionOf(old)).toMatch(/\d{4}/);
+  });
+
   it("opens the highlighted result with Enter", async () => {
     renderPalette();
     await screen.findByRole("option", { name: /Upphandlingsassistenten/ });
