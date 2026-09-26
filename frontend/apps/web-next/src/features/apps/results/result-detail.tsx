@@ -1,14 +1,15 @@
 "use client";
 
+import { Button } from "@astryxdesign/core/Button";
 import { useClipboard } from "@astryxdesign/core/hooks";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Check, ChevronLeft, Copy, Download } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
+import { useId, useState } from "react";
 import { Streamdown } from "streamdown";
 import { PageHeader } from "@/components/composites/page-header";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { toast } from "@/lib/toast";
 import { ClientTime } from "@/components/composites/client-time";
@@ -22,6 +23,8 @@ import {
 import { AppRunStatusBadge } from "../status-badge";
 
 const RESULT_POLL_MS = 3_000;
+
+type ResultTab = "results" | "transcription";
 
 function resultTitleLabels(t: (key: string) => string) {
   return { inputPrefix: t("input"), empty: t("app_run_no_input_title") };
@@ -44,17 +47,39 @@ function OutputToolbar({ text, fileName }: { text: string; fileName: string }) {
       <Button
         variant="ghost"
         size="sm"
+        label={isCopied ? t("copied") : t("copy")}
+        icon={
+          isCopied ? (
+            <Check className="size-4" aria-hidden="true" />
+          ) : (
+            <Copy className="size-4" aria-hidden="true" />
+          )
+        }
         onClick={async () => {
           if (!(await copy(text))) toast.error(t("chat_copy_failed"));
         }}
-      >
-        {isCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
-        {isCopied ? t("copied") : t("copy")}
-      </Button>
-      <Button variant="ghost" size="sm" onClick={() => downloadText(text, fileName)}>
-        <Download className="size-4" /> {t("download")}
-      </Button>
+      />
+      <Button
+        variant="ghost"
+        size="sm"
+        label={t("download")}
+        icon={<Download className="size-4" aria-hidden="true" />}
+        onClick={() => downloadText(text, fileName)}
+      />
     </div>
+  );
+}
+
+function RunOutput({ run, fileName }: { run: AppRun; fileName: string }) {
+  const t = useTranslations();
+  if (!run.output) {
+    return <p className="text-muted-foreground text-center">{t("no_output_generated")}</p>;
+  }
+  return (
+    <>
+      <OutputToolbar text={run.output} fileName={fileName} />
+      <Streamdown>{run.output}</Streamdown>
+    </>
   );
 }
 
@@ -66,14 +91,13 @@ function FailedFileDownloads({ run }: { run: AppRun }) {
       {run.input.files.map((file) => (
         <Button
           key={file.id}
-          variant="outline"
+          label={`${t("download")} "${file.name}"`}
+          icon={<Download className="size-4" aria-hidden="true" />}
           onClick={async () => {
             const url = await fileSignedUrl(browserApi, file.id, "attachment");
             window.open(url, "_blank");
           }}
-        >
-          <Download className="size-4" /> {t("download")} &quot;{file.name}&quot;
-        </Button>
+        />
       ))}
     </div>
   );
@@ -105,10 +129,10 @@ function TranscriptionTab({ run }: { run: AppRun }) {
               <Button
                 variant="ghost"
                 size="sm"
+                label={t("download")}
+                icon={<Download className="size-4" aria-hidden="true" />}
                 onClick={() => downloadText(file.transcription ?? "", `${file.name}.txt`)}
-              >
-                <Download className="size-4" /> {t("download")}
-              </Button>
+              />
             )}
           </div>
           {urls[file.id] && <audio controls src={urls[file.id]} className="w-full px-3 py-2" />}
@@ -117,6 +141,62 @@ function TranscriptionTab({ run }: { run: AppRun }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * The output and the input's transcriptions as WAI-ARIA tabs: the arrow keys
+ * move between the tabs (TabList's roving focus), Enter or Space opens one,
+ * and each panel is named by its tab. Only the open panel renders, so the
+ * audio players stop and the signed audio URLs load on first view.
+ */
+function ResultTabs({ run, fileName }: { run: AppRun; fileName: string }) {
+  const t = useTranslations();
+  const [tab, setTab] = useState<ResultTab>("results");
+  const baseId = useId();
+  const tabId = (value: ResultTab) => `${baseId}-tab-${value}`;
+  const panelId = (value: ResultTab) => `${baseId}-panel-${value}`;
+
+  const panel = (value: ResultTab, content: React.ReactNode) => (
+    <div
+      role="tabpanel"
+      id={panelId(value)}
+      aria-labelledby={tabId(value)}
+      hidden={tab !== value}
+      // In the tab order, as the tabs pattern asks when a panel does not start
+      // with a focusable element (the transcription panel starts with a name).
+      tabIndex={0}
+      className="focus-visible:outline-ring rounded-ax-element pt-4 focus-visible:outline-2 focus-visible:outline-offset-4"
+    >
+      {tab === value ? content : null}
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col">
+      <TabList
+        role="tablist"
+        aria-label={t("legacy_result_tabs_label")}
+        value={tab}
+        onChange={(value) => setTab(value === "transcription" ? "transcription" : "results")}
+        hasDivider
+      >
+        <Tab
+          id={tabId("results")}
+          value="results"
+          label={t("results")}
+          panelId={panelId("results")}
+        />
+        <Tab
+          id={tabId("transcription")}
+          value="transcription"
+          label={t("transcription")}
+          panelId={panelId("transcription")}
+        />
+      </TabList>
+      {panel("results", <RunOutput run={run} fileName={fileName} />)}
+      {panel("transcription", <TranscriptionTab run={run} />)}
     </div>
   );
 }
@@ -158,16 +238,15 @@ export function ResultDetail({
           <ChevronLeft className="size-4" />
           {t("back")}
         </Link>
-        <PageHeader title={title}>
-          {editHref && (
-            <Button asChild variant="outline">
-              <Link href={editHref}>{t("edit")}</Link>
-            </Button>
-          )}
-          <Button asChild>
-            <Link href={newRunHref}>{t("new_run")}</Link>
-          </Button>
-        </PageHeader>
+        <PageHeader
+          title={title}
+          actions={
+            <>
+              {editHref && <Button href={editHref} label={t("edit")} />}
+              <Button href={newRunHref} variant="primary" label={t("new_run")} />
+            </>
+          }
+        />
       </div>
 
       <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
@@ -178,30 +257,9 @@ export function ResultDetail({
               <span className="text-muted-foreground">{t("result_being_generated")}</span>
             </div>
           ) : transcribedCount > 0 ? (
-            <Tabs defaultValue="results">
-              <TabsList>
-                <TabsTrigger value="results">{t("results")}</TabsTrigger>
-                <TabsTrigger value="transcription">{t("transcription")}</TabsTrigger>
-              </TabsList>
-              <TabsContent value="results" className="pt-4">
-                {run.output ? (
-                  <>
-                    <OutputToolbar text={run.output} fileName={outputFileName} />
-                    <Streamdown>{run.output}</Streamdown>
-                  </>
-                ) : (
-                  <p className="text-muted-foreground text-center">{t("no_output_generated")}</p>
-                )}
-              </TabsContent>
-              <TabsContent value="transcription" className="pt-4">
-                <TranscriptionTab run={run} />
-              </TabsContent>
-            </Tabs>
+            <ResultTabs run={run} fileName={outputFileName} />
           ) : run.output ? (
-            <>
-              <OutputToolbar text={run.output} fileName={outputFileName} />
-              <Streamdown>{run.output}</Streamdown>
-            </>
+            <RunOutput run={run} fileName={outputFileName} />
           ) : run.status === "failed" && run.input.files.length > 0 ? (
             <FailedFileDownloads run={run} />
           ) : (
