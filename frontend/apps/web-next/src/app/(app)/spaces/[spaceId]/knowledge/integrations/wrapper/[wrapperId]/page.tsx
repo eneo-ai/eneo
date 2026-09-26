@@ -13,7 +13,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { spaceId, wrapperId } = await params;
   return spacePageTitle(async () => {
-    const space = await getQueryClient().fetchQuery(spaceQueryOptions(eneoApi(), spaceId));
+    const space = await getQueryClient().query(spaceQueryOptions(eneoApi(), spaceId));
     const item = space.knowledge.integration_knowledge_list.items.find(
       (entry) => entry.wrapper_id === wrapperId
     );

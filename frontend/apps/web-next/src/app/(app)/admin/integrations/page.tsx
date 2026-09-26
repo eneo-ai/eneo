@@ -9,7 +9,7 @@ export const generateMetadata = pageTitle("integrations");
 
 export default async function AdminIntegrationsRoute() {
   const queryClient = getQueryClient();
-  await queryClient.fetchQuery(tenantIntegrationsQueryOptions(eneoApi()));
+  await queryClient.query(tenantIntegrationsQueryOptions(eneoApi()));
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>

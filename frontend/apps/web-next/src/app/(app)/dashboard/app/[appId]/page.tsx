@@ -13,8 +13,8 @@ export default async function DashboardAppPage({ params }: { params: Promise<{ a
 
   try {
     await Promise.all([
-      queryClient.fetchQuery(appQueryOptions(api, appId)),
-      queryClient.fetchQuery(appRunsQueryOptions(api, appId))
+      queryClient.query(appQueryOptions(api, appId)),
+      queryClient.query(appRunsQueryOptions(api, appId))
     ]);
   } catch (error) {
     if (error instanceof EneoApiError && error.status === 404) notFound();

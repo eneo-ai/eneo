@@ -15,7 +15,7 @@ export default async function DashboardAppResultPage({
   const queryClient = getQueryClient();
 
   try {
-    await queryClient.fetchQuery(appRunQueryOptions(eneoApi(), resultId));
+    await queryClient.query(appRunQueryOptions(eneoApi(), resultId));
   } catch (error) {
     if (error instanceof EneoApiError && error.status === 404) notFound();
     throw error;

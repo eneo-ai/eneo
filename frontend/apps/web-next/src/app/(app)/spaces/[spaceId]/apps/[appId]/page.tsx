@@ -15,7 +15,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { appId } = await params;
   return spacePageTitle(
-    async () => (await getQueryClient().fetchQuery(appQueryOptions(eneoApi(), appId))).name,
+    async () => (await getQueryClient().query(appQueryOptions(eneoApi(), appId))).name,
     "apps"
   );
 }
@@ -31,8 +31,8 @@ export default async function AppDetailPage({
 
   try {
     await Promise.all([
-      queryClient.fetchQuery(appQueryOptions(api, appId)),
-      queryClient.fetchQuery(appRunsQueryOptions(api, appId))
+      queryClient.query(appQueryOptions(api, appId)),
+      queryClient.query(appRunsQueryOptions(api, appId))
     ]);
   } catch (error) {
     if (error instanceof EneoApiError && error.status === 404) notFound();

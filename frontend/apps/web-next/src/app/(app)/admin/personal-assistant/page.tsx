@@ -17,11 +17,11 @@ export default async function AdminPersonalAssistantRoute() {
   const queryClient = getQueryClient();
   const api = eneoApi();
   await Promise.all([
-    queryClient.fetchQuery(governancePolicyQueryOptions(api)),
-    queryClient.fetchQuery(adminModelsQueryOptions(api)),
-    queryClient.fetchQuery(modelProvidersQueryOptions(api)),
-    queryClient.fetchQuery(mcpServersQueryOptions(api)),
-    queryClient.fetchQuery(promptLibraryQueryOptions(api))
+    queryClient.query(governancePolicyQueryOptions(api)),
+    queryClient.query(adminModelsQueryOptions(api)),
+    queryClient.query(modelProvidersQueryOptions(api)),
+    queryClient.query(mcpServersQueryOptions(api)),
+    queryClient.query(promptLibraryQueryOptions(api))
   ]);
 
   return (

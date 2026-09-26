@@ -9,7 +9,7 @@ export const generateMetadata = pageTitle("tools");
 
 export default async function AdminToolsRoute() {
   const queryClient = getQueryClient();
-  await queryClient.fetchQuery(mcpServersQueryOptions(eneoApi()));
+  await queryClient.query(mcpServersQueryOptions(eneoApi()));
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>
       <CapabilityProvidersPage />

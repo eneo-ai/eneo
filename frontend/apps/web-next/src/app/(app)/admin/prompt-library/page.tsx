@@ -9,7 +9,7 @@ export const generateMetadata = pageTitle("governance_tab_prompts");
 
 export default async function AdminPromptLibraryRoute() {
   const queryClient = getQueryClient();
-  await queryClient.fetchQuery(promptLibraryQueryOptions(eneoApi()));
+  await queryClient.query(promptLibraryQueryOptions(eneoApi()));
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>

@@ -1,4 +1,4 @@
-import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
+import { dehydrate, HydrationBoundary, noop } from "@tanstack/react-query";
 import { getQueryClient } from "@/lib/api/query";
 import { eneoApi } from "@/lib/api/server";
 import { pageTitle } from "@/lib/page-metadata";
@@ -17,13 +17,13 @@ export default async function AdminModelsRoute() {
   const api = eneoApi();
 
   await Promise.all([
-    queryClient.fetchQuery(adminModelsQueryOptions(api)),
-    queryClient.fetchQuery(securityClassificationsQueryOptions(api)),
+    queryClient.query(adminModelsQueryOptions(api)),
+    queryClient.query(securityClassificationsQueryOptions(api)),
     // Custom providers and their field definitions drive the provider cards
-    // + key status. Prefetch (swallows errors) so cards paint on first render
-    // without failing SSR.
-    queryClient.prefetchQuery(modelProvidersQueryOptions(api)),
-    queryClient.prefetchQuery(providerCapabilitiesQueryOptions(api))
+    // + key status. Prefetched with errors swallowed, so cards paint on first
+    // render without failing SSR.
+    queryClient.query(modelProvidersQueryOptions(api)).catch(noop),
+    queryClient.query(providerCapabilitiesQueryOptions(api)).catch(noop)
   ]);
 
   return (

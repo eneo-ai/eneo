@@ -27,8 +27,8 @@ export default async function AdminUserUsageRoute({
 
   try {
     await Promise.all([
-      queryClient.fetchQuery(userTokenUsageSummaryQueryOptions(api, userId, range)),
-      queryClient.fetchQuery(userModelBreakdownQueryOptions(api, userId, range))
+      queryClient.query(userTokenUsageSummaryQueryOptions(api, userId, range)),
+      queryClient.query(userModelBreakdownQueryOptions(api, userId, range))
     ]);
   } catch (error) {
     if (error instanceof EneoApiError && error.status === 404) notFound();

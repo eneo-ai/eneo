@@ -11,7 +11,7 @@ export const generateMetadata = pageTitle("spaces");
 export default async function SpacesListPage() {
   const t = await getTranslations();
   const queryClient = getQueryClient();
-  await queryClient.fetchQuery(spacesListQueryOptions(eneoApi()));
+  await queryClient.query(spacesListQueryOptions(eneoApi()));
 
   return (
     <div className="flex w-full flex-col gap-6 p-6">

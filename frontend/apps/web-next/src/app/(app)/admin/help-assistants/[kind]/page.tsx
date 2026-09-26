@@ -23,12 +23,12 @@ export default async function HelpAssistantEditRoute({
   const queryClient = getQueryClient();
   const api = eneoApi();
 
-  const role = await queryClient.fetchQuery(helpRoleQueryOptions(api, kind as HelperKind));
+  const role = await queryClient.query(helpRoleQueryOptions(api, kind as HelperKind));
   if (!role) notFound();
 
   await Promise.all([
-    queryClient.fetchQuery(assistantQueryOptions(api, role.assistant_id)),
-    queryClient.fetchQuery(spaceQueryOptions(api, "organization"))
+    queryClient.query(assistantQueryOptions(api, role.assistant_id)),
+    queryClient.query(spaceQueryOptions(api, "organization"))
   ]);
 
   return (

@@ -14,7 +14,7 @@ export default async function AdminAssistantInsightsRoute({
 }) {
   const { assistantId } = await params;
   const queryClient = getQueryClient();
-  await queryClient.fetchQuery(assistantQueryOptions(eneoApi(), assistantId));
+  await queryClient.query(assistantQueryOptions(eneoApi(), assistantId));
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>

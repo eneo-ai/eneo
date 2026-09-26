@@ -12,9 +12,9 @@ export default async function AdminUsageRoute() {
   const queryClient = getQueryClient();
   const api = eneoApi();
   await Promise.all([
-    queryClient.fetchQuery(tokenUsageQueryOptions(api)),
-    queryClient.fetchQuery(storageQueryOptions(api)),
-    queryClient.fetchQuery(storageSpacesQueryOptions(api))
+    queryClient.query(tokenUsageQueryOptions(api)),
+    queryClient.query(storageQueryOptions(api)),
+    queryClient.query(storageSpacesQueryOptions(api))
   ]);
 
   return (
