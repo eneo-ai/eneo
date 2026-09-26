@@ -1405,5 +1405,8 @@
   "provider_form_select_model_required": "Välj minst en modell, eller lägg till en med dess id.",
   "provider_form_token_limits_description": "Katalogen saknar tokengränser för modellen. Du hittar dem i leverantörens dokumentation.",
   "provider_form_token_limit_required": "Ange ett heltal större än 0.",
-  "provider_form_name_taken": "Det finns redan en leverantör som heter {name}. Ange ett annat namn."
+  "provider_form_name_taken": "Det finns redan en leverantör som heter {name}. Ange ett annat namn.",
+  "eneo_error_9017": "Namnet används redan. Välj ett annat namn.",
+  "provider_form_model_added": "Tillagd",
+  "provider_form_model_added_error": "Leverantören har redan {name}. Ange ett annat modell-id."
 }

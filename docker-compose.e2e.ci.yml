@@ -71,8 +71,11 @@ services:
       POSTGRES_DB: eneo_test
       REDIS_HOST: e2e-redis
       REDIS_PORT: "6379"
-      # No encryption → seeded provider credentials are plaintext (no real keys).
-      ENCRYPTION_KEY: ""
+      # Credentials are encrypted as in production, so providers can be added
+      # (the backend refuses to store a key without encryption). A fixed,
+      # public test key (CI's backend jobs use it too) that guards only the
+      # stack's dummy keys; e2e/seed.py encrypts the seeded provider's with it.
+      ENCRYPTION_KEY: yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=
       TENANT_CREDENTIALS_ENABLED: "false"
       OPENAI_API_KEY: test-openai-key
       ANTHROPIC_API_KEY: test-anthropic-key

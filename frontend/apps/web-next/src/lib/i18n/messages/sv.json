@@ -698,7 +698,7 @@
   "eneo_error_9024": "Ett internt fel uppstod. Försök igen senare.",
   "eneo_error_9038": "Resursen är inte redo ännu. Försök igen om en stund.",
   "eneo_error_9039": "Modellen används och kan inte tas bort. Migrera eller ta bort beroenden först.",
-  "eneo_error_9017": "En modell med det här visningsnamnet finns redan. Välj ett annat visningsnamn.",
+  "eneo_error_9017": "Namnet används redan. Välj ett annat namn.",
   "eneo_error_9025": "Detta konto har stängts av. Kontakta din administratör.",
   "eneo_error_9026": "API-nyckeln för denna modell är inte konfigurerad. Kontakta din administratör.",
   "eneo_error_9031": "AI-leverantören är för närvarande inaktiv. Kontakta din administratör.",
@@ -5578,5 +5578,7 @@
   "provider_form_select_model_required": "Välj minst en modell, eller lägg till en med dess id.",
   "provider_form_token_limits_description": "Katalogen saknar tokengränser för modellen. Du hittar dem i leverantörens dokumentation.",
   "provider_form_token_limit_required": "Ange ett heltal större än 0.",
-  "provider_form_name_taken": "Det finns redan en leverantör som heter {name}. Ange ett annat namn."
+  "provider_form_name_taken": "Det finns redan en leverantör som heter {name}. Ange ett annat namn.",
+  "provider_form_model_added": "Tillagd",
+  "provider_form_model_added_error": "Leverantören har redan {name}. Ange ett annat modell-id."
 }

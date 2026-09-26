@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import {
-  ConfirmedPasswordField,
-  isConfirmedPasswordValid
-} from "@/components/composites/confirmed-password-field";
+  ConfirmedSecretInput,
+  confirmedSecretProblem
+} from "@/components/composites/confirmed-secret-input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -82,11 +82,12 @@ export function McpServerDialog({
   }
 
   const bearerRequired = authType === "bearer";
-  const bearerConfirmed = isConfirmedPasswordValid({
-    value: bearerToken,
-    confirmation: bearerTokenConfirmation,
-    required: bearerRequired
-  });
+  const bearerConfirmed =
+    confirmedSecretProblem({
+      value: bearerToken,
+      confirmation: bearerTokenConfirmation,
+      isRequired: bearerRequired
+    }) === null;
   const bearerValid = authType !== "bearer" || (bearerToken.trim().length > 0 && bearerConfirmed);
 
   const save = useMutation({
@@ -165,7 +166,7 @@ export function McpServerDialog({
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label>{t("mcp_authentication")}</Label>
+              <Label htmlFor="mcp-auth-type">{t("mcp_authentication")}</Label>
               <Select
                 value={authType}
                 onValueChange={(value) => {
@@ -176,7 +177,7 @@ export function McpServerDialog({
                   }
                 }}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger id="mcp-auth-type" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -186,17 +187,16 @@ export function McpServerDialog({
               </Select>
             </div>
             {authType === "bearer" && (
-              <ConfirmedPasswordField
-                id="mcp-bearer"
+              <ConfirmedSecretInput
                 label={t("bearer_token")}
                 confirmLabel={t("confirm_bearer_token")}
                 value={bearerToken}
                 confirmation={bearerTokenConfirmation}
                 onValueChange={setBearerToken}
                 onConfirmationChange={setBearerTokenConfirmation}
-                errorMessage={t("secret_values_do_not_match")}
+                mismatchMessage={t("secret_values_do_not_match")}
                 autoComplete="off"
-                required
+                isRequired
               />
             )}
           </fieldset>

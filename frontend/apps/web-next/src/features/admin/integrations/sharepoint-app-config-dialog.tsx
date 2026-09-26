@@ -2,11 +2,12 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
-  ConfirmedPasswordField,
-  isConfirmedPasswordValid
-} from "@/components/composites/confirmed-password-field";
+  ConfirmedSecretInput,
+  confirmedSecretProblem
+} from "@/components/composites/confirmed-secret-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -58,18 +59,42 @@ export function SharePointAppConfigDialog({
   const [clientSecretConfirmation, setClientSecretConfirmation] = useState("");
   const [tenantDomain, setTenantDomain] = useState("");
   const [updatingSecret, setUpdatingSecret] = useState(false);
+  const [secretChecked, setSecretChecked] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message?: string } | null>(null);
+  const secretConfirmationRef = useRef<HTMLInputElement>(null);
+  const newSecretRef = useRef<HTMLInputElement>(null);
+  const updateSecretRef = useRef<HTMLButtonElement>(null);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: SHAREPOINT_APP_KEY });
-  const clientSecretValid = isConfirmedPasswordValid({
-    value: clientSecret,
-    confirmation: clientSecretConfirmation,
-    required: true
-  });
+  const clientSecretValid =
+    confirmedSecretProblem({
+      value: clientSecret,
+      confirmation: clientSecretConfirmation,
+      isRequired: true
+    }) === null;
   const clientSecretReady = clientSecret.trim().length > 0 && clientSecretValid;
   function clearClientSecret() {
     setClientSecret("");
     setClientSecretConfirmation("");
+    setSecretChecked(false);
+  }
+
+  // The button pressed disappears, so focus moves to what replaced it: the
+  // new secret's field, and back to "Uppdatera secret" once the fields go.
+  function startUpdatingSecret() {
+    flushSync(() => {
+      clearClientSecret();
+      setUpdatingSecret(true);
+    });
+    newSecretRef.current?.focus();
+  }
+
+  function stopUpdatingSecret() {
+    flushSync(() => {
+      setUpdatingSecret(false);
+      clearClientSecret();
+    });
+    updateSecretRef.current?.focus();
   }
 
   const requireFields = () => {
@@ -78,7 +103,9 @@ export function SharePointAppConfigDialog({
       return false;
     }
     if (!clientSecretReady) {
-      toast.warning(t("secret_values_do_not_match"));
+      // The mismatch is shown at the confirmation, which takes focus.
+      flushSync(() => setSecretChecked(true));
+      secretConfirmationRef.current?.focus();
       return false;
     }
     return true;
@@ -166,17 +193,17 @@ export function SharePointAppConfigDialog({
               </Badge>
             </div>
             {updatingSecret ? (
-              <ConfirmedPasswordField
-                id="sp-new-secret"
+              <ConfirmedSecretInput
                 label={t("new_client_secret")}
                 confirmLabel={t("confirm_client_secret")}
                 value={clientSecret}
                 confirmation={clientSecretConfirmation}
                 onValueChange={setClientSecret}
                 onConfirmationChange={setClientSecretConfirmation}
-                errorMessage={t("secret_values_do_not_match")}
+                mismatchMessage={t("secret_values_do_not_match")}
                 autoComplete="off"
-                required
+                isRequired
+                valueRef={newSecretRef}
               />
             ) : (
               <p className="text-muted-foreground text-xs">{t("sharepoint_change_auth_warning")}</p>
@@ -185,9 +212,9 @@ export function SharePointAppConfigDialog({
         ) : (
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
-              <Label>{t("service_account_option")}</Label>
+              <Label htmlFor="sp-auth-method">{t("service_account_option")}</Label>
               <Select value={authMethod} onValueChange={(v) => setAuthMethod(v as AuthMethod)}>
-                <SelectTrigger className="w-full">
+                <SelectTrigger id="sp-auth-method" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -198,23 +225,29 @@ export function SharePointAppConfigDialog({
                 </SelectContent>
               </Select>
             </div>
-            <Labeled label={t("client_id")}>
-              <Input value={clientId} onChange={(event) => setClientId(event.target.value)} />
+            <Labeled label={t("client_id")} htmlFor="sp-client-id">
+              <Input
+                id="sp-client-id"
+                value={clientId}
+                onChange={(event) => setClientId(event.target.value)}
+              />
             </Labeled>
-            <ConfirmedPasswordField
-              id="sp-client-secret"
+            <ConfirmedSecretInput
               label={t("client_secret")}
               confirmLabel={t("confirm_client_secret")}
               value={clientSecret}
               confirmation={clientSecretConfirmation}
               onValueChange={setClientSecret}
               onConfirmationChange={setClientSecretConfirmation}
-              errorMessage={t("secret_values_do_not_match")}
+              mismatchMessage={t("secret_values_do_not_match")}
               autoComplete="off"
-              required
+              isRequired
+              showErrors={secretChecked}
+              confirmationRef={secretConfirmationRef}
             />
-            <Labeled label={t("tenant_id_or_domain")}>
+            <Labeled label={t("tenant_id_or_domain")} htmlFor="sp-tenant-domain">
               <Input
+                id="sp-tenant-domain"
                 placeholder={t("sharepoint_tenant_domain_placeholder")}
                 value={tenantDomain}
                 onChange={(event) => setTenantDomain(event.target.value)}
@@ -239,13 +272,7 @@ export function SharePointAppConfigDialog({
           {config ? (
             updatingSecret ? (
               <>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setUpdatingSecret(false);
-                    clearClientSecret();
-                  }}
-                >
+                <Button variant="outline" onClick={stopUpdatingSecret}>
                   {t("back")}
                 </Button>
                 <Button
@@ -263,13 +290,7 @@ export function SharePointAppConfigDialog({
               </>
             ) : (
               <>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    clearClientSecret();
-                    setUpdatingSecret(true);
-                  }}
-                >
+                <Button ref={updateSecretRef} variant="outline" onClick={startUpdatingSecret}>
                   {t("update_secret")}
                 </Button>
                 <Button variant="destructive" onClick={onRequestDelete}>
@@ -314,10 +335,18 @@ export function SharePointAppConfigDialog({
   );
 }
 
-function Labeled({ label, children }: { label: string; children: React.ReactNode }) {
+function Labeled({
+  label,
+  htmlFor,
+  children
+}: {
+  label: string;
+  htmlFor: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-2">
-      <Label>{label}</Label>
+      <Label htmlFor={htmlFor}>{label}</Label>
       {children}
     </div>
   );

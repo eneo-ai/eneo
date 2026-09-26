@@ -3,11 +3,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { KeyRound, Lock } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
-  ConfirmedPasswordField,
-  isConfirmedPasswordValid
-} from "@/components/composites/confirmed-password-field";
+  ConfirmedSecretInput,
+  confirmedSecretProblem
+} from "@/components/composites/confirmed-secret-input";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosave } from "@/components/composites/use-autosave";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +33,8 @@ export function CredentialsTab({ server }: { server: McpServer }) {
   const [editing, setEditing] = useState(false);
   const [token, setToken] = useState("");
   const [confirmation, setConfirmation] = useState("");
+  const editRef = useRef<HTMLButtonElement>(null);
+  const tokenRef = useRef<HTMLInputElement>(null);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: MCP_KEY });
 
@@ -39,6 +42,18 @@ export function CredentialsTab({ server }: { server: McpServer }) {
     setEditing(false);
     setToken("");
     setConfirmation("");
+  }
+
+  // The button pressed disappears, so focus moves to what replaced it: the
+  // token's field, and back to the button once the fields go.
+  function startEditing() {
+    flushSync(() => setEditing(true));
+    tokenRef.current?.focus();
+  }
+
+  function stopEditing() {
+    flushSync(reset);
+    editRef.current?.focus();
   }
 
   function changeAuth(value: string) {
@@ -63,14 +78,14 @@ export function CredentialsTab({ server }: { server: McpServer }) {
       }),
     onSuccess: () => {
       void invalidate();
-      reset();
+      stopEditing();
     },
     onError: (error) => toastApiError(error, t)
   });
 
   const tokenValid =
     token.trim().length > 0 &&
-    isConfirmedPasswordValid({ value: token, confirmation, required: true });
+    confirmedSecretProblem({ value: token, confirmation, isRequired: true }) === null;
 
   return (
     <SettingsGroup
@@ -112,7 +127,7 @@ export function CredentialsTab({ server }: { server: McpServer }) {
               </Badge>
             )}
             {!editing && (
-              <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+              <Button ref={editRef} variant="outline" size="sm" onClick={startEditing}>
                 {server.has_credentials ? t("mcp_replace_token") : t("mcp_add_token")}
               </Button>
             )}
@@ -120,17 +135,17 @@ export function CredentialsTab({ server }: { server: McpServer }) {
 
           {editing && (
             <div className="mt-3 flex flex-col gap-3">
-              <ConfirmedPasswordField
-                id="mcp-token"
+              <ConfirmedSecretInput
                 label={t("bearer_token")}
                 confirmLabel={t("confirm_bearer_token")}
                 value={token}
                 confirmation={confirmation}
                 onValueChange={setToken}
                 onConfirmationChange={setConfirmation}
-                errorMessage={t("secret_values_do_not_match")}
+                mismatchMessage={t("secret_values_do_not_match")}
                 autoComplete="off"
-                required
+                isRequired
+                valueRef={tokenRef}
               />
               <div className="flex items-center gap-2">
                 <Button
@@ -139,7 +154,7 @@ export function CredentialsTab({ server }: { server: McpServer }) {
                 >
                   {saveToken.isPending ? t("loading") : t("save")}
                 </Button>
-                <Button variant="ghost" disabled={saveToken.isPending} onClick={reset}>
+                <Button variant="ghost" disabled={saveToken.isPending} onClick={stopEditing}>
                   {t("cancel")}
                 </Button>
               </div>

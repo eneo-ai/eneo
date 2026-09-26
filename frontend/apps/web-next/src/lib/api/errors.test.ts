@@ -1,4 +1,7 @@
+import { createTranslator } from "next-intl";
 import { describe, expect, it } from "vitest";
+import en from "@/lib/i18n/messages/en.json";
+import sv from "@/lib/i18n/messages/sv.json";
 import {
   apiErrorFromResponse,
   EneoApiError,
@@ -107,6 +110,10 @@ describe("unwrap", () => {
   });
 });
 
+/** The app's real catalog, looked up by any key as the error mapping does. */
+const translator = (locale: string, messages: Record<string, string>) =>
+  createTranslator({ locale, messages });
+
 describe("getErrorMessage", () => {
   const t = (key: string) => `t(${key})`;
 
@@ -123,5 +130,20 @@ describe("getErrorMessage", () => {
   it("falls back to the generic message for non-API errors", () => {
     expect(getErrorMessage(new Error("boom"), t)).toBe("t(request_failed)");
     expect(getErrorMessage(undefined, t)).toBe("t(request_failed)");
+  });
+
+  it("words a taken name for every resource that answers with it, not only models", () => {
+    // Providers, MCP servers, templates, files, modules and models all send 9017.
+    const error = new EneoApiError("An MCP server with this name already exists.", {
+      status: 409,
+      code: 9017
+    });
+
+    expect(getErrorMessage(error, translator("sv", sv))).toBe(
+      "Namnet används redan. Välj ett annat namn."
+    );
+    expect(getErrorMessage(error, translator("en", en))).toBe(
+      "This name is already in use. Choose a different one."
+    );
   });
 });

@@ -106,8 +106,11 @@ model whose provider `endpoint` points at it, so chat completions return a fixed
 string (`E2E mock completion: pong`) — fast, free, and identical every run. It
 also seeds a default embedding model on the same mock (`/v1/embeddings` returns
 vectors hashed from the input), so new spaces can create collections and
-embedding text or files works. No real provider is ever called. To keep credentials simple the stack runs with
-encryption off, so the seeded api-key is plaintext (and meaningless).
+embedding text or files works. No real provider is ever called. Credentials are
+encrypted as in production, with a fixed, public test `ENCRYPTION_KEY` set in both
+`docker-compose.e2e*.yml` files: `e2e/seed.py` stores the seeded provider's
+(meaningless) API key encrypted with it, and a provider added in the UI is
+encrypted by the backend, so specs can add providers too.
 
 > **Status:** the suite covers login, rejected credentials, unauthenticated
 > redirects, authenticated landing, primary navigation, account data, logout,

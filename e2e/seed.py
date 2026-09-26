@@ -8,9 +8,11 @@ knowledge collections need, as with a real organisation's default. Idempotent:
 each row is created only when missing, so a rerun also completes a database
 seeded by an older version of this script.
 
-Credentials are stored in plaintext on purpose: the E2E stack runs with
-ENCRYPTION_KEY unset (TENANT_CREDENTIALS_ENABLED=false), so the credential
-resolver reads them as-is — no real keys, no encryption to manage.
+The provider's API key is stored encrypted with the stack's fixed test
+ENCRYPTION_KEY, as the backend stores keys in production: with a key set it
+refuses plaintext credentials. A key left in plaintext by an older version of
+this script is encrypted on the next run. Without ENCRYPTION_KEY (an older
+compose file) the key stays plaintext, which the backend then reads as-is.
 """
 
 import asyncio
@@ -22,43 +24,64 @@ from eneo.database.tables.ai_models_table import CompletionModels, EmbeddingMode
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.tenant_table import Tenants
 from eneo.main.config import get_settings
+from eneo.settings.encryption_service import EncryptionService
 
 MOCK_ENDPOINT = "http://e2e-mock-model:8200/v1"
 TENANT_NAME = "E2ETenant"
 PROVIDER_NAME = "E2E Mock Provider"
+# A dummy: the mock accepts any key.
+API_KEY = "test-key"
 MODEL_NAME = "e2e-mock"
 EMBEDDING_MODEL_NAME = "e2e-mock-embedding"
 
 
 async def main() -> None:
-    created: list[str] = []
-    sessionmanager.init(get_settings().database_url)
+    done: list[str] = []
+    settings = get_settings()
+    encryption = EncryptionService(settings)
+
+    def stored_key(api_key: str) -> str:
+        return encryption.encrypt(api_key) if encryption.is_active() else api_key
+
+    sessionmanager.init(settings.database_url)
     async with sessionmanager.session() as session, session.begin():
         tenant_id = (
             await session.execute(select(Tenants.id).where(Tenants.name == TENANT_NAME))
         ).scalar_one()
 
-        provider_id = (
+        provider = (
             await session.execute(
-                select(ModelProviders.id).where(
+                select(ModelProviders).where(
                     ModelProviders.tenant_id == tenant_id,
                     ModelProviders.name == PROVIDER_NAME,
                 )
             )
         ).scalar_one_or_none()
-        if provider_id is None:
+        if provider is None:
             provider = ModelProviders(
                 tenant_id=tenant_id,
                 name=PROVIDER_NAME,
                 provider_type="openai",
-                credentials={"api_key": "test-key", "endpoint": MOCK_ENDPOINT},
+                credentials={
+                    "api_key": stored_key(API_KEY),
+                    "endpoint": MOCK_ENDPOINT,
+                },
                 config={"endpoint": MOCK_ENDPOINT},
                 is_active=True,
             )
             session.add(provider)
             await session.flush()
-            provider_id = provider.id
-            created.append("E2E mock provider")
+            done.append("created E2E mock provider")
+        elif encryption.is_active() and not encryption.is_encrypted(
+            provider.credentials.get("api_key", "")
+        ):
+            # Seeded in plaintext before the stack had a key: unreadable now.
+            provider.credentials = {
+                **provider.credentials,
+                "api_key": stored_key(API_KEY),
+            }
+            done.append("encrypted the E2E mock provider's key")
+        provider_id = provider.id
 
         async def add_if_missing(model: CompletionModels | EmbeddingModels, kind: str):
             table = type(model)
@@ -69,7 +92,7 @@ async def main() -> None:
             )
             if existing.scalar_one_or_none() is None:
                 session.add(model)
-                created.append(f"{kind} {model.name}")
+                done.append(f"created {kind} {model.name}")
 
         await add_if_missing(
             CompletionModels(
@@ -117,9 +140,9 @@ async def main() -> None:
             "default embedding model",
         )
 
-    for item in created:
-        print(f"[seed] created {item}", flush=True)
-    if not created:
+    for item in done:
+        print(f"[seed] {item}", flush=True)
+    if not done:
         print(
             "[seed] E2E mock provider and models already present, skipping",
             flush=True,
