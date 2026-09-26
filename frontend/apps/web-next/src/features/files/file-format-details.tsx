@@ -29,7 +29,7 @@ export function FileFormatDetails({ formats }: { formats: readonly AcceptedForma
 
   return (
     <details className="border-border group border-t pt-2">
-      <summary className="hover:bg-muted focus-visible:ring-ring/50 flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-lg px-2 py-2 text-left focus-visible:ring-3 [&::-webkit-details-marker]:hidden">
+      <summary className="hover:bg-muted focus-visible:outline-ring flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-lg px-2 py-2 text-left focus-visible:outline-2 focus-visible:outline-offset-2 [&::-webkit-details-marker]:hidden">
         <FileCheck2 className="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
         <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3 gap-y-1">
           <span className="text-sm font-medium">{t("file_types_and_sizes")}</span>

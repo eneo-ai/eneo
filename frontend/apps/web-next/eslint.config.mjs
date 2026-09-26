@@ -143,18 +143,7 @@ const eslintConfig = defineConfig([
     // is about 2:1) and no `outline-none` without a focus-visible replacement
     // in the same class list. Class strings live in .ts files too.
     files: ["src/**/*.{ts,tsx}"],
-    ignores: [
-      ...notShippedUi,
-      "src/**/*.test.ts",
-      // TEMPORARY, owned by other streams of the accessibility review; remove
-      // each entry with its fix: the composer textarea (Astryx ChatComposer
-      // draws the ring; needs a disable comment saying so), the formats
-      // <summary> (translucent ring → the full-strength outline) and the dead
-      // ai-elements/sources.tsx (delete).
-      "src/features/chat/composer.tsx",
-      "src/features/files/file-format-details.tsx",
-      "src/components/ai-elements/sources.tsx"
-    ],
+    ignores: [...notShippedUi, "src/**/*.test.ts"],
     rules: {
       "eneo/no-weak-focus-indicator": "error"
     }
