@@ -50,6 +50,8 @@ describe("CrawlRunsTable", () => {
   it("lists runs newest first with their state as a status dot and text", async () => {
     const { container } = renderInApp(<CrawlRunsTable runs={RUNS} />);
 
+    // Named like the website page's tab it fills.
+    expect(screen.getByRole("table", { name: "Indexeringar" })).toBeTruthy();
     expect(statusColumn()).toEqual(["Slutförd med varningar", "MisslyckadesTimeout", "Slutförd"]);
     expect(
       screen.getByRole("button", { name: "Sortera efter Startad, sorterat fallande" })
