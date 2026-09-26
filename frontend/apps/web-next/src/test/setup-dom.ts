@@ -24,6 +24,8 @@
  * stays interactive, so tests check that a dialog is modal (aria-modal,
  * showModal) rather than that the page behind it is inert.
  */
+import { cleanup } from "@testing-library/react";
+import { toast } from "sonner";
 import { afterEach } from "vitest";
 import { resetNavigation } from "./navigation";
 
@@ -361,6 +363,11 @@ if (typeof window !== "undefined") {
   Element.prototype.scrollIntoView ??= () => {};
 
   afterEach(() => {
+    // Unmount what the test rendered, and drop its toasts: sonner's store is
+    // module-wide, so a toast left behind (errors never time out) reaches the
+    // next test's Toaster after this test has ended.
+    cleanup();
+    toast.dismiss();
     viewport = DESKTOP_VIEWPORT;
     applyViewportSize();
     listening.clear();

@@ -143,7 +143,12 @@ const eslintConfig = defineConfig([
     // src/lib/toast.ts owns that policy, so it and the Toaster are the only
     // shipped code that talks to sonner.
     files: ["src/**/*.{ts,tsx}"],
-    ignores: ["src/lib/toast.ts", "src/components/ui/sonner.tsx", "src/**/*.test.{ts,tsx}"],
+    ignores: [
+      "src/lib/toast.ts",
+      "src/components/ui/sonner.tsx",
+      "src/**/*.test.{ts,tsx}",
+      "src/test/**"
+    ],
     rules: {
       "no-restricted-imports": [
         "error",
