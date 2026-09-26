@@ -22,3 +22,14 @@ test("records what the Content-Security-Policy blocks", async ({ page, cspViolat
   // Provoked on purpose: nothing left for the fixture to fail on.
   cspViolations.length = 0;
 });
+
+test("a legacy Select opens without a <style> the CSP blocks", async ({ page, cspViolations }) => {
+  // An open Radix Select injects two <style> elements, its viewport's and the
+  // page's scroll lock; both need the request nonce (src/components/providers/nonce.tsx).
+  await page.goto("/account");
+  await page.getByRole("combobox", { name: /^(Språk|Language)$/ }).click();
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toBeHidden();
+  expect(cspViolations, "violations while the Select was open").toEqual([]);
+});

@@ -3,7 +3,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ShieldAlert, ShieldCheck } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -28,6 +30,9 @@ export function OrganizationSkillExecution({ skillId }: { skillId: string }) {
   const queryClient = useQueryClient();
   const [action, setAction] = useState<"block" | "unblock" | null>(null);
   const [reason, setReason] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const reasonRef = useRef<HTMLTextAreaElement>(null);
+  const reasonProblem = submitted && !reason.trim() ? t("required_field") : null;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const state = useQuery({
@@ -42,8 +47,17 @@ export function OrganizationSkillExecution({ skillId }: { skillId: string }) {
   });
   const block = state.data?.block ?? null;
 
+  // A missing reason shows at the field, which takes focus.
   async function change() {
-    if (!action || busy || !reason.trim()) return;
+    if (!action || busy) return;
+    if (!reason.trim()) {
+      // Rendered before focus moves, so the field is read with its error.
+      flushSync(() => setSubmitted(true));
+      reasonRef.current?.focus();
+      return;
+    }
+    // Nothing to unblock (it went meanwhile).
+    if (action === "unblock" && !block) return;
     setBusy(true);
     setError(null);
     try {
@@ -156,6 +170,7 @@ export function OrganizationSkillExecution({ skillId }: { skillId: string }) {
           if (!open && !busy) {
             setAction(null);
             setReason("");
+            setSubmitted(false);
           }
         }}
       >
@@ -187,6 +202,7 @@ export function OrganizationSkillExecution({ skillId }: { skillId: string }) {
               {t("organization_skills_execution_reason_label")}
             </Label>
             <Textarea
+              ref={reasonRef}
               id="execution-change-reason"
               value={reason}
               maxLength={1000}
@@ -194,8 +210,14 @@ export function OrganizationSkillExecution({ skillId }: { skillId: string }) {
               disabled={busy}
               placeholder={t("organization_skills_execution_reason_placeholder")}
               onChange={(event) => setReason(event.target.value)}
+              {...fieldProblemProps(
+                "execution-change-reason",
+                reasonProblem,
+                "execution-change-reason-hint"
+              )}
             />
-            <p className="text-muted-foreground text-xs">
+            <FieldProblem id="execution-change-reason" problem={reasonProblem} />
+            <p id="execution-change-reason-hint" className="text-muted-foreground text-xs">
               {t(
                 action === "unblock"
                   ? "organization_skills_execution_unblock_reason_description"
@@ -211,9 +233,10 @@ export function OrganizationSkillExecution({ skillId }: { skillId: string }) {
           )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>{t("cancel")}</AlertDialogCancel>
+            {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
             <Button
               variant={action === "block" ? "destructive" : "default"}
-              disabled={busy || !reason.trim() || (action === "unblock" && !block)}
+              aria-busy={busy || undefined}
               onClick={() => void change()}
             >
               {busy

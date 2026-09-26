@@ -115,6 +115,44 @@ describe("object-store connection lifecycle", () => {
     expect(await screen.findByText("storage_connection_created_title")).toBeTruthy();
   });
 
+  it("shows each missing field at the field on submit, and moves focus to the first", async () => {
+    get.mockImplementation(() =>
+      ok({ source: "unconfigured", configured: false, credentials_can_be_managed: true })
+    );
+    show();
+    fireEvent.click(await screen.findByRole("button", { name: "storage_connection_add_action" }));
+    const save = screen.getByRole("button", { name: "storage_connection_test_and_save" });
+    // Never disabled: a disabled button says nothing about what is missing.
+    expect((save as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(save);
+    const endpoint = screen.getByLabelText("storage_connection_endpoint");
+    const [problem, help] = endpoint.getAttribute("aria-describedby")!.split(" ");
+    expect(document.getElementById(problem!)?.textContent).toBe("required_field");
+    expect(document.getElementById(help!)?.textContent).toBe("storage_connection_endpoint_help");
+    for (const label of [
+      "storage_connection_bucket",
+      "storage_connection_region",
+      "storage_connection_access_key",
+      "storage_connection_secret_key"
+    ]) {
+      expect(screen.getByLabelText(label).getAttribute("aria-invalid")).toBe("true");
+    }
+    expect(document.activeElement).toBe(endpoint);
+
+    fireEvent.change(endpoint, { target: { value: "https://new.example" } });
+    fireEvent.change(screen.getByLabelText("storage_connection_bucket"), {
+      target: { value: "new" }
+    });
+    fireEvent.change(screen.getByLabelText("storage_connection_region"), {
+      target: { value: "se-1" }
+    });
+    fireEvent.click(save);
+    expect(endpoint.getAttribute("aria-invalid")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByLabelText("storage_connection_access_key"));
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it("submits a destination change to the dedicated switch endpoint", async () => {
     show();
     fireEvent.click(await screen.findByRole("button", { name: "storage_switch_action" }));

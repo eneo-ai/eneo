@@ -48,6 +48,34 @@ const field = (dialog: HTMLElement, name: RegExp) =>
 afterEach(() => vi.clearAllMocks());
 
 describe("SharePointAppConfigDialog", () => {
+  it("shows each missing field's problem at the field, and focus moves to the first", async () => {
+    const dialog = await renderDialog(null);
+    const signIn = within(dialog).getByRole("button", { name: "Logga in med Microsoft" });
+    // Never disabled: a disabled button says nothing about what is missing.
+    expect((signIn as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(signIn);
+
+    for (const name of [/^Klient-ID/, /^Klienthemlighet/, /^Tenant-ID eller domän/]) {
+      expect(field(dialog, name).getAttribute("aria-invalid")).toBe("true");
+    }
+    expect(within(dialog).getAllByText("Detta fält är obligatoriskt")).toHaveLength(3);
+    expect(document.activeElement).toBe(field(dialog, /^Klient-ID/));
+    // At the fields instead of a toast, and nothing is sent.
+    expect(toast.warning).not.toHaveBeenCalled();
+    expect(api.POST).not.toHaveBeenCalled();
+    await expectNoAxeViolations(document.body);
+
+    fireEvent.change(field(dialog, /^Klient-ID/), { target: { value: "c0ffee" } });
+    fireEvent.change(field(dialog, /^Klienthemlighet/), { target: { value: "hemlis-1" } });
+    fireEvent.change(field(dialog, /^Bekräfta klienthemlighet/), {
+      target: { value: "hemlis-1" }
+    });
+    fireEvent.click(signIn);
+    expect(document.activeElement).toBe(field(dialog, /^Tenant-ID eller domän/));
+    expect(api.POST).not.toHaveBeenCalled();
+  });
+
   it("shows a mismatched client secret at its confirmation, which takes focus", async () => {
     const dialog = await renderDialog(null);
     fireEvent.change(field(dialog, /^Klient-ID/), { target: { value: "c0ffee" } });
@@ -93,13 +121,15 @@ describe("SharePointAppConfigDialog", () => {
 
     const save = within(dialog).getByRole("button", { name: "Spara" }) as HTMLButtonElement;
     expect(within(dialog).getByText("Värdena matchar inte")).toBeTruthy();
-    expect(save.disabled).toBe(true);
     await expectNoAxeViolations(document.body);
+    // Saving now moves focus to the problem, and sends nothing.
+    fireEvent.click(save);
+    expect(document.activeElement).toBe(field(dialog, /^Bekräfta klienthemlighet/));
+    expect(api.POST).not.toHaveBeenCalled();
 
     fireEvent.change(field(dialog, /^Bekräfta klienthemlighet/), {
       target: { value: "hemlis-3" }
     });
-    expect(save.disabled).toBe(false);
     fireEvent.click(save);
     await waitFor(() =>
       expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/sharepoint/app", {

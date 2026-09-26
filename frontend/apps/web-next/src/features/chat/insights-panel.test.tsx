@@ -63,6 +63,21 @@ function ask(question: string) {
 }
 
 describe("InsightsPanel", () => {
+  it("shows an empty question at the field on submit, which takes focus", async () => {
+    renderPanel();
+    const question = screen.getByRole("textbox", { name: /Fråga om insikter/ });
+    const generate = screen.getByRole("button", { name: "Generera insikter" });
+    // Never disabled: a disabled button says nothing about what is missing.
+    expect((generate as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(generate);
+
+    expect(question.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getAllByText("Detta fält är obligatoriskt").length).toBeGreaterThan(0);
+    expect(document.activeElement).toBe(question);
+    expect(spies.announce).not.toHaveBeenCalled();
+  });
+
   it("shows the counts and announces the answer without reading it out", async () => {
     renderPanel();
     expect(await screen.findByText("12")).toBeTruthy();

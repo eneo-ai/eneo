@@ -4,7 +4,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, LayoutTemplate } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -38,6 +40,9 @@ export function CreateAppButton() {
   const queryClient = useQueryClient();
   const [dialog, setDialog] = useState<"blank" | "template" | null>(null);
   const [name, setName] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const nameProblem = submitted && !name.trim() ? t("required_field") : null;
 
   const create = useMutation({
     mutationFn: ({
@@ -63,6 +68,18 @@ export function CreateAppButton() {
     },
     onError: (error) => toastApiError(error, t)
   });
+
+  // A missing name shows at the field, which takes focus.
+  function createBlank() {
+    if (create.isPending) return;
+    if (!name.trim()) {
+      // Rendered before focus moves, so the field is read with its error.
+      flushSync(() => setSubmitted(true));
+      nameRef.current?.focus();
+      return;
+    }
+    create.mutate({ appName: name.trim() });
+  }
 
   return (
     <>
@@ -94,7 +111,10 @@ export function CreateAppButton() {
       <Dialog
         open={dialog === "blank"}
         onOpenChange={(next) => {
-          if (!next) setName("");
+          if (!next) {
+            setName("");
+            setSubmitted(false);
+          }
           setDialog(next ? "blank" : null);
         }}
       >
@@ -105,27 +125,29 @@ export function CreateAppButton() {
           </DialogHeader>
           <form
             className="flex flex-col gap-2"
+            noValidate
             onSubmit={(event) => {
               event.preventDefault();
-              if (name.trim()) create.mutate({ appName: name.trim() });
+              createBlank();
             }}
           >
             <Label htmlFor="app-name">{t("name")}</Label>
             <Input
+              ref={nameRef}
               id="app-name"
               value={name}
               placeholder={`${t("name")}...`}
               onChange={(event) => setName(event.target.value)}
+              {...fieldProblemProps("app-name", nameProblem)}
             />
+            <FieldProblem id="app-name" problem={nameProblem} />
           </form>
           <DialogFooter>
             <Button variant="outline" disabled={create.isPending} onClick={() => setDialog(null)}>
               {t("cancel")}
             </Button>
-            <Button
-              disabled={create.isPending || !name.trim()}
-              onClick={() => name.trim() && create.mutate({ appName: name.trim() })}
-            >
+            {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+            <Button aria-busy={create.isPending || undefined} onClick={createBlank}>
               {create.isPending ? t("loading") : t("create_app")}
             </Button>
           </DialogFooter>

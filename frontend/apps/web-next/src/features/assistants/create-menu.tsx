@@ -4,7 +4,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Bot, ChevronDown, LayoutTemplate, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -30,6 +32,7 @@ import { useAppContext } from "@/components/providers/app-context";
 import { useSpace } from "@/features/spaces/use-space";
 import { TemplateGalleryDialog } from "@/features/templates/template-gallery-dialog";
 
+/** Names what is created. A missing name shows at the field on create, which takes focus. */
 function CreateDialog({
   open,
   onOpenChange,
@@ -51,12 +54,29 @@ function CreateDialog({
 }) {
   const t = useTranslations();
   const [name, setName] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const nameProblem = submitted && !name.trim() ? t("required_field") : null;
+
+  function create() {
+    if (pending) return;
+    if (!name.trim()) {
+      // Rendered before focus moves, so the field is read with its error.
+      flushSync(() => setSubmitted(true));
+      nameRef.current?.focus();
+      return;
+    }
+    onCreate(name.trim());
+  }
 
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) setName("");
+        if (!next) {
+          setName("");
+          setSubmitted(false);
+        }
         onOpenChange(next);
       }}
     >
@@ -67,24 +87,29 @@ function CreateDialog({
         </DialogHeader>
         <form
           className="flex flex-col gap-2"
+          noValidate
           onSubmit={(event) => {
             event.preventDefault();
-            if (name.trim()) onCreate(name.trim());
+            create();
           }}
         >
           <Label htmlFor="chat-app-name">{nameLabel}</Label>
           <Input
+            ref={nameRef}
             id="chat-app-name"
             value={name}
             placeholder={`${t("name")}...`}
             onChange={(event) => setName(event.target.value)}
+            {...fieldProblemProps("chat-app-name", nameProblem)}
           />
+          <FieldProblem id="chat-app-name" problem={nameProblem} />
         </form>
         <DialogFooter>
           <Button variant="outline" disabled={pending} onClick={() => onOpenChange(false)}>
             {t("cancel")}
           </Button>
-          <Button disabled={pending || !name.trim()} onClick={() => onCreate(name.trim())}>
+          {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+          <Button aria-busy={pending || undefined} onClick={create}>
             {pending ? t("loading") : confirmLabel}
           </Button>
         </DialogFooter>

@@ -148,16 +148,20 @@ describe("SpacesList", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Radera yta" });
     const confirm = within(dialog).getByRole("button", { name: "Bekräfta borttagning" });
-    expect(confirm.hasAttribute("disabled")).toBe(true);
+    const field = within(dialog).getByRole("textbox", { name: "Ange ytnamnet för att bekräfta" });
+    // Never disabled: deleting without the name says so at the field, which takes focus.
+    expect(confirm.hasAttribute("disabled")).toBe(false);
+    fireEvent.change(field, { target: { value: "Upphand" } });
+    fireEvent.click(confirm);
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    expect(
+      within(dialog).getByText("Det stämmer inte. Skriv Upphandling exakt som det står.")
+    ).toBeTruthy();
+    expect(document.activeElement).toBe(field);
+    expect(api.deleted).toEqual([]);
     await expectNoAxeViolations(dialog);
 
-    fireEvent.change(
-      within(dialog).getByRole("textbox", { name: "Ange ytnamnet för att bekräfta" }),
-      {
-        target: { value: "Upphandling" }
-      }
-    );
-    expect(confirm.hasAttribute("disabled")).toBe(false);
+    fireEvent.change(field, { target: { value: "Upphandling" } });
     api.spaces = [];
     fireEvent.click(confirm);
     await waitFor(() => expect(api.deleted).toEqual(["s1"]));

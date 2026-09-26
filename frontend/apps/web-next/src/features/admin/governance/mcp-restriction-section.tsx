@@ -275,7 +275,13 @@ export function McpRestrictionSection({ draft }: { draft: PolicyDraft }) {
             </fieldset>
           )}
           {!mcpValid && (
-            <p className="text-destructive flex items-center gap-2 text-sm" role="alert">
+            <p
+              className="text-destructive flex items-center gap-2 text-sm"
+              role="alert"
+              // Save moves focus here while this blocks it (policy-save-bar.tsx).
+              data-save-problem=""
+              tabIndex={-1}
+            >
               <AlertCircle className="size-4 shrink-0" aria-hidden="true" />
               {t("governance_mcp_error_none")}
             </p>

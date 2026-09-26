@@ -7,6 +7,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { SendHorizontal, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { LoadingState } from "@/components/composites/loading-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -103,6 +104,9 @@ export function InsightsPanel({ partner }: { partner: ChatPartner & { type: Insi
   const t = useTranslations();
   const announce = useAnnounce();
   const [question, setQuestion] = useState("");
+  const [asked, setAsked] = useState(false);
+  const questionRef = useRef<HTMLTextAreaElement>(null);
+  const questionProblem = asked && !question.trim() ? t("required_field") : null;
   const [answer, setAnswer] = useState("");
   const range = insightRange();
   const query = partnerQuery(partner);
@@ -207,23 +211,30 @@ export function InsightsPanel({ partner }: { partner: ChatPartner & { type: Insi
         onSubmit={(event) => {
           event.preventDefault();
           const text = question.trim();
-          if (!text || ask.isPending) return;
+          if (ask.isPending) return;
+          if (!text) {
+            // An empty question shows at the field, which takes focus.
+            flushSync(() => setAsked(true));
+            questionRef.current?.focus();
+            return;
+          }
           setAnswer("");
           ask.mutate(text);
         }}
       >
         <TextArea
+          ref={questionRef}
           label={t("ask_about_insights")}
           value={question}
           onChange={setQuestion}
           rows={3}
+          status={questionProblem ? { type: "error", message: questionProblem } : undefined}
         />
         <Button
           type="submit"
           label={t("generate_insights")}
           variant="primary"
           icon={<SendHorizontal className="size-4" aria-hidden="true" />}
-          isDisabled={!question.trim()}
           // Stays focusable while the answer is prepared (a second submit is ignored).
           isLoading={ask.isPending}
           isInterruptible

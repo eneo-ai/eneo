@@ -165,12 +165,24 @@ export function ModelRestrictionSection({ draft }: { draft: PolicyDraft }) {
             })}
           </RadioGroup>
           {effectiveModelIds.size === 0 ? (
-            <p className="text-destructive flex items-center gap-2 text-sm" role="alert">
+            <p
+              className="text-destructive flex items-center gap-2 text-sm"
+              role="alert"
+              // Save moves focus here while this blocks it (policy-save-bar.tsx).
+              data-save-problem=""
+              tabIndex={-1}
+            >
               <AlertCircle className="size-4 shrink-0" aria-hidden="true" />
               {t("governance_models_error_none")}
             </p>
           ) : !defaultValid ? (
-            <p className="text-destructive flex items-center gap-2 text-sm" role="alert">
+            <p
+              className="text-destructive flex items-center gap-2 text-sm"
+              role="alert"
+              // Save moves focus here while this blocks it (policy-save-bar.tsx).
+              data-save-problem=""
+              tabIndex={-1}
+            >
               <AlertCircle className="size-4 shrink-0" aria-hidden="true" />
               {t("governance_models_error_default_invalid")}
             </p>

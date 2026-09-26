@@ -5,6 +5,7 @@ import { CircleAlert, Database, HardDrive, Info, RefreshCw } from "lucide-react"
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
+import { flushSync } from "react-dom";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { SettingsGroup } from "@/components/composites/settings-rows";
@@ -22,6 +23,7 @@ import { StorageContent } from "./storage-content";
 import {
   classifyPolicyRefresh,
   isDirtyPolicyDraft,
+  isValidByteLimit,
   isValidPolicyDraft,
   policyDraft,
   type DeploymentPolicy,
@@ -115,6 +117,7 @@ function StoragePolicyEditor({
   const [authorityRevoked, setAuthorityRevoked] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [showTechnical, setShowTechnical] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const revokeAuthority = useCallback(() => setAuthorityRevoked(true), []);
 
   const canEdit = allowed && !authorityRevoked;
@@ -129,8 +132,11 @@ function StoragePolicyEditor({
     baseline.policy.new_write_storage_target === "object_store" &&
     objectStoreCapability?.readiness_code !== "ready";
   const interactionUnavailable = reloading || saving;
-  const saveUnavailable =
-    !canEdit || !dirty || !valid || interactionUnavailable || stale || saveOutcomeUnknown;
+  // States that need the administrator's attention elsewhere first (a reload,
+  // a newer revision, an unknown outcome); each has its own message.
+  const saveBlocked = !canEdit || !dirty || reloading || stale || saveOutcomeUnknown;
+  const limitProblem = (field: (typeof LIMIT_FIELDS)[number]["field"]) =>
+    submitted && !isValidByteLimit(draft[field]) ? t("storage_limit_invalid") : null;
 
   const targetLabel = (target: StorageKind) =>
     t(
@@ -184,8 +190,23 @@ function StoragePolicyEditor({
     }
   }
 
+  // Save is not disabled for a limit out of range: it shows at its field,
+  // which takes focus. Busy, Save keeps focus and a second press is ignored.
+  function requestSave() {
+    if (saving || saveBlocked) return;
+    const invalid = LIMIT_FIELDS.find(({ field }) => !isValidByteLimit(draft[field]));
+    if (invalid) {
+      // Rendered before focus moves, so the field is read with its problem.
+      flushSync(() => setSubmitted(true));
+      document.getElementById(invalid.id)?.focus();
+      return;
+    }
+    if (targetChanged) setConfirmOpen(true);
+    else void save();
+  }
+
   async function save() {
-    if (saveUnavailable) return;
+    if (saving || saveBlocked || !valid) return;
     setSaving(true);
     setStale(false);
     setTargetUnavailable(false);
@@ -198,6 +219,7 @@ function StoragePolicyEditor({
       );
       setBaseline(updated);
       setDraft(policyDraft(updated));
+      setSubmitted(false);
       toast.success(t("storage_settings_save_success"));
     } catch (error) {
       if (error instanceof EneoApiError && error.status === 403) setAuthorityRevoked(true);
@@ -212,6 +234,7 @@ function StoragePolicyEditor({
 
   function discard() {
     setDraft(policyDraft(baseline));
+    setSubmitted(false);
     setStale(false);
     setTargetUnavailable(false);
     setSaveOutcomeUnknown(false);
@@ -422,6 +445,7 @@ function StoragePolicyEditor({
                 description={t(help)}
                 bytes={draft[field]}
                 storedBytes={baseline.policy[field]}
+                problem={limitProblem(field)}
                 disabled={interactionUnavailable}
                 onChange={(bytes) => setDraft((current) => ({ ...current, [field]: bytes }))}
               />
@@ -504,13 +528,7 @@ function StoragePolicyEditor({
             <Button variant="outline" disabled={interactionUnavailable} onClick={discard}>
               {t("discard_changes")}
             </Button>
-            <Button
-              disabled={saveUnavailable}
-              onClick={() => {
-                if (targetChanged) setConfirmOpen(true);
-                else void save();
-              }}
-            >
+            <Button disabled={saveBlocked} aria-busy={saving || undefined} onClick={requestSave}>
               {saving ? t("storage_settings_saving") : t("storage_settings_save")}
             </Button>
           </div>

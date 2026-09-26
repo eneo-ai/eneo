@@ -87,6 +87,35 @@ describe("role administration", () => {
     );
   });
 
+  it("shows a missing name at the field on save, and sends nothing unchanged", async () => {
+    show();
+    await screen.findByText("Everyone");
+    fireEvent.click(screen.getByRole("button", { name: "create_role" }));
+    const dialog = screen.getByRole("dialog");
+    const create = within(dialog).getByRole("button", { name: "create_role" });
+    // Never disabled: a disabled button says nothing about what is missing.
+    expect((create as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(create);
+    const name = screen.getByLabelText("role_name");
+    expect(name.getAttribute("aria-invalid")).toBe("true");
+    const [problem, hint] = name.getAttribute("aria-describedby")!.split(" ");
+    expect(document.getElementById(problem!)?.textContent).toBe("required_field");
+    expect(document.getElementById(hint!)?.textContent).toBe("descriptive_name_for_this_role");
+    expect(document.activeElement).toBe(name);
+    expect(post).not.toHaveBeenCalled();
+
+    // An edit that changes nothing just closes.
+    fireEvent.click(within(dialog).getByRole("button", { name: "cancel" }));
+    const row = (await screen.findByText("Manager")).closest("article")!;
+    fireEvent.click(within(row).getByRole("button", { name: "edit" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "save_changes" })
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it("updates only changed fields and refreshes the role list", async () => {
     show();
     const row = (await screen.findByText("Manager")).closest("article");

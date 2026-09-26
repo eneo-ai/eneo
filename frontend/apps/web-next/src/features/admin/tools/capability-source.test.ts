@@ -3,7 +3,7 @@ import type { McpServer } from "@/features/admin/mcp/mcp";
 import {
   createSourcePayload,
   sourceDraft,
-  sourceDraftValid,
+  sourceDraftProblems,
   updateSourcePayload
 } from "./capability-source";
 
@@ -29,6 +29,35 @@ const external: McpServer = {
   is_available: true
 };
 
+describe("sourceDraftProblems", () => {
+  it("lists the problems in the order of the form's fields", () => {
+    const draft = {
+      ...sourceDraft(),
+      auth: "api_key_header" as const,
+      audience: "groups" as const,
+      priority: -1
+    };
+    expect(sourceDraftProblems(draft).map((problem) => problem.field)).toEqual([
+      "url",
+      "headerName",
+      "token",
+      "name",
+      "groups",
+      "priority"
+    ]);
+  });
+
+  it("lets a saved credential be left empty", () => {
+    const draft = { ...sourceDraft(external), token: "" };
+    expect(sourceDraftProblems(draft, external)).toEqual([]);
+    // Another kind of credential than the saved one needs its own.
+    expect(sourceDraftProblems({ ...draft, auth: "api_key_header" }, external)).toEqual([
+      { field: "headerName", kind: "required" },
+      { field: "token", kind: "required" }
+    ]);
+  });
+});
+
 describe("capability source payloads", () => {
   it("creates an external source inactive with its audience and credentials", () => {
     const draft = {
@@ -40,7 +69,7 @@ describe("capability source payloads", () => {
       audience: "groups" as const,
       groupIds: ["group"]
     };
-    expect(sourceDraftValid(draft)).toBe(true);
+    expect(sourceDraftProblems(draft)).toEqual([]);
     const payload = createSourcePayload("web_search", draft);
     expect(payload).toMatchObject({
       purpose: "web_search",
@@ -64,8 +93,12 @@ describe("capability source payloads", () => {
       image_model_id: "model",
       activate: true
     });
-    expect(sourceDraftValid({ ...draft, imageModelId: "" })).toBe(false);
-    expect(sourceDraftValid({ ...draft, toolCatalogMaxCount: 4097 })).toBe(false);
+    expect(sourceDraftProblems({ ...draft, imageModelId: "" })).toEqual([
+      { field: "imageModel", kind: "required" }
+    ]);
+    expect(sourceDraftProblems({ ...draft, toolCatalogMaxCount: 4097 })).toEqual([
+      { field: "toolCatalogMaxCount", kind: "whole-number", min: 1, max: 4096 }
+    ]);
   });
 
   it("preserves credentials and connection on metadata-only edits", () => {

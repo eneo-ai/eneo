@@ -3,7 +3,8 @@
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
@@ -35,12 +36,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import {
   type Entry,
   PROMPT_LIBRARY_KEY as KEY,
   promptLibraryQueryOptions
 } from "@/features/admin/prompt-library/prompt-library";
 
+/** A prompt's fields. Problems show at their fields on save, and focus moves to the first. */
 function EntryForm({
   entryId,
   initial,
@@ -55,6 +58,12 @@ function EntryForm({
   const [name, setName] = useState(initial.name);
   const [description, setDescription] = useState(initial.description);
   const [text, setText] = useState(initial.text);
+  const [submitted, setSubmitted] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const textRef = useRef<HTMLTextAreaElement>(null);
+  const nameProblem = name.trim() ? null : t("required_field");
+  const textProblem = text.trim() ? null : t("required_field");
+  const shown = (problem: string | null) => (submitted ? problem : null);
 
   const save = useMutation({
     mutationFn: async (): Promise<void> => {
@@ -77,6 +86,18 @@ function EntryForm({
     onError: (error) => toastApiError(error, t)
   });
 
+  function submit() {
+    if (save.isPending) return;
+    const firstProblem = nameProblem ? nameRef : textProblem ? textRef : null;
+    if (firstProblem) {
+      // Rendered before focus moves, so the field is read with its error.
+      flushSync(() => setSubmitted(true));
+      firstProblem.current?.focus();
+      return;
+    }
+    save.mutate();
+  }
+
   return (
     <DialogContent>
       <DialogHeader>
@@ -85,7 +106,14 @@ function EntryForm({
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
           <Label htmlFor="prompt-name">{t("name")}</Label>
-          <Input id="prompt-name" value={name} onChange={(event) => setName(event.target.value)} />
+          <Input
+            ref={nameRef}
+            id="prompt-name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            {...fieldProblemProps("prompt-name", shown(nameProblem))}
+          />
+          <FieldProblem id="prompt-name" problem={shown(nameProblem)} />
         </div>
         <div className="flex flex-col gap-2">
           <Label htmlFor="prompt-description">{t("description")}</Label>
@@ -98,21 +126,22 @@ function EntryForm({
         <div className="flex flex-col gap-2">
           <Label htmlFor="prompt-text">{t("prompt")}</Label>
           <Textarea
+            ref={textRef}
             id="prompt-text"
             rows={8}
             value={text}
             onChange={(event) => setText(event.target.value)}
+            {...fieldProblemProps("prompt-text", shown(textProblem))}
           />
+          <FieldProblem id="prompt-text" problem={shown(textProblem)} />
         </div>
       </div>
       <DialogFooter>
         <Button variant="outline" disabled={save.isPending} onClick={onDone}>
           {t("cancel")}
         </Button>
-        <Button
-          disabled={save.isPending || !name.trim() || !text.trim()}
-          onClick={() => save.mutate()}
-        >
+        {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+        <Button aria-busy={save.isPending || undefined} onClick={submit}>
           {save.isPending ? t("loading") : t("save")}
         </Button>
       </DialogFooter>

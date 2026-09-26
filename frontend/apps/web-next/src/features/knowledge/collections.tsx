@@ -17,8 +17,10 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { FolderClosed, FolderInput, Pencil, SearchX, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { EmptyState } from "@/components/composites/empty-state";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { StatusLabel } from "@/components/composites/status-label";
 import { Button } from "@/components/ui/button";
 import {
@@ -57,6 +59,10 @@ function useInvalidateSpace() {
 }
 
 /** Create dialog (with embedding model choice) or rename dialog. */
+/**
+ * Creates or renames a collection. Problems show on submit, and focus moves
+ * to the first: no embedding model (the warning says so), then the name.
+ */
 function CollectionDialog({
   collection,
   open,
@@ -72,6 +78,9 @@ function CollectionDialog({
   const invalidateSpace = useInvalidateSpace();
   const [name, setName] = useState(collection?.name ?? "");
   const [modelId, setModelId] = useState<string | undefined>(space.embedding_models[0]?.id);
+  const [submitted, setSubmitted] = useState(false);
+  const noModelsRef = useRef<HTMLParagraphElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -102,6 +111,7 @@ function CollectionDialog({
   });
 
   const noModels = !collection && space.embedding_models.length === 0;
+  const nameProblem = submitted && !name.trim() ? t("required_field") : null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -113,13 +123,26 @@ function CollectionDialog({
         </DialogHeader>
         <form
           className="flex flex-col gap-4"
+          noValidate
           onSubmit={(event) => {
             event.preventDefault();
-            if (name.trim()) save.mutate();
+            if (save.isPending) return;
+            const firstProblem = noModels ? noModelsRef : !name.trim() ? nameRef : null;
+            if (firstProblem) {
+              // Rendered before focus moves, so the field is read with its error.
+              flushSync(() => setSubmitted(true));
+              firstProblem.current?.focus();
+              return;
+            }
+            save.mutate();
           }}
         >
           {noModels && (
-            <p className="border-destructive/50 text-destructive rounded-md border px-3 py-2 text-sm">
+            <p
+              ref={noModelsRef}
+              tabIndex={-1}
+              className="border-destructive/50 text-destructive rounded-md border px-3 py-2 text-sm"
+            >
               <span className="font-bold">{t("warning")}: </span>
               {t("no_embedding_models_warning")}
             </p>
@@ -127,11 +150,14 @@ function CollectionDialog({
           <div className="flex flex-col gap-2">
             <Label htmlFor="collection-name">{t("name")}</Label>
             <Input
+              ref={nameRef}
               id="collection-name"
               value={name}
               required
               onChange={(event) => setName(event.target.value)}
+              {...fieldProblemProps("collection-name", nameProblem)}
             />
+            <FieldProblem id="collection-name" problem={nameProblem} />
           </div>
           {!collection && (
             <EmbeddingModelSelect
@@ -144,7 +170,8 @@ function CollectionDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               {t("cancel")}
             </Button>
-            <Button type="submit" disabled={save.isPending || noModels || !name.trim()}>
+            {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+            <Button type="submit" aria-busy={save.isPending || undefined}>
               {collection
                 ? save.isPending
                   ? t("saving")

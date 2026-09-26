@@ -2,11 +2,13 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   ConfirmedSecretInput,
   confirmedSecretProblem
 } from "@/components/composites/confirmed-secret-input";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -36,7 +38,6 @@ import { Switch } from "@/components/ui/switch";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
-import { toast } from "@/lib/toast";
 import { ClientTime } from "@/components/composites/client-time";
 import { useSpace } from "@/features/spaces/use-space";
 import { EmbeddingModelSelect } from "./embedding-model-select";
@@ -111,7 +112,8 @@ function intervalLabel(interval: string, t: (key: string) => string): string {
 /**
  * Create / edit a website crawl. On create (outside the org space) the URL is
  * first checked against the organization space; a warning dialog offers
- * "create anyway" when it already exists there.
+ * "create anyway" when it already exists there. Problems show at their
+ * fields on submit, and focus moves to the first.
  */
 export function WebsiteDialog({
   website,
@@ -139,6 +141,12 @@ export function WebsiteDialog({
   const [httpAuthPassword, setHttpAuthPassword] = useState("");
   const [httpAuthPasswordConfirmation, setHttpAuthPasswordConfirmation] = useState("");
   const [existingOnOrg, setExistingOnOrg] = useState<ExistingWebsite | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+  const noModelsRef = useRef<HTMLParagraphElement>(null);
+  const urlRef = useRef<HTMLInputElement>(null);
+  const httpAuthUsernameRef = useRef<HTMLInputElement>(null);
+  const httpAuthPasswordRef = useRef<HTMLInputElement>(null);
+  const httpAuthPasswordConfirmationRef = useRef<HTMLInputElement>(null);
 
   function clearHttpAuthPassword() {
     setHttpAuthPassword("");
@@ -217,30 +225,44 @@ export function WebsiteDialog({
     httpAuthPassword.length > 0 || httpAuthPasswordConfirmation.length > 0;
   const httpAuthNeedsNewCredentials =
     httpAuthEnabled && (!website?.requires_http_auth || httpAuthPasswordTouched);
-  const httpAuthValid =
-    !httpAuthEnabled ||
-    (httpAuthNeedsNewCredentials
-      ? httpAuthUsername.trim().length > 0 &&
-        confirmedSecretProblem({
-          value: httpAuthPassword,
-          confirmation: httpAuthPasswordConfirmation,
-          isRequired: true
-        }) === null
-      : true);
+  const urlProblem = url.trim() ? null : t("required_field");
+  const httpAuthUsernameProblem =
+    httpAuthNeedsNewCredentials && !httpAuthUsername.trim() ? t("required_field") : null;
+  const httpAuthPasswordProblem = httpAuthNeedsNewCredentials
+    ? confirmedSecretProblem({
+        value: httpAuthPassword,
+        confirmation: httpAuthPasswordConfirmation,
+        isRequired: true
+      })
+    : null;
+  const shown = (problem: string | null) => (submitted ? problem : null);
+
+  const pending = save.isPending || checkUrl.isPending;
+  const noModels = !website && space.embedding_models.length === 0;
 
   function submit() {
-    if (!httpAuthValid) {
-      toast.warning(
-        httpAuthUsername.trim().length === 0 ? t("required_field") : t("passwords_do_not_match")
-      );
+    if (pending) return;
+    // No embedding model: the warning above the fields says what is missing.
+    const firstProblem = noModels
+      ? noModelsRef
+      : urlProblem
+        ? urlRef
+        : httpAuthUsernameProblem
+          ? httpAuthUsernameRef
+          : httpAuthPasswordProblem === "required"
+            ? httpAuthPasswordRef
+            : httpAuthPasswordProblem === "mismatch"
+              ? httpAuthPasswordConfirmationRef
+              : null;
+    if (firstProblem) {
+      // Rendered before focus moves, so the field is read with its error.
+      flushSync(() => setSubmitted(true));
+      firstProblem.current?.focus();
       return;
     }
     if (website || space.organization) save.mutate();
     else checkUrl.mutate();
   }
-
-  const pending = save.isPending || checkUrl.isPending;
-  const noModels = !website && space.embedding_models.length === 0;
   const crawlResult = existingOnOrg ? crawlResultSummary(existingOnOrg, t) : null;
 
   return (
@@ -260,13 +282,18 @@ export function WebsiteDialog({
           </DialogHeader>
           <form
             className="flex flex-col gap-4"
+            noValidate
             onSubmit={(event) => {
               event.preventDefault();
-              if (url) submit();
+              submit();
             }}
           >
             {noModels && (
-              <p className="border-destructive/50 text-destructive rounded-md border px-3 py-2 text-sm">
+              <p
+                ref={noModelsRef}
+                tabIndex={-1}
+                className="border-destructive/50 text-destructive rounded-md border px-3 py-2 text-sm"
+              >
                 <span className="font-bold">{t("warning")}: </span>
                 {t("warning_no_embedding_models")}
               </p>
@@ -274,9 +301,11 @@ export function WebsiteDialog({
             <div className="flex flex-col gap-2">
               <Label htmlFor="website-url">{t("url_required")}</Label>
               <Input
+                ref={urlRef}
                 id="website-url"
                 type="url"
                 required
+                {...fieldProblemProps("website-url", shown(urlProblem))}
                 value={url}
                 placeholder={
                   crawlType === "sitemap"
@@ -285,6 +314,7 @@ export function WebsiteDialog({
                 }
                 onChange={(event) => setUrl(event.target.value)}
               />
+              <FieldProblem id="website-url" problem={shown(urlProblem)} />
               <p className="text-muted-foreground text-sm">
                 {crawlType === "sitemap" ? t("full_url_sitemap") : t("url_description")}
               </p>
@@ -326,11 +356,14 @@ export function WebsiteDialog({
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="http-auth-username">{t("username")}</Label>
                   <Input
+                    ref={httpAuthUsernameRef}
                     id="http-auth-username"
                     value={httpAuthUsername}
                     autoComplete="username"
                     onChange={(event) => setHttpAuthUsername(event.target.value)}
+                    {...fieldProblemProps("http-auth-username", shown(httpAuthUsernameProblem))}
                   />
+                  <FieldProblem id="http-auth-username" problem={shown(httpAuthUsernameProblem)} />
                 </div>
                 <ConfirmedSecretInput
                   label={t("password")}
@@ -344,6 +377,10 @@ export function WebsiteDialog({
                     website?.requires_http_auth ? t("leave_blank_keep_password") : undefined
                   }
                   isRequired={!website?.requires_http_auth}
+                  requiredMessage={t("required_field")}
+                  showErrors={submitted}
+                  valueRef={httpAuthPasswordRef}
+                  confirmationRef={httpAuthPasswordConfirmationRef}
                   // The website's password, not the user's own for Eneo.
                   autoComplete="new-password"
                 />
@@ -415,7 +452,8 @@ export function WebsiteDialog({
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 {t("cancel")}
               </Button>
-              <Button type="submit" disabled={pending || noModels || !url || !httpAuthValid}>
+              {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+              <Button type="submit" aria-busy={pending || undefined}>
                 {website
                   ? pending
                     ? t("saving")

@@ -46,6 +46,25 @@ describe("CredentialsTab", () => {
     expect(document.activeElement).toBe(button("Byt token"));
   });
 
+  it("shows the token's problems at its fields on save, and moves focus to the first", async () => {
+    const { container } = renderInApp(<CredentialsTab server={server} />);
+    fireEvent.click(button("Byt token"));
+    // Never disabled: a disabled button says nothing about what is missing.
+    expect(button("Spara").disabled).toBe(false);
+
+    fireEvent.click(button("Spara"));
+    expect(field(/^Bearer-token/).getAttribute("aria-invalid")).toBe("true");
+    expect(within(container).getByText("Detta fält är obligatoriskt")).toBeTruthy();
+    expect(document.activeElement).toBe(field(/^Bearer-token/));
+    await expectNoAxeViolations(container);
+
+    fireEvent.change(field(/^Bearer-token/), { target: { value: "ny-token-1234" } });
+    fireEvent.click(button("Spara"));
+    expect(field(/^Bekräfta Bearer-token/).getAttribute("aria-invalid")).toBe("true");
+    expect(document.activeElement).toBe(field(/^Bekräfta Bearer-token/));
+    expect(api.POST).not.toHaveBeenCalled();
+  });
+
   it("says the tokens differ at the confirmation, and saves once they match", async () => {
     api.POST.mockImplementation(() => Promise.resolve({ data: server, response: new Response() }));
     const { container } = renderInApp(<CredentialsTab server={server} />);
@@ -58,11 +77,9 @@ describe("CredentialsTab", () => {
     const error = within(container).getByText("Värdena matchar inte");
     expect(field(/^Bekräfta Bearer-token/).getAttribute("aria-invalid")).toBe("true");
     expect(field(/^Bekräfta Bearer-token/).getAttribute("aria-describedby")).toContain(error.id);
-    expect(button("Spara").disabled).toBe(true);
     await expectNoAxeViolations(container);
 
     fireEvent.change(field(/^Bekräfta Bearer-token/), { target: { value: "token-1234" } });
-    expect(button("Spara").disabled).toBe(false);
     fireEvent.click(button("Spara"));
 
     await waitFor(() =>

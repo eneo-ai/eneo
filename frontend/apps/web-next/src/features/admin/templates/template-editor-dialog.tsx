@@ -2,7 +2,9 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -65,6 +67,11 @@ export function TemplateEditorDialog({
 
   const [name, setName] = useState(template?.name ?? "");
   const [category, setCategory] = useState(template?.category ?? "");
+  const [submitted, setSubmitted] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const categoryRef = useRef<HTMLInputElement>(null);
+  const nameProblem = submitted && !name.trim() ? t("required_field") : null;
+  const categoryProblem = submitted && !category.trim() ? t("required_field") : null;
   const [description, setDescription] = useState(template?.description ?? "");
   const [prompt, setPrompt] = useState(template?.prompt_text ?? "");
   const [modelId, setModelId] = useState(template?.completion_model_id ?? NO_MODEL);
@@ -164,30 +171,46 @@ export function TemplateEditorDialog({
             {isApp ? t("create_app_template") : t("create_assistant_template")}
           </DialogDescription>
         </DialogHeader>
+        {/* Problems show at their fields on submit, and focus moves to the first. */}
         <form
           className="flex flex-col gap-4"
+          noValidate
           onSubmit={(event) => {
             event.preventDefault();
+            if (save.isPending) return;
+            const firstProblem = !name.trim() ? nameRef : !category.trim() ? categoryRef : null;
+            if (firstProblem) {
+              // Rendered before focus moves, so the field is read with its error.
+              flushSync(() => setSubmitted(true));
+              firstProblem.current?.focus();
+              return;
+            }
             save.mutate();
           }}
         >
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="template-name">{t("template_name")}</Label>
             <Input
+              ref={nameRef}
               id="template-name"
               value={name}
               required
               onChange={(event) => setName(event.target.value)}
+              {...fieldProblemProps("template-name", nameProblem)}
             />
+            <FieldProblem id="template-name" problem={nameProblem} />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="template-category">{t("category")}</Label>
             <Input
+              ref={categoryRef}
               id="template-category"
               value={category}
               required
               onChange={(event) => setCategory(event.target.value)}
+              {...fieldProblemProps("template-category", categoryProblem)}
             />
+            <FieldProblem id="template-category" problem={categoryProblem} />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="template-description">{t("description")}</Label>
@@ -314,7 +337,8 @@ export function TemplateEditorDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               {t("cancel")}
             </Button>
-            <Button type="submit" disabled={!name.trim() || !category.trim() || save.isPending}>
+            {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+            <Button type="submit" aria-busy={save.isPending || undefined}>
               {save.isPending ? t("saving") : editing ? t("save") : t("create")}
             </Button>
           </DialogFooter>

@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { flushSync } from "react-dom";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -123,6 +125,7 @@ export function MigrateModelDialog({
   const queryClient = useQueryClient();
   const [targetId, setTargetId] = useState("");
   const [forceOverride, setForceOverride] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
   const { data: models } = useQuery({ ...adminModelsQueryOptions(browserApi), enabled: open });
   const usage = useQuery({
@@ -148,13 +151,16 @@ export function MigrateModelDialog({
   const warningCodes = validation.data?.warning_codes ?? [];
   const warnings = validation.data?.warnings ?? [];
   const hasSecurityBlocker = warningCodes.some(isMigrationSecurityBlockerCode);
-  const blocked =
+  // Until the impact and the target's validation are known there is nothing
+  // to decide on: Migrate waits for them.
+  const unavailable =
     usage.isPending ||
     usage.isError ||
-    validation.isPending ||
-    validation.isError ||
-    !targetId ||
-    (hasSecurityBlocker && !forceOverride);
+    (targetId !== "" && (validation.isPending || validation.isError));
+  const targetProblem = targetId ? null : t("form_problem_choose_target_model");
+  const overrideProblem =
+    hasSecurityBlocker && !forceOverride ? t("form_problem_confirm_override") : null;
+  const shown = (problem: string | null) => (submitted ? problem : null);
 
   const migrate = useMutation({
     mutationFn: () => migrateModelUsage(browserApi, kind, model.id, targetId, forceOverride),
@@ -171,8 +177,31 @@ export function MigrateModelDialog({
     onError: (error) => toastApiError(error, t)
   });
 
+  // A missing target, or an unconfirmed override of a security blocker, shows
+  // at its field on Migrate, which takes focus.
+  function submit() {
+    if (migrate.isPending) return;
+    const firstProblem = targetProblem
+      ? "migration-target"
+      : overrideProblem
+        ? "migration-force-override"
+        : null;
+    if (firstProblem) {
+      // Rendered before focus moves, so the field is read with its problem.
+      flushSync(() => setSubmitted(true));
+      document.getElementById(firstProblem)?.focus();
+      return;
+    }
+    migrate.mutate();
+  }
+
+  function changeOpen(next: boolean) {
+    if (!next) setSubmitted(false);
+    onOpenChange(next);
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={changeOpen}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{t("migrate_model")}</DialogTitle>
@@ -196,7 +225,11 @@ export function MigrateModelDialog({
                 setForceOverride(false);
               }}
             >
-              <SelectTrigger id="migration-target" className="w-full">
+              <SelectTrigger
+                id="migration-target"
+                className="w-full"
+                {...fieldProblemProps("migration-target", shown(targetProblem))}
+              >
                 <SelectValue placeholder={t("select_target_model")} />
               </SelectTrigger>
               <SelectContent>
@@ -207,6 +240,7 @@ export function MigrateModelDialog({
                 ))}
               </SelectContent>
             </Select>
+            <FieldProblem id="migration-target" problem={shown(targetProblem)} />
           </div>
 
           {targetId && validation.isPending && (
@@ -223,21 +257,31 @@ export function MigrateModelDialog({
           )}
 
           {hasSecurityBlocker && (
-            <label className="border-destructive/30 bg-destructive/10 flex items-start gap-2 rounded-md border px-3 py-2 text-sm">
-              <Checkbox
-                className="mt-0.5"
-                checked={forceOverride}
-                onCheckedChange={(checked) => setForceOverride(checked === true)}
-              />
-              <span>{t("migration_force_override_ack")}</span>
-            </label>
+            <div className="flex flex-col gap-1.5">
+              <label className="border-destructive/30 bg-destructive/10 flex items-start gap-2 rounded-md border px-3 py-2 text-sm">
+                <Checkbox
+                  id="migration-force-override"
+                  className="mt-0.5"
+                  checked={forceOverride}
+                  onCheckedChange={(checked) => setForceOverride(checked === true)}
+                  {...fieldProblemProps("migration-force-override", shown(overrideProblem))}
+                />
+                <span>{t("migration_force_override_ack")}</span>
+              </label>
+              <FieldProblem id="migration-force-override" problem={shown(overrideProblem)} />
+            </div>
           )}
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={() => changeOpen(false)}>
               {t("cancel")}
             </Button>
-            <Button disabled={blocked || migrate.isPending} onClick={() => migrate.mutate()}>
+            {/* Disabled only while there is nothing to decide on; busy, it keeps focus. */}
+            <Button
+              disabled={unavailable}
+              aria-busy={migrate.isPending || undefined}
+              onClick={submit}
+            >
               {migrate.isPending ? t("saving") : t("migrate")}
             </Button>
           </DialogFooter>

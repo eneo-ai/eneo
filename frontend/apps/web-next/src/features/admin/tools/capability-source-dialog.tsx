@@ -3,7 +3,13 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useState, type SubmitEvent } from "react";
+import { useRef, useState, type SubmitEvent } from "react";
+import { flushSync } from "react-dom";
+import {
+  ConfirmedSecretInput,
+  confirmedSecretProblem
+} from "@/components/composites/confirmed-secret-input";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,9 +32,47 @@ import { createMcpServer, MCP_KEY, updateMcpServer, type McpServer } from "../mc
 import {
   createSourcePayload,
   sourceDraft,
-  sourceDraftValid,
-  updateSourcePayload
+  sourceDraftProblems,
+  updateSourcePayload,
+  type SourceField,
+  type SourceProblem
 } from "./capability-source";
+
+/** The fields that can hold a problem, in the order the form shows them. */
+const FIELD_ORDER = [
+  "imageModel",
+  "url",
+  "headerName",
+  "token",
+  "tokenConfirmation",
+  "name",
+  "groups",
+  "priority",
+  "toolCatalogMaxCount",
+  "toolCatalogMaxMiB",
+  "toolDefinitionMaxKiB"
+] as const;
+type FormField = (typeof FIELD_ORDER)[number];
+
+/** The element each field focuses (the token fields have refs instead). */
+const FIELD_IDS: Partial<Record<FormField, string>> = {
+  imageModel: "source-model",
+  url: "source-url",
+  headerName: "source-header",
+  name: "source-name",
+  groups: "source-groups",
+  priority: "source-priority",
+  toolCatalogMaxCount: "source-max-tools",
+  toolCatalogMaxMiB: "source-max-catalog",
+  toolDefinitionMaxKiB: "source-max-definition"
+};
+
+/** Fields inside the collapsed "advanced options". */
+const ADVANCED: ReadonlySet<FormField> = new Set([
+  "toolCatalogMaxCount",
+  "toolCatalogMaxMiB",
+  "toolDefinitionMaxKiB"
+]);
 
 export function CapabilitySourceDialog({
   purpose,
@@ -48,6 +92,10 @@ export function CapabilitySourceDialog({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [tokenConfirmation, setTokenConfirmation] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const advancedRef = useRef<HTMLDetailsElement>(null);
+  const tokenRef = useRef<HTMLInputElement>(null);
+  const tokenConfirmationRef = useRef<HTMLInputElement>(null);
   const { data: security } = useQuery(securityClassificationsQueryOptions(browserApi));
   const groups = useQuery({
     queryKey: ["user-groups"],
@@ -76,8 +124,24 @@ export function CapabilitySourceDialog({
     server?.image_model_id && !imageModels.some((model) => model.id === server.image_model_id)
       ? models.data?.find((model) => model.id === server.image_model_id)
       : null;
-  const tokenMatches = !draft.token || draft.token === tokenConfirmation;
-  const valid = sourceDraftValid(draft, server) && tokenMatches;
+  const problems = sourceDraftProblems(draft, server);
+  const tokenMismatch =
+    draft.source === "external" &&
+    draft.auth !== "none" &&
+    confirmedSecretProblem({ value: draft.token, confirmation: tokenConfirmation }) === "mismatch";
+  const problemText = (problem: SourceProblem) =>
+    problem.kind === "required"
+      ? t("required_field")
+      : problem.kind === "no-group"
+        ? t("form_problem_choose_group")
+        : problem.max === undefined
+          ? t("form_problem_whole_number_from", { min: problem.min })
+          : t("form_problem_whole_number_between", { min: problem.min, max: problem.max });
+  /** The field's problem, once the form was submitted. */
+  const problemAt = (field: SourceField) => {
+    const problem = submitted ? problems.find((candidate) => candidate.field === field) : null;
+    return problem ? problemText(problem) : null;
+  };
   const set = <Key extends keyof typeof draft>(key: Key, value: (typeof draft)[Key]) =>
     setDraft((current) => ({ ...current, [key]: value }));
   const changed = JSON.stringify(draft) !== JSON.stringify(sourceDraft(server));
@@ -90,7 +154,23 @@ export function CapabilitySourceDialog({
 
   async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!valid || busy) return;
+    if (busy) return;
+    const withProblems = new Set<FormField>(problems.map((problem) => problem.field));
+    if (tokenMismatch) withProblems.add("tokenConfirmation");
+    const firstProblem = FIELD_ORDER.find((field) => withProblems.has(field));
+    if (firstProblem) {
+      // Rendered before focus moves, so the field is read with its error.
+      flushSync(() => setSubmitted(true));
+      if (ADVANCED.has(firstProblem) && advancedRef.current) advancedRef.current.open = true;
+      const element =
+        firstProblem === "token"
+          ? tokenRef.current
+          : firstProblem === "tokenConfirmation"
+            ? tokenConfirmationRef.current
+            : document.getElementById(FIELD_IDS[firstProblem] ?? "");
+      (element?.matches("fieldset") ? element.querySelector("input") : element)?.focus();
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -123,7 +203,8 @@ export function CapabilitySourceDialog({
           </DialogTitle>
           <DialogDescription>{t("tools_functions_description")}</DialogDescription>
         </DialogHeader>
-        <form className="space-y-5" onSubmit={(event) => void submit(event)}>
+        {/* Problems show at their fields on submit, and focus moves to the first. */}
+        <form className="space-y-5" noValidate onSubmit={(event) => void submit(event)}>
           {error && (
             <p className="text-destructive text-sm" role="alert">
               {error}
@@ -154,6 +235,7 @@ export function CapabilitySourceDialog({
                 className="border-input bg-background h-9 w-full rounded-md border px-2"
                 value={draft.imageModelId}
                 onChange={(event) => set("imageModelId", event.target.value)}
+                {...fieldProblemProps("source-model", problemAt("imageModel"))}
               >
                 <option value="">{t("select")}</option>
                 {persistedModel && (
@@ -168,6 +250,7 @@ export function CapabilitySourceDialog({
                   </option>
                 ))}
               </select>
+              <FieldProblem id="source-model" problem={problemAt("imageModel")} />
               {(models.isPending || providers.isPending) && (
                 <p className="text-muted-foreground text-sm">{t("loading")}</p>
               )}
@@ -195,7 +278,9 @@ export function CapabilitySourceDialog({
                   value={draft.url}
                   required
                   onChange={(event) => set("url", event.target.value)}
+                  {...fieldProblemProps("source-url", problemAt("url"))}
                 />
+                <FieldProblem id="source-url" problem={problemAt("url")} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="source-auth">{t("mcp_authentication")}</Label>
@@ -226,40 +311,30 @@ export function CapabilitySourceDialog({
                     id="source-header"
                     value={draft.headerName}
                     onChange={(event) => set("headerName", event.target.value)}
+                    {...fieldProblemProps("source-header", problemAt("headerName"))}
                   />
+                  <FieldProblem id="source-header" problem={problemAt("headerName")} />
                 </div>
               )}
               {draft.auth !== "none" && (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="source-token">
-                      {t(draft.auth === "bearer" ? "bearer_token" : "mcp_api_key_token")}
-                    </Label>
-                    <Input
-                      id="source-token"
-                      type="password"
-                      autoComplete="off"
-                      value={draft.token}
-                      placeholder={server?.credential_preview ?? undefined}
-                      onChange={(event) => set("token", event.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="source-token-confirm">{t("confirm_bearer_token")}</Label>
-                    <Input
-                      id="source-token-confirm"
-                      type="password"
-                      autoComplete="off"
-                      value={tokenConfirmation}
-                      onChange={(event) => setTokenConfirmation(event.target.value)}
-                    />
-                  </div>
-                  {!tokenMatches && (
-                    <p role="alert" className="text-destructive text-sm">
-                      {t("secret_values_do_not_match")}
-                    </p>
-                  )}
-                </div>
+                <ConfirmedSecretInput
+                  label={t(draft.auth === "bearer" ? "bearer_token" : "mcp_api_key_token")}
+                  confirmLabel={t("confirm_bearer_token")}
+                  value={draft.token}
+                  confirmation={tokenConfirmation}
+                  onValueChange={(value) => set("token", value)}
+                  onConfirmationChange={setTokenConfirmation}
+                  // A saved credential may be left as it is.
+                  isRequired={server?.http_auth_type !== draft.auth}
+                  requiredMessage={t("required_field")}
+                  valueError={problemAt("token") ?? undefined}
+                  mismatchMessage={t("secret_values_do_not_match")}
+                  showErrors={submitted}
+                  autoComplete="off"
+                  placeholder={server?.credential_preview ?? undefined}
+                  valueRef={tokenRef}
+                  confirmationRef={tokenConfirmationRef}
+                />
               )}
               {security?.security_enabled && (
                 <div className="space-y-2">
@@ -296,7 +371,9 @@ export function CapabilitySourceDialog({
               value={draft.name}
               required
               onChange={(event) => set("name", event.target.value)}
+              {...fieldProblemProps("source-name", problemAt("name"))}
             />
+            <FieldProblem id="source-name" problem={problemAt("name")} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="source-description">{t("description")}</Label>
@@ -322,7 +399,11 @@ export function CapabilitySourceDialog({
             </select>
           </div>
           {draft.audience === "groups" && (
-            <fieldset className="space-y-2 rounded-lg border p-3">
+            <fieldset
+              id="source-groups"
+              className="space-y-2 rounded-lg border p-3"
+              {...fieldProblemProps("source-groups", problemAt("groups"))}
+            >
               <legend className="px-1 text-sm font-medium">{t("mcp_audience_groups")}</legend>
               {groups.isPending ? (
                 <p>{t("loading")}</p>
@@ -349,6 +430,7 @@ export function CapabilitySourceDialog({
               ) : (
                 <p className="text-muted-foreground text-sm">{t("mcp_audience_no_groups")}</p>
               )}
+              <FieldProblem id="source-groups" problem={problemAt("groups")} />
             </fieldset>
           )}
           <div className="space-y-2">
@@ -360,9 +442,11 @@ export function CapabilitySourceDialog({
               step={1}
               value={draft.priority}
               onChange={(event) => set("priority", Number(event.target.value))}
+              {...fieldProblemProps("source-priority", problemAt("priority"))}
             />
+            <FieldProblem id="source-priority" problem={problemAt("priority")} />
           </div>
-          <details className="rounded-lg border p-3">
+          <details ref={advancedRef} className="rounded-lg border p-3">
             <summary className="cursor-pointer text-sm font-medium">
               {t("skills_advanced_options")}
             </summary>
@@ -385,7 +469,9 @@ export function CapabilitySourceDialog({
                   max={4096}
                   value={draft.toolCatalogMaxCount}
                   onChange={(event) => set("toolCatalogMaxCount", Number(event.target.value))}
+                  {...fieldProblemProps("source-max-tools", problemAt("toolCatalogMaxCount"))}
                 />
+                <FieldProblem id="source-max-tools" problem={problemAt("toolCatalogMaxCount")} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="source-max-catalog">{t("mcp_catalog_max_mib")}</Label>
@@ -396,7 +482,9 @@ export function CapabilitySourceDialog({
                   max={64}
                   value={draft.toolCatalogMaxMiB}
                   onChange={(event) => set("toolCatalogMaxMiB", Number(event.target.value))}
+                  {...fieldProblemProps("source-max-catalog", problemAt("toolCatalogMaxMiB"))}
                 />
+                <FieldProblem id="source-max-catalog" problem={problemAt("toolCatalogMaxMiB")} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="source-max-definition">{t("mcp_tool_definition_max_kib")}</Label>
@@ -407,6 +495,11 @@ export function CapabilitySourceDialog({
                   max={1024}
                   value={draft.toolDefinitionMaxKiB}
                   onChange={(event) => set("toolDefinitionMaxKiB", Number(event.target.value))}
+                  {...fieldProblemProps("source-max-definition", problemAt("toolDefinitionMaxKiB"))}
+                />
+                <FieldProblem
+                  id="source-max-definition"
+                  problem={problemAt("toolDefinitionMaxKiB")}
                 />
               </div>
             </div>
@@ -415,7 +508,8 @@ export function CapabilitySourceDialog({
             <Button type="button" variant="outline" disabled={busy} onClick={close}>
               {t("cancel")}
             </Button>
-            <Button type="submit" disabled={!valid || busy}>
+            {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+            <Button type="submit" aria-busy={busy || undefined}>
               {busy
                 ? t("saving")
                 : !server && draft.source === "builtin"

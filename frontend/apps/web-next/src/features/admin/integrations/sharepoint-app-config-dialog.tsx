@@ -8,6 +8,7 @@ import {
   ConfirmedSecretInput,
   confirmedSecretProblem
 } from "@/components/composites/confirmed-secret-input";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -59,24 +60,29 @@ export function SharePointAppConfigDialog({
   const [clientSecretConfirmation, setClientSecretConfirmation] = useState("");
   const [tenantDomain, setTenantDomain] = useState("");
   const [updatingSecret, setUpdatingSecret] = useState(false);
-  const [secretChecked, setSecretChecked] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message?: string } | null>(null);
+  const clientIdRef = useRef<HTMLInputElement>(null);
+  const secretRef = useRef<HTMLInputElement>(null);
   const secretConfirmationRef = useRef<HTMLInputElement>(null);
-  const newSecretRef = useRef<HTMLInputElement>(null);
+  const tenantDomainRef = useRef<HTMLInputElement>(null);
   const updateSecretRef = useRef<HTMLButtonElement>(null);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: SHAREPOINT_APP_KEY });
-  const clientSecretValid =
-    confirmedSecretProblem({
-      value: clientSecret,
-      confirmation: clientSecretConfirmation,
-      isRequired: true
-    }) === null;
-  const clientSecretReady = clientSecret.trim().length > 0 && clientSecretValid;
+  const clientIdProblem = clientId.trim() ? null : t("required_field");
+  const tenantDomainProblem = tenantDomain.trim() ? null : t("required_field");
+  const secretProblem = confirmedSecretProblem({
+    value: clientSecret,
+    confirmation: clientSecretConfirmation,
+    isRequired: true
+  });
+  // Only spaces is no secret either.
+  const secretBlank = clientSecret !== "" && clientSecret.trim() === "";
+  const shown = (problem: string | null) => (submitted ? problem : null);
   function clearClientSecret() {
     setClientSecret("");
     setClientSecretConfirmation("");
-    setSecretChecked(false);
+    setSubmitted(false);
   }
 
   // The button pressed disappears, so focus moves to what replaced it: the
@@ -86,7 +92,7 @@ export function SharePointAppConfigDialog({
       clearClientSecret();
       setUpdatingSecret(true);
     });
-    newSecretRef.current?.focus();
+    secretRef.current?.focus();
   }
 
   function stopUpdatingSecret() {
@@ -97,19 +103,28 @@ export function SharePointAppConfigDialog({
     updateSecretRef.current?.focus();
   }
 
-  const requireFields = () => {
-    if (!clientId.trim() || !clientSecret.trim() || !tenantDomain.trim()) {
-      toast.warning(t("fill_required_fields"));
-      return false;
-    }
-    if (!clientSecretReady) {
-      // The mismatch is shown at the confirmation, which takes focus.
-      flushSync(() => setSecretChecked(true));
-      secretConfirmationRef.current?.focus();
-      return false;
-    }
-    return true;
-  };
+  /**
+   * Shows the problems at their fields and moves focus to the first (the
+   * fields in order: the client ID, the secret and its confirmation, the
+   * tenant); false while there is one. Only the secret when it is replaced.
+   */
+  function checkFields(): boolean {
+    const firstProblem =
+      !config && clientIdProblem
+        ? clientIdRef
+        : secretProblem === "required" || secretBlank
+          ? secretRef
+          : secretProblem === "mismatch"
+            ? secretConfirmationRef
+            : !config && tenantDomainProblem
+              ? tenantDomainRef
+              : null;
+    if (!firstProblem) return true;
+    // Rendered before focus moves, so the field is read with its error.
+    flushSync(() => setSubmitted(true));
+    firstProblem.current?.focus();
+    return false;
+  }
 
   const test = useMutation({
     mutationFn: () =>
@@ -203,7 +218,11 @@ export function SharePointAppConfigDialog({
                 mismatchMessage={t("secret_values_do_not_match")}
                 autoComplete="off"
                 isRequired
-                valueRef={newSecretRef}
+                requiredMessage={t("required_field")}
+                valueError={submitted && secretBlank ? t("required_field") : undefined}
+                showErrors={submitted}
+                valueRef={secretRef}
+                confirmationRef={secretConfirmationRef}
               />
             ) : (
               <p className="text-muted-foreground text-xs">{t("sharepoint_change_auth_warning")}</p>
@@ -227,10 +246,13 @@ export function SharePointAppConfigDialog({
             </div>
             <Labeled label={t("client_id")} htmlFor="sp-client-id">
               <Input
+                ref={clientIdRef}
                 id="sp-client-id"
                 value={clientId}
                 onChange={(event) => setClientId(event.target.value)}
+                {...fieldProblemProps("sp-client-id", shown(clientIdProblem))}
               />
+              <FieldProblem id="sp-client-id" problem={shown(clientIdProblem)} />
             </Labeled>
             <ConfirmedSecretInput
               label={t("client_secret")}
@@ -242,16 +264,22 @@ export function SharePointAppConfigDialog({
               mismatchMessage={t("secret_values_do_not_match")}
               autoComplete="off"
               isRequired
-              showErrors={secretChecked}
+              requiredMessage={t("required_field")}
+              valueError={submitted && secretBlank ? t("required_field") : undefined}
+              showErrors={submitted}
+              valueRef={secretRef}
               confirmationRef={secretConfirmationRef}
             />
             <Labeled label={t("tenant_id_or_domain")} htmlFor="sp-tenant-domain">
               <Input
+                ref={tenantDomainRef}
                 id="sp-tenant-domain"
                 placeholder={t("sharepoint_tenant_domain_placeholder")}
                 value={tenantDomain}
                 onChange={(event) => setTenantDomain(event.target.value)}
+                {...fieldProblemProps("sp-tenant-domain", shown(tenantDomainProblem))}
               />
+              <FieldProblem id="sp-tenant-domain" problem={shown(tenantDomainProblem)} />
             </Labeled>
             {testResult && (
               <p
@@ -276,14 +304,15 @@ export function SharePointAppConfigDialog({
                   {t("back")}
                 </Button>
                 <Button
-                  disabled={!clientSecretReady || save.isPending}
-                  onClick={() =>
+                  aria-busy={save.isPending || undefined}
+                  onClick={() => {
+                    if (save.isPending || !checkFields()) return;
                     save.mutate({
                       client_id: config.client_id,
                       client_secret: clientSecret,
                       tenant_domain: config.tenant_domain
-                    })
-                  }
+                    });
+                  }}
                 >
                   {t("save")}
                 </Button>
@@ -302,29 +331,33 @@ export function SharePointAppConfigDialog({
             <>
               <Button
                 variant="outline"
-                disabled={test.isPending}
-                onClick={() => requireFields() && test.mutate()}
+                aria-busy={test.isPending || undefined}
+                onClick={() => {
+                  if (!test.isPending && checkFields()) test.mutate();
+                }}
               >
                 {test.isPending ? t("testing_connection") : t("test_connection")}
               </Button>
               <Button
-                disabled={save.isPending}
-                onClick={() =>
-                  requireFields() &&
+                aria-busy={save.isPending || undefined}
+                onClick={() => {
+                  if (save.isPending || !checkFields()) return;
                   save.mutate({
                     client_id: clientId.trim(),
                     client_secret: clientSecret,
                     tenant_domain: tenantDomain.trim()
-                  })
-                }
+                  });
+                }}
               >
                 {t("save")}
               </Button>
             </>
           ) : (
             <Button
-              disabled={startOAuth.isPending}
-              onClick={() => requireFields() && startOAuth.mutate()}
+              aria-busy={startOAuth.isPending || undefined}
+              onClick={() => {
+                if (!startOAuth.isPending && checkFields()) startOAuth.mutate();
+              }}
             >
               {t("sign_in_with_microsoft")}
             </Button>

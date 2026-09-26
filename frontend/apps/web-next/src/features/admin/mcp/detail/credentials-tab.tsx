@@ -33,8 +33,10 @@ export function CredentialsTab({ server }: { server: McpServer }) {
   const [editing, setEditing] = useState(false);
   const [token, setToken] = useState("");
   const [confirmation, setConfirmation] = useState("");
+  const [submitted, setSubmitted] = useState(false);
   const editRef = useRef<HTMLButtonElement>(null);
   const tokenRef = useRef<HTMLInputElement>(null);
+  const confirmationRef = useRef<HTMLInputElement>(null);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: MCP_KEY });
 
@@ -42,6 +44,7 @@ export function CredentialsTab({ server }: { server: McpServer }) {
     setEditing(false);
     setToken("");
     setConfirmation("");
+    setSubmitted(false);
   }
 
   // The button pressed disappears, so focus moves to what replaced it: the
@@ -83,9 +86,27 @@ export function CredentialsTab({ server }: { server: McpServer }) {
     onError: (error) => toastApiError(error, t)
   });
 
-  const tokenValid =
-    token.trim().length > 0 &&
-    confirmedSecretProblem({ value: token, confirmation, isRequired: true }) === null;
+  const tokenProblem = confirmedSecretProblem({ value: token, confirmation, isRequired: true });
+  // Only spaces is no token either.
+  const tokenBlank = token !== "" && token.trim() === "";
+
+  // Problems show at their fields on save, and focus moves to the first.
+  function save() {
+    if (saveToken.isPending) return;
+    const firstProblem =
+      tokenProblem === "required" || tokenBlank
+        ? tokenRef
+        : tokenProblem === "mismatch"
+          ? confirmationRef
+          : null;
+    if (firstProblem) {
+      // Rendered before focus moves, so the field is read with its error.
+      flushSync(() => setSubmitted(true));
+      firstProblem.current?.focus();
+      return;
+    }
+    saveToken.mutate();
+  }
 
   return (
     <SettingsGroup
@@ -145,13 +166,15 @@ export function CredentialsTab({ server }: { server: McpServer }) {
                 mismatchMessage={t("secret_values_do_not_match")}
                 autoComplete="off"
                 isRequired
+                requiredMessage={t("required_field")}
+                valueError={submitted && tokenBlank ? t("required_field") : undefined}
+                showErrors={submitted}
                 valueRef={tokenRef}
+                confirmationRef={confirmationRef}
               />
               <div className="flex items-center gap-2">
-                <Button
-                  disabled={!tokenValid || saveToken.isPending}
-                  onClick={() => saveToken.mutate()}
-                >
+                {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+                <Button aria-busy={saveToken.isPending || undefined} onClick={save}>
                   {saveToken.isPending ? t("loading") : t("save")}
                 </Button>
                 <Button variant="ghost" disabled={saveToken.isPending} onClick={stopEditing}>

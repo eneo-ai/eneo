@@ -84,11 +84,13 @@ function tenantModel(overrides: Partial<AdminModel>): AdminModel {
 
 function renderWizard({
   initialProviderId,
-  models = []
-}: { initialProviderId?: string; models?: AdminModel[] } = {}) {
+  models = [],
+  providersLoaded = true
+}: { initialProviderId?: string; models?: AdminModel[]; providersLoaded?: boolean } = {}) {
   api.GET.mockImplementation((path: string) => {
     if (path.endsWith("/models/")) return ok(liveModels);
     if (path.endsWith("/model-defaults/")) return ok({ error: "not found" });
+    if (path === "/api/v1/admin/model-providers/") return ok([existing]);
     return ok([]);
   });
   api.POST.mockImplementation((path: string) => {
@@ -97,7 +99,7 @@ function renderWizard({
     return ok({});
   });
   const queryClient = testQueryClient();
-  queryClient.setQueryData(PROVIDERS_KEY, [existing]);
+  if (providersLoaded) queryClient.setQueryData(PROVIDERS_KEY, [existing]);
   queryClient.setQueryData(CAPABILITIES_KEY, capabilities);
   queryClient.setQueryData(FAVORITES_KEY, []);
   queryClient.setQueryData(MODELS_KEY, {
@@ -245,12 +247,31 @@ describe("the add-provider wizard's credentials", () => {
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Välj en befintlig leverantör" }));
 
-    const picker = within(dialog).getByRole("combobox", { name: "Leverantör" });
+    const picker = within(dialog).getByRole("combobox", { name: /^Leverantör/ });
     // The step's first field, the provider picker.
     await waitFor(() => expect(document.activeElement).toBe(picker));
     expect(picker.textContent).toContain("Kommunens vLLM");
     fireEvent.click(within(dialog).getByRole("button", { name: "Nästa" }));
     expect(await within(dialog).findByRole("checkbox", { name: /gpt-5/ })).toBeTruthy();
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("asks for an existing provider at its picker instead of disabling Nästa", async () => {
+    // The providers arrive after the wizard opened: none is preselected.
+    const { dialog } = renderWizard({ providersLoaded: false });
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: "Välj en befintlig leverantör" })
+    );
+    const next = within(dialog).getByRole("button", { name: "Nästa" });
+    expect(next.hasAttribute("disabled")).toBe(false);
+
+    next.focus();
+    fireEvent.click(next);
+
+    const picker = within(dialog).getByRole("combobox", { name: /^Leverantör/ });
+    expect(document.activeElement).toBe(picker);
+    expect(within(dialog).getByText("Välj en leverantör.")).toBeTruthy();
+    expect(within(dialog).queryByRole("checkbox", { name: /gpt-5/ })).toBeNull();
     await expectNoAxeViolations(document.body);
   });
 });

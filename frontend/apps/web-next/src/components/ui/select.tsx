@@ -4,6 +4,7 @@ import * as React from "react";
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { Select as SelectPrimitive } from "radix-ui";
 
+import { useNonce } from "@/components/providers/nonce";
 import { FIELD_FOCUS_CLASSES } from "@/components/ui/input";
 import { usePortalContainer } from "@/components/ui/portal-container";
 import { cn } from "@/lib/utils";
@@ -55,6 +56,7 @@ function SelectContent({
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
   const container = usePortalContainer();
+  const nonce = useNonce();
   return (
     <SelectPrimitive.Portal container={container}>
       <SelectPrimitive.Content
@@ -70,7 +72,10 @@ function SelectContent({
         {...props}
       >
         <SelectScrollUpButton />
+        {/* The viewport injects a <style> (it hides its scrollbar): with the
+            nonce, or the production CSP blocks it. */}
         <SelectPrimitive.Viewport
+          nonce={nonce}
           className={cn(
             "p-1",
             position === "popper" &&
