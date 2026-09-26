@@ -341,6 +341,7 @@ Run from `frontend/apps/web-next`.
 | ESLint `jsx-a11y` (strict set)                       | Static markup errors: click handlers on divs, autofocus, invalid ARIA, labels | `bun run lint`, CI "Frontend (web-next)"         |
 | ESLint `eneo/no-literal-accessible-name`             | Literal `aria-label`, `alt`, `title`, `placeholder`, Astryx `label`/`tooltip` | `bun run lint`, CI "Frontend (web-next)"         |
 | ESLint `eneo/no-weak-focus-indicator`                | Translucent focus rings (`ring-ring/50`), `outline-none` without replacement  | `bun run lint`, CI "Frontend (web-next)"         |
+| ESLint `eneo/no-busy-disabled-button`                | Controls that disable themselves while busy (focus drops to the page)         | `bun run lint`, CI "Frontend (web-next)"         |
 | ESLint `no-restricted-imports` (`sonner`)            | Toasts that bypass `@/lib/toast` (and its no-timeout rule for errors)         | `bun run lint`, CI "Frontend (web-next)"         |
 | ESLint `eneo/no-raw-color`, `eneo/no-hardcoded-text` | Raw colours, untranslated text                                                | `bun run lint`, CI "Frontend (web-next)"         |
 | `src/theme/eneo-theme.contrast.test.ts`              | Token pairs below 4.5:1 (text) or 3:1 (non-text), light and dark              | `bun run test`, CI "Frontend (web-next)"         |
