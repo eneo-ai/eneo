@@ -12,7 +12,7 @@ vi.mock("@/components/providers/app-context", () => ({
     settings: {},
     user: { email: "anna@example.se", roles: [] },
     tenant: { name: "Sundsvall" },
-    versions: { frontend: "test", backend: "test" }
+    versions: { frontend: "0.1.0", backend: "2.3.0" }
   })
 }));
 
@@ -26,4 +26,14 @@ it("names the language picker by its row title (a combobox takes no name from it
   );
 
   expect(screen.getByRole("combobox", { name: "Språk" })).toBeTruthy();
+});
+
+it("shows the frontend's and the backend's version", () => {
+  render(
+    <NextIntlClientProvider locale="sv" messages={messages}>
+      <AccountProfile />
+    </NextIntlClientProvider>
+  );
+
+  expect(screen.getByText("Frontend 0.1.0 · Backend 2.3.0")).toBeTruthy();
 });
