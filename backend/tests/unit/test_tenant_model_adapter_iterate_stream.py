@@ -120,6 +120,7 @@ def _response_tool_call(tool_call_id: str, arguments: str):
 class _FakeMCPProxy:
     def __init__(self):
         self.calls = []
+        self.refreshed = []
 
     def get_allowed_tool_names(self):
         return {"server__tool"}
@@ -137,6 +138,11 @@ class _FakeMCPProxy:
             {"content": [{"type": "text", "text": "tool-ok"}], "is_error": False}
             for _ in proxy_calls
         ]
+
+    async def refresh_tools(self, touched_tool_names: list[str] | None = None) -> bool:
+        # A static tool set: re-listing after a round never changes it.
+        self.refreshed.append(touched_tool_names)
+        return False
 
 
 class _ResourceMCPProxy(_FakeMCPProxy):
@@ -1433,6 +1439,38 @@ async def _stream_rounds(rounds: list[list[SimpleNamespace]]):
             approval_context=None,
             pending_approval_ids=set(),
         )
+
+
+async def test_iterate_stream_refreshes_tools_after_each_tool_round():
+    mcp_proxy = _FakeMCPProxy()
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk(tool_call_id="call_1")],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+    follow_ups = [
+        _AsyncChunkStream([_tool_call_chunk(tool_call_id="call_2")]),
+        _AsyncChunkStream([_text_chunk("done", finish_reason="stop")]),
+    ]
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=follow_ups),
+    ):
+        await _collect(
+            _make_adapter(),
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    assert mcp_proxy.refreshed == [["server__tool"], ["server__tool"]]
 
 
 def _streamed_texts(completions) -> list[str]:
