@@ -1353,5 +1353,9 @@
   "your_invite_link": "Din inbjudningslänk",
   "your_session_expired": "Din session har gått ut",
   "zoom_in": "Zooma in",
-  "zoom_out": "Zooma ut"
+  "zoom_out": "Zooma ut",
+  "api_key_header_sent_as": "Skickas som en HTTP-header med API-nyckeln som värde, till exempel X-Api-Key: '<api-nyckel>'",
+  "confirm_remove_group": "Vill du verkligen ta bort gruppen ”{groupName}” från den här ytan? Gruppens medlemmar förlorar då den åtkomst de har genom gruppen.",
+  "generate_api_key_warning": "Vill du verkligen generera en ny API-nyckel? Dina befintliga API-nycklar fortsätter att fungera om du inte återkallar dem. Skriv ner den nya nyckeln när den visas – du kan inte hämta den från servern i efterhand.",
+  "will_be_sent_as_bearer": "Skickas som: Authorization: Bearer '<token>'"
 }

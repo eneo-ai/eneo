@@ -93,12 +93,14 @@ cookie (default `sv`, also `en`). Catalogs in `src/lib/i18n/messages/` are
 generated from the SvelteKit app's Paraglide catalogs:
 
 ```bash
-node scripts/convert-paraglide-messages.mjs
+bun run i18n:convert
 ```
 
 The script flags messages that need manual ICU review; do not edit the
-generated catalogs by hand.
+generated catalogs by hand. Add web-next-only strings (and web-next wording of
+an apps/web string) to `src/lib/i18n/extra/{sv,en}.json`, then regenerate.
 
 `bun run lint` runs `scripts/check-i18n.mjs`, which fails when `sv`/`en` drift
-apart or when a literal `t("key")` call is missing from the generated catalogs.
-Add web-next-only strings to `src/lib/i18n/extra/{sv,en}.json`, then regenerate.
+apart, when a literal `t("key")` call is missing from the generated catalogs,
+or when the catalogs differ from what the converter writes (a hand edit, or
+apps/web's catalogs changed since the last run): regenerate to fix it.

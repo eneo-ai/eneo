@@ -129,8 +129,8 @@ export async function unwrap<T>(
  * Backend error code → i18n message key. Mirrors the SvelteKit app's
  * getErrorMessage mapping; codes without an entry fall back to the backend's
  * English message. When the backend adds a code, add the `eneo_error_{code}`
- * key to src/lib/i18n/extra/{en,sv}.json (or the Svelte catalogs) and the
- * entry below.
+ * key to src/lib/i18n/extra/{en,sv}.json (or the Svelte catalogs), run
+ * `bun run i18n:convert`, and add the entry below.
  */
 const ERROR_MESSAGE_KEYS: Record<number, string> = {
   // Authorization & authentication
