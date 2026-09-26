@@ -1,4 +1,5 @@
-// IndexedDB-backed segment ledger with memory fallback when Blob round-trip fails.
+// IndexedDB-backed segment ledger. Memory holds only the parts IndexedDB could not
+// store (a failed write or Blob round trip), and every read combines the two.
 
 import type { RecordingStopReason } from "./recordedAudioFile";
 
@@ -45,13 +46,9 @@ export type StoreMode = "indexeddb" | "memory";
 
 class RecordingSessionStoreImpl {
   private db: IDBDatabase | null = null;
-  private mode: StoreMode = "indexeddb";
+  // Parts IndexedDB could not store, by composite key; nothing that it holds.
   private memoryFallback = new Map<string, SegmentRecord>();
   private openPromise: Promise<IDBDatabase | null> | null = null;
-
-  get currentMode(): StoreMode {
-    return this.mode;
-  }
 
   private isBrowser(): boolean {
     return typeof indexedDB !== "undefined" && typeof window !== "undefined";
@@ -71,14 +68,11 @@ class RecordingSessionStoreImpl {
   }
 
   private async openDb(): Promise<IDBDatabase | null> {
-    if (!this.isBrowser()) {
-      this.mode = "memory";
-      return null;
-    }
+    if (!this.isBrowser()) return null;
     if (this.db) return this.db;
     if (this.openPromise) return this.openPromise;
 
-    this.openPromise = new Promise<IDBDatabase | null>((resolve) => {
+    const opening = new Promise<IDBDatabase | null>((resolve) => {
       try {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
         request.onupgradeneeded = () => {
@@ -90,28 +84,32 @@ class RecordingSessionStoreImpl {
           }
         };
         request.onsuccess = () => {
-          this.db = request.result;
-          this.mode = "indexeddb";
+          // A blocked attempt can still open after a later one did: keep one connection.
+          if (this.db) request.result.close();
+          else this.db = request.result;
           resolve(this.db);
         };
         request.onerror = () => {
           console.warn("RecordingSessionStore: indexedDB.open failed", request.error);
-          this.mode = "memory";
           resolve(null);
         };
         request.onblocked = () => {
           console.warn("RecordingSessionStore: indexedDB.open blocked, using memory");
-          this.mode = "memory";
           resolve(null);
         };
       } catch (error) {
         console.warn("RecordingSessionStore: indexedDB.open threw, using memory", error);
-        this.mode = "memory";
         resolve(null);
       }
     });
 
-    return this.openPromise;
+    // A failed attempt is not kept: the next write tries IndexedDB again rather than
+    // keeping the rest of a long recording in memory.
+    this.openPromise = opening;
+    void opening.then((db) => {
+      if (db === null && this.openPromise === opening) this.openPromise = null;
+    });
+    return opening;
   }
 
   // Round-trip-verifying write: some browsers persist a *reference* to the
@@ -125,41 +123,24 @@ class RecordingSessionStoreImpl {
       record.sessionId,
       record.segmentIndex
     );
-    const expectedSize = record.blob.size;
-
-    this.memoryFallback.set(compositeKey, record);
-
-    const db = await this.openDb();
-    if (db === null || this.mode === "memory") {
-      return { persisted: false, mode: "memory" };
-    }
-
-    try {
-      await this.runTransaction("readwrite", (store) => {
-        store.put({ ...record, compositeKey });
-      });
-    } catch (error) {
-      console.warn("RecordingSessionStore: write failed, falling back to memory", error);
-      this.mode = "memory";
-      return { persisted: false, mode: "memory" };
-    }
-
-    try {
-      const verified = await this.verifyRoundTrip(compositeKey, expectedSize);
-      if (!verified) {
+    if ((await this.openDb()) !== null) {
+      try {
+        await this.runTransaction("readwrite", (store) => {
+          store.put({ ...record, compositeKey });
+        });
+        if (await this.verifyRoundTrip(compositeKey, record.blob.size)) {
+          this.memoryFallback.delete(compositeKey);
+          return { persisted: true, mode: "indexeddb" };
+        }
         console.warn(
-          "RecordingSessionStore: Blob round-trip verification failed, falling back to memory"
+          "RecordingSessionStore: Blob round-trip verification failed, keeping it in memory"
         );
-        this.mode = "memory";
-        return { persisted: false, mode: "memory" };
+      } catch (error) {
+        console.warn("RecordingSessionStore: write failed, keeping it in memory", error);
       }
-    } catch (error) {
-      console.warn("RecordingSessionStore: round-trip verify threw, falling back to memory", error);
-      this.mode = "memory";
-      return { persisted: false, mode: "memory" };
     }
-
-    return { persisted: true, mode: "indexeddb" };
+    this.memoryFallback.set(compositeKey, record);
+    return { persisted: false, mode: "memory" };
   }
 
   private async verifyRoundTrip(compositeKey: string, expectedSize: number): Promise<boolean> {
@@ -190,40 +171,8 @@ class RecordingSessionStoreImpl {
   }
 
   async readSession(flowId: string, stepId: string, sessionId: string): Promise<SegmentRecord[]> {
-    const prefix = this.sessionPrefix(flowId, stepId, sessionId);
-
-    if (this.mode === "memory" || (await this.openDb()) === null) {
-      return Array.from(this.memoryFallback.values())
-        .filter((r) => r.flowId === flowId && r.stepId === stepId && r.sessionId === sessionId)
-        .sort((a, b) => a.segmentIndex - b.segmentIndex);
-    }
-
-    try {
-      return await this.runTransaction("readonly", (store) => {
-        return new Promise<SegmentRecord[]>((resolve, reject) => {
-          const results: SegmentRecord[] = [];
-          const range = IDBKeyRange.bound(prefix, prefix + "￿");
-          const request = store.openCursor(range);
-          request.onsuccess = () => {
-            const cursor = request.result;
-            if (cursor) {
-              const value = cursor.value as SegmentRecord & { compositeKey: string };
-              const { compositeKey: _drop, ...rest } = value;
-              results.push(rest);
-              cursor.continue();
-            } else {
-              results.sort((a, b) => a.segmentIndex - b.segmentIndex);
-              resolve(results);
-            }
-          };
-          request.onerror = () => reject(request.error);
-        });
-      });
-    } catch (error) {
-      console.warn("RecordingSessionStore: readSession failed, using memory", error);
-      this.mode = "memory";
-      return this.readSession(flowId, stepId, sessionId);
-    }
+    const records = await this.readRange(this.sessionPrefix(flowId, stepId, sessionId));
+    return records.sort((a, b) => a.segmentIndex - b.segmentIndex);
   }
 
   async patchUploadedFileId(
@@ -239,7 +188,7 @@ class RecordingSessionStoreImpl {
       this.memoryFallback.set(compositeKey, { ...memoryRecord, uploadedFileId });
     }
 
-    if (this.mode === "memory" || (await this.openDb()) === null) return;
+    if ((await this.openDb()) === null) return;
 
     try {
       await this.runTransaction("readwrite", (store) => {
@@ -281,7 +230,7 @@ class RecordingSessionStoreImpl {
     const compositeKey = this.compositeKey(flowId, stepId, sessionId, match.segmentIndex);
     this.memoryFallback.delete(compositeKey);
 
-    if (this.mode === "memory" || (await this.openDb()) === null) return true;
+    if ((await this.openDb()) === null) return true;
 
     try {
       await this.runTransaction("readwrite", (store) => {
@@ -297,25 +246,21 @@ class RecordingSessionStoreImpl {
     return true;
   }
 
+  // Rejects when IndexedDB could not delete the stored parts; the parts only memory
+  // holds are then kept too, so the whole session stays for another try.
   async deleteSession(flowId: string, stepId: string, sessionId: string): Promise<void> {
     const prefix = this.sessionPrefix(flowId, stepId, sessionId);
-    for (const key of Array.from(this.memoryFallback.keys())) {
-      if (key.startsWith(prefix)) this.memoryFallback.delete(key);
-    }
-
-    if (this.mode === "memory" || (await this.openDb()) === null) return;
-
-    try {
+    if ((await this.openDb()) !== null) {
       await this.runTransaction("readwrite", (store) => {
         return new Promise<void>((resolve, reject) => {
-          const range = IDBKeyRange.bound(prefix, prefix + "￿");
-          const request = store.delete(range);
+          const request = store.delete(IDBKeyRange.bound(prefix, prefix + "\uffff"));
           request.onsuccess = () => resolve();
           request.onerror = () => reject(request.error);
         });
       });
-    } catch (error) {
-      console.warn("RecordingSessionStore: deleteSession failed", error);
+    }
+    for (const key of Array.from(this.memoryFallback.keys())) {
+      if (key.startsWith(prefix)) this.memoryFallback.delete(key);
     }
   }
 
@@ -325,8 +270,7 @@ class RecordingSessionStoreImpl {
     now: number = Date.now()
   ): Promise<SessionRecoveryHint[]> {
     const cutoff = now - SESSION_TTL_MS;
-    const segments = await this._readAllSegments(flowId, stepId);
-    if (segments === null) return [];
+    const segments = await this.readRange(`${flowId}::${stepId}::`);
 
     // Group first, then decide expiry per session — never list and delete
     // the same session in one pass, and never expire a multi-hour session
@@ -347,7 +291,9 @@ class RecordingSessionStoreImpl {
       // long recording that's still rotating doesn't get pruned even when
       // its earliest segments are old.
       if (latestCapturedAt < cutoff) {
-        void this.deleteSession(flowId, stepId, sessionId);
+        void this.deleteSession(flowId, stepId, sessionId).catch((error) =>
+          console.warn("RecordingSessionStore: an expired session could not be deleted", error)
+        );
         continue;
       }
       const totalDurationMs = list.reduce((sum, s) => sum + (s.durationMs || 0), 0);
@@ -375,102 +321,38 @@ class RecordingSessionStoreImpl {
     return hints;
   }
 
-  async cleanupExpired(now: number = Date.now()): Promise<number> {
-    const cutoff = now - SESSION_TTL_MS;
-
-    // We can't trust the `by_capturedAt` index for cleanup because it
-    // would delete individual old segments inside an otherwise-fresh
-    // session, leaving a partial recording with holes. Group every
-    // segment by (flowId, stepId, sessionId) first and only delete the
-    // session if its latest activity is past cutoff.
-    type SessionKey = string;
-    const sessionKey = (s: SegmentRecord): SessionKey => `${s.flowId}::${s.stepId}::${s.sessionId}`;
-    const latestPerSession = new Map<
-      SessionKey,
-      { flowId: string; stepId: string; sessionId: string; latestCapturedAt: number }
-    >();
-    const visit = (record: SegmentRecord) => {
-      const key = sessionKey(record);
-      const prior = latestPerSession.get(key);
-      if (!prior || record.capturedAt > prior.latestCapturedAt) {
-        latestPerSession.set(key, {
-          flowId: record.flowId,
-          stepId: record.stepId,
-          sessionId: record.sessionId,
-          latestCapturedAt: record.capturedAt
-        });
-      }
-    };
-    for (const record of this.memoryFallback.values()) visit(record);
-
-    if (this.mode !== "memory") {
-      const db = await this.openDb();
-      if (db !== null) {
-        try {
-          await this.runTransaction("readonly", (store) => {
-            return new Promise<void>((resolve, reject) => {
-              const request = store.openCursor();
-              request.onsuccess = () => {
-                const cursor = request.result;
-                if (cursor) {
-                  const value = cursor.value as SegmentRecord & { compositeKey: string };
-                  const { compositeKey: _drop, ...rest } = value;
-                  visit(rest);
-                  cursor.continue();
-                } else {
-                  resolve();
-                }
-              };
-              request.onerror = () => reject(request.error);
-            });
-          });
-        } catch (error) {
-          console.warn("RecordingSessionStore: cleanupExpired walk failed", error);
-        }
-      }
-    }
-
-    let removed = 0;
-    for (const session of latestPerSession.values()) {
-      if (session.latestCapturedAt >= cutoff) continue;
-      const before = this.memoryFallback.size;
-      await this.deleteSession(session.flowId, session.stepId, session.sessionId);
-      removed += before - this.memoryFallback.size;
-    }
-    return removed;
-  }
-
-  private async _readAllSegments(flowId: string, stepId: string): Promise<SegmentRecord[] | null> {
-    if (this.mode === "memory" || (await this.openDb()) === null) {
-      return Array.from(this.memoryFallback.values()).filter(
-        (r) => r.flowId === flowId && r.stepId === stepId
-      );
-    }
-    try {
-      return await this.runTransaction("readonly", (store) => {
-        return new Promise<SegmentRecord[]>((resolve, reject) => {
-          const results: SegmentRecord[] = [];
-          const prefix = `${flowId}::${stepId}::`;
-          const range = IDBKeyRange.bound(prefix, prefix + "￿");
-          const request = store.openCursor(range);
+  // Every part whose composite key starts with `prefix`: the stored ones and the ones
+  // only memory holds (memory wins for the same key). A read IndexedDB started but could
+  // not finish rejects: stored parts have no copy in memory, so part of a recording must
+  // not pass for all of it. When IndexedDB does not open, this tab stored nothing there,
+  // and memory holds everything it recorded.
+  private async readRange(prefix: string): Promise<SegmentRecord[]> {
+    const db = await this.openDb();
+    const byKey = new Map<string, SegmentRecord>();
+    if (db !== null) {
+      await this.runTransaction("readonly", (store) => {
+        return new Promise<void>((resolve, reject) => {
+          const request = store.openCursor(IDBKeyRange.bound(prefix, prefix + "\uffff"));
           request.onsuccess = () => {
             const cursor = request.result;
             if (cursor) {
-              const value = cursor.value as SegmentRecord & { compositeKey: string };
-              const { compositeKey: _drop, ...rest } = value;
-              results.push(rest);
+              const { compositeKey, ...rest } = cursor.value as SegmentRecord & {
+                compositeKey: string;
+              };
+              byKey.set(compositeKey, rest);
               cursor.continue();
             } else {
-              resolve(results);
+              resolve();
             }
           };
           request.onerror = () => reject(request.error);
         });
       });
-    } catch (error) {
-      console.warn("RecordingSessionStore: _readAllSegments failed", error);
-      return null;
     }
+    for (const [key, record] of this.memoryFallback) {
+      if (key.startsWith(prefix)) byKey.set(key, record);
+    }
+    return [...byKey.values()];
   }
 
   private async runTransaction<T>(
@@ -532,8 +414,11 @@ class RecordingSessionStoreImpl {
     this.db?.close();
     this.db = null;
     this.openPromise = null;
-    this.mode = "indexeddb";
     this.memoryFallback.clear();
+  }
+
+  __unpersistedCountForTests(): number {
+    return this.memoryFallback.size;
   }
 }
 

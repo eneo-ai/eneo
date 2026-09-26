@@ -24,13 +24,14 @@ import {
   liveSession
 } from "$lib/features/audio/live/liveTranscriptTestFakes";
 import type { SegmentRecord, SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
+import { toast } from "$lib/components/toast";
 import { m } from "$lib/paraglide/messages";
 import FlowRunDialog from "./FlowRunDialog.svelte";
 
 const recordingMocks = vi.hoisted(() => ({
   markSegmentUploaded: vi.fn(async () => undefined),
   persistRecordingSegment: vi.fn(async () => ({ degraded: false })),
-  purgeSession: vi.fn(async () => undefined),
+  purgeSession: vi.fn(async () => true),
   readSessionRecords: vi.fn(async () => []),
   scanRecoverableSessionsForSteps: vi.fn(async () => ({}))
 }));
@@ -128,7 +129,7 @@ afterEach(async () => {
 beforeEach(() => {
   vi.mocked(markSegmentUploaded).mockReset().mockResolvedValue(undefined);
   vi.mocked(persistRecordingSegment).mockReset().mockResolvedValue({ degraded: false });
-  vi.mocked(purgeSession).mockReset().mockResolvedValue(undefined);
+  vi.mocked(purgeSession).mockReset().mockResolvedValue(true);
   vi.mocked(readSessionRecords).mockReset().mockResolvedValue([]);
   vi.mocked(scanRecoverableSessionsForSteps).mockReset().mockResolvedValue({});
 });
@@ -690,6 +691,42 @@ describe("FlowRunDialog recording upload reconciliation", () => {
     await waitFor(() => expect(readSessionRecords).toHaveBeenCalledOnce());
     expect(upload).not.toHaveBeenCalled();
     expect(markSegmentUploaded).not.toHaveBeenCalled();
+  });
+
+  it("says so when the saved recording cannot be read, and keeps the offer to try again", async () => {
+    const upload = vi.fn(async () => uploadedFile("should-not-upload", "recording.webm"));
+    vi.mocked(scanRecoverableSessionsForSteps).mockResolvedValue({
+      "step-audio": [recoveryHint()]
+    });
+    vi.mocked(readSessionRecords).mockRejectedValueOnce(new Error("IndexedDB read failed"));
+
+    renderDialog(buildEneo({ upload }));
+    await fireEvent.click(
+      await screen.findByRole("button", { name: m.recording_resume_continue_recording() })
+    );
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(m.recording_resume_read_failed()));
+    expect(upload).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: m.recording_resume_continue_recording() })
+    ).toBeTruthy();
+  });
+
+  it("keeps the offer when a discard could not reach the saved recording, so it can be tried again", async () => {
+    vi.mocked(scanRecoverableSessionsForSteps).mockResolvedValue({
+      "step-audio": [recoveryHint()]
+    });
+    vi.mocked(purgeSession).mockResolvedValueOnce(false);
+
+    renderDialog(buildEneo({ upload: vi.fn() }));
+    await fireEvent.click(
+      await screen.findByRole("button", { name: m.recording_resume_discard() })
+    );
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(m.recording_resume_discard_failed())
+    );
+    expect(screen.getByRole("button", { name: m.recording_resume_discard() })).toBeTruthy();
   });
 
   it("submits with the idempotency key derived from the uploaded-file intent", async () => {

@@ -44,7 +44,7 @@ import FlowRunDialog from "./FlowRunDialog.svelte";
 const recordingMocks = vi.hoisted(() => ({
   markSegmentUploaded: vi.fn(async () => undefined),
   persistRecordingSegment: vi.fn(async () => ({ degraded: false })),
-  purgeSession: vi.fn(async () => undefined),
+  purgeSession: vi.fn(async () => true),
   readSessionRecords: vi.fn(async () => []),
   scanRecoverableSessionsForSteps: vi.fn(async () => ({}))
 }));
@@ -89,7 +89,7 @@ beforeEach(() => {
   media = installFakeMedia();
   vi.mocked(markSegmentUploaded).mockReset().mockResolvedValue(undefined);
   vi.mocked(persistRecordingSegment).mockReset().mockResolvedValue({ degraded: false });
-  vi.mocked(purgeSession).mockReset().mockResolvedValue(undefined);
+  vi.mocked(purgeSession).mockReset().mockResolvedValue(true);
   vi.mocked(readSessionRecords).mockReset().mockResolvedValue([]);
   vi.mocked(scanRecoverableSessionsForSteps).mockReset().mockResolvedValue({});
 });

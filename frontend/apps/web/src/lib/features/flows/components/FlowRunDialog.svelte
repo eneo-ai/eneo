@@ -27,7 +27,10 @@
     type RecordingSessionDeps,
     type SessionState
   } from "$lib/features/audio/recordingSession";
-  import type { SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
+  import type {
+    SegmentRecord,
+    SessionRecoveryHint
+  } from "$lib/features/audio/recordingSessionStore";
   import { LiveTranscriptPreview } from "$lib/features/audio/live/LiveTranscriptPreview.svelte";
   import {
     buildContractSnapshotFromStep,
@@ -1143,7 +1146,16 @@
     const operationFlowId = flow.id;
     if (!fileInputState.beginResumeAction(stepId)) return;
     try {
-      const records = await readSessionRecords(operationFlowId, stepId, hint.sessionId);
+      let records: SegmentRecord[];
+      try {
+        records = await readSessionRecords(operationFlowId, stepId, hint.sessionId);
+      } catch (error) {
+        // The prompt stays: nothing was attached or dropped, so Continue can try again.
+        console.warn("FlowRunDialog: the saved recording could not be read", error);
+        if (!isStale(operationGeneration, operationFlowId))
+          toast.error(m.recording_resume_read_failed());
+        return;
+      }
       if (isStale(operationGeneration, operationFlowId)) return;
       if (records.length === 0) {
         fileInputState.dismissResumePrompt();
@@ -1210,9 +1222,16 @@
     const operationFlowId = flow.id;
     if (!fileInputState.beginResumeAction(stepId)) return;
     try {
-      await purgeSession({ eneo, flowId: operationFlowId, stepId, sessionId: hint.sessionId });
+      const purged = await purgeSession({
+        eneo,
+        flowId: operationFlowId,
+        stepId,
+        sessionId: hint.sessionId
+      });
       if (isStale(operationGeneration, operationFlowId)) return;
-      fileInputState.discardRecoveredSession(stepId);
+      // Kept on a failed read or delete: the recording is still stored, and Discard can try again.
+      if (purged) fileInputState.discardRecoveredSession(stepId);
+      else toast.error(m.recording_resume_discard_failed());
     } finally {
       if (!isStale(operationGeneration, operationFlowId)) {
         fileInputState.finishResumeAction();

@@ -215,16 +215,17 @@ export async function scanRecoverableSessionsForSteps(args: {
   return collected;
 }
 
-// Best-effort: deletes server-side files for every uploaded segment of
-// this session, then drops the IDB ledger. Errors are logged but do
-// not abort — the orphan janitor sweeps any survivors within 24 h, so
-// individual delete failures are not load-bearing.
+// Deletes server-side files for every uploaded segment of this session,
+// then drops the IDB ledger. A failed server delete is logged and does not
+// abort (the orphan janitor sweeps survivors within 24 h). Returns false
+// when the ledger could not be read or dropped: the session is still there
+// and discarding it can be tried again.
 export async function purgeSession(args: {
   eneo: Eneo;
   flowId: string;
   stepId: string;
   sessionId: string;
-}): Promise<void> {
+}): Promise<boolean> {
   try {
     const records = await recordingSessionStore.readSession(
       args.flowId,
@@ -244,8 +245,10 @@ export async function purgeSession(args: {
       }
     }
     await recordingSessionStore.deleteSession(args.flowId, args.stepId, args.sessionId);
+    return true;
   } catch (error) {
     console.warn("flowRunRecordingSession.purgeSession failed", error);
+    return false;
   }
 }
 
