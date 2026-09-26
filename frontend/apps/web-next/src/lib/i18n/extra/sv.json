@@ -1193,7 +1193,7 @@
   "server_type": "Servertyp",
   "service_description": "Tjänstbeskrivning",
   "service_name": "Tjänstnamn",
-  "session": "session",
+  "session": "Session",
   "set_as_default": "Ange som standard",
   "set_as_default_model": "Ange som standardmodell",
   "share": "Dela",
@@ -1379,5 +1379,6 @@
   "feedback_summary_title": "Återkoppling på svar",
   "feedback_good_answers": "Bra svar",
   "feedback_bad_answers": "Dåliga svar",
-  "ui_more_actions_for": "Fler åtgärder för {name}"
+  "ui_more_actions_for": "Fler åtgärder för {name}",
+  "insights_session_from": "Session från {time}"
 }

@@ -106,8 +106,21 @@ describe("AssistantInsightsPage", () => {
     expect(history.getAttribute("aria-controls")).toBe(historyPanel.id);
     const table = await within(historyPanel).findByRole("table", { name: "Frågehistorik" });
     expect(within(table).getByText("Hur lång är avtalstiden?")).toBeTruthy();
-    const session = within(table).getAllByRole("link", { name: "session" })[0];
-    expect(session?.getAttribute("href")).toBe("/dashboard/assistant-1/session-1");
+    // Every row links to its conversation; the link's name says which one by
+    // the question's time, as the row's Skapad cell writes it.
+    const rows = within(table).getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(2);
+    const sessions = rows.map((row) => {
+      const time = within(row).getAllByRole("cell")[0]!.textContent!;
+      expect(time).toMatch(/2026/);
+      const link = within(row).getByRole("link", { name: `Session från ${time}` });
+      expect(link.textContent).toBe("Session");
+      return link.getAttribute("href");
+    });
+    expect(sessions.sort()).toEqual([
+      "/dashboard/assistant-1/session-1",
+      "/dashboard/assistant-1/session-2"
+    ]);
     await expectNoAxeViolations(container);
 
     // Back to the analysis: the question typed there is still there.
