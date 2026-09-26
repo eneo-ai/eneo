@@ -101,4 +101,28 @@ describe("admin skill runtime policy", () => {
     );
     expect(await screen.findByText("skills_runtime_policy_reset_done")).toBeTruthy();
   });
+
+  it("names the model impact table by its heading", async () => {
+    get.mockImplementation((path: string) =>
+      path.endsWith("model-projections")
+        ? ok({
+            context_share_percent: 20,
+            models: [
+              {
+                completion_model_id: "model-1",
+                name: "gpt-5",
+                nickname: null,
+                max_input_tokens: 400_000,
+                skill_context_token_allowance: 80_000,
+                supports_tool_calling: true
+              }
+            ]
+          })
+        : ok(policy)
+    );
+    show();
+
+    const table = await screen.findByRole("table", { name: "skills_runtime_models_title" });
+    expect(within(table).getByText("gpt-5")).toBeTruthy();
+  });
 });

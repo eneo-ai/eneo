@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { type Dispatch, type SetStateAction, useMemo, useState } from "react";
+import { type Dispatch, type SetStateAction, useId, useMemo, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -267,6 +267,7 @@ function ModelBreakdownTable({
 }) {
   const t = useTranslations();
   const unknown = t("unknown");
+  const headingId = useId();
 
   if (data.models.length === 0) {
     return (
@@ -281,8 +282,10 @@ function ModelBreakdownTable({
 
   return (
     <Card className="flex flex-col gap-4 p-4">
-      <h2 className="font-semibold">{t("usage_complete_model_breakdown")}</h2>
-      <Table>
+      <h2 id={headingId} className="font-semibold">
+        {t("usage_complete_model_breakdown")}
+      </h2>
+      <Table aria-labelledby={headingId}>
         <TableHeader>
           <TableRow>
             <TableHead>{t("model")}</TableHead>
