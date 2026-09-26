@@ -329,7 +329,9 @@ export function Composer({
   };
 
   return (
-    <div className="group/composer flex w-full flex-col gap-2">
+    // Toasts rise above the whole composer while focus is in it (toast-lift.ts),
+    // so Send stays in view while the user types.
+    <div className="group/composer flex w-full flex-col gap-2" data-clear-of-toasts="">
       <div className="relative" {...handlers}>
         <ChatComposer
           value={value}

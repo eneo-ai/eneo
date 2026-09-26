@@ -100,6 +100,16 @@ describe("Composer", () => {
     expect(onSubmit).toHaveBeenCalledTimes(2);
   });
 
+  it("is one group for the toasts to clear, so Send stays in view while the user types", () => {
+    renderComposer();
+    const textarea = screen.getByRole("textbox");
+    // src/components/ui/toast-lift.ts raises the toasts above the whole group.
+    const group = textarea.closest("[data-clear-of-toasts]");
+    expect(group).not.toBeNull();
+    expect(group?.contains(screen.getByRole("button", { name: "Skicka meddelande" }))).toBe(true);
+    expect(group?.contains(screen.getByRole("button", { name: "Bifoga filer" }))).toBe(true);
+  });
+
   it("turns send into a keyboard-reachable stop button while generating", () => {
     const onStop = vi.fn();
     const onSubmit = vi.fn();

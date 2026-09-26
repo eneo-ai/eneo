@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
+import { useRef } from "react";
 import { createPortal } from "react-dom";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
 // Sonner's styles ship as a same-origin stylesheet (allowed by style-src 'self').
@@ -16,6 +17,7 @@ import { Toaster as Sonner, type ToasterProps } from "sonner";
 // frontend/patches/sonner@*.patch.
 import "sonner/dist/styles.css";
 import { useLiveRegionsIn, useTopModalDialog } from "@/components/ui/open-modals";
+import { liftStyle, useToastLift } from "@/components/ui/toast-lift";
 import { TOAST_DURATION_MS } from "@/lib/toast";
 
 /**
@@ -30,15 +32,23 @@ import { TOAST_DURATION_MS } from "@/lib/toast";
  * toaster inside it shows the same toasts (sonner's store is shared) in the
  * dialog's layer, like the nested ToastViewport Astryx uses inside dialogs.
  * Astryx's own announcements (useAnnounce) move into it too.
+ *
+ * The toasts never cover what has keyboard focus (WCAG 2.4.11): while they
+ * would, they rise above it (toast-lift.ts).
  */
 const Toaster = ({ ...props }: ToasterProps) => {
   const t = useTranslations();
   const { theme = "system" } = useTheme();
   const modal = useTopModalDialog();
   useLiveRegionsIn(modal);
+  const pageToaster = useRef<HTMLElement>(null);
+  const modalToaster = useRef<HTMLElement>(null);
+  // The toaster in the top-most modal is the one on screen while one is open.
+  const lift = useToastLift(modal ? modalToaster : pageToaster, modal);
 
-  const toaster = (
+  const toaster = (ref: React.Ref<HTMLElement>) => (
     <Sonner
+      ref={ref}
       theme={theme as ToasterProps["theme"]}
       className="toaster group"
       containerAriaLabel={t("notifications")}
@@ -57,7 +67,8 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-bg": "var(--popover)",
           "--normal-text": "var(--popover-foreground)",
           "--normal-border": "var(--border)",
-          "--border-radius": "var(--radius)"
+          "--border-radius": "var(--radius)",
+          translate: liftStyle(lift)
         } as React.CSSProperties
       }
       {...props}
@@ -66,11 +77,11 @@ const Toaster = ({ ...props }: ToasterProps) => {
 
   return (
     <>
-      {toaster}
+      {toaster(pageToaster)}
       {modal
         ? createPortal(
             // Out of the dialog's layout; the toasts themselves are fixed.
-            <div className="absolute size-0">{toaster}</div>,
+            <div className="absolute size-0">{toaster(modalToaster)}</div>,
             modal
           )
         : null}
