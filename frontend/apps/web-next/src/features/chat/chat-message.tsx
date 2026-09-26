@@ -22,7 +22,7 @@ import { useAppContext } from "@/components/providers/app-context";
 import { resolveInrefs, trimPartialInref } from "@/lib/chat/inref";
 import type { EneoUIMessage, KnowledgeOrigin } from "@/lib/chat/types";
 
-import { deriveActivity } from "./activity";
+import { deriveActivity, modelName } from "./activity";
 import type { ActivityTab } from "./activity-panel";
 import { ActivityPill } from "./activity-pill";
 import type { TurnDurations } from "./activity-timings";
@@ -103,7 +103,7 @@ function ThinkingStatus() {
         aria-hidden="true"
         className="border-ax-accent size-3.5 animate-spin rounded-full border-2 border-t-transparent"
       />
-      {t("assistant_is_thinking")}…
+      {t("chat_assistant_thinking")}
     </span>
   );
 }
@@ -153,18 +153,6 @@ function AssistantName({
       )}
     </span>
   );
-}
-
-function modelOf(message: EneoUIMessage): string | null {
-  const model =
-    message.metadata?.completionModel ??
-    (() => {
-      const session = message.parts.find((part) => part.type === "data-session");
-      return session?.type === "data-session" ? session.data.completion_model : null;
-    })();
-  if (!model) return null;
-  const nickname = typeof model.nickname === "string" && model.nickname ? model.nickname : null;
-  return nickname ?? model.name ?? null;
 }
 
 function AnswerActions({
@@ -318,7 +306,7 @@ function AssistantMessage({
       name={
         <AssistantName
           assistant={assistant}
-          model={modelOf(message)}
+          model={modelName(message)}
           handle={showResponseLabel && answering ? answering.handle : null}
         />
       }
@@ -376,7 +364,7 @@ function AssistantMessage({
           <AnswerActions
             text={text}
             hasActivity={activity.hasActivity}
-            onShowActivity={(trigger) => onActivityToggle?.(trigger)}
+            onShowActivity={(trigger) => onActivityToggle?.(trigger, { tab: "steps" })}
             feedback={feedback}
             timestamp={message.metadata?.createdAt ?? durations?.finishedAt ?? null}
           />

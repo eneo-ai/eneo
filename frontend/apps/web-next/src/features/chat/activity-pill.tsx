@@ -30,7 +30,7 @@ export function ActivityPill({
   const live = currentStep(activity);
   const stepCount = activity.steps.length;
   const label = live
-    ? `${stepTitle(live, t)}…`
+    ? t("chat_activity_running_step", { step: stepTitle(live, t) })
     : [
         stepCount > 0 ? t("chat_activity_steps", { count: stepCount }) : null,
         durations?.totalMs != null ? formatSeconds(durations.totalMs, locale) : null,

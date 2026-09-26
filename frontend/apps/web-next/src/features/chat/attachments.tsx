@@ -10,7 +10,7 @@ import {
   Paperclip,
   X
 } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import {
   Dialog,
@@ -22,7 +22,7 @@ import {
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";
-import { formatFileSize } from "./format";
+import { formatBytes } from "@/lib/format";
 import type { Attachment } from "./use-attachments";
 
 /** A representative icon for an attachment, chosen from its mime type. */
@@ -202,7 +202,6 @@ export function ComposerAttachments({
   };
 }) {
   const t = useTranslations();
-  const locale = useLocale();
   const [preview, setPreview] = useState<PendingPreview | null>(null);
   const items = attachments.attachments;
 
@@ -256,7 +255,7 @@ export function ComposerAttachments({
                   {item.name}
                 </span>
                 <span className="text-ax-text-secondary text-xs tabular-nums">
-                  {formatFileSize(item.size, locale)} ·{" "}
+                  {formatBytes(item.size)} ·{" "}
                   {item.uploading ? t("chat_attachment_uploading") : t("chat_attachment_ready")}
                 </span>
               </span>

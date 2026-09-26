@@ -6,7 +6,6 @@ import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/Segme
 import { Check, ChevronDown, History, Menu, ShieldCheck, SquarePen } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import type { Ref } from "react";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { iconUrl } from "@/components/composites/icon-field";
 import {
@@ -16,14 +15,13 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
+import { OPEN_NAV_EVENT } from "@/components/shell/routes";
 import type { ChatPartner } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import type { ChatPartnerSwitcherItem } from "./partner-switcher";
 import { BrandMark } from "./start-state";
 
-/** Asks the app shell to open its navigation drawer (mobile). The shell listens for this event. */
-export const OPEN_NAV_EVENT = "eneo:open-nav";
-
+/** Asks the app shell to open its navigation drawer (phones). */
 function openAppNavigation() {
   window.dispatchEvent(new CustomEvent(OPEN_NAV_EVENT));
 }
@@ -200,12 +198,11 @@ export type ChatHeaderProps = {
   switcherItems?: ChatPartnerSwitcherItem[];
   /** Conversation title (the page's h1); null in the start state, whose greeting is the h1. */
   title: string | null;
-  /** Model shown under the name on phones ("space · model"). */
+  /** A fixed model, shown under the partner's name ("space · model"). */
   modelName?: string | null;
   view?: { value: "chat" | "insights"; onChange: (value: "chat" | "insights") => void } | null;
   historyOpen: boolean;
   onToggleHistory: () => void;
-  historyButtonRef?: Ref<HTMLButtonElement>;
   onNewConversation: () => void;
   /** Session actions (rename, delete) and partner actions (edit). */
   menuItems: HeaderMenuItem[];
@@ -213,21 +210,10 @@ export type ChatHeaderProps = {
   minimal?: boolean;
 };
 
-function HistoryButton({
-  open,
-  onToggle,
-  buttonRef,
-  className
-}: {
-  open: boolean;
-  onToggle: () => void;
-  buttonRef?: Ref<HTMLButtonElement>;
-  className?: string;
-}) {
+function HistoryButton({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const t = useTranslations();
   return (
     <IconButton
-      ref={buttonRef}
       label={t("history")}
       tooltip={t("history")}
       icon={<History className="size-[18px]" />}
@@ -235,7 +221,7 @@ function HistoryButton({
       aria-expanded={open}
       aria-controls={open ? "chat-history" : undefined}
       onClick={onToggle}
-      className={cn(open && "bg-ax-selected", className)}
+      className={cn(open && "bg-ax-selected")}
     />
   );
 }
@@ -255,14 +241,12 @@ export function ChatHeader({
   view,
   historyOpen,
   onToggleHistory,
-  historyButtonRef,
   onNewConversation,
   menuItems,
   minimal = false
 }: ChatHeaderProps) {
   const t = useTranslations();
-  const subtitle = partner.spaceName ?? null;
-  const mobileSubtitle = [partner.spaceName, modelName].filter(Boolean).join(" · ") || null;
+  const subtitle = [partner.spaceName, modelName].filter(Boolean).join(" · ") || null;
   const mobileMenu: HeaderMenuItem[] = [
     { label: historyOpen ? t("chat_history_close") : t("history"), onClick: onToggleHistory },
     ...(view
@@ -326,11 +310,7 @@ export function ChatHeader({
             variant="ghost"
             onClick={onNewConversation}
           />
-          <HistoryButton
-            open={historyOpen}
-            onToggle={onToggleHistory}
-            buttonRef={historyButtonRef}
-          />
+          <HistoryButton open={historyOpen} onToggle={onToggleHistory} />
           {menuItems.length > 0 && (
             <MoreMenu label={t("chat_more_options")} items={menuItems} alignment="end" />
           )}
@@ -349,7 +329,7 @@ export function ChatHeader({
         <PartnerSwitcher
           partner={partner}
           items={switcherItems}
-          subtitle={mobileSubtitle}
+          subtitle={subtitle}
           variant="mobile"
         />
         {title !== null && <h1 className="sr-only">{title}</h1>}

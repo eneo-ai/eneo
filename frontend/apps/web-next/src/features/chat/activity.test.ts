@@ -149,7 +149,25 @@ describe("deriveActivity", () => {
     );
     const step = activity.steps[0]!;
     expect(step.kind === "tool" && step.references.map((ref) => ref.id)).toEqual(["ref-1"]);
-    expect(activity.sources[0]).toMatchObject({ title: "Policy", detail: "4, 9" });
+    expect(activity.sources[0]).toMatchObject({ title: "Policy", pageRange: "4, 9" });
+  });
+
+  it("never labels a section as a page range", () => {
+    const reference = {
+      id: "ref-2",
+      uri: "eneo://docs/policy",
+      content: "…",
+      tool_call_id: "call-1",
+      meta: { title: "Policy", section: "Avsnitt 4" }
+    };
+    const activity = deriveActivity(
+      assistant([
+        tool("call-1", "output-available"),
+        { type: "data-mcp-tool-references", data: { mcp_tool_references: [reference] } }
+      ])
+    );
+    expect(activity.sources[0]).toMatchObject({ pageRange: null });
+    expect(activity.sources[0]?.title).toContain("Avsnitt 4");
   });
 });
 

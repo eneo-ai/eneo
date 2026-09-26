@@ -3,7 +3,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
-import { ChatHeader, OPEN_NAV_EVENT } from "./chat-header";
+import { OPEN_NAV_EVENT } from "@/components/shell/routes";
+import { ChatHeader } from "./chat-header";
 import type { ChatPartnerSwitcherItem } from "./partner-switcher";
 import { ChatTestProviders, installDomPolyfills } from "./testing";
 
@@ -65,6 +66,12 @@ describe("ChatHeader", () => {
     expect(
       screen.getAllByRole("button", { name: /byt assistent: upphandlingsassistenten/i }).length
     ).toBeGreaterThan(0);
+  });
+
+  it("shows a fixed model under the partner's name on every width", () => {
+    renderHeader();
+    // Desktop header and phone header (only one is displayed).
+    expect(screen.getAllByText("Upphandling · Claude Haiku 4.5")).toHaveLength(2);
   });
 
   it("renders no heading in the start state (the greeting is the h1 there)", () => {

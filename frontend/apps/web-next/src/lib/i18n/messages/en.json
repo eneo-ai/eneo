@@ -5073,5 +5073,7 @@
   "chat_tool_accept_named": "Accept {tool}",
   "chat_tool_deny_named": "Deny {tool}",
   "chat_history_load_more": "Show more conversations",
-  "chat_insights_generating": "Generating insights…"
+  "chat_insights_generating": "Generating insights…",
+  "chat_activity_running_step": "{step}…",
+  "chat_assistant_thinking": "The assistant is thinking…"
 }

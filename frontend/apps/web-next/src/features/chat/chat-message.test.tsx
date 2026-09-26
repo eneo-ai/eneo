@@ -69,7 +69,7 @@ describe("ChatMessage", () => {
     const article = screen.getByRole("article", { name: "Ditt meddelande" });
     expect(within(article).getByText("Jämför policyn mot LOU.")).toBeTruthy();
     const file = within(article).getByRole("button", { name: /Upphandlingspolicy 2024\.pdf/ });
-    expect(file.textContent).toContain("184 kB");
+    expect(file.textContent).toContain("184.0 kB");
   });
 
   it("renders an answer: named by its sender, with model, activity pill, table and citation", () => {
@@ -91,6 +91,24 @@ describe("ChatMessage", () => {
     const pill = within(article).getByRole("button", { name: /aktivitet: .*1 källa/i });
     fireEvent.click(pill);
     expect(onActivityToggle).toHaveBeenLastCalledWith(pill);
+  });
+
+  it("opens the activity from the more menu, even when it is already open", async () => {
+    const onActivityToggle = vi.fn();
+    renderMessages(
+      <ChatMessage
+        message={answer}
+        assistant={assistant}
+        activityExpanded
+        onActivityToggle={onActivityToggle}
+      />
+    );
+    const more = screen.getByRole("button", { name: "Fler åtgärder" });
+    fireEvent.click(more);
+    const menu = document.getElementById(more.getAttribute("aria-controls") ?? "")!;
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Visa aktivitet" }));
+    // With a tab the panel opens or switches; without one the pill's toggle would close it.
+    expect(onActivityToggle).toHaveBeenCalledWith(more, { tab: "steps" });
   });
 
   it("offers copy and more actions; thumbs only for the latest answer", () => {

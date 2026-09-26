@@ -53,8 +53,8 @@ export type ActivityStep =
 export type ActivitySource = SourceChip & {
   /** Where the source lives: collection/website name or web host. */
   origin: string | null;
-  /** Page range or section, when the reference carries one. */
-  detail: string | null;
+  /** The pages it was cited from, when the reference says ("4, 9"). */
+  pageRange: string | null;
 };
 
 export type Activity = {
@@ -152,7 +152,8 @@ function knowledgeStep(
   return { kind: "knowledge", key: "knowledge", status: "done", hits: documents.length, origins };
 }
 
-function modelName(message: EneoUIMessage): string | null {
+/** The model that wrote an answer: its nickname, else its name. */
+export function modelName(message: EneoUIMessage): string | null {
   const fromMetadata = message.metadata?.completionModel;
   if (fromMetadata) {
     return asString(fromMetadata.nickname) ?? asString(fromMetadata.name);
@@ -186,12 +187,12 @@ function activitySources(
     const knowledgeName = document
       ? (byId.get(document.groupId ?? "") ?? byId.get(document.websiteId ?? "") ?? null)
       : null;
+    // A section is already part of an MCP source's title.
     const snippet = chip.mcpSnippet;
-    const detail = snippet?.pageRange ?? snippet?.section ?? null;
     return {
       ...chip,
       origin: knowledgeName ?? hostOf(chip.url) ?? hostOf(snippet?.uri) ?? null,
-      detail
+      pageRange: snippet?.pageRange ?? null
     };
   });
 }

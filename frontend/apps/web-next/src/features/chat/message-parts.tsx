@@ -3,7 +3,7 @@
 import { Button as AxButton } from "@astryxdesign/core/Button";
 import { useMutation } from "@tanstack/react-query";
 import { Download, ExternalLink, ShieldAlert, ShieldCheck, ShieldX } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { useId, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,7 +25,7 @@ import { asString, hostOf } from "@/lib/chat/metadata";
 import type { EneoUIMessage, SessionData, ToolApprovalData } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import { AttachmentPreviewDialog, FileTypeTile, useSignedUrl } from "./attachments";
-import { formatFileSize } from "./format";
+import { formatBytes } from "@/lib/format";
 
 type Part = EneoUIMessage["parts"][number];
 type McpToolReference = Schema<"McpToolReferencePublic">;
@@ -414,14 +414,11 @@ function FileTokenBody({
   mimetype: string;
   size?: number | null;
 }) {
-  const locale = useLocale();
   return (
     <>
       <FileTypeTile mimetype={mimetype} size="sm" />
       <span className="min-w-0 truncate font-semibold">{name}</span>
-      {size ? (
-        <span className="text-ax-text-secondary shrink-0">{formatFileSize(size, locale)}</span>
-      ) : null}
+      {size ? <span className="text-ax-text-secondary shrink-0">{formatBytes(size)}</span> : null}
     </>
   );
 }

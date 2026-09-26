@@ -51,7 +51,7 @@ export function SourceList({
         const number = index + 1;
         const meta = [
           source.origin,
-          source.detail ? t("mcp_resource_page_range", { pageRange: source.detail }) : null
+          source.pageRange ? t("mcp_resource_page_range", { pageRange: source.pageRange }) : null
         ]
           .filter(Boolean)
           .join(" · ");

@@ -1,4 +1,4 @@
-/** Locale-aware formatting for the chat (durations, timestamps, token counts, greetings). */
+/** Locale-aware formatting for the chat (durations, greetings, history buckets). */
 
 function intlLocale(locale: string): string {
   return locale === "sv" ? "sv-SE" : locale === "en" ? "en-GB" : locale;
@@ -48,16 +48,4 @@ export function historyBucket(date: Date, now: Date): HistoryBucket {
   if (diffDays < 7) return "week";
   if (diffDays < 30) return "month";
   return "older";
-}
-
-/** "184 kB", "1,2 MB" (Swedish decimal comma): file sizes for attachment tokens. */
-export function formatFileSize(bytes: number, locale: string): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  const units = ["B", "kB", "MB", "GB", "TB"];
-  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const value = bytes / 1024 ** exponent;
-  const formatted = new Intl.NumberFormat(intlLocale(locale), {
-    maximumFractionDigits: exponent <= 1 ? 0 : 1
-  }).format(value);
-  return `${formatted} ${units[exponent]}`;
 }

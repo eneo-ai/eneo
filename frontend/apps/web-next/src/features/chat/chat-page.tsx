@@ -286,7 +286,8 @@ export function ChatPage({
         partner={partner}
         switcherItems={switcherItems}
         title={effectiveTab === "insights" ? t("insights") : title}
-        modelName={partner.completionModel?.name ?? null}
+        // The personal assistant picks its model in the composer.
+        modelName={modelSelector ? null : (partner.completionModel?.name ?? null)}
         view={insightPartner ? { value: effectiveTab, onChange: selectTab } : null}
         historyOpen={historyOpen}
         onToggleHistory={toggleHistory}
