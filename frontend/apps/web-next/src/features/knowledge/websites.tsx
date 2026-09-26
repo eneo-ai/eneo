@@ -413,8 +413,12 @@ export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; lab
           }
           variant="primary"
           icon={<RefreshCw aria-hidden="true" />}
-          isDisabled={bulkRecrawl.isPending}
-          onClick={() => bulkRecrawl.mutate(selectedIds)}
+          // Busy, it stays enabled so it keeps focus; a second press is ignored.
+          isLoading={bulkRecrawl.isPending}
+          isInterruptible
+          onClick={() => {
+            if (!bulkRecrawl.isPending) bulkRecrawl.mutate(selectedIds);
+          }}
         />
       ) : null}
       {canCreate && selectedIds.length === 0 ? connectButton : null}

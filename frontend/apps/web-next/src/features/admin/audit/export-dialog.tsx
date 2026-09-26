@@ -180,10 +180,14 @@ export function ExportDialog({
               </Button>
             </>
           ) : running ? (
+            // Busy, a button stays enabled so it keeps focus; a second press is ignored.
             <Button
               variant="destructive"
-              disabled={cancel.isPending || !jobId}
-              onClick={() => cancel.mutate()}
+              disabled={!jobId}
+              aria-busy={cancel.isPending || undefined}
+              onClick={() => {
+                if (!cancel.isPending) cancel.mutate();
+              }}
             >
               {t("cancel")}
             </Button>
@@ -199,7 +203,12 @@ export function ExportDialog({
               <Button variant="outline" onClick={reset}>
                 {t("cancel")}
               </Button>
-              <Button disabled={start.isPending} onClick={() => start.mutate()}>
+              <Button
+                aria-busy={start.isPending || undefined}
+                onClick={() => {
+                  if (!start.isPending) start.mutate();
+                }}
+              >
                 {t("export")}
               </Button>
             </>

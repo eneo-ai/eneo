@@ -507,9 +507,12 @@ export function WebsiteDialog({
             <Button variant="outline" onClick={() => setExistingOnOrg(null)}>
               {t("go_back")}
             </Button>
+            {/* Closes this warning and creates; the form's own button shows the
+                busy state from there. A second press is ignored. */}
             <Button
-              disabled={save.isPending}
+              aria-busy={save.isPending || undefined}
               onClick={() => {
+                if (save.isPending) return;
                 setExistingOnOrg(null);
                 save.mutate();
               }}

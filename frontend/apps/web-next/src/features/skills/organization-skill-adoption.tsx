@@ -417,6 +417,7 @@ export function OrganizationSkillAdoption({
                 <Button
                   variant="outline"
                   size="sm"
+                  // eslint-disable-next-line eneo/no-busy-disabled-button -- a rollout runs in the background (its progress shows on the page); detaching waits for it.
                   disabled={rolloutRunning}
                   onClick={() => setAction("detach")}
                 >
@@ -544,8 +545,11 @@ export function OrganizationSkillAdoption({
             {bindings.hasNextPage && (
               <Button
                 variant="outline"
-                disabled={bindings.isFetchingNextPage}
-                onClick={() => void bindings.fetchNextPage()}
+                aria-busy={bindings.isFetchingNextPage || undefined}
+                onClick={() => {
+                  // Loading, it stays enabled so it keeps focus; a second press is ignored.
+                  if (!bindings.isFetchingNextPage) void bindings.fetchNextPage();
+                }}
               >
                 {bindings.isFetchingNextPage
                   ? t("organization_skills_adoption_loading_more")
@@ -622,9 +626,12 @@ export function OrganizationSkillAdoption({
           )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>{t("cancel")}</AlertDialogCancel>
+            {/* Busy, it stays enabled so it keeps focus; confirm() ignores a second press. */}
             <Button
               variant={action === "detach" ? "destructive" : "default"}
-              disabled={busy || rolloutRunning}
+              // eslint-disable-next-line eneo/no-busy-disabled-button -- a rollout runs in the background (its progress shows on the page); this change waits for it.
+              disabled={rolloutRunning}
+              aria-busy={busy || undefined}
               onClick={() => void confirm()}
             >
               {busy

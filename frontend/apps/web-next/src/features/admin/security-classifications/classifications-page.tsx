@@ -167,10 +167,13 @@ function EnableToggle({ enabled }: { enabled: boolean }) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={toggle.isPending}>{t("cancel")}</AlertDialogCancel>
+            {/* Busy, it stays enabled so it keeps focus; a second press is ignored. */}
             <Button
               variant={confirm === "disable" ? "destructive" : "default"}
-              disabled={toggle.isPending}
-              onClick={() => toggle.mutate(confirm === "enable")}
+              aria-busy={toggle.isPending || undefined}
+              onClick={() => {
+                if (!toggle.isPending) toggle.mutate(confirm === "enable");
+              }}
             >
               {confirm === "disable" ? t("disable") : t("enable")}
             </Button>

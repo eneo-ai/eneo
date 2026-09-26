@@ -281,19 +281,23 @@ function DeletedRow({ template, kind }: { template: TemplateRowData; kind: Templ
       </TableCell>
       <TableCell className="text-right">
         <div className="flex justify-end gap-2">
+          {/* Busy, Restore stays enabled so it keeps focus; a second press is
+              ignored. The delete confirmation stays open while it deletes, so
+              its trigger needs no busy state. */}
           <Button
             variant="outline"
             size="sm"
-            disabled={restore.isPending}
-            onClick={() => restore.mutate()}
+            aria-busy={restore.isPending || undefined}
+            onClick={() => {
+              if (!restore.isPending) restore.mutate();
+            }}
           >
-            <RotateCcw className="size-4" /> {t("restore")}
+            {!restore.isPending && <RotateCcw className="size-4" />} {t("restore")}
           </Button>
           <Button
             variant="ghost"
             size="icon"
             aria-label={t("delete_permanently")}
-            disabled={purge.isPending}
             onClick={() => setShowPurge(true)}
           >
             <Trash2 className="size-4" />

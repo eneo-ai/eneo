@@ -274,6 +274,10 @@ export function ToolApprovalCard({
   const t = useTranslations();
   const headingId = useId();
   const [decisions, setDecisions] = useState<Record<string, "approved" | "denied">>({});
+  // The button whose decision is being sent: busy, it stays enabled (Astryx
+  // isInterruptible) so it keeps focus, and presses while one is sent are
+  // ignored.
+  const [running, setRunning] = useState<string | null>(null);
 
   const submit = useMutation({
     mutationFn: (items: { tool_call_id: string; approved: boolean }[]) =>
@@ -293,15 +297,24 @@ export function ToolApprovalCard({
       });
       onResolved?.();
     },
-    onError: (error) => toastApiError(error, t)
+    onError: (error) => toastApiError(error, t),
+    onSettled: () => setRunning(null)
   });
 
   const timedOut = data.status === "timeout_denied";
   const pending = timedOut
     ? []
     : data.tools.filter((tool) => tool.tool_call_id && !decisions[tool.tool_call_id]);
+  function decide(control: string, items: { tool_call_id: string; approved: boolean }[]) {
+    if (running !== null || submit.isPending) return;
+    setRunning(control);
+    submit.mutate(items);
+  }
   const decideAll = (approved: boolean) =>
-    submit.mutate(pending.map((tool) => ({ tool_call_id: tool.tool_call_id ?? "", approved })));
+    decide(
+      approved ? "accept-all" : "deny-all",
+      pending.map((tool) => ({ tool_call_id: tool.tool_call_id ?? "", approved }))
+    );
 
   return (
     <section
@@ -356,9 +369,12 @@ export function ToolApprovalCard({
                     label={t("chat_tool_accept_named", { tool: name })}
                     variant="primary"
                     size="sm"
-                    isDisabled={submit.isPending}
+                    isLoading={running === `accept:${tool.tool_call_id}`}
+                    isInterruptible
                     onClick={() =>
-                      submit.mutate([{ tool_call_id: tool.tool_call_id ?? "", approved: true }])
+                      decide(`accept:${tool.tool_call_id}`, [
+                        { tool_call_id: tool.tool_call_id ?? "", approved: true }
+                      ])
                     }
                   >
                     {t("tool_accept")}
@@ -367,9 +383,12 @@ export function ToolApprovalCard({
                     label={t("chat_tool_deny_named", { tool: name })}
                     variant="secondary"
                     size="sm"
-                    isDisabled={submit.isPending}
+                    isLoading={running === `deny:${tool.tool_call_id}`}
+                    isInterruptible
                     onClick={() =>
-                      submit.mutate([{ tool_call_id: tool.tool_call_id ?? "", approved: false }])
+                      decide(`deny:${tool.tool_call_id}`, [
+                        { tool_call_id: tool.tool_call_id ?? "", approved: false }
+                      ])
                     }
                   >
                     {t("tool_deny")}
@@ -386,14 +405,16 @@ export function ToolApprovalCard({
             label={t("tool_accept_all", { count: pending.length })}
             variant="primary"
             size="sm"
-            isDisabled={submit.isPending}
+            isLoading={running === "accept-all"}
+            isInterruptible
             onClick={() => decideAll(true)}
           />
           <AxButton
             label={t("tool_deny_all")}
             variant="secondary"
             size="sm"
-            isDisabled={submit.isPending}
+            isLoading={running === "deny-all"}
+            isInterruptible
             onClick={() => decideAll(false)}
           />
         </div>

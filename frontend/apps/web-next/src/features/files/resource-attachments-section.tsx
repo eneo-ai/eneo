@@ -533,14 +533,15 @@ export function ResourceAttachmentsSection({
               variant="outline"
               size="sm"
               className="shrink-0"
-              disabled={uploading || atCapacity}
-              onClick={() => fileInput.current?.click()}
+              disabled={atCapacity}
+              // Uploading, it stays enabled so it keeps focus (the busy
+              // spinner replaces its icon); a press meanwhile is ignored.
+              aria-busy={uploading || undefined}
+              onClick={() => {
+                if (!uploading) fileInput.current?.click();
+              }}
             >
-              {uploading ? (
-                <Spinner size="sm" shade="inherit" aria-hidden />
-              ) : (
-                <Paperclip className="size-4" />
-              )}
+              {!uploading && <Paperclip className="size-4" />}
               {t("attach_files")}
             </Button>
           </div>

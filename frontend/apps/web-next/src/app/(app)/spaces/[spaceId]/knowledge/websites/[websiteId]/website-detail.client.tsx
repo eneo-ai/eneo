@@ -94,7 +94,13 @@ function SyncNowButton({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-            <Button disabled={createRun.isPending} onClick={() => createRun.mutate()}>
+            {/* Busy, it stays enabled so it keeps focus; a second press is ignored. */}
+            <Button
+              aria-busy={createRun.isPending || undefined}
+              onClick={() => {
+                if (!createRun.isPending) createRun.mutate();
+              }}
+            >
               {createRun.isPending ? t("starting") : t("start_crawl")}
             </Button>
           </AlertDialogFooter>

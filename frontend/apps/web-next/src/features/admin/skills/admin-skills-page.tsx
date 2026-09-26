@@ -256,7 +256,12 @@ function PolicyEditor({
                 : ""}
         </p>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" disabled={busy !== null} onClick={() => setResetOpen(true)}>
+          <Button
+            variant="outline"
+            // eslint-disable-next-line eneo/no-busy-disabled-button -- Reset only opens its confirmation, whose own button holds focus while resetting; it waits while Save runs.
+            disabled={busy !== null}
+            onClick={() => setResetOpen(true)}
+          >
             <RotateCcw className="size-4" />
             {t("skills_runtime_policy_reset")}
           </Button>

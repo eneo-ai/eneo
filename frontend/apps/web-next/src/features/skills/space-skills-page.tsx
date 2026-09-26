@@ -256,8 +256,11 @@ export function SpaceSkillsPage() {
             <Button
               variant="outline"
               className="self-center"
-              disabled={skills.isFetchingNextPage}
-              onClick={() => void skills.fetchNextPage()}
+              aria-busy={skills.isFetchingNextPage || undefined}
+              onClick={() => {
+                // Loading, it stays enabled so it keeps focus; a second press is ignored.
+                if (!skills.isFetchingNextPage) void skills.fetchNextPage();
+              }}
             >
               {skills.isFetchingNextPage ? t("loading") : t("load_more")}
             </Button>
@@ -295,7 +298,8 @@ export function SpaceSkillsPage() {
           )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>{t("cancel")}</AlertDialogCancel>
-            <Button variant="destructive" disabled={deleting} onClick={deleteSkill}>
+            {/* Busy, it stays enabled so it keeps focus; deleteSkill ignores a second press. */}
+            <Button variant="destructive" aria-busy={deleting || undefined} onClick={deleteSkill}>
               {deleting ? t("skills_library_deleting") : t("delete")}
             </Button>
           </AlertDialogFooter>

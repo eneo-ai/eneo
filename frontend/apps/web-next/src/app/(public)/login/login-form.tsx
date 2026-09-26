@@ -35,7 +35,14 @@ export function LoginForm({ next }: { next?: string }) {
   }, [state]);
 
   return (
-    <form action={formAction} className="flex flex-col gap-4">
+    <form
+      action={formAction}
+      // Busy, Logga in stays enabled so it keeps focus; a second submit is ignored.
+      onSubmit={(event) => {
+        if (pending) event.preventDefault();
+      }}
+      className="flex flex-col gap-4"
+    >
       {state.error && (
         <Alert ref={errorRef} id={errorId} tabIndex={-1} variant="destructive">
           <AlertDescription>{t(ERROR_MESSAGE_KEYS[state.error])}</AlertDescription>
@@ -67,7 +74,7 @@ export function LoginForm({ next }: { next?: string }) {
           required
         />
       </div>
-      <Button type="submit" disabled={pending}>
+      <Button type="submit" aria-busy={pending || undefined}>
         {t("login")}
       </Button>
     </form>

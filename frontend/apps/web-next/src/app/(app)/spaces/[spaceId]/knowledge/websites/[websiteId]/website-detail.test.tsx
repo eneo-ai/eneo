@@ -7,6 +7,7 @@ import type { Space } from "@/features/spaces/space";
 import { makeSpace, makeWebsite } from "@/features/spaces/testing/space-fixture";
 
 const state = vi.hoisted(() => ({ runStatus: "complete" as string }));
+const post = vi.hoisted(() => vi.fn());
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: () => {}, prefetch: () => {} }),
@@ -46,7 +47,8 @@ vi.mock("@/lib/api/browser", () => ({
               ? { items: [{ id: "blob-1", metadata: { title: "lou.html", size: 2048 } }] }
               : { items: [] };
       return Promise.resolve({ data, response: new Response("{}") });
-    }
+    },
+    POST: post
   }
 }));
 
@@ -55,6 +57,7 @@ import { WebsiteDetail } from "./website-detail.client";
 afterEach(() => {
   cleanup();
   state.runStatus = "complete";
+  post.mockReset();
 });
 
 describe("WebsiteDetail", () => {
@@ -94,5 +97,24 @@ describe("WebsiteDetail", () => {
     const sync = await screen.findByRole("button", { name: "Synkronisera nu" });
     expect((sync as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByText("Kan inte synkronisera medan en crawl redan körs")).toBeNull();
+  });
+
+  it("keeps focus on a busy Starta crawl and starts one crawl", async () => {
+    post.mockReturnValue(new Promise(() => {}));
+    renderInApp(<WebsiteDetail websiteId="website-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Synkronisera nu" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Synkronisera webbplats" });
+    const start = within(dialog).getByRole("button", { name: "Starta crawl" });
+    start.focus();
+
+    fireEvent.click(start);
+
+    const busy = await within(dialog).findByRole("button", { name: "Startar..." });
+    expect(busy).toBe(start);
+    expect(busy.getAttribute("aria-busy")).toBe("true");
+    expect(busy.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(busy);
+    fireEvent.click(busy);
+    expect(post).toHaveBeenCalledTimes(1);
   });
 });

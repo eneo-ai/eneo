@@ -181,6 +181,8 @@ export function SkillBindingsEditor({
   const [revisionMetadata, setRevisionMetadata] = useState<Preview[]>([]);
 
   function setDraft(next: Binding[] | ((current: Binding[]) => Binding[])) {
+    // What was announced (saved, nothing to save) no longer holds.
+    setAnnouncement("");
     if (resource === "personal_chat") {
       onChange?.(typeof next === "function" ? next(bindings ?? []) : next);
       return;
@@ -279,6 +281,7 @@ export function SkillBindingsEditor({
   }
 
   async function upgradeToLatest(summary: BindingSummary, revisionId: string) {
+    if (upgradeBusy !== null) return;
     setUpgradeBusy(summary.skill_id);
     setUpgradeError(null);
     try {
@@ -302,8 +305,14 @@ export function SkillBindingsEditor({
     }
   }
 
+  // Save and Discard stay enabled, so they keep focus: busy, a second press
+  // is ignored; with nothing changed they say so.
   async function saveDraft() {
-    if (!dirty || saving || !save) return;
+    if (saving || !save) return;
+    if (!dirty) {
+      setAnnouncement(t("form_nothing_to_save"));
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     const submitted = draft.map((binding) => ({ ...binding }));
@@ -317,6 +326,12 @@ export function SkillBindingsEditor({
     } finally {
       setSaving(false);
     }
+  }
+
+  function discardDraft() {
+    setAnnouncement(t(dirty ? "form_changes_discarded" : "form_nothing_to_discard"));
+    setEditing(null);
+    setSaveError(null);
   }
 
   async function createSkill(value: Schema<"SkillCreateRequest">) {
@@ -543,13 +558,16 @@ export function SkillBindingsEditor({
                     active &&
                     !blocked &&
                     summary && (
+                      // Busy, it stays enabled so it keeps focus; while one
+                      // upgrade loads, presses are ignored.
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={!canEdit || upgradeBusy !== null}
+                        disabled={!canEdit}
+                        aria-busy={upgradeBusy === binding.skill_id || undefined}
                         onClick={() => void upgradeToLatest(summary, attachableId)}
                       >
-                        <RefreshCw className="size-4" />
+                        {upgradeBusy !== binding.skill_id && <RefreshCw className="size-4" />}
                         {t("skills_use_latest_revision")}
                       </Button>
                     )}
@@ -650,8 +668,11 @@ export function SkillBindingsEditor({
           {catalogue.hasNextPage && (
             <Button
               variant="ghost"
-              disabled={catalogue.isFetchingNextPage}
-              onClick={() => void catalogue.fetchNextPage()}
+              aria-busy={catalogue.isFetchingNextPage || undefined}
+              onClick={() => {
+                // Loading, it stays enabled so it keeps focus; a second press is ignored.
+                if (!catalogue.isFetchingNextPage) void catalogue.fetchNextPage();
+              }}
             >
               {catalogue.isFetchingNextPage ? t("loading") : t("load_more")}
             </Button>
@@ -660,17 +681,14 @@ export function SkillBindingsEditor({
       )}
       {resource !== "personal_chat" && (
         <div className="flex flex-wrap items-center gap-2 border-t pt-4">
-          <Button disabled={!dirty || saving || !canEdit} onClick={() => void saveDraft()}>
+          <Button
+            disabled={!canEdit}
+            aria-busy={saving || undefined}
+            onClick={() => void saveDraft()}
+          >
             {saving ? t("saving") : t("skills_bindings_save")}
           </Button>
-          <Button
-            variant="ghost"
-            disabled={!dirty || saving}
-            onClick={() => {
-              setEditing(null);
-              setSaveError(null);
-            }}
-          >
+          <Button variant="ghost" disabled={saving} onClick={discardDraft}>
             {t("discard_changes")}
           </Button>
           {dirty && (

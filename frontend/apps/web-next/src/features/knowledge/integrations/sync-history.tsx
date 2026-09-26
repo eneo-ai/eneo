@@ -190,7 +190,7 @@ function SyncHistoryContent({ item }: { item: IntegrationKnowledge }) {
           <Button
             variant="outline"
             size="sm"
-            disabled={page <= 1 || isPending}
+            disabled={page <= 1}
             onClick={() => setPage((current) => current - 1)}
           >
             {t("previous")}
@@ -198,7 +198,7 @@ function SyncHistoryContent({ item }: { item: IntegrationKnowledge }) {
           <Button
             variant="outline"
             size="sm"
-            disabled={page >= totalPages || isPending}
+            disabled={page >= totalPages}
             onClick={() => setPage((current) => current + 1)}
           >
             {t("next")}

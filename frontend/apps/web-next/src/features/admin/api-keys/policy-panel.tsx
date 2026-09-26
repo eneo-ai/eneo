@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useId, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -122,6 +122,17 @@ function PolicyForm({
 
   const dirty = (Object.keys(draft) as (keyof Policy)[]).some((key) => draft[key] !== policy[key]);
 
+  // Never disabled: busy, it keeps focus and a second press is ignored; with
+  // nothing changed there is nothing to send, and the dialog just closes.
+  function submit() {
+    if (save.isPending) return;
+    if (!dirty) {
+      onClose();
+      return;
+    }
+    save.mutate();
+  }
+
   const setField = (key: keyof PolicyUpdate, value: number | boolean | null) =>
     setDraft((prev) => ({ ...prev, [key]: value }));
 
@@ -210,7 +221,7 @@ function PolicyForm({
         <Button variant="outline" onClick={onClose}>
           {t("cancel")}
         </Button>
-        <Button disabled={!dirty || save.isPending} onClick={() => save.mutate()}>
+        <Button aria-busy={save.isPending || undefined} onClick={submit}>
           {t("api_keys_admin_save_changes")}
         </Button>
       </DialogFooter>
@@ -229,13 +240,21 @@ function ToggleRow({
   checked: boolean;
   onCheckedChange: (value: boolean) => void;
 }) {
+  const id = useId();
   return (
     <div className="flex items-start justify-between gap-4 rounded-lg border p-3">
       <div className="flex flex-col gap-0.5">
         <span className="text-sm font-medium">{label}</span>
-        <span className="text-muted-foreground text-xs">{description}</span>
+        <span id={`${id}-description`} className="text-muted-foreground text-xs">
+          {description}
+        </span>
       </div>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} aria-label={label} />
+      <Switch
+        checked={checked}
+        onCheckedChange={onCheckedChange}
+        aria-label={label}
+        aria-describedby={`${id}-description`}
+      />
     </div>
   );
 }
@@ -257,22 +276,31 @@ function NumberRow({
   value: string;
   onChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
 }) {
+  const id = useId();
   return (
     <div className="flex items-start justify-between gap-4 rounded-lg border p-3">
       <div className="flex flex-col gap-0.5">
-        <Label className="text-sm font-medium">{label}</Label>
-        <span className="text-muted-foreground text-xs">{description}</span>
+        <Label htmlFor={id} className="text-sm font-medium">
+          {label}
+        </Label>
+        <span id={`${id}-description`} className="text-muted-foreground text-xs">
+          {description}
+        </span>
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <Input
+          id={id}
           type="number"
           min={min}
           className="w-24"
           placeholder={placeholder}
           value={value}
           onChange={onChange}
+          aria-describedby={`${id}-description ${id}-unit`}
         />
-        <span className="text-muted-foreground text-xs">{suffix}</span>
+        <span id={`${id}-unit`} className="text-muted-foreground text-xs">
+          {suffix}
+        </span>
       </div>
     </div>
   );

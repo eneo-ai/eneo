@@ -125,21 +125,37 @@ export function SpaceModelSelect({
     return [...map.entries()].map(([name, list]) => ({ name, models: list }));
   }, [models]);
 
+  // The control whose change is saving: busy, it stays enabled so it keeps
+  // focus; while a change saves, presses are ignored.
+  const [changing, setChanging] = useState<string | null>(null);
+  function change(control: string, ids: string[]) {
+    if (pending) return;
+    setChanging(control);
+    onChange(ids);
+  }
+  const busyOn = (control: string) => (pending && changing === control) || undefined;
+
   function toggleOne(id: string) {
-    onChange(selected.has(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id]);
+    change(
+      `model:${id}`,
+      selected.has(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id]
+    );
   }
 
-  function setWholeGroup(groupModels: SelectableModel[], on: boolean) {
+  function setWholeGroup(group: string, groupModels: SelectableModel[], on: boolean) {
     const ids = groupModels
       .filter((model) => model.meets_security_classification ?? true)
       .map((model) => model.id);
     if (on) {
       const merged = new Set(selectedIds);
       ids.forEach((id) => merged.add(id));
-      onChange([...merged]);
+      change(`group:${group}`, [...merged]);
     } else {
       const remove = new Set(ids);
-      onChange(selectedIds.filter((id) => !remove.has(id)));
+      change(
+        `group:${group}`,
+        selectedIds.filter((id) => !remove.has(id))
+      );
     }
   }
 
@@ -213,8 +229,9 @@ export function SpaceModelSelect({
                   variant="ghost"
                   size="sm"
                   className="shrink-0"
-                  disabled={pending || selectable.length === 0}
-                  onClick={() => setWholeGroup(group.models, !allSelected)}
+                  disabled={selectable.length === 0}
+                  aria-busy={busyOn(`group:${group.name}`)}
+                  onClick={() => setWholeGroup(group.name, group.models, !allSelected)}
                 >
                   {allSelected ? t("deselect_all") : t("select_all")}
                 </Button>
@@ -245,7 +262,8 @@ export function SpaceModelSelect({
                         )}
                         <Switch
                           checked={selected.has(model.id)}
-                          disabled={pending || !meets}
+                          disabled={!meets}
+                          aria-busy={busyOn(`model:${model.id}`)}
                           onCheckedChange={() => toggleOne(model.id)}
                           aria-label={label(model)}
                         />

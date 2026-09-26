@@ -6,6 +6,7 @@ import noHardcodedText from "./rules/no-hardcoded-text.js";
 import noLiteralAccessibleName from "./rules/no-literal-accessible-name.js";
 import noRawColor from "./rules/no-raw-color.js";
 import noWeakFocusIndicator from "./rules/no-weak-focus-indicator.js";
+import noBusyDisabledButton from "./rules/no-busy-disabled-button.js";
 
 const pkg = JSON.parse(
   fs.readFileSync(new URL("./package.json", import.meta.url), "utf8"),
@@ -25,6 +26,7 @@ const plugin = {
     "no-literal-accessible-name": noLiteralAccessibleName,
     "no-raw-color": noRawColor,
     "no-weak-focus-indicator": noWeakFocusIndicator,
+    "no-busy-disabled-button": noBusyDisabledButton,
   },
 };
 

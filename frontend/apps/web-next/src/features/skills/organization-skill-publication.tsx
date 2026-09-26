@@ -44,7 +44,11 @@ export function OrganizationSkillPublication({
   const [action, setAction] = useState<"publish" | "unpublish" | null>(null);
   const [includeAssistants, setIncludeAssistants] = useState(true);
   const [includeApps, setIncludeApps] = useState(true);
-  const [busy, setBusy] = useState(false);
+  // What is running: the publication change, or a rollout started from the
+  // restart or the recovery button. Busy, a button stays enabled so it keeps
+  // focus; a second press is ignored.
+  const [running, setRunning] = useState<"publication" | "restart" | "recover" | null>(null);
+  const busy = running !== null;
   const [error, setError] = useState<string | null>(null);
   const [rollout, setRollout] = useState<RolloutProgress | null>(null);
   const [rolloutScope, setRolloutScope] = useState<RolloutScope | null>(null);
@@ -115,7 +119,7 @@ export function OrganizationSkillPublication({
 
   async function changePublication() {
     if (!action || busy || unsaved || rollout?.status === "running") return;
-    setBusy(true);
+    setRunning("publication");
     setError(null);
     const selectedAction = action;
     const scope = { assistants: includeAssistants, apps: includeApps };
@@ -140,7 +144,7 @@ export function OrganizationSkillPublication({
             );
       queryClient.setQueryData([...ORGANIZATION_SKILLS_KEY, skill.id], next);
       setAction(null);
-      setBusy(false);
+      setRunning(null);
       if (selectedAction === "publish" && (scope.assistants || scope.apps))
         await beginRollout(next.current_revision_id, scope, reviewed);
       else {
@@ -151,11 +155,11 @@ export function OrganizationSkillPublication({
       }
     } catch (cause) {
       setError(getErrorMessage(cause, t));
-      setBusy(false);
+      setRunning(null);
     }
   }
 
-  async function retryRollout() {
+  async function retryRollout(control: "restart" | "recover") {
     const currentPublishedRevisionId =
       skill.published_revision_number === skill.current_revision_number
         ? skill.current_revision_id
@@ -163,12 +167,12 @@ export function OrganizationSkillPublication({
     const revisionId = currentPublishedRevisionId ?? rolloutRevisionId;
     const scope = rolloutScope ?? { assistants: true, apps: true };
     if (!revisionId || rollout?.status === "running" || busy) return;
-    setBusy(true);
+    setRunning(control);
     try {
       const reviewed = await adoption.refetch();
       await beginRollout(revisionId, scope, reviewed.data ?? null);
     } finally {
-      setBusy(false);
+      setRunning(null);
     }
   }
 
@@ -305,7 +309,11 @@ export function OrganizationSkillPublication({
               {t("organization_skills_rollout_stop")}
             </Button>
           ) : rollout.status === "failed" || rollout.status === "stopped" ? (
-            <Button variant="outline" disabled={busy} onClick={() => void retryRollout()}>
+            <Button
+              variant="outline"
+              aria-busy={running === "restart" || undefined}
+              onClick={() => void retryRollout("restart")}
+            >
               {t("organization_skills_rollout_restart")}
             </Button>
           ) : null}
@@ -323,8 +331,8 @@ export function OrganizationSkillPublication({
               <Button
                 className="mt-3"
                 variant="outline"
-                disabled={busy}
-                onClick={() => void retryRollout()}
+                aria-busy={running === "recover" || undefined}
+                onClick={() => void retryRollout("recover")}
               >
                 {t("organization_skills_rollout_recovery_action")}
               </Button>
@@ -402,10 +410,10 @@ export function OrganizationSkillPublication({
             <AlertDialogCancel disabled={busy}>{t("cancel")}</AlertDialogCancel>
             <Button
               variant={action === "unpublish" ? "destructive" : "default"}
-              disabled={busy}
+              aria-busy={running === "publication" || undefined}
               onClick={() => void changePublication()}
             >
-              {busy
+              {running === "publication"
                 ? t("saving")
                 : t(
                     action === "unpublish"

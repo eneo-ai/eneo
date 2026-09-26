@@ -80,6 +80,22 @@ describe("ToolApprovalCard", () => {
     expect(screen.queryByRole("button", { name: "Avvisa alla" })).toBeNull();
   });
 
+  it("keeps focus on a busy Godkänn and sends one decision", async () => {
+    api.POST.mockReturnValueOnce(new Promise(() => {}));
+    renderCard({ approval_id: "approval-1", status: "pending", tools: [lookup, register] });
+    const approve = screen.getByRole("button", { name: "Godkänn lou/troskelvarden" });
+    approve.focus();
+
+    fireEvent.click(approve);
+
+    await waitFor(() => expect(approve.getAttribute("aria-busy")).toBe("true"));
+    expect(approve.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(approve);
+    fireEvent.click(approve);
+    fireEvent.click(screen.getByRole("button", { name: "Avvisa alla" }));
+    expect(api.POST).toHaveBeenCalledTimes(1);
+  });
+
   it("shows tools that timed out as denied, without actions", () => {
     renderCard({ approval_id: "approval-4", status: "timeout_denied", tools: [lookup, register] });
     const card = screen.getByRole("region", { name: "Verktygsgodkännande" });

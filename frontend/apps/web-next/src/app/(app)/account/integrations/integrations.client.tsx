@@ -58,16 +58,25 @@ function IntegrationCard({
             <p className="text-warning text-sm">{t("contact_admin_to_configure")}</p>
           )}
         </div>
+        {/* Busy, a button stays enabled so it keeps focus; a second press is ignored. */}
         {integration.connected ? (
           <Button
             variant="outline"
-            disabled={disconnect.isPending}
-            onClick={() => disconnect.mutate()}
+            aria-busy={disconnect.isPending || undefined}
+            onClick={() => {
+              if (!disconnect.isPending) disconnect.mutate();
+            }}
           >
             {t("disconnect")}
           </Button>
         ) : (
-          <Button disabled={connecting || tenantAppMissing} onClick={onConnect}>
+          <Button
+            disabled={tenantAppMissing}
+            aria-busy={connecting || undefined}
+            onClick={() => {
+              if (!connecting) onConnect();
+            }}
+          >
             {t("connect")}
           </Button>
         )}

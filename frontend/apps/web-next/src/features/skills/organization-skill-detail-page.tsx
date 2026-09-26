@@ -72,6 +72,7 @@ export function OrganizationSkillDetailPage({ skillId }: { skillId: string }) {
         {!value.removed_at && (
           <Button
             variant="destructive"
+            // eslint-disable-next-line eneo/no-busy-disabled-button -- unsaved changes and a background rollout (both shown on the page) hold removal back; neither is work this button runs.
             disabled={dirty || rolloutRunning}
             onClick={() => setRemovalOpen(true)}
           >

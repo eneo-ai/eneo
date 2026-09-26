@@ -4,7 +4,7 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import { ChevronRight, Plus, Sparkles } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { ConfirmDialog } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -66,36 +66,50 @@ function AddHelpAssistant({ templates }: { templates: HelperTemplate[] }) {
   });
 
   const noneAvailable = templates.length === 0;
+  const reasonId = useId();
 
+  // Busy installing, the menu's button stays enabled so focus can return to it
+  // from the menu; a second pick is ignored. With nothing to add, the reason
+  // is visible text: a disabled button's tooltip reaches no keyboard user.
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          disabled={noneAvailable || install.isPending}
-          title={noneAvailable ? t("admin_help_assistants_add_none_available") : undefined}
-        >
-          <Plus className="size-4" />
-          {t("admin_help_assistants_add_button")}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-80 max-w-[calc(100vw-2rem)]">
-        <DropdownMenuLabel>{t("admin_help_assistants_add_menu_label")}</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {templates.map((template) => (
-          <DropdownMenuItem
-            key={template.kind}
-            className="flex cursor-pointer flex-col items-start gap-0.5 whitespace-normal"
-            onClick={() => install.mutate(template.kind)}
+    <div className="flex flex-col items-end gap-1">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            disabled={noneAvailable}
+            aria-busy={install.isPending || undefined}
+            aria-describedby={noneAvailable ? reasonId : undefined}
           >
-            <span className="font-medium">{template.name}</span>
-            <span className="text-muted-foreground text-xs leading-snug">
-              {template.description}
-            </span>
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+            {!install.isPending && <Plus className="size-4" />}
+            {t("admin_help_assistants_add_button")}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-80 max-w-[calc(100vw-2rem)]">
+          <DropdownMenuLabel>{t("admin_help_assistants_add_menu_label")}</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {templates.map((template) => (
+            <DropdownMenuItem
+              key={template.kind}
+              className="flex cursor-pointer flex-col items-start gap-0.5 whitespace-normal"
+              onClick={() => {
+                if (!install.isPending) install.mutate(template.kind);
+              }}
+            >
+              <span className="font-medium">{template.name}</span>
+              <span className="text-muted-foreground text-xs leading-snug">
+                {template.description}
+              </span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {noneAvailable && (
+        <p id={reasonId} className="text-muted-foreground text-sm">
+          {t("admin_help_assistants_add_none_available")}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -187,9 +201,10 @@ function HelpAssistantRow({ role }: { role: RoleAssignment }) {
           />
         </Label>
         <div className="flex justify-end">
+          {/* The dialog stays open while it deletes, so its trigger needs no busy state. */}
           <ConfirmDialog
             trigger={
-              <Button type="button" variant="outline" size="sm" disabled={uninstall.isPending}>
+              <Button type="button" variant="outline" size="sm">
                 {t("admin_help_assistants_delete_button")}
               </Button>
             }

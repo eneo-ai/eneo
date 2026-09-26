@@ -177,7 +177,7 @@ export function EditModelDialog({
           className="flex flex-col gap-4"
           onSubmit={(event) => {
             event.preventDefault();
-            save.mutate();
+            if (!save.isPending) save.mutate();
           }}
         >
           <div className="flex flex-col gap-1.5">
@@ -381,7 +381,8 @@ export function EditModelDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               {t("cancel")}
             </Button>
-            <Button type="submit" disabled={save.isPending}>
+            {/* Busy, it stays enabled so it keeps focus; a second submit is ignored. */}
+            <Button type="submit" aria-busy={save.isPending || undefined}>
               {save.isPending ? t("saving") : t("save")}
             </Button>
           </DialogFooter>

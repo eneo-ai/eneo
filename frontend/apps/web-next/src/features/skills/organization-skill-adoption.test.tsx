@@ -140,6 +140,35 @@ describe("organisation Skill bindings", () => {
     );
   });
 
+  it("keeps focus on a busy detach and detaches once", async () => {
+    post.mockReturnValue(new Promise(() => {}));
+    show();
+    await screen.findByText("Review app");
+    fireEvent.click(
+      screen.getAllByRole("checkbox", { name: "organization_skills_adoption_select_resource" })[0]!
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "organization_skills_adoption_detach_selected" })
+    );
+    const dialog = screen.getByRole("alertdialog");
+    const detach = within(dialog).getByRole("button", {
+      name: "organization_skills_adoption_detach_selected"
+    });
+    detach.focus();
+
+    fireEvent.click(detach);
+
+    const busy = await within(dialog).findByRole("button", {
+      name: "organization_skills_adoption_detaching"
+    });
+    expect(busy).toBe(detach);
+    expect(busy.getAttribute("aria-busy")).toBe("true");
+    expect(busy.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(busy);
+    fireEvent.click(busy);
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
   it("updates selected outdated bindings using the exact published revision", async () => {
     show();
     await screen.findByText("Review app");

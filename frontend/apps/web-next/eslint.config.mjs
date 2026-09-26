@@ -175,6 +175,30 @@ const eslintConfig = defineConfig([
     }
   },
   {
+    // Busy buttons keep focus (2.4.3; ACCESSIBILITY.md → Forms): a button
+    // that disables itself while its own action runs drops focus to the page.
+    // Cancel, Back, Close and the discard/reset of a form may wait while the
+    // action runs: the action holds the focus then.
+    files: ["src/**/*.tsx"],
+    ignores: notShippedUi,
+    rules: {
+      "eneo/no-busy-disabled-button": [
+        "error",
+        {
+          dismissLabels: [
+            "cancel",
+            "back",
+            "go_back",
+            "close",
+            "discard_changes",
+            "discard_all_changes",
+            "reset"
+          ]
+        }
+      ]
+    }
+  },
+  {
     // Astryx parts we wrap to work around their gaps (AGENTS.md → Reuse
     // before you build). A separate rule from no-restricted-imports above, so
     // neither block replaces the other's options.

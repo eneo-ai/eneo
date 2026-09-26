@@ -135,6 +135,24 @@ describe("admin function sources", () => {
     );
   });
 
+  it("keeps focus on a busy activate and activates once", async () => {
+    get.mockImplementation((path?: string) =>
+      path === "/api/v1/mcp-servers/settings/" ? ok({ items: [source] }) : ok({ items: [] })
+    );
+    post.mockReturnValue(new Promise(() => {}));
+    show();
+    const activate = await screen.findByRole("button", { name: "activate" });
+    activate.focus();
+
+    fireEvent.click(activate);
+
+    await waitFor(() => expect(activate.getAttribute("aria-busy")).toBe("true"));
+    expect(activate.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(activate);
+    fireEvent.click(activate);
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
   it("creates a built-in image source with the selected enabled model", async () => {
     get.mockImplementation((path?: string) => {
       if (path === "/api/v1/mcp-servers/settings/") return ok({ items: [] });

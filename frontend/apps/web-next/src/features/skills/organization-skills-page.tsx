@@ -392,10 +392,13 @@ export function OrganizationSkillsPage() {
           </div>
           {skills.hasNextPage && (
             <div className="flex justify-center">
+              {/* Loading, it stays enabled so it keeps focus; a second press is ignored. */}
               <Button
                 variant="outline"
-                disabled={skills.isFetchingNextPage}
-                onClick={() => void skills.fetchNextPage()}
+                aria-busy={skills.isFetchingNextPage || undefined}
+                onClick={() => {
+                  if (!skills.isFetchingNextPage) void skills.fetchNextPage();
+                }}
               >
                 {skills.isFetchingNextPage ? t("loading") : t("load_more")}
               </Button>
@@ -573,7 +576,13 @@ export function SkillRemovalDialog({
         )}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={busy}>{t("cancel")}</AlertDialogCancel>
-          <Button variant="destructive" disabled={busy || !request} onClick={() => void remove()}>
+          {/* Busy, it stays enabled so it keeps focus; remove() ignores a second press. */}
+          <Button
+            variant="destructive"
+            disabled={!request}
+            aria-busy={busy || undefined}
+            onClick={() => void remove()}
+          >
             {busy
               ? t("organization_skills_removing")
               : skills.length === 1

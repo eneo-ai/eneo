@@ -5607,5 +5607,7 @@
   "form_problem_choose_provider": "Välj en leverantör.",
   "form_problem_choose_target_model": "Välj en modell att migrera till.",
   "form_problem_confirm_override": "Kryssa i rutan för att tvinga igenom migreringen.",
-  "storage_limit_invalid": "Ange ett positivt värde, till exempel 10 MB."
+  "storage_limit_invalid": "Ange ett positivt värde, till exempel 10 MB.",
+  "form_changes_discarded": "Ändringarna ignorerades.",
+  "form_nothing_to_discard": "Inga ändringar att ignorera."
 }
