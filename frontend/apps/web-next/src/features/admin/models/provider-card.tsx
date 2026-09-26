@@ -23,11 +23,12 @@ import { toast } from "@/lib/toast";
 import { deleteProvider, PROVIDERS_KEY } from "./model-providers";
 import { ModelRow } from "./model-row";
 import { MODELS_KEY } from "./models";
+import { ProviderConnectionStatus } from "./provider-connection-status";
 import { ProviderEditDialog } from "./provider-management";
 import type { KindedModel, ProviderSection, ProviderStatus } from "./provider-sections";
 
-const STATUS_TONE: Record<ProviderStatus, StatusTone> = {
-  ready: "success",
+/** Setup problems shown by the name; a configured provider has its connection line. */
+const SETUP_TONE: Record<Exclude<ProviderStatus, "ready">, StatusTone> = {
   missing_key: "warning",
   inactive: "neutral"
 };
@@ -100,8 +101,10 @@ function ModelTable({
 }
 
 /**
- * One provider: logo, name, model count and masked key, key status, "Lägg till
- * modell" and the provider menu (edit, delete), then its models as a table.
+ * One provider: logo, name, model count and masked key, a setup problem (key
+ * missing, inactive), "Lägg till modell" and the provider menu (edit,
+ * delete); then the connection line (latest check, key expiry, "Testa
+ * anslutning") and its models as a table.
  */
 export function ProviderCard({
   section,
@@ -142,12 +145,6 @@ export function ProviderCard({
     onError: (error) => toastApiError(error, t)
   });
 
-  const statusLabel =
-    section.status === "ready"
-      ? t("configured")
-      : section.status === "missing_key"
-        ? t("key_missing")
-        : t("inactive");
   const summary = [
     t("provider_model_count", { count: section.models.length }),
     section.maskedKey ? t("admin_models_provider_key", { key: section.maskedKey }) : null
@@ -170,7 +167,12 @@ export function ProviderCard({
           </Heading>
           <Text type="supporting">{summary}</Text>
         </div>
-        <StatusLabel status={STATUS_TONE[section.status]} label={statusLabel} />
+        {section.status !== "ready" ? (
+          <StatusLabel
+            status={SETUP_TONE[section.status]}
+            label={section.status === "missing_key" ? t("key_missing") : t("inactive")}
+          />
+        ) : null}
         <div className="ms-auto flex items-center gap-1">
           <Button
             size="sm"
@@ -206,6 +208,8 @@ export function ProviderCard({
           </DropdownMenu>
         </div>
       </div>
+
+      <ProviderConnectionStatus provider={section.provider} />
 
       <ModelTable
         models={models}

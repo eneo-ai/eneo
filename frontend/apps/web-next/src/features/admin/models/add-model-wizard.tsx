@@ -31,6 +31,7 @@ import {
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
 import { cn } from "@/lib/utils";
+import { KeyExpiryField } from "./key-expiry-field";
 import { ModelCatalogStep } from "./model-catalog-step";
 import {
   createProvider,
@@ -119,6 +120,7 @@ export function AddModelWizard({
   const [providerName, setProviderName] = useState("");
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [fieldConfirmations, setFieldConfirmations] = useState<Record<string, string>>({});
+  const [keyExpiresOn, setKeyExpiresOn] = useState<string | null>(null);
   const [providerId, setProviderId] = useState<string | null>(null);
   const [modelKind, setModelKind] = useState<ModelKind>("completion");
 
@@ -133,6 +135,7 @@ export function AddModelWizard({
     setProviderName("");
     setFieldValues({});
     setFieldConfirmations({});
+    setKeyExpiresOn(null);
     setProviderId(initialProviderId ?? null);
     const provider = providers.data?.find((item) => item.id === preselect);
     setModelKind(defaultModelKind(caps?.providers[provider?.provider_type ?? ""]?.modes));
@@ -163,7 +166,8 @@ export function AddModelWizard({
         name: providerName.trim() || providerDisplayName(providerType),
         provider_type: providerType,
         credentials,
-        config
+        config,
+        key_expires_on: keyExpiresOn
       });
     },
     onSuccess: (provider) => {
@@ -383,6 +387,7 @@ export function AddModelWizard({
                   </div>
                 );
               })}
+              <KeyExpiryField value={keyExpiresOn} onChange={setKeyExpiresOn} />
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setStep("provider")}>
                   {t("back")}

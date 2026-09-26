@@ -21,6 +21,7 @@ import { Switch } from "@/components/ui/switch";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
+import { KeyExpiryField } from "./key-expiry-field";
 import {
   type ModelProvider,
   PROVIDERS_KEY,
@@ -60,6 +61,7 @@ export function ProviderEditDialog({
   const [apiKey, setApiKey] = useState("");
   const [apiKeyConfirmation, setApiKeyConfirmation] = useState("");
   const [configValues, setConfigValues] = useState(() => configToStrings(provider.config));
+  const [keyExpiresOn, setKeyExpiresOn] = useState(provider.key_expires_on ?? null);
   const apiKeyValid = isConfirmedPasswordValid({
     value: apiKey,
     confirmation: apiKeyConfirmation,
@@ -85,6 +87,8 @@ export function ProviderEditDialog({
       updateProvider(browserApi, provider.id, {
         name: name.trim(),
         is_active: isActive,
+        // Always sent: null removes a date the admin cleared.
+        key_expires_on: keyExpiresOn,
         ...(changingKey && apiKeyReady ? { credentials: { api_key: apiKey } } : {}),
         ...(configFields.length > 0
           ? {
@@ -177,6 +181,7 @@ export function ProviderEditDialog({
               </div>
             </div>
           )}
+          <KeyExpiryField value={keyExpiresOn} onChange={setKeyExpiresOn} />
           {configFields.length > 0 && (
             <fieldset className="flex flex-col gap-3">
               <legend className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
