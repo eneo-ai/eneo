@@ -296,10 +296,41 @@ class Observation:
     # here is what lets it drop its own tolerant loader instead of keeping a
     # second, laxer reading of the same file.
     row: Mapping[str, Any]
+    cohorts: tuple[str, ...] = ()
+    # The edit capability gate's reading of an edit case; None elsewhere.
+    edit: EditVerdict | None = None
 
     @property
     def slot(self) -> tuple[str, int]:
         return (self.case_id, self.repetition)
+
+
+@dataclass(frozen=True, slots=True)
+class EditVerdict:
+    """One edit observation's verdict, as the harness projected it."""
+
+    verdict: str
+    categories: tuple[str, ...]
+    seed: str
+    seed_sha256: str
+    executes: bool
+    runtime_model_id: str | None
+
+
+def _edit_verdict(value: object, *, where: str) -> EditVerdict | None:
+    if value is None:
+        return None
+    edit = _mapping(value, where=where, key="edit")
+    return EditVerdict(
+        verdict=_required_str(edit, "verdict", where=where),
+        categories=_string_tuple(edit.get("categories"), where=where, key="categories"),
+        seed=_required_str(edit, "seed", where=where),
+        seed_sha256=_required_str(edit, "seed_sha256", where=where),
+        executes=edit.get("executes") is True,
+        runtime_model_id=(
+            str(edit["runtime_model_id"]) if edit.get("runtime_model_id") else None
+        ),
+    )
 
 
 def observation_is_replacement_eligible(observation: Observation) -> bool:
@@ -478,6 +509,8 @@ def observation_from_row(raw_row: Any, *, where: str) -> Observation:
         output_executed=output_executed,
         output_success=output_success,
         row=row,
+        cohorts=_string_tuple(row.get("cohorts") or [], where=where, key="cohorts"),
+        edit=_edit_verdict(row.get("edit"), where=where),
     )
 
 
@@ -581,7 +614,9 @@ def load_summary_receipt(path: Path) -> Receipt:
     return receipt_from_summary(_read_json(path), where=str(path))
 
 
-def _load_integrity_verified_base_receipt(suite_dir: Path) -> Receipt:
+def _load_integrity_verified_base_receipt(
+    suite_dir: Path, *, cases_file: str = CASES_FILE
+) -> Receipt:
     """Read and verify the immutable base receipt before any overlay.
 
     The summary carries a `receipt_integrity` block, but the writer computed it
@@ -650,11 +685,14 @@ def _load_integrity_verified_base_receipt(suite_dir: Path) -> Receipt:
         receipt,
         manifest=cast(Mapping[str, Any], manifest),
         where=str(manifest_path),
+        cases_file=cases_file,
     )
     return receipt
 
 
-def load_recoverable_release_receipt(suite_dir: Path) -> Receipt:
+def load_recoverable_release_receipt(
+    suite_dir: Path, *, cases_file: str = CASES_FILE
+) -> Receipt:
     """Load an identity-valid base receipt eligible for bounded recovery.
 
     This does not apply or excuse a replacement. It verifies the immutable base
@@ -662,15 +700,22 @@ def load_recoverable_release_receipt(suite_dir: Path) -> Receipt:
     faults; identity failures and invalid evidence remain terminal.
     """
 
-    receipt = _load_integrity_verified_base_receipt(suite_dir)
+    receipt = _load_integrity_verified_base_receipt(suite_dir, cases_file=cases_file)
     _require_recoverable_release_receipt(receipt, where=str(suite_dir))
     return receipt
 
 
-def load_release_receipt(suite_dir: Path) -> Receipt:
-    """Load an authoritative receipt whose effective acquisition is valid."""
+def load_release_receipt(suite_dir: Path, *, cases_file: str = CASES_FILE) -> Receipt:
+    """Load an authoritative receipt whose effective acquisition is valid.
 
-    base_receipt = _load_integrity_verified_base_receipt(suite_dir)
+    `cases_file` names the tracked corpus the receipt must have been measured
+    on (a file next to this module); the battle corpus unless a caller judges
+    another, such as the edit capability corpus.
+    """
+
+    base_receipt = _load_integrity_verified_base_receipt(
+        suite_dir, cases_file=cases_file
+    )
     receipt = _apply_replacements(base_receipt, suite_dir=suite_dir)
     _require_effective_release_receipt(receipt, where=str(suite_dir))
     return receipt
@@ -1197,7 +1242,11 @@ def require_passed_capacity_preflight(
 
 
 def _require_base_release_receipt(
-    receipt: Receipt, *, manifest: Mapping[str, Any], where: str
+    receipt: Receipt,
+    *,
+    manifest: Mapping[str, Any],
+    where: str,
+    cases_file: str = CASES_FILE,
 ) -> None:
     """A release receipt is a specific artifact, not any receipt in a folder.
 
@@ -1378,7 +1427,7 @@ def _require_base_release_receipt(
         raise ReceiptError(f"{where}: the run does not name a model.")
     for input_name, path in (
         ("harness_sha256", _SCRIPTS_DIR / HARNESS_FILE),
-        ("cases_sha256", _SCRIPTS_DIR / CASES_FILE),
+        ("cases_sha256", _SCRIPTS_DIR / cases_file),
     ):
         recorded = build.get(input_name)
         if not is_sha256(recorded):

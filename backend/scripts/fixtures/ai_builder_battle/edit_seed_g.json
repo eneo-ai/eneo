@@ -1,0 +1,83 @@
+{
+  "name": "Bostadsanpassning - kontroller",
+  "description": "Extraherar uppgifter ur en ansökan, kontrollerar belopp och datum var för sig och sammanställer ett besked.",
+  "metadata_json": {"form_schema": {"fields": [{"name": "ansokan", "type": "text", "label": "Ansökan (inklistrad text)", "required": true, "order": 1}]}},
+  "steps": [
+    {
+      "name": "Extrahera uppgifter",
+      "instructions": "Extrahera uppgifterna ur ansökan exakt som de står. belopp_kr är det belopp som söks nu, inte tidigare beviljade belopp. Skriv datum som ÅÅÅÅ-MM-DD. Sätt sista_datum till null om inget datum för beslut anges.",
+      "input_source": "flow_input",
+      "input_type": "text",
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "input_bindings": {"question": "Ansökan:\n{{ flow_input.ansokan }}"},
+      "output_contract": {
+        "type": "object",
+        "required": ["diarienummer", "sokande", "atgard", "belopp_kr", "sista_datum"],
+        "properties": {
+          "diarienummer": {"type": "string"},
+          "sokande": {"type": "string"},
+          "atgard": {"type": "string"},
+          "belopp_kr": {"type": "number"},
+          "sista_datum": {"type": ["string", "null"]}
+        }
+      }
+    },
+    {
+      "name": "Kontroll av belopp",
+      "instructions": "Kontrollera det sökta beloppet mot bidragstaket 60000 kr. Återge belopp_kr oförändrat och sätt inom_bidragstak till true om beloppet är högst 60000 kr.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["belopp_kr", "inom_bidragstak", "kommentar"],
+        "properties": {"belopp_kr": {"type": "number"}, "inom_bidragstak": {"type": "boolean"}, "kommentar": {"type": "string"}}
+      }
+    },
+    {
+      "name": "Kontroll av datum",
+      "instructions": "Kontrollera datumet då beslut senast önskas. Återge sista_datum oförändrat (ÅÅÅÅ-MM-DD) eller null, och sätt datum_saknas till true om datumet saknas.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "input_bindings": {
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "diarienummer", "label": "Diarienummer"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "sista_datum", "label": "Sista datum"}
+        ]
+      },
+      "output_contract": {
+        "type": "object",
+        "required": ["sista_datum", "datum_saknas"],
+        "properties": {"sista_datum": {"type": ["string", "null"]}, "datum_saknas": {"type": "boolean"}}
+      }
+    },
+    {
+      "name": "Sammanställ besked",
+      "instructions": "Skriv ett kort besked på svenska. Ange diarienumret, beloppet med siffror utan mellanslag och sista datum exakt som i underlaget, och om beloppet ryms inom bidragstaket.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "diarienummer", "label": "Diarienummer"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "belopp_kr", "label": "Belopp"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "inom_bidragstak", "label": "Inom bidragstaket"},
+          {"step_ref": "step_3", "output": "structured", "field_path": "sista_datum", "label": "Sista datum"}
+        ]
+      }
+    }
+  ],
+  "calibration": {
+    "inputs": {
+      "form_fields": {
+        "ansokan": "Ärende BAB-2026-0588. Sökande: Karl Nyström, Bergsgatan 3, Timrå. Åtgärd: installation av trapphiss. Sökt belopp: 57300 kr. Tidigare beviljat bidrag 2023: 12400 kr. Beslut önskas senast 2027-01-15."
+      }
+    },
+    "expect": {"output_kind": "text", "required_facts": ["BAB-2026-0588", "57300", "2027-01-15"], "forbidden": ["12400"]}
+  }
+}

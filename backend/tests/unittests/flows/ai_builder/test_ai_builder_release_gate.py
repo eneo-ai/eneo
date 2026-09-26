@@ -1843,3 +1843,17 @@ def test_an_acquisition_status_requires_an_acquisition_class(
     row["failure_class"] = "not_a_class"
     with pytest.raises(receipts.ReceiptError, match="not a known class"):
         receipts.observation_from_row(row, where="row")
+
+
+def test_a_receipt_is_bound_to_the_corpus_it_is_judged_against(
+    receipts: ModuleType, tmp_path: Path
+) -> None:
+    # One integrity owner serves every corpus: the edit capability gate names
+    # its own cases file, and a receipt measured on another corpus is refused.
+    suite_dir = _suite_dir(tmp_path, _perfect_rows(4))
+
+    assert receipts.load_release_receipt(suite_dir).observations
+    with pytest.raises(receipts.ReceiptError, match="ai_builder_api_edit_cases.json"):
+        receipts.load_release_receipt(
+            suite_dir, cases_file="ai_builder_api_edit_cases.json"
+        )

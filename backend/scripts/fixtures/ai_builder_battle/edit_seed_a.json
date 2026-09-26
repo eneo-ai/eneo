@@ -1,0 +1,76 @@
+{
+  "name": "Bostadsanpassning - besked",
+  "description": "Sammanställer källfakta ur en ansökan om bostadsanpassningsbidrag, bedömer ärendet och skriver ett besked till den sökande.",
+  "metadata_json": {
+    "form_schema": {
+      "fields": [
+        {"name": "ansokan", "type": "text", "label": "Ansökan (inklistrad text)", "required": true, "order": 1},
+        {"name": "sokande", "type": "text", "label": "Sökandens namn", "required": true, "order": 2},
+        {"name": "sokt_belopp", "type": "number", "label": "Sökt belopp enligt blanketten (kr)", "required": true, "order": 3}
+      ]
+    }
+  },
+  "steps": [
+    {
+      "name": "Sammanställ källfakta",
+      "instructions": "Du får en ansökan om bostadsanpassningsbidrag. Återge sakuppgifterna exakt som de står: diarienummer, sökt åtgärd, belopp som nämns i texten och alla datum i formatet ÅÅÅÅ-MM-DD. Skriv 'saknas' för en uppgift som inte finns. Lägg inte till något.",
+      "input_source": "flow_input",
+      "input_type": "text",
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "input_bindings": {"question": "Ansökan:\n{{ flow_input.ansokan }}"}
+    },
+    {
+      "name": "Bedöm ärendet",
+      "instructions": "Bedöm ansökan utifrån källfakta. Bidrag kan beviljas för åtgärder som behövs för att den sökande ska kunna bo kvar i sin bostad. Återge diarienumret exakt. Sätt sista_datum till det datum då beslut senast önskas (ÅÅÅÅ-MM-DD), eller null om inget sådant datum finns. Lista uppgifter som saknas i saknade_falt. Sätt beslut till BEVILJAS om åtgärderna behövs för att den sökande ska kunna bo kvar, annars AVSLAS.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["diarienummer", "atgard", "belopp_i_text_kr", "sista_datum", "bedomning", "saknade_falt", "beslut"],
+        "properties": {
+          "diarienummer": {"type": "string"},
+          "atgard": {"type": "string"},
+          "belopp_i_text_kr": {"type": ["number", "null"]},
+          "sista_datum": {"type": ["string", "null"]},
+          "bedomning": {"type": "string"},
+          "saknade_falt": {"type": "array", "items": {"type": "string"}},
+          "beslut": {"type": "string", "enum": ["BEVILJAS", "AVSLAS"]}
+        }
+      }
+    },
+    {
+      "name": "Skriv besked",
+      "instructions": "Skriv ett kort besked på svenska till den sökande. Nämn den sökande vid namn. Ange diarienumret och sista datum exakt som i bedömningen. Ange beloppet från blanketten (sökt belopp) med siffror utan mellanslag, inte beloppet i fritexten.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "input_bindings": {
+        "question": "Sökande: {{ flow_input.sokande }}\nSökt belopp enligt blanketten: {{ flow_input.sokt_belopp }} kr",
+        "source_refs": [
+          {"step_ref": "step_1", "output": "text", "label": "Källfakta"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "diarienummer", "label": "Diarienummer"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "bedomning", "label": "Bedömning"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "sista_datum", "label": "Sista datum"}
+        ]
+      }
+    }
+  ],
+  "calibration": {
+    "inputs": {
+      "form_fields": {
+        "ansokan": "Ansökan om bostadsanpassningsbidrag. Diarienummer: BAB-2026-0417. Den sökande bor på Storgatan 14 i Sundsvall och behöver en ramp vid entrén och att tröskeln till badrummet tas bort. Enligt bifogad offert kostar åtgärderna cirka 51200 kr. Ett tidigare ärende, BAB-2025-0913, avslutades utan beslut. Datum för hembesök: 2026-10-05. Önskat startdatum för arbetet: . Datum för slutbesiktning: . Beslut önskas senast 2026-11-30.",
+        "sokande": "Ingrid Wästberg",
+        "sokt_belopp": 48500
+      }
+    },
+    "expect": {
+      "output_kind": "text",
+      "required_facts": ["BAB-2026-0417", "Ingrid Wästberg", "48500", "2026-11-30"],
+      "forbidden": ["51200", "BAB-2025-0913"]
+    }
+  }
+}

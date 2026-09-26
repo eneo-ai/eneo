@@ -23,6 +23,7 @@ import unicodedata
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from dataclasses import field as dataclass_field
 from dataclasses import fields as dataclass_fields
@@ -98,6 +99,10 @@ MAX_INTERACTIONS_PER_CASE = 6
 RUNTIME_POLL_INTERVAL_SECONDS = 1
 # v9: `execution` replaces `execute_flow` and `runtime_files`.
 SUPPORTED_CASES_FILE_VERSION = 9
+# The edit capability corpus: its own cases file, so the release corpus and
+# `--run-suite` are unchanged; sealed and judged by ai_builder_edit_capability.
+EDIT_CASES_FILE = Path(__file__).with_name("ai_builder_api_edit_cases.json")
+EDIT_CAPABILITY_COHORT = "edit_capability"
 # Bump when the meaning of question-relevance checks changes; receipts
 # across different semantics versions must never be compared.
 QUESTION_RELEVANCE_SEMANTICS_VERSION = 3
@@ -158,6 +163,18 @@ _require_local_eneo_checkout()
 LOCAL_APP_VERSION = os.getenv("ENEO_APP_VERSION") or _local_app_version()
 
 # Keep standalone script execution on the same production models as the API.
+from ai_builder_edit_expectation import (  # noqa: E402
+    PERSISTED_STEP_KEYS,
+    EditExpectation,
+    add_execution,
+    closed_object,
+    evaluate_edit,
+    literal_checks,
+    literal_list,
+    parse_edit_expectation,
+    seed_view,
+    snapshot_view,
+)
 from ai_builder_release_gate import replacement_limit  # noqa: E402
 
 from eneo.files.docx_template_validation import (  # noqa: E402
@@ -205,6 +222,34 @@ class ApiConfig:
     base_url: str
     api_key: str
     timeout_seconds: int
+    # Monotonic end of the current observation, or None outside one. Every
+    # request and every blocking stream read is bounded by it.
+    deadline: float | None = None
+
+
+_READ_CHUNK_BYTES = 64 * 1024
+
+
+class ObservationDeadlineExceeded(TimeoutError):
+    """The observation ran out of its total time: unmeasured, never scored."""
+
+
+def _request_timeout(config: ApiConfig) -> float:
+    if config.deadline is None:
+        return config.timeout_seconds
+    remaining = config.deadline - time.monotonic()
+    if remaining <= 0:
+        raise ObservationDeadlineExceeded("observation deadline reached")
+    return min(config.timeout_seconds, remaining)
+
+
+def _without_deadline(config: ApiConfig) -> ApiConfig:
+    """Cleanup (DELETE, run cancel) must still happen after the deadline."""
+
+    # Test doubles pass a bare object as the config; it has no deadline.
+    return (
+        replace(config, deadline=None) if getattr(config, "deadline", None) else config
+    )
 
 
 class BattleTurnError(ValueError):
@@ -240,12 +285,12 @@ def harness_failure_class(error: Exception) -> FailureClass:
     harness raised itself is its own configuration.
     """
 
-    cause = (
-        error.cause
-        if isinstance(error, (BattleTurnError, BattleFlowLifecycleError))
-        and error.cause is not None
-        else error
-    )
+    cause: Exception = error
+    while (
+        isinstance(cause, (BattleTurnError, BattleFlowLifecycleError))
+        and cause.cause is not None
+    ):
+        cause = cause.cause
     if isinstance(cause, HTTPError):
         return "dependency_stack" if cause.code >= 500 else "harness_configuration"
     if isinstance(cause, (URLError, TimeoutError)):
@@ -266,27 +311,44 @@ def _failure_error_fields(error: Exception) -> JsonObject:
 
 
 @dataclass(frozen=True, slots=True)
-class SavedStepEditCase:
-    """One saved-step edit on a flow the harness seeds from a frozen fixture.
+class EditCase:
+    """One edit of a flow the harness seeds from a frozen fixture.
 
-    The fixture is harness-owned (name, description, steps with instructions):
-    the Flow API cannot create a flow with instructions in one call, so the
-    harness provisions it (empty flow, flow-managed assistants, prompt text,
-    step update) and deletes it after the observation. The prompt of the case
-    is the edit message; the fixture bytes are part of the case contract.
+    The fixture is harness-owned (flow metadata and form fields, steps with
+    instructions, review and output settings): the Flow API cannot create a
+    flow with instructions in one call, so the harness provisions it and
+    deletes it after the observation. The prompt of the case is the edit
+    message; the fixture bytes and the gold are part of the case contract.
+    `target_order` None is whole-flow chat: an edit session with no step
+    context. `raw` is the case's `edit` block as written, the contract.
     """
 
     seed_flow_fixture: str
     seed_flow_sha256: str
-    target_step_order: int
-    step_count: int
+    target_order: int | None
+    gold: EditExpectation | None
+    raw: JsonObject = dataclass_field(compare=False, repr=False)
+    fixture: JsonObject = dataclass_field(compare=False, repr=False)
+
+    @property
+    def step_count(self) -> int:
+        return len(self.fixture["steps"])
 
 
 @dataclass(frozen=True, slots=True)
 class SeededFlow:
     flow_id: str
-    target_step_id: str
+    target_step_id: str | None
     step_ids: tuple[str, ...]
+    assistant_ids: tuple[str, ...] = ()
+    captured_revision: int | None = None
+    # The round-tripped flow before any Builder call: the edit's baseline.
+    baseline: JsonObject | None = None
+    runtime_model_id: str | None = None
+
+    @property
+    def identity(self) -> dict[str, str]:
+        return {aid: f"s{order}" for order, aid in enumerate(self.assistant_ids, 1)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -349,7 +411,7 @@ class BattleCase:
     cohorts: tuple[str, ...] = ()
     configured_question_answers: JsonObject | None = None
     question_answer_sources: JsonObject | None = None
-    edit: SavedStepEditCase | None = None
+    edit: EditCase | None = None
     execution: CaseExecution | None = None
 
     @property
@@ -363,12 +425,8 @@ class BattleCase:
         return self.execution.inputs.files if self.execution is not None else ()
 
 
-def _edit_contract(edit: SavedStepEditCase) -> JsonObject:
-    return {
-        "seed_flow_fixture": edit.seed_flow_fixture,
-        "seed_flow_sha256": edit.seed_flow_sha256,
-        "target_step_order": edit.target_step_order,
-    }
+def _edit_contract(edit: EditCase) -> JsonObject:
+    return {**edit.raw, "seed_flow_sha256": edit.seed_flow_sha256}
 
 
 def _case_identity(case: BattleCase) -> JsonObject:
@@ -482,10 +540,7 @@ def _observed_case_contract_payload(case: Mapping[str, object]) -> JsonObject:
     raw_edit = case.get("edit")
     if isinstance(raw_edit, Mapping):
         edit = cast(Mapping[str, Any], raw_edit)
-        payload["edit"] = {
-            key: edit.get(key)
-            for key in ("seed_flow_fixture", "seed_flow_sha256", "target_step_order")
-        }
+        payload["edit"] = dict(edit)
     raw_execution = case.get("execution")
     if isinstance(raw_execution, Mapping):
         payload["execution"] = dict(cast(Mapping[str, Any], raw_execution))
@@ -493,19 +548,7 @@ def _observed_case_contract_payload(case: Mapping[str, object]) -> JsonObject:
 
 
 _SEED_FLOW_STEP_KEYS = frozenset(
-    {
-        "name",
-        "instructions",
-        "user_description",
-        "input_source",
-        "input_type",
-        "input_contract",
-        "output_mode",
-        "output_type",
-        "output_contract",
-        "input_bindings",
-        "input_config",
-    }
+    {"name", "instructions", "user_description", *PERSISTED_STEP_KEYS}
 )
 _SEED_FLOW_STEP_REQUIRED_STRINGS = (
     "name",
@@ -529,9 +572,18 @@ def _load_seed_flow_fixture(name: str) -> JsonObject:
     if not isinstance(raw, Mapping):
         raise ValueError(f"{path} must be an object.")
     fixture = cast(Mapping[str, Any], raw)
-    unknown = set(fixture) - {"name", "description", "steps"}
+    unknown = set(fixture) - {
+        "name",
+        "description",
+        "metadata_json",
+        "steps",
+        "calibration",
+    }
     if unknown or not isinstance(fixture.get("name"), str) or not fixture["name"]:
-        raise ValueError(f"{path} must carry name, description and steps only.")
+        raise ValueError(
+            f"{path} must carry name, description, metadata_json, steps and "
+            "calibration only."
+        )
     description = fixture.get("description")
     if description is not None and not isinstance(description, str):
         raise ValueError(f"{path}.description must be a string or null.")
@@ -773,6 +825,38 @@ def runtime_poll_requests(*, timeout_seconds: int) -> int:
 
 
 _SEED_FLOW_FIXED_REQUESTS = 3
+# The applied snapshot reads one assistant per applied step, up to this many
+# steps beyond the larger of the seed and the gold; a flow grown past it has
+# already failed its sequence check and is not read further.
+_APPLIED_STEP_SLACK = 5
+_EDIT_APPLY_REQUESTS = 2  # approve, apply
+
+
+def _applied_step_bound(edit: EditCase) -> int:
+    sequence = edit.gold.sequence if edit.gold is not None else None
+    return max(edit.step_count, len(sequence or ())) + _APPLIED_STEP_SLACK
+
+
+def _edit_lifecycle_requests(edit: EditCase, *, applies: bool) -> int:
+    """Worst-case requests of one seeded edit observation outside its turns.
+
+    Seeding (flow create, the space read for a transcription model, an
+    assistant create and prompt update per step, the steps update, the
+    DELETE), the baseline and after-turn snapshots (the flow and each
+    assistant), and when the plan is applied: approve, apply and the applied
+    snapshot.
+    """
+
+    wizard = (edit.fixture.get("metadata_json") or {}).get("wizard") or {}
+    seed = (
+        _SEED_FLOW_FIXED_REQUESTS
+        + int(bool(wizard.get("transcription_enabled")))
+        + 2 * edit.step_count
+    )
+    snapshots = 2 * (1 + edit.step_count)
+    if applies:
+        snapshots += _EDIT_APPLY_REQUESTS + 1 + _applied_step_bound(edit)
+    return seed + snapshots
 
 
 def observation_request_demand(case: BattleCase, *, timeout_seconds: int) -> int:
@@ -784,12 +868,11 @@ def observation_request_demand(case: BattleCase, *, timeout_seconds: int) -> int
         + _OBSERVATION_DIAGNOSTIC_REQUESTS
     )
     if case.edit is not None:
-        # Seeding: create the flow, one assistant create + one prompt update
-        # per step, the step update, and the deletion afterwards.
-        total += _SEED_FLOW_FIXED_REQUESTS + 2 * case.edit.step_count
+        total += _edit_lifecycle_requests(case.edit, applies=case.apply_plan)
     if not case.apply_plan:
         return total
-    total += _APPLY_PLAN_REQUESTS
+    if case.edit is None:
+        total += _APPLY_PLAN_REQUESTS
     if case.execution is not None:
         total += (
             _RUNTIME_FIXED_REQUESTS
@@ -943,6 +1026,10 @@ def main() -> int:
     )
     try:
         cases = _cases_from_args(args)
+        if getattr(args, "seed_calibration", False):
+            return _run_seed_calibration(
+                cases=cases, config=config, args=args, output_dir=output_dir
+            )
         if args.run_suite or args.sealed_targeted_suite or len(cases) > 1:
             return _run_suite(
                 cases=cases,
@@ -1146,6 +1233,24 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.set_defaults(auto_confirm_requirements=True)
     parser.add_argument(
+        "--observation-deadline-seconds",
+        type=int,
+        default=None,
+        help=(
+            "Total time one observation may take, requests and stream reads "
+            "included; past it the observation is unmeasured. Cleanup still runs."
+        ),
+    )
+    parser.add_argument(
+        "--seed-calibration",
+        action="store_true",
+        help=(
+            "Seed, publish and run each selected edit case's seed with its "
+            "calibration block, --repetitions times, without any Builder call; "
+            "writes seed-calibration.json for the edit capability gate."
+        ),
+    )
+    parser.add_argument(
         "--timeout-seconds",
         type=int,
         default=900,
@@ -1174,37 +1279,57 @@ def _read_prompt(args: argparse.Namespace) -> str:
     return prompt
 
 
-def _saved_step_edit_from_case(
-    raw_case: Mapping[str, object], *, path: Path, case_id: str
-) -> SavedStepEditCase | None:
+def _edit_case_from_case(
+    raw_case: Mapping[str, object], *, path: Path | str, case_id: str
+) -> EditCase | None:
+    """Read `edit`: a seed, a scope (selected step or whole flow) and the gold.
+
+    A legacy case names only a seed and a target step; it reads as a selected
+    step, and its contract keeps its old shape and hash.
+    """
+
     raw_edit = raw_case.get("edit")
     if raw_edit is None:
         return None
     owner = f"{path} case {case_id}.edit"
-    if not isinstance(raw_edit, Mapping):
-        raise ValueError(f"{owner} must be an object.")
-    edit = cast(Mapping[str, Any], raw_edit)
-    if set(edit) != {"seed_flow_fixture", "target_step_order"}:
-        raise ValueError(f"{owner} must carry seed_flow_fixture and target_step_order.")
+    edit = closed_object(
+        raw_edit,
+        frozenset({"seed_flow_fixture", "scope", "target_step_order", "expect"}),
+        owner=owner,
+    )
     fixture_name = edit.get("seed_flow_fixture")
     if not isinstance(fixture_name, str):
         raise ValueError(f"{owner}.seed_flow_fixture must be a string.")
     fixture = _load_seed_flow_fixture(fixture_name)
-    target = edit.get("target_step_order")
-    step_count = len(fixture["steps"])
-    if (
-        not isinstance(target, int)
-        or isinstance(target, bool)
-        or not 1 <= target <= step_count
+    order = edit.get("target_step_order")
+    whole_flow = edit.get("scope", "selected_step") == "whole_flow"
+    if edit.get("scope", "selected_step") not in {"whole_flow", "selected_step"}:
+        raise ValueError(f"{owner}.scope must be whole_flow or selected_step.")
+    if whole_flow != (order is None) or not (
+        whole_flow
+        or (
+            isinstance(order, int)
+            and not isinstance(order, bool)
+            and 1 <= order <= len(fixture["steps"])
+        )
     ):
         raise ValueError(
-            f"{owner}.target_step_order must be an integer in 1..{step_count}."
+            f"{owner}.target_step_order must be an integer in "
+            f"1..{len(fixture['steps'])} for a selected step, absent for a whole flow."
         )
-    return SavedStepEditCase(
+    return EditCase(
         seed_flow_fixture=fixture_name,
         seed_flow_sha256=_seed_flow_fixture_sha256(fixture_name),
-        target_step_order=target,
-        step_count=step_count,
+        target_order=order,
+        gold=(
+            parse_edit_expectation(
+                edit["expect"], seed=fixture, owner=f"{owner}.expect"
+            )
+            if "expect" in edit
+            else None
+        ),
+        raw=dict(edit),
+        fixture=fixture,
     )
 
 
@@ -1511,7 +1636,7 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             raise ValueError(f"{path} case {case_id} has an empty prompt.")
         if case_id in seen_case_ids:
             raise ValueError(f"{path} contains duplicate case id: {case_id}")
-        edit = _saved_step_edit_from_case(raw_case, path=path, case_id=case_id)
+        edit = _edit_case_from_case(raw_case, path=path, case_id=case_id)
         # An edit case is identified by its prompt AND its seed flow: the same
         # message against the 10-step and 30-step fixtures asks two questions.
         if edit is None and prompt in seen_prompts:
@@ -1628,12 +1753,19 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             edit=edit,
             execution=execution,
         )
-        if case.edit is not None and (
-            case.apply_plan or case.executes or case.file_ids or case.attachments
+        if case.edit is not None and case.file_ids:
+            raise ValueError(
+                f"{path} case {case_id} is an edit case and takes fixtures, "
+                "not raw file ids."
+            )
+        if EDIT_CAPABILITY_COHORT in case.cohorts and (
+            case.edit is None
+            or case.edit.gold is None
+            or (case.edit.gold.outcome == "plan") is not case.apply_plan
         ):
             raise ValueError(
-                f"{path} case {case_id} is a saved-step edit case and cannot "
-                "apply, execute or attach files."
+                f"{path} case {case_id} is a capability case: it needs edit gold, "
+                "and applies its plan exactly when it expects one."
             )
         if case.executes and not case.apply_plan:
             raise ValueError(
@@ -1681,22 +1813,6 @@ def _field_names(cls: type[object]) -> frozenset[str]:
     return frozenset(item.name for item in dataclass_fields(cast(Any, cls)))
 
 
-def _closed_object(
-    value: object,
-    allowed: frozenset[str],
-    *,
-    owner: str,
-    noun: str = "keys",
-) -> Mapping[str, Any]:
-    if not isinstance(value, Mapping):
-        raise ValueError(f"{owner} must be an object.")
-    raw = cast(Mapping[str, Any], value)
-    unknown = sorted(str(key) for key in set(raw) - allowed)
-    if unknown:
-        raise ValueError(f"{owner} has unknown {noun}: {', '.join(unknown)}")
-    return raw
-
-
 def _one_of(value: object, allowed: frozenset[str], *, owner: str) -> str:
     if value not in allowed:
         raise ValueError(f"{owner} must be one of {', '.join(sorted(allowed))}.")
@@ -1713,7 +1829,7 @@ def _case_execution(
 
     if value is None:
         return None
-    block = _closed_object(value, _field_names(CaseExecution), owner=owner)
+    block = closed_object(value, _field_names(CaseExecution), owner=owner)
     if "inputs" not in block or "expect" not in block:
         raise ValueError(f"{owner} needs inputs and expect.")
     raw_checkpoints = block.get("checkpoints", [])
@@ -1737,7 +1853,7 @@ def _execution_inputs(
     manifest: Mapping[str, str],
     owner: str,
 ) -> ExecutionInputs:
-    raw = _closed_object(
+    raw = closed_object(
         value, _field_names(ExecutionInputs), owner=owner, noun="input kinds"
     )
     files = _case_fixture_names(
@@ -1778,7 +1894,7 @@ def _is_form_field_value(value: object) -> bool:
 
 
 def _expected_checkpoint(value: object, *, owner: str) -> ExpectedCheckpoint:
-    raw = _closed_object(value, _field_names(ExpectedCheckpoint), owner=owner)
+    raw = closed_object(value, _field_names(ExpectedCheckpoint), owner=owner)
     review_mode = _one_of(
         raw.get("review_mode"), _REVIEW_MODES, owner=f"{owner}.review_mode"
     )
@@ -1808,12 +1924,14 @@ def _expected_checkpoint(value: object, *, owner: str) -> ExpectedCheckpoint:
 
 
 def _output_expectation(value: object, *, owner: str) -> OutputExpectation:
-    raw = _closed_object(value, _field_names(OutputExpectation), owner=owner)
+    raw = closed_object(value, _field_names(OutputExpectation), owner=owner)
     output_kind = raw.get("output_kind")
     if output_kind is not None:
         _one_of(output_kind, _OUTPUT_KINDS, owner=f"{owner}.output_kind")
-    required_facts = _literal_list(
-        raw.get("required_facts"), owner=f"{owner}.required_facts"
+    required_facts = literal_list(
+        raw.get("required_facts"),
+        owner=f"{owner}.required_facts",
+        normalize=_normalized_output_text,
     )
     if output_kind is None and not required_facts:
         raise ValueError(
@@ -1823,22 +1941,12 @@ def _output_expectation(value: object, *, owner: str) -> OutputExpectation:
     return OutputExpectation(
         output_kind=output_kind,
         required_facts=required_facts,
-        forbidden=_literal_list(raw.get("forbidden"), owner=f"{owner}.forbidden"),
+        forbidden=literal_list(
+            raw.get("forbidden"),
+            owner=f"{owner}.forbidden",
+            normalize=_normalized_output_text,
+        ),
     )
-
-
-def _literal_list(value: object, *, owner: str) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if not isinstance(value, list) or not all(
-        isinstance(item, str) and _normalized_output_text(item)
-        for item in cast(list[object], value)
-    ):
-        raise ValueError(f"{owner} must be a list of non-empty literals.")
-    literals = tuple(cast(list[str], value))
-    if len({_normalized_output_text(item) for item in literals}) != len(literals):
-        raise ValueError(f"{owner} repeats a literal.")
-    return literals
 
 
 def _synthetic_user_profiles(
@@ -2565,6 +2673,9 @@ def _suite_run_context(args: argparse.Namespace) -> JsonObject:
         "max_concurrency": _max_concurrency(args),
         "max_concurrent_observations_per_case": (_MAX_CONCURRENT_OBSERVATIONS_PER_CASE),
         "flow_isolation_semantics_version": _FLOW_ISOLATION_SEMANTICS_VERSION,
+        "observation_deadline_seconds": getattr(
+            args, "observation_deadline_seconds", None
+        ),
     }
 
 
@@ -3233,7 +3344,12 @@ def _run_replacement_batch(
     if not isinstance(reason, str) or not reason.strip():
         raise ValueError("--replacement-reason is required in replacement mode.")
 
-    receipt = load_recoverable_release_receipt(suite_dir)
+    receipt = load_recoverable_release_receipt(
+        suite_dir,
+        cases_file=(
+            Path(args.cases_file) if args.cases_file else DEFAULT_CASES_FILE
+        ).name,
+    )
     if len(slots) > replacement_limit(len(receipt.observations)):
         raise ValueError(
             f"replacement batch has {len(slots)} slots; this receipt allows "
@@ -3299,6 +3415,7 @@ def _run_replacement_batch(
     args.model_id = requested_model_id
     args.ui_language = ui_language
     args.auto_confirm_requirements = auto_confirm
+    args.observation_deadline_seconds = run_context.get("observation_deadline_seconds")
     args.repetitions = receipt.repetitions
     args.concurrency = max_concurrency
 
@@ -3578,7 +3695,7 @@ def _target_runtime_identity(
         headers={"Accept": "application/json", "X-API-Key": config.api_key},
         method="GET",
     )
-    with urlopen(request, timeout=config.timeout_seconds) as response:
+    with urlopen(request, timeout=_request_timeout(config)) as response:
         payload = json.loads(response.read().decode("utf-8"))
     version = payload.get("version") if isinstance(payload, Mapping) else None
     version = version.strip() if isinstance(version, str) else None
@@ -3935,6 +4052,9 @@ def _run_case(
     cases_path: Path | None = DEFAULT_CASES_FILE,
     provisioned_fixtures: Mapping[str, object] | None = None,
 ) -> JsonObject:
+    deadline_seconds = getattr(args, "observation_deadline_seconds", None)
+    if deadline_seconds:
+        config = replace(config, deadline=time.monotonic() + deadline_seconds)
     if case.edit is None:
         return _run_case_session(
             case=case,
@@ -3947,22 +4067,13 @@ def _run_case(
             seeded_flow=None,
         )
     if existing_session_id:
-        raise ValueError(
-            "a saved-step edit case always seeds its own flow and session."
-        )
-    fixture = _selected_seed_flow_fixture(case.edit)
-    flow_id = _create_seed_flow(config=config, space_id=args.space_id, fixture=fixture)
-    bundle: JsonObject | None = None
-    primary_error: Exception | None = None
-    cleanup_error: Exception | None = None
-    try:
-        # The flow is owned from the moment it has an id: a refused assistant,
-        # a rejected steps response, a failed turn and an interrupt all reach
-        # the DELETE below.
-        seeded_flow = _seed_edit_flow(
-            config=config, flow_id=flow_id, fixture=fixture, edit=case.edit
-        )
-        print(f"seeded flow {flow_id} ({len(seeded_flow.step_ids)} steps)")
+        raise ValueError("an edit case always seeds its own flow and session.")
+    with _seeded_flow(
+        config=config,
+        space_id=args.space_id,
+        fixture=case.edit.fixture,
+        target_order=case.edit.target_order,
+    ) as seeded_flow:
         bundle = _run_case_session(
             case=case,
             config=config,
@@ -3973,12 +4084,51 @@ def _run_case(
             provisioned_fixtures=provisioned_fixtures,
             seeded_flow=seeded_flow,
         )
+    bundle["seeded_flow_lifecycle"] = {
+        "status": "deleted",
+        "flow_id": seeded_flow.flow_id,
+    }
+    return bundle
+
+
+@contextmanager
+def _seeded_flow(
+    *,
+    config: ApiConfig,
+    space_id: str,
+    fixture: Mapping[str, Any],
+    target_order: int | None,
+) -> Iterator[SeededFlow]:
+    """One seeded flow, owned from the moment it has an id until its DELETE.
+
+    A refused assistant, a rejected steps response, a seed that did not
+    round-trip, a failed turn and an interrupt all reach the DELETE. A failure
+    inside is re-raised carrying the flow's lifecycle (and the record of any
+    run on it); a failed DELETE is never hidden behind it.
+    """
+
+    flow_id = _create_seed_flow(config=config, space_id=space_id, fixture=fixture)
+    primary_error: Exception | None = None
+    cleanup_error: Exception | None = None
+    try:
+        seeded = _seed_edit_flow(
+            config=config,
+            flow_id=flow_id,
+            fixture=fixture,
+            target_order=target_order,
+            space_id=space_id,
+        )
+        # Before any Builder call: a seed that did not persist as written
+        # would measure the wrong flow.
+        seeded = _verify_seed_round_trip(config=config, seeded=seeded, fixture=fixture)
+        print(f"seeded flow {flow_id} ({len(seeded.step_ids)} steps)")
+        yield seeded
     except Exception as error:
         primary_error = error
     finally:
         try:
             _request_no_content(
-                config=config,
+                config=_without_deadline(config),
                 method="DELETE",
                 path=f"/flows/{flow_id}/",
             )
@@ -3988,6 +4138,11 @@ def _run_case(
         "status": "cleanup_failed" if cleanup_error is not None else "deleted",
         "flow_id": flow_id,
     }
+    if isinstance(primary_error, BattleFlowLifecycleError) and (
+        execution := primary_error.flow_lifecycle.get("execution")
+    ):
+        # The run happened on this flow; its record outlives the flow.
+        lifecycle["execution"] = execution
     if cleanup_error is not None:
         message = f"seeded Flow cleanup failed: {cleanup_error}"
         if primary_error is not None:
@@ -4003,19 +4158,6 @@ def _run_case(
                 cause=primary_error,
             ) from primary_error
         raise primary_error
-    assert bundle is not None
-    bundle["seeded_flow_lifecycle"] = lifecycle
-    return bundle
-
-
-def _selected_seed_flow_fixture(edit: SavedStepEditCase) -> JsonObject:
-    """The fixture the case selected, refused if it changed since selection."""
-
-    if _seed_flow_fixture_sha256(edit.seed_flow_fixture) != edit.seed_flow_sha256:
-        raise ValueError(
-            f"seed flow fixture changed since selection: {edit.seed_flow_fixture}"
-        )
-    return _load_seed_flow_fixture(edit.seed_flow_fixture)
 
 
 def _create_seed_flow(
@@ -4047,18 +4189,20 @@ def _seed_edit_flow(
     config: ApiConfig,
     flow_id: str,
     fixture: Mapping[str, Any],
-    edit: SavedStepEditCase,
+    target_order: int | None,
+    space_id: str | None = None,
 ) -> SeededFlow:
     """Turn the empty flow into the fixture: assistants, prompts, then steps.
 
     Each step's instructions live on a flow-managed assistant, which can only be
     created once the flow exists and can only be referenced by a step once it
     exists; the flow update at the end is what turns the fixture into steps.
-    Deleting the flow on failure is the caller's job (`_run_case`), not this
-    function's, so a refusal here and a rejected response below are cleaned up
-    by the same owner.
+    Deleting the flow on failure is the caller's job (`_seeded_flow`), not
+    this function's, so a refusal here and a rejected response below are
+    cleaned up by the same owner.
     """
 
+    metadata = _seed_metadata(config=config, fixture=fixture, space_id=space_id)
     step_payloads: list[JsonObject] = []
     for step_order, step in enumerate(fixture["steps"], start=1):
         assistant = _request_json(
@@ -4079,14 +4223,7 @@ def _seed_edit_flow(
                 "assistant_id": assistant_id,
                 "step_order": step_order,
                 "user_description": step.get("user_description") or step["name"],
-                "input_source": step["input_source"],
-                "input_type": step["input_type"],
-                "input_contract": step.get("input_contract"),
-                "output_mode": step["output_mode"],
-                "output_type": step["output_type"],
-                "output_contract": step.get("output_contract"),
-                "input_bindings": step.get("input_bindings"),
-                "input_config": step.get("input_config"),
+                **{key: step.get(key) for key in PERSISTED_STEP_KEYS},
             }
         )
     updated = _request_json(
@@ -4097,6 +4234,7 @@ def _seed_edit_flow(
             "name": fixture["name"],
             "description": fixture.get("description"),
             "steps": step_payloads,
+            **({"metadata_json": metadata} if metadata is not None else {}),
         },
     )
     steps = updated.get("steps")
@@ -4111,65 +4249,127 @@ def _seed_edit_flow(
         raise ValueError(f"seeded flow {flow_id} returned steps without ids.")
     return SeededFlow(
         flow_id=flow_id,
-        target_step_id=step_ids[edit.target_step_order - 1],
+        target_step_id=step_ids[target_order - 1] if target_order else None,
         step_ids=step_ids,
+        assistant_ids=tuple(str(step["assistant_id"]) for step in step_payloads),
     )
 
 
-def _saved_step_edit_evidence(
-    *, plan: Mapping[str, Any] | None, seeded_flow: SeededFlow
-) -> JsonObject:
-    """What the server's own edit diff says about the untouched steps.
+def _seed_metadata(
+    *, config: ApiConfig, fixture: Mapping[str, Any], space_id: str | None
+) -> JsonObject | None:
+    """The fixture's flow metadata; an audio seed gets the space's model.
 
-    Read from the plan's edit approval, never recomputed client-side: the
-    receipt must show the same diff the review screen shows the user.
+    Draft writes of audio steps require a transcription model, and the model
+    id belongs to the space, not to the fixture: the org default, else the
+    first, as the space itself resolves its default.
     """
 
-    evidence: JsonObject = {
-        "seeded_step_count": len(seeded_flow.step_ids),
-        "available": False,
-    }
-    proposal = plan.get("proposal") if isinstance(plan, Mapping) else None
-    approval = proposal.get("edit") if isinstance(proposal, Mapping) else None
-    diff = approval.get("diff") if isinstance(approval, Mapping) else None
-    changes = diff.get("step_changes") if isinstance(diff, Mapping) else None
-    if not isinstance(approval, Mapping) or not isinstance(changes, list):
-        return evidence
-    target_ref = approval.get("scoped_target_existing_step_ref")
-    typed_changes = [
-        cast(Mapping[str, Any], change)
-        for change in changes
-        if isinstance(change, Mapping)
-    ]
-    target = next(
-        (change for change in typed_changes if change.get("step_ref") == target_ref),
-        None,
-    )
-    unrelated = [
-        change for change in typed_changes if change.get("step_ref") != target_ref
-    ]
-    evidence.update(
-        {
-            "available": True,
-            "target_step_ref": target_ref,
-            "target_change_kind": target.get("kind") if target is not None else None,
-            "target_field_changes": (
-                list(target.get("field_changes") or []) if target is not None else None
-            ),
-            "step_change_kinds": {
-                str(change.get("step_ref") or change.get("step_name")): change.get(
-                    "kind"
-                )
-                for change in typed_changes
-            },
-            "unrelated_step_count": len(unrelated),
-            "unrelated_steps_unchanged": (
-                isinstance(target_ref, str)
-                and all(change.get("kind") == "unchanged" for change in unrelated)
-            ),
+    raw = fixture.get("metadata_json")
+    if raw is None:
+        return None
+    metadata = cast(JsonObject, json.loads(json.dumps(raw)))
+    wizard = metadata.get("wizard")
+    if (
+        isinstance(wizard, dict)
+        and cast(JsonObject, wizard).get("transcription_enabled")
+        and "transcription_model" not in wizard
+    ):
+        space = _request_json(config=config, method="GET", path=f"/spaces/{space_id}/")
+        models = _mapping_list(space.get("transcription_models"))
+        chosen = next(
+            (model for model in models if model.get("is_org_default")),
+            models[0] if models else None,
+        )
+        if chosen is None:
+            raise ValueError("the space has no transcription model for an audio seed.")
+        cast(JsonObject, wizard)["transcription_model"] = {
+            "id": _required_string(chosen, "id")
         }
+    return metadata
+
+
+def _flow_snapshot(
+    *, config: ApiConfig, flow_id: str, max_steps: int | None = None
+) -> JsonObject:
+    """The persisted flow and each step's assistant, as the public API has them."""
+
+    flow = _request_json(config=config, method="GET", path=f"/flows/{flow_id}/")
+    steps = sorted(
+        _mapping_list(flow.get("steps")),
+        key=lambda step: _int_value(step.get("step_order")) or 0,
     )
-    return evidence
+    assistants = {
+        str(step.get("assistant_id")): _request_json(
+            config=config,
+            method="GET",
+            path=f"/flows/{flow_id}/assistants/{step.get('assistant_id')}/",
+        )
+        for step in steps[:max_steps]
+    }
+    return {"flow": flow, "assistants": assistants}
+
+
+def _persisted_as_written(written: object, persisted: object) -> bool:
+    """Every written value persisted; the server may add keys, never drop one."""
+
+    if isinstance(written, Mapping):
+        return isinstance(persisted, Mapping) and all(
+            key in persisted and _persisted_as_written(value, persisted[key])
+            for key, value in cast(Mapping[str, object], written).items()
+        )
+    if isinstance(written, list):
+        items = cast(list[object], written)
+        return (
+            isinstance(persisted, list)
+            and len(cast(list[object], persisted)) == len(items)
+            and all(map(_persisted_as_written, items, cast(list[object], persisted)))
+        )
+    return written == persisted
+
+
+def _verify_seed_round_trip(
+    *, config: ApiConfig, seeded: SeededFlow, fixture: Mapping[str, Any]
+) -> SeededFlow:
+    """Read the seeded flow back; every fixture value must have persisted.
+
+    Raises before the session exists, so a mis-seeded flow costs no Builder
+    call and is an acquisition fault, never a product outcome. The snapshot is
+    the edit's baseline and its revision the one the edit is applied against.
+    """
+
+    snapshot = _flow_snapshot(config=config, flow_id=seeded.flow_id)
+    written, persisted = seed_view(fixture), snapshot_view(snapshot, seeded.identity)
+    mismatches = [
+        f"{want['slot']} {key}"
+        for want, got in zip(written["steps"], persisted["steps"], strict=False)
+        for key, value in want.items()
+        if value is not None and not _persisted_as_written(value, got.get(key))
+    ]
+    if [step["slot"] for step in persisted["steps"]] != [
+        step["slot"] for step in written["steps"]
+    ]:
+        mismatches.append("step order or assistants")
+    mismatches += [
+        f"form field {name}"
+        for name, field in written["form_fields"].items()
+        if not _persisted_as_written(field, persisted["form_fields"].get(name))
+    ]
+    if not _persisted_as_written(written["metadata"], persisted["metadata"]):
+        mismatches.append("metadata_json")
+    if mismatches:
+        raise ValueError(
+            f"seeded flow {seeded.flow_id} did not round-trip: " + ", ".join(mismatches)
+        )
+    models = sorted(
+        {str(step["model_ref"]) for step in persisted["steps"] if step["model_ref"]}
+    )
+    return replace(
+        seeded,
+        captured_revision=persisted["revision"],
+        baseline=snapshot,
+        runtime_model_id=",".join(models) or None,
+    )
 
 
 def _run_case_session(
@@ -4215,9 +4415,10 @@ def _run_case_session(
     # first: a clarification answer without it would widen the planner's
     # scope to the whole flow mid-observation. (The server restores an omitted
     # context only for requirements confirmation.)
+    # Whole-flow chat sends no step context.
     edit_context: JsonObject | None = (
         {"kind": "saved_flow_step", "flow_step_id": seeded_flow.target_step_id}
-        if seeded_flow is not None
+        if seeded_flow is not None and seeded_flow.target_step_id is not None
         else None
     )
     interactions: list[JsonObject] = []
@@ -4309,6 +4510,34 @@ def _run_case_session(
     applied_flow_evidence = None
     flow_lifecycle: JsonObject = {"status": "not_applied"}
     plan_id = _optional_string(final_interaction, "plan_id")
+    event_summary = _interaction_event_summary(interactions)
+    edit_evidence: JsonObject | None = None
+    if seeded_flow is not None:
+        edit_evidence = {
+            "identity": seeded_flow.identity,
+            "captured_revision": seeded_flow.captured_revision,
+            "runtime_model_id": seeded_flow.runtime_model_id,
+            "baseline": seeded_flow.baseline,
+            # Before any approval: every outcome is checked for writes.
+            "after_turn": _flow_snapshot(config=config, flow_id=seeded_flow.flow_id),
+            "outcome": _edit_outcome(
+                final_interaction=final_interaction,
+                event_summary=event_summary,
+                ui_language=args.ui_language,
+            ),
+            "plan": plan,
+            "apply": None,
+            "applied": None,
+        }
+    # One evaluation per observation: the structural phase runs before the
+    # run is spent (it decides whether there is one) or, with no apply, here.
+    structural: JsonObject | None = None
+
+    def structure_passed() -> bool:
+        nonlocal structural
+        structural = _judge_edit(case.edit, edit_evidence)
+        return structural["verdict"] == "pass"
+
     if case.apply_plan and plan_id is not None:
         applied_flow_evidence, runtime_evidence, flow_lifecycle = (
             _apply_execute_and_cleanup_flow(
@@ -4318,11 +4547,13 @@ def _run_case_session(
                 runtime_file_paths=runtime_file_paths,
                 timeout_seconds=args.timeout_seconds,
                 artifact_output_dir=artifact_output_dir,
+                seeded_flow=seeded_flow,
+                edit_evidence=edit_evidence,
+                structure_passed=structure_passed if case.execution else None,
             )
         )
     else:
         runtime_evidence = None
-    event_summary = _interaction_event_summary(interactions)
     journey = _journey_summary(
         interactions,
         expected=case.expected or {},
@@ -4390,6 +4621,15 @@ def _run_case_session(
         provenance=live_execution_provenance,
         expected=case.expected or {},
     )
+    if case.edit is not None and case.edit.gold is not None and edit_evidence:
+        quality_report["edit"] = _edit_report(
+            case.edit,
+            executes=case.executes,
+            structural=structural or _judge_edit(case.edit, edit_evidence),
+            evidence=edit_evidence,
+            runtime_evidence=runtime_evidence,
+            output_success=quality_report.get("output_success"),
+        )
 
     bundle: JsonObject = {
         "artifact_mode": "live_execution",
@@ -4441,10 +4681,76 @@ def _run_case_session(
         bundle["case"]["execution"] = _execution_contract(case.execution)
     if case.edit is not None and seeded_flow is not None:
         bundle["case"]["edit"] = _edit_contract(case.edit)
-        bundle["edit_evidence"] = _saved_step_edit_evidence(
-            plan=plan, seeded_flow=seeded_flow
-        )
+        bundle["edit_evidence"] = edit_evidence
     return bundle
+
+
+def _edit_outcome(
+    *,
+    final_interaction: Mapping[str, Any],
+    event_summary: Mapping[str, Any],
+    ui_language: str | None,
+) -> JsonObject:
+    """What the user got: a plan, questions, and the Builder's last words."""
+
+    session = final_interaction.get("latest_session")
+    conversation = (
+        _mapping_list(cast(Mapping[str, Any], session).get("conversation"))
+        if isinstance(session, Mapping)
+        else []
+    )
+    replies = [item for item in conversation if item.get("role") == "assistant"]
+    return {
+        "plan": final_interaction.get("plan_id") is not None,
+        "questions": _int_value(event_summary.get("question_event_count")) or 0,
+        "final_text": replies[-1].get("content") if replies else None,
+        "ui_language": ui_language,
+    }
+
+
+def _judge_edit(
+    edit: EditCase | None, evidence: Mapping[str, Any] | None
+) -> JsonObject:
+    assert edit is not None and edit.gold is not None and evidence is not None
+    return evaluate_edit(edit.gold, seed=edit.fixture, evidence=evidence)
+
+
+def _edit_report(
+    edit: EditCase,
+    *,
+    executes: bool,
+    structural: Mapping[str, Any],
+    evidence: Mapping[str, Any],
+    runtime_evidence: Mapping[str, Any] | None,
+    output_success: object,
+) -> JsonObject:
+    """The case's one edit verdict: the structural phase, then its run.
+
+    Recomputable from what the bundle keeps. A structurally failed edit is
+    not run, so its verdict is the structural one.
+    """
+
+    assert edit.gold is not None
+    report = (
+        add_execution(
+            structural,
+            edit.gold,
+            evidence=evidence,
+            output_success=output_success,
+            step_results=(runtime_evidence or {}).get("step_results"),
+        )
+        if executes and structural["verdict"] == "pass"
+        else dict(structural)
+    )
+    return {
+        **report,
+        "outcome": edit.gold.outcome,
+        "seed": edit.seed_flow_fixture,
+        "seed_sha256": edit.seed_flow_sha256,
+        "scope": "whole_flow" if edit.target_order is None else "selected_step",
+        "executes": executes,
+        "runtime_model_id": evidence.get("runtime_model_id"),
+    }
 
 
 def _apply_execute_and_cleanup_flow(
@@ -4455,8 +4761,19 @@ def _apply_execute_and_cleanup_flow(
     runtime_file_paths: tuple[Path, ...],
     timeout_seconds: int,
     artifact_output_dir: Path,
+    seeded_flow: SeededFlow | None = None,
+    edit_evidence: JsonObject | None = None,
+    structure_passed: Callable[[], bool] | None = None,
 ) -> tuple[JsonObject, JsonObject | None, JsonObject]:
-    """Own one benchmark Flow from materialization through evidence and deletion."""
+    """Own one benchmark Flow from materialization through evidence.
+
+    A create plan is materialized with `/create` and the Flow it creates is
+    deleted here. An edit plan is approved and applied to its seeded Flow
+    against the revision captured at seeding; that Flow belongs to the
+    seeding owner (`_run_case`), which deletes it. An edit runs only when its
+    structure passed: a failed edit is already failed, and its run would only
+    spend the runtime model.
+    """
 
     apply_result: JsonObject | None = None
     applied_flow_evidence: JsonObject | None = None
@@ -4469,18 +4786,38 @@ def _apply_execute_and_cleanup_flow(
     cleanup_error: Exception | None = None
     try:
         try:
-            with _FLOW_APPLY_LOCK:
-                apply_result = _request_json(
+            if seeded_flow is None:
+                with _FLOW_APPLY_LOCK:
+                    apply_result = _request_json(
+                        config=config,
+                        method="POST",
+                        path=f"/flows/ai-builder/plans/{plan_id}/create",
+                    )
+                flow_id = _required_string(apply_result, "flow_id")
+                flow = _request_json(
                     config=config,
-                    method="POST",
-                    path=f"/flows/ai-builder/plans/{plan_id}/create",
+                    method="GET",
+                    path=f"/flows/{flow_id}/",
                 )
-            flow_id = _required_string(apply_result, "flow_id")
-            flow = _request_json(
-                config=config,
-                method="GET",
-                path=f"/flows/{flow_id}/",
-            )
+            else:
+                flow_id = seeded_flow.flow_id
+                apply_result = _approve_and_apply_edit(
+                    config=config, plan_id=plan_id, seeded_flow=seeded_flow
+                )
+                snapshot = (
+                    None
+                    if "refused" in apply_result
+                    else _flow_snapshot(
+                        config=config,
+                        flow_id=flow_id,
+                        max_steps=(
+                            _applied_step_bound(case.edit) if case.edit else None
+                        ),
+                    )
+                )
+                flow = snapshot["flow"] if snapshot is not None else None
+                if edit_evidence is not None:
+                    edit_evidence.update(apply=apply_result, applied=snapshot)
             applied_flow_evidence = {
                 "apply_result": apply_result,
                 "flow": flow,
@@ -4489,7 +4826,9 @@ def _apply_execute_and_cleanup_flow(
                     "does_not_prove_runtime_checkpoint_pause_or_resume"
                 ),
             }
-            if case.execution is not None:
+            if structure_passed is not None and not structure_passed():
+                runtime_record["skipped"] = "structural_failure"
+            elif case.execution is not None and flow is not None:
                 runtime_evidence = _execute_and_collect_runtime_evidence(
                     config=config,
                     flow_id=flow_id,
@@ -4523,12 +4862,12 @@ def _apply_execute_and_cleanup_flow(
         except Exception as error:
             primary_error = error
     finally:
-        if flow_id is not None:
+        if flow_id is not None and seeded_flow is None:
             try:
                 # Do not hide a transient cleanup failure with an implicit retry.
                 # The exact id is retained and replacements require an empty space.
                 _request_no_content(
-                    config=config,
+                    config=_without_deadline(config),
                     method="DELETE",
                     path=f"/flows/{flow_id}/",
                 )
@@ -4549,7 +4888,9 @@ def _apply_execute_and_cleanup_flow(
         ) from cleanup_error
     if primary_error is not None:
         lifecycle = (
-            {"status": "deleted", "flow_id": flow_id}
+            {"status": "owned_by_seed", "flow_id": flow_id}
+            if seeded_flow is not None
+            else {"status": "deleted", "flow_id": flow_id}
             if flow_id is not None
             else {
                 "status": (
@@ -4572,11 +4913,42 @@ def _apply_execute_and_cleanup_flow(
     if applied_flow_evidence is None or flow_id is None:
         # All ordinary exits above either return complete evidence or raise.
         raise RuntimeError("applied Flow lifecycle completed without Flow evidence.")
-    return (
-        applied_flow_evidence,
-        runtime_evidence,
-        {"status": "deleted", "flow_id": flow_id},
-    )
+    lifecycle = {
+        "status": "owned_by_seed" if seeded_flow is not None else "deleted",
+        "flow_id": flow_id,
+    }
+    if runtime_record.get("skipped"):
+        lifecycle["execution"] = runtime_record
+    return applied_flow_evidence, runtime_evidence, lifecycle
+
+
+def _approve_and_apply_edit(
+    *, config: ApiConfig, plan_id: str, seeded_flow: SeededFlow
+) -> JsonObject:
+    """Approve, then apply against the revision captured at seeding.
+
+    The server refusing either is the product's answer to this plan and is
+    returned as evidence; a 5xx is the stack's and raises.
+    """
+
+    try:
+        _request_json(
+            config=config,
+            method="POST",
+            path=f"/flows/ai-builder/plans/{plan_id}/approve",
+        )
+        return {
+            "applied": _request_json(
+                config=config,
+                method="POST",
+                path=f"/flows/ai-builder/plans/{plan_id}/apply",
+                payload={"expected_revision": seeded_flow.captured_revision},
+            )
+        }
+    except HTTPError as error:
+        if error.code >= 500:
+            raise
+        return {"refused": _http_error_detail(error, config)}
 
 
 def _flow_api_path(template: str, **ids: str) -> str:
@@ -4657,7 +5029,7 @@ def _execute_and_collect_runtime_evidence(
         )
     except HTTPError as error:
         # The server owns run-request validation; keep its answer.
-        record["run_request_refused"] = _http_error_detail(error)
+        record["run_request_refused"] = _http_error_detail(error, config)
         raise
     run_id = _required_string(created_run, "id")
     record["run_id"] = run_id
@@ -4812,7 +5184,7 @@ def _cancel_run(
 
     try:
         return _request_json(
-            config=config,
+            config=_without_deadline(config),
             method="POST",
             path=_flow_api_path(FLOW_RUN_CANCEL_PATH, id=flow_id, run_id=run_id),
         )
@@ -4821,7 +5193,7 @@ def _cancel_run(
             {
                 "action": "cancel_run",
                 **(
-                    _http_error_detail(error)
+                    _http_error_detail(error, _without_deadline(config))
                     if isinstance(error, HTTPError)
                     else {"error": str(error)}
                 ),
@@ -4909,18 +5281,31 @@ def _resolve_review_pause(
         return {
             "kind": failed_kind,
             "checkpoint": observed,
-            **_http_error_detail(error),
+            **_http_error_detail(error, config),
         }
     handled.append({"checkpoint": observed, "action": expected.action})
     return None
 
 
-def _http_error_detail(error: HTTPError) -> JsonObject:
+_HTTP_ERROR_DETAIL_CHARS = 2000
+
+
+def _http_error_detail(error: HTTPError, config: ApiConfig) -> JsonObject:
+    """A refusal's status and the start of its body, read like any other body:
+    in bounded reads under the observation's remaining time, capped."""
+
     try:
-        body = error.read().decode("utf-8", errors="replace")
+        body = _read_body(error, config, limit=4 * _HTTP_ERROR_DETAIL_CHARS)
+    except TimeoutError:
+        # Inside an observation, out of time is unmeasured, never a scored
+        # refusal; best-effort cleanup (no deadline) only records it.
+        if getattr(config, "deadline", None) is not None:
+            raise
+        body = b""
     except (OSError, ValueError, HTTPException):
-        body = ""
-    return {"status_code": error.code, "error": body[:2000] or str(error)}
+        body = b""
+    text = body.decode("utf-8", errors="replace")[:_HTTP_ERROR_DETAIL_CHARS]
+    return {"status_code": error.code, "error": text or str(error)}
 
 
 def _upload_file(*, config: ApiConfig, source_path: Path) -> JsonObject:
@@ -4976,8 +5361,8 @@ def _post_multipart_file(
         },
         method="POST",
     )
-    with urlopen(request, timeout=config.timeout_seconds) as response:
-        parsed = json.loads(response.read().decode("utf-8"))
+    with urlopen(request, timeout=_request_timeout(config)) as response:
+        parsed = json.loads(_read_body(response, config).decode("utf-8"))
     if not isinstance(parsed, dict):
         raise ValueError(f"Upload of {source_path.name} returned no object.")
     return parsed
@@ -5109,8 +5494,8 @@ def _download_run_file(
         payload={"expires_in": 3600, "content_disposition": "attachment"},
     )
     url = _required_string(signed_url, "url")
-    with urlopen(url, timeout=config.timeout_seconds) as response:
-        return response.read(_MAX_FINAL_FILE_BYTES + 1)
+    with urlopen(url, timeout=_request_timeout(config)) as response:
+        return _read_body(response, config, limit=_MAX_FINAL_FILE_BYTES + 1)
 
 
 def _pdf_text(content: bytes) -> str:
@@ -5259,22 +5644,14 @@ def _output_report(
                 "reason": f"the run delivered {file_count} final file(s); one is read",
             }
         )
-    for name, key, literals, must_appear in (
-        ("required_fact", "fact", expect.required_facts, True),
-        ("forbidden_literal", "literal", expect.forbidden, False),
-    ):
-        for literal in literals:
-            present = bool(text) and _normalized_output_text(literal) in text
-            checks.append(
-                {
-                    "name": name,
-                    key: literal,
-                    "passed": bool(text) and present == must_appear,
-                    "reason": f"{literal!r} "
-                    + ("appears in" if present else "is missing from")
-                    + " the final output",
-                }
-            )
+    checks.extend(
+        literal_checks(
+            raw_text if isinstance(raw_text, str) else "",
+            required=expect.required_facts,
+            forbidden=expect.forbidden,
+            normalize=_normalized_output_text,
+        )
+    )
     checks.extend(
         check
         for check in runtime_checks
@@ -7172,6 +7549,11 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
         else None,
         "failed_expectation_check_count": len(failed_checks),
         "failed_checks": failed_checks,
+        "edit": (
+            {key: value for key, value in report["edit"].items() if key != "checks"}
+            if isinstance(report.get("edit"), Mapping)
+            else None
+        ),
         "output_executed": _created_run(bundle),
         "output_success": output_success if isinstance(output_success, bool) else None,
         "output_failed_checks": output_failed_checks,
@@ -7526,6 +7908,23 @@ def _reanalyze_bundles(
                 provenance=provenance,
                 expected=expected,
             )
+            edit_contract = case.get("edit") if isinstance(case, Mapping) else None
+            if isinstance(edit_contract, Mapping) and "expect" in edit_contract:
+                edit = _edit_case_from_contract(
+                    edit_contract, path=bundle_path, case_id=str(case_id)
+                )
+                report["edit"] = _edit_report(
+                    edit,
+                    executes=case.get("execute_flow") is True,
+                    structural=_judge_edit(edit, bundle["edit_evidence"]),
+                    evidence=bundle["edit_evidence"],
+                    runtime_evidence=(
+                        bundle.get("runtime_evidence")
+                        if isinstance(bundle.get("runtime_evidence"), Mapping)
+                        else None
+                    ),
+                    output_success=report.get("output_success"),
+                )
             refreshed = {
                 **{
                     key: value
@@ -7560,6 +7959,119 @@ def _reanalyze_bundles(
             failures += 1
             print(f"reanalyze failed for {bundle_path}: {error}", file=sys.stderr)
     return 1 if failures else 0
+
+
+def _edit_case_from_contract(
+    contract: Mapping[str, Any], *, path: Path, case_id: str
+) -> EditCase:
+    """The recorded edit contract, read by the one parser, on these seed bytes."""
+
+    raw = {key: value for key, value in contract.items() if key != "seed_flow_sha256"}
+    edit = _edit_case_from_case({"edit": raw}, path=path, case_id=case_id)
+    assert edit is not None
+    if edit.seed_flow_sha256 != contract.get("seed_flow_sha256"):
+        raise ValueError(f"{path}: the seed fixture changed since the observation.")
+    return edit
+
+
+_CALIBRATION_EVIDENCE = ("execution", "run", "run_contract", "final_artifact")
+
+
+def calibration_run_passed(
+    fixture: Mapping[str, Any], evidence: Mapping[str, Any]
+) -> bool:
+    """One calibration run, judged from its kept evidence by the output owner
+    against the seed's own calibration block."""
+
+    execution = _case_execution(
+        fixture["calibration"], manifest=_fixture_manifest(), owner="calibration"
+    )
+    assert execution is not None
+    report = _output_report(execution.expect, evidence, runtime_checks=[])
+    return report.get("output_success") is True
+
+
+def _run_seed_calibration(
+    *,
+    cases: list[BattleCase],
+    config: ApiConfig,
+    args: argparse.Namespace,
+    output_dir: Path,
+) -> int:
+    """Run each executable seed as written, with no Builder turn at all.
+
+    A seed must produce its own facts on this stack and runtime model before
+    an edit of it can be blamed for missing them. The record is bound to the
+    build and target it ran on; the capability gate refuses any other.
+    """
+
+    manifest = _fixture_manifest()
+    seeds = {
+        case.edit.seed_flow_fixture: case.edit
+        for case in cases
+        if case.edit is not None and case.executes
+    }
+    record: JsonObject = {
+        "artifact_mode": "seed_calibration",
+        # The same identity a release receipt records: the gate accepts this
+        # calibration only for a receipt of the same build and target.
+        "release_identity": _release_run_identity(
+            cases=cases,
+            cases_path=_cases_path_from_args(args) or DEFAULT_CASES_FILE,
+            requested_model_id=args.model_id,
+            require_clean_source=False,
+            config=config,
+        ),
+        "space_id": args.space_id,
+        "seeds": {},
+    }
+    passed = True
+    for name, edit in sorted(seeds.items()):
+        if "calibration" not in edit.fixture:
+            raise ValueError(f"{name} has no calibration block.")
+        execution = _case_execution(
+            edit.fixture["calibration"], manifest=manifest, owner=f"{name}.calibration"
+        )
+        assert execution is not None
+        runs: list[JsonObject] = []
+        for _ in range(args.repetitions):
+            with _seeded_flow(
+                config=config,
+                space_id=args.space_id,
+                fixture=edit.fixture,
+                target_order=None,
+            ) as seeded:
+                evidence = _execute_and_collect_runtime_evidence(
+                    config=config,
+                    flow_id=seeded.flow_id,
+                    execution=execution,
+                    runtime_file_paths=tuple(
+                        _verified_fixture_path(file, manifest)
+                        for file in execution.inputs.files
+                    ),
+                    timeout_seconds=args.timeout_seconds,
+                    artifact_output_dir=output_dir,
+                    case_id=f"calibration-{name}",
+                    record={},
+                )
+            runs.append(
+                {
+                    # The bounded evidence the output owner judges, not its
+                    # verdict: the gate recomputes every run from it.
+                    "evidence": {
+                        key: evidence.get(key) for key in _CALIBRATION_EVIDENCE
+                    },
+                    "runtime_model_id": seeded.runtime_model_id,
+                }
+            )
+        passed = passed and all(
+            calibration_run_passed(edit.fixture, run["evidence"]) for run in runs
+        )
+        record["seeds"][name] = {"sha256": edit.seed_flow_sha256, "runs": runs}
+    path = output_dir / "seed-calibration.json"
+    _write_json_exclusive(path, record)
+    print(f"seed calibration {'passed' if passed else 'FAILED'}: {path}")
+    return 0 if passed else 1
 
 
 def _validated_reanalysis_bundle(path: Path, value: object) -> JsonObject:
@@ -7697,8 +8209,8 @@ def _send_message_stream(
         payload={key: value for key, value in payload.items() if value is not None},
         accept="text/event-stream",
     )
-    with urlopen(request, timeout=config.timeout_seconds) as response:
-        yield from _iter_sse_events(response)
+    with urlopen(request, timeout=_request_timeout(config)) as response:
+        yield from _iter_sse_events(response, config=config)
 
 
 def _request_json(
@@ -7735,8 +8247,8 @@ def _request_json_or_null(
         accept="application/json",
         headers=headers,
     )
-    with urlopen(request, timeout=config.timeout_seconds) as response:
-        body = response.read().decode("utf-8")
+    with urlopen(request, timeout=_request_timeout(config)) as response:
+        body = _read_body(response, config).decode("utf-8")
     parsed = json.loads(body)
     if parsed is None:
         return None
@@ -7758,8 +8270,8 @@ def _request_no_content(
         payload=None,
         accept="application/json",
     )
-    with urlopen(request, timeout=config.timeout_seconds) as response:
-        response.read()
+    with urlopen(request, timeout=_request_timeout(config)) as response:
+        _read_body(response, config)
 
 
 def _request(
@@ -7784,26 +8296,64 @@ def _request(
     return Request(url, data=body, headers=request_headers, method=method)
 
 
-def _iter_sse_events(response: Any) -> Iterator[JsonObject]:
+def _iter_sse_events(
+    response: Any, *, config: ApiConfig | None = None
+) -> Iterator[JsonObject]:
     current_event = "message"
     data_lines: list[str] = []
-    for raw_line in response:
-        line = raw_line.decode("utf-8").rstrip("\r\n")
-        if line == "":
-            if data_lines:
-                yield _decode_sse_event(current_event, data_lines)
-            current_event = "message"
-            data_lines = []
-            continue
-        if line.startswith(":"):
-            continue
-        if line.startswith("event:"):
-            current_event = line.removeprefix("event:").strip()
-            continue
-        if line.startswith("data:"):
-            data_lines.append(line.removeprefix("data:").lstrip())
+    pending = b""
+    # Lines are split from bounded reads, never read whole: a partial line
+    # trickling in cannot hold a read open past the deadline.
+    for chunk in itertools.chain(_read_chunks(response, config), [b"\n"]):
+        *raw_lines, pending = (pending + chunk).split(b"\n")
+        for raw_line in raw_lines:
+            line = raw_line.decode("utf-8").rstrip("\r")
+            if line == "":
+                if data_lines:
+                    yield _decode_sse_event(current_event, data_lines)
+                current_event = "message"
+                data_lines = []
+            elif line.startswith("event:"):
+                current_event = line.removeprefix("event:").strip()
+            elif line.startswith("data:"):
+                data_lines.append(line.removeprefix("data:").lstrip())
     if data_lines:
         yield _decode_sse_event(current_event, data_lines)
+
+
+def _read_chunks(response: Any, config: ApiConfig | None) -> Iterator[bytes]:
+    """A body in bounded reads, each under the observation's remaining time.
+
+    One `read1` returns what one socket read brings, so a peer trickling
+    bytes cannot stretch a read past the deadline; the socket timeout is
+    re-set to the remaining time before every read.
+    """
+
+    while True:
+        if config is not None:
+            _bound_socket_read(response, _request_timeout(config))
+        chunk = response.read1(_READ_CHUNK_BYTES)
+        if not chunk:
+            return
+        yield chunk
+
+
+def _read_body(response: Any, config: ApiConfig, *, limit: int | None = None) -> bytes:
+    body = bytearray()
+    for chunk in _read_chunks(response, config):
+        body += chunk
+        if limit is not None and len(body) >= limit:
+            return bytes(body[:limit])
+    return bytes(body)
+
+
+def _bound_socket_read(response: Any, seconds: float) -> None:
+    # A response's socket, or an HTTPError's, one wrapper further in.
+    for candidate in (response, getattr(response, "fp", None)):
+        raw = getattr(getattr(candidate, "fp", None), "raw", None)
+        if (sock := getattr(raw, "_sock", None)) is not None:
+            sock.settimeout(seconds)
+            return
 
 
 def _decode_sse_event(event: str, data_lines: list[str]) -> JsonObject:

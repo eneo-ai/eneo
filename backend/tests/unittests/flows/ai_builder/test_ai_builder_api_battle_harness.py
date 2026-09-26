@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import socket
 import subprocess
 import sys
 import time
@@ -11,7 +12,7 @@ from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
-from threading import Barrier, Lock
+from threading import Barrier, Lock, Thread
 from types import ModuleType, SimpleNamespace
 from typing import Any, NoReturn, get_args
 from urllib.error import HTTPError
@@ -4724,7 +4725,9 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
             },
         },
     )
-    monkeypatch.setattr(harness, "load_recoverable_release_receipt", lambda _: receipt)
+    monkeypatch.setattr(
+        harness, "load_recoverable_release_receipt", lambda _, **__: receipt
+    )
     monkeypatch.setattr(harness, "_read_cases_file", lambda _: cases)
     monkeypatch.setattr(harness, "_release_run_identity", lambda **_: release_identity)
     monkeypatch.setattr(
@@ -9177,7 +9180,10 @@ def test_suite_demand_for_the_frozen_corpus_exceeds_the_default_ceilings() -> No
     # the reference-rename case on the 10-step fixture added 120 (3 reps).
     # 2026-09-26: the executed case charges the stop of a run that pauses
     # undeclared (an active-checkpoint read and a cancel): 2 x 3 reps.
-    assert demand["total"] == 12_052
+    # 2026-09-26 (eneo-e7h6): each edit observation reads its seeded flow back
+    # before the first turn and again after the last one (the flow and one
+    # assistant per step): 2 x (1 + steps) = 22 + 22 + 62, x 3 reps.
+    assert demand["total"] == 12_370
     assert demand["total"] > 10_000
 
 
@@ -10378,40 +10384,14 @@ def _edit_namespace(**overrides: object) -> SimpleNamespace:
     return SimpleNamespace(**arguments)
 
 
-def test_seed_flow_fixtures_are_steps_the_flow_api_accepts() -> None:
-    from uuid import uuid4
-
-    from eneo.flows.api.flow_models import FlowStepCreateRequest
-
+def test_the_long_chain_only_adds_distant_review_steps() -> None:
     harness = _battle_harness()
-    fixtures = {
-        name: harness._load_seed_flow_fixture(name)
-        for name in ("edit_chain_10.json", "edit_chain_30.json")
-    }
-    api_fields = (
-        "user_description",
-        "input_source",
-        "input_type",
-        "input_contract",
-        "output_mode",
-        "output_type",
-        "output_contract",
-        "input_bindings",
-        "input_config",
-    )
-    for name, fixture in fixtures.items():
-        assert len(fixture["steps"]) == int(name.split("_")[2].split(".")[0])
-        for order, step in enumerate(fixture["steps"], start=1):
-            FlowStepCreateRequest.model_validate(
-                {
-                    **{field: step.get(field) for field in api_fields},
-                    "assistant_id": str(uuid4()),
-                    "step_order": order,
-                }
-            )
-    small, large = fixtures["edit_chain_10.json"], fixtures["edit_chain_30.json"]
+    small = harness._load_seed_flow_fixture("edit_chain_10.json")
+    large = harness._load_seed_flow_fixture("edit_chain_30.json")
+
     # Same target, same direct producers and consumer, same renderer at the end;
     # only the number of distant review steps differs.
+    assert (len(small["steps"]), len(large["steps"])) == (10, 30)
     assert small["steps"][:4] == large["steps"][:4]
     assert small["steps"][-1] == large["steps"][-1]
     assert small["steps"][2]["name"] == "Skriv beslutsdokument"
@@ -10430,7 +10410,7 @@ def test_edit_cases_load_with_the_fixture_hash_in_their_contract() -> None:
     assert cases[0].prompt == cases[1].prompt
     for case in cases:
         assert case.edit is not None
-        assert case.edit.target_step_order == 3
+        assert case.edit.target_order == 3
         assert case.edit.seed_flow_sha256 == harness._seed_flow_fixture_sha256(
             case.edit.seed_flow_fixture
         )
@@ -10472,20 +10452,18 @@ def test_a_changed_seed_fixture_changes_the_case_contract(
         "edit": {"seed_flow_fixture": "edit_chain_10.json", "target_step_order": 3}
     }
 
-    before = harness._saved_step_edit_from_case(
+    before = harness._edit_case_from_case(
         raw_case, path=Path("cases.json"), case_id="c"
     )
     fixture = json.loads(copy.read_text())
     fixture["steps"][2]["instructions"] += " Var kortfattad."
     copy.write_text(json.dumps(fixture, ensure_ascii=False))
-    after = harness._saved_step_edit_from_case(
-        raw_case, path=Path("cases.json"), case_id="c"
-    )
+    after = harness._edit_case_from_case(raw_case, path=Path("cases.json"), case_id="c")
 
     assert before is not None and after is not None
     assert before.seed_flow_sha256 != after.seed_flow_sha256
     with raises(ValueError, match="target_step_order"):
-        harness._saved_step_edit_from_case(
+        harness._edit_case_from_case(
             {
                 "edit": {
                     "seed_flow_fixture": "edit_chain_10.json",
@@ -10530,19 +10508,12 @@ def test_seeding_provisions_the_flow_then_assistants_then_steps(
         raise AssertionError((method, path))
 
     monkeypatch.setattr(harness, "_request_json", fake_request_json)
-    edit = harness.SavedStepEditCase(
-        seed_flow_fixture="edit_chain_10.json",
-        seed_flow_sha256=harness._seed_flow_fixture_sha256("edit_chain_10.json"),
-        target_step_order=3,
-        step_count=10,
-    )
-
-    fixture = harness._selected_seed_flow_fixture(edit)
+    fixture = harness._load_seed_flow_fixture("edit_chain_10.json")
     flow_id = harness._create_seed_flow(
         config=object(), space_id="space-1", fixture=fixture
     )
     seeded = harness._seed_edit_flow(
-        config=object(), flow_id=flow_id, fixture=fixture, edit=edit
+        config=object(), flow_id=flow_id, fixture=fixture, target_order=3
     )
 
     assert seeded.flow_id == "flow-1"
@@ -10561,7 +10532,6 @@ def test_seeding_provisions_the_flow_then_assistants_then_steps(
         f"asst-{n}" for n in range(1, 11)
     ]
     prompt_payload = calls[2][2]
-    fixture = harness._load_seed_flow_fixture("edit_chain_10.json")
     assert prompt_payload == {"prompt": {"text": fixture["steps"][0]["instructions"]}}
 
 
@@ -10811,61 +10781,6 @@ def test_a_clarification_answer_keeps_the_saved_step_scope(
     assert sent[1]["question_answer"] == {"question_id": "q-1", "option_id": "o-1"}
 
 
-def test_edit_evidence_reads_the_servers_own_diff() -> None:
-    harness = _battle_harness()
-    seeded = harness.SeededFlow(
-        flow_id="flow-1",
-        target_step_id="step-3",
-        step_ids=tuple(f"s{n}" for n in range(10)),
-    )
-
-    def plan(kinds: dict[str, str]) -> dict[str, Any]:
-        return {
-            "proposal": {
-                "edit": {
-                    "scoped_target_existing_step_ref": "step_3",
-                    "diff": {
-                        "step_changes": [
-                            {
-                                "step_ref": ref,
-                                "step_name": ref,
-                                "kind": kind,
-                                "field_changes": (
-                                    [{"field": "instructions"}]
-                                    if kind == "modified"
-                                    else []
-                                ),
-                            }
-                            for ref, kind in kinds.items()
-                        ]
-                    },
-                }
-            }
-        }
-
-    clean = harness._saved_step_edit_evidence(
-        plan=plan({"step_1": "unchanged", "step_3": "modified", "step_4": "unchanged"}),
-        seeded_flow=seeded,
-    )
-    assert clean["available"] is True
-    assert clean["unrelated_steps_unchanged"] is True
-    assert clean["target_change_kind"] == "modified"
-    assert clean["target_field_changes"] == [{"field": "instructions"}]
-    assert clean["unrelated_step_count"] == 2
-
-    drifted = harness._saved_step_edit_evidence(
-        plan=plan({"step_1": "unchanged", "step_3": "modified", "step_4": "modified"}),
-        seeded_flow=seeded,
-    )
-    assert drifted["unrelated_steps_unchanged"] is False
-    assert drifted["step_change_kinds"]["step_4"] == "modified"
-
-    assert harness._saved_step_edit_evidence(plan=None, seeded_flow=seeded) == {
-        "seeded_step_count": 10,
-        "available": False,
-    }
-
-
 def test_an_edit_case_deletes_its_seeded_flow_even_when_the_session_fails(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -10876,6 +10791,7 @@ def test_an_edit_case_deletes_its_seeded_flow_even_when_the_session_fails(
     )
     monkeypatch.setattr(harness, "_create_seed_flow", lambda **_kwargs: "flow-1")
     monkeypatch.setattr(harness, "_seed_edit_flow", lambda **_kwargs: seeded)
+    monkeypatch.setattr(harness, "_verify_seed_round_trip", lambda **_kwargs: seeded)
     monkeypatch.setattr(
         harness,
         "_request_no_content",
@@ -11819,3 +11735,463 @@ def test_cases_file_rejects_an_execution_block_it_cannot_measure(
 
     with raises(ValueError, match=error):
         harness._read_cases_file(cases_path)
+
+
+# --- Edit capability lifecycle (eneo-e7h6) --------------------------------
+
+
+class _EditApi:
+    """A seeded flow's API, request by request, counting every charged call."""
+
+    def __init__(self, *, apply_error: HTTPError | None = None) -> None:
+        self.calls: list[tuple[str, str, object]] = []
+        self.flow: dict[str, Any] = {}
+        self.prompts: dict[str, str] = {}
+        self.apply_error = apply_error
+
+    def install(self, harness: ModuleType, monkeypatch: MonkeyPatch) -> None:
+        monkeypatch.setattr(harness, "_request_json", self.request)
+        monkeypatch.setattr(harness, "_request_json_or_null", self.request)
+        monkeypatch.setattr(harness, "_request_no_content", self.request)
+        monkeypatch.setattr(harness, "_send_message_stream", self.stream)
+        monkeypatch.setattr(
+            harness,
+            "_git_output",
+            lambda *a: "a" * 40 if a == ("rev-parse", "HEAD") else "",
+        )
+
+    def paths(self, method: str) -> list[str]:
+        return [path for verb, path, _ in self.calls if verb == method]
+
+    def stream(
+        self, *, config: object, session_id: str, payload: object
+    ) -> Iterator[dict[str, Any]]:
+        self.calls.append(("POST", f"/sessions/{session_id}/messages", payload))
+        return iter([{"event": "plan", "data": {"plan_id": "plan-1"}}])
+
+    def request(
+        self, *, method: str, path: str, payload: object = None, **_: object
+    ) -> Any:
+        self.calls.append((method, path, payload))
+        if method == "POST" and path == "/flows/":
+            return {"id": "flow-1"}
+        if path.startswith("/spaces/"):
+            return {"transcription_models": [{"id": "tm-1", "is_org_default": True}]}
+        if method == "POST" and path.endswith("/assistants/"):
+            assistant_id = f"asst-{len(self.prompts) + 1}"
+            self.prompts[assistant_id] = ""
+            return {"id": assistant_id}
+        if method == "PATCH" and "/assistants/" in path:
+            assert isinstance(payload, dict)
+            self.prompts[path.rstrip("/").split("/")[-1]] = payload["prompt"]["text"]
+            return {}
+        if method == "PATCH" and path == "/flows/flow-1/":
+            assert isinstance(payload, dict)
+            self.flow = {
+                "id": "flow-1",
+                "name": payload["name"],
+                "description": payload["description"],
+                "draft_revision": 7,
+                "metadata_json": payload.get("metadata_json"),
+                "steps": [
+                    {**step, "id": f"step-{step['step_order']}"}
+                    for step in payload["steps"]
+                ],
+            }
+            return self.flow
+        if method == "GET" and path == "/flows/flow-1/":
+            return self.flow
+        if method == "GET" and "/assistants/" in path:
+            aid = path.rstrip("/").split("/")[-1]
+            return {
+                "prompt": {"text": self.prompts[aid]},
+                "completion_model": {"id": "m-1"},
+            }
+        if path == "/flows/ai-builder/sessions":
+            return {"session_id": _TEST_SESSION_ID}
+        if path.endswith("/models"):
+            return {
+                "default_model_id": "m",
+                "models": [{"id": "m", "name": "g", "provider": "p"}],
+            }
+        if path == f"/flows/ai-builder/sessions/{_TEST_SESSION_ID}":
+            return {"latest_plan_id": "plan-1", "conversation": []}
+        if path == "/flows/ai-builder/plans/plan-1":
+            return {
+                "plan_id": "plan-1",
+                "proposal": {
+                    "spec": {"steps": []},
+                    "edit": {"base_flow_revision": 7, "diff": {"step_changes": []}},
+                },
+            }
+        if path.endswith("/approve"):
+            return {"status": "approved"}
+        if path.endswith("/apply"):
+            if self.apply_error is not None:
+                raise self.apply_error
+            return {"flow_id": "flow-1"}
+        if path.endswith("/_diagnostics/classifier-slots"):
+            return {"session_id": _TEST_SESSION_ID, "classifier_runs": []}
+        if "/_diagnostics/" in path or method == "DELETE":
+            return None
+        raise AssertionError(f"unexpected request: {method} {path}")
+
+
+def _edit_case(harness: ModuleType, case_id: str) -> Any:
+    return {
+        case.case_id: case for case in harness._read_cases_file(harness.EDIT_CASES_FILE)
+    }[case_id]
+
+
+def _run_edit(
+    harness: ModuleType,
+    case: Any,
+    tmp_path: Path,
+    *,
+    deadline_seconds: float | None = None,
+) -> dict[str, Any]:
+    return harness._run_case(
+        case=case,
+        config=harness.ApiConfig(
+            base_url="http://localhost/api/v1", api_key="k", timeout_seconds=5
+        ),
+        args=SimpleNamespace(
+            space_id="space-1",
+            model_id="m",
+            file_ids=(),
+            ui_language="sv",
+            auto_confirm_requirements=False,
+            timeout_seconds=5,
+            observation_deadline_seconds=deadline_seconds,
+        ),
+        existing_session_id=None,
+        artifact_output_dir=tmp_path,
+        cases_path=harness.EDIT_CASES_FILE,
+    )
+
+
+@mark.parametrize(
+    "case_id",
+    [
+        "edit_e02_a_whole_flow_tone",
+        "edit_e16_g_whole_flow_remove_and_rewire",
+        "edit_e28_l30_whole_flow_derived_rename",
+        "edit_r01_speaker_whole_flow_shorter_plain_summary",
+        "edit_e27_a_selected_step_model_decline",
+    ],
+)
+def test_an_edit_observation_stays_within_its_request_demand(
+    monkeypatch: MonkeyPatch, tmp_path: Path, case_id: str
+) -> None:
+    # Counts every call the edit lifecycle makes around its one turn: seeding,
+    # the space read for an audio seed, the round trip, the
+    # after-turn snapshot, approve, apply and the applied snapshot. The run's
+    # own calls have their bound tested in test_a_maximal_run_...
+    harness = _battle_harness()
+    api = _EditApi()
+    api.install(harness, monkeypatch)
+    runs: list[object] = []
+    monkeypatch.setattr(
+        harness,
+        "_execute_and_collect_runtime_evidence",
+        lambda **kw: runs.append(kw) or {},
+    )
+    case = _edit_case(harness, case_id)
+
+    bundle = _run_edit(harness, case, tmp_path)
+
+    demand = harness.observation_request_demand(
+        replace(case, execution=None), timeout_seconds=5
+    )
+    assert len(api.calls) <= demand, [f"{m} {p}" for m, p, _ in api.calls]
+    assert api.paths("DELETE") == ["/flows/flow-1/"]
+    assert "/flows/ai-builder/plans/plan-1/create" not in api.paths("POST")
+    if case.apply_plan:
+        assert api.paths("POST")[-2:] == [
+            "/flows/ai-builder/plans/plan-1/approve",
+            "/flows/ai-builder/plans/plan-1/apply",
+        ]
+        apply_payload = next(p for m, path, p in api.calls if path.endswith("/apply"))
+        assert apply_payload == {"expected_revision": 7}
+    # The fake applies nothing, so no plan here is structurally complete and
+    # none of them may spend a run.
+    assert runs == []
+    assert bundle["quality_report"]["edit"]["verdict"] == "fail"
+    if case.executes:
+        assert bundle["flow_lifecycle"]["execution"] == {
+            "skipped": "structural_failure"
+        }
+
+
+def test_seeding_persists_review_output_and_flow_metadata(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    harness = _battle_harness()
+    api = _EditApi()
+    api.install(harness, monkeypatch)
+
+    _run_edit(
+        harness,
+        _edit_case(harness, "edit_r01_speaker_whole_flow_shorter_plain_summary"),
+        tmp_path,
+    )
+    seeded = next(
+        p for m, path, p in api.calls if m == "PATCH" and path == "/flows/flow-1/"
+    )
+
+    assert isinstance(seeded, dict)
+    assert seeded["metadata_json"]["wizard"]["transcription_model"] == {"id": "tm-1"}
+    assert seeded["metadata_json"]["form_schema"]["fields"][0]["name"] == "deltagare"
+    assert seeded["steps"][1]["review_policy"] == {"mode": "edit"}
+    assert seeded["steps"][1]["output_config"] == {
+        "speaker_mapping": {"participants_field": "deltagare"}
+    }
+
+
+def test_a_seed_that_does_not_round_trip_stops_before_any_builder_call(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    harness = _battle_harness()
+    api = _EditApi()
+    api.install(harness, monkeypatch)
+    original = api.request
+
+    def drifting(**kwargs: Any) -> Any:
+        response = original(**kwargs)
+        if kwargs["method"] == "GET" and "/assistants/" in kwargs["path"]:
+            return {**response, "prompt": {"text": "rewritten by the server"}}
+        return response
+
+    monkeypatch.setattr(harness, "_request_json", drifting)
+
+    with raises(harness.BattleFlowLifecycleError, match="did not round-trip"):
+        _run_edit(harness, _edit_case(harness, "edit_e02_a_whole_flow_tone"), tmp_path)
+
+    assert not any("/ai-builder/" in path for _, path, _ in api.calls)
+    assert api.paths("DELETE") == ["/flows/flow-1/"]
+
+
+def test_a_refused_apply_is_the_products_answer_not_an_acquisition_fault(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    harness = _battle_harness()
+    refusal = HTTPError(
+        "http://x/apply",
+        409,
+        "stale",
+        {},
+        io.BytesIO(b'{"code": "stale_revision"}'),  # type: ignore[arg-type]
+    )
+    api = _EditApi(apply_error=refusal)
+    api.install(harness, monkeypatch)
+
+    bundle = _run_edit(
+        harness, _edit_case(harness, "edit_e02_a_whole_flow_tone"), tmp_path
+    )
+
+    report = bundle["quality_report"]["edit"]
+    assert bundle["edit_evidence"]["apply"]["refused"]["status_code"] == 409
+    assert "apply_refused" in report["categories"]
+    assert api.paths("DELETE") == ["/flows/flow-1/"]
+
+
+def test_an_edit_out_of_time_on_a_refusal_body_is_an_unmeasured_stack_fault(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    harness = _battle_harness()
+    refusal = HTTPError("http://x/apply", 409, "stale", {}, _TimingOutBody())  # type: ignore[arg-type]
+    _EditApi(apply_error=refusal).install(harness, monkeypatch)
+
+    with raises(ValueError) as failure:
+        _run_edit(
+            harness,
+            _edit_case(harness, "edit_e02_a_whole_flow_tone"),
+            tmp_path,
+            deadline_seconds=60,
+        )
+
+    # The lifecycle wraps the timeout twice; the class reads the innermost cause.
+    assert harness.harness_failure_class(failure.value) == "dependency_stack"
+
+
+def test_whole_flow_chat_sends_no_step_context_and_a_selected_step_sends_its_own(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    harness = _battle_harness()
+    api = _EditApi()
+    api.install(harness, monkeypatch)
+
+    _run_edit(harness, _edit_case(harness, "edit_e02_a_whole_flow_tone"), tmp_path)
+    _run_edit(harness, _edit_case(harness, "edit_e25_a_selected_step_rename"), tmp_path)
+    turns = [payload for _, path, payload in api.calls if path.endswith("/messages")]
+
+    assert isinstance(turns[0], dict) and "edit_context" not in turns[0]
+    assert turns[1]["edit_context"] == {
+        "kind": "saved_flow_step",
+        "flow_step_id": "step-3",
+    }
+
+
+def _trickling_server(head: bytes) -> str:
+    """A local HTTP peer that sends `head`, then one byte every 50 ms for 3 s:
+    never a whole SSE line, never the whole announced body."""
+
+    listener = socket.create_server(("127.0.0.1", 0))
+
+    def serve() -> None:
+        connection, _ = listener.accept()
+        with connection, listener:
+            connection.recv(65536)
+            connection.sendall(head)
+            for _ in range(60):
+                try:
+                    connection.sendall(b"d")
+                except OSError:
+                    return
+                time.sleep(0.05)
+
+    Thread(target=serve, daemon=True).start()
+    return f"http://127.0.0.1:{listener.getsockname()[1]}/api/v1"
+
+
+def _read_sse(harness: ModuleType, config: Any) -> object:
+    return list(harness._send_message_stream(config=config, session_id="s", payload={}))
+
+
+def _read_json(harness: ModuleType, config: Any) -> object:
+    return harness._request_json(config=config, method="GET", path="/x")
+
+
+def _read_refusal(harness: ModuleType, config: Any) -> object:
+    seeded = harness.SeededFlow(flow_id="f", target_step_id=None, step_ids=())
+    return harness._approve_and_apply_edit(
+        config=config, plan_id="p", seeded_flow=seeded
+    )
+
+
+_SLOW_BODY = b"Content-Type: application/json\r\nContent-Length: 100000\r\n\r\n{"
+
+
+@mark.parametrize(
+    ("head", "read"),
+    [
+        (
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\ndata: {",
+            _read_sse,
+        ),
+        (b"HTTP/1.1 200 OK\r\n" + _SLOW_BODY, _read_json),
+        (b"HTTP/1.1 409 Conflict\r\n" + _SLOW_BODY, _read_refusal),
+    ],
+    ids=["partial-sse-line", "slow-json-body", "slow-4xx-body"],
+)
+def test_the_observation_deadline_holds_inside_a_trickling_read(
+    head: bytes, read: Any
+) -> None:
+    harness = _battle_harness()
+    config = harness.ApiConfig(
+        base_url=_trickling_server(head),
+        api_key="k",
+        timeout_seconds=30,
+        deadline=time.monotonic() + 0.4,
+    )
+    started = time.monotonic()
+
+    # Out of time is unmeasured: a refusal's body must not turn it into a score.
+    with raises(TimeoutError):
+        read(harness, config)
+    # The peer keeps a read alive for 3 s; the deadline must cut it at 0.4 s.
+    assert time.monotonic() - started < 1.5
+    assert harness._without_deadline(config).deadline is None
+
+
+class _TimingOutBody(io.BytesIO):
+    def read1(self, size: int = -1, /) -> bytes:
+        raise TimeoutError("timed out")
+
+
+@mark.parametrize("in_observation", [True, False])
+def test_a_refusal_body_that_times_out_is_unmeasured_only_inside_an_observation(
+    in_observation: bool,
+) -> None:
+    harness = _battle_harness()
+    config = harness.ApiConfig(
+        base_url="http://localhost",
+        api_key="k",
+        timeout_seconds=30,
+        deadline=time.monotonic() + 60 if in_observation else None,
+    )
+    refusal = HTTPError("http://x/apply", 409, "stale", {}, _TimingOutBody())  # type: ignore[arg-type]
+
+    if in_observation:
+        with raises(TimeoutError):
+            harness._http_error_detail(refusal, config)
+    else:
+        assert harness._http_error_detail(refusal, config) == {
+            "status_code": 409,
+            "error": str(refusal),
+        }
+
+
+def test_the_edit_corpus_can_start_a_sealed_targeted_run() -> None:
+    harness = _battle_harness()
+    args = _edit_namespace(
+        cases_file=str(harness.EDIT_CASES_FILE),
+        sealed_targeted_suite=True,
+        cohort=["edit_smoke"],
+    )
+
+    cases = harness._cases_from_args(args)
+    contract = harness._acquisition_contract_from_args(args, selected_cases=cases)
+
+    assert len(cases) == 10
+    assert contract.required_case_ids == tuple(case.case_id for case in cases)
+    assert contract.require_clean_source is True
+
+
+@mark.parametrize(
+    "name",
+    [
+        "edit_seed_a.json",
+        "edit_seed_g.json",
+        "edit_seed_s_speaker.json",
+        "edit_chain_10.json",
+        "edit_chain_30.json",
+    ],
+)
+def test_seed_fixtures_pass_the_products_draft_and_publish_validators(
+    name: str,
+) -> None:
+    from uuid import uuid4
+
+    from eneo.flows.api.flow_models import FlowStepCreateRequest
+    from eneo.flows.domain.flow import FlowStep
+    from eneo.flows.flow_metadata import normalize_flow_metadata_for_write
+    from eneo.flows.flow_validators import validate_steps
+    from eneo.flows.flow_validators_form import validate_variable_alias_collisions
+
+    harness = _battle_harness()
+    fixture = harness._load_seed_flow_fixture(name)
+    metadata = json.loads(json.dumps(fixture.get("metadata_json")))
+    wizard = (metadata or {}).get("wizard")
+    if wizard and wizard.get("transcription_enabled"):
+        wizard["transcription_model"] = {"id": str(uuid4())}  # the space default
+    metadata = normalize_flow_metadata_for_write(metadata)
+    steps = [
+        FlowStep.model_validate(
+            FlowStepCreateRequest.model_validate(
+                {
+                    **{key: step.get(key) for key in harness.PERSISTED_STEP_KEYS},
+                    "user_description": step["name"],
+                    "assistant_id": str(uuid4()),
+                    "step_order": order,
+                }
+            ).model_dump()
+        )
+        for order, step in enumerate(fixture["steps"], start=1)
+    ]
+
+    validate_steps(steps, metadata_json=metadata)
+    validate_variable_alias_collisions(steps=steps, metadata_json=metadata)
+    validate_steps(
+        steps, metadata_json=metadata, require_complete_template_fill_config=True
+    )

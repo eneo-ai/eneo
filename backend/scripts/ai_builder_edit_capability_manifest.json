@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "description": "Sealed edit capability corpus (eneo-e7h6). Regenerate the hashes only in a reviewed change: test_ai_builder_edit_capability recomputes them from the cases file.",
+  "cases_file": "ai_builder_api_edit_cases.json",
+  "repetitions": 5,
+  "calibration_runs": 3,
+  "observation_deadline_seconds": 900,
+  "cases": {
+    "edit_e02_a_whole_flow_tone": "06af36a4937916c0076885036ec188e32cfd3eb75be77c2d1fc1329f803de8a7",
+    "edit_e10_a_whole_flow_assessment_as_text": "4a63313df52787ee1b0453c598c1bb6166861ec6c376442e39b0d6786c15a687",
+    "edit_e12_a_whole_flow_add_required_field": "6f6aae5c5697f947445c672ce0073cd7c2fadca177d8c9215eb16d0e074d8a40",
+    "edit_e14_a_whole_flow_insert_after_first": "52db09a8ca6de0c1b1626634399f84b4688dd5c91d751843f6324f1c43312f9c",
+    "edit_e16_g_whole_flow_remove_and_rewire": "9c230ab329c7f95a1a7e7192f8ffd89909ba464f09f04b9409f93ea12eeb726b",
+    "edit_e17_g_whole_flow_swap_checks": "2926daea301cbc1bb6a6da3080bc408990b2b1faf327cafd5c40c531457a2801",
+    "edit_e25_a_selected_step_rename": "ba93a7f3d692be28c3b35167e5273c83a1c7f69e1bdf0d3895d9837d416c871b",
+    "edit_e27_a_selected_step_model_decline": "99b77ee2571488e49c42452eb68fd37b6dca30f5cc96e8fc3fb78e97f66be562",
+    "edit_e28_l30_whole_flow_derived_rename": "591d6d30c35844a65099108f2d7f330c2e57c4627420d7aa71202dcdbd4582a5",
+    "edit_r01_speaker_whole_flow_shorter_plain_summary": "1ce9c078c9282325c75976bacc36552e755c17d2be593f1655c790a732ce141e"
+  }
+}

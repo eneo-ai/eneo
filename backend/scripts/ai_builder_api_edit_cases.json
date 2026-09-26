@@ -1,0 +1,262 @@
+{
+  "version": 9,
+  "description": "The Flow AI Builder edit capability corpus (eneo-e7h6): the user asks for one change to a saved flow, and the Builder must make it and nothing else. Judged by ai_builder_edit_capability against ai_builder_edit_capability_manifest.json.",
+  "acquisition_contract": {"artifact_schema_version": "ai-builder-live-release.v6", "require_clean_source": true},
+  "cases": [
+    {
+      "id": "edit_e02_a_whole_flow_tone",
+      "prompt": "I steg 3: gör svaret mer vänligt och sakligt. Behåll alla sakuppgifter.",
+      "complexity": "flow_edit",
+      "domain": "municipal_housing_adaptation",
+      "cohorts": ["edit_capability", "edit_smoke", "edit_human"],
+      "apply_plan": true,
+      "edit": {
+        "seed_flow_fixture": "edit_seed_a.json",
+        "scope": "whole_flow",
+        "expect": {"outcome": "plan", "changes": {"s3": {"required": ["instructions"], "permitted": ["instructions"]}}}
+      },
+      "execution": {
+        "inputs": {
+          "form_fields": {
+            "ansokan": "Ansökan om bostadsanpassningsbidrag. Diarienummer: BAB-2026-0417. Den sökande bor på Storgatan 14 i Sundsvall och behöver en ramp vid entrén och att tröskeln till badrummet tas bort. Enligt bifogad offert kostar åtgärderna cirka 51200 kr. Ett tidigare ärende, BAB-2025-0913, avslutades utan beslut. Datum för hembesök: 2026-10-05. Önskat startdatum för arbetet: . Datum för slutbesiktning: . Beslut önskas senast 2026-11-30.",
+            "sokande": "Ingrid Wästberg",
+            "sokt_belopp": 48500
+          }
+        },
+        "expect": {
+          "output_kind": "text",
+          "required_facts": ["BAB-2026-0417", "Ingrid Wästberg", "48500", "2026-11-30"],
+          "forbidden": ["51200", "BAB-2025-0913"]
+        }
+      },
+      "required": true
+    },
+    {
+      "id": "edit_e10_a_whole_flow_assessment_as_text",
+      "prompt": "Låt steg 2 lämna sin bedömning som text. Anpassa steg 3 så att det fortfarande använder bedömningen och källfakta.",
+      "complexity": "flow_edit",
+      "domain": "municipal_housing_adaptation",
+      "cohorts": ["edit_capability", "edit_smoke"],
+      "apply_plan": true,
+      "edit": {
+        "seed_flow_fixture": "edit_seed_a.json",
+        "scope": "whole_flow",
+        "expect": {
+          "outcome": "plan",
+          "changes": {
+            "s2": {"required": ["output_type"], "permitted": ["output_type", "output_contract", "output_mode", "instructions"]},
+            "s3": {"required": ["input_bindings"], "permitted": ["input_bindings", "input_type", "input_contract", "instructions"]}
+          },
+          "edges": {
+            "add": ["s2.text -> s3"],
+            "drop": ["s2.structured.diarienummer -> s3", "s2.structured.bedomning -> s3", "s2.structured.sista_datum -> s3"]
+          },
+          "postconditions": [{"kind": "output_type", "step": "s2", "equals": "text"}],
+          "step_outputs": {"s2": {"output_kind": "text", "required_facts": ["BEVILJAS", "BAB-2026-0417"], "forbidden": ["AVSLAS"]}}
+        }
+      },
+      "execution": {
+        "inputs": {
+          "form_fields": {
+            "ansokan": "Ansökan om bostadsanpassningsbidrag. Diarienummer: BAB-2026-0417. Den sökande bor på Storgatan 14 i Sundsvall och behöver en ramp vid entrén och att tröskeln till badrummet tas bort. Enligt bifogad offert kostar åtgärderna cirka 51200 kr. Ett tidigare ärende, BAB-2025-0913, avslutades utan beslut. Datum för hembesök: 2026-10-05. Önskat startdatum för arbetet: . Datum för slutbesiktning: . Beslut önskas senast 2026-11-30.",
+            "sokande": "Ingrid Wästberg",
+            "sokt_belopp": 48500
+          }
+        },
+        "expect": {
+          "output_kind": "text",
+          "required_facts": ["BAB-2026-0417", "Ingrid Wästberg", "48500", "2026-11-30"],
+          "forbidden": ["51200", "BAB-2025-0913"]
+        }
+      },
+      "required": true
+    },
+    {
+      "id": "edit_e12_a_whole_flow_add_required_field",
+      "prompt": "Lägg till ett obligatoriskt textfält handlaggare och låt steg 3 ange handläggaren. Behåll övrigt underlag.",
+      "complexity": "flow_edit",
+      "domain": "municipal_housing_adaptation",
+      "cohorts": ["edit_capability", "edit_smoke"],
+      "apply_plan": true,
+      "edit": {
+        "seed_flow_fixture": "edit_seed_a.json",
+        "scope": "whole_flow",
+        "expect": {
+          "outcome": "plan",
+          "form_fields": {"added": ["handlaggare"]},
+          "changes": {"s3": {"required": [], "permitted": ["input_bindings", "input_type", "input_contract", "instructions"]}},
+          "edges": {"add": ["form.handlaggare -> s3"]},
+          "postconditions": [{"kind": "form_field", "name": "handlaggare", "type": "text", "required": true}]
+        }
+      },
+      "execution": {
+        "inputs": {
+          "form_fields": {
+            "ansokan": "Ansökan om bostadsanpassningsbidrag. Diarienummer: BAB-2026-0417. Den sökande bor på Storgatan 14 i Sundsvall och behöver en ramp vid entrén och att tröskeln till badrummet tas bort. Enligt bifogad offert kostar åtgärderna cirka 51200 kr. Ett tidigare ärende, BAB-2025-0913, avslutades utan beslut. Datum för hembesök: 2026-10-05. Önskat startdatum för arbetet: . Datum för slutbesiktning: . Beslut önskas senast 2026-11-30.",
+            "sokande": "Ingrid Wästberg",
+            "sokt_belopp": 48500,
+            "handlaggare": "Omar Lindqvist"
+          }
+        },
+        "expect": {
+          "output_kind": "text",
+          "required_facts": ["BAB-2026-0417", "Ingrid Wästberg", "48500", "2026-11-30", "Omar Lindqvist"],
+          "forbidden": ["51200", "BAB-2025-0913"]
+        }
+      },
+      "required": true
+    },
+    {
+      "id": "edit_e14_a_whole_flow_insert_after_first",
+      "prompt": "Lägg ett separat steg efter steg 1 som listar saknade datum. Låt befintliga steg läsa samma underlag som nu.",
+      "complexity": "flow_edit",
+      "domain": "municipal_housing_adaptation",
+      "cohorts": ["edit_capability", "edit_smoke"],
+      "apply_plan": true,
+      "edit": {
+        "seed_flow_fixture": "edit_seed_a.json",
+        "scope": "whole_flow",
+        "expect": {
+          "outcome": "plan",
+          "sequence": ["s1", "n1", "s2", "s3"],
+          "changes": {"s2": {"required": [], "permitted": ["input_source", "input_type", "input_bindings", "input_contract"]}},
+          "edges": {"add": ["s1.text -> n1"], "may_add": ["form.ansokan -> n1"]},
+          "step_outputs": {"n1": {"required_facts": ["startdatum", "slutbesiktning"], "forbidden": ["2026-10-05", "2026-11-30"]}}
+        }
+      },
+      "execution": {
+        "inputs": {
+          "form_fields": {
+            "ansokan": "Ansökan om bostadsanpassningsbidrag. Diarienummer: BAB-2026-0417. Den sökande bor på Storgatan 14 i Sundsvall och behöver en ramp vid entrén och att tröskeln till badrummet tas bort. Enligt bifogad offert kostar åtgärderna cirka 51200 kr. Ett tidigare ärende, BAB-2025-0913, avslutades utan beslut. Datum för hembesök: 2026-10-05. Önskat startdatum för arbetet: . Datum för slutbesiktning: . Beslut önskas senast 2026-11-30.",
+            "sokande": "Ingrid Wästberg",
+            "sokt_belopp": 48500
+          }
+        },
+        "expect": {
+          "output_kind": "text",
+          "required_facts": ["BAB-2026-0417", "Ingrid Wästberg", "48500", "2026-11-30"],
+          "forbidden": ["51200", "BAB-2025-0913"]
+        }
+      },
+      "required": true
+    },
+    {
+      "id": "edit_e16_g_whole_flow_remove_and_rewire",
+      "prompt": "Ta bort steg 2. Låt slutsteget läsa beloppet direkt ur steg 1 och behåll datumkällan.",
+      "complexity": "flow_edit",
+      "domain": "municipal_housing_adaptation",
+      "cohorts": ["edit_capability", "edit_smoke"],
+      "apply_plan": true,
+      "edit": {
+        "seed_flow_fixture": "edit_seed_g.json",
+        "scope": "whole_flow",
+        "expect": {
+          "outcome": "plan",
+          "sequence": ["s1", "s3", "s4"],
+          "changes": {"s4": {"required": ["input_bindings"], "permitted": ["input_bindings", "input_type", "input_contract", "instructions"]}},
+          "edges": {"add": ["s1.structured.belopp_kr -> s4"]}
+        }
+      },
+      "execution": {
+        "inputs": {
+          "form_fields": {
+            "ansokan": "Ärende BAB-2026-0588. Sökande: Karl Nyström, Bergsgatan 3, Timrå. Åtgärd: installation av trapphiss. Sökt belopp: 57300 kr. Tidigare beviljat bidrag 2023: 12400 kr. Beslut önskas senast 2027-01-15."
+          }
+        },
+        "expect": {"output_kind": "text", "required_facts": ["BAB-2026-0588", "57300", "2027-01-15"], "forbidden": ["12400"]}
+      },
+      "required": true
+    },
+    {
+      "id": "edit_e17_g_whole_flow_swap_checks",
+      "prompt": "Byt plats på beloppskontrollen och datumkontrollen. Behåll deras underlag och slutsvaret.",
+      "complexity": "flow_edit",
+      "domain": "municipal_housing_adaptation",
+      "cohorts": ["edit_capability", "edit_smoke", "edit_mechanical"],
+      "apply_plan": true,
+      "edit": {
+        "seed_flow_fixture": "edit_seed_g.json",
+        "scope": "whole_flow",
+        "expect": {
+          "outcome": "plan",
+          "sequence": ["s1", "s3", "s2", "s4"],
+          "changes": {"s2": {"required": [], "permitted": ["input_source", "input_type", "input_bindings", "input_contract"]}}
+        }
+      },
+      "execution": {
+        "inputs": {
+          "form_fields": {
+            "ansokan": "Ärende BAB-2026-0588. Sökande: Karl Nyström, Bergsgatan 3, Timrå. Åtgärd: installation av trapphiss. Sökt belopp: 57300 kr. Tidigare beviljat bidrag 2023: 12400 kr. Beslut önskas senast 2027-01-15."
+          }
+        },
+        "expect": {"output_kind": "text", "required_facts": ["BAB-2026-0588", "57300", "2027-01-15"], "forbidden": ["12400"]}
+      },
+      "required": true
+    },
+    {
+      "id": "edit_e25_a_selected_step_rename",
+      "prompt": "Döp om steget till Besked till invånaren. Ändra inget annat.",
+      "complexity": "flow_edit",
+      "domain": "municipal_housing_adaptation",
+      "cohorts": ["edit_capability", "edit_smoke", "edit_mechanical"],
+      "apply_plan": true,
+      "edit": {
+        "seed_flow_fixture": "edit_seed_a.json",
+        "scope": "selected_step",
+        "target_step_order": 3,
+        "expect": {
+          "outcome": "plan",
+          "changes": {"s3": {"required": ["name"], "permitted": ["name"]}},
+          "postconditions": [{"kind": "name", "step": "s3", "equals": "Besked till invånaren"}]
+        }
+      },
+      "required": true
+    },
+    {
+      "id": "edit_e27_a_selected_step_model_decline",
+      "prompt": "Byt till en billigare språkmodell i det här steget.",
+      "complexity": "flow_edit",
+      "domain": "municipal_housing_adaptation",
+      "cohorts": ["edit_capability", "edit_smoke", "edit_mechanical", "edit_proxy_outcome"],
+      "edit": {
+        "seed_flow_fixture": "edit_seed_a.json",
+        "scope": "selected_step",
+        "target_step_order": 2,
+        "expect": {"outcome": "declined", "decline_reason": "model_choice_belongs_to_step_editor"}
+      },
+      "required": true
+    },
+    {
+      "id": "edit_e28_l30_whole_flow_derived_rename",
+      "prompt": "Döp om steg 3 till samma namn som steg 1 följt av ‘ - kontroll’. Ändra inget annat.",
+      "complexity": "flow_edit",
+      "domain": "municipal_permit",
+      "cohorts": ["edit_capability", "edit_smoke", "edit_mechanical"],
+      "apply_plan": true,
+      "edit": {
+        "seed_flow_fixture": "edit_chain_30.json",
+        "scope": "whole_flow",
+        "expect": {
+          "outcome": "plan",
+          "changes": {"s3": {"required": ["name"], "permitted": ["name"]}},
+          "postconditions": [{"kind": "name", "step": "s3", "equals": "Extrahera källfält - kontroll"}]
+        }
+      },
+      "required": true
+    },
+    {
+      "id": "edit_r01_speaker_whole_flow_shorter_plain_summary",
+      "prompt": "Gör sammanfattningen per talare kortare, högst tre meningar per person, och skriv den på lättläst svenska.",
+      "complexity": "flow_edit",
+      "domain": "meeting_notes",
+      "cohorts": ["edit_capability", "edit_smoke", "edit_regression", "edit_human"],
+      "apply_plan": true,
+      "edit": {
+        "seed_flow_fixture": "edit_seed_s_speaker.json",
+        "scope": "whole_flow",
+        "expect": {"outcome": "plan", "changes": {"s3": {"required": ["instructions"], "permitted": ["instructions"]}}}
+      },
+      "required": true
+    }
+  ]
+}
