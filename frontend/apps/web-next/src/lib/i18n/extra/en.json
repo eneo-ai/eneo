@@ -153,7 +153,6 @@
   "api_credentials": "API credentials",
   "api_credentials_hint": "Store the provider credential used when this model is called.",
   "not_configured": "Not configured",
-  "configured": "Configured",
   "migration_impact": "Migration impact",
   "migration_no_warnings": "No compatibility warnings",
   "migration_warnings": "Migration warnings",
@@ -298,8 +297,6 @@
   "admin_models_unclassified": "Not classified",
   "admin_models_results": "{count, plural, =0 {No models match the filters} one {# model shown} other {# models shown}}",
   "admin_models_attention_title": "Some models need attention",
-  "admin_models_missing_key_title": "{count, plural, one {A provider is missing its API key} other {# providers are missing their API key}}",
-  "admin_models_missing_key_description": "{providers}: the models can't be used until a key has been added. Choose Edit provider in the provider's menu.",
   "admin_models_deprecated_title": "{count, plural, one {A deprecated model is still active} other {# deprecated models are still active}}",
   "admin_models_deprecated_description": "{models}: move the usage to another model with Migrate in the model's menu.",
   "admin_models_providers_load_failed": "The providers could not be loaded",
@@ -1380,5 +1377,7 @@
   "feedback_good_answers": "Good answers",
   "feedback_bad_answers": "Bad answers",
   "ui_more_actions_for": "More actions for {name}",
-  "insights_session_from": "Session from {time}"
+  "insights_session_from": "Session from {time}",
+  "provider_status_attention_title": "{count, plural, one {One provider needs attention} other {# providers need attention}}",
+  "provider_status_attention_hint": "Go to the provider to test the connection again. Change its key and expiry date under Edit provider in the provider's menu."
 }

@@ -15,7 +15,7 @@ import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
-import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
+import { StatusLabel } from "@/components/composites/status-label";
 import type { SecurityClassification } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
@@ -25,13 +25,13 @@ import { ModelRow } from "./model-row";
 import { MODELS_KEY } from "./models";
 import { ProviderConnectionStatus } from "./provider-connection-status";
 import { ProviderEditDialog } from "./provider-management";
-import type { KindedModel, ProviderSection, ProviderStatus } from "./provider-sections";
+import { useProviderNotices } from "./provider-notices";
+import type { KindedModel, ProviderSection } from "./provider-sections";
 
-/** Setup problems shown by the name; a configured provider has its connection line. */
-const SETUP_TONE: Record<Exclude<ProviderStatus, "ready">, StatusTone> = {
-  missing_key: "warning",
-  inactive: "neutral"
-};
+/** The id of a provider's card, where the models page banner moves focus. */
+export function providerCardId(providerId: string): string {
+  return `provider-${providerId}`;
+}
 
 function ModelTable({
   models,
@@ -127,6 +127,7 @@ export function ProviderCard({
 }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
+  const notices = useProviderNotices();
   const headingId = useId();
   const [showEdit, setShowEdit] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
@@ -151,11 +152,21 @@ export function ProviderCard({
   ]
     .filter(Boolean)
     .join(" · ");
+  // A configured provider has no setup label: its connection line says more.
+  const setup = notices.setup(section.status);
 
   return (
     <section
+      id={providerCardId(section.providerId)}
       aria-labelledby={headingId}
-      className="bg-ax-card border-ax-border rounded-ax-container shadow-ax-low overflow-hidden border"
+      // Focusable from script only: the banner's link to this provider moves
+      // focus here, so the next Tab continues inside the card.
+      tabIndex={-1}
+      // `relative` makes the card the containing block of the table's
+      // visually hidden (absolutely positioned) texts. Without one they
+      // escape the clipping scroll wrapper and widen the page, which then
+      // scrolls sideways at 320 px (WCAG 1.4.10).
+      className="bg-ax-card border-ax-border rounded-ax-container shadow-ax-low focus-visible:outline-ring relative overflow-hidden border focus-visible:outline-2 focus-visible:outline-offset-2"
     >
       <div className="border-ax-border flex flex-wrap items-center gap-x-3 gap-y-2 border-b py-3 ps-4 pe-2.5">
         <span className="bg-ax-muted rounded-ax-inner flex size-8 shrink-0 items-center justify-center">
@@ -167,12 +178,7 @@ export function ProviderCard({
           </Heading>
           <Text type="supporting">{summary}</Text>
         </div>
-        {section.status !== "ready" ? (
-          <StatusLabel
-            status={SETUP_TONE[section.status]}
-            label={section.status === "missing_key" ? t("key_missing") : t("inactive")}
-          />
-        ) : null}
+        {setup ? <StatusLabel status={setup.tone} label={setup.label} /> : null}
         <div className="ms-auto flex items-center gap-1">
           <Button
             size="sm"

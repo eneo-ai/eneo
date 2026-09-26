@@ -200,12 +200,15 @@ describe("ModelsPage", () => {
 
   it("warns once about the missing key and the deprecated model that is still active", () => {
     renderPage();
-    const banner = screen.getByText("Några modeller behöver åtgärdas").closest("[role=status]");
+    const banner = screen
+      .getByText("Några modeller behöver åtgärdas")
+      .closest(".astryx-banner-frame");
     expect(banner).toBeTruthy();
-    expect(banner?.textContent).toContain("En leverantör saknar API-nyckel");
-    expect(banner?.textContent).toContain("OpenAI");
     expect(banner?.textContent).toContain("En utfasad modell är fortfarande aktiv");
     expect(banner?.textContent).toContain("Claude 3.7 Sonnet");
+    // The provider in its card's words (OpenAI has no models, so no link).
+    const row = within(banner as HTMLElement).getByRole("listitem");
+    expect(row.textContent).toBe("OpenAINyckel saknas");
   });
 
   it("filters by type with counts and announces the result", async () => {

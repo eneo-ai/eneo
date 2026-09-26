@@ -3,15 +3,19 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
+import { Link } from "@astryxdesign/core/Link";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Selector } from "@astryxdesign/core/Selector";
+import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
 import { useFormatter, useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
+import { flushSync } from "react-dom";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
+import { StatusLabel } from "@/components/composites/status-label";
 import {
   highestFirst,
   type SecurityClassification
@@ -20,7 +24,8 @@ import { browserApi } from "@/lib/api/browser";
 import { modelProvidersQueryOptions, providerCapabilitiesQueryOptions } from "./model-providers";
 import { useModelTypeLabel } from "./model-type-label";
 import { type ModelsPresentation, modelLabel } from "./models";
-import { ProviderCard } from "./provider-card";
+import { ProviderCard, providerCardId } from "./provider-card";
+import { useProviderNotices } from "./provider-notices";
 import {
   buildProviderSections,
   countByKind,
@@ -34,62 +39,106 @@ import {
 } from "./provider-sections";
 
 /**
- * One warning for everything the data says needs an admin: providers whose
- * required API key is missing, and deprecated models that are still active.
- * Rendered on page load, so it is a polite status (not an alert).
+ * One banner for everything the data says needs an admin: active providers
+ * whose key is missing, whose connection check failed or whose key expires
+ * within 30 days or has expired, in their cards' words, each a link that moves
+ * focus to its card; and deprecated models that are still active.
+ *
+ * Not a live region: it is there on page load, and it changes after actions
+ * that announce their own result (a connection check, a saved key), so a
+ * live region would say those twice.
  */
-function AttentionBanner({ attention }: { attention: ModelsAttention }) {
+function AttentionBanner({
+  attention,
+  onShowProvider
+}: {
+  attention: ModelsAttention;
+  onShowProvider: (providerId: string) => void;
+}) {
   const t = useTranslations();
   const format = useFormatter();
-  const { missingKey, deprecated } = attention;
-  if (missingKey.length === 0 && deprecated.length === 0) return null;
+  const notices = useProviderNotices();
+  const { providers, deprecated } = attention;
+  if (providers.length === 0 && deprecated.length === 0) return null;
 
-  const keyIssue =
-    missingKey.length > 0
-      ? {
-          title: t("admin_models_missing_key_title", { count: missingKey.length }),
-          description: t("admin_models_missing_key_description", {
-            providers: format.list(
-              missingKey.map((section) => section.name),
-              { type: "conjunction" }
-            )
-          })
-        }
-      : null;
-  const deprecatedIssue =
-    deprecated.length > 0
-      ? {
-          title: t("admin_models_deprecated_title", { count: deprecated.length }),
-          description: t("admin_models_deprecated_description", {
-            models: format.list(
-              deprecated.map(({ model }) => modelLabel(model)),
-              { type: "conjunction" }
-            )
-          })
-        }
-      : null;
-  const issues = [keyIssue, deprecatedIssue].filter((issue) => issue !== null);
-  const single = issues.length === 1 ? issues[0] : null;
+  const rows = providers.map(({ section, connectionFailed, keyExpiry }) => ({
+    section,
+    notices: [
+      notices.setup(section.status),
+      connectionFailed ? notices.connection(section.provider) : null,
+      keyExpiry ? notices.expiryNotice(keyExpiry) : null
+    ].filter((notice) => notice !== null)
+  }));
+  const deprecatedTitle = t("admin_models_deprecated_title", { count: deprecated.length });
+  const deprecatedDescription = t("admin_models_deprecated_description", {
+    models: format.list(
+      deprecated.map(({ model }) => modelLabel(model)),
+      { type: "conjunction" }
+    )
+  });
+
+  let title: string;
+  let description: React.ReactNode = null;
+  if (rows.length === 0) {
+    title = deprecatedTitle;
+    description = deprecatedDescription;
+  } else if (deprecated.length === 0) {
+    title = t("provider_status_attention_title", { count: rows.length });
+  } else {
+    title = t("admin_models_attention_title");
+    description = (
+      <>
+        <strong className="font-semibold">{deprecatedTitle}.</strong> {deprecatedDescription}
+      </>
+    );
+  }
 
   return (
     <Banner
-      role="status"
-      status="warning"
-      title={single ? single.title : t("admin_models_attention_title")}
-      description={
-        single ? (
-          single.description
-        ) : (
-          <ul className="flex list-disc flex-col gap-1 ps-5">
-            {issues.map((issue) => (
-              <li key={issue.title}>
-                <strong className="font-semibold">{issue.title}.</strong> {issue.description}
+      // Astryx makes a warning or error banner an alert; see above.
+      role={undefined}
+      status={
+        rows.some((row) => row.notices.some((notice) => notice.tone === "error"))
+          ? "error"
+          : "warning"
+      }
+      title={title}
+      description={description}
+      collapsible={false}
+    >
+      {rows.length > 0 ? (
+        <div className="flex flex-col gap-3">
+          <ul className="flex flex-col gap-2">
+            {rows.map(({ section, notices: rowNotices }) => (
+              <li key={section.key} className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                {/* A provider without models has no card to go to. */}
+                {section.models.length > 0 ? (
+                  <Link
+                    href={`#${providerCardId(section.providerId)}`}
+                    hasUnderline
+                    isStandalone
+                    // A 44 px target on touch (ACCESSIBILITY.md → Target size).
+                    className="pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      onShowProvider(section.providerId);
+                    }}
+                  >
+                    {section.name}
+                  </Link>
+                ) : (
+                  <Text type="label">{section.name}</Text>
+                )}
+                {rowNotices.map((notice) => (
+                  <StatusLabel key={notice.label} status={notice.tone} label={notice.label} />
+                ))}
               </li>
             ))}
           </ul>
-        )
-      }
-    />
+          <Text type="supporting">{t("provider_status_attention_hint")}</Text>
+        </div>
+      ) : null}
+    </Banner>
   );
 }
 
@@ -141,7 +190,24 @@ export function ProviderOverview({
     () => countByKind(sections, { search, security }),
     [sections, search, security]
   );
-  const attention = useMemo(() => modelsAttention(sections), [sections]);
+  const viewerToday = useProviderNotices().today;
+  const attention = useMemo(
+    () => modelsAttention(sections, { viewerToday }),
+    [sections, viewerToday]
+  );
+
+  // The banner's links move focus to a provider's card. When the filters
+  // hide the card, they are cleared first so it is there to receive focus.
+  function showProvider(providerId: string) {
+    if (!rendered.some(({ section }) => section.providerId === providerId)) {
+      flushSync(() => {
+        setSearch("");
+        setKind("all");
+        setSecurityFilter("all");
+      });
+    }
+    document.getElementById(providerCardId(providerId))?.focus();
+  }
 
   // The number of models a filter change leaves is announced politely,
   // without moving focus (WCAG 4.1.3).
@@ -276,7 +342,7 @@ export function ProviderOverview({
         )}
       </div>
 
-      <AttentionBanner attention={attention} />
+      <AttentionBanner attention={attention} onShowProvider={showProvider} />
 
       {content}
     </div>

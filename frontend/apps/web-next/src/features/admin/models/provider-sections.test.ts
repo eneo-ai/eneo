@@ -194,8 +194,14 @@ describe("lifecycle and attention", () => {
   });
 
   it("reports active providers without a required key and deprecated models still in use", () => {
-    const attention = modelsAttention(sections, TODAY);
-    expect(attention.missingKey.map((section) => section.name)).toEqual(["Mistral"]);
+    const attention = modelsAttention(sections, { today: TODAY });
+    expect(attention.providers).toEqual([
+      {
+        section: sections.find(({ name }) => name === "Mistral"),
+        connectionFailed: false,
+        keyExpiry: null
+      }
+    ]);
     expect(attention.deprecated.map(({ model }) => model.id)).toEqual(["c2"]);
 
     const quiet = buildProviderSections(
@@ -209,7 +215,52 @@ describe("lifecycle and attention", () => {
       [provider({ id: "p1" }), provider({ id: "p3", is_active: false, masked_api_key: null })],
       capabilities
     );
-    expect(modelsAttention(quiet, TODAY)).toEqual({ missingKey: [], deprecated: [] });
+    expect(modelsAttention(quiet, { today: TODAY })).toEqual({ providers: [], deprecated: [] });
+  });
+
+  it("reports active providers whose connection check failed or whose key runs out", () => {
+    const failed = { status: "failed" as const, checked_at: "2026-09-24T08:00:00Z", error: null };
+    const checked = buildProviderSections(
+      presentation,
+      [
+        provider({ id: "p1", name: "OpenAI", connection_check: failed }),
+        provider({
+          id: "p2",
+          name: "vLLM",
+          provider_type: "hosted_vllm",
+          key_expires_on: "2026-10-20"
+        }),
+        provider({ id: "p4", name: "Azure", key_expires_on: "2026-09-01" }),
+        // Fine: expires after the warning window, or checked successfully.
+        provider({ id: "p5", name: "Groq", key_expires_on: "2027-01-01" }),
+        provider({
+          id: "p6",
+          name: "Cohere",
+          connection_check: { ...failed, status: "ok" }
+        }),
+        // Switched off: nothing to fix now.
+        provider({ id: "p7", name: "Mistral", is_active: false, connection_check: failed })
+      ],
+      capabilities
+    );
+
+    const attention = modelsAttention(checked, { today: TODAY, viewerToday: "2026-09-26" });
+    expect(
+      attention.providers.map(({ section, connectionFailed, keyExpiry }) => [
+        section.name,
+        connectionFailed,
+        keyExpiry?.state ?? null
+      ])
+    ).toEqual([
+      ["OpenAI", true, null],
+      ["vLLM", false, "expiring"],
+      ["Azure", false, "expired"]
+    ]);
+
+    // Before hydration the viewer's date is unknown: no expiry yet.
+    expect(
+      modelsAttention(checked, { today: TODAY }).providers.map(({ section }) => section.name)
+    ).toEqual(["OpenAI"]);
   });
 });
 
