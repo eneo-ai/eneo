@@ -18,6 +18,7 @@ from eneo.analysis.analysis import (
     AssistantInsightQuestion,
     ConversationInsightResponse,
     Counts,
+    MessageFeedbackCounts,
 )
 from eneo.analysis.analysis_repo import AnalysisRepository
 from eneo.assistants.assistant import Assistant
@@ -31,7 +32,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
-from eneo.questions.question import Question
+from eneo.questions.question import MessageFeedback, Question
 from eneo.questions.questions_repo import QuestionRepository
 from eneo.roles.permissions import Permission, validate_permissions
 from eneo.sessions.session import SessionInDB, SessionMetadataPublic
@@ -861,11 +862,42 @@ class AnalysisService:
                     question=row.question,
                     created_at=row.created_at,
                     session_id=row.session_id,
+                    # The comment follows the question text's visibility: whoever
+                    # may read the question here may read its rating.
+                    feedback=(
+                        MessageFeedback.model_validate(
+                            {"value": row.feedback_value, "text": row.feedback_text}
+                        )
+                        if row.feedback_value is not None
+                        else None
+                    ),
                 )
                 for row in rows
             ],
             total_count,
             next_cursor,
+        )
+
+    async def get_assistant_feedback_counts(
+        self,
+        *,
+        assistant_id: UUID,
+        from_date: datetime,
+        to_date: datetime,
+        include_followups: bool,
+    ) -> MessageFeedbackCounts:
+        """Answer ratings for the answers the question history lists.
+
+        Same access check and filters as ``get_assistant_question_history_page``.
+        """
+        assistant, _ = await self.assistant_service.get_assistant(assistant_id)
+        await self._check_space_permissions(assistant.space_id)
+        return await self.repo.get_message_feedback_counts(
+            tenant_id=self.user.tenant_id,
+            assistant_id=assistant_id,
+            from_date=from_date,
+            to_date=to_date,
+            include_followups=include_followups,
         )
 
     async def get_assistant_insight_sessions(
@@ -1053,6 +1085,14 @@ class AnalysisService:
                 tenant_id=self.user.tenant_id,
             )
 
+        feedback = await self.repo.get_message_feedback_counts(
+            tenant_id=self.user.tenant_id,
+            assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
+            from_date=start_time,
+            to_date=end_time,
+        )
+
         logger.info(
             "analysis_conversation_stats_loaded",
             extra={
@@ -1068,6 +1108,7 @@ class AnalysisService:
         return ConversationInsightResponse(
             total_conversations=session_count,
             total_questions=question_count,
+            feedback=feedback,
         )
 
     async def generate_unified_analysis_answer(

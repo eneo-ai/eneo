@@ -7,14 +7,16 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import aliased, selectinload
 
+from eneo.analysis.analysis import MessageFeedbackCounts
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.questions_table import (
     InfoBlobReferences,
+    QuestionFeedback,
     Questions,
     QuestionsFiles,
 )
@@ -100,6 +102,8 @@ class AssistantInsightQuestionRow(NamedTuple):
     question: str
     created_at: datetime
     session_id: UUID
+    feedback_value: int | None
+    feedback_text: str | None
 
 
 class AnalysisRepository:
@@ -468,10 +472,13 @@ class AnalysisRepository:
                 Questions.question.label("question"),
                 Questions.created_at.label("created_at"),
                 Questions.session_id.label("session_id"),
+                QuestionFeedback.value.label("feedback_value"),
+                QuestionFeedback.text.label("feedback_text"),
                 question_rank,
             )
             .join(Sessions, Questions.session_id == Sessions.id)
             .join(Users, Sessions.user_id == Users.id)
+            .outerjoin(QuestionFeedback, QuestionFeedback.question_id == Questions.id)
             .where(Users.tenant_id == tenant_id)
             .where(Sessions.assistant_id == assistant_id)
             .where(Sessions.created_at >= from_date)
@@ -492,6 +499,8 @@ class AnalysisRepository:
             ranked_questions.c.question,
             ranked_questions.c.created_at,
             ranked_questions.c.session_id,
+            ranked_questions.c.feedback_value,
+            ranked_questions.c.feedback_text,
         )
         if not include_followups:
             filtered_stmt = filtered_stmt.where(ranked_questions.c.question_rank == 1)
@@ -529,6 +538,8 @@ class AnalysisRepository:
                 question=row.question,
                 created_at=row.created_at,
                 session_id=row.session_id,
+                feedback_value=row.feedback_value,
+                feedback_text=row.feedback_text,
             )
             for row in rows[:limit]
             if row.question
@@ -536,6 +547,60 @@ class AnalysisRepository:
 
         has_more = len(rows) > limit
         return items, total_count, has_more
+
+    async def get_message_feedback_counts(
+        self,
+        *,
+        tenant_id: UUID,
+        assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+        from_date: datetime | None = None,
+        to_date: datetime | None = None,
+        include_followups: bool = True,
+    ) -> MessageFeedbackCounts:
+        """Count the good and bad answer ratings in a partner's conversations.
+
+        Scoped like the question counts: conversations started in the window.
+        Without follow-ups only each conversation's first answer counts, the
+        same answers the question history lists.
+        """
+        if (assistant_id is None) == (group_chat_id is None):
+            raise ValueError("Exactly one of assistant_id or group_chat_id is required")
+
+        stmt = (
+            sa.select(
+                sa.func.count().filter(QuestionFeedback.value == 1).label("positive"),
+                sa.func.count().filter(QuestionFeedback.value == -1).label("negative"),
+            )
+            .select_from(QuestionFeedback)
+            .join(Questions, Questions.id == QuestionFeedback.question_id)
+            .join(Sessions, Questions.session_id == Sessions.id)
+            .join(Users, Sessions.user_id == Users.id)
+            .where(Users.tenant_id == tenant_id)
+        )
+        stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
+
+        if assistant_id is not None:
+            stmt = stmt.where(Sessions.assistant_id == assistant_id)
+        else:
+            stmt = stmt.where(Sessions.group_chat_id == group_chat_id)
+        if from_date is not None:
+            stmt = stmt.where(Sessions.created_at >= from_date)
+        if to_date is not None:
+            stmt = stmt.where(Sessions.created_at <= to_date)
+        if not include_followups:
+            first = aliased(Questions)
+            first_question_id = (
+                sa.select(first.id)
+                .where(first.session_id == Questions.session_id)
+                .order_by(first.created_at.asc(), first.id.asc())
+                .limit(1)
+                .scalar_subquery()
+            )
+            stmt = stmt.where(Questions.id == first_question_id)
+
+        row = (await self.session.execute(stmt)).one()
+        return MessageFeedbackCounts(positive=row.positive, negative=row.negative)
 
     async def get_assistant_conversation_counts(
         self,
