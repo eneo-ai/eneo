@@ -51,12 +51,16 @@ it("provides the signed-in context, the app's query client, the shell and the ro
   ).toBeTruthy();
 });
 
-it("starts the next test at / with a fresh router", () => {
-  const { result } = renderHookInApp(() => ({ pathname: usePathname(), router: useRouter() }));
-  expect(result.current.pathname).toBe("/");
-  expect(router.push).not.toHaveBeenCalled();
-  result.current.router.push("/dashboard");
+it("records where the app navigates", () => {
+  const { result } = renderHookInApp(() => useRouter(), { route: "/spaces/list" });
+  result.current.push("/dashboard");
   expect(router.push).toHaveBeenCalledWith("/dashboard");
+});
+
+it("starts every test at / with fresh router mocks", () => {
+  const { result } = renderHookInApp(() => usePathname());
+  expect(result.current).toBe("/");
+  expect(router.push).not.toHaveBeenCalled();
 });
 
 it("renders what the server sends", () => {
