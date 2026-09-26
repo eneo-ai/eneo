@@ -92,6 +92,12 @@ def _text_chunk(text: str, finish_reason: str | None = None):
     return SimpleNamespace(choices=[choice])
 
 
+def _reasoning_chunk(reasoning: str):
+    delta = SimpleNamespace(content=None, reasoning_content=reasoning, tool_calls=None)
+    choice = SimpleNamespace(delta=delta, finish_reason=None)
+    return SimpleNamespace(choices=[choice])
+
+
 def _response(*, content=None, tool_calls=None, finish_reason="stop"):
     message = SimpleNamespace(
         content=content,
@@ -1522,3 +1528,25 @@ async def test_iterate_stream_separates_only_rounds_that_stream_text():
     )
 
     assert _streamed_texts(completions) == ["Found it.", "\n\nAnswer"]
+
+
+async def test_iterate_stream_separates_reasoning_of_rounds_around_a_tool_call():
+    completions = await _stream_rounds(
+        [
+            [_reasoning_chunk("I need the time."), _tool_call_chunk()],
+            [
+                _reasoning_chunk("Format"),
+                _reasoning_chunk(" it."),
+                _text_chunk("It is ten.", finish_reason="stop"),
+            ],
+        ]
+    )
+
+    assert [
+        c.reasoning_content
+        for c in completions
+        if c.response_type == ResponseType.REASONING
+    ] == ["I need the time.", "\n\nFormat", " it."]
+    # Reasoning and answer text are joined separately: the first answer text
+    # follows reasoning, not earlier answer text, so it gets no break.
+    assert _streamed_texts(completions) == ["It is ten."]

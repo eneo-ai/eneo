@@ -311,10 +311,10 @@ async def test_reasoning_can_resume_after_text():
     ]
 
 
-def _text_parts(chunks: list[dict]) -> dict[str, str]:
+def _part_texts(chunks: list[dict], kind: str = "text") -> dict[str, str]:
     parts: dict[str, str] = {}
     for chunk in chunks:
-        if chunk["type"] == "text-delta":
+        if chunk["type"] == f"{kind}-delta":
             parts[chunk["id"]] = parts.get(chunk["id"], "") + chunk["delta"]
     return parts
 
@@ -335,10 +335,38 @@ async def test_round_break_stays_in_a_continuing_part_but_never_starts_one():
 
     chunks = await _collect(_response(completions))
 
-    assert _text_parts(chunks) == {
+    assert _part_texts(chunks) == {
         "text-0": "Checking.\n\nFound it.",
         "text-1": "Answer",
     }
+
+
+@pytest.mark.asyncio
+async def test_round_break_in_reasoning_follows_the_same_part_rules():
+    # The adapter opens a later model round's reasoning with a paragraph break.
+    completions = [
+        Completion(response_type=ResponseType.REASONING, reasoning_content="Plan."),
+        Completion(
+            response_type=ResponseType.TOOL_CALL,
+            tool_calls_metadata=[_tool(status="succeeded")],
+        ),
+        Completion(
+            response_type=ResponseType.REASONING, reasoning_content="\n\nCheck."
+        ),
+        Completion(response_type=ResponseType.TEXT, text="Found it."),
+        Completion(
+            response_type=ResponseType.REASONING, reasoning_content="\n\nFormat."
+        ),
+        Completion(response_type=ResponseType.TEXT, text="\n\nDone."),
+    ]
+
+    chunks = await _collect(_response(completions))
+
+    assert _part_texts(chunks, "reasoning") == {
+        "reasoning-0": "Plan.\n\nCheck.",
+        "reasoning-1": "Format.",
+    }
+    assert _part_texts(chunks) == {"text-0": "Found it.", "text-1": "Done."}
 
 
 @pytest.mark.asyncio
@@ -366,7 +394,7 @@ async def test_later_text_part_opens_at_its_first_text():
         "text-end",
         "finish",
     ]
-    assert _text_parts(chunks) == {"text-0": "First", "text-1": "Second"}
+    assert _part_texts(chunks) == {"text-0": "First", "text-1": "Second"}
 
 
 @pytest.mark.asyncio

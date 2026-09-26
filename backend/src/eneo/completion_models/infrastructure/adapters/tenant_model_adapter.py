@@ -427,6 +427,35 @@ class _ToolResultBudget:
         return llm_text
 
 
+class _RoundJoiner:
+    """Separates the text successive model rounds stream into one string.
+
+    Callers append every chunk of a turn's answer (or reasoning), so the text
+    a model writes before a tool call would run straight into the next
+    round's text. The first chunk of a later round therefore starts a new
+    paragraph unless a newline already divides the rounds; text within a
+    round passes through unchanged.
+    """
+
+    def __init__(self) -> None:
+        self._ends_mid_line = False
+        self._round_started = False
+
+    def start_round(self) -> None:
+        self._round_started = False
+
+    def join(self, text: str) -> str:
+        if (
+            not self._round_started
+            and self._ends_mid_line
+            and not text.startswith("\n")
+        ):
+            text = f"\n\n{text}"
+        self._round_started = True
+        self._ends_mid_line = not text.endswith("\n")
+        return text
+
+
 if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import (
         CompletionModel,
@@ -1691,9 +1720,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                     self.cumulative_output_tokens = 0
                     self.used_output_estimate = False
                     self.context_output_token_estimate: int | None = None
-                    # True while the answer text streamed so far, across all
-                    # rounds, ends without a newline.
-                    self.answer_ends_mid_line = False
+                    self.answer_rounds = _RoundJoiner()
+                    self.reasoning_rounds = _RoundJoiner()
 
             result = _StreamResult()
 
@@ -1716,7 +1744,6 @@ class TenantModelAdapter(CompletionModelAdapter):
                 buffer = ""
                 inside_thinking = False
                 thinking_stripped = False
-                round_has_text = False
                 pending_emitted: set[int] = set()
                 request_prompt_tokens = 0
                 provider_reported_prompt_tokens = False
@@ -1726,6 +1753,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                 res.tool_calls_acc = {}
                 res.assistant_content = []
                 res.reasoning_content = []
+                res.answer_rounds.start_round()
+                res.reasoning_rounds.start_round()
                 if res.usage is not None:
                     res.usage = res.usage.model_copy(
                         update={
@@ -1733,23 +1762,6 @@ class TenantModelAdapter(CompletionModelAdapter):
                             "context_completion_tokens": None,
                         }
                     )
-
-                def _answer_text(text: str) -> Completion:
-                    # Callers join every text chunk into one answer, but the
-                    # text before a tool call and the text after it come from
-                    # separate model rounds and would otherwise run together.
-                    # The first text of a later round therefore starts a new
-                    # paragraph unless a newline already divides the rounds.
-                    nonlocal round_has_text
-                    if (
-                        not round_has_text
-                        and res.answer_ends_mid_line
-                        and not text.startswith("\n")
-                    ):
-                        text = f"\n\n{text}"
-                    round_has_text = True
-                    res.answer_ends_mid_line = not text.endswith("\n")
-                    return Completion(text=text)
 
                 async for chunk in s:
                     # Capture usage from final chunk (when stream_options include_usage is set)
@@ -1785,7 +1797,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                     if reasoning_delta:
                         res.reasoning_content.append(reasoning_delta)
                         yield Completion(
-                            reasoning_content=reasoning_delta,
+                            reasoning_content=res.reasoning_rounds.join(
+                                reasoning_delta
+                            ),
                             response_type=ResponseType.REASONING,
                         )
 
@@ -1860,7 +1874,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             inside_thinking = True
                             pre_think = buffer.split("<think>")[0]
                             if pre_think.strip():
-                                yield _answer_text(pre_think)
+                                yield Completion(text=res.answer_rounds.join(pre_think))
                             buffer = buffer[buffer.index("<think>") :]
 
                         if inside_thinking and "</think>" in buffer:
@@ -1869,14 +1883,14 @@ class TenantModelAdapter(CompletionModelAdapter):
                             post_think = buffer.split("</think>", 1)[1].lstrip()
                             buffer = post_think
                             if buffer:
-                                yield _answer_text(buffer)
+                                yield Completion(text=res.answer_rounds.join(buffer))
                                 buffer = ""
 
                         if not inside_thinking and buffer and not thinking_stripped:
-                            yield _answer_text(buffer)
+                            yield Completion(text=res.answer_rounds.join(buffer))
                             buffer = ""
                         elif not inside_thinking and buffer and thinking_stripped:
-                            yield _answer_text(buffer)
+                            yield Completion(text=res.answer_rounds.join(buffer))
                             buffer = ""
 
                     # Handle final chunk (flush buffer but don't yield stop yet)
@@ -1884,7 +1898,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                         if buffer and not inside_thinking:
                             cleaned = self._strip_thinking_content(buffer)
                             if cleaned:
-                                yield _answer_text(cleaned)
+                                yield Completion(text=res.answer_rounds.join(cleaned))
                         buffer = ""
 
                 if provider_reported_prompt_tokens:
