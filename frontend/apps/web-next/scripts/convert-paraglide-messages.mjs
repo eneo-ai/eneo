@@ -10,17 +10,11 @@
  *   - keys containing "." (next-intl treats dots as namespace separators)
  *   - apostrophes directly before "{" or "}" (ICU escape semantics differ)
  *
- * Keys that exist only in web-next live in src/lib/i18n/extra/{locale}.json
- * and are merged last (they win over converted keys).
+ * Every string web-next owns lives in src/lib/i18n/extra/{locale}.json (its
+ * own keys and its wording for apps/web keys), merged last so it wins. The
+ * output, src/lib/i18n/messages/{locale}.json, is generated: never edit it.
  *
  * Usage: bun run i18n:convert
- *
- * DRIFT: do not run this until the catalogs are reconciled. About 750
- * web-next keys were added to messages/*.json directly instead of to
- * extra/*.json, so a run drops them (and changes some values and adds keys
- * from apps/web). Until they move into extra/, add new keys to all four
- * catalogs (extra/ and messages/, sv and en) by hand; `bun run lint` checks
- * that the locales match.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { buildLocale, locales, messagesDir, serializeCatalog } from "./i18n-catalogs.mjs";
