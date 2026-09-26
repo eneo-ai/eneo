@@ -266,12 +266,17 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
 - `StatusLabel` — Astryx `StatusDot` plus text: `status`, `label`, `isPulsing?`.
 - `ClientTime` — the one way to show a date: `value`, `format: "date" |
 "date_long" | "date_time" | "relative"`. It renders in the viewer's time zone
-  after hydration, so server and client HTML never disagree.
+  after hydration, so server and client HTML never disagree. Where the text
+  must go into a label (an accessible name), `useClientTimeText` returns the
+  same string.
 - `ResourceCard` (`resource-tile.tsx`) — the card for assistants, apps and
   services (Astryx `ClickableCard`; its action menu is a sibling, so actions
   never open the card).
 - `ConfirmDialog` / `ConfirmDialogControlled` — confirmations; put the
   controlled one outside menus.
+- `ConfirmedSecretInput` — a secret typed twice (API keys, passwords) on
+  Astryx fields: paste and password managers work, `autoComplete` is a prop,
+  and "required" / "mismatch" errors show as text at the field.
 - `SettingsGroup` / `SettingsRow` — legacy (shadcn-based); keep using them until
   a screen is migrated.
 
