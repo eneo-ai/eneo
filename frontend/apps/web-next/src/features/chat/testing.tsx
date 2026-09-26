@@ -55,6 +55,8 @@ export function ChatTestProviders({
   );
 }
 
+let focusGuarded = false;
+
 /** Which ResizeObservers observe which element (TestResizeObserver). */
 const observers = new Map<Element, Set<TestResizeObserver>>();
 
@@ -129,6 +131,17 @@ export function installDomPolyfills({ desktop = true }: { desktop?: boolean } = 
     };
     HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement) {
       this.removeAttribute("open");
+    };
+  }
+  // As in browsers, nothing inside a closed <dialog> can take focus (jsdom
+  // has no layout, so it would): sheets and dialogs must place focus after
+  // they open.
+  if (!focusGuarded) {
+    focusGuarded = true;
+    const focus = HTMLElement.prototype.focus;
+    HTMLElement.prototype.focus = function guardedFocus(this: HTMLElement, options) {
+      if (this.closest("dialog:not([open])")) return;
+      focus.call(this, options);
     };
   }
   if (!Element.prototype.scrollIntoView) {

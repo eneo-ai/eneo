@@ -61,7 +61,13 @@ const durations: TurnDurations = {
   finishedAt: null
 };
 
-function Harness({ initialSource = null }: { initialSource?: number | null }) {
+function Harness({
+  initialSource = null,
+  variant = "side"
+}: {
+  initialSource?: number | null;
+  variant?: "side" | "sheet";
+}) {
   const [open, setOpen] = useState(initialSource !== null);
   const [tab, setTab] = useState<ActivityTab>(initialSource !== null ? "sources" : "steps");
   const activity = deriveActivity(message, { knowledge });
@@ -75,7 +81,7 @@ function Harness({ initialSource = null }: { initialSource?: number | null }) {
       />
       {open && (
         <ActivityPanel
-          variant="side"
+          variant={variant}
           messageId={message.id}
           activity={activity}
           durations={durations}
@@ -187,6 +193,26 @@ describe("ActivityPanel", () => {
     render(<Harness initialSource={1} />);
     const target = document.getElementById(sourceAnchorId(message.id, 2));
     await waitFor(() => expect(document.activeElement).toBe(target));
+  });
+
+  // Below 1024px (tablets, phones, 200–400% zoom) the panel is a modal sheet.
+  it("focuses the cited source in the bottom sheet once it has opened", async () => {
+    render(<Harness initialSource={1} variant="sheet" />);
+    const sheet = await screen.findByRole("dialog", { name: "Aktivitet för svaret" });
+    const target = document.getElementById(sourceAnchorId(message.id, 2));
+    expect(sheet.contains(target)).toBe(true);
+    await waitFor(() => expect(document.activeElement).toBe(target));
+  });
+
+  it("points the pill at the sheet it opens", async () => {
+    render(<Harness variant="sheet" />);
+    const pill = screen.getByRole("button", { name: /aktivitet:/i });
+    fireEvent.click(pill);
+    const sheet = await screen.findByRole("dialog", { name: "Aktivitet för svaret" });
+    const controlled = document.getElementById(pill.getAttribute("aria-controls") ?? "");
+    expect(controlled).not.toBeNull();
+    expect(sheet.contains(controlled)).toBe(true);
+    await expectNoAxeViolations(sheet);
   });
 
   it("has no axe violations with either tab open", async () => {
