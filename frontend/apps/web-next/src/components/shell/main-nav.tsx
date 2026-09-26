@@ -7,25 +7,23 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { Kbd } from "@astryxdesign/core/Kbd";
 import { SideNavItem, SideNavSection, useSideNavCollapse } from "@astryxdesign/core/SideNav";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
+import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { Bot, LayoutGrid, Plus, Search, SquarePen, User } from "lucide-react";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
+import type { RecentConversation } from "@/lib/api/conversations";
 import { cn } from "@/lib/utils";
-import { useNavSpaces, useRecentConversations } from "./nav-data";
+import { conversationContext } from "./conversation-context";
+import { useNavSpaces, useNavTarget, useRecentConversations } from "./nav-data";
 import { NAV_ITEM_CLASSES, SECONDARY_LINK_CLASSES } from "./nav-styles";
-import { conversationHref, navTarget, NEW_CONVERSATION_HREF, type NavTarget } from "./routes";
+import { conversationHref, NEW_CONVERSATION_HREF } from "./routes";
 import { useShell } from "./shell-context";
 
 /** Shared spaces shown before "Alla ytor" takes over. */
 const MAX_SPACES_IN_NAV = 8;
-
-/** The main-navigation destination the current URL belongs to (for aria-current). */
-function useNavTarget(): NavTarget {
-  return navTarget(usePathname(), useSearchParams());
-}
 
 function NewConversationButton() {
   const t = useTranslations();
@@ -169,6 +167,36 @@ function SpacesSection() {
   );
 }
 
+/**
+ * A conversation under "Senaste": its title, plus a tooltip saying who it is
+ * with (the assistant or group chat and its space) unless it is the personal
+ * chat. The tooltip is also the link's accessible description, so screen
+ * readers hear it without the nav growing a second line per row.
+ */
+function RecentConversationItem({
+  conversation,
+  isSelected
+}: {
+  conversation: RecentConversation;
+  isSelected: boolean;
+}) {
+  const t = useTranslations();
+  const linkRef = useRef<HTMLElement>(null);
+  const context = conversationContext(conversation, t);
+
+  return (
+    <>
+      <SideNavItem
+        ref={linkRef}
+        label={conversation.name.trim() || t("shell_untitled_conversation")}
+        href={conversationHref(conversation)}
+        isSelected={isSelected}
+      />
+      {context ? <Tooltip anchorRef={linkRef} content={context} placement="end" /> : null}
+    </>
+  );
+}
+
 function RecentSection() {
   const t = useTranslations();
   const target = useNavTarget();
@@ -184,10 +212,9 @@ function RecentSection() {
       className={cn(NAV_ITEM_CLASSES, SECONDARY_LINK_CLASSES)}
     >
       {conversations.map((conversation) => (
-        <SideNavItem
+        <RecentConversationItem
           key={conversation.id}
-          label={conversation.name.trim() || t("shell_untitled_conversation")}
-          href={conversationHref(conversation.id)}
+          conversation={conversation}
           isSelected={target.kind === "conversation" && target.sessionId === conversation.id}
         />
       ))}

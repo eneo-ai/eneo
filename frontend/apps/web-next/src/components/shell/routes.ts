@@ -4,6 +4,9 @@
  * selects, and the links the shell builds.
  */
 
+import type { RecentConversation } from "@/lib/api/conversations";
+import { spaceRouteId } from "@/features/spaces/space";
+
 /**
  * Window event a page's own phone header (the chat's) dispatches from its
  * menu button; the shell answers by opening the navigation drawer. The one
@@ -16,9 +19,25 @@ export const OPEN_NAV_EVENT = "eneo:open-nav";
 /** Where "Ny konversation" goes: a fresh conversation with the personal assistant. */
 export const NEW_CONVERSATION_HREF = "/spaces/personal/chat";
 
-/** A personal-assistant conversation, in the URL scheme the personal chat uses. */
-export function conversationHref(sessionId: string): string {
-  return `${NEW_CONVERSATION_HREF}?${new URLSearchParams({ session_id: sessionId })}`;
+/** What a saved conversation's link needs: its partner and that partner's space. */
+type ConversationLink = Pick<RecentConversation, "id"> & {
+  partner: Pick<RecentConversation["partner"], "type" | "id">;
+  space: Pick<RecentConversation["space"], "id" | "personal" | "organization">;
+};
+
+/**
+ * Where a saved conversation opens: its space's chat with its partner, in the
+ * URL scheme the space chat builds itself. The space's own assistant (in the
+ * personal space: the personal chat) needs no `type` and `id`.
+ */
+export function conversationHref({ id, partner, space }: ConversationLink): string {
+  const params = new URLSearchParams();
+  if (partner.type !== "default-assistant") {
+    params.set("type", partner.type);
+    params.set("id", partner.id);
+  }
+  params.set("session_id", id);
+  return `/spaces/${spaceRouteId(space)}/chat?${params}`;
 }
 
 function segmentsOf(pathname: string): string[] {
@@ -54,15 +73,22 @@ export function spaceRouteIdFromPath(pathname: string): string | null {
   return second;
 }
 
-/** The main-navigation destination a URL belongs to, for `aria-current`. */
-export type NavTarget =
+/** A main-navigation destination other than one conversation. */
+type PlaceTarget =
   | { kind: "new-conversation" }
-  | { kind: "conversation"; sessionId: string }
   | { kind: "assistants" }
   | { kind: "space"; routeId: string }
   | { kind: "all-spaces" }
   | { kind: "organization" }
   | { kind: "none" };
+
+/**
+ * The main-navigation destination a URL belongs to, for `aria-current`. A
+ * saved conversation is current under "Senaste" when listed there;
+ * `otherwise` is current when it isn't (see `currentNavTarget`).
+ */
+export type NavTarget =
+  PlaceTarget | { kind: "conversation"; sessionId: string; otherwise: PlaceTarget };
 
 type SearchParamsLike = Pick<URLSearchParams, "get">;
 
@@ -73,20 +99,31 @@ export function navTarget(pathname: string, searchParams: SearchParamsLike | nul
   if (first === "dashboard") return { kind: "assistants" };
   if (first !== "spaces" || !second) return { kind: "none" };
   if (second === "list") return { kind: "all-spaces" };
-  if (second === "organization") return { kind: "organization" };
 
-  // The personal chat with its default assistant: a new conversation or a
-  // saved one. Other partners in the personal space belong to "Personligt".
-  const isDefaultAssistantChat =
-    second === "personal" &&
-    third === "chat" &&
-    segments.length === 3 &&
-    !searchParams?.get("type") &&
-    !searchParams?.get("id");
-  if (isDefaultAssistantChat) {
-    const sessionId = searchParams?.get("session_id");
-    return sessionId ? { kind: "conversation", sessionId } : { kind: "new-conversation" };
+  const space: PlaceTarget =
+    second === "organization" ? { kind: "organization" } : { kind: "space", routeId: second };
+  if (third !== "chat" || segments.length !== 3) return space;
+
+  // The personal chat with its default assistant belongs to "Ny konversation"
+  // and "Senaste"; other partners in the personal space to "Personligt".
+  const isPersonalChat =
+    second === "personal" && !searchParams?.get("type") && !searchParams?.get("id");
+  const sessionId = searchParams?.get("session_id");
+  if (sessionId) {
+    return {
+      kind: "conversation",
+      sessionId,
+      otherwise: isPersonalChat ? { kind: "none" } : space
+    };
   }
+  return isPersonalChat ? { kind: "new-conversation" } : space;
+}
 
-  return { kind: "space", routeId: second };
+/** One current destination: the conversation when "Senaste" lists it, else its place. */
+export function currentNavTarget(
+  target: NavTarget,
+  listedSessionIds: readonly string[]
+): NavTarget {
+  if (target.kind !== "conversation" || listedSessionIds.includes(target.sessionId)) return target;
+  return target.otherwise;
 }

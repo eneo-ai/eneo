@@ -9,6 +9,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { browserApi } from "@/lib/api/browser";
+import { invalidateConversationLists } from "@/lib/api/conversations";
 import { unwrap } from "@/lib/api/errors";
 import type { CursorPage } from "@/lib/api/pagination";
 import { toastApiError } from "@/lib/api/toast";
@@ -36,7 +37,7 @@ export function useSessionMutations(
   const t = useTranslations();
   const queryClient = useQueryClient();
   const historyKey = historyQueryKey(partner);
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: historyKey });
+  const invalidate = () => invalidateConversationLists(queryClient, historyKey);
 
   const rename = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) =>

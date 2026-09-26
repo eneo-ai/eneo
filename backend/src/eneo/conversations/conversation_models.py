@@ -2,7 +2,8 @@
 #
 # Licensed under the MIT License.
 
-from typing import Optional
+from datetime import datetime
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -177,3 +178,41 @@ class ChatTurnDiagnostics(BaseModel):
     session_id: UUID
     message_id: UUID
     skill_activation: SkillActivationEvidenceV1 | None
+
+
+class RecentConversationPartner(BaseModel):
+    """The assistant or group chat a recent conversation is held with."""
+
+    type: Literal["assistant", "default-assistant", "group-chat"] = Field(
+        description=(
+            "`default-assistant` is the space's own assistant; in the personal "
+            "space that is the personal chat."
+        )
+    )
+    id: UUID
+    name: str
+
+
+class RecentConversationSpace(BaseModel):
+    """The space the conversation's assistant or group chat belongs to."""
+
+    id: UUID
+    name: str
+    personal: bool
+    organization: bool
+
+
+class RecentConversation(BaseModel):
+    """One of the caller's own conversations, with what it takes to show and open it."""
+
+    id: UUID = Field(description="The conversation (session) id.")
+    name: str
+    created_at: datetime
+    last_activity_at: datetime = Field(
+        description=(
+            "When the latest question was asked; the creation time for a "
+            "conversation without questions."
+        )
+    )
+    partner: RecentConversationPartner
+    space: RecentConversationSpace

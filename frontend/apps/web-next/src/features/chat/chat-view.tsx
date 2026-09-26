@@ -20,6 +20,7 @@ import {
 } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
+import { invalidateConversationLists } from "@/lib/api/conversations";
 import { getErrorMessageForCode } from "@/lib/api/errors";
 import { createChatTransport, type ChatSendOptions } from "@/lib/chat/transport";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
@@ -308,7 +309,7 @@ export function ChatView({
             // Title generation is a nicety; ignore failures.
           }
         }
-        queryClient.invalidateQueries({ queryKey: historyQueryKey(partner) });
+        invalidateConversationLists(queryClient, historyQueryKey(partner));
       }
     });
 

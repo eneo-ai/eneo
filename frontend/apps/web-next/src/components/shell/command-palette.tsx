@@ -26,10 +26,10 @@ import { useMemo, useRef } from "react";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
+import { recentConversationsQueryOptions } from "@/lib/api/conversations";
 import { dashboardQueryOptions } from "@/app/(app)/dashboard/queries";
 import { spaceQueryOptions, spacesListQueryOptions } from "@/features/spaces/space";
 import { adminNavGroups } from "./admin-nav-items";
-import { recentConversationsQueryOptions } from "./nav-data";
 import {
   bootstrapEntries,
   buildPaletteEntries,
@@ -43,9 +43,6 @@ import {
 import { spaceRouteIdFromPath } from "./routes";
 
 type PaletteItem = SearchableItem<{ group: string; entry: PaletteEntry }>;
-
-/** Conversations the palette searches (the nav shows 5; searching deserves more). */
-const PALETTE_CONVERSATIONS = 20;
 
 const ICONS: Record<Extract<PaletteEntry["visual"], { type: "icon" }>["icon"], LucideIcon> = {
   personal: User,
@@ -76,22 +73,15 @@ async function loadPaletteData(
   queryClient: QueryClient,
   currentSpaceRouteId: string | null
 ): Promise<PaletteData> {
-  const [dashboard, spaces, currentSpace] = await Promise.all([
+  const [dashboard, spaces, conversations, currentSpace] = await Promise.all([
     settle(queryClient.query(dashboardQueryOptions(browserApi))),
     settle(queryClient.query(spacesListQueryOptions(browserApi))),
+    // The SideNav's "Senaste" list: the palette searches all of it.
+    settle(queryClient.query(recentConversationsQueryOptions(browserApi))),
     currentSpaceRouteId
       ? settle(queryClient.query(spaceQueryOptions(browserApi, currentSpaceRouteId)))
       : Promise.resolve(null)
   ]);
-  const personalAssistantId = dashboard?.spaces.items.find((space) => space.personal)
-    ?.default_assistant?.id;
-  const conversations = personalAssistantId
-    ? await settle(
-        queryClient.query(
-          recentConversationsQueryOptions(browserApi, personalAssistantId, PALETTE_CONVERSATIONS)
-        )
-      )
-    : null;
 
   return {
     dashboard,
@@ -174,7 +164,7 @@ function Hint({ keys, keyName, label }: { keys: string[]; keyName: string; label
 
 /**
  * The ⌘K command palette (Astryx CommandPalette): a modal dialog with a
- * labelled combobox that searches assistants, spaces, personal conversations,
+ * labelled combobox that searches assistants, spaces, recent conversations,
  * the current space's knowledge and actions (admin pages for admins). Mounted
  * the first time it opens; data loads then, never on page load.
  */

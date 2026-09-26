@@ -1350,5 +1350,6 @@
   "space_about_show_fewer_embedding_models": "Show fewer embedding models",
   "legacy_result_tabs_label": "Result and transcription",
   "legacy_insights_tabs_label": "Analysis and question history",
-  "legacy_model_selector_trigger": "{label}: {model}"
+  "legacy_model_selector_trigger": "{label}: {model}",
+  "recent_partner_in_space": "{partner} in {space}"
 }

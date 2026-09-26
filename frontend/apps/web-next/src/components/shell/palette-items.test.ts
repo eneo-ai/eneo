@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { RecentConversation } from "@/lib/api/conversations";
 import { adminNavGroups } from "./admin-nav-items";
 import {
   bootstrapEntries,
@@ -11,6 +12,19 @@ import {
 
 const t = (key: string, values?: Record<string, string>) =>
   values ? `${key}(${Object.values(values).join(",")})` : key;
+
+const PERSONAL_SPACE = { id: "p", name: "Personal", personal: true, organization: false };
+const UPPHANDLING = { id: "s1", name: "Upphandling", personal: false, organization: false };
+
+function conversation(
+  id: string,
+  name: string,
+  partner: RecentConversation["partner"],
+  space: RecentConversation["space"]
+): RecentConversation {
+  const at = "2026-09-26T10:00:00Z";
+  return { id, name, created_at: at, last_activity_at: at, partner, space };
+}
 
 const data = {
   dashboard: {
@@ -53,8 +67,19 @@ const data = {
     { id: "org", name: "Org", description: null, personal: false, organization: true }
   ],
   conversations: [
-    { id: "c1", name: "Upphandlingsanalys mot LOU" },
-    { id: "c2", name: "  " }
+    conversation(
+      "c1",
+      "Upphandlingsanalys mot LOU",
+      { type: "assistant", id: "a1", name: "Upphandlingsassistenten" },
+      UPPHANDLING
+    ),
+    conversation("c2", "  ", { type: "default-assistant", id: "d", name: "Eneo" }, PERSONAL_SPACE),
+    conversation(
+      "c3",
+      "Veckomöte",
+      { type: "group-chat", id: "g1", name: "Inköpsrådet" },
+      UPPHANDLING
+    )
   ],
   currentSpace: {
     routeId: "s1",
@@ -107,14 +132,26 @@ describe("buildPaletteEntries", () => {
     });
   });
 
-  it("links conversations with ?session_id= and names untitled ones", () => {
+  it("opens conversations in their chat, says who they are with and names untitled ones", () => {
     const entries = buildPaletteEntries(data, member, t);
     const conversations = entries.filter((entry) => entry.group === "conversations");
-    expect(conversations.map((entry) => entry.action)).toEqual([
-      { type: "navigate", href: "/spaces/personal/chat?session_id=c1" },
-      { type: "navigate", href: "/spaces/personal/chat?session_id=c2" }
+    expect(conversations.map((entry) => [entry.label, entry.subtitle, entry.action])).toEqual([
+      [
+        "Upphandlingsanalys mot LOU",
+        "recent_partner_in_space(Upphandlingsassistenten,Upphandling)",
+        { type: "navigate", href: "/spaces/s1/chat?type=assistant&id=a1&session_id=c1" }
+      ],
+      [
+        "shell_untitled_conversation",
+        "personal_assistant",
+        { type: "navigate", href: "/spaces/personal/chat?session_id=c2" }
+      ],
+      [
+        "Veckomöte",
+        "recent_partner_in_space(Inköpsrådet,Upphandling)",
+        { type: "navigate", href: "/spaces/s1/chat?type=group-chat&id=g1&session_id=c3" }
+      ]
     ]);
-    expect(conversations[1]?.label).toBe("shell_untitled_conversation");
   });
 
   it("offers the current space's collections and websites", () => {
@@ -153,13 +190,14 @@ describe("bootstrapEntries / searchEntries", () => {
   it("matches labels, subtitles and keywords case-insensitively, in group order", async () => {
     const entries = buildPaletteEntries(data, admin, t);
     const ids = (await searchEntries(entries, "UPPH")).map((entry) => entry.id);
-    // a2, the app and the website match through the space name in their subtitle.
+    // a2, the app, c3 and the website match through the space name in their subtitle.
     expect(ids).toEqual([
       "assistant:a1",
       "assistant:a2",
       "app:app1",
       "space:s1",
       "conversation:c1",
+      "conversation:c3",
       "collection:col1",
       "website:w1"
     ]);
@@ -170,10 +208,14 @@ describe("bootstrapEntries / searchEntries", () => {
   });
 
   it("caps each group and shows the bootstrap set for an empty query", async () => {
-    const many = Array.from({ length: 10 }, (_, index) => ({
-      id: `conversation:${index}`,
-      name: `Samtal ${index}`
-    }));
+    const many = Array.from({ length: 10 }, (_, index) =>
+      conversation(
+        `conversation:${index}`,
+        `Samtal ${index}`,
+        { type: "default-assistant", id: "d", name: "Eneo" },
+        PERSONAL_SPACE
+      )
+    );
     const entries = buildPaletteEntries({ ...data, conversations: many }, member, t);
     const found = await searchEntries(entries, "samtal");
     expect(found).toHaveLength(6);

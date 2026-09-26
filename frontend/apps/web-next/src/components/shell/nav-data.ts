@@ -1,35 +1,17 @@
 "use client";
 
-import { queryOptions, useQuery } from "@tanstack/react-query";
-import { browserApi, type EneoClient } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
-import { spaceQueryOptions, spacesListQueryOptions } from "@/features/spaces/space";
+import { useQuery } from "@tanstack/react-query";
+import { usePathname, useSearchParams } from "next/navigation";
+import { browserApi } from "@/lib/api/browser";
+import { recentConversationsQueryOptions, type RecentConversation } from "@/lib/api/conversations";
+import { spacesListQueryOptions } from "@/features/spaces/space";
+import { currentNavTarget, navTarget, type NavTarget } from "./routes";
 
-/** How many personal conversations the SideNav lists under "Senaste". */
+/** How many conversations the SideNav lists under "Senaste". */
 export const RECENT_CONVERSATIONS_IN_NAV = 5;
 
-/**
- * The latest conversations of one assistant. The key extends the chat
- * history's key (["conversations", "assistant", id]), so the chat's
- * invalidation after every answer refreshes these lists too.
- */
-export function recentConversationsQueryOptions(
-  api: EneoClient,
-  assistantId: string,
-  limit: number
-) {
-  return queryOptions({
-    queryKey: ["conversations", "assistant", assistantId, "recent", limit],
-    queryFn: async () => {
-      const page = await unwrap(
-        api.GET("/api/v1/conversations/", {
-          params: { query: { assistant_id: assistantId, limit } }
-        })
-      );
-      return page.items;
-    }
-  });
-}
+const firstInNav = (conversations: RecentConversation[]) =>
+  conversations.slice(0, RECENT_CONVERSATIONS_IN_NAV);
 
 /** Shared (non-personal, non-organisation) spaces, from the existing spaces list query. */
 export function useNavSpaces() {
@@ -41,16 +23,21 @@ export function useNavSpaces() {
 }
 
 /**
- * The personal assistant's latest conversations. The conversations endpoint
- * needs an assistant id (there is no cross-assistant history), so this lists
- * the personal (default) assistant only.
+ * The latest conversations with any assistant or group chat: the first few
+ * of the list the ⌘K palette searches (one query, one cache entry).
  */
-export function useRecentConversations(limit = RECENT_CONVERSATIONS_IN_NAV) {
-  const personal = useQuery(spaceQueryOptions(browserApi, "personal"));
-  const assistantId = personal.data?.default_assistant?.id;
-  const recent = useQuery({
-    ...recentConversationsQueryOptions(browserApi, assistantId ?? "", limit),
-    enabled: Boolean(assistantId)
-  });
-  return recent.data ?? [];
+export function useRecentConversations(): RecentConversation[] {
+  const { data } = useQuery({ ...recentConversationsQueryOptions(browserApi), select: firstInNav });
+  return data ?? [];
+}
+
+/**
+ * The main-navigation destination the current URL belongs to (for
+ * aria-current): a saved conversation while "Senaste" lists it, else the
+ * place it belongs to.
+ */
+export function useNavTarget(): NavTarget {
+  const target = navTarget(usePathname(), useSearchParams());
+  const listed = useRecentConversations().map((conversation) => conversation.id);
+  return currentNavTarget(target, listed);
 }
