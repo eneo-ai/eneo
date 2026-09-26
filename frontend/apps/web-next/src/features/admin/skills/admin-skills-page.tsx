@@ -5,7 +5,9 @@ import { CircleAlert, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
+import { flushSync } from "react-dom";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { PageHeader } from "@/components/composites/page-header";
 import { SettingsGroup } from "@/components/composites/settings-rows";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -25,6 +27,29 @@ import {
   type SkillRuntimePolicy,
   type SkillRuntimePolicyDraft
 } from "./skill-runtime-policy";
+
+// The limits in the order they are shown: Save moves focus to the first one
+// out of bounds.
+const LIMIT_FIELDS = [
+  {
+    key: "max_attached_skills",
+    id: "max-attached-skills",
+    label: "skills_runtime_policy_max_attached",
+    description: "skills_runtime_policy_max_attached_description"
+  },
+  {
+    key: "context_share_percent",
+    id: "context-share-percent",
+    label: "skills_runtime_policy_context_share",
+    description: "skills_runtime_policy_context_share_description"
+  },
+  {
+    key: "max_activations_per_turn",
+    id: "max-activations",
+    label: "skills_runtime_policy_max_activations",
+    description: "skills_runtime_policy_max_activations_description"
+  }
+] as const;
 
 export function AdminSkillsPage() {
   const t = useTranslations();
@@ -100,13 +125,39 @@ function PolicyEditor({
   const [busy, setBusy] = useState<"save" | "reset" | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
   const [error, setError] = useState<"save" | "reset" | null>(null);
-  const [status, setStatus] = useState<"saved" | "reset" | null>(null);
+  const [status, setStatus] = useState<"saved" | "reset" | "unchanged" | null>(null);
+  const [submitted, setSubmitted] = useState(false);
 
-  const dirty = !draftsEqual(draft, policyDraft(policy));
-  const valid = draftValid(draft, policy.editable_bounds);
+  const limitProblem = (field: (typeof LIMIT_FIELDS)[number]) =>
+    submitted && !fieldValid(draft[field.key], policy.editable_bounds[field.key])
+      ? t("skills_runtime_policy_invalid")
+      : null;
+
+  // Save is never disabled: a limit out of bounds shows at its field, which
+  // takes focus; with nothing changed it says so.
+  function save() {
+    if (busy) return;
+    const invalid = LIMIT_FIELDS.find(
+      ({ key }) => !fieldValid(draft[key], policy.editable_bounds[key])
+    );
+    if (invalid) {
+      // Rendered before focus moves, so the field is read with its problem.
+      flushSync(() => {
+        setSubmitted(true);
+        setStatus(null);
+      });
+      document.getElementById(invalid.id)?.focus();
+      return;
+    }
+    if (draftsEqual(draft, policyDraft(policy))) {
+      setStatus("unchanged");
+      return;
+    }
+    void update("save");
+  }
 
   async function update(kind: "save" | "reset") {
-    if (busy || (kind === "save" && !dirty)) return;
+    if (busy) return;
     setBusy(kind);
     setError(null);
     setStatus(null);
@@ -122,6 +173,7 @@ function PolicyEditor({
       }
       setPolicy(next);
       setDraft(policyDraft(next));
+      setSubmitted(false);
       const projection = await unwrap(
         browserApi.GET("/api/v1/settings/skills/runtime-policy/model-projections")
       ).catch(() => null);
@@ -167,37 +219,19 @@ function PolicyEditor({
         />
       </div>
       <div className="grid gap-5 border-t pt-5 md:grid-cols-3">
-        <PolicyNumberField
-          id="max-attached-skills"
-          label={t("skills_runtime_policy_max_attached")}
-          description={t("skills_runtime_policy_max_attached_description")}
-          value={draft.max_attached_skills}
-          bounds={policy.editable_bounds.max_attached_skills}
-          disabled={busy !== null}
-          onChange={(value) => setDraft((current) => ({ ...current, max_attached_skills: value }))}
-        />
-        <PolicyNumberField
-          id="context-share-percent"
-          label={t("skills_runtime_policy_context_share")}
-          description={t("skills_runtime_policy_context_share_description")}
-          value={draft.context_share_percent}
-          bounds={policy.editable_bounds.context_share_percent}
-          disabled={busy !== null}
-          onChange={(value) =>
-            setDraft((current) => ({ ...current, context_share_percent: value }))
-          }
-        />
-        <PolicyNumberField
-          id="max-activations"
-          label={t("skills_runtime_policy_max_activations")}
-          description={t("skills_runtime_policy_max_activations_description")}
-          value={draft.max_activations_per_turn}
-          bounds={policy.editable_bounds.max_activations_per_turn}
-          disabled={busy !== null}
-          onChange={(value) =>
-            setDraft((current) => ({ ...current, max_activations_per_turn: value }))
-          }
-        />
+        {LIMIT_FIELDS.map((field) => (
+          <PolicyNumberField
+            key={field.key}
+            id={field.id}
+            label={t(field.label)}
+            description={t(field.description)}
+            value={draft[field.key]}
+            bounds={policy.editable_bounds[field.key]}
+            problem={limitProblem(field)}
+            disabled={busy !== null}
+            onChange={(value) => setDraft((current) => ({ ...current, [field.key]: value }))}
+          />
+        ))}
       </div>
       {error && (
         <Alert variant="destructive" role="alert">
@@ -217,14 +251,17 @@ function PolicyEditor({
             ? t("skills_runtime_policy_saved")
             : status === "reset"
               ? t("skills_runtime_policy_reset_done")
-              : ""}
+              : status === "unchanged"
+                ? t("form_nothing_to_save")
+                : ""}
         </p>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" disabled={busy !== null} onClick={() => setResetOpen(true)}>
             <RotateCcw className="size-4" />
             {t("skills_runtime_policy_reset")}
           </Button>
-          <Button disabled={busy !== null || !dirty || !valid} onClick={() => void update("save")}>
+          {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+          <Button aria-busy={busy === "save" || undefined} onClick={save}>
             {busy === "save" ? t("skills_runtime_policy_saving") : t("skills_runtime_policy_save")}
           </Button>
         </div>
@@ -328,6 +365,7 @@ function PolicyNumberField({
   description,
   value,
   bounds,
+  problem,
   disabled,
   onChange
 }: {
@@ -336,11 +374,11 @@ function PolicyNumberField({
   description: string;
   value: number | null;
   bounds: { minimum: number; maximum: number };
+  problem: string | null;
   disabled: boolean;
   onChange: (value: number | null) => void;
 }) {
   const t = useTranslations();
-  const valid = fieldValid(value, bounds);
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id}>{label}</Label>
@@ -351,24 +389,22 @@ function PolicyNumberField({
         min={bounds.minimum}
         max={bounds.maximum}
         value={value ?? ""}
-        aria-invalid={!valid}
         disabled={disabled}
         onChange={(event) =>
           onChange(event.target.value === "" ? null : Number(event.target.value))
         }
+        {...fieldProblemProps(id, problem, `${id}-description ${id}-range`)}
       />
-      <p className="text-muted-foreground text-xs">{description}</p>
-      <p className="text-muted-foreground text-xs tabular-nums">
+      <FieldProblem id={id} problem={problem} />
+      <p id={`${id}-description`} className="text-muted-foreground text-xs">
+        {description}
+      </p>
+      <p id={`${id}-range`} className="text-muted-foreground text-xs tabular-nums">
         {t("skills_runtime_policy_allowed_range", {
           minimum: String(bounds.minimum),
           maximum: String(bounds.maximum)
         })}
       </p>
-      {!valid && (
-        <p className="text-destructive text-xs" role="alert">
-          {t("skills_runtime_policy_invalid")}
-        </p>
-      )}
     </div>
   );
 }

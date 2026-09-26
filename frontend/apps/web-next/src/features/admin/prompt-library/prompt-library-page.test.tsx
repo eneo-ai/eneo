@@ -19,7 +19,8 @@ const api = vi.hoisted(() => ({
       },
       response: new Response("{}")
     }),
-  DELETE: vi.fn()
+  DELETE: vi.fn(),
+  POST: vi.fn()
 }));
 const toast = vi.hoisted(() => ({
   success: vi.fn(),
@@ -77,5 +78,30 @@ describe("PromptLibraryPage", () => {
         expect.anything()
       )
     );
+  });
+
+  it("shows each problem at its field on save, and moves focus to the first", async () => {
+    renderInApp(<PromptLibraryPage />);
+    await screen.findByRole("table", { name: "Promptbibliotek" });
+    fireEvent.click(screen.getAllByRole("button", { name: "Ny prompt" })[0]!);
+    const dialog = await screen.findByRole("dialog", { name: "Ny prompt" });
+    const save = within(dialog).getByRole("button", { name: "Spara" }) as HTMLButtonElement;
+    // Never disabled: a disabled button says nothing about what is missing.
+    expect(save.disabled).toBe(false);
+
+    fireEvent.click(save);
+    const name = within(dialog).getByLabelText("Namn");
+    const prompt = within(dialog).getByLabelText("Prompt");
+    for (const field of [name, prompt]) {
+      expect(field.getAttribute("aria-invalid")).toBe("true");
+    }
+    expect(document.activeElement).toBe(name);
+    await expectNoAxeViolations(dialog);
+
+    fireEvent.change(name, { target: { value: "Sammanfatta ett protokoll" } });
+    fireEvent.click(save);
+    expect(name.getAttribute("aria-invalid")).toBeNull();
+    expect(document.activeElement).toBe(prompt);
+    expect(api.POST).not.toHaveBeenCalled();
   });
 });

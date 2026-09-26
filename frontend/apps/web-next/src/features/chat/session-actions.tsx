@@ -6,7 +6,8 @@ import { HStack, Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/
 import { TextInput } from "@/components/astryx/text-input";
 import { useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { browserApi } from "@/lib/api/browser";
 import { invalidateConversationLists } from "@/lib/api/conversations";
@@ -81,7 +82,10 @@ export function useSessionMutations(
   return { rename, remove };
 }
 
-/** Rename dialog (Astryx Dialog, form purpose) with a visible label; Enter saves. */
+/**
+ * Rename dialog (Astryx Dialog, form purpose) with a visible label; Enter
+ * saves. An empty name shows at the field on save, which takes focus.
+ */
 export function RenameSessionDialog({
   session,
   pending,
@@ -95,9 +99,21 @@ export function RenameSessionDialog({
 }) {
   const t = useTranslations();
   const [draft, setDraft] = useState<{ id: string; name: string } | null>(null);
+  // The conversation whose save found the name empty.
+  const [submittedFor, setSubmittedFor] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const value = draft && draft.id === session?.id ? draft.name : (session?.name ?? "");
+  const problem =
+    session && submittedFor === session.id && !value.trim() ? t("required_field") : null;
   const save = () => {
-    if (value.trim() && !pending) onSave(value.trim());
+    if (pending || !session) return;
+    if (!value.trim()) {
+      // Rendered before focus moves, so the field is read with its error.
+      flushSync(() => setSubmittedFor(session.id));
+      inputRef.current?.focus();
+      return;
+    }
+    onSave(value.trim());
   };
 
   return (
@@ -118,10 +134,13 @@ export function RenameSessionDialog({
         content={
           <LayoutContent>
             <TextInput
+              ref={inputRef}
               label={t("chat_history_name_label")}
               value={value}
               onChange={(next) => session && setDraft({ id: session.id, name: next })}
               onEnter={save}
+              isRequired
+              status={problem ? { type: "error", message: problem } : undefined}
             />
           </LayoutContent>
         }
@@ -132,7 +151,9 @@ export function RenameSessionDialog({
               <Button
                 label={t("save")}
                 variant="primary"
-                isDisabled={!value.trim() || pending}
+                // Keeps focus while saving; a second press is ignored.
+                isLoading={pending}
+                isInterruptible
                 onClick={save}
               />
             </HStack>

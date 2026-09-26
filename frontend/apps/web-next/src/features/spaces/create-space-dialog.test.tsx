@@ -75,6 +75,22 @@ it("creates the space, opens its overview and leaves no form behind", async () =
   expect(screen.queryByLabelText(/Namn/)).toBeNull();
 });
 
+it("keeps focus on the busy Skapa yta and ignores a second press", async () => {
+  api.POST.mockReturnValue(new Promise(() => {}));
+  const { dialog } = await openDialog();
+  fireEvent.change(within(dialog).getByLabelText(/Namn/), { target: { value: "Upphandling" } });
+  const create = within(dialog).getByRole("button", { name: "Skapa yta" });
+  create.focus();
+
+  fireEvent.click(create);
+
+  await waitFor(() => expect(create.getAttribute("aria-busy")).toBe("true"));
+  expect(create.hasAttribute("disabled")).toBe(false);
+  expect(document.activeElement).toBe(create);
+  fireEvent.click(create);
+  expect(api.POST).toHaveBeenCalledTimes(1);
+});
+
 it("closes with Escape and returns focus to the opener", async () => {
   const { opener, dialog } = await openDialog();
   fireEvent.keyDown(dialog, { key: "Escape" });

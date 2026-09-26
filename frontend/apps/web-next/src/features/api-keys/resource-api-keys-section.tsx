@@ -11,23 +11,7 @@ import { SettingsGroup } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
+import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -41,15 +25,13 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { usePaginatedQuery } from "@/lib/hooks/use-paginated-query";
+import { CreateApiKeyForm, type ApiKeyDraft } from "./create-api-key-form";
 import {
-  API_KEY_EXPIRY_PRESETS,
   API_KEY_STATE_BADGE_VARIANT,
   API_KEY_STATES,
   buildScopedApiKeyCreateBody,
   formatApiKeyDate,
   type ApiKey,
-  type ApiKeyExpiryPresetValue,
-  type ApiKeyPermission,
   type ApiKeyScopeType,
   type ApiKeyState
 } from "./api-keys";
@@ -70,30 +52,20 @@ function CreateScopedKeyDialog({
   const t = useTranslations();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [permission, setPermission] = useState<ApiKeyPermission>("read");
-  const [expiryDays, setExpiryDays] = useState<ApiKeyExpiryPresetValue>("30");
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["api-keys", scopeType, scopeId] });
 
   const createKey = useMutation({
-    mutationFn: () =>
+    mutationFn: (draft: ApiKeyDraft) =>
       unwrap(
         browserApi.POST("/api/v1/api-keys", {
-          body: buildScopedApiKeyCreateBody({
-            name,
-            scopeType,
-            scopeId,
-            permission,
-            expiryDays
-          })
+          body: buildScopedApiKeyCreateBody({ ...draft, scopeType, scopeId })
         })
       ),
     onSuccess: (created) => {
       void invalidate();
       setOpen(false);
-      setName("");
       onCreated(created.secret);
     },
     onError: (error) => toastApiError(error, t)
@@ -108,71 +80,13 @@ function CreateScopedKeyDialog({
         </Button>
       </DialogTrigger>
       <DialogContent>
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (name.trim()) createKey.mutate();
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>
-              {t("api_keys_create_for_resource", { resource: resourceName })}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor={`${scopeType}-key-name`}>{t("name")}</Label>
-            <Input
-              id={`${scopeType}-key-name`}
-              value={name}
-              placeholder={t("api_keys_name_placeholder")}
-              onChange={(event) => setName(event.target.value)}
-              required
-            />
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label>{t("api_keys_permission_level")}</Label>
-            <Select
-              value={permission}
-              onValueChange={(next) => setPermission(next as ApiKeyPermission)}
-            >
-              <SelectTrigger className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="read">{t("api_keys_permission_read")}</SelectItem>
-                <SelectItem value="write">{t("api_keys_permission_write")}</SelectItem>
-                <SelectItem value="admin">{t("api_keys_permission_admin")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label>{t("api_keys_expiration")}</Label>
-            <Select
-              value={expiryDays}
-              onValueChange={(value) => setExpiryDays(value as ApiKeyExpiryPresetValue)}
-            >
-              <SelectTrigger className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {API_KEY_EXPIRY_PRESETS.map((preset) => (
-                  <SelectItem key={preset.key} value={preset.value}>
-                    {t(preset.key)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-              {t("cancel")}
-            </Button>
-            <Button type="submit" disabled={!name.trim() || createKey.isPending}>
-              {createKey.isPending ? t("api_keys_creating") : t("api_keys_create_short")}
-            </Button>
-          </DialogFooter>
-        </form>
+        <CreateApiKeyForm
+          idPrefix={scopeType}
+          title={t("api_keys_create_for_resource", { resource: resourceName })}
+          pending={createKey.isPending}
+          onSubmit={(draft) => createKey.mutate(draft)}
+          onCancel={() => setOpen(false)}
+        />
       </DialogContent>
     </Dialog>
   );

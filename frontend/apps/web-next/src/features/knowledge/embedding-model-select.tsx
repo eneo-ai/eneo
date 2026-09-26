@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { useId } from "react";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -32,6 +33,7 @@ export function EmbeddingModelSelect({
   onChange: (id: string) => void;
 }) {
   const t = useTranslations();
+  const id = useId();
   if (models.length < 2) return null;
 
   const stable = models.filter((model) => model.stability === "stable");
@@ -39,9 +41,9 @@ export function EmbeddingModelSelect({
 
   return (
     <div className="flex flex-col gap-2">
-      <Label>{t("embedding_model")}</Label>
+      <Label htmlFor={id}>{t("embedding_model")}</Label>
       <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className="w-full">
+        <SelectTrigger id={id} className="w-full">
           <SelectValue placeholder={t("select_ellipsis")} />
         </SelectTrigger>
         <SelectContent>

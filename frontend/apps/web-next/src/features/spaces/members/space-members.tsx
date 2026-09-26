@@ -5,7 +5,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trash2, UserPlus, Users } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { ConfirmDialog } from "@/components/composites/confirm-dialog";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
@@ -141,6 +143,7 @@ function MemberRow({ member }: { member: SpaceMember }) {
  * shows it as its primary action; `variant="header"` is the quieter button in
  * the space header on the other tabs (same name, same dialog).
  */
+/** Adds a member: a user picked from the search, and a role. A missing pick shows on add. */
 export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "header" }) {
   const t = useTranslations();
   const roleId = useId();
@@ -150,6 +153,9 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
   const [filter, setFilter] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [role, setRole] = useState<SpaceRoleValue>(space.available_roles[0]?.value ?? "editor");
+  const [submitted, setSubmitted] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const userProblem = submitted && !selectedId ? t("form_problem_choose_user") : null;
 
   const memberIds = new Set(space.members.items.map((member) => member.id));
   const { data: candidates } = useQuery({
@@ -184,8 +190,25 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
 
   const selectable = (candidates ?? []).filter((user) => !memberIds.has(user.id));
 
+  function add() {
+    if (addMember.isPending) return;
+    if (!selectedId) {
+      // Rendered before focus moves, so the field is read with its error.
+      flushSync(() => setSubmitted(true));
+      searchRef.current?.focus();
+      return;
+    }
+    addMember.mutate({ id: selectedId, role });
+  }
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) setSubmitted(false);
+        setOpen(next);
+      }}
+    >
       <DialogTrigger asChild>
         {variant === "header" ? (
           <AstryxButton
@@ -205,6 +228,7 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
           <div className="flex flex-col gap-2">
             <Label htmlFor="member-search">{t("email")}</Label>
             <Input
+              ref={searchRef}
               id="member-search"
               value={filter}
               placeholder={t("member_search_placeholder")}
@@ -212,7 +236,9 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
                 setFilter(event.target.value);
                 setSelectedId(null);
               }}
+              {...fieldProblemProps("member-search", userProblem)}
             />
+            <FieldProblem id="member-search" problem={userProblem} />
             <div className="flex max-h-48 flex-col overflow-y-auto rounded-md border">
               {selectable.length === 0 ? (
                 <p className="text-muted-foreground p-3 text-sm">{t("no_results")}</p>
@@ -253,10 +279,8 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
           <Button variant="outline" onClick={() => setOpen(false)}>
             {t("cancel")}
           </Button>
-          <Button
-            disabled={!selectedId || addMember.isPending}
-            onClick={() => selectedId && addMember.mutate({ id: selectedId, role })}
-          >
+          {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+          <Button aria-busy={addMember.isPending || undefined} onClick={add}>
             {addMember.isPending ? t("loading") : t("add_member")}
           </Button>
         </DialogFooter>
@@ -329,6 +353,7 @@ function GroupMemberRow({ group }: { group: Schema<"SpaceGroupMember"> }) {
   );
 }
 
+/** Adds a user group with a role. A missing group shows on add. */
 function AddGroupMemberDialog() {
   const t = useTranslations();
   const groupId = useId();
@@ -338,6 +363,9 @@ function AddGroupMemberDialog() {
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [role, setRole] = useState<SpaceRoleValue>(space.available_roles[0]?.value ?? "editor");
+  const [submitted, setSubmitted] = useState(false);
+  const groupRef = useRef<HTMLButtonElement>(null);
+  const groupProblem = submitted && !selectedId ? t("form_problem_choose_user_group") : null;
 
   const groupMemberIds = new Set((space.group_members?.items ?? []).map((group) => group.id));
   const { data: groups } = useQuery({
@@ -367,8 +395,25 @@ function AddGroupMemberDialog() {
 
   const selectable = (groups ?? []).filter((group) => !groupMemberIds.has(group.id));
 
+  function add() {
+    if (addGroup.isPending) return;
+    if (!selectedId) {
+      // Rendered before focus moves, so the field is read with its error.
+      flushSync(() => setSubmitted(true));
+      groupRef.current?.focus();
+      return;
+    }
+    addGroup.mutate({ id: selectedId, role });
+  }
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) setSubmitted(false);
+        setOpen(next);
+      }}
+    >
       <DialogTrigger asChild>
         <AstryxButton label={t("add_group")} variant="secondary" />
       </DialogTrigger>
@@ -380,7 +425,12 @@ function AddGroupMemberDialog() {
           <div className="flex flex-col gap-2">
             <Label htmlFor={groupId}>{t("user_groups")}</Label>
             <Select value={selectedId ?? ""} onValueChange={setSelectedId}>
-              <SelectTrigger id={groupId} className="w-full">
+              <SelectTrigger
+                ref={groupRef}
+                id={groupId}
+                className="w-full"
+                {...fieldProblemProps(groupId, groupProblem)}
+              >
                 <SelectValue placeholder={t("user_groups")} />
               </SelectTrigger>
               <SelectContent>
@@ -391,6 +441,7 @@ function AddGroupMemberDialog() {
                 ))}
               </SelectContent>
             </Select>
+            <FieldProblem id={groupId} problem={groupProblem} />
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor={roleId}>{t("role")}</Label>
@@ -412,10 +463,8 @@ function AddGroupMemberDialog() {
           <Button variant="outline" onClick={() => setOpen(false)}>
             {t("cancel")}
           </Button>
-          <Button
-            disabled={!selectedId || addGroup.isPending}
-            onClick={() => selectedId && addGroup.mutate({ id: selectedId, role })}
-          >
+          {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+          <Button aria-busy={addGroup.isPending || undefined} onClick={add}>
             {addGroup.isPending ? t("loading") : t("add_group")}
           </Button>
         </DialogFooter>

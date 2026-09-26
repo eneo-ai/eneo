@@ -8,6 +8,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -59,9 +60,11 @@ export function CreateSpaceDialog({
   // prevented with a disabled button that says nothing.
   function submit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (createSpace.isPending) return;
     const trimmed = name.trim();
     if (!trimmed) {
-      setShowError(true);
+      // Rendered before focus moves, so the field is read with its error.
+      flushSync(() => setShowError(true));
       inputRef.current?.focus();
       return;
     }
@@ -112,7 +115,10 @@ export function CreateSpaceDialog({
                   form={formId}
                   variant="primary"
                   label={t("create_space")}
+                  // Busy, it stays enabled (aria-busy) and keeps focus; a
+                  // second press is ignored.
                   isLoading={createSpace.isPending}
+                  isInterruptible
                 />
               </div>
             </LayoutFooter>

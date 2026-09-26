@@ -1,11 +1,13 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
+import { flushSync } from "react-dom";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import {
   Dialog,
   DialogContent,
@@ -15,6 +17,7 @@ import {
   DialogTitle
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
@@ -26,6 +29,9 @@ import { useJobs } from "@/features/jobs/use-jobs";
 import { collectionBlobsQueryOptions } from "./knowledge";
 
 type ValidationError = { fileName?: string; message: string };
+
+const FILES_ID = "knowledge-upload-files";
+const FILE_ERRORS_ID = `${FILES_ID}-errors`;
 
 /** "Ladda upp filer" on a collection's page: the button and its upload dialog. */
 export function UploadBlobsButton({
@@ -76,11 +82,12 @@ export function UploadBlobsDialog({
   const locale = useLocale();
   const { limits, user, tenant, can } = useAppContext();
   const { queueUploads } = useJobs();
-  // The collection's files, for the duplicate-title warning (cached on its page).
-  const currentBlobs = useQuery({
-    ...collectionBlobsQueryOptions(browserApi, collectionId),
-    enabled: open
-  });
+  const queryClient = useQueryClient();
+  // The collection's files, for the duplicate-title warning (cached on its
+  // page); loaded when the dialog opens, so Upload rarely waits for them.
+  useQuery({ ...collectionBlobsQueryOptions(browserApi, collectionId), enabled: open });
+  const [checking, setChecking] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [skippedFiles, setSkippedFiles] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -131,10 +138,26 @@ export function UploadBlobsDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [files, storage, user.quota_limit, user.quota_used, t]);
 
-  function startUpload() {
-    if (errors.length > 0 || files.length === 0) return;
+  const noFilesProblem = submitted && files.length === 0 ? t("form_problem_choose_files") : null;
 
-    const existingTitles = new Set((currentBlobs.data ?? []).map((blob) => blob.metadata.title));
+  // Upload is never disabled: with no files, or files it cannot take, the
+  // problem shows at the file field, which takes focus.
+  async function startUpload() {
+    if (checking) return;
+    if (files.length === 0 || errors.length > 0) {
+      // Rendered before focus moves, so the field is read with its problem.
+      flushSync(() => setSubmitted(true));
+      document.getElementById(FILES_ID)?.focus();
+      return;
+    }
+
+    // Wait for the collection's files, so the duplicate warning can run.
+    setChecking(true);
+    const currentBlobs = await queryClient
+      .query({ ...collectionBlobsQueryOptions(browserApi, collectionId), staleTime: "static" })
+      .catch(() => []);
+    setChecking(false);
+    const existingTitles = new Set(currentBlobs.map((blob) => blob.metadata.title));
     const duplicates = files.filter((file) => existingTitles.has(file.name));
     if (duplicates.length > 0) {
       setDuplicateFileNames(duplicates.map((file) => file.name));
@@ -148,6 +171,7 @@ export function UploadBlobsDialog({
     setSkippedFiles([]);
     setDragging(false);
     setDuplicateFileNames([]);
+    setSubmitted(false);
   }
 
   function queueSelectedFiles() {
@@ -214,8 +238,11 @@ export function UploadBlobsDialog({
                   .catch(() => toast.error(t("file_upload_error")));
               }}
             >
-              <p className="text-muted-foreground mb-2 text-sm">{t("upload_dropzone_prompt")}</p>
+              <Label htmlFor={FILES_ID} className="text-muted-foreground mb-2 text-sm font-normal">
+                {t("upload_dropzone_prompt")}
+              </Label>
               <Input
+                id={FILES_ID}
                 type="file"
                 multiple
                 accept={acceptedMimeTypes.join(",")}
@@ -223,7 +250,15 @@ export function UploadBlobsDialog({
                   addSelectedFiles(Array.from(event.target.files ?? []));
                   event.target.value = "";
                 }}
+                {...fieldProblemProps(
+                  FILES_ID,
+                  noFilesProblem,
+                  errors.length > 0 ? FILE_ERRORS_ID : undefined
+                )}
+                // Files it cannot take make the choice invalid as soon as they are added.
+                aria-invalid={noFilesProblem !== null || errors.length > 0 || undefined}
               />
+              <FieldProblem id={FILES_ID} problem={noFilesProblem} />
             </div>
             <FileFormatDetails
               formats={limits.info_blobs.formats.map((format) => ({
@@ -253,7 +288,10 @@ export function UploadBlobsDialog({
               </ul>
             )}
             {errors.length > 0 && (
-              <div className="border-destructive/50 text-destructive rounded-md border px-3 py-2 text-sm">
+              <div
+                id={FILE_ERRORS_ID}
+                className="border-destructive/50 text-destructive rounded-md border px-3 py-2 text-sm"
+              >
                 {errors.map((error, index) => (
                   <p key={`${error.fileName}-${error.message}-${index}`}>{error.message}</p>
                 ))}
@@ -282,11 +320,8 @@ export function UploadBlobsDialog({
             >
               {t("cancel")}
             </Button>
-            <Button
-              // Wait for the collection's files so the duplicate warning can run.
-              disabled={files.length === 0 || errors.length > 0 || currentBlobs.isPending}
-              onClick={startUpload}
-            >
+            {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+            <Button aria-busy={checking || undefined} onClick={() => void startUpload()}>
               {t("upload_files")}
             </Button>
           </DialogFooter>

@@ -36,6 +36,37 @@ const add = (dialog: HTMLElement) =>
   within(dialog).getByRole("button", { name: "Lägg till MCP-server" }) as HTMLButtonElement;
 
 describe("McpServerDialog", () => {
+  it("shows each problem at its field when added, and moves focus to the first", async () => {
+    const dialog = renderDialog();
+    // Never disabled: a disabled button says nothing about what is missing.
+    expect(add(dialog).disabled).toBe(false);
+
+    fireEvent.click(add(dialog));
+
+    const name = within(dialog).getByLabelText("Namn");
+    const url = within(dialog).getByLabelText("URL");
+    for (const input of [name, url]) {
+      expect(input.getAttribute("aria-invalid")).toBe("true");
+      const problem = document.getElementById(input.getAttribute("aria-describedby")!);
+      expect(problem?.textContent).toBe("Detta fält är obligatoriskt");
+    }
+    expect(document.activeElement).toBe(name);
+    await expectNoAxeViolations(document.body);
+
+    // With bearer authentication, the token is next.
+    fireEvent.change(name, { target: { value: "Diariet" } });
+    fireEvent.change(url, { target: { value: "https://diariet.example.se/mcp" } });
+    chooseBearer(dialog);
+    fireEvent.click(add(dialog));
+    expect(name.getAttribute("aria-invalid")).toBeNull();
+    expect(document.activeElement).toBe(field(/^Bearer-token/));
+
+    fireEvent.change(field(/^Bearer-token/), { target: { value: "token-1234" } });
+    fireEvent.click(add(dialog));
+    expect(document.activeElement).toBe(field(/^Bekräfta Bearer-token/));
+    expect(api.POST).not.toHaveBeenCalled();
+  });
+
   it("asks for the bearer token twice once bearer authentication is chosen", async () => {
     const dialog = renderDialog();
     expect(within(dialog).queryByLabelText(/^Bearer-token/)).toBeNull();
@@ -63,7 +94,6 @@ describe("McpServerDialog", () => {
     fireEvent.change(field(/^Bekräfta Bearer-token/), { target: { value: "token-12" } });
 
     expect(field(/^Bekräfta Bearer-token/).getAttribute("aria-invalid")).toBeNull();
-    expect(add(dialog).disabled).toBe(true);
 
     fireEvent.blur(field(/^Bekräfta Bearer-token/));
 
@@ -85,7 +115,6 @@ describe("McpServerDialog", () => {
     fireEvent.change(field(/^Bearer-token/), { target: { value: "token-1234" } });
     fireEvent.change(field(/^Bekräfta Bearer-token/), { target: { value: "token-1234" } });
 
-    expect(add(dialog).disabled).toBe(false);
     fireEvent.click(add(dialog));
 
     await waitFor(() =>

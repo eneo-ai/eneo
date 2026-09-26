@@ -157,7 +157,7 @@ describe("HistoryAside", () => {
     const { onDeleted } = renderHistory({ queryClient });
 
     fireEvent.click(await rowMenuItem("Upphandlingsanalys", "Byt namn"));
-    const input = await screen.findByLabelText("Namn");
+    const input = await screen.findByLabelText(/^Namn/);
     fireEvent.change(input, { target: { value: "Direktupphandling" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(queryClient.getQueryState(recent)?.isInvalidated).toBe(true));
@@ -207,9 +207,35 @@ describe("RenameSessionDialog", () => {
         onSave={onSave}
       />
     );
-    const input = screen.getByLabelText("Namn");
+    const input = screen.getByLabelText(/^Namn/);
     fireEvent.change(input, { target: { value: "Nytt namn" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onSave).toHaveBeenCalledWith("Nytt namn");
+  });
+
+  it("shows an empty name at the field on save, which takes focus", async () => {
+    const onSave = vi.fn();
+    renderInApp(
+      <RenameSessionDialog
+        session={{ id: "s1", name: "Gammalt namn" }}
+        pending={false}
+        onCancel={vi.fn()}
+        onSave={onSave}
+      />
+    );
+    const dialog = screen.getByRole("dialog", { name: "Byt namn" });
+    const input = within(dialog).getByRole("textbox", { name: /^Namn/ });
+    const save = within(dialog).getByRole("button", { name: "Spara" }) as HTMLButtonElement;
+    fireEvent.change(input, { target: { value: "  " } });
+    // Never disabled: a disabled button says nothing about what is missing.
+    expect(save.disabled).toBe(false);
+
+    fireEvent.click(save);
+
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(within(dialog).getByText("Detta fält är obligatoriskt")).toBeTruthy();
+    expect(document.activeElement).toBe(input);
+    expect(onSave).not.toHaveBeenCalled();
+    await expectNoAxeViolations(dialog);
   });
 });

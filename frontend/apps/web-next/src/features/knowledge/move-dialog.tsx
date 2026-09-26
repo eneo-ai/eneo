@@ -2,7 +2,9 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,6 +29,7 @@ import { useSpace } from "@/features/spaces/use-space";
  * Move a resource to another accessible space. The hint warns about what the
  * move breaks; the transfer itself fails if the target lacks matching models.
  * Extra rows (e.g. the assistant "include knowledge" switch) go in children.
+ * A missing destination shows at its picker on move, which takes focus.
  */
 export function MoveResourceDialog({
   open,
@@ -51,12 +54,32 @@ export function MoveResourceDialog({
   const { space } = useSpace();
   const destinationId = useId();
   const [targetId, setTargetId] = useState<string | undefined>();
+  const [submitted, setSubmitted] = useState(false);
+  const destinationRef = useRef<HTMLButtonElement>(null);
+  const destinationProblem = submitted && !targetId ? t("select_a_space") : null;
 
   const { data: spaces } = useQuery({ ...spacesListQueryOptions(browserApi), enabled: open });
   const targets = (spaces ?? []).filter((candidate) => candidate.id !== space.id);
 
+  function move() {
+    if (pending) return;
+    if (!targetId) {
+      // Rendered before focus moves, so the field is read with its error.
+      flushSync(() => setSubmitted(true));
+      destinationRef.current?.focus();
+      return;
+    }
+    onMove(targetId);
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) setSubmitted(false);
+        onOpenChange(next);
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
@@ -64,7 +87,12 @@ export function MoveResourceDialog({
         <div className="flex flex-col gap-2">
           <Label htmlFor={destinationId}>{t("destination")}</Label>
           <Select value={targetId} onValueChange={setTargetId}>
-            <SelectTrigger id={destinationId} className="w-full">
+            <SelectTrigger
+              ref={destinationRef}
+              id={destinationId}
+              className="w-full"
+              {...fieldProblemProps(destinationId, destinationProblem)}
+            >
               <SelectValue placeholder={t("select_ellipsis")} />
             </SelectTrigger>
             <SelectContent>
@@ -75,6 +103,7 @@ export function MoveResourceDialog({
               ))}
             </SelectContent>
           </Select>
+          <FieldProblem id={destinationId} problem={destinationProblem} />
           {children}
           {hint && (
             <p className="text-muted-foreground text-sm">
@@ -87,11 +116,8 @@ export function MoveResourceDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {t("cancel")}
           </Button>
-          <Button
-            variant="destructive"
-            disabled={!targetId || pending}
-            onClick={() => targetId && onMove(targetId)}
-          >
+          {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+          <Button variant="destructive" aria-busy={pending || undefined} onClick={move}>
             {pending ? t("moving") : confirmLabel}
           </Button>
         </DialogFooter>

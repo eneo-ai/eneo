@@ -5,6 +5,8 @@ import { CircleAlert, Pencil, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -28,6 +30,9 @@ import {
 
 const UNBOUND = "__unbound__";
 
+/** What a module key may look like (the backend's rule). */
+const MODULE_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
 export function ModulesPage({ title }: { title: string }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -40,6 +45,10 @@ export function ModulesPage({ title }: { title: string }) {
   const [pendingRemoval, setPendingRemoval] = useState<ModuleInstallation | null>(null);
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const moduleKeyRef = useRef<HTMLInputElement>(null);
+  const redirectUrisRef = useRef<HTMLTextAreaElement>(null);
+  const serviceKeyRef = useRef<HTMLSelectElement>(null);
 
   const installations = useQuery({
     queryKey: ["admin-modules"],
@@ -53,12 +62,22 @@ export function ModulesPage({ title }: { title: string }) {
   const loadError = installations.error ?? serviceKeys.error;
   const keys = serviceKeys.data ?? [];
   const redirectUris = parseRedirectUris(redirectUrisInput);
+  const trimmedKey = moduleKey.trim();
+  const moduleKeyProblem = !trimmedKey
+    ? t("required_field")
+    : MODULE_KEY_PATTERN.test(trimmedKey)
+      ? null
+      : t("form_problem_module_key_format");
+  const redirectUrisProblem = redirectUris.length > 0 ? null : t("required_field");
+  const serviceKeyProblem = serviceKeyId ? null : t("required_field");
+  const shown = (problem: string | null) => (submitted ? problem : null);
 
   useEffect(() => {
     if (loadError) toastApiError(loadError, t);
   }, [loadError, t]);
 
   function resetForm() {
+    setSubmitted(false);
     setModuleKey("");
     setRedirectUrisInput("");
     setServiceKeyId("");
@@ -76,10 +95,24 @@ export function ModulesPage({ title }: { title: string }) {
     formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  // Problems show at their fields on submit, and focus moves to the first.
   async function saveInstallation(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    const key = moduleKey.trim();
-    if (!key || redirectUris.length === 0 || !serviceKeyId) return;
+    if (saving || loading) return;
+    const firstProblem = moduleKeyProblem
+      ? moduleKeyRef
+      : redirectUrisProblem
+        ? redirectUrisRef
+        : serviceKeyProblem
+          ? serviceKeyRef
+          : null;
+    if (firstProblem) {
+      // Rendered before focus moves, so the field is read with its error.
+      flushSync(() => setSubmitted(true));
+      firstProblem.current?.focus();
+      return;
+    }
+    const key = trimmedKey;
     setSaving(true);
     try {
       await unwrap(
@@ -217,24 +250,29 @@ export function ModulesPage({ title }: { title: string }) {
         <h2 id="module-form-title" className="text-lg font-semibold">
           {t(editingModuleKey ? "module_admin_edit_title" : "module_admin_add_title")}
         </h2>
-        <form ref={formRef} className="max-w-2xl space-y-5" onSubmit={saveInstallation}>
+        <form ref={formRef} className="max-w-2xl space-y-5" noValidate onSubmit={saveInstallation}>
           <div className="space-y-2">
             <Label htmlFor="module-key">{t("module_admin_module_key")}</Label>
             <Input
+              ref={moduleKeyRef}
               id="module-key"
               value={moduleKey}
               onChange={(event) => setModuleKey(event.target.value)}
               required
               disabled={editingModuleKey !== null || saving}
-              pattern="[A-Za-z0-9][A-Za-z0-9._-]*"
               autoComplete="off"
               placeholder={t("module_admin_module_key_placeholder")}
+              {...fieldProblemProps("module-key", shown(moduleKeyProblem), "module-key-help")}
             />
-            <p className="text-muted-foreground text-sm">{t("module_admin_module_key_help")}</p>
+            <FieldProblem id="module-key" problem={shown(moduleKeyProblem)} />
+            <p id="module-key-help" className="text-muted-foreground text-sm">
+              {t("module_admin_module_key_help")}
+            </p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="redirect-uris">{t("module_admin_callback_urls")}</Label>
             <Textarea
+              ref={redirectUrisRef}
               id="redirect-uris"
               value={redirectUrisInput}
               onChange={(event) => setRedirectUrisInput(event.target.value)}
@@ -242,13 +280,23 @@ export function ModulesPage({ title }: { title: string }) {
               disabled={saving}
               rows={4}
               placeholder={t("module_admin_callback_urls_placeholder")}
+              {...fieldProblemProps(
+                "redirect-uris",
+                shown(redirectUrisProblem),
+                "redirect-uris-help"
+              )}
             />
-            <p className="text-muted-foreground text-sm">{t("module_admin_callback_urls_help")}</p>
+            <FieldProblem id="redirect-uris" problem={shown(redirectUrisProblem)} />
+            <p id="redirect-uris-help" className="text-muted-foreground text-sm">
+              {t("module_admin_callback_urls_help")}
+            </p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="service-key">{t("module_admin_service_key")}</Label>
             <select
+              ref={serviceKeyRef}
               id="service-key"
+              {...fieldProblemProps("service-key", shown(serviceKeyProblem), "service-key-help")}
               value={serviceKeyId}
               onChange={(event) => {
                 setServiceKeyId(event.target.value);
@@ -268,7 +316,10 @@ export function ModulesPage({ title }: { title: string }) {
                 </option>
               ))}
             </select>
-            <p className="text-muted-foreground text-sm">{t("module_admin_service_key_help")}</p>
+            <FieldProblem id="service-key" problem={shown(serviceKeyProblem)} />
+            <p id="service-key-help" className="text-muted-foreground text-sm">
+              {t("module_admin_service_key_help")}
+            </p>
             {boundKeyMissing && !serviceKeyId && (
               <Alert variant="destructive" role="alert">
                 <CircleAlert className="size-4" />
@@ -289,12 +340,8 @@ export function ModulesPage({ title }: { title: string }) {
             </Alert>
           )}
           <div className="flex gap-2">
-            <Button
-              type="submit"
-              disabled={
-                saving || loading || !moduleKey.trim() || !redirectUris.length || !serviceKeyId
-              }
-            >
+            {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+            <Button type="submit" aria-busy={saving || undefined}>
               <Plus className="size-4" />
               {t(editingModuleKey ? "module_admin_update" : "module_admin_install")}
             </Button>

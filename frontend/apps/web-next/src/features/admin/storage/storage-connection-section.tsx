@@ -10,7 +10,9 @@ import {
   RefreshCw
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState, type SubmitEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type SubmitEvent } from "react";
+import { flushSync } from "react-dom";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -72,6 +74,12 @@ export function StorageConnectionSection({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [previousOpen, setPreviousOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const endpointRef = useRef<HTMLInputElement>(null);
+  const bucketRef = useRef<HTMLInputElement>(null);
+  const regionRef = useRef<HTMLInputElement>(null);
+  const accessKeyRef = useRef<HTMLInputElement>(null);
+  const secretKeyRef = useRef<HTMLInputElement>(null);
   const [submissionReason, setSubmissionReason] = useState<string | null>(null);
   const [submissionFailed, setSubmissionFailed] = useState(false);
   const [mutationUnknown, setMutationUnknown] = useState(false);
@@ -102,13 +110,17 @@ export function StorageConnectionSection({
     loadStatus === "idle" &&
     connection?.source === "unconfigured" &&
     connection.credentials_can_be_managed;
-  const formValid =
-    input.access_key_id.trim().length > 0 &&
-    input.secret_access_key.length > 0 &&
-    (mode === "rotate" ||
-      (input.endpoint_url.trim().length > 0 &&
-        input.bucket.trim().length > 0 &&
-        input.region.trim().length > 0));
+  // Every field is required; rotating the keys keeps the destination.
+  const requiredProblem = (value: string) => (value.trim() ? null : t("required_field"));
+  const destinationLocked = mode === "rotate";
+  const problems = {
+    endpoint: destinationLocked ? null : requiredProblem(input.endpoint_url),
+    bucket: destinationLocked ? null : requiredProblem(input.bucket),
+    region: destinationLocked ? null : requiredProblem(input.region),
+    accessKey: requiredProblem(input.access_key_id),
+    secretKey: input.secret_access_key ? null : t("required_field")
+  };
+  const shownProblem = (field: keyof typeof problems) => (submitted ? problems[field] : null);
 
   const readConnection = useCallback(async (): Promise<Connection | null> => {
     setLoadStatus("loading");
@@ -194,6 +206,7 @@ export function StorageConnectionSection({
         : EMPTY_INPUT
     );
     setAdvancedOpen(false);
+    setSubmitted(false);
     setSubmissionReason(null);
     setSubmissionFailed(false);
     setMutationUnknown(false);
@@ -207,9 +220,25 @@ export function StorageConnectionSection({
     setInput((current) => ({ ...current, access_key_id: "", secret_access_key: "" }));
   }
 
+  // Problems show at their fields on submit, and focus moves to the first.
   async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!mode || !formValid || submitting) return;
+    if (!mode || submitting) return;
+    const firstProblem = (
+      [
+        [problems.endpoint, endpointRef],
+        [problems.bucket, bucketRef],
+        [problems.region, regionRef],
+        [problems.accessKey, accessKeyRef],
+        [problems.secretKey, secretKeyRef]
+      ] as const
+    ).find(([problem]) => problem)?.[1];
+    if (firstProblem) {
+      // Rendered before focus moves, so the field is read with its error.
+      flushSync(() => setSubmitted(true));
+      firstProblem.current?.focus();
+      return;
+    }
     setSubmitting(true);
     setSubmissionFailed(false);
     setSubmissionReason(null);
@@ -663,7 +692,7 @@ export function StorageConnectionSection({
               )}
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={(event) => void submit(event)} className="space-y-5">
+          <form onSubmit={(event) => void submit(event)} noValidate className="space-y-5">
             {submissionFailed && failureAlert(submissionReason)}
             {mode === "switch" && (
               <Alert>
@@ -701,12 +730,19 @@ export function StorageConnectionSection({
               <div className="grid gap-4 sm:grid-cols-2">
                 <ConnectionField
                   id="object-store-endpoint"
+                  problem={shownProblem("endpoint")}
                   label={t("storage_connection_endpoint")}
                   help={t("storage_connection_endpoint_help")}
                   className="sm:col-span-2"
                 >
                   <Input
+                    ref={endpointRef}
                     id="object-store-endpoint"
+                    {...fieldProblemProps(
+                      "object-store-endpoint",
+                      shownProblem("endpoint"),
+                      "object-store-endpoint-help"
+                    )}
                     type="url"
                     autoComplete="url"
                     required
@@ -718,9 +754,15 @@ export function StorageConnectionSection({
                     }
                   />
                 </ConnectionField>
-                <ConnectionField id="object-store-bucket" label={t("storage_connection_bucket")}>
+                <ConnectionField
+                  id="object-store-bucket"
+                  problem={shownProblem("bucket")}
+                  label={t("storage_connection_bucket")}
+                >
                   <Input
+                    ref={bucketRef}
                     id="object-store-bucket"
+                    {...fieldProblemProps("object-store-bucket", shownProblem("bucket"))}
                     autoComplete="off"
                     required
                     disabled={submitting}
@@ -733,11 +775,18 @@ export function StorageConnectionSection({
                 </ConnectionField>
                 <ConnectionField
                   id="object-store-region"
+                  problem={shownProblem("region")}
                   label={t("storage_connection_region")}
                   help={t("storage_connection_region_help")}
                 >
                   <Input
+                    ref={regionRef}
                     id="object-store-region"
+                    {...fieldProblemProps(
+                      "object-store-region",
+                      shownProblem("region"),
+                      "object-store-region-help"
+                    )}
                     autoComplete="off"
                     required
                     disabled={submitting}
@@ -753,11 +802,18 @@ export function StorageConnectionSection({
             <div className="grid gap-4 sm:grid-cols-2">
               <ConnectionField
                 id="object-store-access-key"
+                problem={shownProblem("accessKey")}
                 label={t("storage_connection_access_key")}
                 help={t("storage_connection_access_key_help")}
               >
                 <Input
+                  ref={accessKeyRef}
                   id="object-store-access-key"
+                  {...fieldProblemProps(
+                    "object-store-access-key",
+                    shownProblem("accessKey"),
+                    "object-store-access-key-help"
+                  )}
                   autoComplete="off"
                   required
                   disabled={submitting}
@@ -769,11 +825,18 @@ export function StorageConnectionSection({
               </ConnectionField>
               <ConnectionField
                 id="object-store-secret-key"
+                problem={shownProblem("secretKey")}
                 label={t("storage_connection_secret_key")}
                 help={t("storage_connection_secret_key_help")}
               >
                 <Input
+                  ref={secretKeyRef}
                   id="object-store-secret-key"
+                  {...fieldProblemProps(
+                    "object-store-secret-key",
+                    shownProblem("secretKey"),
+                    "object-store-secret-key-help"
+                  )}
                   type="password"
                   autoComplete="new-password"
                   required
@@ -843,7 +906,8 @@ export function StorageConnectionSection({
               <Button type="button" variant="outline" disabled={submitting} onClick={closeDialog}>
                 {t("cancel")}
               </Button>
-              <Button type="submit" disabled={!formValid || submitting} aria-busy={submitting}>
+              {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+              <Button type="submit" aria-busy={submitting}>
                 {submitting
                   ? t("storage_connection_testing")
                   : t(
@@ -873,16 +937,22 @@ function ConnectionDetail({ label, value }: { label: string; value: string | nul
   );
 }
 
+/**
+ * A labelled field with its problem after a submit and its help. The control
+ * (children) points at both: fieldProblemProps(id, problem, `${id}-help`).
+ */
 function ConnectionField({
   id,
   label,
   help,
+  problem = null,
   className,
   children
 }: {
   id: string;
   label: string;
   help?: string;
+  problem?: string | null;
   className?: string;
   children: React.ReactNode;
 }) {
@@ -890,7 +960,12 @@ function ConnectionField({
     <div className={`space-y-1.5 ${className ?? ""}`}>
       <Label htmlFor={id}>{label}</Label>
       {children}
-      {help && <p className="text-muted-foreground text-xs">{help}</p>}
+      <FieldProblem id={id} problem={problem} />
+      {help && (
+        <p id={`${id}-help`} className="text-muted-foreground text-xs">
+          {help}
+        </p>
+      )}
     </div>
   );
 }

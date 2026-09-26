@@ -125,6 +125,7 @@ export function AddModelWizard({
   const [providerId, setProviderId] = useState<string | null>(null);
   const [modelKind, setModelKind] = useState<ModelKind>("completion");
   const [credentialsSubmitted, setCredentialsSubmitted] = useState(false);
+  const [existingSubmitted, setExistingSubmitted] = useState(false);
   /** A name the create was refused for: another provider has it. */
   const [takenName, setTakenName] = useState<string | null>(null);
   const focus = useFieldFocus();
@@ -146,6 +147,7 @@ export function AddModelWizard({
     setFieldConfirmations({});
     setKeyExpiresOn(null);
     setCredentialsSubmitted(false);
+    setExistingSubmitted(false);
     setTakenName(null);
     setProviderId(initialProviderId ?? null);
     const provider = providers.data?.find((item) => item.id === preselect);
@@ -302,6 +304,18 @@ export function AddModelWizard({
     );
   }
 
+  // "Nästa" is never disabled: without a provider the problem shows at the
+  // picker, which takes focus.
+  function continueWithExisting() {
+    if (!existingId) {
+      // Rendered before focus moves, so the picker is read with its problem.
+      flushSync(() => setExistingSubmitted(true));
+      contentRef.current?.querySelector<HTMLElement>('[role="combobox"]')?.focus();
+      return;
+    }
+    setStep("models");
+  }
+
   function providerStep() {
     if (mode === "existing") {
       return frame(
@@ -324,6 +338,12 @@ export function AddModelWizard({
             }))}
             value={existingId || undefined}
             placeholder={t("no_providers_configured")}
+            isRequired
+            status={
+              existingSubmitted && !existingId
+                ? { type: "error", message: t("form_problem_choose_provider") }
+                : undefined
+            }
             onChange={(id) => {
               setExistingId(id);
               const provider = providers.data?.find((item) => item.id === id);
@@ -331,12 +351,7 @@ export function AddModelWizard({
             }}
           />
         </div>,
-        <Button
-          variant="primary"
-          label={t("next")}
-          isDisabled={!existingId}
-          onClick={() => setStep("models")}
-        />
+        <Button variant="primary" label={t("next")} onClick={continueWithExisting} />
       );
     }
     return frame(

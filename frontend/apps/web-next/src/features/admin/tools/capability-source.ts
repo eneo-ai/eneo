@@ -50,38 +50,56 @@ export function sourceDraft(server?: McpServer | null): SourceDraft {
   };
 }
 
-export function sourceDraftValid(draft: SourceDraft, editing?: McpServer | null) {
-  if (
-    !draft.name.trim() ||
-    !Number.isInteger(draft.priority) ||
-    draft.priority < 0 ||
-    (draft.audience === "groups" && draft.groupIds.length === 0) ||
-    !Number.isInteger(draft.toolCatalogMaxCount) ||
-    draft.toolCatalogMaxCount < 1 ||
-    draft.toolCatalogMaxCount > 4096 ||
-    !Number.isInteger(draft.toolCatalogMaxMiB) ||
-    draft.toolCatalogMaxMiB < 1 ||
-    draft.toolCatalogMaxMiB > 64 ||
-    !Number.isInteger(draft.toolDefinitionMaxKiB) ||
-    draft.toolDefinitionMaxKiB < 1 ||
-    draft.toolDefinitionMaxKiB > 1024
-  )
-    return false;
-  if (draft.source === "builtin") return Boolean(draft.imageModelId);
-  if (!draft.url.trim()) return false;
-  if (
-    draft.auth === "bearer" &&
-    !draft.token.trim() &&
-    (!editing || editing.http_auth_type !== "bearer")
-  )
-    return false;
-  if (
-    draft.auth === "api_key_header" &&
-    (!draft.token.trim() || !draft.headerName.trim()) &&
-    (!editing || editing.http_auth_type !== "api_key_header")
-  )
-    return false;
-  return true;
+/** A draft's field, in the order the form shows them. */
+export type SourceField =
+  | "imageModel"
+  | "url"
+  | "headerName"
+  | "token"
+  | "name"
+  | "groups"
+  | "priority"
+  | "toolCatalogMaxCount"
+  | "toolCatalogMaxMiB"
+  | "toolDefinitionMaxKiB";
+
+/** What is wrong with a field: empty, no group chosen, or a whole number out of range. */
+export type SourceProblem =
+  | { field: SourceField; kind: "required" }
+  | { field: SourceField; kind: "no-group" }
+  | { field: SourceField; kind: "whole-number"; min: number; max?: number };
+
+/**
+ * The draft's problems in the order of the form's fields (the first takes
+ * focus on submit). A credential that is saved already may be left empty.
+ */
+export function sourceDraftProblems(
+  draft: SourceDraft,
+  editing?: McpServer | null
+): SourceProblem[] {
+  const problems: SourceProblem[] = [];
+  const wholeNumber = (field: SourceField, value: number, min: number, max?: number) => {
+    if (!Number.isInteger(value) || value < min || (max !== undefined && value > max))
+      problems.push({ field, kind: "whole-number", min, max });
+  };
+  if (draft.source === "builtin") {
+    if (!draft.imageModelId) problems.push({ field: "imageModel", kind: "required" });
+  } else {
+    if (!draft.url.trim()) problems.push({ field: "url", kind: "required" });
+    const credentialSaved = editing?.http_auth_type === draft.auth;
+    if (draft.auth === "api_key_header" && !credentialSaved && !draft.headerName.trim())
+      problems.push({ field: "headerName", kind: "required" });
+    if (draft.auth !== "none" && !credentialSaved && !draft.token.trim())
+      problems.push({ field: "token", kind: "required" });
+  }
+  if (!draft.name.trim()) problems.push({ field: "name", kind: "required" });
+  if (draft.audience === "groups" && draft.groupIds.length === 0)
+    problems.push({ field: "groups", kind: "no-group" });
+  wholeNumber("priority", draft.priority, 0);
+  wholeNumber("toolCatalogMaxCount", draft.toolCatalogMaxCount, 1, 4096);
+  wholeNumber("toolCatalogMaxMiB", draft.toolCatalogMaxMiB, 1, 64);
+  wholeNumber("toolDefinitionMaxKiB", draft.toolDefinitionMaxKiB, 1, 1024);
+  return problems;
 }
 
 function credentials(draft: SourceDraft) {

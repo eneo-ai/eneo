@@ -3,11 +3,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   ConfirmedSecretInput,
   confirmedSecretProblem
 } from "@/components/composites/confirmed-secret-input";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,7 +43,10 @@ import { TagInput } from "./tag-input";
 
 const NO_CLASSIFICATION = "__none__";
 
-/** Quick-add for a global MCP server (admin catalog, HTTP transport only). */
+/**
+ * Quick-add for a global MCP server (admin catalog, HTTP transport only).
+ * Problems show at their fields when it is added, and focus moves to the first.
+ */
 export function McpServerDialog({
   open,
   onOpenChange
@@ -67,6 +72,11 @@ export function McpServerDialog({
   const [iconUrl, setIconUrl] = useState("");
   const [documentationUrl, setDocumentationUrl] = useState("");
   const [classificationId, setClassificationId] = useState<string>(NO_CLASSIFICATION);
+  const [submitted, setSubmitted] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const urlRef = useRef<HTMLInputElement>(null);
+  const tokenRef = useRef<HTMLInputElement>(null);
+  const tokenConfirmationRef = useRef<HTMLInputElement>(null);
 
   function reset() {
     setName("");
@@ -79,16 +89,22 @@ export function McpServerDialog({
     setIconUrl("");
     setDocumentationUrl("");
     setClassificationId(NO_CLASSIFICATION);
+    setSubmitted(false);
   }
 
-  const bearerRequired = authType === "bearer";
-  const bearerConfirmed =
-    confirmedSecretProblem({
-      value: bearerToken,
-      confirmation: bearerTokenConfirmation,
-      isRequired: bearerRequired
-    }) === null;
-  const bearerValid = authType !== "bearer" || (bearerToken.trim().length > 0 && bearerConfirmed);
+  const nameProblem = name.trim() ? null : t("required_field");
+  const urlProblem = httpUrl.trim() ? null : t("required_field");
+  const tokenProblem =
+    authType === "bearer"
+      ? confirmedSecretProblem({
+          value: bearerToken,
+          confirmation: bearerTokenConfirmation,
+          isRequired: true
+        })
+      : null;
+  // Only spaces is no token either.
+  const tokenBlank = authType === "bearer" && bearerToken !== "" && bearerToken.trim() === "";
+  const shown = (problem: string | null) => (submitted ? problem : null);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -121,7 +137,25 @@ export function McpServerDialog({
     onError: (error) => toastApiError(error, t)
   });
 
-  const valid = name.trim().length > 0 && httpUrl.trim().length > 0 && bearerValid;
+  function add() {
+    if (save.isPending) return;
+    const firstProblem = nameProblem
+      ? nameRef
+      : urlProblem
+        ? urlRef
+        : tokenProblem === "required" || tokenBlank
+          ? tokenRef
+          : tokenProblem === "mismatch"
+            ? tokenConfirmationRef
+            : null;
+    if (firstProblem) {
+      // Rendered before focus moves, so the field is read with its error.
+      flushSync(() => setSubmitted(true));
+      firstProblem.current?.focus();
+      return;
+    }
+    save.mutate();
+  }
 
   return (
     <Dialog
@@ -144,17 +178,27 @@ export function McpServerDialog({
             </legend>
             <div className="flex flex-col gap-2">
               <Label htmlFor="mcp-name">{t("name")}</Label>
-              <Input id="mcp-name" value={name} onChange={(event) => setName(event.target.value)} />
+              <Input
+                ref={nameRef}
+                id="mcp-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                {...fieldProblemProps("mcp-name", shown(nameProblem))}
+              />
+              <FieldProblem id="mcp-name" problem={shown(nameProblem)} />
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="mcp-url">{t("url")}</Label>
               <Input
+                ref={urlRef}
                 id="mcp-url"
                 type="url"
                 placeholder="https://"
                 value={httpUrl}
                 onChange={(event) => setHttpUrl(event.target.value)}
+                {...fieldProblemProps("mcp-url", shown(urlProblem))}
               />
+              <FieldProblem id="mcp-url" problem={shown(urlProblem)} />
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="mcp-description">{t("description")}</Label>
@@ -197,6 +241,11 @@ export function McpServerDialog({
                 mismatchMessage={t("secret_values_do_not_match")}
                 autoComplete="off"
                 isRequired
+                requiredMessage={t("required_field")}
+                valueError={submitted && tokenBlank ? t("required_field") : undefined}
+                showErrors={submitted}
+                valueRef={tokenRef}
+                confirmationRef={tokenConfirmationRef}
               />
             )}
           </fieldset>
@@ -267,7 +316,8 @@ export function McpServerDialog({
           <Button variant="outline" disabled={save.isPending} onClick={() => onOpenChange(false)}>
             {t("cancel")}
           </Button>
-          <Button disabled={!valid || save.isPending} onClick={() => save.mutate()}>
+          {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+          <Button aria-busy={save.isPending || undefined} onClick={add}>
             {save.isPending ? t("mcp_connecting") : t("add_mcp_server")}
           </Button>
         </DialogFooter>

@@ -14,7 +14,9 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { MessageResponse } from "@/components/ai-elements/message";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -101,7 +103,7 @@ function PromptGuideContextCard({ text }: { text: string }) {
   );
 }
 
-function PromptGuideQuestionCard({
+export function PromptGuideQuestionCard({
   question,
   disabled,
   onAnswer
@@ -116,17 +118,20 @@ function PromptGuideQuestionCard({
   const [checkedFlags, setCheckedFlags] = useState<boolean[]>(() => q.options.map(() => false));
   const [otherText, setOtherText] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [attempted, setAttempted] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const idPrefix = useMemo(
     () => `pg-q-${q.header.replace(/\s+/g, "-").toLowerCase()}-${q.question.length}`,
     [q.header, q.question.length]
   );
 
-  useEffect(() => {
+  const focusFirstAnswer = useCallback(() => {
     cardRef.current
       ?.querySelector<HTMLElement>("[data-slot=radio-group-item], [data-slot=checkbox], textarea")
       ?.focus();
   }, []);
+
+  useEffect(focusFirstAnswer, [focusFirstAnswer]);
 
   function setChecked(index: number, checked: boolean) {
     setCheckedFlags((current) => current.map((value, i) => (i === index ? checked : value)));
@@ -149,14 +154,29 @@ function PromptGuideQuestionCard({
     return picked.join(", ");
   }
 
-  const canSubmit =
-    !submitted &&
-    !disabled &&
-    (otherText.trim().length > 0 ||
-      (q.multiSelect ? checkedFlags.some(Boolean) : radioValue.length > 0));
+  const answered =
+    otherText.trim().length > 0 ||
+    (q.multiSelect ? checkedFlags.some(Boolean) : radioValue.length > 0);
+  const answerId = `${idPrefix}-answer`;
+  const answerProblem =
+    attempted && !answered
+      ? t(
+          q.options.length > 0
+            ? "prompt_guide_question_choose_or_write"
+            : "prompt_guide_question_write_answer"
+        )
+      : null;
 
+  // Send is disabled only once answered or while the guide writes: without an
+  // answer, the problem shows at the question and focus moves to it.
   function submit() {
-    if (!canSubmit) return;
+    if (submitted || disabled) return;
+    if (!answered) {
+      // Rendered before focus moves, so the question is read with its problem.
+      flushSync(() => setAttempted(true));
+      focusFirstAnswer();
+      return;
+    }
     setSubmitted(true);
     onAnswer(pickedText());
   }
@@ -187,6 +207,7 @@ function PromptGuideQuestionCard({
           className="flex flex-col gap-2"
           disabled={submitted}
           aria-labelledby={`${idPrefix}-title`}
+          {...fieldProblemProps(answerId, answerProblem)}
         >
           <legend className="sr-only">{q.question}</legend>
           {q.options.map((option, index) => {
@@ -223,6 +244,7 @@ function PromptGuideQuestionCard({
           value={radioValue}
           disabled={submitted}
           aria-labelledby={`${idPrefix}-title`}
+          {...fieldProblemProps(answerId, answerProblem)}
           onValueChange={(value) => {
             setRadioValue(value);
             setOtherText("");
@@ -270,11 +292,13 @@ function PromptGuideQuestionCard({
             className="resize-none"
             onKeyDown={handleTextareaKeyDown}
             onChange={(event) => setOtherText(event.target.value)}
+            {...fieldProblemProps(answerId, answerProblem)}
           />
+          <FieldProblem id={answerId} problem={answerProblem} />
           <Button
             type="button"
             size="sm"
-            disabled={!canSubmit}
+            disabled={submitted || disabled}
             onClick={submit}
             className="self-end"
           >
@@ -283,6 +307,7 @@ function PromptGuideQuestionCard({
         </div>
       ) : (
         <div className="mt-3">
+          <FieldProblem id={answerId} problem={answerProblem} />
           <Label htmlFor={`${idPrefix}-other`} className="text-muted-foreground mb-1 block text-xs">
             {t("prompt_guide_question_other_label")}
           </Label>
@@ -297,7 +322,7 @@ function PromptGuideQuestionCard({
                 if (!q.multiSelect) setRadioValue("");
               }}
             />
-            <Button type="button" size="sm" disabled={!canSubmit} onClick={submit}>
+            <Button type="button" size="sm" disabled={submitted || disabled} onClick={submit}>
               {t("prompt_guide_question_send")}
             </Button>
           </div>

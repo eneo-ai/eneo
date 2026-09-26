@@ -141,6 +141,27 @@ describe("organisation skill detail", () => {
     expect(post).toHaveBeenCalledTimes(1);
   });
 
+  it("shows a missing reason at the field, which takes focus, before blocking", async () => {
+    show(<OrganizationSkillExecution skillId="skill-1" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "organization_skills_execution_block_action" })
+    );
+    const dialog = screen.getByRole("alertdialog");
+    const confirm = within(dialog).getByRole("button", {
+      name: "organization_skills_execution_block_confirm"
+    });
+    // Never disabled: a disabled button says nothing about what is missing.
+    expect((confirm as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(confirm);
+
+    const reason = screen.getByLabelText("organization_skills_execution_reason_label");
+    expect(reason.getAttribute("aria-invalid")).toBe("true");
+    expect(reason.getAttribute("aria-describedby")).toContain("execution-change-reason-hint");
+    expect(document.activeElement).toBe(reason);
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it("records a reason and the reviewed block id when unblocking", async () => {
     const block = { id: "block-1", reason: "Incident", blocked_at: "2026-09-01T12:00:00Z" };
     post.mockImplementation((path: string) =>

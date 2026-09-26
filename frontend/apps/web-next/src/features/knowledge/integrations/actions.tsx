@@ -5,7 +5,9 @@ import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import {
   AlertDialog,
@@ -283,6 +285,7 @@ export function WrapperActions({
   );
 }
 
+/** Renames an integration. An empty name shows at the field on save, which takes focus. */
 function RenameDialog({
   open,
   onOpenChange,
@@ -301,8 +304,29 @@ function RenameDialog({
   onSave: () => void;
 }) {
   const t = useTranslations();
+  const [submitted, setSubmitted] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const nameProblem = submitted && !name.trim() ? t("required_field") : null;
+
+  function save() {
+    if (pending) return;
+    if (!name.trim()) {
+      // Rendered before focus moves, so the field is read with its error.
+      flushSync(() => setSubmitted(true));
+      nameRef.current?.focus();
+      return;
+    }
+    onSave();
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) setSubmitted(false);
+        onOpenChange(next);
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
@@ -310,16 +334,20 @@ function RenameDialog({
         <div className="flex flex-col gap-2">
           <Label htmlFor="integration-name">{t("name")}</Label>
           <Input
+            ref={nameRef}
             id="integration-name"
             value={name}
             onChange={(event) => onNameChange(event.target.value)}
+            {...fieldProblemProps("integration-name", nameProblem)}
           />
+          <FieldProblem id="integration-name" problem={nameProblem} />
         </div>
         <DialogFooter>
           <Button variant="outline" disabled={pending} onClick={() => onOpenChange(false)}>
             {t("cancel")}
           </Button>
-          <Button disabled={pending || !name.trim()} onClick={onSave}>
+          {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+          <Button aria-busy={pending || undefined} onClick={save}>
             {pending ? t("saving") : t("save")}
           </Button>
         </DialogFooter>

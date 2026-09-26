@@ -20,9 +20,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, FileText, Pencil, SearchX, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
+import { flushSync } from "react-dom";
 import { Streamdown } from "streamdown";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -348,6 +350,14 @@ export function AddTextDialog({
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const titleProblem = submitted && !title ? t("required_field") : null;
+  const textProblem = submitted && !text ? t("required_field") : null;
+
+  function changeOpen(next: boolean) {
+    setOpen(next);
+    if (!next) setSubmitted(false);
+  }
 
   const create = useMutation({
     mutationFn: () =>
@@ -359,26 +369,41 @@ export function AddTextDialog({
       ),
     onSuccess: () => {
       void invalidateBlobs();
-      setOpen(false);
+      changeOpen(false);
       setTitle("");
       setText("");
     },
     onError: (error) => toastApiError(error, t)
   });
 
+  // Submit is never disabled: what is missing shows at its field, and focus
+  // moves to the first.
+  function submit() {
+    if (create.isPending) return;
+    const firstProblem = !title ? "text-title" : !text ? "text-content" : null;
+    if (firstProblem) {
+      // Rendered before focus moves, so the field is read with its problem.
+      flushSync(() => setSubmitted(true));
+      document.getElementById(firstProblem)?.focus();
+      return;
+    }
+    create.mutate();
+  }
+
   return (
     <>
       <AstryxButton label={t("add_text")} isDisabled={disabled} onClick={() => setOpen(true)} />
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={changeOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{t("add_text")}</DialogTitle>
           </DialogHeader>
           <form
             className="flex flex-col gap-4"
+            noValidate
             onSubmit={(event) => {
               event.preventDefault();
-              if (title && text) create.mutate();
+              submit();
             }}
           >
             <div className="flex flex-col gap-2">
@@ -388,7 +413,9 @@ export function AddTextDialog({
                 value={title}
                 required
                 onChange={(event) => setTitle(event.target.value)}
+                {...fieldProblemProps("text-title", titleProblem)}
               />
+              <FieldProblem id="text-title" problem={titleProblem} />
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="text-content">{t("content")}</Label>
@@ -398,13 +425,16 @@ export function AddTextDialog({
                 required
                 rows={12}
                 onChange={(event) => setText(event.target.value)}
+                {...fieldProblemProps("text-content", textProblem)}
               />
+              <FieldProblem id="text-content" problem={textProblem} />
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+              <Button type="button" variant="outline" onClick={() => changeOpen(false)}>
                 {t("cancel")}
               </Button>
-              <Button type="submit" disabled={create.isPending || !title || !text}>
+              {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+              <Button type="submit" aria-busy={create.isPending || undefined}>
                 {create.isPending ? t("submitting") : t("submit")}
               </Button>
             </DialogFooter>

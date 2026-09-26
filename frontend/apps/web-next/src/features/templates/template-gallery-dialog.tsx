@@ -4,6 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, BookOpen, FileUp, Loader2, Paperclip, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
 import {
@@ -315,6 +317,11 @@ export function TemplateGalleryDialog({
   const { limits } = useAppContext();
   const [selected, setSelected] = useState<TemplateOption | null>(null);
   const [name, setName] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const templatesRef = useRef<HTMLDivElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const templateProblem = submitted && !selected ? t("select_a_template") : null;
+  const nameProblem = submitted && selected && !name.trim() ? t("required_field") : null;
   const [step, setStep] = useState<"gallery" | "wizard">("gallery");
   const [knowledgeSelections, setKnowledgeSelections] = useState<KnowledgeSelections>(
     EMPTY_KNOWLEDGE_SELECTIONS
@@ -342,6 +349,7 @@ export function TemplateGalleryDialog({
     }
     setSelected(null);
     setName("");
+    setSubmitted(false);
     setStep("gallery");
     setKnowledgeSelections({ ...EMPTY_KNOWLEDGE_SELECTIONS });
     setAttachments([]);
@@ -389,8 +397,16 @@ export function TemplateGalleryDialog({
     setAttachments((current) => current.filter((candidate) => candidate.key !== key));
   }
 
+  // What is missing (a template, its name) shows on submit, and focus moves there.
   async function submit() {
-    if (!selected || !name.trim() || pending) return;
+    if (pending) return;
+    if (!selected || !name.trim()) {
+      // Rendered before focus moves, so the field is read with its error.
+      flushSync(() => setSubmitted(true));
+      if (!selected) templatesRef.current?.querySelector("button")?.focus();
+      else nameRef.current?.focus();
+      return;
+    }
 
     if (templateHasWizard(selected) && step === "gallery") {
       setStep("wizard");
@@ -440,11 +456,18 @@ export function TemplateGalleryDialog({
             ) : (templates.data ?? []).length === 0 ? (
               <p className="text-muted-foreground py-6 text-center text-sm">{t("no_results")}</p>
             ) : (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div
+                ref={templatesRef}
+                role="group"
+                aria-label={t("select_a_template")}
+                className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+                {...fieldProblemProps("template-options", templateProblem)}
+              >
                 {(templates.data ?? []).map((template) => (
                   <button
                     key={template.id}
                     type="button"
+                    aria-pressed={selected?.id === template.id}
                     onClick={() => {
                       setSelected(template);
                       setName((current) => current || template.name);
@@ -465,15 +488,19 @@ export function TemplateGalleryDialog({
                 ))}
               </div>
             )}
+            <FieldProblem id="template-options" problem={templateProblem} />
 
             {selected ? (
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="template-create-name">{t("name")}</Label>
                 <Input
+                  ref={nameRef}
                   id="template-create-name"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
+                  {...fieldProblemProps("template-create-name", nameProblem)}
                 />
+                <FieldProblem id="template-create-name" problem={nameProblem} />
               </div>
             ) : null}
           </>
@@ -510,11 +537,8 @@ export function TemplateGalleryDialog({
           >
             {t("cancel")}
           </Button>
-          <Button
-            type="button"
-            disabled={!selected || !name.trim() || pending}
-            onClick={() => void submit()}
-          >
+          {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+          <Button type="button" aria-busy={pending || undefined} onClick={() => void submit()}>
             {pending
               ? t("loading")
               : selected && templateHasWizard(selected) && step === "gallery"

@@ -31,6 +31,7 @@ import {
   useRef,
   useState
 } from "react";
+import { flushSync } from "react-dom";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -125,6 +126,9 @@ function AnalysisTab({
   const t = useTranslations();
   const announce = useAnnounce();
   const [question, setQuestion] = useState("");
+  const [asked, setAsked] = useState(false);
+  const questionRef = useRef<HTMLTextAreaElement>(null);
+  const questionProblem = asked && !question.trim() ? t("required_field") : null;
   const [answer, setAnswer] = useState("");
   const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
 
@@ -147,17 +151,25 @@ function AnalysisTab({
           onSubmit={(event) => {
             event.preventDefault();
             const text = question.trim();
-            if (!text || ask.isPending) return;
+            if (ask.isPending) return;
+            if (!text) {
+              // An empty question shows at the field, which takes focus.
+              flushSync(() => setAsked(true));
+              questionRef.current?.focus();
+              return;
+            }
             setAnswer("");
             ask.mutate(text);
           }}
         >
           <TextArea
+            ref={questionRef}
             label={t("ask_about_insights")}
             description={t("insights_enter_hint")}
             rows={4}
             value={question}
             onChange={setQuestion}
+            status={questionProblem ? { type: "error", message: questionProblem } : undefined}
             onKeyDown={(event) => {
               if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
               event.preventDefault();
@@ -169,7 +181,6 @@ function AnalysisTab({
             variant="primary"
             label={t("submit_your_question")}
             icon={<SendHorizontal className="size-4" aria-hidden="true" />}
-            isDisabled={!question.trim()}
             // Stays focusable while the answer is prepared (a second submit is ignored).
             isLoading={ask.isPending}
             isInterruptible

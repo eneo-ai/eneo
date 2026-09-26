@@ -75,16 +75,69 @@ describe("admin skill runtime policy", () => {
     ).toHaveLength(2);
   });
 
-  it("rejects values outside the backend bounds", async () => {
+  it("shows a value outside the backend bounds at its field on save, which takes focus", async () => {
     show();
     await screen.findByRole("switch", { name: "skills_runtime_policy_selective_title" });
-    fireEvent.change(screen.getByLabelText("skills_runtime_policy_max_attached"), {
-      target: { value: "0" }
-    });
+    const field = screen.getByLabelText("skills_runtime_policy_context_share");
+    fireEvent.change(field, { target: { value: "51" } });
+    // Nothing is flagged while typing.
+    expect(field.getAttribute("aria-invalid")).toBeNull();
+
+    const save = screen.getByRole("button", { name: "skills_runtime_policy_save" });
+    expect(save.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(save);
+
+    expect(document.activeElement).toBe(field);
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    const describedBy = field.getAttribute("aria-describedby")?.split(" ") ?? [];
+    expect(describedBy.map((id) => document.getElementById(id)?.textContent)).toEqual([
+      "skills_runtime_policy_invalid",
+      "skills_runtime_policy_context_share_description",
+      "skills_runtime_policy_allowed_range"
+    ]);
+    // The other limits are within bounds.
     expect(
-      screen.getByRole("button", { name: "skills_runtime_policy_save" }).hasAttribute("disabled")
-    ).toBe(true);
+      screen.getByLabelText("skills_runtime_policy_max_attached").getAttribute("aria-invalid")
+    ).toBeNull();
     expect(put).not.toHaveBeenCalled();
+
+    fireEvent.change(field, { target: { value: "50" } });
+    expect(field.getAttribute("aria-invalid")).toBeNull();
+    fireEvent.click(save);
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps focus on Save while it saves, and says when there is nothing to save", async () => {
+    let resolve: (value: unknown) => void = () => {};
+    put.mockImplementation(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        })
+    );
+    show();
+    const save = await screen.findByRole("button", { name: "skills_runtime_policy_save" });
+
+    fireEvent.click(save);
+    expect(await screen.findByText("form_nothing_to_save")).toBeTruthy();
+    expect(put).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("skills_runtime_policy_max_attached"), {
+      target: { value: "9" }
+    });
+    save.focus();
+    fireEvent.click(save);
+    const busy = await screen.findByRole("button", { name: "skills_runtime_policy_saving" });
+    expect(busy).toBe(save);
+    expect(busy.getAttribute("aria-busy")).toBe("true");
+    expect(busy.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(busy);
+    fireEvent.click(busy);
+    expect(put).toHaveBeenCalledTimes(1);
+
+    resolve({ data: { ...policy, max_attached_skills: 9 }, response: new Response("{}") });
+    expect(await screen.findByText("skills_runtime_policy_saved")).toBeTruthy();
+    expect(document.activeElement).toBe(save);
   });
 
   it("requires confirmation to reset the policy", async () => {

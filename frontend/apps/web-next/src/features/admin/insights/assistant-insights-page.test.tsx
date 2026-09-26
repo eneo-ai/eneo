@@ -132,6 +132,21 @@ describe("AssistantInsightsPage", () => {
     ).toBe("Vad frågar folk mest om?");
   });
 
+  it("shows an empty question at the field on Enter, which takes focus", async () => {
+    renderPage();
+    const question = screen.getByRole("textbox", { name: /Fråga om insikter/ });
+    const submit = screen.getByRole("button", { name: "Skicka din fråga" });
+    // Never disabled: a disabled button says nothing about what is missing.
+    expect((submit as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.keyDown(question, { key: "Enter" });
+
+    expect(question.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getAllByText("Detta fält är obligatoriskt").length).toBeGreaterThan(0);
+    expect(document.activeElement).toBe(question);
+    expect(spies.asked).toEqual([]);
+  });
+
   it("asks with Enter and announces the answer when it is ready", async () => {
     renderPage();
     const question = screen.getByRole("textbox", { name: /Fråga om insikter/ });

@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { isValidByteLimit, UNIT_BYTES, unitForBytes } from "./storage-policy";
+import { UNIT_BYTES, unitForBytes } from "./storage-policy";
 
 type Unit = keyof typeof UNIT_BYTES;
 const units: Unit[] = ["B", "KB", "MB", "GB"];
@@ -15,6 +16,7 @@ export function ByteLimitField({
   description,
   bytes,
   storedBytes,
+  problem,
   disabled,
   onChange
 }: {
@@ -23,12 +25,13 @@ export function ByteLimitField({
   description: string;
   bytes: number;
   storedBytes: number;
+  /** Shown once the form is submitted (the caller validates). */
+  problem: string | null;
   disabled: boolean;
   onChange: (bytes: number) => void;
 }) {
   const t = useTranslations();
   const [unit, setUnit] = useState<Unit>(() => unitForBytes(storedBytes));
-  const valid = isValidByteLimit(bytes);
 
   return (
     <div className="space-y-2">
@@ -41,8 +44,7 @@ export function ByteLimitField({
           step="any"
           required
           disabled={disabled}
-          aria-invalid={!valid}
-          aria-describedby={`${id}-description`}
+          {...fieldProblemProps(id, problem, `${id}-description`)}
           value={Number.isNaN(bytes) ? "" : bytes / UNIT_BYTES[unit]}
           onChange={(event) =>
             onChange(
@@ -56,7 +58,6 @@ export function ByteLimitField({
           disabled={disabled}
           aria-label={t("storage_limit_unit", { limit: label })}
           aria-describedby={`${id}-description`}
-          aria-invalid={!valid}
           className="bg-background border-input focus-visible:ring-ring h-9 rounded-md border px-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
         >
           {units.map((candidate) => (
@@ -66,6 +67,7 @@ export function ByteLimitField({
           ))}
         </select>
       </div>
+      <FieldProblem id={id} problem={problem} />
       <p id={`${id}-description`} className="text-muted-foreground text-sm">
         {description}
       </p>

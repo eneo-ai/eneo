@@ -5,7 +5,9 @@ import { Check, Minus, Pencil, Plus, RotateCcw, Search, Star, Trash2, Users } fr
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useState, type SubmitEvent } from "react";
+import { useRef, useState, type SubmitEvent } from "react";
+import { flushSync } from "react-dom";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -86,6 +88,8 @@ export function RolesPage() {
   const [name, setName] = useState("");
   const [selected, setSelected] = useState<Permission[]>([]);
   const [saving, setSaving] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
 
@@ -117,6 +121,7 @@ export function RolesPage() {
   function openEditor(next: Editor) {
     setName(next.kind === "update" ? next.role.name : "");
     setSelected(next.kind === "update" ? [...next.role.permissions] : []);
+    setSubmitted(false);
     setEditor(next);
   }
 
@@ -140,14 +145,23 @@ export function RolesPage() {
   const editingRole = editor?.kind === "update" ? editor.role : null;
   const nameChanged = name.trim() !== (editingRole?.name ?? "").trim();
   const permissionsChanged = !sameSet(selected, editingRole?.permissions ?? []);
-  const canSubmit =
-    !saving &&
-    name.trim().length > 0 &&
-    (editor?.kind === "create" || nameChanged || permissionsChanged);
+  const nameProblem = submitted && !name.trim() ? t("required_field") : null;
 
+  // A missing name shows at the field on save, which takes focus.
   async function saveRole(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!editor || !canSubmit) return;
+    if (!editor || saving) return;
+    if (!name.trim()) {
+      // Rendered before focus moves, so the field is read with its error.
+      flushSync(() => setSubmitted(true));
+      nameRef.current?.focus();
+      return;
+    }
+    // Nothing changed: nothing to send.
+    if (editor.kind === "update" && !nameChanged && !permissionsChanged) {
+      setEditor(null);
+      return;
+    }
     setSaving(true);
     const trimmed = name.trim();
     try {
@@ -333,18 +347,26 @@ export function RolesPage() {
             </DialogTitle>
             <DialogDescription>{t("what_users_of_this_role_can_manage")}</DialogDescription>
           </DialogHeader>
-          <form className="space-y-5" onSubmit={(event) => void saveRole(event)} aria-busy={saving}>
+          <form
+            className="space-y-5"
+            noValidate
+            onSubmit={(event) => void saveRole(event)}
+            aria-busy={saving}
+          >
             <fieldset disabled={saving} className="space-y-5">
               <div className="space-y-1.5">
                 <Label htmlFor="role-name">{t("role_name")}</Label>
                 <Input
+                  ref={nameRef}
                   id="role-name"
                   required
                   autoComplete="off"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
+                  {...fieldProblemProps("role-name", nameProblem, "role-name-hint")}
                 />
-                <p className="text-muted-foreground text-xs">
+                <FieldProblem id="role-name" problem={nameProblem} />
+                <p id="role-name-hint" className="text-muted-foreground text-xs">
                   {t("descriptive_name_for_this_role")}
                 </p>
               </div>
@@ -450,7 +472,8 @@ export function RolesPage() {
                 >
                   {t("cancel")}
                 </Button>
-                <Button type="submit" disabled={!canSubmit}>
+                {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+                <Button type="submit" aria-busy={saving || undefined}>
                   {saving
                     ? t("saving")
                     : editor?.kind === "create"

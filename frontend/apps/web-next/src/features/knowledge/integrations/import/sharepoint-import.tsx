@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Cloud, Globe, Search } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
+import { flushSync } from "react-dom";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -101,6 +103,7 @@ export function SharePointImportDialog({
   const [embeddingModelId, setEmbeddingModelId] = useState<string | undefined>(
     space.embedding_models[0]?.id
   );
+  const [submitted, setSubmitted] = useState(false);
 
   const userIntegrationId = integration.id ?? "";
   const preview = useQuery({
@@ -131,14 +134,34 @@ export function SharePointImportDialog({
   const requiresWrapperName = deduped.effectiveEntries.length > 1;
   const wrapperNameMissing = requiresWrapperName && wrapperName.trim().length === 0;
 
+  const noModels = space.embedding_models.length === 0 || !embeddingModelId;
+  const siteProblem = !site ? t("form_problem_choose_sharepoint_site") : null;
+  const itemsProblem =
+    site && deduped.effectiveEntries.length === 0
+      ? t("form_problem_choose_sharepoint_items")
+      : null;
+  const wrapperNameProblem = wrapperNameMissing ? t("sharepoint_wrapper_name_missing_hint") : null;
+  const shown = (problem: string | null) => (submitted ? problem : null);
+
   function reset() {
     setSite(null);
     setSelected([]);
     setWrapperName("");
     setSearch("");
+    setSubmitted(false);
+  }
+
+  function chooseSite(next: IntegrationPreview | null) {
+    setSite(next);
+    setSelected([]);
+    setWrapperName("");
+    setSubmitted(false);
   }
 
   function toggleSelect(item: SelectedTreeItem) {
+    // A new selection starts over: a field it brings (the group name) shows
+    // its problem only once Import is pressed again.
+    setSubmitted(false);
     const key = buildSelectionKey(item);
     setSelected((current) =>
       current.some((entry) => entry.selectionKey === key)
@@ -155,7 +178,7 @@ export function SharePointImportDialog({
 
   const importBatch = useMutation({
     mutationFn: () => {
-      if (!site || !embeddingModelId) throw new Error("unreachable: gated by disabled state");
+      if (!site || !embeddingModelId) throw new Error("unreachable: checked on submit");
       return unwrap(
         browserApi.POST(
           "/api/v1/spaces/{id}/knowledge/integrations/add/{user_integration_id}/batch/",
@@ -188,6 +211,31 @@ export function SharePointImportDialog({
     onError: (error) => toastApiError(error, t)
   });
 
+  // Import is never disabled: without an embedding model focus moves to the
+  // warning; otherwise what is missing (a site, content, the group name)
+  // shows at its place, and focus moves there.
+  function submit() {
+    if (importBatch.isPending) return;
+    const target = noModels
+      ? document.getElementById("sharepoint-no-models")
+      : siteProblem
+        ? (document.querySelector<HTMLElement>("#sharepoint-sites button") ??
+          document.getElementById("sharepoint-site-search"))
+        : itemsProblem
+          ? (document.querySelector<HTMLElement>("#sharepoint-tree [role=checkbox]") ??
+            document.getElementById("sharepoint-tree"))
+          : wrapperNameProblem
+            ? document.getElementById("sharepoint-wrapper-name")
+            : null;
+    if (noModels || siteProblem || itemsProblem || wrapperNameProblem) {
+      // Rendered before focus moves, so the target is read with its problem.
+      flushSync(() => setSubmitted(true));
+      target?.focus();
+      return;
+    }
+    importBatch.mutate();
+  }
+
   const selectedKeys = new Set(selected.map((entry) => entry.selectionKey));
 
   return (
@@ -204,7 +252,11 @@ export function SharePointImportDialog({
         </DialogHeader>
 
         {space.embedding_models.length === 0 && (
-          <p className="border-warning/30 bg-warning/10 text-warning rounded-md border px-3 py-2 text-sm">
+          <p
+            id="sharepoint-no-models"
+            tabIndex={-1}
+            className="border-warning/30 bg-warning/10 text-warning rounded-md border px-3 py-2 text-sm"
+          >
             <span className="font-semibold">{t("warning")}:</span>{" "}
             {t("warning_no_embedding_models")}
           </p>
@@ -231,7 +283,13 @@ export function SharePointImportDialog({
                 {t("sharepoint_toggle_public_non_member_teams")}
               </label>
             )}
-            <div className="max-h-[40vh] overflow-y-auto rounded-md border p-1">
+            <div
+              id="sharepoint-sites"
+              role="group"
+              aria-label={t("sharepoint_available_sources")}
+              className="max-h-[40vh] overflow-y-auto rounded-md border p-1"
+              {...fieldProblemProps("sharepoint-sites", shown(siteProblem))}
+            >
               {userIntegrationId.length === 0 ? (
                 <ImportPreviewError
                   message={t("integration_preview_connection_missing")}
@@ -267,11 +325,7 @@ export function SharePointImportDialog({
                         key={entry.key}
                         type="button"
                         className="hover:bg-muted/50 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left"
-                        onClick={() => {
-                          setSite(entry);
-                          setSelected([]);
-                          setWrapperName("");
-                        }}
+                        onClick={() => chooseSite(entry)}
                       >
                         {entry.type === "onedrive" ? (
                           <Cloud className="text-muted-foreground size-4 shrink-0" />
@@ -285,16 +339,26 @@ export function SharePointImportDialog({
                 ))
               )}
             </div>
+            <FieldProblem id="sharepoint-sites" problem={shown(siteProblem)} />
           </div>
         ) : (
           <div className="flex max-h-[56vh] min-h-0 flex-col gap-3 overflow-y-auto pr-1">
-            <SharePointFolderTree
-              userIntegrationId={userIntegrationId}
-              spaceId={space.id}
-              site={{ key: site.key, name: site.name, type: site.type }}
-              selectedKeys={selectedKeys}
-              onToggleSelect={toggleSelect}
-            />
+            <div
+              id="sharepoint-tree"
+              role="group"
+              tabIndex={-1}
+              aria-label={t("sharepoint_step_content")}
+              {...fieldProblemProps("sharepoint-tree", shown(itemsProblem))}
+            >
+              <SharePointFolderTree
+                userIntegrationId={userIntegrationId}
+                spaceId={space.id}
+                site={{ key: site.key, name: site.name, type: site.type }}
+                selectedKeys={selectedKeys}
+                onToggleSelect={toggleSelect}
+              />
+            </div>
+            <FieldProblem id="sharepoint-tree" problem={shown(itemsProblem)} />
 
             {selected.length > 0 && (
               <>
@@ -317,21 +381,24 @@ export function SharePointImportDialog({
                       {t("sharepoint_wrapper_name_label")}{" "}
                       <span className="text-destructive">*</span>
                     </Label>
-                    <p className="text-muted-foreground text-xs">
+                    <p id="sharepoint-wrapper-name-hint" className="text-muted-foreground text-xs">
                       {t("sharepoint_wrapper_name_required_hint")}
                     </p>
                     <Input
                       id="sharepoint-wrapper-name"
                       value={wrapperName}
                       placeholder={t("sharepoint_wrapper_name_placeholder")}
-                      aria-invalid={wrapperNameMissing}
                       onChange={(event) => setWrapperName(event.target.value)}
+                      {...fieldProblemProps(
+                        "sharepoint-wrapper-name",
+                        shown(wrapperNameProblem),
+                        "sharepoint-wrapper-name-hint"
+                      )}
                     />
-                    {wrapperNameMissing && (
-                      <p className="text-destructive text-xs">
-                        {t("sharepoint_wrapper_name_missing_hint")}
-                      </p>
-                    )}
+                    <FieldProblem
+                      id="sharepoint-wrapper-name"
+                      problem={shown(wrapperNameProblem)}
+                    />
                   </div>
                 )}
 
@@ -341,12 +408,18 @@ export function SharePointImportDialog({
                       <div className="flex items-center gap-2">
                         <Input
                           className="h-8 min-w-0 flex-1 text-sm"
+                          aria-label={t("sharepoint_import_name_for", { name: entry.item.name })}
                           value={entry.importName}
                           onChange={(event) =>
                             updateImportName(entry.selectionKey, event.target.value)
                           }
                         />
-                        <Button variant="ghost" size="sm" onClick={() => toggleSelect(entry.item)}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={t("sharepoint_remove_item", { name: entry.item.name })}
+                          onClick={() => toggleSelect(entry.item)}
+                        >
                           {t("remove")}
                         </Button>
                       </div>
@@ -376,36 +449,17 @@ export function SharePointImportDialog({
         />
 
         <DialogFooter>
-          {wrapperNameMissing && (
-            <span className="text-muted-foreground mr-auto self-center text-xs">
-              {t("sharepoint_wrapper_name_missing_hint")}
-            </span>
-          )}
           <Button
             variant="outline"
             onClick={() => {
-              if (site) {
-                setSite(null);
-                setSelected([]);
-                setWrapperName("");
-              } else {
-                onBack();
-              }
+              if (site) chooseSite(null);
+              else onBack();
             }}
           >
             {t("back")}
           </Button>
-          <Button
-            disabled={
-              importBatch.isPending ||
-              space.embedding_models.length === 0 ||
-              !embeddingModelId ||
-              !site ||
-              deduped.effectiveEntries.length === 0 ||
-              wrapperNameMissing
-            }
-            onClick={() => importBatch.mutate()}
-          >
+          {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+          <Button aria-busy={importBatch.isPending || undefined} onClick={submit}>
             {importBatch.isPending ? t("importing") : t("import")}
           </Button>
         </DialogFooter>

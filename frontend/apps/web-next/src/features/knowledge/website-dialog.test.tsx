@@ -33,6 +33,35 @@ const field = (dialog: HTMLElement, name: RegExp) =>
 afterEach(() => vi.clearAllMocks());
 
 describe("WebsiteDialog", () => {
+  it("shows each problem at its field on submit, and moves focus to the first", async () => {
+    const dialog = renderDialog();
+    const create = within(dialog).getByRole("button", { name: "Skapa webbplats" });
+    // Never disabled: a disabled button says nothing about what is missing.
+    expect((create as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.submit(create.closest("form")!);
+    const url = field(dialog, /^URL/);
+    expect(url.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(url.getAttribute("aria-describedby")!)?.textContent).toBe(
+      "Detta fält är obligatoriskt"
+    );
+    expect(document.activeElement).toBe(url);
+    await expectNoAxeViolations(document.body);
+
+    // With HTTP authentication: its username, then its password.
+    fireEvent.change(url, { target: { value: "https://intranat.sundsvall.se" } });
+    fireEvent.click(within(dialog).getByRole("switch", { name: /HTTP Basic Authentication/ }));
+    fireEvent.submit(create.closest("form")!);
+    expect(url.getAttribute("aria-invalid")).toBeNull();
+    expect(document.activeElement).toBe(field(dialog, /^Användarnamn/));
+
+    fireEvent.change(field(dialog, /^Användarnamn/), { target: { value: "crawler" } });
+    fireEvent.submit(create.closest("form")!);
+    expect(document.activeElement).toBe(field(dialog, /^Lösenord/));
+    expect(api.GET).not.toHaveBeenCalled();
+    expect(api.POST).not.toHaveBeenCalled();
+  });
+
   it("asks for the site's password twice and says at the confirmation when they differ", async () => {
     api.GET.mockImplementation(() => ok(null));
     api.POST.mockReturnValue(new Promise(() => {}));
@@ -58,11 +87,9 @@ describe("WebsiteDialog", () => {
     expect(confirmation.getAttribute("aria-invalid")).toBe("true");
     expect(confirmation.getAttribute("aria-describedby")).toContain(error.id);
     const create = within(dialog).getByRole("button", { name: "Skapa webbplats" });
-    expect((create as HTMLButtonElement).disabled).toBe(true);
     await expectNoAxeViolations(document.body);
 
     fireEvent.change(confirmation, { target: { value: "hemlis-1" } });
-    expect((create as HTMLButtonElement).disabled).toBe(false);
     fireEvent.submit(create.closest("form")!);
 
     await waitFor(() =>
@@ -86,10 +113,14 @@ describe("WebsiteDialog", () => {
     await expectNoAxeViolations(document.body);
 
     fireEvent.change(password, { target: { value: "hemlis-3" } });
-    expect(field(dialog, /^Bekräfta lösenord/).getAttribute("aria-required")).toBe("true");
-    expect(
-      (within(dialog).getByRole("button", { name: "Spara ändringar" }) as HTMLButtonElement)
-        .disabled
-    ).toBe(true);
+    const confirmation = field(dialog, /^Bekräfta lösenord/);
+    expect(confirmation.getAttribute("aria-required")).toBe("true");
+    fireEvent.submit(
+      within(dialog).getByRole("button", { name: "Spara ändringar" }).closest("form")!
+    );
+    // A new password needs the username (it is not shown back) and its confirmation.
+    expect(confirmation.getAttribute("aria-invalid")).toBe("true");
+    expect(document.activeElement).toBe(field(dialog, /^Användarnamn/));
+    expect(api.POST).not.toHaveBeenCalled();
   });
 });

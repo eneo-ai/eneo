@@ -87,6 +87,41 @@ describe("admin function sources", () => {
     expect(await screen.findByText("tools_saved_inactive")).toBeTruthy();
   });
 
+  it("shows each problem at its field on save, and moves focus to the first", async () => {
+    show();
+    fireEvent.click((await screen.findAllByRole("button", { name: "capability_configure" }))[0]!);
+    const save = screen.getByRole("button", { name: "save" }) as HTMLButtonElement;
+    // Never disabled: a disabled button says nothing about what is missing.
+    expect(save.disabled).toBe(false);
+    const problemOf = (input: HTMLElement) =>
+      document.getElementById(input.getAttribute("aria-describedby") ?? "")?.textContent;
+
+    fireEvent.click(save);
+    expect(problemOf(screen.getByLabelText("url"))).toBe("required_field");
+    expect(problemOf(screen.getByLabelText("name"))).toBe("required_field");
+    expect(document.activeElement).toBe(screen.getByLabelText("url"));
+
+    fireEvent.change(screen.getByLabelText("url"), {
+      target: { value: "https://search.example/mcp" }
+    });
+    fireEvent.change(screen.getByLabelText("name"), { target: { value: "Search source" } });
+    fireEvent.change(screen.getByLabelText("mcp_audience_priority"), { target: { value: "-1" } });
+    fireEvent.click(save);
+    expect(screen.getByLabelText("url").getAttribute("aria-invalid")).toBeNull();
+    expect(problemOf(screen.getByLabelText("mcp_audience_priority"))).toBe(
+      "form_problem_whole_number_from"
+    );
+    expect(document.activeElement).toBe(screen.getByLabelText("mcp_audience_priority"));
+
+    // A problem among the advanced options opens them.
+    fireEvent.change(screen.getByLabelText("mcp_audience_priority"), { target: { value: "5" } });
+    fireEvent.change(screen.getByLabelText("mcp_catalog_max_count"), { target: { value: "5000" } });
+    fireEvent.click(save);
+    expect(screen.getByLabelText("mcp_catalog_max_count").closest("details")?.open).toBe(true);
+    expect(document.activeElement).toBe(screen.getByLabelText("mcp_catalog_max_count"));
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it("activates an existing source through the capability endpoint", async () => {
     get.mockImplementation((path?: string) =>
       path === "/api/v1/mcp-servers/settings/" ? ok({ items: [source] }) : ok({ items: [] })
@@ -130,9 +165,7 @@ describe("admin function sources", () => {
     fireEvent.change(screen.getByLabelText("tools_source_model"), {
       target: { value: "model" }
     });
-    const submit = screen.getByRole("button", { name: "tools_save_activate" });
-    expect(submit.hasAttribute("disabled")).toBe(false);
-    fireEvent.click(submit);
+    fireEvent.click(screen.getByRole("button", { name: "tools_save_activate" }));
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/api/v1/mcp-servers/", {
         body: expect.objectContaining({

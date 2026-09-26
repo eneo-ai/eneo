@@ -5,6 +5,8 @@ import { useMutation } from "@tanstack/react-query";
 import { Check, Copy } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { flushSync } from "react-dom";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -39,6 +41,21 @@ export function ServicePlayground({ serviceId }: { serviceId: string }) {
     onError: (error) => toastApiError(error, t)
   });
 
+  const [submitted, setSubmitted] = useState(false);
+  const inputProblem = submitted && !input.trim() ? t("required_field") : null;
+
+  // Run is never disabled: an empty input shows at the field, which takes focus.
+  function runService() {
+    if (run.isPending) return;
+    if (!input.trim()) {
+      // Rendered before focus moves, so the field is read with its problem.
+      flushSync(() => setSubmitted(true));
+      document.getElementById("service-input")?.focus();
+      return;
+    }
+    run.mutate(input);
+  }
+
   return (
     <div className="grid h-full grid-cols-1 gap-4 md:grid-cols-2">
       <div className="flex flex-col gap-3">
@@ -49,12 +66,11 @@ export function ServicePlayground({ serviceId }: { serviceId: string }) {
           rows={12}
           className="flex-1"
           onChange={(event) => setInput(event.target.value)}
+          {...fieldProblemProps("service-input", inputProblem)}
         />
-        <Button
-          className="self-end"
-          disabled={run.isPending || input.trim().length === 0}
-          onClick={() => run.mutate(input)}
-        >
+        <FieldProblem id="service-input" problem={inputProblem} />
+        {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+        <Button className="self-end" aria-busy={run.isPending || undefined} onClick={runService}>
           {run.isPending ? t("running") : t("run_this_service")}
         </Button>
       </div>

@@ -1,7 +1,9 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useTranslations } from "next-intl";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -19,7 +21,8 @@ import { Label } from "@/components/ui/label";
 /**
  * Controlled confirmation dialog without a trigger, for actions launched from
  * dropdown menus (the menu closes before the dialog opens). While `pending`,
- * neither Cancel nor Escape closes it.
+ * neither Cancel nor Escape closes it, and the confirm button stays enabled
+ * (so it keeps focus) but ignores a press.
  */
 export function ConfirmDialogControlled({
   open,
@@ -55,7 +58,13 @@ export function ConfirmDialogControlled({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>{t("cancel")}</AlertDialogCancel>
-          <Button variant={variant} disabled={pending} onClick={onConfirm}>
+          <Button
+            variant={variant}
+            aria-busy={pending || undefined}
+            onClick={() => {
+              if (!pending) onConfirm();
+            }}
+          >
             {confirmLabel}
           </Button>
         </AlertDialogFooter>
@@ -66,9 +75,10 @@ export function ConfirmDialogControlled({
 
 /**
  * Confirmation dialog for destructive actions. With `confirmValue` set, the
- * user must type it (e.g. the resource name) before the action is enabled.
- * While the action runs it cannot be closed; when it fails (the caller reports
- * the error) the dialog stays open with what the user typed.
+ * user must type it (e.g. the resource name): confirming without it says so at
+ * the field, which takes focus. While the action runs it cannot be closed and
+ * the confirm button keeps focus; when it fails (the caller reports the error)
+ * the dialog stays open with what the user typed.
  */
 export function ConfirmDialog({
   trigger,
@@ -94,16 +104,30 @@ export function ConfirmDialog({
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState("");
   const [running, setRunning] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
   const busy = pending || running;
   const blocked = confirmValue !== undefined && typed !== confirmValue;
+  const problem =
+    submitted && blocked ? t("form_problem_confirm_mismatch", { value: confirmValue }) : null;
 
   function changeOpen(next: boolean) {
     if (!next && busy) return;
     setOpen(next);
-    if (!next) setTyped("");
+    if (!next) {
+      setTyped("");
+      setSubmitted(false);
+    }
   }
 
   async function confirm() {
+    if (busy) return;
+    if (blocked) {
+      // Rendered before focus moves, so the field is read with its error.
+      flushSync(() => setSubmitted(true));
+      inputRef.current?.focus();
+      return;
+    }
     setRunning(true);
     try {
       await onConfirm();
@@ -116,6 +140,7 @@ export function ConfirmDialog({
     }
     setOpen(false);
     setTyped("");
+    setSubmitted(false);
   }
 
   return (
@@ -130,16 +155,23 @@ export function ConfirmDialog({
           <div className="flex flex-col gap-2">
             <Label htmlFor={inputId}>{confirmValueLabel}</Label>
             <Input
+              ref={inputRef}
               id={inputId}
               value={typed}
               placeholder={confirmValue}
               onChange={(event) => setTyped(event.target.value)}
+              {...fieldProblemProps(inputId, problem)}
             />
+            <FieldProblem id={inputId} problem={problem} />
           </div>
         ) : null}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={busy}>{t("cancel")}</AlertDialogCancel>
-          <Button variant="destructive" disabled={blocked || busy} onClick={() => void confirm()}>
+          <Button
+            variant="destructive"
+            aria-busy={busy || undefined}
+            onClick={() => void confirm()}
+          >
             {confirmLabel}
           </Button>
         </AlertDialogFooter>

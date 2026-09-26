@@ -30,6 +30,7 @@ async function open() {
 
 describe("ConfirmDialog", () => {
   it("asks for the name in a labelled field with an id of its own", async () => {
+    const onConfirm = vi.fn();
     renderInApp(
       <>
         <ConfirmDialog
@@ -39,7 +40,7 @@ describe("ConfirmDialog", () => {
           confirmLabel="Ta bort"
           confirmValue="a"
           confirmValueLabel="Skriv a"
-          onConfirm={() => {}}
+          onConfirm={onConfirm}
         />
         <ConfirmDialog
           trigger={<Button>Andra</Button>}
@@ -56,13 +57,21 @@ describe("ConfirmDialog", () => {
     const first = await screen.findByRole("alertdialog", { name: "Första" });
     const field = within(first).getByRole("textbox", { name: "Skriv a" });
     expect(field.id).not.toBe("confirm-value");
-    expect(within(first).getByRole("button", { name: "Ta bort" })).toHaveProperty("disabled", true);
-    fireEvent.change(field, { target: { value: "a" } });
-    expect(within(first).getByRole("button", { name: "Ta bort" })).toHaveProperty(
-      "disabled",
-      false
+    const remove = within(first).getByRole("button", { name: "Ta bort" });
+    // Never disabled: confirming without the name says so at the field.
+    expect(remove).toHaveProperty("disabled", false);
+    fireEvent.click(remove);
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(field.getAttribute("aria-describedby")!)?.textContent).toBe(
+      "Det stämmer inte. Skriv a exakt som det står."
     );
+    expect(document.activeElement).toBe(field);
+    expect(onConfirm).not.toHaveBeenCalled();
     await expectNoAxeViolations(document.body);
+
+    fireEvent.change(field, { target: { value: "a" } });
+    fireEvent.click(remove);
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(1));
   });
 
   it("stays open with what was typed when the action fails", async () => {
@@ -77,10 +86,9 @@ describe("ConfirmDialog", () => {
 
     await waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(1));
     await waitFor(() =>
-      expect(within(dialog).getByRole("button", { name: "Ta bort" })).toHaveProperty(
-        "disabled",
-        false
-      )
+      expect(
+        within(dialog).getByRole("button", { name: "Ta bort" }).getAttribute("aria-busy")
+      ).toBeNull()
     );
     expect(screen.getByRole("alertdialog", { name: "Ta bort yta" })).toBeTruthy();
     expect(within(dialog).getByRole("textbox", { name: "Skriv ytans namn" })).toHaveProperty(
@@ -119,6 +127,31 @@ describe("ConfirmDialog", () => {
 });
 
 describe("ConfirmDialogControlled", () => {
+  it("keeps focus on the busy confirm button and ignores a press", async () => {
+    const onConfirm = vi.fn();
+    renderInApp(
+      <ConfirmDialogControlled
+        open
+        onOpenChange={() => {}}
+        title="Ta bort samling"
+        description="Det här går inte att ångra."
+        confirmLabel="Ta bort"
+        pending
+        onConfirm={onConfirm}
+      />
+    );
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort samling" });
+    const remove = within(dialog).getByRole("button", { name: "Ta bort" });
+    remove.focus();
+
+    fireEvent.click(remove);
+
+    expect(remove).toHaveProperty("disabled", false);
+    expect(remove.getAttribute("aria-busy")).toBe("true");
+    expect(document.activeElement).toBe(remove);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
   it("does not ask its owner to close while pending", async () => {
     const onOpenChange = vi.fn();
     renderInApp(

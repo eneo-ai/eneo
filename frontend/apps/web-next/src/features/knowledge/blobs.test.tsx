@@ -6,15 +6,18 @@ import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import type { InfoBlob } from "./knowledge";
 
-vi.mock("@/lib/api/browser", () => ({
-  browserApi: {
-    GET: () => Promise.resolve({ data: { text: "" }, response: new Response("{}") })
-  }
+const api = vi.hoisted(() => ({
+  GET: () => Promise.resolve({ data: { text: "" }, response: new Response("{}") }),
+  POST: vi.fn()
 }));
+vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
-import { BlobTable } from "./blobs";
+import { AddTextDialog, BlobTable } from "./blobs";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 const blob = (id: string, title: string, size: number) =>
   ({ id, metadata: { title, size } }) as unknown as InfoBlob;
@@ -103,5 +106,39 @@ describe("BlobTable", () => {
     expect(
       screen.getByRole("heading", { level: 2, name: "Du har inga filer uppladdade ännu" })
     ).toBeTruthy();
+  });
+});
+
+describe("AddTextDialog", () => {
+  it("shows what is missing at its field on submit, and keeps focus on a busy submit", async () => {
+    api.POST.mockReturnValue(new Promise(() => {}));
+    renderInApp(<AddTextDialog collectionId="collection-1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Lägg till text" }));
+    const dialog = await screen.findByRole("dialog", { name: "Lägg till text" });
+    const submit = within(dialog).getByRole("button", { name: "Skicka" });
+    expect(submit.hasAttribute("disabled")).toBe(false);
+
+    fireEvent.click(submit);
+    const title = within(dialog).getByLabelText("Titel");
+    const content = within(dialog).getByLabelText("Innehåll");
+    expect(document.activeElement).toBe(title);
+    expect(title.getAttribute("aria-invalid")).toBe("true");
+    expect(content.getAttribute("aria-invalid")).toBe("true");
+    await expectNoAxeViolations(dialog);
+
+    fireEvent.change(title, { target: { value: "Delegationsordning" } });
+    fireEvent.click(submit);
+    expect(document.activeElement).toBe(content);
+    expect(api.POST).not.toHaveBeenCalled();
+
+    fireEvent.change(content, { target: { value: "Nämnden delegerar beslut om ..." } });
+    submit.focus();
+    fireEvent.click(submit);
+    const busy = await within(dialog).findByRole("button", { name: "Skickar..." });
+    expect(busy).toBe(submit);
+    expect(busy.getAttribute("aria-busy")).toBe("true");
+    expect(document.activeElement).toBe(busy);
+    fireEvent.click(busy);
+    expect(api.POST).toHaveBeenCalledTimes(1);
   });
 });
