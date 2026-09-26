@@ -177,18 +177,6 @@ ClassifierRetentionClass: TypeAlias = Literal[
     "schema_direction",
 ]
 ClassifierRetentionIdentity: TypeAlias = tuple[ClassifierRetentionClass, str]
-CLASSIFIER_RETENTION_CLASSES: frozenset[ClassifierRetentionClass] = frozenset(
-    {
-        "slot",
-        "file_role",
-        "checkpoint_update",
-        "form_intake",
-        "named_result_evidence",
-        "example_output_constraint",
-        "secondary_obligation",
-        "schema_direction",
-    }
-)
 
 _MAX_RESULT_OBLIGATIONS = len(RESULT_OBLIGATION_VALUES)
 _MAX_QUESTION_ANSWER_SELECTIONS = 20

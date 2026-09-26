@@ -21,9 +21,8 @@ Each `Pattern` captures:
 - `polarity` — `"positive"` archetypes are recommended paths;
   `"negative"` archetypes are anti-patterns grounded in FCM truth.
 
-The module also owns the tiny chain-step vocabulary used by patterns. Pattern
-objects store backend tokens; `render_chain_shape` translates those tokens into
-prompt-safe labels. Concrete compiler step text lives with the compiler.
+The module also owns the tiny chain-step vocabulary used by patterns. Concrete
+compiler step text lives with the compiler.
 """
 
 from __future__ import annotations
@@ -34,7 +33,6 @@ from types import MappingProxyType
 from typing import Literal
 
 PatternId = str
-ChainStepToken = str
 FLOW_INPUT_AUDIO_TRANSCRIPTION = "flow_input_audio_transcription"
 FLOW_INPUT_DOCUMENT_UPLOAD = "flow_input_document_upload"
 FLOW_INPUT_SECTIONED_FORM_FIELDS = "flow_input_sectioned_form_fields"
@@ -51,65 +49,6 @@ _VALID_CHAIN_KINDS: frozenset[str] = frozenset({"none", "compiled", "planner_onl
 
 
 @dataclass(frozen=True, slots=True)
-class ChainStepDescriptor:
-    """Developer-owned metadata for backend pattern-chain tokens.
-
-    Pattern chains are server/compiler vocabulary. The LLM should see a
-    readable shape, not these token names, so every token used by the Pattern
-    Registry must have human-readable metadata here.
-    """
-
-    token: str
-    label: str
-
-
-CHAIN_STEP_DESCRIPTORS: Mapping[str, ChainStepDescriptor] = MappingProxyType(
-    {
-        FLOW_INPUT_AUDIO_TRANSCRIPTION: ChainStepDescriptor(
-            token=FLOW_INPUT_AUDIO_TRANSCRIPTION,
-            label="transcribe uploaded audio",
-        ),
-        FLOW_INPUT_DOCUMENT_UPLOAD: ChainStepDescriptor(
-            token=FLOW_INPUT_DOCUMENT_UPLOAD,
-            label="receive uploaded document material",
-        ),
-        FLOW_INPUT_SECTIONED_FORM_FIELDS: ChainStepDescriptor(
-            token=FLOW_INPUT_SECTIONED_FORM_FIELDS,
-            label="collect runtime input fields",
-        ),
-        EXTRACT_TEMPLATE_VARIABLES_STEP: ChainStepDescriptor(
-            token=EXTRACT_TEMPLATE_VARIABLES_STEP,
-            label="extract template variables",
-        ),
-        COMPOSE_SECTIONS_STEP: ChainStepDescriptor(
-            token=COMPOSE_SECTIONS_STEP,
-            label="compose sections",
-        ),
-        PREPARE_TEMPLATE_CONTENT_STEP: ChainStepDescriptor(
-            token=PREPARE_TEMPLATE_CONTENT_STEP,
-            label="analyze, validate, and prepare template content",
-        ),
-        TEMPLATE_FILL_DOCX_STEP: ChainStepDescriptor(
-            token=TEMPLATE_FILL_DOCX_STEP,
-            label="fill DOCX template",
-        ),
-        TERMINAL_ARTIFACT_STEP: ChainStepDescriptor(
-            token=TERMINAL_ARTIFACT_STEP,
-            label="create final output",
-        ),
-    }
-)
-
-
-def render_chain_shape(chain_steps: tuple[str, ...]) -> str:
-    """Render backend chain tokens as prompt-safe semantic guidance."""
-
-    return " -> ".join(
-        CHAIN_STEP_DESCRIPTORS[chain_step].label for chain_step in chain_steps
-    )
-
-
-@dataclass(frozen=True, slots=True)
 class Pattern:
     """Structural planner-strategy archetype.
 
@@ -121,9 +60,7 @@ class Pattern:
     surfaces that render patterns to users.
 
     `chain_steps` is the backend/compiler token sequence for patterns whose
-    canonical realisation is multi-step. Knowledge-pack rendering translates
-    these tokens into human-readable `chain_shape` guidance; raw tokens are
-    not part of the LLM contract. Single-step shapes leave it empty.
+    canonical realisation is multi-step. Single-step shapes leave it empty.
 
     The registry deliberately avoids prompt recipe coupling. Patterns
     describe structural intent; the backend compiler and Flow capability
@@ -412,11 +349,6 @@ COMPILED_CHAIN_PATTERN_IDS: frozenset[str] = frozenset(
     for pattern in PATTERN_REGISTRY.values()
     if pattern.chain_kind == "compiled"
 )
-PLANNER_ONLY_CHAIN_PATTERN_IDS: frozenset[str] = frozenset(
-    pattern.id
-    for pattern in PATTERN_REGISTRY.values()
-    if pattern.chain_kind == "planner_only"
-)
 
 
 def compiled_chain_pattern_ids(pattern_ids: Iterable[str]) -> frozenset[str]:
@@ -450,22 +382,3 @@ def pattern_chain_steps(pattern_ids: Iterable[str]) -> tuple[str, ...]:
             chain_steps.append(chain_step)
             seen.add(chain_step)
     return tuple(chain_steps)
-
-
-def question_template_ids_for_slot(pattern_id: str, slot: str) -> tuple[str, ...]:
-    """Return the question-template ids this pattern declares for `slot`.
-
-    Preserves the pattern's declaration order. Returns `()` when the
-    pattern does not reference the slot. Raises `KeyError` for an unknown
-    `pattern_id` — a typo in a caller should fail loudly rather than
-    silently return empty.
-
-    Slot names are not validated against
-    `KNOWN_REQUIREMENT_SLOT_NAMES` here; the dangling-reference guard in
-    `test_question_catalog.py::test_every_question_template_id_resolves_in_catalog`
-    already covers that contract.
-    """
-    pattern = PATTERN_REGISTRY[pattern_id]
-    if slot not in pattern.required_architectural_slots:
-        return ()
-    return tuple(qid for qid in pattern.question_template_ids if qid == slot)

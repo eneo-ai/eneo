@@ -62,7 +62,7 @@ def architecture_blockers(
         [], spec, aggregation_intent=aggregation_intent
     )
     result = run_draft_preflight(context)
-    return tuple(issue.id for issue in result.architecture_issues)
+    return tuple(issue.id for issue in result.issues if issue.kind == "architecture")
 
 
 def unused_form_fields(spec: FlowDraftSpecCore) -> list[str]:

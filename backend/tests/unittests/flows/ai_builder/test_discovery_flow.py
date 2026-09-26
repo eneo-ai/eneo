@@ -743,7 +743,6 @@ class TestExtendedClarificationHints:
         ]
 
         analysis = analyze_discovery(conversation)
-        assert analysis.ready_for_confirmation is False
         assert analysis.next_issue is not None
         assert analysis.next_issue.suggestion is not None
 
@@ -1259,7 +1258,6 @@ class TestExtendedClarificationHints:
         ]
 
         assert "docx_output_mode" in question_ids
-        assert analysis.ready_for_confirmation is False
 
     def test_conflicting_template_reference_role_still_requires_docx_mode_choice(
         self,
@@ -1302,7 +1300,6 @@ class TestExtendedClarificationHints:
         ]
 
         assert "docx_output_mode" in question_ids
-        assert analysis.ready_for_confirmation is False
 
     def test_template_file_role_does_not_reask_after_explicit_generated_docx_choice(
         self,
@@ -2322,7 +2319,6 @@ class TestExtendedClarificationHints:
             slot_classification_result=context.slot_classification_result,
         )
 
-        assert analysis.ready_for_confirmation is False
         assert analysis.next_issue is not None
         assert analysis.next_issue.issue_id in {
             "primary_runtime_input",
@@ -3270,7 +3266,7 @@ class TestExtendedClarificationHints:
         ]
 
         assert "runtime_metadata_fields" not in question_ids
-        assert analysis.ready_for_confirmation is True
+        assert not analysis.blocking_issues
 
     def test_explicit_runtime_metadata_does_not_reask_runtime_metadata_fields(
         self,

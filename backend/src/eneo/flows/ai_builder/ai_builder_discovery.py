@@ -135,7 +135,6 @@ def _analyze_discovery_profile(
     planning_state: PlanningState | None,
     slot_classification_result: SlotClassificationResult | None,
 ) -> DiscoveryAnalysis:
-    mvs_met = _has_minimum_viable_specification(profile)
     raw_issues = _build_raw_discovery_issues(
         conversation,
         profile,
@@ -178,7 +177,6 @@ def _analyze_discovery_profile(
                         *_mapped_file_limit_message(planning_state),
                     ),
                     suggestion=suggestion,
-                    question_level="blocking",
                 )
             )
 
@@ -189,7 +187,6 @@ def _analyze_discovery_profile(
 
     return DiscoveryAnalysis(
         issues=tuple(selected_issues),
-        mvs_met=mvs_met,
         selected_question_ids=tuple(selected_question_ids),
         profile=profile,
     )
@@ -262,7 +259,6 @@ def _build_comparison_scope_conflict_issue(
             "documents in the same run. Resolve the comparison architecture before summarizing.",
         ),
         suggestion=comparison_scope_conflict_question(profile.language),
-        question_level="blocking",
     )
 
 
@@ -284,7 +280,6 @@ def _build_primary_runtime_input_issue(
             "It is still unclear what kind of runtime material the user should provide.",
         ),
         suggestion=primary_runtime_input_question(profile.language),
-        question_level="blocking",
     )
 
 
@@ -304,7 +299,6 @@ def _build_flow_input_architecture_issue(
             "The user appears to want both audio transcription and document upload in the same flow, but the input architecture is not resolved yet.",
         ),
         suggestion=flow_input_architecture_question(profile.language),
-        question_level="blocking",
     )
 
 
@@ -324,7 +318,6 @@ def _build_document_material_scope_issue(
             "It is still unclear whether one run normally contains one source document or a document package with several files.",
         ),
         suggestion=document_material_scope_question(profile.language),
-        question_level="high_value",
     )
 
 
@@ -355,7 +348,6 @@ def _build_comparison_scope_issue(
             "The comparison architecture is unresolved.",
         ),
         suggestion=comparison_scope_question(profile.language),
-        question_level="blocking",
     )
 
 
@@ -377,7 +369,6 @@ def _build_external_delivery_unsupported_issue(
             "The user wants to send the result to an external API or system, but AI Builder cannot automatically create an outbound API delivery step in new flows yet.",
         ),
         suggestion=external_delivery_internal_output_question(profile.language),
-        question_level="blocking",
     )
 
 
@@ -397,7 +388,6 @@ def _build_structured_io_contract_issue(
             "It is still unclear how input JSON should be transformed into output JSON.",
         ),
         suggestion=structured_io_contract_question(profile.language),
-        question_level="blocking",
     )
 
 
@@ -422,7 +412,6 @@ def _build_post_processing_goal_issue(
             "It is still unclear what the flow should help the user do with the material.",
         ),
         suggestion=post_processing_goal_question(profile.language),
-        question_level="high_value",
     )
 
 
@@ -450,7 +439,6 @@ def _build_terminal_output_issue(
         severity="blocking",
         message=message,
         suggestion=terminal_output_question(profile.language),
-        question_level="blocking",
     )
 
 
@@ -472,7 +460,6 @@ def _build_docx_output_mode_issue(
             "DOCX output is requested, but the DOCX generation mode is unresolved.",
         ),
         suggestion=docx_output_mode_question(profile.language),
-        question_level="blocking",
     )
 
 
@@ -494,7 +481,6 @@ def _build_pdf_generation_mode_issue(
             "The user mentions a PDF template, but it is still unclear whether the result should be a normal generated PDF or whether a fixed template expectation must be handled explicitly.",
         ),
         suggestion=pdf_generation_mode_question(profile.language),
-        question_level="blocking",
     )
 
 
@@ -598,7 +584,6 @@ def build_registry_question_followup(
             planning_state=planning_state,
         ),
         assistant_text=assistant_text,
-        issue=issue,
     )
 
 
@@ -749,38 +734,3 @@ def build_discovery_followup_text(
         "Jag behöver reda ut en viktig detalj till innan jag kan sammanfatta kraven.",
         "I need to clarify one more important detail before I can summarize the requirements.",
     )
-
-
-# ---------------------------------------------------------------------------
-# MVS gate — Minimum Viable Specification
-# ---------------------------------------------------------------------------
-
-
-def _has_minimum_viable_specification(profile: DiscoveryProfile) -> bool:
-    """Require at least 2 of 3 dimensions (input, output, purpose) resolved."""
-    return (
-        sum(
-            [
-                _has_mvs_input(profile),
-                _has_mvs_output(profile),
-                _has_mvs_purpose(profile),
-            ]
-        )
-        >= 2
-    )
-
-
-def _has_mvs_input(profile: DiscoveryProfile) -> bool:
-    return (
-        profile.document_like_input
-        or profile.audio_like_input
-        or "primary_runtime_input" in profile.answers
-    )
-
-
-def _has_mvs_output(profile: DiscoveryProfile) -> bool:
-    return profile.final_output_text_or_docx or "terminal_output" in profile.answers
-
-
-def _has_mvs_purpose(profile: DiscoveryProfile) -> bool:
-    return profile.comparison_requested or _expresses_task_intent(profile.text)

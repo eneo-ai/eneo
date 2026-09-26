@@ -17,10 +17,12 @@ from eneo.flows.ai_builder.ai_builder_edit_scope import (
 from eneo.flows.ai_builder.ai_builder_flow_context import (
     build_flow_context,
     build_plan_summary,
-    build_step_ref_mapping,
 )
-from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
-    trim_conversation_for_context,
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    LLMMessageParam,
+    fit_proposal_message_groups,
+    flatten_proposal_message_groups,
+    group_proposal_messages,
 )
 from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
@@ -269,7 +271,6 @@ class TestBuildFlowContextDetails:
             is_edit_mode=True,
             capabilities=build_flow_capability_profile(flow),
             edit_scope=EditScopeResolution(
-                settled_families=frozenset({"input_shape", "output_artifact"}),
                 active_families=frozenset({"output_artifact"}),
                 requested_output_artifact="docx_document",
             ),
@@ -284,40 +285,6 @@ class TestBuildFlowContextDetails:
         assert "Aktiv familj: output_artifact" in ctx
         assert "Begärd ändring: PDF -> DOCX" in ctx
         assert "Draft-revision" not in ctx
-
-
-# ---------------------------------------------------------------------------
-# Step ref mapping
-# ---------------------------------------------------------------------------
-
-
-class TestStepRefMapping:
-    def test_maps_step_order_to_id(self) -> None:
-        step1 = _make_step(step_order=1)
-        step2 = _make_step(step_order=2)
-        flow = _make_flow(steps=[step1, step2])
-        mapping = build_step_ref_mapping(flow)
-        assert mapping["existing_step_1"] == step1.id
-        assert mapping["existing_step_2"] == step2.id
-
-    def test_empty_flow(self) -> None:
-        flow = _make_flow()
-        mapping = build_step_ref_mapping(flow)
-        assert mapping == {}
-
-    def test_step_without_id_skipped(self) -> None:
-        step = FlowStep(
-            id=None,
-            assistant_id=uuid4(),
-            step_order=1,
-            input_source="flow_input",
-            input_type="text",
-            output_mode="pass_through",
-            output_type="text",
-        )
-        flow = _make_flow(steps=[step])
-        mapping = build_step_ref_mapping(flow)
-        assert mapping == {}
 
 
 # ---------------------------------------------------------------------------
@@ -425,33 +392,16 @@ class TestBuildPlanSummary:
         assert "modifierar" in summary
 
 
+def _trim(messages: list[LLMMessageParam], *, max_tokens: int) -> list[LLMMessageParam]:
+    """Fit a conversation the way proposal preparation does."""
+    groups = group_proposal_messages(messages, current_turn_index=len(messages) - 1)
+    fitted = fit_proposal_message_groups(groups, token_limit=max_tokens, model_name="")
+    if fitted is None:
+        fitted = tuple(group for group in groups if group.protected)
+    return flatten_proposal_message_groups(fitted)
+
+
 class TestTrimConversation:
-    def test_within_budget_unchanged(self) -> None:
-        messages = [
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi!"},
-        ]
-        result = trim_conversation_for_context(messages, max_tokens=999_999)
-        assert len(result) == 2
-
-    def test_over_budget_keeps_recent(self) -> None:
-        messages = [
-            {"role": "user", "content": f"Message {i}" + "x" * 100} for i in range(20)
-        ]
-        # Small budget forces trimming to only the most recent messages
-        result = trim_conversation_for_context(messages, max_tokens=200)
-        assert len(result) < 20
-        assert result[-1]["content"].startswith("Message 19")
-
-    def test_empty_messages(self) -> None:
-        result = trim_conversation_for_context([], max_tokens=999_999)
-        assert result == []
-
-    def test_returns_new_list(self) -> None:
-        messages = [{"role": "user", "content": "Test"}]
-        result = trim_conversation_for_context(messages, max_tokens=999_999)
-        assert result is not messages
-
     def test_tool_call_and_result_kept_together(self) -> None:
         """When trimming, assistant+tool_calls and tool result messages are atomic."""
         messages = [
@@ -473,7 +423,7 @@ class TestTrimConversation:
             {"role": "user", "content": "Change step 2"},
         ]
         # Budget that fits the tool group + last user msg but not the old messages
-        result = trim_conversation_for_context(messages, max_tokens=200)
+        result = _trim(messages, max_tokens=200)
         roles = [m["role"] for m in result]
         # The assistant+tool pair should be kept together
         assert "assistant" in roles
@@ -502,7 +452,7 @@ class TestTrimConversation:
             {"role": "tool", "content": "Plan summary", "tool_call_id": "call_x"},
             {"role": "user", "content": "Final msg"},
         ]
-        result = trim_conversation_for_context(messages, max_tokens=300)
+        result = _trim(messages, max_tokens=300)
         # Should never have a tool message without its preceding assistant
         for i, msg in enumerate(result):
             if msg.get("role") == "tool":
@@ -517,7 +467,7 @@ class TestTrimConversation:
             {"role": "assistant", "content": "And me"},
         ]
 
-        result = trim_conversation_for_context(messages, max_tokens=80)
+        result = _trim(messages, max_tokens=80)
 
         assert [message["content"] for message in result] == ["Keep me", "And me"]
 
@@ -538,7 +488,7 @@ class TestTrimConversation:
             {"role": "tool", "content": "Plan summary", "tool_call_id": "call_latest"},
         ]
 
-        result = trim_conversation_for_context(messages, max_tokens=20)
+        result = _trim(messages, max_tokens=20)
 
         assert len(result) == 2
         assert result[0]["role"] == "assistant"
@@ -547,7 +497,7 @@ class TestTrimConversation:
     def test_large_budget_keeps_everything(self) -> None:
         """With a budget larger than the conversation, nothing is trimmed."""
         messages = [{"role": "user", "content": f"Message {i}"} for i in range(50)]
-        result = trim_conversation_for_context(messages, max_tokens=999_999)
+        result = _trim(messages, max_tokens=999_999)
         assert len(result) == 50
 
 

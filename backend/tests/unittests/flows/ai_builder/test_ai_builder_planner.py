@@ -411,12 +411,10 @@ def _runtime_result(
 
 def _discovery_analysis(
     *,
-    mvs_met: bool = True,
     selected_question_ids: tuple[str, ...] = (),
 ) -> DiscoveryAnalysis:
     return DiscoveryAnalysis(
         issues=(),
-        mvs_met=mvs_met,
         selected_question_ids=selected_question_ids,
     )
 
@@ -2259,10 +2257,6 @@ async def test_prepare_planner_request_requires_fresh_confirmation_after_attachm
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
             return_value=256,
         ),
-        patch(
-            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.trim_conversation_for_context",
-            return_value=[{"role": "user", "content": "Build a report flow"}],
-        ),
     ):
         prepared = await _prepare_planner_request_for_test(
             planner,
@@ -2294,7 +2288,6 @@ async def test_server_action_policy_overrides_stale_discovery_question() -> None
     ]
     requirements_state = _requirements_state_unconfirmed()
     discovery_analysis = _discovery_analysis(
-        mvs_met=False,
         selected_question_ids=("primary_runtime_input",),
     )
     planning_state = build_planning_state_from_conversation(conversation)
@@ -2568,10 +2561,6 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
             return_value=256,
         ),
-        patch(
-            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.trim_conversation_for_context",
-            return_value=[{"role": "user", "content": "Build from this file"}],
-        ),
     ):
         await _prepare_planner_request_for_test(
             planner,
@@ -2651,10 +2640,6 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
             return_value=256,
-        ),
-        patch(
-            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.trim_conversation_for_context",
-            return_value=[{"role": "user", "content": "Build a report flow"}],
         ),
     ):
         prepared = await _prepare_planner_request_for_test(
@@ -3138,10 +3123,6 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
             return_value=256,
-        ),
-        patch(
-            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.trim_conversation_for_context",
-            return_value=[{"role": "user", "content": "Build a flow"}],
         ),
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.logger.info"

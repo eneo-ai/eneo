@@ -133,7 +133,6 @@ def _issue_for_slot(slot_name: str, profile: DiscoveryProfile) -> DiscoveryIssue
         severity="blocking",
         message=suggestion.question,
         suggestion=suggestion,
-        question_level="blocking",
     )
 
 

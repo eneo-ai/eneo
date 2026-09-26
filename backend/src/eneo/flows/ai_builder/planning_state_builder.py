@@ -21,7 +21,6 @@ from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
 )
 from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
-    ClassifierRetentionClass,
     NamedContentFieldsEditRequest,
     SlotClassificationNamedResultEvidenceMetadata,
     named_content_fields_edit_from_metadata,
@@ -147,19 +146,6 @@ from eneo.flows.domain.mapped_execution_policy import (
 )
 from eneo.flows.enums import FlowOutputMode
 from eneo.json_types import JsonObject
-
-CLASSIFIER_REBUILD_INPUT_CLASSES: frozenset[ClassifierRetentionClass] = frozenset(
-    {
-        "slot",
-        "file_role",
-        "checkpoint_update",
-        "form_intake",
-        "named_result_evidence",
-        "example_output_constraint",
-        "schema_direction",
-        "secondary_obligation",
-    }
-)
 
 
 def build_planning_state_from_conversation(

@@ -11,7 +11,6 @@ from pydantic import ValidationError
 
 from eneo.flows.ai_builder import ai_builder_conversation_metadata as metadata_module
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
-    CLASSIFIER_RETENTION_CLASSES,
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
     LLMResolvableSlotName,
     NamedContentFieldsEditRequest,
@@ -69,9 +68,6 @@ from eneo.flows.ai_builder.planning_state import (
     ExampleOutputSourceCoverage,
     ExampleOutputStyleConstraint,
     NamedResultEvidence,
-)
-from eneo.flows.ai_builder.planning_state_builder import (
-    CLASSIFIER_REBUILD_INPUT_CLASSES,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from tests.unittests.flows.ai_builder.slot_classification_test_support import (
@@ -912,10 +908,6 @@ def test_classifier_metadata_preserves_supplier_owned_identifiers() -> None:
     assert classification.provider == provider
     assert classification.source_inventory[0].source_id == source_id
     assert classification.source_inventory[0].message_id == message_id
-
-
-def test_classifier_rebuild_classes_all_have_canonical_retention_rules() -> None:
-    assert CLASSIFIER_REBUILD_INPUT_CLASSES == CLASSIFIER_RETENTION_CLASSES
 
 
 def test_classifier_metadata_rejects_attachment_only_terminal_output() -> None:

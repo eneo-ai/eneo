@@ -39,6 +39,7 @@ import ast
 import asyncio
 import json
 import math
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any, Literal, Protocol, cast
@@ -59,6 +60,33 @@ logger = get_logger(__name__)
 _MAX_PROVIDER_ERROR_BODY_BYTES = 65_536
 # Provider error codes that state one named request field was refused.
 _UNSUPPORTED_PARAMETER_CODES = frozenset({"unsupported_parameter", "unsupported_value"})
+_MAX_PROVIDER_FACT_LENGTH = 64
+# A sanitized parameter must fit one public error detail string, and a
+# correlation id the length a request id may have.
+_MAX_PROVIDER_PARAMETER_LENGTH = 256
+_MAX_PROVIDER_CORRELATION_ID_LENGTH = 128
+# Parameter suffixes can contain user-controlled schema names.
+PROVIDER_ERROR_PARAMETERS = frozenset(
+    {
+        "model",
+        "messages",
+        "tools",
+        "tool_choice",
+        "parallel_tool_calls",
+        "response_format",
+        "temperature",
+        "top_p",
+        "top_k",
+        "reasoning_effort",
+        "max_tokens",
+        "max_completion_tokens",
+        "verbosity",
+        "stream",
+        "presence_penalty",
+        "frequency_penalty",
+        "api_version",
+    }
+)
 
 # Whether the caller admits one more request without the refused control;
 # the caller charges it to its own call budget and telemetry.
@@ -235,11 +263,6 @@ def provider_error_fields(error: BaseException) -> ProviderRejection:
     contract.
     """
 
-    from eneo.flows.ai_builder.ai_builder_error_contract import (
-        safe_provider_correlation_id,
-        safe_provider_parameter,
-    )
-
     body = getattr(error, "body", None)
     result = _rejection_envelope_fields(body, "body", "body.error")
     response = getattr(error, "response", None)
@@ -345,11 +368,6 @@ def _rejection_envelope_fields(
     source: ProviderRejectionSource,
     nested_source: ProviderRejectionSource,
 ) -> ProviderRejection:
-    from eneo.flows.ai_builder.ai_builder_error_contract import (
-        safe_provider_error_code,
-        safe_provider_parameter,
-    )
-
     if body is None:
         return ProviderRejection()
     if not isinstance(body, Mapping):
@@ -407,6 +425,58 @@ def _select_rejection(
     ):
         return candidate
     return current
+
+
+def safe_provider_error_code(
+    value: object, *, source: ProviderRejectionSource
+) -> str | None:
+    if source not in {
+        "body",
+        "body.error",
+        "response",
+        "response.error",
+        "message",
+        "message.error",
+    }:
+        return None
+    if not isinstance(value, str) or not 1 <= len(value) <= _MAX_PROVIDER_FACT_LENGTH:
+        return None
+    return value if re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", value, re.ASCII) else None
+
+
+def safe_provider_parameter(value: object) -> str | None:
+    if (
+        not isinstance(value, str)
+        or not 1 <= len(value) <= _MAX_PROVIDER_PARAMETER_LENGTH
+    ):
+        return None
+    if value in PROVIDER_ERROR_PARAMETERS:
+        return value
+    # Only protocol-owned paths are normalized; schema property names are not.
+    match = re.fullmatch(
+        r"(?P<root>tools)(?:\[[0-9]+\]|\.[0-9]+)(?:\.type|\.function(?:\.(?:name|description|parameters|strict))?)?"
+        r"|(?P<messages>messages)(?:\[[0-9]+\]|\.[0-9]+)(?:\.(?:role|content|name|tool_calls|tool_call_id))?"
+        r"|(?P<format>response_format)\.(?:type|json_schema(?:\.(?:name|description|schema|strict))?)"
+        r"|(?P<choice>tool_choice)\.(?:type|function(?:\.name)?)",
+        value,
+        re.ASCII,
+    )
+    return (
+        next((root for root in match.groups() if root is not None), None)
+        if match
+        else None
+    )
+
+
+def safe_provider_correlation_id(value: object) -> str | None:
+    if (
+        not isinstance(value, str)
+        or not 1 <= len(value) <= _MAX_PROVIDER_CORRELATION_ID_LENGTH
+    ):
+        return None
+    return (
+        value if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", value, re.ASCII) else None
+    )
 
 
 async def _under_silence(awaitable: Awaitable[Any], seconds: float) -> Any:

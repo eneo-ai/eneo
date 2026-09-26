@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING, cast
-from uuid import UUID
 
 from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     FlowCapabilityProfile,
@@ -403,15 +402,6 @@ def _build_edit_mode_flow_context(
             lines.append(f"{ref} | {name} | {io}")
 
     return "\n".join(lines)
-
-
-def build_step_ref_mapping(flow: Flow) -> dict[str, UUID]:
-    """Build existing_step_ref → step_id mapping for edit sessions."""
-    mapping: dict[str, UUID] = {}
-    for step in flow.steps:
-        if step.id is not None:
-            mapping[existing_step_ref_for_order(step.step_order)] = step.id
-    return mapping
 
 
 def build_plan_summary(

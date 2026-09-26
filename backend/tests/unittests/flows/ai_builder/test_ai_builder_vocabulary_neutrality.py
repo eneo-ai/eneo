@@ -40,21 +40,6 @@ def test_generic_underlag_does_not_create_domain_or_runtime_metadata_evidence() 
     assert "processing_scope" not in question_ids
 
 
-def test_generic_source_material_does_not_establish_flow_purpose() -> None:
-    for text in ("Underlag", "Source material"):
-        analysis = analyze_discovery(
-            [
-                ConversationMessage(
-                    role="user",
-                    content=text,
-                    metadata={"ui_language": "sv"},
-                )
-            ]
-        )
-
-        assert analysis.mvs_met is False
-
-
 def test_structured_runtime_fields_persist_without_reasking() -> None:
     conversation = [
         ConversationMessage(

@@ -1,10 +1,8 @@
 """Deterministic preflight over a parsed AI-builder draft.
 
 The preflight runs the existing critic against a compiled draft spec and reports
-a typed verdict the proposal pipeline can act on before persisting: whether the
-draft passed, whether a violation would block materialization (architecture
-invariant) or is a retryable quality issue (semantic invariant), and which
-invariant fired.
+the issues it found as a typed verdict the proposal pipeline acts on before
+persisting.
 """
 
 from __future__ import annotations
@@ -71,11 +69,7 @@ def test_preflight_passes_a_clean_single_step_draft() -> None:
 
     result = _preflight(spec)
 
-    assert isinstance(result, PreflightResult)
-    assert result.passed is True
-    assert result.blocks_materialization is False
-    assert result.critic_invariant_ids == ()
-    assert result.critic_invariant_id is None
+    assert result.issues == ()
 
 
 def test_create_preflight_leaves_terminal_alignment_to_compiled_spec() -> None:
@@ -101,8 +95,4 @@ def test_create_preflight_leaves_terminal_alignment_to_compiled_spec() -> None:
 
     result = _preflight(spec, conversation=conversation)
 
-    assert result.passed is True
-    assert result.blocks_materialization is False
-    assert result.can_retry is True
-    assert result.architecture_issues == ()
-    assert "pdf_terminal_output_alignment" not in result.critic_invariant_ids
+    assert result.issues == ()

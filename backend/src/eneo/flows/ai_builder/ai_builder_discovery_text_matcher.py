@@ -104,15 +104,6 @@ def contains_any_phrase(text: str, phrases: Iterable[str]) -> bool:
     )
 
 
-def contains_token_prefix(text: str, prefix: str) -> bool:
-    if not text or not prefix:
-        return False
-    normalized_text = normalize_discovery_text(text)
-    if not normalized_text:
-        return False
-    return _contains_normalized_token_prefix(normalized_text, prefix)
-
-
 def _contains_normalized_token_prefix(normalized_text: str, prefix: str) -> bool:
     normalized_prefix = normalize_discovery_text(prefix)
     return bool(normalized_prefix) and any(

@@ -821,14 +821,6 @@ class AIBuilderPlanLifecycle:
             raise_persisted_flow_mcp_plan_error(exc)
             raise
 
-    async def _require_session_creator(self, session_id: UUID) -> BuilderSession:
-        session = await self.repo.get_session(
-            session_id=session_id,
-            tenant_id=self.user.tenant_id,
-        )
-        self._require_creator(session)
-        return session
-
     def _require_creator(self, session: BuilderSession) -> None:
         if session.actor_user_id != self.user.id:
             raise AIBuilderUnauthorizedException(

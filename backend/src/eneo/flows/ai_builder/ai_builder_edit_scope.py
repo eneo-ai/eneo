@@ -112,7 +112,6 @@ _OUTPUT_STYLE_HINTS: tuple[str, ...] = (
 class ActiveRequestWindow:
     text: str
     start_index: int | None
-    merged_previous_request: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,11 +125,9 @@ class EditScopeResolution:
     change signal for that family.
     """
 
-    settled_families: frozenset[DiscoveryFamily]
     active_families: frozenset[DiscoveryFamily]
     requested_output_artifact: str | None = None
     requested_output_generation_mode: str | None = None
-    merged_previous_request: bool = False
 
 
 def has_change_semantics(text: str) -> bool:
@@ -157,7 +154,6 @@ def build_active_request_window(
         return ActiveRequestWindow(
             text="\n".join(part for part in (previous_text, latest_text) if part),
             start_index=previous_index,
-            merged_previous_request=True,
         )
 
     if len(freeform_messages) == 1 or not _is_elliptical_request(
@@ -170,7 +166,6 @@ def build_active_request_window(
     return ActiveRequestWindow(
         text="\n".join(part for part in (previous_text, latest_text) if part),
         start_index=previous_index,
-        merged_previous_request=True,
     )
 
 
@@ -188,23 +183,13 @@ def resolve_edit_scope(
     active_request_text: str,
     active_answer_signals: dict[str, set[str]],
     active_explicit_question_ids: set[str] | None = None,
-    merged_previous_request: bool = False,
 ) -> EditScopeResolution:
-    settled_families = capabilities.settled_families
     if not edit_mode:
-        return EditScopeResolution(
-            settled_families=settled_families,
-            active_families=ALL_DISCOVERY_FAMILIES,
-            merged_previous_request=merged_previous_request,
-        )
+        return EditScopeResolution(active_families=ALL_DISCOVERY_FAMILIES)
 
     normalized_text = normalize_discovery_text(active_request_text)
     if not normalized_text:
-        return EditScopeResolution(
-            settled_families=settled_families,
-            active_families=frozenset(),
-            merged_previous_request=merged_previous_request,
-        )
+        return EditScopeResolution(active_families=frozenset())
 
     flow_defaults = capabilities.to_signal_defaults()
     output_intent = resolve_output_intent(
@@ -255,11 +240,9 @@ def resolve_edit_scope(
         output_intent.docx_output_mode or output_intent.pdf_generation_mode
     )
     return EditScopeResolution(
-        settled_families=settled_families,
         active_families=frozenset(active_families),
         requested_output_artifact=output_intent.terminal_output,
         requested_output_generation_mode=requested_generation_mode,
-        merged_previous_request=merged_previous_request,
     )
 
 

@@ -12,7 +12,6 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_unprompted_user_text,
     extract_answer_signals,
     is_supported_structured_question_id,
-    latest_pending_structured_question,
     mentions_runtime_metadata,
     needs_structured_extraction,
     normalize_question_answer,
@@ -935,36 +934,6 @@ def test_structured_answer_signals_use_canonical_value_not_display_label(
     ]
 
     assert extract_answer_signals(conversation)["report_disposition"] == {"both"}
-
-
-def test_latest_pending_structured_question_reads_backend_question_payload() -> None:
-    question = latest_pending_structured_question(
-        [
-            ConversationMessage(
-                role="assistant",
-                content="Question",
-                tool_calls=[
-                    {
-                        "id": "call_1",
-                        "name": "ask_structured_question",
-                        "arguments": {
-                            "question_id": "terminal_output",
-                            "question": "Vad ska flödet producera som slutresultat?",
-                            "options": [
-                                {
-                                    "id": "structured_text",
-                                    "label": "Strukturerat textresultat",
-                                }
-                            ],
-                        },
-                    }
-                ],
-            )
-        ]
-    )
-
-    assert question is not None
-    assert question["question_id"] == "terminal_output"
 
 
 def test_extract_answer_signals_preserves_document_input_structure() -> None:

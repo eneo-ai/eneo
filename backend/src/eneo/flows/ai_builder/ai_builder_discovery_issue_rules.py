@@ -17,12 +17,7 @@ from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_phrase,
     contains_any_token_prefix,
 )
-from eneo.flows.ai_builder.ai_builder_domain_models import (
-    ConversationMessage,
-)
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
-    canonical_question_id,
-    latest_pending_structured_question,
     mentions_output_change,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
@@ -97,16 +92,6 @@ def external_delivery_requested(profile: DiscoveryProfile) -> bool:
         _EXTERNAL_DELIVERY_ACTION_RE.search(profile.text)
         and _EXTERNAL_DELIVERY_DESTINATION_RE.search(profile.text)
     )
-
-
-def latest_pending_question_id(
-    conversation: list[ConversationMessage],
-) -> str | None:
-    payload = latest_pending_structured_question(conversation)
-    if not isinstance(payload, dict):
-        return None
-    question_id = payload.get("question_id")
-    return canonical_question_id(question_id) if isinstance(question_id, str) else None
 
 
 def _family_inactive(profile: DiscoveryProfile, question_id: str) -> bool:

@@ -19,9 +19,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 )
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
-    latest_confirmed_requirements,
     render_confirmed_requirements_proposal_prompt_block,
-    render_confirmed_requirements_system_prompt_block,
     resolve_requirements_state,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
@@ -179,77 +177,6 @@ class TestResolveRequirementsStateFromAssistantMetadata:
 
 
 class TestRenderConfirmedRequirementsBlocks:
-    def test_confirmed_requirements_prompt_omits_default_review_boilerplate(
-        self,
-    ) -> None:
-        payload = _disclosure(
-            {
-                "summary": (
-                    "Jag har tillräckligt med information för att ta fram ett "
-                    "förslag till flödesplan. Granska sammanfattningen innan "
-                    "planen byggs."
-                ),
-                "key_decisions": [
-                    {"topic": "Bearbetning", "decision": "Översätt text till text"},
-                ],
-                "input_description": "Primär indata vid körning behöver granskas.",
-                "output_description": "Huvudsakligt slutresultat behöver granskas.",
-                "assumptions": [
-                    "Planen ska följa kraven och underlaget i konversationen.",
-                    "Användaren ska kunna granska och ändra planen innan den tillämpas.",
-                    "Ingen extra metadata ska samlas in vid körning.",
-                ],
-                "manual_setup_notes": [
-                    "The user can review and change the plan before it is applied.",
-                    "Koppla standardmodellen för textsteg.",
-                ],
-            }
-        ).model_copy(
-            update={
-                "named_content_fields": [
-                    NamedContentFieldPayload(
-                        id="beslut",
-                        label="beslut",
-                        name="beslut",
-                        segments=[],
-                        unplaced=False,
-                        can_contain_fields=False,
-                    )
-                ]
-            }
-        )
-        version = payload.requirements_version
-        conversation = [
-            ConversationMessage(
-                role="assistant",
-                content="Summary",
-                metadata={
-                    "requirements_summary": payload.model_dump(mode="json"),
-                    "requirements_version": version,
-                },
-            ),
-            ConversationMessage(
-                role="user",
-                content="",
-                metadata={
-                    "requirements_confirmed": True,
-                    "requirements_version": version,
-                },
-            ),
-        ]
-
-        summary = latest_confirmed_requirements(conversation)
-        assert summary is not None
-        prompt_block = render_confirmed_requirements_system_prompt_block(summary)
-
-        assert "Granska sammanfattningen innan planen byggs" not in prompt_block
-        assert "Primär indata vid körning behöver granskas" not in prompt_block
-        assert "Huvudsakligt slutresultat behöver granskas" not in prompt_block
-        assert "Användaren ska kunna granska" not in prompt_block
-        assert "Översätt text till text" in prompt_block
-        assert "Koppla standardmodellen för textsteg" in prompt_block
-        assert "### Innehåll som resultatet ska bevara\n- beslut" in prompt_block
-
     def test_confirmed_requirements_proposal_block_uses_user_relevant_fields_only(
         self,
     ) -> None:

@@ -7,7 +7,7 @@ architecture invariants are backend-owned mechanics failures.
 `CRITIC_INVARIANTS` is the single public registry; its registration order
 pins the order planner-visible issues surface in. Callers that need a
 narrower view can filter the tuple inline and pass `invariants=` to
-`render_critic_issues`.
+`evaluate_critic_invariants`.
 
 Layering: this module imports AI Builder types (`FlowDraftSpecCore`,
 `OutputIntentResolution`) and authored flow specs. The Flow Capability Manifest
@@ -1828,17 +1828,6 @@ def evaluate_edit_topology_invariants(
             invariant for invariant in CRITIC_INVARIANTS if invariant.edit_topology
         ),
     )
-
-
-def render_critic_issues(
-    context: CriticContext,
-    *,
-    invariants: tuple[CriticInvariant, ...] = CRITIC_INVARIANTS,
-) -> list[str]:
-    return [
-        issue.remediation
-        for issue in evaluate_critic_invariants(context, invariants=invariants)
-    ]
 
 
 def enforce_architecture_critic_invariants(

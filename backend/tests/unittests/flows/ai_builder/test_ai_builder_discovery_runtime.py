@@ -74,7 +74,6 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
 )
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
-    AbsentSlotClassificationOutcome,
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedNamedResultDelta,
@@ -83,7 +82,6 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedSlot,
     ResolvedSlotClassificationOutcome,
     SlotClassificationAttempt,
-    SlotClassificationDiagnostic,
     SlotClassificationInput,
     SlotClassificationSource,
     parse_slot_classification_response,
@@ -929,22 +927,6 @@ def test_slot_classification_input_keeps_parser_shape_invariants() -> None:
     assert len(structured_source.text) == 500
     assert structured_source.selected_value == structured_source.text
     assert structured_source.truncated is True
-
-
-def test_classifier_diagnostics_never_reach_the_requirements_disclosure() -> None:
-    analyze_discovery(
-        [ConversationMessage(role="user", content="Build a document summary flow.")],
-        planning_state=_resolved_state(),
-        slot_classification_result=slot_classification_result(
-            slot_outcomes={"terminal_output": AbsentSlotClassificationOutcome()},
-            diagnostics=(
-                SlotClassificationDiagnostic(
-                    code="slot_outcome_omitted",
-                    slot_name="terminal_output",
-                ),
-            ),
-        ),
-    )
 
 
 @pytest.mark.asyncio
@@ -3725,7 +3707,7 @@ async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_f
     assert "input_material_mode" not in question_ids
     assert "final_output_mode" not in question_ids
     assert question_ids == set()
-    assert analysis.ready_for_confirmation is True
+    assert not analysis.blocking_issues
     assert result.planning_state.resolved_slots["runtime_metadata_fields"].source == (
         "policy_default"
     )
@@ -3787,7 +3769,6 @@ async def test_runtime_discovery_blocks_output_classification_when_user_is_uncer
         if issue.suggestion is not None
     }
     assert "terminal_output" in question_ids
-    assert analysis.ready_for_confirmation is False
 
     messages = litellm_client.acompletion.await_args.kwargs["messages"]
     prompt = "\n".join(message["content"] for message in messages)
@@ -3875,7 +3856,7 @@ async def test_runtime_discovery_uses_llm_baseline_for_swedish_document_json_flo
     assert "document_material_scope" not in question_ids
     assert "final_output_mode" not in question_ids
     assert question_ids == set()
-    assert analysis.ready_for_confirmation is True
+    assert not analysis.blocking_issues
     assert result.planning_state.resolved_slots["runtime_metadata_fields"].source == (
         "policy_default"
     )
@@ -3945,7 +3926,6 @@ async def test_runtime_uses_one_classification_for_state_and_default_assumption(
         ui_language="sv",
     )
     assert result.discovery_analysis.next_issue is None
-    assert result.discovery_analysis.ready_for_confirmation is True
     assert result.planning_state.resolved_slots["runtime_metadata_fields"].source == (
         "policy_default"
     )

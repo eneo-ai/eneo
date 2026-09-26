@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -28,9 +27,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
 from eneo.flows.ai_builder.ai_builder_provider_call import (
+    PROVIDER_ERROR_PARAMETERS,
     ProviderCallCeilingExpired,
     ProviderRejection,
-    ProviderRejectionSource,
     ProviderSilenceExpired,
     ProviderStreamIncomplete,
     provider_error_fields,
@@ -106,32 +105,9 @@ _MAX_DETAILS_JSON_BYTES = 1024
 _MAX_MESSAGE_LENGTH = 4096
 _MAX_REQUEST_ID_LENGTH = 128
 _DIAGNOSTIC_CONTEXT_STRING_LENGTH = 256
-_MAX_PROVIDER_FACT_LENGTH = 64
 # The one gateway status that states a timeout; 502 and 503 say an upstream
 # failed or is unavailable, which is not the same fact.
 _UPSTREAM_GATEWAY_STATUS_CODES = frozenset({504})
-# Parameter suffixes can contain user-controlled schema names.
-_PROVIDER_ERROR_PARAMETERS = frozenset(
-    {
-        "model",
-        "messages",
-        "tools",
-        "tool_choice",
-        "parallel_tool_calls",
-        "response_format",
-        "temperature",
-        "top_p",
-        "top_k",
-        "reasoning_effort",
-        "max_tokens",
-        "max_completion_tokens",
-        "verbosity",
-        "stream",
-        "presence_penalty",
-        "frequency_penalty",
-        "api_version",
-    }
-)
 AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_LOG_KEY = "ai_builder_provider_incident_evidence"
 AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_SCHEMA_VERSION = (
     "ai-builder-provider-incident-evidence.v2"
@@ -539,7 +515,7 @@ def record_ai_builder_provider_failure(
         )
         if rejection.code is not None:
             safe_detail["provider_error_code"] = rejection.code
-        if failure.parameter in _PROVIDER_ERROR_PARAMETERS:
+        if failure.parameter in PROVIDER_ERROR_PARAMETERS:
             safe_detail["provider_parameter"] = failure.parameter
     if request_budget is not None:
         safe_detail.update(
@@ -643,52 +619,6 @@ def _provider_exception_class(
     if isinstance(error, APIError):
         return "api_error"
     return "unknown"
-
-
-def safe_provider_error_code(
-    value: object, *, source: ProviderRejectionSource
-) -> str | None:
-    if source not in {
-        "body",
-        "body.error",
-        "response",
-        "response.error",
-        "message",
-        "message.error",
-    }:
-        return None
-    if not isinstance(value, str) or not 1 <= len(value) <= _MAX_PROVIDER_FACT_LENGTH:
-        return None
-    return value if re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", value, re.ASCII) else None
-
-
-def safe_provider_parameter(value: object) -> str | None:
-    if not isinstance(value, str) or not 1 <= len(value) <= _MAX_DETAILS_STRING_LENGTH:
-        return None
-    if value in _PROVIDER_ERROR_PARAMETERS:
-        return value
-    # Only protocol-owned paths are normalized; schema property names are not.
-    match = re.fullmatch(
-        r"(?P<root>tools)(?:\[[0-9]+\]|\.[0-9]+)(?:\.type|\.function(?:\.(?:name|description|parameters|strict))?)?"
-        r"|(?P<messages>messages)(?:\[[0-9]+\]|\.[0-9]+)(?:\.(?:role|content|name|tool_calls|tool_call_id))?"
-        r"|(?P<format>response_format)\.(?:type|json_schema(?:\.(?:name|description|schema|strict))?)"
-        r"|(?P<choice>tool_choice)\.(?:type|function(?:\.name)?)",
-        value,
-        re.ASCII,
-    )
-    return (
-        next((root for root in match.groups() if root is not None), None)
-        if match
-        else None
-    )
-
-
-def safe_provider_correlation_id(value: object) -> str | None:
-    if not isinstance(value, str) or not 1 <= len(value) <= _MAX_REQUEST_ID_LENGTH:
-        return None
-    return (
-        value if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", value, re.ASCII) else None
-    )
 
 
 def _bounded_provider_status(value: object) -> int | None:

@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from eneo.flows.ai_builder.ai_builder_canonicalization import (
-    canonical_option_id,
     canonical_question_id,
     is_supported_structured_question_id,
     normalize_question_answer,
@@ -24,8 +23,6 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     question_answer_question_id,
     question_answer_values,
     question_response_from_metadata,
-    structured_question_payload_from_tool_arguments,
-    tool_calls_from_message,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     build_flow_discovery_defaults,
@@ -56,9 +53,6 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     normalize_runtime_metadata_state,
     runtime_metadata_allows_input_fields,
 )
-from eneo.flows.ai_builder.ai_builder_tool_names import (
-    ASK_STRUCTURED_QUESTION_TOOL_NAME,
-)
 from eneo.flows.ai_builder.question_catalog import QUESTION_CATALOG
 from eneo.flows.domain.flow import Flow
 from eneo.flows.flow_authoring_spec import (
@@ -67,12 +61,10 @@ from eneo.flows.flow_authoring_spec import (
 
 __all__ = [
     "aggregate_unprompted_user_text",
-    "canonical_option_id",
     "canonical_question_id",
     "extract_freeform_user_messages",
     "extract_answer_signals",
     "is_supported_structured_question_id",
-    "latest_pending_structured_question",
     "mentions_output_change",
     "mentions_runtime_metadata",
     "needs_structured_extraction",
@@ -178,28 +170,6 @@ _TERMINAL_OUTPUT_UNCERTAINTY_SCOPE_MARKERS: tuple[str, ...] = (
     "slutresultatet",
     "utdata",
 )
-
-
-def latest_pending_structured_question(
-    conversation: Sequence[ConversationMessage | Mapping[str, Any]],
-) -> dict[str, Any] | None:
-    for message in reversed(conversation):
-        role = (
-            message.role
-            if isinstance(message, ConversationMessage)
-            else message.get("role")
-        )
-        if role != "assistant":
-            continue
-        for tool_call in reversed(tool_calls_from_message(message)):
-            if tool_call.name != ASK_STRUCTURED_QUESTION_TOOL_NAME:
-                continue
-            payload = structured_question_payload_from_tool_arguments(
-                tool_call.arguments
-            )
-            if payload is not None:
-                return payload
-    return None
 
 
 def has_explicit_structured_answer(

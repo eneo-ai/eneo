@@ -117,26 +117,6 @@ class CreateCompileContext:
         )
 
     @property
-    def admitted_form_field_hints(self) -> tuple[RuntimeInputFieldHint, ...]:
-        hints: list[RuntimeInputFieldHint] = []
-        seen: set[str] = set()
-        for hint in (
-            *self.runtime_input_field_hints,
-            *self.template_placeholder_field_hints,
-        ):
-            if hint.variable_name in seen:
-                continue
-            if is_primary_runtime_input_shadow_field(
-                variable_name=hint.variable_name,
-                field_type=hint.field_type,
-                runtime_input_type=self.runtime_input_type,
-            ):
-                continue
-            hints.append(hint)
-            seen.add(hint.variable_name)
-        return tuple(hints)
-
-    @property
     def incompatible_confirmed_form_field_names(self) -> tuple[str, ...]:
         return tuple(
             dict.fromkeys(

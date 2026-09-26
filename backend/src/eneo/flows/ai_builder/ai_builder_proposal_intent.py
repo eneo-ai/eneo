@@ -38,8 +38,6 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
 )
 from eneo.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
     build_knowledge_refs_property_schema,
-    build_previous_field_refs_schema,
-    build_previous_output_refs_schema,
     build_proposal_structured_field_schema,
     build_review_mode_schema,
 )
@@ -958,7 +956,6 @@ def build_semantic_step_schema(
     include_output_type: bool = True,
     include_review_mode: bool = True,
     include_form_field_refs: bool = True,
-    include_previous_refs: bool = False,
     kb_refs: list[str] | None = None,
 ) -> dict[str, Any]:
     schema: dict[str, Any] = {
@@ -1008,14 +1005,6 @@ def build_semantic_step_schema(
                     }
                 }
                 if include_form_field_refs
-                else {}
-            ),
-            **(
-                {
-                    "uses_previous_fields": build_previous_field_refs_schema(),
-                    "uses_previous_outputs": build_previous_output_refs_schema(),
-                }
-                if include_previous_refs
                 else {}
             ),
             **build_knowledge_refs_property_schema(kb_refs=kb_refs),

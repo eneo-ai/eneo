@@ -34,34 +34,8 @@ class PreflightResult:
     issues: tuple[CriticIssue, ...]
 
     @property
-    def passed(self) -> bool:
-        return not self.issues
-
-    @property
-    def architecture_issues(self) -> tuple[CriticIssue, ...]:
-        return tuple(issue for issue in self.issues if issue.kind == "architecture")
-
-    @property
     def semantic_issues(self) -> tuple[CriticIssue, ...]:
         return tuple(issue for issue in self.issues if issue.kind == "semantic")
-
-    @property
-    def blocks_materialization(self) -> bool:
-        return bool(self.architecture_issues)
-
-    @property
-    def can_retry(self) -> bool:
-        """A draft with only semantic issues can be re-attempted by the planner;
-        an architecture violation is handled through the hard error path."""
-        return not self.architecture_issues
-
-    @property
-    def critic_invariant_ids(self) -> tuple[str, ...]:
-        return tuple(issue.id for issue in self.issues)
-
-    @property
-    def critic_invariant_id(self) -> str | None:
-        return self.critic_invariant_ids[0] if self.critic_invariant_ids else None
 
 
 def run_draft_preflight(context: CriticContext) -> PreflightResult:

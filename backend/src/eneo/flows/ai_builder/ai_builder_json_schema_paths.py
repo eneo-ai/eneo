@@ -54,22 +54,6 @@ def schema_property_names(schema: dict[str, Any]) -> set[str]:
     return names
 
 
-def top_level_schema_property_names(schema: dict[str, Any]) -> list[str]:
-    """Return declared top-level property names in schema order."""
-
-    properties = schema.get("properties")
-    if not isinstance(properties, dict):
-        return []
-
-    property_map = cast(dict[str, object], properties)
-    names: list[str] = []
-    for raw_name in property_map:
-        name = str(raw_name).strip()
-        if name:
-            names.append(name)
-    return names
-
-
 def schema_leaf_property_names(schema: dict[str, Any]) -> list[str]:
     """Return leaf property names in schema order, descending objects and arrays."""
 

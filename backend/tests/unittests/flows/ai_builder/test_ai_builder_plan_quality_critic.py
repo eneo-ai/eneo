@@ -2847,7 +2847,7 @@ class TestCriticInvariantLoop:
     Covered here: the explicit-PDF-terminal-mismatch invariant.
     """
 
-    def test_render_critic_issues_fires_pdf_terminal_alignment_on_mismatch(
+    def test_critic_fires_pdf_terminal_alignment_on_mismatch(
         self,
     ) -> None:
         """The loop runs the pdf-terminal-alignment evidence and returns its
@@ -2855,7 +2855,6 @@ class TestCriticInvariantLoop:
         output PDF."""
         from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
-            render_critic_issues,
         )
         from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
@@ -2880,15 +2879,14 @@ class TestCriticInvariantLoop:
             mixed_audio_doc_input=False,
         )
 
-        issues = render_critic_issues(context)
+        issues = evaluate_critic_invariants(context)
 
-        assert any("PDF" in issue for issue in issues)
+        assert any("PDF" in issue.remediation for issue in issues)
 
-    def test_render_critic_issues_stays_silent_when_terminal_matches(self) -> None:
+    def test_critic_stays_silent_when_terminal_matches(self) -> None:
         """The invariant must not fire when the terminal step already produces PDF."""
         from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
-            render_critic_issues,
         )
         from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
@@ -2918,13 +2916,12 @@ class TestCriticInvariantLoop:
             mixed_audio_doc_input=False,
         )
 
-        assert render_critic_issues(context) == []
+        assert evaluate_critic_invariants(context) == ()
 
-    def test_render_critic_issues_stays_silent_without_pdf_intent(self) -> None:
+    def test_critic_stays_silent_without_pdf_intent(self) -> None:
         """The invariant requires explicit PDF intent; absent it, no issue fires."""
         from eneo.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
-            render_critic_issues,
         )
         from eneo.flows.ai_builder.ai_builder_framework_policy import (
             OutputIntentResolution,
@@ -2947,7 +2944,7 @@ class TestCriticInvariantLoop:
             mixed_audio_doc_input=False,
         )
 
-        assert render_critic_issues(context) == []
+        assert evaluate_critic_invariants(context) == ()
 
 
 _FINAL_TEXT_STEP_INVARIANT_ID = (
@@ -4927,10 +4924,6 @@ class TestTypedDocumentWorkflowInvariants:
     def test_create_rich_workflow_leaves_form_fields_to_assembly(
         self,
     ) -> None:
-        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-            render_critic_issues,
-        )
-
         spec = FlowDraftSpecCore(
             flow_name="Rapport",
             steps=[
@@ -4944,7 +4937,7 @@ class TestTypedDocumentWorkflowInvariants:
         )
         context = self._typed_document_workflow_context(spec)
 
-        issues = render_critic_issues(context)
+        issues = [issue.remediation for issue in evaluate_critic_invariants(context)]
 
         assert not any("form_fields" in issue for issue in issues)
 
@@ -5010,10 +5003,6 @@ class TestTypedDocumentWorkflowInvariants:
     def test_rich_workflow_requires_json_contract_step_fires_when_missing(
         self,
     ) -> None:
-        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-            render_critic_issues,
-        )
-
         spec = FlowDraftSpecCore(
             flow_name="Rapport",
             steps=[
@@ -5030,7 +5019,7 @@ class TestTypedDocumentWorkflowInvariants:
             spec, structured_result_requested=True
         )
 
-        issues = render_critic_issues(context)
+        issues = [issue.remediation for issue in evaluate_critic_invariants(context)]
 
         assert any(
             "output_contract" in issue or "JSON-steg" in issue for issue in issues
@@ -5168,10 +5157,6 @@ class TestTypedDocumentWorkflowInvariants:
         document-in/document-out workflow, planner obliged, no
         downstream reuse was ever requested.
         """
-        from eneo.flows.ai_builder.ai_builder_critic_invariants import (
-            render_critic_issues,
-        )
-
         spec = FlowDraftSpecCore(
             flow_name="Rapport",
             steps=[
@@ -5188,7 +5173,7 @@ class TestTypedDocumentWorkflowInvariants:
             spec, structured_result_requested=False
         )
 
-        issues = render_critic_issues(context)
+        issues = [issue.remediation for issue in evaluate_critic_invariants(context)]
 
         assert not any("output_contract" in issue for issue in issues)
         assert not any("JSON-steg" in issue for issue in issues)

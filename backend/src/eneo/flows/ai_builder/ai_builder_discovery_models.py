@@ -25,15 +25,6 @@ from eneo.flows.ai_builder.question_catalog import QuestionExposure
 
 DiscoverySeverity = Literal["blocking", "info"]
 DiscoveryLanguage = Literal["sv", "en"]
-QuestionLevel = Literal["blocking", "high_value", "nice_to_have"]
-DiscoveryConfidence = Literal["high", "medium", "low"]
-DiscoveryResolvedBy = Literal[
-    "structured_answer",
-    "deterministic_inference",
-    "llm_semantic_inference",
-    "flow_default",
-    "heuristic_assumption",
-]
 ReferenceSourceStatus = Literal[
     "not_requested",
     "missing",
@@ -71,14 +62,12 @@ class DiscoveryIssue:
     severity: DiscoverySeverity
     message: str
     suggestion: DiscoveryQuestionSuggestion | None = None
-    question_level: QuestionLevel = "blocking"
 
 
 @dataclass(frozen=True)
 class BackendQuestion:
     question_data: StructuredQuestionPayload
     assistant_text: str
-    issue: DiscoveryIssue | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +79,6 @@ class ReferenceSourceResolution:
 @dataclass(frozen=True)
 class DiscoveryAnalysis:
     issues: tuple[DiscoveryIssue, ...]
-    mvs_met: bool = True
     selected_question_ids: tuple[str, ...] = ()
     # The profile this analysis read, so the question the turn then renders
     # reads it too instead of building it again. Not part of the result.
@@ -104,16 +92,11 @@ class DiscoveryAnalysis:
     def next_issue(self) -> DiscoveryIssue | None:
         return self.blocking_issues[0] if self.blocking_issues else None
 
-    @property
-    def ready_for_confirmation(self) -> bool:
-        return self.mvs_met and not self.blocking_issues
-
 
 @dataclass(frozen=True)
 class DiscoveryProfile:
     language: DiscoveryLanguage
     text: str
-    active_request_text: str
     answers: dict[str, set[str]]
     flow_defaults: dict[str, set[str]]
     capabilities: "FlowCapabilityProfile"
@@ -128,7 +111,6 @@ class DiscoveryProfile:
     document_like_input: bool
     audio_like_input: bool
     final_output_text_or_docx: bool
-    prefer_structured_intermediate: bool = False
 
     def resolved_slot(self, slot_name: str) -> ResolvedSlot | None:
         return self.planning_state.resolved_slots.get(slot_name)

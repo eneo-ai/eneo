@@ -2,7 +2,6 @@ from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     missing_structured_output_path,
     schema_leaf_property_names,
     schema_property_names,
-    top_level_schema_property_names,
 )
 
 
@@ -92,39 +91,6 @@ def test_schema_property_names_includes_composite_and_child_properties() -> None
     }
 
     assert schema_property_names(schema) == {"summary", "risker", "rubrik"}
-
-
-def test_top_level_schema_property_names_preserves_declaration_order() -> None:
-    schema = {
-        "type": "object",
-        "properties": {
-            "meeting_context": {"type": "string"},
-            "participants": {"type": "array"},
-        },
-    }
-
-    assert top_level_schema_property_names(schema) == [
-        "meeting_context",
-        "participants",
-    ]
-
-
-def test_top_level_schema_property_names_ignores_composite_and_nested_properties() -> (
-    None
-):
-    schema = {
-        "allOf": [
-            {"type": "object", "properties": {"summary": {"type": "string"}}},
-        ],
-        "properties": {
-            "risker": {
-                "type": "object",
-                "properties": {"rubrik": {"type": "string"}},
-            }
-        },
-    }
-
-    assert top_level_schema_property_names(schema) == ["risker"]
 
 
 def test_schema_leaf_property_names_descends_objects_and_array_items() -> None:

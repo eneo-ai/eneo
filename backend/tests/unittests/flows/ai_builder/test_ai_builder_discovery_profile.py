@@ -167,10 +167,6 @@ def test_build_flow_capability_profile_tracks_entry_points_and_step_capabilities
     assert profile.citation_step_orders == (1,)
     assert profile.contract_step_orders == (2,)
     assert profile.variable_binding_step_orders == (2, 4)
-    assert profile.all_previous_steps_orders == (4,)
-    assert profile.settled_families == frozenset(
-        {"output_artifact", "runtime_metadata"}
-    )
 
 
 def test_existing_transcription_only_flow_settles_the_purpose_for_an_edit() -> None:
@@ -255,9 +251,6 @@ def test_build_discovery_profile_uses_settled_flow_state_to_keep_docx_edit_outpu
     )
 
     assert profile.input_intent.document_runtime_input_requested is True
-    assert profile.capabilities.settled_families == frozenset(
-        {"input_shape", "output_artifact"}
-    )
     assert profile.edit_scope.active_families == frozenset({"output_artifact"})
     assert "input_shape" not in profile.edit_scope.active_families
 
@@ -296,9 +289,8 @@ def test_build_discovery_profile_merges_short_follow_up_into_active_request_wind
         flow=flow,
     )
 
-    assert profile.edit_scope.merged_previous_request is True
-    assert "docx" in profile.active_request_text
-    assert "kortare" in profile.active_request_text
+    assert "docx" in profile.text
+    assert "kortare" in profile.text
 
 
 def test_expresses_task_intent_uses_token_prefixes_not_raw_substrings() -> None:
@@ -550,43 +542,3 @@ def test_has_change_semantics_recognizes_substitution_phrase() -> None:
         has_change_semantics("ändra sista steget till docx i stället för pdf") is True
     )
     assert has_change_semantics("analysera docx-filer och skriv en rapport") is False
-
-
-def test_profile_prefers_structured_intermediate_for_audio_artifact_analysis_report() -> (
-    None
-):
-    profile = build_discovery_profile(
-        [
-            ConversationMessage(
-                role="user",
-                content=(
-                    "Create a flow that transcribes meeting audio, analyzes the "
-                    "discussion topics, and produces a DOCX meeting report."
-                ),
-            )
-        ]
-    )
-
-    assert profile.audio_like_input is True
-    assert profile.output_intent.terminal_output == "docx_document"
-    assert profile.prefer_structured_intermediate is True
-
-
-def test_profile_does_not_force_structured_intermediate_for_simple_audio_docx_transcript() -> (
-    None
-):
-    profile = build_discovery_profile(
-        [
-            ConversationMessage(
-                role="user",
-                content=(
-                    "Create a flow that transcribes meeting audio and produces "
-                    "a DOCX file with the transcription."
-                ),
-            )
-        ]
-    )
-
-    assert profile.audio_like_input is True
-    assert profile.output_intent.terminal_output == "docx_document"
-    assert profile.prefer_structured_intermediate is False

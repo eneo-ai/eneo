@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import cast
 
-from eneo.flows.ai_builder.ai_builder_discovery_families import (
-    DiscoveryFamily,
-)
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     BASIC_RUNTIME_METADATA,
     NO_EXTRA_RUNTIME_METADATA,
@@ -48,14 +45,9 @@ class FlowCapabilityProfile:
     final_output_generation_mode: str | None = None
     runtime_metadata_state: RuntimeMetadataState | None = None
     stops_after_primary_operation: bool = False
-    knowledge_base_step_orders: tuple[int, ...] = ()
     citation_step_orders: tuple[int, ...] = ()
     contract_step_orders: tuple[int, ...] = ()
     variable_binding_step_orders: tuple[int, ...] = ()
-    all_previous_steps_orders: tuple[int, ...] = ()
-    settled_families: frozenset[DiscoveryFamily] = field(
-        default_factory=lambda: frozenset()
-    )
 
     def to_signal_defaults(self) -> dict[str, set[str]]:
         defaults: dict[str, set[str]] = defaultdict(set)
@@ -146,18 +138,6 @@ def build_flow_capability_profile(flow: Flow | None) -> FlowCapabilityProfile:
     variable_binding_step_orders = tuple(
         step.step_order for step in steps if _has_variable_bindings(step)
     )
-    all_previous_steps_orders = tuple(
-        step.step_order
-        for step in steps
-        if step.input_source is FlowInputSource.ALL_PREVIOUS_STEPS
-    )
-
-    settled_families: set[DiscoveryFamily] = set()
-    if runtime_input_settled:
-        settled_families.add("input_shape")
-    settled_families.add("output_artifact")
-    if runtime_metadata_state is not None:
-        settled_families.add("runtime_metadata")
 
     return FlowCapabilityProfile(
         flow_input_steps=flow_input_steps,
@@ -173,8 +153,6 @@ def build_flow_capability_profile(flow: Flow | None) -> FlowCapabilityProfile:
         citation_step_orders=citation_step_orders,
         contract_step_orders=contract_step_orders,
         variable_binding_step_orders=variable_binding_step_orders,
-        all_previous_steps_orders=all_previous_steps_orders,
-        settled_families=frozenset(settled_families),
     )
 
 

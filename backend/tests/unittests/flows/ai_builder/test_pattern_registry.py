@@ -22,12 +22,8 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
 )
 from eneo.flows.ai_builder.pattern_registry import (
-    CHAIN_STEP_DESCRIPTORS,
-    COMPILED_CHAIN_PATTERN_IDS,
     PATTERN_REGISTRY,
-    PLANNER_ONLY_CHAIN_PATTERN_IDS,
     Pattern,
-    question_template_ids_for_slot,
 )
 from eneo.flows.enums import (
     FlowInputType,
@@ -301,45 +297,6 @@ class TestPositivePatternContract:
                 f"non-empty chain_steps; got {pattern.chain_steps!r}"
             )
 
-    def test_chain_bearing_patterns_are_explicitly_classified(self) -> None:
-        """Every chain-bearing pattern needs an owner.
-
-        Compiler-backed chains are turned into backend-owned skeleton steps;
-        planner-only chains are prompt metadata only. A new chain pattern
-        must choose one category explicitly so compiler behavior cannot drift
-        behind the planner-visible registry.
-        """
-
-        chain_bearing_ids = frozenset(
-            pattern.id for pattern in PATTERN_REGISTRY.values() if pattern.chain_steps
-        )
-        classified_ids = COMPILED_CHAIN_PATTERN_IDS | PLANNER_ONLY_CHAIN_PATTERN_IDS
-
-        assert COMPILED_CHAIN_PATTERN_IDS.isdisjoint(PLANNER_ONLY_CHAIN_PATTERN_IDS)
-        assert chain_bearing_ids == classified_ids
-
-    def test_every_chain_step_token_is_declared_in_manifest(self) -> None:
-        """Chain tokens are backend/compiler vocabulary.
-
-        The Pattern Registry chooses which token sequence belongs to a
-        pattern and owns the human-readable label for each token. Concrete
-        compiler step text lives in the create intent compiler. This guard makes
-        token renames fail in tests instead of silently drifting between the
-        planner prompt and backend compiler.
-        """
-
-        registry_tokens = frozenset(
-            chain_step
-            for pattern in PATTERN_REGISTRY.values()
-            for chain_step in pattern.chain_steps
-        )
-        manifest_tokens = frozenset(CHAIN_STEP_DESCRIPTORS)
-
-        assert registry_tokens == manifest_tokens
-        for token, descriptor in CHAIN_STEP_DESCRIPTORS.items():
-            assert descriptor.token == token
-            assert descriptor.label.strip(), f"{token}: empty chain-step label"
-
 
 class TestNegativePatternContract:
     @pytest.fixture
@@ -387,36 +344,7 @@ class TestQuestionTemplateIdReferences:
 
 
 class TestPatternRegistryPublicApi:
-    """Public planner-strategy entry points for slot-to-question lookup."""
-
-    def test_question_template_ids_for_slot_returns_declared_qids(self) -> None:
-        """`summarize_text` declares `primary_runtime_input` and
-        `terminal_output` as both slots and question_template_ids. The
-        lookup must return the qids in declaration order."""
-        qids = question_template_ids_for_slot("summarize_text", "primary_runtime_input")
-        assert qids == ("primary_runtime_input",)
-        qids = question_template_ids_for_slot("summarize_text", "terminal_output")
-        assert qids == ("terminal_output",)
-
-    def test_question_template_ids_for_slot_returns_empty_for_unknown_slot(
-        self,
-    ) -> None:
-        """A slot the pattern does not declare yields `()` — not an
-        exception, because 'does this pattern care about slot X' is a
-        valid question a consumer may ask repeatedly."""
-        assert (
-            question_template_ids_for_slot("summarize_text", "pdf_generation_mode")
-            == ()
-        )
-
-    def test_question_template_ids_for_slot_raises_for_unknown_pattern_id(
-        self,
-    ) -> None:
-        """A typo in `pattern_id` should fail loudly. Returning `()`
-        would mask a programmer error — the caller almost certainly
-        meant a real pattern id."""
-        with pytest.raises(KeyError):
-            question_template_ids_for_slot("no_such_pattern", "primary_runtime_input")
+    """Slot and question-template declarations of individual patterns."""
 
     def test_form_field_runtime_inputs_declares_runtime_metadata_slot(
         self,

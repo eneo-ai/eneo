@@ -1251,28 +1251,6 @@ def compute_conversation_token_budget(
     )
 
 
-def trim_conversation_for_context(
-    messages: list[LLMMessageParam],
-    *,
-    max_tokens: int,
-    litellm_model: str = "",
-) -> list[LLMMessageParam]:
-    if not messages:
-        return []
-    groups = group_proposal_messages(
-        messages,
-        current_turn_index=len(messages) - 1,
-    )
-    fitted = fit_proposal_message_groups(
-        groups,
-        token_limit=max_tokens,
-        model_name=litellm_model,
-    )
-    if fitted is None:
-        fitted = tuple(group for group in groups if group.protected)
-    return flatten_proposal_message_groups(fitted)
-
-
 def conversation_message_to_llm_message(msg: ConversationMessage) -> LLMMessageParam:
     content = msg.content
     question_answer = question_answer_from_metadata(msg.metadata)

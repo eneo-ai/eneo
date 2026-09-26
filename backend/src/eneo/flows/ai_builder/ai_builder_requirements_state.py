@@ -283,50 +283,6 @@ def latest_confirmed_requirements(
     return state.latest_summary if state.confirmed else None
 
 
-def render_confirmed_requirements_system_prompt_block(
-    summary: RequirementsSummaryPayload,
-) -> str:
-    lines = ["## Bekräftade krav"]
-    if relevant_summary := user_relevant_requirement_text(summary.summary):
-        lines.extend(["", relevant_summary])
-    lines.extend(["", "### Nyckelbeslut"])
-    for decision in summary.key_decisions:
-        lines.append(f"- {decision.topic}: {decision.decision}")
-
-    lines.extend(
-        [
-            "",
-            "### Indata",
-        ]
-    )
-    if input_description := user_relevant_requirement_text(summary.input_description):
-        lines.append(input_description)
-    else:
-        lines.append("-")
-    lines.extend(["", "### Utdata"])
-    if output_description := user_relevant_requirement_text(summary.output_description):
-        lines.append(output_description)
-    else:
-        lines.append("-")
-
-    if summary.named_content_fields:
-        lines.extend(["", "### Innehåll som resultatet ska bevara"])
-        lines.extend(f"- {field.label}" for field in summary.named_content_fields)
-
-    manual_setup_notes = user_relevant_requirement_notes(summary.manual_setup_notes)
-    if manual_setup_notes:
-        lines.extend(["", "### Manuell uppsättning"])
-        lines.extend(f"- {note}" for note in manual_setup_notes)
-
-    lines.extend(
-        [
-            "",
-            "Bygg vidare på dessa bekräftade krav. Om användaren ändrar något måste du först uppdatera kraven och få en ny bekräftelse innan du föreslår en plan.",
-        ]
-    )
-    return "\n".join(lines)
-
-
 def render_confirmed_requirements_proposal_prompt_block(
     summary: RequirementsSummaryPayload | None,
 ) -> str:

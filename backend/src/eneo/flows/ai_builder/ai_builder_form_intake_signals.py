@@ -76,12 +76,6 @@ class FormIntakePattern:
     needs_form_fields: bool = False
     sectioned_form_intake: bool = False
 
-    def recipe_signals(self) -> set[str]:
-        signals: set[str] = set()
-        if self.sectioned_form_intake:
-            signals.add(SECTIONED_FORM_INTAKE_SIGNAL)
-        return signals
-
 
 def detect_form_intake_pattern(text: str) -> FormIntakePattern:
     normalized = text.casefold()
@@ -106,10 +100,6 @@ def mentions_form_field_needs(text: str) -> bool:
 
 def mentions_sectioned_form_intake(text: str) -> bool:
     return detect_form_intake_pattern(text).sectioned_form_intake
-
-
-def extract_form_intake_recipe_signals(text: str) -> set[str]:
-    return detect_form_intake_pattern(text).recipe_signals()
 
 
 def form_intake_signal_values_from_planning_state(

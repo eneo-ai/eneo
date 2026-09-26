@@ -27,7 +27,6 @@ from eneo.flows.ai_builder.ai_builder_edit_scope import (
     resolve_edit_scope,
 )
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
-    OutputIntentResolution,
     aggregate_unprompted_user_text,
     extract_answer_signals,
     has_explicit_structured_answer,
@@ -118,46 +117,6 @@ _QUESTION_ACTION_MARKERS = (
     "lagg till",
     "make",
     "skapa",
-)
-
-_STRUCTURED_INTERMEDIATE_FORCE_HINTS = (
-    "json",
-    "kontrakt",
-    "contract",
-    "extrahera",
-    "extract",
-    "risker",
-    "risks",
-    "rekommendationer",
-    "recommendations",
-)
-
-_STRUCTURED_INTERMEDIATE_OPTOUT_HINTS = (
-    "håll analysen som vanlig text",
-    "keep the analysis as plain text",
-    "undvik extra struktur",
-    "avoid extra structure",
-    "plain text only",
-    "text only",
-)
-
-_STRUCTURED_REPORT_HINTS = (
-    "rapport",
-    "report",
-    "pdf",
-    "docx",
-    "structured report",
-    "strukturerad",
-)
-
-_ANALYSIS_STAGE_HINTS = (
-    "analys",
-    "analysis",
-    "sociologisk",
-    "psykologisk",
-    "psychological",
-    "comparison",
-    "jämförelse",
 )
 
 _DOCUMENT_PACKAGE_PHRASES: tuple[str, ...] = (
@@ -295,18 +254,6 @@ def build_discovery_profile(
         active_request_text=text,
         active_answer_signals=active_answers,
         active_explicit_question_ids=active_explicit_question_ids,
-        merged_previous_request=(
-            active_window.merged_previous_request
-            if active_window is not None
-            else False
-        ),
-    )
-    prefer_structured_intermediate = should_prefer_structured_intermediate(
-        text=text,
-        input_intent=input_intent,
-        output_intent=output_intent,
-        flow_defaults=flow_defaults,
-        answers=answers,
     )
     comparison_requested = _comparison_requested(
         text=text,
@@ -320,7 +267,6 @@ def build_discovery_profile(
     return DiscoveryProfile(
         language=resolve_discovery_language(conversation, text),
         text=text,
-        active_request_text=text,
         answers=answers,
         flow_defaults=flow_defaults,
         capabilities=capabilities,
@@ -340,7 +286,6 @@ def build_discovery_profile(
             or output_intent.content_shape == "structured_report"
             or bool(default_output_mode)
         ),
-        prefer_structured_intermediate=prefer_structured_intermediate,
     )
 
 
@@ -488,62 +433,6 @@ def expresses_task_intent(text: str) -> bool:
         normalized,
         (*_TASK_VERB_PREFIXES_SV, *_TASK_VERB_PREFIXES_EN),
     ) or any(token in normalized.split() for token in _TASK_VERB_EXACT_TOKENS)
-
-
-def count_distinct_task_verbs(text: str) -> int:
-    normalized = normalize_discovery_text(text)
-    tokens = normalized.split()
-    matches = {
-        verb
-        for verb in (*_TASK_VERB_PREFIXES_SV, *_TASK_VERB_PREFIXES_EN)
-        if any(token.startswith(verb) for token in tokens)
-    }
-    matches.update(token for token in _TASK_VERB_EXACT_TOKENS if token in tokens)
-    return len(matches)
-
-
-def should_prefer_structured_intermediate(
-    *,
-    text: str,
-    input_intent: InputIntentResolution,
-    output_intent: OutputIntentResolution,
-    flow_defaults: dict[str, set[str]],
-    answers: dict[str, set[str]],
-) -> bool:
-    if contains_any_phrase(text, _STRUCTURED_INTERMEDIATE_OPTOUT_HINTS):
-        return False
-    if contains_any_phrase(text, _STRUCTURED_INTERMEDIATE_FORCE_HINTS):
-        return True
-
-    document_like_input = (
-        input_intent.document_runtime_input_requested
-        or "documents"
-        in flow_defaults.get(
-            "primary_runtime_input",
-            set(),
-        )
-    )
-    audio_like_input = input_intent.audio_requested or "audio" in flow_defaults.get(
-        "primary_runtime_input",
-        set(),
-    )
-    if not (document_like_input or audio_like_input):
-        return False
-
-    structured_deliverable = (
-        output_intent.terminal_output in {"pdf_document", "docx_document"}
-        or output_intent.content_shape == "structured_report"
-        or contains_any_token_prefix(text, _STRUCTURED_REPORT_HINTS)
-    )
-    if not structured_deliverable:
-        return False
-
-    task_verb_count = count_distinct_task_verbs(text)
-    if task_verb_count >= 3:
-        return True
-    return task_verb_count >= 2 and contains_any_token_prefix(
-        text, _ANALYSIS_STAGE_HINTS
-    )
 
 
 def infer_discovery_language(text: str) -> DiscoveryLanguage:
