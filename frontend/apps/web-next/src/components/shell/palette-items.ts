@@ -29,6 +29,8 @@ export type PaletteEntry = {
   keywords?: string[];
   /** Only offered once the user types (keeps the empty palette short). */
   searchOnly?: boolean;
+  /** When the result was last active (conversations), shown at the row's end. */
+  activeAt?: string;
 };
 
 type Translate = (key: string, values?: Record<string, string>) => string;
@@ -139,7 +141,8 @@ export function buildPaletteEntries(
       subtitle: conversationContext(conversation, t) ?? t("personal_assistant"),
       group: "conversations",
       action: { type: "navigate", href: conversationHref(conversation) },
-      visual: { type: "icon", icon: "conversation" }
+      visual: { type: "icon", icon: "conversation" },
+      activeAt: conversation.last_activity_at
     });
   }
 
