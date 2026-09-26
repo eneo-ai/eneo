@@ -41,8 +41,9 @@ services:
       timeout: 3s
       retries: 30
 
-  # Deterministic OpenAI-compatible stand-in. The seeded test model's provider
-  # endpoint points here, so chat completions never reach a real provider.
+  # Deterministic OpenAI-compatible stand-in. The seeded test models' provider
+  # endpoint points here, so chat completions and embeddings never reach a real
+  # provider.
   e2e-mock-model:
     image: eneo_devcontainer-eneo
     command: ["python3", "/workspace/e2e/mock_model_server.py"]
@@ -96,7 +97,7 @@ services:
         export PATH="/workspace/backend/.venv/bin:$$PATH"
         apt-get update -qq && apt-get install -y -qq libsndfile1 ffmpeg >/dev/null
         python init_db.py            # migrate (alembic upgrade head) + seed tenant/user
-        python /workspace/e2e/seed.py  # seed mock completion model
+        python /workspace/e2e/seed.py  # seed mock completion + embedding models
         exec gunicorn src.eneo.server.main:app \
           --workers 1 --worker-class uvicorn.workers.UvicornWorker \
           --keep-alive 75 --bind 0.0.0.0:8000

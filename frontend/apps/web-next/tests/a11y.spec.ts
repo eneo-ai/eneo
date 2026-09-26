@@ -313,16 +313,11 @@ for (const colorScheme of ["light", "dark"] as const) {
     });
 
     test("collection detail", async ({ page }) => {
+      // A new space gets the organisation's embedding model (e2e/seed.py),
+      // which a collection needs.
       const space = await createSpace(page, uniqueName(`E2E A11y Collection ${colorScheme}`));
       await page.goto(`${space}/knowledge`);
       const dialog = await openCreateCollectionDialog(page);
-      test.skip(
-        await dialog
-          .getByText(/inga inbäddningsmodeller|not have any embedding models/i)
-          .isVisible(),
-        "A collection needs an embedding model in its space, and the e2e stack (e2e/seed.py) " +
-          "seeds none; the scan runs once it does."
-      );
 
       const name = uniqueName("E2E A11y samling");
       await dialog.getByLabel(/^(namn|name)$/i).fill(name);

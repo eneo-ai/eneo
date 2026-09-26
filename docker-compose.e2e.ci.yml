@@ -108,7 +108,7 @@ services:
         set -e
         export PATH="/app/.venv/bin:$$PATH"
         python init_db.py            # migrate (alembic upgrade head) + seed tenant/user
-        python /e2e/seed.py          # seed mock completion model
+        python /e2e/seed.py          # seed mock completion + embedding models
         exec gunicorn src.eneo.server.main:app \
           --workers 1 --worker-class uvicorn.workers.UvicornWorker \
           --keep-alive 75 --bind 0.0.0.0:8000
