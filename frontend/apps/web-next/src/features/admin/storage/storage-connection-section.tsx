@@ -10,7 +10,7 @@ import {
   RefreshCw
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type SubmitEvent } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -207,7 +207,7 @@ export function StorageConnectionSection({
     setInput((current) => ({ ...current, access_key_id: "", secret_access_key: "" }));
   }
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!mode || !formValid || submitting) return;
     setSubmitting(true);

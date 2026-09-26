@@ -5,7 +5,7 @@ import { BookOpenCheck, Plus, Search, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useState, type FormEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -120,7 +120,7 @@ export function OrganizationSkillsPage() {
     router.push(`${LIST_PATH}${params.size ? `?${params}` : ""}`);
   }
 
-  function submitSearch(event: FormEvent<HTMLFormElement>) {
+  function submitSearch(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     navigate(searchInput.trim(), removed);
   }

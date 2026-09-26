@@ -1,13 +1,14 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type SubmitEvent } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { getErrorMessage } from "@/lib/api/errors";
+import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import {
   deriveSkillSlug,
   normalizedSkillContent,
@@ -59,19 +60,11 @@ export function SkillForm(props: Props) {
     instructions !== baseline.instructions ||
     (props.mode === "create" && slug !== baseline.slug);
 
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
+  useBeforeUnloadWarning(dirty);
 
   useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
     setAttempted(true);

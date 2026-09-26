@@ -5,7 +5,7 @@ import { Check, Minus, Pencil, Plus, RotateCcw, Search, Star, Trash2, Users } fr
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useState, type FormEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -145,7 +145,7 @@ export function RolesPage() {
     name.trim().length > 0 &&
     (editor?.kind === "create" || nameChanged || permissionsChanged);
 
-  async function saveRole(event: FormEvent<HTMLFormElement>) {
+  async function saveRole(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!editor || !canSubmit) return;
     setSaving(true);

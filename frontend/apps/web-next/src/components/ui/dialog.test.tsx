@@ -403,7 +403,7 @@ describe("Dialog", () => {
   });
 
   it("never submits a form from its trigger or close button", async () => {
-    const onSubmit = vi.fn((event: React.FormEvent) => event.preventDefault());
+    const onSubmit = vi.fn((event: React.SubmitEvent) => event.preventDefault());
     renderInApp(
       <form onSubmit={onSubmit}>
         <Dialog>
@@ -542,7 +542,7 @@ describe("Dialog", () => {
 
 describe("AlertDialog", () => {
   it("never submits a form from Cancel or the action", async () => {
-    const onSubmit = vi.fn((event: React.FormEvent) => event.preventDefault());
+    const onSubmit = vi.fn((event: React.SubmitEvent) => event.preventDefault());
     const onAction = vi.fn();
     renderInApp(
       <AlertDialog open onOpenChange={() => {}}>

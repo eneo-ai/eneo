@@ -57,7 +57,7 @@ export function CreateSpaceDialog({
 
   // An empty name is explained at the field (WCAG 3.3.1, 3.3.3), not
   // prevented with a disabled button that says nothing.
-  function submit(event: React.FormEvent<HTMLFormElement>) {
+  function submit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) {

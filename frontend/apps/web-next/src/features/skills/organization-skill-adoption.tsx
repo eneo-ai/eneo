@@ -3,7 +3,7 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useState, type FormEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -98,7 +98,7 @@ export function OrganizationSkillAdoption({
   const selectedBehind = selected.filter((resource) => resource.drift === "behind");
   const canAdvance = Boolean(revisionId) && !skill.execution_blocked && !rolloutRunning;
 
-  function searchSubmit(event: FormEvent<HTMLFormElement>) {
+  function searchSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setSelected([]);
     setSearch(searchInput.trim());

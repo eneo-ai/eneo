@@ -168,6 +168,20 @@ const eslintConfig = defineConfig([
     rules: {
       "eneo/no-weak-focus-indicator": "error"
     }
+  },
+  {
+    // Deprecated APIs (TanStack Query methods, React types, DOM properties)
+    // are replaced while their successors exist, not when a major upgrade
+    // removes them. The rule needs type information, so this block turns on
+    // typed linting for app source.
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/lib/api/schema.d.ts"],
+    languageOptions: {
+      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname }
+    },
+    rules: {
+      "@typescript-eslint/no-deprecated": "error"
+    }
   }
 ]);
 

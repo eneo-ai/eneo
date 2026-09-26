@@ -1,4 +1,8 @@
-import { defaultShouldDehydrateQuery, isServer, QueryClient } from "@tanstack/react-query";
+import {
+  defaultShouldDehydrateQuery,
+  environmentManager,
+  QueryClient
+} from "@tanstack/react-query";
 
 /**
  * TanStack Query setup for the App Router hydration pattern: server
@@ -34,6 +38,6 @@ let browserQueryClient: QueryClient | undefined;
  * browser: a singleton that survives suspense-driven re-renders.
  */
 export function getQueryClient(): QueryClient {
-  if (isServer) return makeQueryClient();
+  if (environmentManager.isServer()) return makeQueryClient();
   return (browserQueryClient ??= makeQueryClient());
 }

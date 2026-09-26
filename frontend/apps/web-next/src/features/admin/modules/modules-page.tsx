@@ -76,7 +76,7 @@ export function ModulesPage({ title }: { title: string }) {
     formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  async function saveInstallation(event: React.FormEvent<HTMLFormElement>) {
+  async function saveInstallation(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const key = moduleKey.trim();
     if (!key || redirectUris.length === 0 || !serviceKeyId) return;

@@ -2,7 +2,8 @@
 
 import { Check, CircleAlert, Loader2, OctagonX } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 
 export type SaveStatus = "dirty" | "saving" | "error";
 
@@ -41,15 +42,7 @@ export function SaveStatusProvider({ children }: { children: React.ReactNode }) 
   );
 
   // Catch full reloads / tab close while local state may not be durably saved.
-  useEffect(() => {
-    if (!guarded) return;
-    const handler = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [guarded]);
+  useBeforeUnloadWarning(guarded);
 
   return (
     <SetStatusContext.Provider value={setStatus}>

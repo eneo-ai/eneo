@@ -304,7 +304,9 @@ production build shows these violations. Never loosen the policy.
 ## Verify
 
 - `bun run check` — route typegen and `tsc`.
-- `bun run lint` — i18n drift, theme staleness, Prettier, ESLint.
+- `bun run lint` — i18n drift, theme staleness, Prettier, ESLint. ESLint lints
+  `src` with type information and fails on deprecated APIs
+  (`@typescript-eslint/no-deprecated`): move to the replacement the warning names.
 - `bun run test` — Vitest. `src/app/globals-css.test.ts` compiles `globals.css`
   and guards the layer order, the theme import, the Streamdown `@source`
   paths and the touch-target rules; `src/theme/eneo-theme.contrast.test.ts`

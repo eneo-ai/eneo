@@ -7,7 +7,7 @@ import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { BookOpenCheck, Plus, Search, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type SubmitEvent } from "react";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -65,7 +65,7 @@ export function SpaceSkillsPage() {
   });
   const items = skills.data?.pages.flatMap((page) => page.items) ?? [];
 
-  function submitSearch(event: FormEvent<HTMLFormElement>) {
+  function submitSearch(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setSearch(searchInput.trim());
   }
