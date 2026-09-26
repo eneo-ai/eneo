@@ -33,6 +33,10 @@ describe("PromptLibraryPage", () => {
 
     const table = await screen.findByRole("table", { name: "Promptbibliotek" });
     expect(within(table).getByText("Sammanfatta ett beslut")).toBeTruthy();
+    // Each row's menu says whose it is.
+    expect(
+      within(table).getByRole("button", { name: "Fler åtgärder för Sammanfatta ett beslut" })
+    ).toBeTruthy();
     await expectNoAxeViolations(container);
   });
 });

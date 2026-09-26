@@ -78,7 +78,11 @@ function ClassificationActions({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" aria-label={t("actions")}>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={t("ui_more_actions_for", { name: classification.name })}
+          >
             <MoreHorizontal className="size-4" />
           </Button>
         </DropdownMenuTrigger>

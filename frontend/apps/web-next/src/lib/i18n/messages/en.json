@@ -5556,5 +5556,6 @@
   "feedback_comment": "Comment",
   "feedback_summary_title": "Feedback on answers",
   "feedback_good_answers": "Good answers",
-  "feedback_bad_answers": "Bad answers"
+  "feedback_bad_answers": "Bad answers",
+  "ui_more_actions_for": "More actions for {name}"
 }

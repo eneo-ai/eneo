@@ -57,6 +57,10 @@ describe("OrgApiKeysPage", () => {
 
     const table = await screen.findByRole("table", { name: "API-nycklar" });
     expect(await within(table).findByText("Ärendesystemet")).toBeTruthy();
+    // Each row's menu says whose it is.
+    expect(
+      within(table).getByRole("button", { name: "Fler åtgärder för Ärendesystemet" })
+    ).toBeTruthy();
   });
 
   it("shows the keys in the panel of the selected state tab", async () => {

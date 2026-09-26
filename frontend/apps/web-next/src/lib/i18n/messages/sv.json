@@ -5556,5 +5556,6 @@
   "feedback_comment": "Kommentar",
   "feedback_summary_title": "Återkoppling på svar",
   "feedback_good_answers": "Bra svar",
-  "feedback_bad_answers": "Dåliga svar"
+  "feedback_bad_answers": "Dåliga svar",
+  "ui_more_actions_for": "Fler åtgärder för {name}"
 }

@@ -191,7 +191,11 @@ function EntryRow({ entry }: { entry: Entry }) {
       <TableCell className="w-12">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" aria-label={t("actions")}>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={t("ui_more_actions_for", { name: entry.name })}
+            >
               <MoreHorizontal className="size-4" />
             </Button>
           </DropdownMenuTrigger>
