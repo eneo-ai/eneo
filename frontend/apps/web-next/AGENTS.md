@@ -160,9 +160,12 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
 - **Colour mode**: next-themes owns it (the profile menu's `ThemeSubMenu` calls
   `setTheme`). Its
   nonce'd blocking script sets `.light`/`.dark` and `data-theme` on `<html>`
-  before first paint; Astryx mirrors `resolvedTheme` after hydration. For other
-  client-only values use `useHydrated()` (`src/lib/hooks/use-hydrated.ts`)
-  instead of effect + setState.
+  before first paint, and `globals.css` (section 5) pins `color-scheme` to that
+  class. Astryx stays on `mode="system"`: a context above the page that changes
+  right after hydration makes React client-render a page it has not revealed
+  yet (`astryx-provider.tsx`). For other client-only values use `useHydrated()`
+  (`src/lib/hooks/use-hydrated.ts`) instead of effect + setState, below the
+  page's providers.
 - **Fonts**: Figtree for UI (`font-sans`), JetBrains Mono (`font-mono`), Source
   Serif 4 for assistant answers (`font-voice`). Type scale 14px / 1.2.
 - **App shell** (`src/components/shell/`): Astryx `SideNav` (collapsed state in
