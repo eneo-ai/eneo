@@ -269,7 +269,7 @@ export function BlobTable({ blobs, canEdit }: { blobs: InfoBlob[]; canEdit: bool
   });
 
   if (blobs.length === 0) {
-    return <EmptyState icon={<FileText />} title={t("no_files_uploaded_yet")} headingLevel={3} />;
+    return <EmptyState icon={<FileText />} title={t("no_files_uploaded_yet")} />;
   }
 
   const columns: TableColumn<InfoBlob>[] = [
@@ -309,7 +309,7 @@ export function BlobTable({ blobs, canEdit }: { blobs: InfoBlob[]; canEdit: bool
         }}
       />
       {filtered.length === 0 ? (
-        <EmptyState icon={<SearchX />} title={t("no_results_found")} headingLevel={3} isCompact />
+        <EmptyState icon={<SearchX />} title={t("no_results_found")} isCompact />
       ) : (
         <SpaceTableFrame>
           <Table

@@ -103,8 +103,10 @@ is `e2e@example.com` / `E2ePassword123!` in tenant `E2ETenant`.
 **Deterministic chat.** The stack includes a tiny OpenAI-compatible **mock model
 server** (`e2e/mock_model_server.py`); `e2e/seed.py` seeds a default completion
 model whose provider `endpoint` points at it, so chat completions return a fixed
-string (`E2E mock completion: pong`) — fast, free, and identical every run. No
-real provider is ever called. To keep credentials simple the stack runs with
+string (`E2E mock completion: pong`) — fast, free, and identical every run. It
+also seeds a default embedding model on the same mock (`/v1/embeddings` returns
+vectors hashed from the input), so new spaces can create collections and
+embedding text or files works. No real provider is ever called. To keep credentials simple the stack runs with
 encryption off, so the seeded api-key is plaintext (and meaningless).
 
 > **Status:** the suite covers login, rejected credentials, unauthenticated

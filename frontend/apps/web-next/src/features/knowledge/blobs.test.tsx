@@ -91,8 +91,11 @@ describe("BlobTable", () => {
     expect(screen.getByRole("navigation", { name: /Bläddra bland filer/ })).toBeTruthy();
   });
 
-  it("explains an empty list", () => {
+  it("explains an empty list, one level below the page's h1", () => {
+    // Both pages render the table straight under their h1 (1.3.1 heading order).
     renderInApp(<BlobTable blobs={[]} canEdit />);
-    expect(screen.getByRole("heading", { name: "Du har inga filer uppladdade ännu" })).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Du har inga filer uppladdade ännu" })
+    ).toBeTruthy();
   });
 });
