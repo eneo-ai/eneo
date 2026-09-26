@@ -2,7 +2,6 @@
 
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useTranslations } from "next-intl";
-import { cn } from "@/lib/utils";
 import type { SpaceSection, SpaceSectionId } from "./space-sections";
 
 // Links navigate; the TabList only needs the value to mark the current tab.
@@ -32,11 +31,7 @@ export function SpaceTabs({
       onChange={ignoreSelection}
       size="lg"
       aria-label={t("space_sections_label")}
-      // Forced colours drop the selected tab's background bar; underline it instead.
-      className={cn(
-        "forced-colors:[&_a[aria-current=true]]:underline forced-colors:[&_a[aria-current=true]]:underline-offset-8",
-        className
-      )}
+      className={className}
     >
       {sections.map((section) => {
         const label = t(section.id);

@@ -388,3 +388,44 @@
     position: relative;
   }
 }
+
+/*
+ * 10. Forced colours (Windows contrast themes; ACCESSIBILITY.md → manual
+ *    protocol, step 6). The mode swaps author colours for the system palette,
+ *    so a state drawn only as a tint or a coloured bar disappears: mark what
+ *    is selected, current or highlighted with the system's Highlight instead.
+ *    Unlayered, because a layered rule loses to the legacy tabs' Tailwind
+ *    fill, and a fill that is not a system colour is forced to Canvas.
+ */
+@media (forced-colors: active) {
+  /* The current nav item is Highlight/HighlightText already (Astryx), but
+     Chromium paints a Canvas "backplate" behind every line of text, which
+     turns the label into a white block. The label holds only text, so it can
+     opt out and keep the row's HighlightText; a badge in the row's end
+     content keeps its own forced colours. */
+  .astryx-side-nav-item[data-selected="selected"] > span:not(:has(*)) {
+    forced-color-adjust: none;
+  }
+
+  /* A selected tab's bar is a background: draw it in Highlight. */
+  .astryx-tab-indicator[data-selected="selected"] {
+    background-color: Highlight;
+  }
+
+  /* Menu items and palette options show the highlight as a tint and draw no
+     outline: outline the focused menu item and the palette's active option. */
+  .astryx-dropdown-menu-item:focus,
+  .astryx-command-palette-item[aria-selected="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  /* The current page and the legacy active tab: a Highlight fill, like a
+     selected Astryx segment, opted out so there is no backplate. */
+  .astryx-pagination [aria-current="page"],
+  [data-slot="tabs-trigger"][data-state="active"] {
+    forced-color-adjust: none;
+    background-color: Highlight;
+    color: HighlightText;
+  }
+}

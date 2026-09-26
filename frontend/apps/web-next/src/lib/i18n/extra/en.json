@@ -1379,5 +1379,9 @@
   "ui_more_actions_for": "More actions for {name}",
   "insights_session_from": "Session from {time}",
   "provider_status_attention_title": "{count, plural, one {One provider needs attention} other {# providers need attention}}",
-  "provider_status_attention_hint": "Go to the provider to test the connection again. Change its key and expiry date under Edit provider in the provider's menu."
+  "provider_status_attention_hint": "Go to the provider to test the connection again. Change its key and expiry date under Edit provider in the provider's menu.",
+  "ui_more_ways_to_create": "More ways to create",
+  "model_usage_type_service": "Service",
+  "model_usage_type_assistant_template": "Assistant template",
+  "model_usage_type_app_template": "App template"
 }

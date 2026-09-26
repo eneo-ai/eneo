@@ -120,6 +120,47 @@ describe("globals.css", () => {
     expect(inputs?.[1]).toMatchObject({ "min-inline-size": "44px", "min-block-size": "44px" });
   });
 
+  it("marks what is selected, current or highlighted with Highlight in forced colours", () => {
+    // selector → declarations of every rule under an unlayered
+    // @media (forced-colors: active): a layered rule would lose to Tailwind.
+    const forced = new Map<string, Record<string, string>>();
+    postcss.parse(css).walkAtRules("media", (media: AtRule) => {
+      if (media.params !== "(forced-colors: active)" || media.parent?.type !== "root") return;
+      media.walkRules((rule: Rule) => {
+        const declarations = forced.get(rule.selector) ?? {};
+        rule.walkDecls((decl) => {
+          declarations[decl.prop] = decl.value;
+        });
+        forced.set(rule.selector.replace(/\s+/g, " "), declarations);
+      });
+    });
+
+    // The current nav item's label: no Canvas backplate over HighlightText.
+    expect(
+      forced.get('.astryx-side-nav-item[data-selected="selected"] > span:not(:has(*))')
+    ).toEqual({ "forced-color-adjust": "none" });
+    // A selected tab's bar.
+    expect(forced.get('.astryx-tab-indicator[data-selected="selected"]')).toEqual({
+      "background-color": "Highlight"
+    });
+    // The focused menu item and the palette's active option.
+    expect(
+      forced.get(
+        '.astryx-dropdown-menu-item:focus, .astryx-command-palette-item[aria-selected="true"]'
+      )
+    ).toMatchObject({ outline: "2px solid Highlight" });
+    // The current page and the legacy active tab.
+    expect(
+      forced.get(
+        '.astryx-pagination [aria-current="page"], [data-slot="tabs-trigger"][data-state="active"]'
+      )
+    ).toEqual({
+      "forced-color-adjust": "none",
+      "background-color": "Highlight",
+      color: "HighlightText"
+    });
+  });
+
   it("makes the toast close button a 24 px target (44 px on touch) with a full-strength focus outline", () => {
     const button = '[data-sonner-toast][data-styled="true"] [data-close-button]';
     const rules = new Map<string, Record<string, string>>();

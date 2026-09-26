@@ -18,6 +18,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { type AdminModel, modelLabel, modelUsageDetailsQueryOptions } from "./models";
 
+/** Labels for the entity types the usage endpoint returns; an unknown one shows as sent. */
+const ENTITY_TYPE_KEYS = new Map([
+  ["assistant", "assistant"],
+  ["app", "app"],
+  ["service", "model_usage_type_service"],
+  ["assistant_template", "model_usage_type_assistant_template"],
+  ["app_template", "model_usage_type_app_template"]
+]);
+
 /** Read-only model details: properties (Info) + which resources use it (Usage). */
 export function ModelDetailDialog({
   model,
@@ -103,6 +112,10 @@ function UsageTab({
     ...modelUsageDetailsQueryOptions(browserApi, modelId, kind),
     enabled: open
   });
+  const entityTypeLabel = (type: string) => {
+    const key = ENTITY_TYPE_KEYS.get(type);
+    return key ? t(key) : type;
+  };
 
   if (isPending) return <Skeleton className="h-40 w-full" />;
   if (!data || data.items.length === 0)
@@ -128,7 +141,7 @@ function UsageTab({
               <TableRow key={`${entity.entity_type}-${entity.entity_id}`}>
                 <TableCell className="text-sm font-medium">{entity.entity_name}</TableCell>
                 <TableCell>
-                  <Badge variant="secondary">{entity.entity_type}</Badge>
+                  <Badge variant="secondary">{entityTypeLabel(entity.entity_type)}</Badge>
                 </TableCell>
                 <TableCell className="text-muted-foreground text-sm">
                   {entity.space_name ?? "—"}
