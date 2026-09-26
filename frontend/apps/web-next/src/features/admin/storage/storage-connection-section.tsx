@@ -627,6 +627,7 @@ export function StorageConnectionSection({
                 )}
                 <Button
                   variant="ghost"
+                  // eslint-disable-next-line eneo/no-busy-disabled-button -- unresolvedPending is an earlier abandon whose outcome is unknown until Retry (above) reads it, not work this button runs.
                   disabled={!canManage || unresolvedPending !== null}
                   aria-busy={pendingBusy || undefined}
                   onClick={() => void abandonPending()}

@@ -417,6 +417,7 @@ export function OrganizationSkillAdoption({
                 <Button
                   variant="outline"
                   size="sm"
+                  // eslint-disable-next-line eneo/no-busy-disabled-button -- a rollout runs in the background (its progress shows on the page); detaching waits for it.
                   disabled={rolloutRunning}
                   onClick={() => setAction("detach")}
                 >
@@ -628,6 +629,7 @@ export function OrganizationSkillAdoption({
             {/* Busy, it stays enabled so it keeps focus; confirm() ignores a second press. */}
             <Button
               variant={action === "detach" ? "destructive" : "default"}
+              // eslint-disable-next-line eneo/no-busy-disabled-button -- a rollout runs in the background (its progress shows on the page); this change waits for it.
               disabled={rolloutRunning}
               aria-busy={busy || undefined}
               onClick={() => void confirm()}
