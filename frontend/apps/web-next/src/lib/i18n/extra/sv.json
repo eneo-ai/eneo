@@ -1341,5 +1341,11 @@
   "api_key_header_sent_as": "Skickas som en HTTP-header med API-nyckeln som värde, till exempel X-Api-Key: '<api-nyckel>'",
   "confirm_remove_group": "Vill du verkligen ta bort gruppen ”{groupName}” från den här ytan? Gruppens medlemmar förlorar då den åtkomst de har genom gruppen.",
   "generate_api_key_warning": "Vill du verkligen generera en ny API-nyckel? Dina befintliga API-nycklar fortsätter att fungera om du inte återkallar dem. Skriv ner den nya nyckeln när den visas – du kan inte hämta den från servern i efterhand.",
-  "will_be_sent_as_bearer": "Skickas som: Authorization: Bearer '<token>'"
+  "will_be_sent_as_bearer": "Skickas som: Authorization: Bearer '<token>'",
+  "space_about_show_all": "Visa alla {count}",
+  "space_about_show_fewer": "Visa färre",
+  "space_about_show_all_chat_models": "Visa alla {count} chattmodeller",
+  "space_about_show_fewer_chat_models": "Visa färre chattmodeller",
+  "space_about_show_all_embedding_models": "Visa alla {count} inbäddningsmodeller",
+  "space_about_show_fewer_embedding_models": "Visa färre inbäddningsmodeller"
 }

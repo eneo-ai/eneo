@@ -80,6 +80,8 @@ describe("space Skills", () => {
   it("loads a bounded catalogue page, searches with q and confirms deletion", async () => {
     show(<SpaceSkillsPage />);
     await screen.findByText("Reports");
+    // Named like the page heading (translation keys stand in for the text here).
+    expect(screen.getByRole("table", { name: "skills" })).toBeTruthy();
     expect(get).toHaveBeenCalledWith("/api/v1/spaces/{space_id}/skills/", {
       params: { path: { space_id: "space-1" }, query: { limit: 25, cursor: null, q: undefined } }
     });

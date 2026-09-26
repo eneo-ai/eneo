@@ -242,7 +242,14 @@ export function SpaceSkillsPage() {
       ) : (
         <>
           <SpaceTableFrame>
-            <Table data={items} columns={columns} idKey="id" verticalAlign="top" />
+            {/* Named like the page heading (PageHeader takes no id to point at). */}
+            <Table
+              data={items}
+              columns={columns}
+              idKey="id"
+              verticalAlign="top"
+              aria-label={t("skills")}
+            />
           </SpaceTableFrame>
           {skills.hasNextPage && (
             <Button

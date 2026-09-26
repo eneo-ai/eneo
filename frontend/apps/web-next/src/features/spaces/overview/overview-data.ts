@@ -17,6 +17,19 @@ function time(value: string | null | undefined): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+/**
+ * A space's models with the organization's default model first (when the
+ * space offers it, new assistants, apps and services start with it); the rest
+ * keep the API's order.
+ */
+export function defaultModelFirst<Model extends { is_org_default?: boolean }>(
+  models: readonly Model[]
+): Model[] {
+  return [...models].sort(
+    (a, b) => Number(b.is_org_default === true) - Number(a.is_org_default === true)
+  );
+}
+
 /** Assistants and group chats, most recently changed first. */
 export function recentChatItems(space: Space, compare: Compare): ChatAppItem[] {
   return [

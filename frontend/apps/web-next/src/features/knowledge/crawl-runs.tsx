@@ -184,7 +184,15 @@ export function CrawlRunsTable({ runs }: { runs: CrawlRun[] }) {
         />
       ) : (
         <SpaceTableFrame>
-          <Table data={sortedData} columns={columns} idKey="id" plugins={{ sort: sortPlugin }} />
+          {/* No heading above it: the table fills the website page's
+              "Indexeringar" tab, so it takes the tab's name. */}
+          <Table
+            data={sortedData}
+            columns={columns}
+            idKey="id"
+            aria-label={t("crawls")}
+            plugins={{ sort: sortPlugin }}
+          />
         </SpaceTableFrame>
       )}
     </div>

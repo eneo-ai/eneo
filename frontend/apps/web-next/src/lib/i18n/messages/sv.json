@@ -5519,5 +5519,11 @@
   "your_invite_link": "Din inbjudningslänk",
   "your_session_expired": "Din session har gått ut",
   "zoom_in": "Zooma in",
-  "zoom_out": "Zooma ut"
+  "zoom_out": "Zooma ut",
+  "space_about_show_all": "Visa alla {count}",
+  "space_about_show_fewer": "Visa färre",
+  "space_about_show_all_chat_models": "Visa alla {count} chattmodeller",
+  "space_about_show_fewer_chat_models": "Visa färre chattmodeller",
+  "space_about_show_all_embedding_models": "Visa alla {count} inbäddningsmodeller",
+  "space_about_show_fewer_embedding_models": "Visa färre inbäddningsmodeller"
 }

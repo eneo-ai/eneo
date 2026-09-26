@@ -1341,5 +1341,11 @@
   "confirm_remove_group": "Do you really want to remove the group “{groupName}” from this space? Its members lose the access they have through the group.",
   "generate_api_key_warning": "Do you really want to generate a new API key? Your existing API keys will keep working unless you revoke them. Write down the new key when it is shown – you cannot retrieve it from the server later.",
   "will_be_sent_as_bearer": "Will be sent as: Authorization: Bearer '<token>'",
-  "migrate_model_description": "Move assistants, apps, services, templates, and spaces from {name} to another enabled model. Previous questions are not changed."
+  "migrate_model_description": "Move assistants, apps, services, templates, and spaces from {name} to another enabled model. Previous questions are not changed.",
+  "space_about_show_all": "Show all {count}",
+  "space_about_show_fewer": "Show fewer",
+  "space_about_show_all_chat_models": "Show all {count} chat models",
+  "space_about_show_fewer_chat_models": "Show fewer chat models",
+  "space_about_show_all_embedding_models": "Show all {count} embedding models",
+  "space_about_show_fewer_embedding_models": "Show fewer embedding models"
 }

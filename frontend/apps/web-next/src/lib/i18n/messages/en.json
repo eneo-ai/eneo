@@ -5519,5 +5519,11 @@
   "your_invite_link": "Your invite link",
   "your_session_expired": "Your session has expired",
   "zoom_in": "Zoom in",
-  "zoom_out": "Zoom out"
+  "zoom_out": "Zoom out",
+  "space_about_show_all": "Show all {count}",
+  "space_about_show_fewer": "Show fewer",
+  "space_about_show_all_chat_models": "Show all {count} chat models",
+  "space_about_show_fewer_chat_models": "Show fewer chat models",
+  "space_about_show_all_embedding_models": "Show all {count} embedding models",
+  "space_about_show_fewer_embedding_models": "Show fewer embedding models"
 }
