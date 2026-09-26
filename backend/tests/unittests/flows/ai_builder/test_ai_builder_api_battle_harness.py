@@ -10832,6 +10832,93 @@ def test_a_clarification_answer_keeps_the_saved_step_scope(
     assert sent[1]["question_answer"] == {"question_id": "q-1", "option_id": "o-1"}
 
 
+def test_an_executed_create_case_runs_its_flow_without_an_edit_judgement(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """Only an edit case has a structural phase before its run (live municipal md_portal_lagrum,
+    2026-09-26: an executed create case crashed in _judge_edit before the flow ran).
+
+    Drives the real apply/run/cleanup owner; only the API and the runtime beneath it are faked.
+    """
+
+    harness = _battle_harness()
+    monkeypatch.setattr(
+        harness, "_create_session", lambda **_kwargs: {"session_id": "session-1"}
+    )
+    monkeypatch.setattr(
+        harness,
+        "_send_and_fetch",
+        lambda **_kwargs: {"plan_id": "plan-1", "plan": {"id": "plan-1"}, "events": []},
+    )
+    calls: list[tuple[str, str]] = []
+
+    def request_json(*, method: str, path: str, **_: object) -> dict[str, object]:
+        calls.append((method, path))
+        if path == "/flows/ai-builder/plans/plan-1/create":
+            return {"flow_id": "flow-1"}
+        if path == "/flows/flow-1/":
+            return _applied_flow_from_plan(_review_policy_plan())
+        if path.endswith("/_diagnostics/classifier-slots"):
+            # The session reached its post-apply diagnostics: the lifecycle returned.
+            raise RuntimeError("stop after the flow lifecycle")
+        return {}
+
+    def request_no_content(*, method: str, path: str, **_: object) -> None:
+        calls.append((method, path))
+
+    executed: list[str] = []
+
+    def execute(*, flow_id: str, **_kwargs: object) -> dict[str, object]:
+        executed.append(flow_id)
+        return {}
+
+    monkeypatch.setattr(harness, "_request_json", request_json)
+    monkeypatch.setattr(harness, "_request_no_content", request_no_content)
+    monkeypatch.setattr(harness, "_execute_and_collect_runtime_evidence", execute)
+    case = harness.BattleCase(
+        case_id="create-run",
+        prompt="Bygg ett flöde.",
+        apply_plan=True,
+        execution=harness._case_execution(
+            {"inputs": {"text": "Ansökan."}, "expect": {"output_kind": "text"}},
+            manifest={},
+            owner="test",
+        ),
+    )
+
+    with raises(RuntimeError, match="stop after the flow lifecycle"):
+        harness._run_case_session(
+            case=case,
+            config=harness.ApiConfig(
+                base_url="http://localhost:8123/api/v1",
+                api_key="test-key",
+                timeout_seconds=1,
+            ),
+            args=SimpleNamespace(
+                space_id="space-1",
+                model_id=None,
+                ui_language="sv",
+                file_ids=None,
+                auto_confirm_requirements=False,
+                timeout_seconds=1,
+            ),
+            existing_session_id=None,
+            artifact_output_dir=tmp_path,
+            cases_path=None,
+            provisioned_fixtures=None,
+            seeded_flow=None,
+        )
+
+    assert executed == ["flow-1"]
+    assert calls == [
+        ("GET", "/flows/ai-builder/sessions/session-1/models"),
+        ("POST", "/flows/ai-builder/plans/plan-1/create"),
+        ("GET", "/flows/flow-1/"),
+        ("DELETE", "/flows/flow-1/"),
+        ("GET", "/flows/ai-builder/sessions/session-1/_diagnostics/classifier-slots"),
+    ]
+
+
 def test_an_edit_case_deletes_its_seeded_flow_even_when_the_session_fails(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:

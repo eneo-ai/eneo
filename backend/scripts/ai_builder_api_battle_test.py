@@ -4671,7 +4671,11 @@ def _run_case_session(
                 artifact_output_dir=artifact_output_dir,
                 seeded_flow=seeded_flow,
                 edit_evidence=edit_evidence,
-                structure_passed=structure_passed if case.execution else None,
+                structure_passed=(
+                    structure_passed
+                    if case.edit is not None and case.execution is not None
+                    else None
+                ),
             )
         )
     else:
