@@ -549,8 +549,8 @@ jobs:
 
   # web-next end-to-end and page-level accessibility (tests/a11y.spec.ts: axe
   # WCAG 2.2 A/AA scans in light and dark mode, plus the skip link) against the
-  # same isolated stack as "Frontend E2E". Like "Frontend (web-next)", it is not
-  # part of the aggregate CI gate yet.
+  # same isolated stack as "Frontend E2E". Unlike "Frontend (web-next)", it is
+  # not part of the aggregate CI gate yet: add it once it has run green.
   frontend-web-next-e2e:
     name: Frontend E2E (web-next)
     needs: changes
@@ -855,6 +855,7 @@ jobs:
       - no-intric
       - frontend
       - frontend-e2e
+      - frontend-web-next
       - schema-drift
       - docker-builds
 
@@ -871,6 +872,7 @@ jobs:
           NO_INTRIC_RESULT: ${{ needs.no-intric.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           FRONTEND_E2E_RESULT: ${{ needs.frontend-e2e.result }}
+          FRONTEND_WEB_NEXT_RESULT: ${{ needs.frontend-web-next.result }}
           SCHEMA_DRIFT_RESULT: ${{ needs.schema-drift.result }}
           DOCKER_BUILDS_RESULT: ${{ needs.docker-builds.result }}
         run: |
@@ -901,6 +903,7 @@ jobs:
           check_result "No intric references" "$NO_INTRIC_RESULT"
           check_result "Frontend" "$FRONTEND_RESULT"
           check_result "Frontend E2E" "$FRONTEND_E2E_RESULT"
+          check_result "Frontend (web-next)" "$FRONTEND_WEB_NEXT_RESULT"
           check_result "Schema drift" "$SCHEMA_DRIFT_RESULT"
           check_result "Docker builds" "$DOCKER_BUILDS_RESULT"
 
