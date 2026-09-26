@@ -9,7 +9,6 @@ version=1/2 framing (assistant_protocol.to_conversation_response) is untouched.
 Custom data parts (consumed by the web-next chat UI):
 - `data-session`: session id, completion model and uploaded files, replacing
   v2's first_chunk metadata.
-- `data-status`: transient progress events (e.g. generating_image).
 - `data-mcp-tool-references`: MCP resource citations emitted by tool calls.
 - `data-token-usage`: transient prompt/completion/turn token counts.
 - `data-tool-approval`: MCP tool approval requests; reconciled in place by
@@ -302,13 +301,6 @@ async def _ui_message_chunks(
         elif response_type == ResponseType.FILES:
             assert completion.generated_file is not None
             yield _generated_file_chunk(completion.generated_file, base_url)
-
-        elif response_type == ResponseType.ENEO_EVENT:
-            yield {
-                "type": "data-status",
-                "data": {"status": "generating_image"},
-                "transient": True,
-            }
 
         elif response_type == ResponseType.TOOL_CALL:
             reference_chunk = _mcp_tool_references_chunk(

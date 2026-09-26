@@ -75,7 +75,6 @@ export type EneoDataParts = {
   session: SessionData;
   "mcp-tool-references": { mcp_tool_references: Schema<"McpToolReferencePublic">[] };
   "token-usage": TokenUsageData;
-  status: { status: string };
   "tool-approval": ToolApprovalData;
   error: { code?: number | null };
 };

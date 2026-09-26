@@ -449,7 +449,8 @@ async def test_streaming_abort_persists_changed_skill_evidence_without_text():
     async def fake_completion_stream():
         yield Completion(
             reasoning_token_count=0,
-            response_type=ResponseType.ENEO_EVENT,
+            response_type=ResponseType.TOOL_CALL,
+            tool_calls_metadata=[],
         )
 
     response = SimpleNamespace(

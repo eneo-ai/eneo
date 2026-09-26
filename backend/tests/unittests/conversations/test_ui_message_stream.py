@@ -539,21 +539,16 @@ async def test_failed_tool_maps_to_output_error():
 
 
 @pytest.mark.asyncio
-async def test_generated_image_and_status_event():
+async def test_generated_image():
     completions = [
-        Completion(response_type=ResponseType.ENEO_EVENT),
         Completion(response_type=ResponseType.FILES, generated_file=_generated_file()),
     ]
 
     chunks = await _collect(_response(completions))
     types = [chunk["type"] for chunk in chunks]
-    assert types == ["start", "data-session", "data-status", "file", "finish"]
+    assert types == ["start", "data-session", "file", "finish"]
 
-    status = chunks[2]
-    assert status["data"] == {"status": "generating_image"}
-    assert status["transient"] is True
-
-    file_chunk = chunks[3]
+    file_chunk = chunks[2]
     assert file_chunk["mediaType"] == "image/png"
     assert file_chunk["filename"] == "generated.png"
     assert file_chunk["url"].startswith("http://backend:8123/api/v1/files/")

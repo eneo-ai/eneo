@@ -688,10 +688,7 @@ export class ChatService {
               if (isStale()) return;
               if (!ensureCurrentSession(event)) return;
 
-              if (event.eneo_event_type === "generating_image") {
-                if (!ref) return;
-                ref.generated_files.push({ id: "", name: "", mimetype: "", size: 0 });
-              } else if (event.eneo_event_type === "token_usage" && "usage" in event) {
+              if (event.eneo_event_type === "token_usage" && "usage" in event) {
                 // The backend routes token_usage events through the same SSE
                 // channel as eneo events. Reflect them on the live message
                 // so reload-from-history matches the in-memory state, then
