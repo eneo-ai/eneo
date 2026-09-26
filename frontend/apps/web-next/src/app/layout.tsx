@@ -45,8 +45,9 @@ export default async function RootLayout({
   const locale = await getLocale();
   const messages = await getMessages();
   // Per-request CSP nonce from src/proxy.ts. next-themes needs it for its
-  // blocking colour-mode script (and its transition-suppressing <style>), which
-  // the nonce-only CSP would otherwise block.
+  // blocking colour-mode script (and its transition-suppressing <style>), and
+  // client components that inject a <style> read it from Providers; the
+  // nonce-only CSP would otherwise block them.
   const nonce = (await headers()).get("x-nonce") ?? undefined;
 
   return (
@@ -78,7 +79,7 @@ export default async function RootLayout({
             disableTransitionOnChange
             nonce={nonce}
           >
-            <Providers>{children}</Providers>
+            <Providers nonce={nonce}>{children}</Providers>
             <Toaster />
           </ThemeProvider>
         </NextIntlClientProvider>
