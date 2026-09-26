@@ -345,9 +345,11 @@ export function ToolApprovalCard({
                   {decision === "approved" ? t("chat_tool_approved") : t("chat_tool_denied")}
                 </span>
               ) : (
+                // Astryx Button names itself from `label` (aria-label) and shows
+                // the children: each button names its tool, the text stays short.
                 <span className="flex gap-1.5">
                   <AxButton
-                    label={t("tool_accept")}
+                    label={t("chat_tool_accept_named", { tool: name })}
                     variant="primary"
                     size="sm"
                     isDisabled={submit.isPending}
@@ -356,10 +358,9 @@ export function ToolApprovalCard({
                     }
                   >
                     {t("tool_accept")}
-                    <span className="sr-only">: {name}</span>
                   </AxButton>
                   <AxButton
-                    label={t("tool_deny")}
+                    label={t("chat_tool_deny_named", { tool: name })}
                     variant="secondary"
                     size="sm"
                     isDisabled={submit.isPending}
@@ -368,7 +369,6 @@ export function ToolApprovalCard({
                     }
                   >
                     {t("tool_deny")}
-                    <span className="sr-only">: {name}</span>
                   </AxButton>
                 </span>
               )}
