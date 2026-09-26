@@ -110,16 +110,15 @@ function AttentionBanner({
         <div className="flex flex-col gap-3">
           <ul className="flex flex-col gap-2">
             {rows.map(({ section, notices: rowNotices }) => (
-              <li
-                key={section.key}
-                className="flex flex-wrap items-center gap-x-4 gap-y-1 pointer-coarse:min-h-11"
-              >
+              <li key={section.key} className="flex flex-wrap items-center gap-x-4 gap-y-1">
                 {/* A provider without models has no card to go to. */}
                 {section.models.length > 0 ? (
                   <Link
                     href={`#${providerCardId(section.providerId)}`}
                     hasUnderline
                     isStandalone
+                    // A 44 px target on touch (ACCESSIBILITY.md → Target size).
+                    className="pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
                     onClick={(event) => {
                       event.preventDefault();
                       onShowProvider(section.providerId);

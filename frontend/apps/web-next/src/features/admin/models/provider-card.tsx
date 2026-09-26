@@ -162,7 +162,11 @@ export function ProviderCard({
       // Focusable from script only: the banner's link to this provider moves
       // focus here, so the next Tab continues inside the card.
       tabIndex={-1}
-      className="bg-ax-card border-ax-border rounded-ax-container shadow-ax-low focus-visible:outline-ring overflow-hidden border focus-visible:outline-2 focus-visible:outline-offset-2"
+      // `relative` makes the card the containing block of the table's
+      // visually hidden (absolutely positioned) texts. Without one they
+      // escape the clipping scroll wrapper and widen the page, which then
+      // scrolls sideways at 320 px (WCAG 1.4.10).
+      className="bg-ax-card border-ax-border rounded-ax-container shadow-ax-low focus-visible:outline-ring relative overflow-hidden border focus-visible:outline-2 focus-visible:outline-offset-2"
     >
       <div className="border-ax-border flex flex-wrap items-center gap-x-3 gap-y-2 border-b py-3 ps-4 pe-2.5">
         <span className="bg-ax-muted rounded-ax-inner flex size-8 shrink-0 items-center justify-center">
