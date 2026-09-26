@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   conversationHref,
+  currentNavTarget,
   isAdminRoute,
   isChatRoute,
   navTarget,
@@ -53,10 +54,36 @@ describe("navTarget", () => {
     expect(navTarget("/spaces/personal/chat", params())).toEqual({ kind: "new-conversation" });
   });
 
-  it("selects the conversation for a saved personal chat", () => {
+  it("selects the conversation for a saved personal chat, with no place behind it", () => {
     expect(navTarget("/spaces/personal/chat", params("session_id=s-1"))).toEqual({
       kind: "conversation",
-      sessionId: "s-1"
+      sessionId: "s-1",
+      otherwise: { kind: "none" }
+    });
+  });
+
+  it("selects the conversation for a saved chat in any space, its space behind it", () => {
+    expect(navTarget("/spaces/abc/chat", params("type=assistant&id=a-1&session_id=s-1"))).toEqual({
+      kind: "conversation",
+      sessionId: "s-1",
+      otherwise: { kind: "space", routeId: "abc" }
+    });
+    expect(navTarget("/spaces/abc/chat", params("session_id=s-2"))).toEqual({
+      kind: "conversation",
+      sessionId: "s-2",
+      otherwise: { kind: "space", routeId: "abc" }
+    });
+    expect(
+      navTarget("/spaces/personal/chat", params("type=group-chat&id=g-1&session_id=s-3"))
+    ).toEqual({
+      kind: "conversation",
+      sessionId: "s-3",
+      otherwise: { kind: "space", routeId: "personal" }
+    });
+    expect(navTarget("/spaces/organization/chat", params("session_id=s-4"))).toEqual({
+      kind: "conversation",
+      sessionId: "s-4",
+      otherwise: { kind: "organization" }
     });
   });
 
@@ -83,6 +110,64 @@ describe("navTarget", () => {
   });
 });
 
-it("builds conversation links in the personal chat's URL scheme", () => {
-  expect(conversationHref("s 1")).toBe("/spaces/personal/chat?session_id=s+1");
+describe("currentNavTarget", () => {
+  const saved = navTarget("/spaces/abc/chat", new URLSearchParams("session_id=s-1"));
+
+  it("keeps a conversation that Senaste lists", () => {
+    expect(currentNavTarget(saved, ["s-0", "s-1"])).toBe(saved);
+  });
+
+  it("falls back to its place when Senaste doesn't list it", () => {
+    expect(currentNavTarget(saved, ["s-0"])).toEqual({ kind: "space", routeId: "abc" });
+    const personal = navTarget("/spaces/personal/chat", new URLSearchParams("session_id=s-1"));
+    expect(currentNavTarget(personal, [])).toEqual({ kind: "none" });
+  });
+
+  it("leaves every other destination alone", () => {
+    const space = navTarget("/spaces/abc/overview", null);
+    expect(currentNavTarget(space, [])).toBe(space);
+  });
+});
+
+describe("conversationHref", () => {
+  const space = { id: "abc", personal: false, organization: false };
+  const personal = { id: "p-1", personal: true, organization: false };
+
+  it("opens the personal chat in its own URL scheme", () => {
+    expect(
+      conversationHref({
+        id: "s 1",
+        partner: { type: "default-assistant", id: "d-1" },
+        space: personal
+      })
+    ).toBe("/spaces/personal/chat?session_id=s+1");
+  });
+
+  it("opens other partners in their space's chat, as the chat builds the URL itself", () => {
+    expect(conversationHref({ id: "s-1", partner: { type: "assistant", id: "a-1" }, space })).toBe(
+      "/spaces/abc/chat?type=assistant&id=a-1&session_id=s-1"
+    );
+    expect(
+      conversationHref({ id: "s-2", partner: { type: "group-chat", id: "g-1" }, space: personal })
+    ).toBe("/spaces/personal/chat?type=group-chat&id=g-1&session_id=s-2");
+    expect(
+      conversationHref({ id: "s-3", partner: { type: "default-assistant", id: "d-2" }, space })
+    ).toBe("/spaces/abc/chat?session_id=s-3");
+    expect(
+      conversationHref({
+        id: "s-4",
+        partner: { type: "assistant", id: "a-2" },
+        space: { id: "org", personal: false, organization: true }
+      })
+    ).toBe("/spaces/organization/chat?type=assistant&id=a-2&session_id=s-4");
+  });
+
+  it("round-trips to the conversation in navTarget", () => {
+    const href = conversationHref({ id: "s-1", partner: { type: "assistant", id: "a-1" }, space });
+    const url = new URL(href, "https://eneo.example");
+    expect(navTarget(url.pathname, url.searchParams)).toMatchObject({
+      kind: "conversation",
+      sessionId: "s-1"
+    });
+  });
 });

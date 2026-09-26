@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "@/lib/api/browser";
+import { recentConversationsQueryOptions, type RecentConversation } from "@/lib/api/conversations";
 import type { Permission } from "@/lib/auth/permissions";
 import { expectNoAxeViolations } from "@/test/axe";
 import { setRoute } from "@/test/navigation";
@@ -12,7 +13,6 @@ import {
   testAppContext,
   testQueryClient
 } from "@/test/render";
-import { recentConversationsQueryOptions } from "./nav-data";
 import type { NavVariant } from "./routes";
 import { DesktopSideNav } from "./side-nav";
 import { SIDE_NAV_COLLAPSED_COOKIE } from "./side-nav-preference";
@@ -33,30 +33,56 @@ const SPACES = [
   { id: "org", name: "Organisation", description: null, personal: false, organization: true }
 ];
 
-function seededClient({ conversations = true } = {}) {
+function conversation(
+  id: string,
+  name: string,
+  partner: RecentConversation["partner"],
+  space: RecentConversation["space"]
+): RecentConversation {
+  const at = "2026-09-26T10:00:00Z";
+  return { id, name, created_at: at, last_activity_at: at, partner, space };
+}
+
+const PERSONAL_SPACE = { id: "p", name: "Personal", personal: true, organization: false };
+const PERSONAL_CHAT = { type: "default-assistant", id: "d", name: "Eneo" } as const;
+
+/** Latest first, across the personal chat, space assistants and group chats. */
+const CONVERSATIONS = [
+  conversation("c1", "Upphandlingsanalys mot LOU", PERSONAL_CHAT, PERSONAL_SPACE),
+  conversation(
+    "c2",
+    "Sammanfatta KS-protokoll",
+    { type: "assistant", id: "a1", name: "Avtalsgranskaren" },
+    { id: "s1", name: "Upphandling", personal: false, organization: false }
+  ),
+  conversation(
+    "c3",
+    "Veckomöte",
+    { type: "group-chat", id: "g1", name: "Inköpsrådet" },
+    { id: "s2", name: "Socialtjänst", personal: false, organization: false }
+  ),
+  conversation(
+    "c4",
+    "Årsplanering",
+    { type: "default-assistant", id: "od", name: "Organisationsassistenten" },
+    { id: "org", name: "Organisation", personal: false, organization: true }
+  ),
+  conversation("c5", "Mötesanteckningar", PERSONAL_CHAT, PERSONAL_SPACE),
+  // Past the nav's five: only the ⌘K palette offers it.
+  conversation("c6", "Gammal fråga", PERSONAL_CHAT, PERSONAL_SPACE)
+];
+
+function seededClient({ conversations = CONVERSATIONS } = {}) {
   const queryClient = testQueryClient();
   queryClient.setQueryData(["spaces"], SPACES);
-  queryClient.setQueryData(["spaces", "personal"], {
-    id: "p",
-    personal: true,
-    default_assistant: { id: "default-assistant" }
-  });
-  queryClient.setQueryData(
-    recentConversationsQueryOptions(browserApi, "default-assistant", 5).queryKey,
-    conversations
-      ? [
-          { id: "c1", name: "Upphandlingsanalys mot LOU" },
-          { id: "c2", name: "Sammanfatta KS-protokoll" }
-        ]
-      : []
-  );
+  queryClient.setQueryData(recentConversationsQueryOptions(browserApi).queryKey, conversations);
   return queryClient;
 }
 
 function renderNav({
   variant = "main" as NavVariant,
   permissions = [] as Permission[],
-  conversations = true,
+  conversations = CONVERSATIONS,
   shell = { ...noopShell, openPalette: vi.fn(), openCreateSpace: vi.fn() }
 } = {}) {
   const utils = renderInApp(<DesktopSideNav variant={variant} navId="side-nav" />, {
@@ -65,6 +91,19 @@ function renderNav({
     shell
   });
   return { ...utils, shell };
+}
+
+function currentLinks() {
+  return screen.getAllByRole("link").filter((link) => link.getAttribute("aria-current") === "page");
+}
+
+/** The accessible description: the text of the elements aria-describedby names. */
+function descriptionOf(element: HTMLElement) {
+  return (element.getAttribute("aria-describedby") ?? "")
+    .split(" ")
+    .filter(Boolean)
+    .map((id) => document.getElementById(id)?.textContent)
+    .join(" ");
 }
 
 beforeEach(() => setRoute("/spaces/personal/chat"));
@@ -100,13 +139,46 @@ describe("DesktopSideNav (main)", () => {
       expect(within(spaces).getByRole("link", { name })).toBeTruthy();
     }
 
+    // The five latest conversations, each opening its own chat.
     const recent = within(navigation).getByRole("group", { name: "Senaste" });
     expect(
       within(recent)
         .getAllByRole("link")
         .map((link) => link.getAttribute("href"))
-    ).toEqual(["/spaces/personal/chat?session_id=c1", "/spaces/personal/chat?session_id=c2"]);
+    ).toEqual([
+      "/spaces/personal/chat?session_id=c1",
+      "/spaces/s1/chat?type=assistant&id=a1&session_id=c2",
+      "/spaces/s2/chat?type=group-chat&id=g1&session_id=c3",
+      "/spaces/organization/chat?session_id=c4",
+      "/spaces/personal/chat?session_id=c5"
+    ]);
 
+    await expectNoAxeViolations(container);
+  });
+
+  it("says who a conversation is with where its title alone doesn't", async () => {
+    const { container } = renderNav();
+    const recent = screen.getByRole("group", { name: "Senaste" });
+
+    // Titles stay the links' names; the partner and its space are their
+    // descriptions (and tooltips). The personal chat needs neither.
+    const personal = within(recent).getByRole("link", { name: "Upphandlingsanalys mot LOU" });
+    expect(personal.hasAttribute("aria-describedby")).toBe(false);
+    expect(
+      descriptionOf(within(recent).getByRole("link", { name: "Sammanfatta KS-protokoll" }))
+    ).toBe("Avtalsgranskaren i Upphandling");
+    expect(descriptionOf(within(recent).getByRole("link", { name: "Veckomöte" }))).toBe(
+      "Inköpsrådet i Socialtjänst"
+    );
+    expect(descriptionOf(within(recent).getByRole("link", { name: "Årsplanering" }))).toBe(
+      "Organisationsassistenten i Organisation"
+    );
+
+    // Plain links: each is a keyboard stop of its own.
+    for (const link of within(recent).getAllByRole("link")) {
+      link.focus();
+      expect(document.activeElement).toBe(link);
+    }
     await expectNoAxeViolations(container);
   });
 
@@ -132,22 +204,40 @@ describe("DesktopSideNav (main)", () => {
     );
     cleanup();
 
-    setRoute("/spaces/personal/chat?session_id=c2");
+    setRoute("/spaces/personal/chat?session_id=c5");
     renderNav();
-    expect(
-      screen.getByRole("link", { name: "Sammanfatta KS-protokoll" }).getAttribute("aria-current")
-    ).toBe("page");
-    expect(
-      screen.getByRole("link", { name: "Ny konversation" }).getAttribute("aria-current")
-    ).toBeNull();
+    expect(currentLinks()).toEqual([screen.getByRole("link", { name: "Mötesanteckningar" })]);
+    cleanup();
+
+    // A personal conversation Senaste doesn't show: nothing else stands in.
+    setRoute("/spaces/personal/chat?session_id=c6");
+    renderNav();
+    expect(currentLinks()).toEqual([]);
     cleanup();
 
     setRoute("/spaces/s2/knowledge");
     renderNav();
-    const current = screen
-      .getAllByRole("link")
-      .filter((link) => link.getAttribute("aria-current") === "page");
-    expect(current).toEqual([screen.getByRole("link", { name: "Socialtjänst" })]);
+    expect(currentLinks()).toEqual([screen.getByRole("link", { name: "Socialtjänst" })]);
+  });
+
+  it("marks a conversation of any assistant in Senaste, else its space", () => {
+    setRoute("/spaces/s1/chat?type=assistant&id=a1&session_id=c2");
+    renderNav();
+    expect(currentLinks()).toEqual([
+      screen.getByRole("link", { name: "Sammanfatta KS-protokoll" })
+    ]);
+    cleanup();
+
+    // Past the five Senaste shows: the space it belongs to is current instead.
+    setRoute("/spaces/s1/chat?type=assistant&id=a1&session_id=c9");
+    renderNav();
+    expect(currentLinks()).toEqual([screen.getByRole("link", { name: "Upphandling" })]);
+    cleanup();
+
+    // The organisation space's chat: Senaste, not Organisation, marks it.
+    setRoute("/spaces/organization/chat?session_id=c4");
+    renderNav({ permissions: ["admin"] });
+    expect(currentLinks()).toEqual([screen.getByRole("link", { name: "Årsplanering" })]);
   });
 
   it("offers Skapa yta only with the shared-spaces permission", () => {
@@ -169,7 +259,7 @@ describe("DesktopSideNav (main)", () => {
   });
 
   it("hides Senaste when there are no conversations", () => {
-    renderNav({ conversations: false });
+    renderNav({ conversations: [] });
     expect(screen.queryByRole("group", { name: "Senaste" })).toBeNull();
   });
 

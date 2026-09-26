@@ -1,7 +1,9 @@
 import { createStaticSource } from "@astryxdesign/core/Typeahead";
+import type { RecentConversation } from "@/lib/api/conversations";
 import type { Schema } from "@/lib/api/models";
 import { catalogGroups } from "@/app/(app)/dashboard/catalog";
 import type { AdminNavGroup } from "./admin-nav-items";
+import { conversationContext } from "./conversation-context";
 import { conversationHref, NEW_CONVERSATION_HREF } from "./routes";
 
 /** Result groups; buildPaletteEntries emits them in this order, which the palette keeps. */
@@ -34,7 +36,7 @@ type Translate = (key: string, values?: Record<string, string>) => string;
 export type PaletteData = {
   dashboard: Schema<"Dashboard"> | null;
   spaces: Schema<"SpaceSparse">[] | null;
-  conversations: Schema<"SessionMetadataPublic">[];
+  conversations: RecentConversation[];
   /** The space the user is in, for its collections and websites ("Kunskap"). */
   currentSpace: { routeId: string; space: Schema<"SpacePublic"> } | null;
 };
@@ -51,9 +53,9 @@ function spaceLabel(space: { personal: boolean; name: string }, t: Translate) {
 
 /**
  * Everything the ⌘K palette can find, in group order. Built from queries the
- * app already has (dashboard, spaces list, personal conversations, the
- * current space); no search endpoint is involved. "Assistenter" lists what
- * the "Assistenter" page lists (`catalogGroups`): assistants and apps.
+ * app already has (dashboard, spaces list, recent conversations, the current
+ * space); no search endpoint is involved. "Assistenter" lists what the
+ * "Assistenter" page lists (`catalogGroups`): assistants and apps.
  */
 export function buildPaletteEntries(
   data: PaletteData,
@@ -133,8 +135,10 @@ export function buildPaletteEntries(
     entries.push({
       id: `conversation:${conversation.id}`,
       label: conversation.name.trim() || t("shell_untitled_conversation"),
+      // Who it is with, also searchable: "avtalsgranskaren" finds its conversations.
+      subtitle: conversationContext(conversation, t) ?? t("personal_assistant"),
       group: "conversations",
-      action: { type: "navigate", href: conversationHref(conversation.id) },
+      action: { type: "navigate", href: conversationHref(conversation) },
       visual: { type: "icon", icon: "conversation" }
     });
   }

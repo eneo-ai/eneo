@@ -2,12 +2,31 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "@/lib/api/browser";
+import {
+  invalidateConversationLists,
+  recentConversationsQueryOptions,
+  type RecentConversation
+} from "@/lib/api/conversations";
 import type { Permission } from "@/lib/auth/permissions";
 import { expectNoAxeViolations } from "@/test/axe";
 import { router, setRoute } from "@/test/navigation";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import ShellCommandPalette from "./command-palette";
-import { recentConversationsQueryOptions } from "./nav-data";
+
+const PERSONAL_SPACE = { id: "p", name: "Personal", personal: true, organization: false };
+const UPPHANDLING = { id: "s1", name: "Upphandling", personal: false, organization: false };
+
+function conversation(
+  id: string,
+  name: string,
+  partner: RecentConversation["partner"] = { type: "default-assistant", id: "d", name: "Eneo" },
+  space: RecentConversation["space"] = PERSONAL_SPACE
+): RecentConversation {
+  const at = "2026-09-26T10:00:00Z";
+  return { id, name, created_at: at, last_activity_at: at, partner, space };
+}
+
+const recentKey = recentConversationsQueryOptions(browserApi).queryKey;
 
 vi.mock("next/navigation", () => import("@/test/navigation"));
 
@@ -41,10 +60,15 @@ function seededClient() {
     ["spaces"],
     [{ id: "s1", name: "Upphandling", description: null, personal: false, organization: false }]
   );
-  queryClient.setQueryData(
-    recentConversationsQueryOptions(browserApi, "default-assistant", 20).queryKey,
-    [{ id: "c1", name: "Upphandlingsanalys mot LOU" }]
-  );
+  queryClient.setQueryData(recentKey, [
+    conversation("c1", "Upphandlingsanalys mot LOU"),
+    conversation(
+      "c2",
+      "Leverantörsbedömning",
+      { type: "assistant", id: "a2", name: "Avtalsgranskaren" },
+      UPPHANDLING
+    )
+  ]);
   queryClient.setQueryData(["spaces", "s1"], {
     id: "s1",
     name: "Upphandling",
@@ -118,6 +142,17 @@ describe("ShellCommandPalette", () => {
     expect(router.push).toHaveBeenCalledWith("/spaces/personal/chat?session_id=c1");
   });
 
+  it("lists conversations with every assistant, saying who each one is with", async () => {
+    renderPalette();
+    const personal = await screen.findByRole("option", { name: /Upphandlingsanalys mot LOU/ });
+    expect(personal.textContent).toContain("Personlig assistent");
+
+    const inSpace = screen.getByRole("option", { name: /Leverantörsbedömning/ });
+    expect(inSpace.textContent).toContain("Avtalsgranskaren i Upphandling");
+    fireEvent.click(inSpace);
+    expect(router.push).toHaveBeenCalledWith("/spaces/s1/chat?type=assistant&id=a2&session_id=c2");
+  });
+
   it("opens the highlighted result with Enter", async () => {
     renderPalette();
     await screen.findByRole("option", { name: /Upphandlingsassistenten/ });
@@ -177,18 +212,16 @@ describe("ShellCommandPalette", () => {
     });
     queryClient.setQueryData(["spaces"], []);
     // Fresh, but the chat invalidated it: a conversation was deleted.
-    const conversationsKey = recentConversationsQueryOptions(
-      browserApi,
-      "default-assistant",
-      20
-    ).queryKey;
-    queryClient.setQueryData(conversationsKey, [{ id: "c1", name: "Raderad konversation" }]);
-    await queryClient.invalidateQueries({
-      queryKey: ["conversations", "assistant", "default-assistant"]
-    });
+    queryClient.setQueryData(recentKey, [conversation("c1", "Raderad konversation")]);
+    await invalidateConversationLists(queryClient, [
+      "conversations",
+      "assistant",
+      "default-assistant"
+    ]);
     const get = vi.spyOn(browserApi, "GET").mockImplementation(((path: string) => {
       if (path === "/api/v1/dashboard/") return ok(dashboard("Nytt namn"));
-      if (path === "/api/v1/conversations/") return ok({ items: [{ id: "c2", name: "Ny fråga" }] });
+      if (path === "/api/v1/conversations/recent/")
+        return ok({ items: [conversation("c2", "Ny fråga")] });
       return ok({});
     }) as unknown as typeof browserApi.GET);
 
