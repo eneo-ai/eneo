@@ -161,7 +161,7 @@ describe("KnowledgePage", () => {
 
     const table = screen.getByRole("table", { name: "Webbplatser" });
     // The same words as on the space overview.
-    expect(within(table).getByText("Inte crawlad ännu")).toBeTruthy();
+    expect(within(table).getByText("Inte indexerad ännu")).toBeTruthy();
     expect(within(table).getByText("Synkfel")).toBeTruthy();
     expect(within(table).getAllByRole("link", { name: /Gå till webbplats/ })).toHaveLength(2);
     await expectNoAxeViolations(container);
@@ -376,7 +376,7 @@ describe("KnowledgePage", () => {
     expect(cells("Gammal")[4]!.textContent).toMatch(/Över 10 dagar sedan$/);
     expect(cells("Gammal")[5]!.textContent).toBe("Aldrig");
     expect(cells("Ny")[5]!.textContent).toBe(
-      "VeckovisNästa crawl schemaläggs efter första synkningen"
+      "VeckovisNästa indexering schemaläggs efter den första"
     );
     expect(screen.getByRole("table").querySelector("tbody [title]")).toBeNull();
   });

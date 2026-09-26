@@ -148,7 +148,7 @@ describe("CrawlRunsTable", () => {
   it("says so when the website was never crawled", () => {
     renderInApp(<CrawlRunsTable runs={[]} />);
     expect(
-      screen.getByRole("heading", { name: "Denna webbplats har inte crawlats tidigare" })
+      screen.getByRole("heading", { name: "Denna webbplats har inte indexerats tidigare" })
     ).toBeTruthy();
   });
 });

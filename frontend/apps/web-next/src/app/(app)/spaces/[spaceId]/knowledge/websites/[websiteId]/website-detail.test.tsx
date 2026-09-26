@@ -87,7 +87,7 @@ describe("WebsiteDetail", () => {
     const sync = await screen.findByRole("button", { name: "Synkronisera nu" });
     expect((sync as HTMLButtonElement).disabled).toBe(true);
     expect(sync.getAttribute("title")).toBeNull();
-    const reason = screen.getByText("Kan inte synkronisera medan en crawl redan körs");
+    const reason = screen.getByText("Kan inte synkronisera medan en indexering redan pågår");
     expect(sync.getAttribute("aria-describedby")).toBe(reason.id);
   });
 
@@ -96,15 +96,15 @@ describe("WebsiteDetail", () => {
 
     const sync = await screen.findByRole("button", { name: "Synkronisera nu" });
     expect((sync as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.queryByText("Kan inte synkronisera medan en crawl redan körs")).toBeNull();
+    expect(screen.queryByText("Kan inte synkronisera medan en indexering redan pågår")).toBeNull();
   });
 
-  it("keeps focus on a busy Starta crawl and starts one crawl", async () => {
+  it("keeps focus on a busy Starta indexering and starts one crawl", async () => {
     post.mockReturnValue(new Promise(() => {}));
     renderInApp(<WebsiteDetail websiteId="website-1" />);
     fireEvent.click(await screen.findByRole("button", { name: "Synkronisera nu" }));
     const dialog = await screen.findByRole("alertdialog", { name: "Synkronisera webbplats" });
-    const start = within(dialog).getByRole("button", { name: "Starta crawl" });
+    const start = within(dialog).getByRole("button", { name: "Starta indexering" });
     start.focus();
 
     fireEvent.click(start);
