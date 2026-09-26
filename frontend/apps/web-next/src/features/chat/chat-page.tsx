@@ -28,6 +28,8 @@ type ActiveConversation = {
   feedback: 1 | -1 | null;
   /** The first question was sent (the header then shows a title). */
   started: boolean;
+  /** Replaces a deleted conversation: its composer takes focus if focus was lost. */
+  focusComposer?: boolean;
 };
 
 function hasInsights(partner: ChatPartner): partner is ChatPartner & {
@@ -39,7 +41,7 @@ function hasInsights(partner: ChatPartner): partner is ChatPartner & {
 let conversationCounter = 0;
 
 /** A fresh, unsent conversation (a new remount key each time). */
-function newConversationState(): ActiveConversation {
+function newConversationState({ focusComposer = false } = {}): ActiveConversation {
   conversationCounter += 1;
   return {
     key: `new-${conversationCounter}`,
@@ -47,7 +49,8 @@ function newConversationState(): ActiveConversation {
     messages: [],
     title: null,
     feedback: null,
-    started: false
+    started: false,
+    focusComposer
   };
 }
 
@@ -217,11 +220,13 @@ export function ChatPage({
     if (!historyInline) closeHistory();
   }
 
-  function newConversation() {
-    setActive(newConversationState());
+  /** Starts a fresh conversation (`focusComposer`: it replaces a deleted one). */
+  function startConversation(focusComposer: boolean) {
+    setActive(newConversationState({ focusComposer }));
     setActivity(null);
     updateUrl(null);
   }
+  const newConversation = () => startConversation(false);
 
   const onActivityChange = useCallback((next: ActivityState | null) => {
     if (next) setHistoryOpen(false);
@@ -240,7 +245,9 @@ export function ChatPage({
     },
     onDeleted: (id) => {
       setDeleting(null);
-      if (active?.sessionId === id) newConversation();
+      // The header menu that opened the dialog can go with the conversation's
+      // actions, so the fresh conversation takes focus if it was lost.
+      if (active?.sessionId === id) startConversation(true);
     }
   });
 
@@ -309,6 +316,7 @@ export function ChatPage({
                 partner={partner}
                 initialSessionId={active.sessionId}
                 initialMessages={active.messages}
+                focusComposerIfLost={active.focusComposer}
                 feedback={active.feedback}
                 onRated={rated}
                 modelSelector={modelSelector}

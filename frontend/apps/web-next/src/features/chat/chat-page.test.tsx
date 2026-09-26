@@ -117,7 +117,7 @@ const api = vi.hoisted(() => ({
     return { data: {}, response: new Response() };
   }),
   PATCH: vi.fn(),
-  DELETE: vi.fn()
+  DELETE: vi.fn(async () => ({ data: null, response: new Response(null, { status: 204 }) }))
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
@@ -277,6 +277,21 @@ describe("ChatPage", () => {
     const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "")!;
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Betygsätt som bra" }));
     await waitFor(() => expect(good.getAttribute("aria-pressed")).toBe("true"));
+  });
+
+  it("starts over with focus in the composer after deleting the open conversation", async () => {
+    renderPage("s-1");
+    await screen.findByRole("log", { name: "Konversation" });
+    const [more] = screen.getAllByRole("button", { name: "Fler alternativ" });
+    fireEvent.click(more!);
+    const menu = document.getElementById(more!.getAttribute("aria-controls") ?? "")!;
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Ta bort konversationen" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort konversationen" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Bekräfta borttagning" }));
+
+    await waitFor(() => expect(screen.queryByRole("log")).toBeNull());
+    expect(api.DELETE).toHaveBeenCalled();
+    await waitFor(() => expect(document.activeElement).toBe(composer()));
   });
 
   it("has no axe violations with a loaded conversation", async () => {

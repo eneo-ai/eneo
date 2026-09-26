@@ -24,6 +24,7 @@ import { getErrorMessageForCode } from "@/lib/api/errors";
 import { createChatTransport, type ChatSendOptions } from "@/lib/chat/transport";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
+import { rescueFocus } from "@/lib/focus-rescue";
 import { deriveActivity } from "./activity";
 import { ActivityPanel, type ActivityTab } from "./activity-panel";
 import { ActivityTimings } from "./activity-timings";
@@ -89,6 +90,7 @@ export function ChatView({
   partner,
   initialSessionId = null,
   initialMessages = [],
+  focusComposerIfLost = false,
   feedback = null,
   onRated,
   onSessionCreated,
@@ -103,6 +105,11 @@ export function ChatView({
   partner: ChatPartner;
   initialSessionId?: string | null;
   initialMessages?: EneoUIMessage[];
+  /**
+   * Replaces a conversation that was just deleted: the control that deleted it
+   * may be gone, so the composer takes focus if focus was lost.
+   */
+  focusComposerIfLost?: boolean;
   /** The session's feedback (session-level, shown on the latest answer). */
   feedback?: 1 | -1 | null;
   /** The answer thumbs rated the session. */
@@ -194,6 +201,9 @@ export function ChatView({
   const dockTextareaRef = useRef<HTMLTextAreaElement>(null);
   const startTextareaRef = useRef<HTMLTextAreaElement>(null);
   const refocusComposer = useRef(false);
+  useEffect(() => {
+    if (focusComposerIfLost) rescueFocus(startTextareaRef.current);
+  }, [focusComposerIfLost]);
 
   const transport = useMemo(() => createChatTransport(), []);
   const { messages, sendMessage, setMessages, status, stop, error, clearError } =
