@@ -9,6 +9,7 @@ not.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -105,6 +106,18 @@ def step_template_sites(step: StepSpec) -> list[tuple[ReadSite, str]]:
         if payload is not None:
             sites.append((site, _template_text(payload)))
     return sites
+
+
+def spec_step_refs(steps: Sequence[StepSpec]) -> dict[str, int]:
+    """Every name a step of an authoring spec is read by, to its 1-based order:
+    its plan ref, its saved ref and its runtime alias (step_<order>)."""
+
+    return {
+        ref: order
+        for order, step in enumerate(steps, 1)
+        for ref in (step.plan_step_ref, step.existing_step_ref, f"step_{order}")
+        if ref is not None
+    }
 
 
 def step_reads(

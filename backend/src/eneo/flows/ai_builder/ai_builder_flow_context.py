@@ -11,6 +11,7 @@ from eneo.flows.ai_builder.ai_builder_step_reads import (
     ReadChannel,
     ReadSite,
     StepRead,
+    spec_step_refs,
     step_reads,
 )
 from eneo.flows.assistant_authoring_snapshot import (
@@ -131,12 +132,7 @@ def _build_saved_step_authoring_context(
         for order, step in enumerate(spec.steps, 1)
         if step.existing_step_ref == target_existing_step_ref
     )
-    step_refs = {
-        ref: order
-        for order, step in enumerate(spec.steps, 1)
-        for ref in (step.plan_step_ref, step.existing_step_ref, f"step_{order}")
-        if ref is not None
-    }
+    step_refs = spec_step_refs(spec.steps)
     forms = {field.name for field in spec.form_fields or []}
     target_dependencies: dict[int, list[StepRead]] = {}
     target_forms: set[str] = set()

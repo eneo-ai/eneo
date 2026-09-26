@@ -190,7 +190,7 @@ class EditCompilationResult:
         the same baseline against the spec that is actually returned.
         """
 
-        step_changes = _build_step_changes(
+        step_changes = build_step_changes(
             base_spec=self.base_spec,
             compiled_steps=prepared_spec.steps,
             removed_refs=self.authored_approval.removed_existing_step_refs,
@@ -326,7 +326,7 @@ def compile_edit_proposal(
     final_name = normalized_spec.flow_name
     final_description = normalized_spec.flow_description
     compiled_form_fields = normalized_spec.form_fields
-    form_changes = _build_form_field_changes(base_form_fields, compiled_form_fields)
+    form_changes = build_form_field_changes(base_form_fields, compiled_form_fields)
 
     compiled_spec = FlowDraftSpecCore(
         flow_name=final_name,
@@ -376,7 +376,7 @@ def compile_edit_proposal(
         )
     )
 
-    step_changes = _build_step_changes(
+    step_changes = build_step_changes(
         base_spec=base_spec,
         compiled_steps=compiled_steps,
         removed_refs=prepared.proposal.removed_existing_step_refs,
@@ -719,7 +719,7 @@ def _is_bad_leading_audio_document_extraction(
     )
 
 
-def _build_form_field_changes(
+def build_form_field_changes(
     current_fields: list[FormFieldSpec] | None,
     proposed_fields: list[FormFieldSpec] | None,
 ) -> list[FormFieldChange]:
@@ -822,7 +822,7 @@ def _build_normalization_advisories(
     return advisories
 
 
-def _build_step_changes(
+def build_step_changes(
     *,
     base_spec: FlowDraftSpecCore,
     compiled_steps: list[StepSpec],
