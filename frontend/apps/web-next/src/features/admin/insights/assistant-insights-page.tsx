@@ -1,6 +1,15 @@
 "use client";
 
-import { useClipboard } from "@astryxdesign/core/hooks";
+import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
+import { DateInput } from "@astryxdesign/core/DateInput";
+import { useAnnounce, useClipboard } from "@astryxdesign/core/hooks";
+import { Switch } from "@astryxdesign/core/Switch";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { pixel, proportional, Table, type TableColumn } from "@astryxdesign/core/Table";
+import { TextArea } from "@astryxdesign/core/TextArea";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import type { ISODateString } from "@astryxdesign/core/utils";
 import { useInfiniteQuery, useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   BarChart3,
@@ -12,26 +21,20 @@ import {
   Search,
   SendHorizontal
 } from "lucide-react";
-import Link from "next/link";
-import { useLocale, useTranslations } from "next-intl";
-import { type Dispatch, type SetStateAction, useDeferredValue, useMemo, useState } from "react";
-import { MessageResponse } from "@/components/ai-elements/message";
-import { PageHeader } from "@/components/composites/page-header";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/switch";
+import { useFormatter, useTranslations } from "next-intl";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
+  type Dispatch,
+  type SetStateAction,
+  useDeferredValue,
+  useEffect,
+  useId,
+  useRef,
+  useState
+} from "react";
+import { MessageResponse } from "@/components/ai-elements/message";
+import { ClientTime } from "@/components/composites/client-time";
+import { LoadingState } from "@/components/composites/loading-state";
+import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
 import { toast } from "@/lib/toast";
@@ -39,13 +42,22 @@ import {
   askAssistantInsightQuestion,
   assistantQuestionHistoryQueryOptions,
   fetchAssistantQuestionHistory,
-  type AssistantInsightFilters
+  type AssistantInsightFilters,
+  type AssistantInsightQuestion
 } from "./insights";
 import { assistantQueryOptions } from "@/features/assistants/editor/use-assistant";
 
-const NUMBER = new Intl.NumberFormat("sv-SE");
+type InsightsTab = "analysis" | "questions";
 
-function isoFromDateInput(value: string, boundary: "start" | "end"): string {
+/** The viewer's calendar day of an instant, as the date fields show it. */
+function localDate(iso: string): ISODateString {
+  const date = new Date(iso);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` as ISODateString;
+}
+
+/** The start or the end of the viewer's day `value` (YYYY-MM-DD), as an instant. */
+function isoFromDateInput(value: ISODateString, boundary: "start" | "end"): string {
   const time = boundary === "start" ? "00:00:00" : "23:59:59";
   return new Date(`${value}T${time}`).toISOString();
 }
@@ -59,9 +71,9 @@ function defaultFilters(): AssistantInsightFilters {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <Card className="flex flex-col gap-1 p-4">
-      <span className="text-muted-foreground text-sm">{label}</span>
-      <span className="text-2xl font-semibold tabular-nums">{value}</span>
+    <Card className="flex flex-col gap-1">
+      <dt className="text-ax-text-secondary text-sm">{label}</dt>
+      <dd className="text-2xl font-semibold wrap-anywhere tabular-nums">{value}</dd>
     </Card>
   );
 }
@@ -74,51 +86,39 @@ function FilterBar({
   setFilters: Dispatch<SetStateAction<AssistantInsightFilters>>;
 }) {
   const t = useTranslations();
+  // Astryx's own calendar everywhere: the native picker it uses on touch
+  // probes the engine with a <style> element, which the production CSP blocks
+  // (AGENTS.md → CSP). Astryx 0.6.3 also passes `nativePicker` on to the
+  // field's <div>, so React warns about the prop in development.
+  const dateField = (boundary: "start" | "end") => (
+    <DateInput
+      label={boundary === "start" ? t("from") : t("to")}
+      value={localDate(boundary === "start" ? filters.start : filters.end)}
+      onChange={(value) => {
+        if (!value) return;
+        setFilters((current) => ({ ...current, [boundary]: isoFromDateInput(value, boundary) }));
+      }}
+      nativePicker="never"
+      weekStartsOn="mon"
+      format="date"
+      width="11rem"
+    />
+  );
+
   return (
-    <Card className="flex flex-wrap items-end gap-3 p-4">
-      <label className="flex flex-col gap-1 text-xs">
-        {t("from")}
-        <Input
-          type="date"
-          className="h-8 w-36"
-          value={filters.start.slice(0, 10)}
-          onChange={(event) => {
-            if (!event.target.value) return;
-            setFilters((current) => ({
-              ...current,
-              start: isoFromDateInput(event.target.value, "start")
-            }));
-          }}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-xs">
-        {t("to")}
-        <Input
-          type="date"
-          className="h-8 w-36"
-          value={filters.end.slice(0, 10)}
-          onChange={(event) => {
-            if (!event.target.value) return;
-            setFilters((current) => ({
-              ...current,
-              end: isoFromDateInput(event.target.value, "end")
-            }));
-          }}
-        />
-      </label>
-      <label className="flex min-h-8 items-center gap-2 text-sm">
-        <Switch
-          checked={filters.includeFollowups}
-          onCheckedChange={(checked) =>
-            setFilters((current) => ({ ...current, includeFollowups: checked }))
-          }
-        />
-        {t("include_follow_up_questions")}
-      </label>
-      <Button variant="outline" size="sm" onClick={() => setFilters(defaultFilters())}>
-        <RotateCcw className="size-4" />
-        {t("reset")}
-      </Button>
+    <Card className="flex flex-wrap items-end gap-3">
+      {dateField("start")}
+      {dateField("end")}
+      <Switch
+        label={t("include_follow_up_questions")}
+        value={filters.includeFollowups}
+        onChange={(checked) => setFilters((current) => ({ ...current, includeFollowups: checked }))}
+      />
+      <Button
+        label={t("reset")}
+        icon={<RotateCcw className="size-4" aria-hidden="true" />}
+        onClick={() => setFilters(defaultFilters())}
+      />
     </Card>
   );
 }
@@ -133,6 +133,7 @@ function AnalysisTab({
   filters: AssistantInsightFilters;
 }) {
   const t = useTranslations();
+  const announce = useAnnounce();
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
@@ -140,12 +141,17 @@ function AnalysisTab({
   const ask = useMutation({
     mutationFn: (text: string) =>
       askAssistantInsightQuestion({ api: browserApi, assistantId, filters, question: text }),
-    onSuccess: (text) => setAnswer(text)
+    // The answer can take a while and appears away from focus (WCAG 4.1.3).
+    onSuccess: (text) => {
+      setAnswer(text);
+      announce(t("chat_announce_answer_ready"));
+    },
+    onError: () => announce(t("request_failed"))
   });
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
-      <Card className="flex min-h-96 flex-col gap-4 p-4">
+      <Card className="flex min-h-96 flex-col gap-4">
         <form
           className="flex flex-col gap-3"
           onSubmit={(event) => {
@@ -156,65 +162,78 @@ function AnalysisTab({
             ask.mutate(text);
           }}
         >
-          <Textarea
+          <TextArea
+            label={t("ask_about_insights")}
+            description={t("insights_enter_hint")}
             rows={4}
             value={question}
-            placeholder={t("ask_about_insights")}
+            onChange={setQuestion}
             onKeyDown={(event) => {
-              if (event.key !== "Enter" || event.shiftKey) return;
+              if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
               event.preventDefault();
-              event.currentTarget.form?.requestSubmit();
+              event.currentTarget.closest("form")?.requestSubmit();
             }}
-            onChange={(event) => setQuestion(event.target.value)}
           />
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <span className="text-muted-foreground text-xs">{t("insights_enter_hint")}</span>
-            <Button type="submit" disabled={!question.trim() || ask.isPending}>
-              <SendHorizontal className="size-4" />
-              {ask.isPending ? t("loading") : t("submit_your_question")}
-            </Button>
-          </div>
+          <Button
+            type="submit"
+            variant="primary"
+            label={t("submit_your_question")}
+            icon={<SendHorizontal className="size-4" aria-hidden="true" />}
+            isDisabled={!question.trim()}
+            // Stays focusable while the answer is prepared (a second submit is ignored).
+            isLoading={ask.isPending}
+            isInterruptible
+            className="self-end"
+          />
         </form>
 
-        <div className="bg-muted/30 flex min-h-52 flex-1 flex-col gap-3 rounded-lg border p-4">
+        <div className="bg-ax-sunken border-ax-border rounded-ax-container flex min-h-52 flex-1 flex-col gap-3 border p-4">
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm font-medium">{t("answer")}</p>
             {answer ? (
               <Button
-                type="button"
                 variant="ghost"
                 size="sm"
+                label={isCopied ? t("copied") : t("copy")}
+                icon={
+                  isCopied ? (
+                    <Check className="size-4" aria-hidden="true" />
+                  ) : (
+                    <Copy className="size-4" aria-hidden="true" />
+                  )
+                }
                 onClick={async () => {
                   if (!(await copy(answer))) toast.error(t("chat_copy_failed"));
                 }}
-              >
-                {isCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
-                {isCopied ? t("copied") : t("copy")}
-              </Button>
+              />
             ) : null}
           </div>
           {ask.isPending ? (
-            <Skeleton className="h-28 w-full" />
+            <LoadingState variant="text" rows={3} label={t("chat_insights_generating")} />
           ) : ask.isError ? (
-            <p className="text-destructive text-sm">{t("request_failed")}</p>
+            <p className="text-ax-error text-sm">{t("request_failed")}</p>
           ) : answer ? (
             <MessageResponse className="text-sm leading-7">{answer}</MessageResponse>
           ) : (
-            <p className="text-muted-foreground text-sm">
+            <p className="text-ax-text-secondary text-sm">
               {t("ask_question_about_conversation_history")}
             </p>
           )}
         </div>
       </Card>
 
-      <Card className="flex h-fit flex-col gap-3 p-4">
+      <Card className="flex h-fit flex-col gap-3">
         <p className="font-medium">{t("included_timeframe")}</p>
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
-          <dt className="text-muted-foreground">{t("from")}</dt>
-          <dd>{filters.start.slice(0, 10)}</dd>
-          <dt className="text-muted-foreground">{t("to")}</dt>
-          <dd>{filters.end.slice(0, 10)}</dd>
-          <dt className="text-muted-foreground">{t("assistant")}</dt>
+          <dt className="text-ax-text-secondary">{t("from")}</dt>
+          <dd>
+            <ClientTime value={filters.start} format="date" />
+          </dd>
+          <dt className="text-ax-text-secondary">{t("to")}</dt>
+          <dd>
+            <ClientTime value={filters.end} format="date" />
+          </dd>
+          <dt className="text-ax-text-secondary">{t("assistant")}</dt>
           <dd className="truncate">{assistantName}</dd>
         </dl>
       </Card>
@@ -230,13 +249,9 @@ function QuestionsTab({
   filters: AssistantInsightFilters;
 }) {
   const t = useTranslations();
-  const locale = useLocale();
+  const announce = useAnnounce();
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search.trim());
-  const dateFormatter = useMemo(
-    () => new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }),
-    [locale]
-  );
 
   const query = useInfiniteQuery({
     ...cursorPagination,
@@ -252,75 +267,94 @@ function QuestionsTab({
   });
   const items = flattenPages(query.data?.pages);
   const total = query.data?.pages[0]?.total_count ?? 0;
+  const countLabel = t("loaded_questions_count", { loaded: items.length, total });
+
+  // Announce the count once a new search has its results (WCAG 4.1.3), not
+  // on the first load.
+  const announcedFor = useRef(deferredSearch);
+  const settled = query.isSuccess && !query.isFetching;
+  useEffect(() => {
+    if (!settled || announcedFor.current === deferredSearch) return;
+    announcedFor.current = deferredSearch;
+    announce(countLabel);
+  }, [announce, countLabel, deferredSearch, settled]);
+
+  const columns: TableColumn<AssistantInsightQuestion>[] = [
+    {
+      key: "created_at",
+      header: t("created"),
+      width: pixel(176),
+      renderCell: (item) => <ClientTime value={item.created_at} format="date_time" />
+    },
+    // Room for whole words: on a phone the table scrolls sideways instead.
+    { key: "question", header: t("question"), width: proportional(1, { minWidth: 240 }) },
+    {
+      key: "session_id",
+      header: t("session"),
+      width: pixel(136),
+      renderCell: (item) => (
+        <Button
+          href={`/dashboard/${assistantId}/${item.session_id}`}
+          variant="ghost"
+          size="sm"
+          label={t("session")}
+          icon={<ExternalLink className="size-4" aria-hidden="true" />}
+        />
+      )
+    }
+  ];
 
   return (
-    <Card className="flex flex-col gap-4 p-4">
+    <Card className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <label className="relative flex min-w-64 flex-1 items-center">
-          <Search className="text-muted-foreground absolute left-2.5 size-4" />
-          <Input
-            className="pl-8"
-            value={search}
+        <div className="min-w-0 flex-1 basis-64">
+          <TextInput
+            label={t("search")}
+            isLabelHidden
             placeholder={t("assistant_questions_search_placeholder")}
-            aria-label={t("search")}
-            onChange={(event) => setSearch(event.target.value)}
+            startIcon={Search}
+            value={search}
+            onChange={setSearch}
+            hasClear
+            autoComplete="off"
+            width="100%"
           />
-        </label>
-        <span className="text-muted-foreground text-sm">
-          {t("loaded_questions_count", { loaded: items.length, total })}
-        </span>
+        </div>
+        <span className="text-ax-text-secondary text-sm">{countLabel}</span>
       </div>
 
       {query.isPending ? (
-        <Skeleton className="h-64 w-full" />
+        <LoadingState rows={5} />
       ) : query.isError ? (
-        <p className="text-destructive text-sm">{t("request_failed")}</p>
+        <p className="text-ax-error text-sm">{t("request_failed")}</p>
       ) : items.length === 0 ? (
-        <p className="text-muted-foreground text-sm">{t("no_questions_found_current_settings")}</p>
+        <p className="text-ax-text-secondary text-sm">{t("no_questions_found_current_settings")}</p>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("created")}</TableHead>
-              <TableHead>{t("question")}</TableHead>
-              <TableHead>{t("session")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.map((item) => (
-              <TableRow key={item.id}>
-                <TableCell className="text-muted-foreground text-sm">
-                  {dateFormatter.format(new Date(item.created_at))}
-                </TableCell>
-                <TableCell className="max-w-xl whitespace-normal">{item.question}</TableCell>
-                <TableCell>
-                  <Button variant="ghost" size="sm" asChild>
-                    <Link href={`/dashboard/${assistantId}/${item.session_id}`}>
-                      <ExternalLink className="size-4" />
-                      {t("session")}
-                    </Link>
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <Table
+          aria-label={t("question_history")}
+          data={items}
+          columns={columns}
+          idKey="id"
+          verticalAlign="top"
+        />
       )}
 
       <div className="flex items-center justify-end gap-2">
         {!query.hasNextPage && items.length > 0 ? (
-          <span className="text-muted-foreground text-sm">
+          <span className="text-ax-text-secondary text-sm">
             {t("loaded_all_questions", { total })}
           </span>
         ) : null}
         <Button
-          variant="outline"
-          size="sm"
-          disabled={!query.hasNextPage || query.isFetchingNextPage}
-          onClick={() => void query.fetchNextPage()}
-        >
-          {query.isFetchingNextPage ? t("loading") : t("load_more_questions")}
-        </Button>
+          label={t("load_more_questions")}
+          isDisabled={!query.hasNextPage}
+          // Stays focusable while the next page loads.
+          isLoading={query.isFetchingNextPage}
+          isInterruptible
+          onClick={() => {
+            if (!query.isFetchingNextPage) void query.fetchNextPage();
+          }}
+        />
       </div>
     </Card>
   );
@@ -328,56 +362,95 @@ function QuestionsTab({
 
 export function AssistantInsightsPage({ assistantId }: { assistantId: string }) {
   const t = useTranslations();
+  const format = useFormatter();
   const [filters, setFilters] = useState(defaultFilters);
+  const [tab, setTab] = useState<InsightsTab>("analysis");
+  // Panels stay mounted once opened (hidden when inactive), so a question and
+  // its answer survive a look at the history; the history loads on first visit.
+  const [visited, setVisited] = useState<ReadonlySet<InsightsTab>>(() => new Set(["analysis"]));
   const { data: assistant } = useSuspenseQuery(assistantQueryOptions(browserApi, assistantId));
   const stats = useQuery(
     assistantQuestionHistoryQueryOptions({ api: browserApi, assistantId, filters, limit: 1 })
   );
   const count = stats.data?.total_count;
 
+  const baseId = useId();
+  const tabId = (value: InsightsTab) => `${baseId}-tab-${value}`;
+  const panelId = (value: InsightsTab) => `${baseId}-panel-${value}`;
+
+  function selectTab(next: InsightsTab) {
+    setTab(next);
+    setVisited((current) => (current.has(next) ? current : new Set([...current, next])));
+  }
+
+  const panel = (value: InsightsTab, content: React.ReactNode) => (
+    <div
+      role="tabpanel"
+      id={panelId(value)}
+      aria-labelledby={tabId(value)}
+      hidden={tab !== value}
+      className="pt-4"
+    >
+      {visited.has(value) ? content : null}
+    </div>
+  );
+
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <PageHeader title={assistant.name}>
-        <Button variant="outline" asChild>
-          <Link href="/admin/insights">
-            <BarChart3 className="size-4" />
-            {t("insights")}
-          </Link>
-        </Button>
-      </PageHeader>
+      <PageHeader
+        title={assistant.name}
+        actions={
+          <Button
+            href="/admin/insights"
+            label={t("insights")}
+            icon={<BarChart3 className="size-4" aria-hidden="true" />}
+          />
+        }
+      />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Stat label={t("assistant")} value={assistant.name} />
         <Stat
           label={t("question_history")}
-          value={count == null ? t("loading") : NUMBER.format(count)}
+          value={count == null ? t("loading") : format.number(count)}
         />
         <Stat
           label={t("include_follow_up_questions")}
           value={filters.includeFollowups ? t("yes") : t("no")}
         />
-      </div>
+      </dl>
 
       <FilterBar filters={filters} setFilters={setFilters} />
 
-      <Tabs defaultValue="analysis">
-        <TabsList>
-          <TabsTrigger value="analysis">
-            <BarChart3 className="size-4" />
-            {t("analyse")}
-          </TabsTrigger>
-          <TabsTrigger value="questions">
-            <History className="size-4" />
-            {t("question_history")}
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="analysis" className="pt-4">
+      <div className="flex flex-col">
+        <TabList
+          role="tablist"
+          aria-label={t("legacy_insights_tabs_label")}
+          value={tab}
+          onChange={(value) => selectTab(value === "questions" ? "questions" : "analysis")}
+          hasDivider
+        >
+          <Tab
+            id={tabId("analysis")}
+            value="analysis"
+            label={t("analyse")}
+            icon={<BarChart3 className="size-4" aria-hidden="true" />}
+            panelId={panelId("analysis")}
+          />
+          <Tab
+            id={tabId("questions")}
+            value="questions"
+            label={t("question_history")}
+            icon={<History className="size-4" aria-hidden="true" />}
+            panelId={panelId("questions")}
+          />
+        </TabList>
+        {panel(
+          "analysis",
           <AnalysisTab assistantId={assistantId} assistantName={assistant.name} filters={filters} />
-        </TabsContent>
-        <TabsContent value="questions" className="pt-4">
-          <QuestionsTab assistantId={assistantId} filters={filters} />
-        </TabsContent>
-      </Tabs>
+        )}
+        {panel("questions", <QuestionsTab assistantId={assistantId} filters={filters} />)}
+      </div>
     </div>
   );
 }

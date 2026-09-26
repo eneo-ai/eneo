@@ -88,9 +88,10 @@ function ModelSwitcher() {
     <ModelSelector
       models={visibleModels}
       selectedId={selectedId}
-      onSelect={(id) => update.mutate(id)}
+      // The picker shows the new model while it saves and keeps focus; a
+      // disabled trigger would drop focus to the page.
+      onSelect={(id) => update.mutateAsync(id)}
       locked={lockedModel}
-      disabled={update.isPending}
       size="sm"
       showPricing={tenant.show_model_pricing}
       className="text-ax-text-secondary hover:text-ax-text rounded-ax-element h-8 border-0 px-2 text-[13px] font-semibold pointer-coarse:h-11"

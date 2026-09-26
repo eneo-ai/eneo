@@ -5525,5 +5525,8 @@
   "space_about_show_all_chat_models": "Visa alla {count} chattmodeller",
   "space_about_show_fewer_chat_models": "Visa färre chattmodeller",
   "space_about_show_all_embedding_models": "Visa alla {count} inbäddningsmodeller",
-  "space_about_show_fewer_embedding_models": "Visa färre inbäddningsmodeller"
+  "space_about_show_fewer_embedding_models": "Visa färre inbäddningsmodeller",
+  "legacy_result_tabs_label": "Resultat och transkription",
+  "legacy_insights_tabs_label": "Analys och frågehistorik",
+  "legacy_model_selector_trigger": "{label}: {model}"
 }

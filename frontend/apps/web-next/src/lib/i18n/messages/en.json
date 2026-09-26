@@ -5525,5 +5525,8 @@
   "space_about_show_all_chat_models": "Show all {count} chat models",
   "space_about_show_fewer_chat_models": "Show fewer chat models",
   "space_about_show_all_embedding_models": "Show all {count} embedding models",
-  "space_about_show_fewer_embedding_models": "Show fewer embedding models"
+  "space_about_show_fewer_embedding_models": "Show fewer embedding models",
+  "legacy_result_tabs_label": "Result and transcription",
+  "legacy_insights_tabs_label": "Analysis and question history",
+  "legacy_model_selector_trigger": "{label}: {model}"
 }
