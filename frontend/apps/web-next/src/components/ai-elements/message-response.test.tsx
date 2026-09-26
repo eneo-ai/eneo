@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useMemo } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatTestProviders } from "@/features/chat/testing";
 import { expectNoAxeViolations } from "@/test/axe";
+import { renderInApp } from "@/test/render";
 import {
   CitationSourcesProvider,
   citationComponents,
@@ -60,11 +60,7 @@ function renderAnswer(
   onOpenSource: (index: number, trigger: HTMLElement) => void = vi.fn(),
   text = ANSWER
 ) {
-  return render(
-    <ChatTestProviders>
-      <Answer text={text} onOpenSource={onOpenSource} />
-    </ChatTestProviders>
-  );
+  return renderInApp(<Answer text={text} onOpenSource={onOpenSource} />);
 }
 
 describe("MessageResponse", () => {

@@ -1,22 +1,21 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
+import { renderInApp } from "@/test/render";
 import { ComposerAttachments } from "./attachments";
 import { ContextUsageBar } from "./context-usage-bar";
 import { ChatMcpServers, type McpServerSummary } from "./mcp-controls";
 import { McpSnippetButton } from "./message-parts";
-import { ChatTestProviders, installDomPolyfills } from "./testing";
 
-beforeAll(() => installDomPolyfills());
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
 });
 
 function renderInChat(ui: React.ReactNode) {
-  return render(<ChatTestProviders>{ui}</ChatTestProviders>);
+  return renderInApp(ui);
 }
 
 const servers: McpServerSummary[] = [

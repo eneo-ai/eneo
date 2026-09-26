@@ -1,19 +1,18 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
+import { renderInApp } from "@/test/render";
 import { deriveActivity } from "./activity";
 import { ActivityPanel, type ActivityTab } from "./activity-panel";
 import { ActivityPill } from "./activity-pill";
 import { sourceAnchorId } from "./activity-sources";
 import type { TurnDurations } from "./activity-timings";
-import { ChatTestProviders, installDomPolyfills } from "./testing";
 
 type Part = EneoUIMessage["parts"][number];
 
-beforeAll(() => installDomPolyfills());
 afterEach(cleanup);
 
 const knowledge = [{ id: "group-1", name: "Upphandlingspolicy", kind: "collection" as const }];
@@ -72,7 +71,7 @@ function Harness({
   const [tab, setTab] = useState<ActivityTab>(initialSource !== null ? "sources" : "steps");
   const activity = deriveActivity(message, { knowledge });
   return (
-    <ChatTestProviders>
+    <>
       <ActivityPill
         activity={activity}
         durations={durations}
@@ -92,13 +91,13 @@ function Harness({
           onClose={() => setOpen(false)}
         />
       )}
-    </ChatTestProviders>
+    </>
   );
 }
 
 describe("ActivityPill", () => {
   it("summarises steps, time and sources and is a disclosure for the panel", () => {
-    render(<Harness />);
+    renderInApp(<Harness />);
     const pill = screen.getByRole("button", { name: /aktivitet: 4 steg · 14,6 s · 2 källor/i });
     expect(pill.getAttribute("aria-expanded")).toBe("false");
     expect(pill.hasAttribute("aria-controls")).toBe(false);
@@ -117,10 +116,8 @@ describe("ActivityPill", () => {
       },
       { streaming: true }
     );
-    render(
-      <ChatTestProviders>
-        <ActivityPill activity={live} durations={null} expanded={false} onToggle={vi.fn()} />
-      </ChatTestProviders>
+    renderInApp(
+      <ActivityPill activity={live} durations={null} expanded={false} onToggle={vi.fn()} />
     );
     expect(
       screen.getByRole("button", { name: /aktivitet: lou_troskelvarden…|lou troskelvarden…/i })
@@ -130,7 +127,7 @@ describe("ActivityPill", () => {
 
 describe("ActivityPanel", () => {
   it("moves focus to the selected tab, lists steps with durations and closes on Escape", async () => {
-    render(<Harness />);
+    renderInApp(<Harness />);
     const pill = screen.getByRole("button", { name: /aktivitet:/i });
     fireEvent.click(pill);
 
@@ -157,7 +154,7 @@ describe("ActivityPanel", () => {
   });
 
   it("keeps reasoning and tool call details behind disclosures", () => {
-    render(<Harness />);
+    renderInApp(<Harness />);
     fireEvent.click(screen.getByRole("button", { name: /aktivitet:/i }));
     const reasoning = screen.getByRole("button", { name: "Resonemang" });
     expect(reasoning.getAttribute("aria-expanded")).toBe("false");
@@ -175,7 +172,7 @@ describe("ActivityPanel", () => {
   });
 
   it("switches to numbered sources with where they come from", () => {
-    render(<Harness />);
+    renderInApp(<Harness />);
     fireEvent.click(screen.getByRole("button", { name: /aktivitet:/i }));
     fireEvent.click(screen.getByRole("tab", { name: /källor/i }));
     const sources = screen.getByRole("tabpanel", { name: "Källor" });
@@ -190,14 +187,14 @@ describe("ActivityPanel", () => {
   });
 
   it("focuses the source a citation opened", async () => {
-    render(<Harness initialSource={1} />);
+    renderInApp(<Harness initialSource={1} />);
     const target = document.getElementById(sourceAnchorId(message.id, 2));
     await waitFor(() => expect(document.activeElement).toBe(target));
   });
 
   // Below 1024px (tablets, phones, 200–400% zoom) the panel is a modal sheet.
   it("focuses the cited source in the bottom sheet once it has opened", async () => {
-    render(<Harness initialSource={1} variant="sheet" />);
+    renderInApp(<Harness initialSource={1} variant="sheet" />);
     const sheet = await screen.findByRole("dialog", { name: "Aktivitet för svaret" });
     const target = document.getElementById(sourceAnchorId(message.id, 2));
     expect(sheet.contains(target)).toBe(true);
@@ -205,7 +202,7 @@ describe("ActivityPanel", () => {
   });
 
   it("points the pill at the sheet it opens", async () => {
-    render(<Harness variant="sheet" />);
+    renderInApp(<Harness variant="sheet" />);
     const pill = screen.getByRole("button", { name: /aktivitet:/i });
     fireEvent.click(pill);
     const sheet = await screen.findByRole("dialog", { name: "Aktivitet för svaret" });
@@ -216,7 +213,7 @@ describe("ActivityPanel", () => {
   });
 
   it("has no axe violations with either tab open", async () => {
-    render(<Harness />);
+    renderInApp(<Harness />);
     fireEvent.click(screen.getByRole("button", { name: /aktivitet:/i }));
     await expectNoAxeViolations(document.body);
     fireEvent.click(screen.getByRole("tab", { name: /källor/i }));

@@ -1,17 +1,11 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import type { AppContextData } from "@/components/providers/app-context";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
+import { renderInApp, testAppContext } from "@/test/render";
+import { observedElements, reportResize } from "@/test/setup-dom";
 import { ChatView, type ActivityState } from "./chat-view";
-import {
-  ChatTestProviders,
-  installDomPolyfills,
-  observedElements,
-  reportResize,
-  testAppContext
-} from "./testing";
 
 const spies = vi.hoisted(() => ({
   announce: vi.fn(),
@@ -96,9 +90,8 @@ vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@astryxdesign/core/hooks")>()),
   useAnnounce: () => spies.announce
 }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("next/navigation", () => import("@/test/navigation"));
 
-beforeAll(() => installDomPolyfills());
 afterEach(() => {
   cleanup();
   spies.announce.mockReset();
@@ -116,25 +109,21 @@ const partner: ChatPartner = {
 function Harness({
   onSessionCreated,
   onTitle,
-  appContext,
   chatPartner = partner
 }: {
   onSessionCreated?: (id: string) => void;
   onTitle?: (title: string) => void;
-  appContext?: AppContextData;
   chatPartner?: ChatPartner;
 }) {
   const [activity, setActivity] = useState<ActivityState | null>(null);
   return (
-    <ChatTestProviders appContext={appContext}>
-      <ChatView
-        partner={chatPartner}
-        activity={activity}
-        onActivityChange={setActivity}
-        onSessionCreated={onSessionCreated}
-        onTitle={onTitle}
-      />
-    </ChatTestProviders>
+    <ChatView
+      partner={chatPartner}
+      activity={activity}
+      onActivityChange={setActivity}
+      onSessionCreated={onSessionCreated}
+      onTitle={onTitle}
+    />
   );
 }
 
@@ -149,7 +138,7 @@ describe("ChatView streaming an answer", () => {
     spies.mode = "answer";
     const onSessionCreated = vi.fn();
     const onTitle = vi.fn();
-    render(<Harness onSessionCreated={onSessionCreated} onTitle={onTitle} />);
+    renderInApp(<Harness onSessionCreated={onSessionCreated} onTitle={onTitle} />);
     ask("Vilken gräns gäller?");
 
     const log = await screen.findByRole("log", { name: "Konversation" });
@@ -168,7 +157,7 @@ describe("ChatView streaming an answer", () => {
 describe("ChatView sending", () => {
   it("sends an @-mention to the group chat member it names", async () => {
     spies.mode = "answer";
-    render(
+    renderInApp(
       <Harness
         chatPartner={{
           type: "group-chat",
@@ -195,7 +184,7 @@ describe("ChatView sending", () => {
 
   it("stops an answer from the stop button and says so", async () => {
     spies.mode = "hold";
-    render(<Harness />);
+    renderInApp(<Harness />);
     ask("Vilken gräns gäller?");
     const stop = await screen.findByRole("button", { name: "Stoppa generering" });
     fireEvent.click(stop);
@@ -211,7 +200,7 @@ describe("ChatView docked composer", () => {
   // question, and its height must still be tracked.
   it("keeps focus clear of the dock that appears with the first question", async () => {
     spies.mode = "answer";
-    render(<Harness />);
+    renderInApp(<Harness />);
     ask("Vilken gräns gäller?");
 
     const log = await screen.findByRole("log", { name: "Konversation" });
@@ -221,14 +210,14 @@ describe("ChatView docked composer", () => {
     const textarea = screen.getByRole("textbox", { name: /Meddelande till/ });
     const dock = observedElements().find((element) => element.contains(textarea));
     expect(dock).toBeDefined();
-    act(() => reportResize(dock!, 150));
+    act(() => reportResize(dock!, { height: 150 }));
     expect(scroller?.style.scrollPaddingBottom).toBe("178px");
   });
 });
 
 describe("ChatView when generation fails", () => {
   it("shows and announces the error, keeps the question and retries it", async () => {
-    render(<Harness />);
+    renderInApp(<Harness />);
     ask("Vilken gräns gäller?");
 
     expect(await screen.findByText("Tjänsten svarar inte")).toBeTruthy();
@@ -254,16 +243,16 @@ describe("ChatView when generation fails", () => {
       "URL",
       Object.assign(URL, { createObjectURL: () => "blob:policy", revokeObjectURL: revoke })
     );
-    const appContext = {
-      ...testAppContext,
+    const appContext = testAppContext({
       limits: {
         attachments: {
-          formats: [{ mimetype: "application/pdf", size: 10_000_000, vision: false }],
-          max_in_question: 5
+          formats: [
+            { mimetype: "application/pdf", extensions: ["pdf"], size: 10_000_000, vision: false }
+          ]
         }
       }
-    } as unknown as AppContextData;
-    const { container } = render(<Harness appContext={appContext} />);
+    });
+    const { container } = renderInApp(<Harness />, { appContext });
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
     const file = new File(["%PDF"], "Policy.pdf", { type: "application/pdf" });
     fireEvent.change(input, { target: { files: [file] } });

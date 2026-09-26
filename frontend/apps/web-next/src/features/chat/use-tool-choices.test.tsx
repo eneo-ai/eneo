@@ -1,11 +1,9 @@
 // @vitest-environment jsdom
-import { act, cleanup, renderHook } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { act, cleanup } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import type { AppContextData } from "@/components/providers/app-context";
 import type { Schema } from "@/lib/api/models";
 import type { ChatPartner } from "@/lib/chat/types";
-import { ChatTestProviders, testAppContext } from "./testing";
+import { renderHookInApp, testAppContext } from "@/test/render";
 import { useToolChoices } from "./use-tool-choices";
 
 afterEach(() => {
@@ -40,20 +38,12 @@ const personal: ChatPartner = {
   mcpServers: [server("diarium"), server("kalender")]
 };
 
-function contextWith(showWebSearch: boolean): AppContextData {
-  return {
-    ...testAppContext,
-    user: { ...testAppContext.user, roles: [{ permissions: ["web_search", "image_generation"] }] },
-    featureFlags: { ...testAppContext.featureFlags, showWebSearch }
-  } as AppContextData;
-}
-
 function renderChoices(partner: ChatPartner, showWebSearch = true) {
-  const appContext = contextWith(showWebSearch);
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <ChatTestProviders appContext={appContext}>{children}</ChatTestProviders>
-  );
-  return renderHook(() => useToolChoices(partner), { wrapper });
+  const appContext = testAppContext({
+    permissions: ["web_search", "image_generation"],
+    featureFlags: { showWebSearch }
+  });
+  return renderHookInApp(() => useToolChoices(partner), { appContext });
 }
 
 describe("useToolChoices", () => {

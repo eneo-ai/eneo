@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testAppContext } from "@/test/render";
 import {
   spaceHasPermission,
   type ResourcePermission,
@@ -38,20 +38,6 @@ vi.mock("@/lib/api/browser", () => ({
     GET: () => Promise.resolve({ data: { items: [] }, response: new Response("{}") })
   }
 }));
-vi.mock("@/components/providers/app-context", () => ({
-  useAppContext: () => ({
-    user: { id: "user-1" },
-    tenant: { id: "tenant-1" },
-    settings: { using_templates: true },
-    limits: {
-      attachments: { formats: [] },
-      info_blobs: {
-        formats: [{ mimetype: "application/pdf", extensions: ["pdf"], size: 10_000_000 }]
-      }
-    },
-    can: () => true
-  })
-}));
 vi.mock("@/features/jobs/use-jobs", () => ({
   useJobs: () => ({ trackJob: () => {}, queueUploads: () => {} })
 }));
@@ -60,9 +46,22 @@ import { SpaceOverview } from "@/app/(app)/spaces/[spaceId]/overview/space-overv
 
 afterEach(cleanup);
 
+const appContext = testAppContext({
+  permissions: ["admin"],
+  settings: { using_templates: true },
+  limits: {
+    attachments: { formats: [] },
+    info_blobs: {
+      formats: [
+        { mimetype: "application/pdf", extensions: ["pdf"], size: 10_000_000, vision: false }
+      ]
+    }
+  }
+});
+
 function show(space: Space) {
   state.space = space;
-  return renderInApp(<SpaceOverview />);
+  return renderInApp(<SpaceOverview />, { appContext });
 }
 
 const busySpace = () =>

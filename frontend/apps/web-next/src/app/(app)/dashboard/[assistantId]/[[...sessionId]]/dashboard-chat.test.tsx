@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { retryPartnerQuery } from "@/features/chat/chat-partner-state";
-import { ChatTestProviders, installDomPolyfills } from "@/features/chat/testing";
 import { EneoApiError } from "@/lib/api/errors";
 import { expectNoAxeViolations } from "@/test/axe";
+import { renderInApp } from "@/test/render";
 import { DashboardChat } from "./dashboard-chat.client";
 
 const api = vi.hoisted(() => ({
@@ -46,9 +46,8 @@ const api = vi.hoisted(() => ({
   POST: vi.fn(async () => ({ data: {}, response: new Response() }))
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("next/navigation", () => import("@/test/navigation"));
 
-beforeAll(() => installDomPolyfills());
 afterEach(() => {
   cleanup();
   api.assistantCalls = 0;
@@ -56,11 +55,7 @@ afterEach(() => {
 });
 
 function renderRoute() {
-  return render(
-    <ChatTestProviders>
-      <DashboardChat assistantId="assistant-1" sessionId={null} />
-    </ChatTestProviders>
-  );
+  return renderInApp(<DashboardChat assistantId="assistant-1" sessionId={null} />);
 }
 
 describe("DashboardChat", () => {

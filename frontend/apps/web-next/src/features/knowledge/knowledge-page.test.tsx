@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testAppContext } from "@/test/render";
 import type { Space } from "@/features/spaces/space";
 import {
   makeCollection,
@@ -48,9 +48,6 @@ vi.mock("sonner", () => ({
       state.toasts.push({ kind: "error", message, description: options?.description })
   }
 }));
-vi.mock("@/components/providers/app-context", () => ({
-  useAppContext: () => ({ can: () => true, settings: {}, user: { id: "user-1" } })
-}));
 vi.mock("@/features/jobs/use-jobs", () => ({
   useJobs: () => ({ trackJob: () => {}, queueUploads: () => {} })
 }));
@@ -67,7 +64,7 @@ afterEach(() => {
 function show(space: Space, tab: string | null = null) {
   state.space = space;
   state.tab = tab;
-  return renderInApp(<KnowledgePage />);
+  return renderInApp(<KnowledgePage />, { appContext: testAppContext({ permissions: ["admin"] }) });
 }
 
 const liveRegion = () => document.querySelector("[data-astryx-live-region='polite']");

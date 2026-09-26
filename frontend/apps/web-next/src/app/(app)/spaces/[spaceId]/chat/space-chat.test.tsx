@@ -1,11 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { ChatTestProviders, installDomPolyfills } from "@/features/chat/testing";
+import { cleanup, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderInApp } from "@/test/render";
 import { SpaceChat } from "./space-chat.client";
 
 const route = vi.hoisted(() => ({
-  search: new URLSearchParams(),
   space: {
     id: "space-1",
     name: "Upphandling",
@@ -24,34 +23,24 @@ const api = vi.hoisted(() => ({
   }))
 }));
 
-vi.mock("next/navigation", () => ({
-  useSearchParams: () => route.search,
-  useRouter: () => ({ push: vi.fn() })
-}));
+vi.mock("next/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", () => ({
   useSpace: () => ({ space: route.space, routeId: "space-1", can: () => true })
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
-beforeAll(() => installDomPolyfills());
 afterEach(() => {
   cleanup();
   api.GET.mockClear();
-  route.search = new URLSearchParams();
 });
 
-function renderRoute() {
-  return render(
-    <ChatTestProviders>
-      <SpaceChat />
-    </ChatTestProviders>
-  );
+function renderRoute(url = "/spaces/space-1/chat") {
+  return renderInApp(<SpaceChat />, { route: url });
 }
 
 describe("SpaceChat", () => {
   it("offers a retry when an assistant in the space can't be loaded", async () => {
-    route.search = new URLSearchParams({ type: "assistant", id: "assistant-9" });
-    renderRoute();
+    renderRoute("/spaces/space-1/chat?type=assistant&id=assistant-9");
     expect(await screen.findByText("Det gick inte att öppna chatten")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Försök igen" })).toBeTruthy();
   });

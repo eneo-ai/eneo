@@ -2,25 +2,14 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
+import { router, setRoute } from "@/test/navigation";
+import { renderInApp, renderToHtml, testAppContext, testQueryClient } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { AppShellFrame } from "./app-shell";
 import { OPEN_NAV_EVENT } from "./routes";
 import { useOwnMobileHeader } from "./shell-context";
-import {
-  appContext,
-  installBrowserMocks,
-  renderToHtml,
-  renderWithProviders,
-  testQueryClient
-} from "./test-support";
 
-const nav = vi.hoisted(() => ({ pathname: "/spaces/list", search: "" }));
-const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
-
-vi.mock("next/navigation", () => ({
-  usePathname: () => nav.pathname,
-  useSearchParams: () => new URLSearchParams(nav.search),
-  useRouter: () => router
-}));
+vi.mock("next/navigation", () => import("@/test/navigation"));
 // Stand-ins that show where the bells are placed (they have their own tests).
 vi.mock("@/features/jobs/job-indicator", () => ({
   JobIndicator: () => <button type="button">Jobbklockan</button>
@@ -40,10 +29,10 @@ function seededClient() {
   return queryClient;
 }
 
-function renderShellWith(page: React.ReactNode, context = appContext()) {
-  return renderWithProviders(<AppShellFrame>{page}</AppShellFrame>, {
+function renderShellWith(page: React.ReactNode, appContext = testAppContext()) {
+  return renderInApp(<AppShellFrame>{page}</AppShellFrame>, {
     queryClient: seededClient(),
-    context
+    appContext
   });
 }
 
@@ -57,19 +46,10 @@ function OwnHeaderPage() {
   return <h1>Chatt</h1>;
 }
 
-beforeEach(() => {
-  nav.pathname = "/spaces/list";
-  nav.search = "";
-});
-
-afterEach(() => {
-  cleanup();
-  router.push.mockReset();
-});
+beforeEach(() => setRoute("/spaces/list"));
+afterEach(cleanup);
 
 describe("AppShellFrame", () => {
-  beforeEach(() => installBrowserMocks());
-
   it("puts the skip link first and the page in main#main-content", async () => {
     const { container } = renderShell();
     const focusable = container.querySelectorAll<HTMLElement>(
@@ -88,7 +68,7 @@ describe("AppShellFrame", () => {
   });
 
   it("switches the SideNav to admin mode under /admin", () => {
-    nav.pathname = "/admin/users";
+    setRoute("/admin/users");
     renderShell();
     expect(screen.getByRole("navigation", { name: "Administration" })).toBeTruthy();
     expect(screen.queryByRole("navigation", { name: "Huvudmeny" })).toBeNull();
@@ -128,7 +108,7 @@ describe("AppShellFrame", () => {
   });
 
   it("opens the app's one create-space dialog from the SideNav", async () => {
-    renderShellWith(<h1>Sidinnehåll</h1>, appContext({ permissions: ["shared_spaces"] }));
+    renderShellWith(<h1>Sidinnehåll</h1>, testAppContext({ permissions: ["shared_spaces"] }));
     // The form exists only while the dialog is open: no stray Namn field.
     expect(screen.queryByLabelText(/Namn/)).toBeNull();
 
@@ -152,10 +132,10 @@ describe("AppShellFrame", () => {
 });
 
 describe("AppShellFrame on a phone", () => {
-  beforeEach(() => installBrowserMocks({ mobile: true }));
+  beforeEach(() => setViewport("phone"));
 
   it("hides the top bar only while the page's own header is mounted", () => {
-    nav.pathname = "/spaces/personal/chat";
+    setRoute("/spaces/personal/chat");
     const { rerender } = renderShellWith(<OwnHeaderPage />);
     expect(screen.queryByRole("button", { name: "Öppna menyn" })).toBeNull();
 
@@ -186,9 +166,9 @@ describe("AppShellFrame on a phone", () => {
         </AppShellFrame>,
         { queryClient: seededClient() }
       );
-    nav.pathname = "/spaces/s1/chat";
+    setRoute("/spaces/s1/chat");
     expect(serverHtml()).not.toContain("<header");
-    nav.pathname = "/spaces/list";
+    setRoute("/spaces/list");
     expect(serverHtml()).toContain("<header");
   });
 
@@ -209,7 +189,7 @@ describe("AppShellFrame on a phone", () => {
   });
 
   it("opens the drawer when the chat's header asks for it, with the bells in it", async () => {
-    nav.pathname = "/spaces/s1/chat";
+    setRoute("/spaces/s1/chat");
     renderShell();
     // Chat routes have no top bar: the drawer is where the bells are.
     act(() => {
@@ -223,7 +203,7 @@ describe("AppShellFrame on a phone", () => {
   });
 
   it("closes the drawer when the palette opens a result on the same page", async () => {
-    nav.pathname = "/spaces/personal/chat";
+    setRoute("/spaces/personal/chat");
     renderShell();
     const menuButton = screen.getByRole("button", { name: "Öppna menyn" });
     fireEvent.click(menuButton);

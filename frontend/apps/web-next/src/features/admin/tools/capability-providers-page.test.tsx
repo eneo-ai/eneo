@@ -39,14 +39,6 @@ const source: McpServer = {
 };
 
 beforeEach(() => {
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-  );
   get.mockReset();
   post.mockReset();
   get.mockImplementation((path?: string) => {

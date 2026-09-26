@@ -2,25 +2,14 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "@/lib/api/browser";
-import { makeQueryClient } from "@/lib/api/query";
 import type { Permission } from "@/lib/auth/permissions";
 import { expectNoAxeViolations } from "@/test/axe";
+import { router, setRoute } from "@/test/navigation";
+import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import ShellCommandPalette from "./command-palette";
 import { recentConversationsQueryOptions } from "./nav-data";
-import {
-  appContext,
-  installBrowserMocks,
-  renderWithProviders,
-  testQueryClient
-} from "./test-support";
 
-const nav = vi.hoisted(() => ({ pathname: "/spaces/s1/knowledge" }));
-const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
-
-vi.mock("next/navigation", () => ({
-  usePathname: () => nav.pathname,
-  useRouter: () => router
-}));
+vi.mock("next/navigation", () => import("@/test/navigation"));
 
 function seededClient() {
   const queryClient = testQueryClient();
@@ -71,9 +60,9 @@ function seededClient() {
 function renderPalette(permissions: Permission[] = []) {
   const onCreateSpace = vi.fn();
   const onOpenChange = vi.fn();
-  renderWithProviders(
+  renderInApp(
     <ShellCommandPalette isOpen onOpenChange={onOpenChange} onCreateSpace={onCreateSpace} />,
-    { queryClient: seededClient(), context: appContext({ permissions }) }
+    { queryClient: seededClient(), appContext: testAppContext({ permissions }) }
   );
   return { onCreateSpace, onOpenChange };
 }
@@ -82,13 +71,9 @@ function search(query: string) {
   fireEvent.change(screen.getByRole("combobox"), { target: { value: query } });
 }
 
-beforeEach(() => {
-  installBrowserMocks();
-  nav.pathname = "/spaces/s1/knowledge";
-});
+beforeEach(() => setRoute("/spaces/s1/knowledge"));
 afterEach(() => {
   cleanup();
-  router.push.mockReset();
   vi.restoreAllMocks();
 });
 
@@ -159,9 +144,9 @@ describe("ShellCommandPalette", () => {
   });
 
   it("fetches what the cache holds as stale or invalidated before listing it", async () => {
-    nav.pathname = "/dashboard";
-    // The app's own client (30 s staleTime), not the test client that never goes stale.
-    const queryClient = makeQueryClient();
+    setRoute("/dashboard");
+    // The app's 30 s staleTime: the dashboard below is older than that.
+    const queryClient = testQueryClient();
     const dashboard = (assistant: string) => ({
       spaces: {
         items: [
@@ -207,10 +192,9 @@ describe("ShellCommandPalette", () => {
       return ok({});
     }) as unknown as typeof browserApi.GET);
 
-    renderWithProviders(
-      <ShellCommandPalette isOpen onOpenChange={vi.fn()} onCreateSpace={vi.fn()} />,
-      { queryClient, context: appContext() }
-    );
+    renderInApp(<ShellCommandPalette isOpen onOpenChange={vi.fn()} onCreateSpace={vi.fn()} />, {
+      queryClient
+    });
 
     expect(await screen.findByRole("option", { name: /Nytt namn/ })).toBeTruthy();
     expect(screen.getByRole("option", { name: /Ny fråga/ })).toBeTruthy();

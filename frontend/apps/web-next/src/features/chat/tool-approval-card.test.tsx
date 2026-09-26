@@ -1,17 +1,16 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ToolApprovalData } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
+import { renderInApp } from "@/test/render";
 import { ToolApprovalCard } from "./message-parts";
-import { ChatTestProviders, installDomPolyfills } from "./testing";
 
 const api = vi.hoisted(() => ({
   POST: vi.fn(async () => ({ data: {}, response: new Response() }))
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
-beforeAll(() => installDomPolyfills());
 afterEach(() => {
   cleanup();
   api.POST.mockClear();
@@ -21,11 +20,7 @@ const lookup = { server_name: "lou", tool_name: "troskelvarden", tool_call_id: "
 const register = { server_name: "diarium", tool_name: "sok_arende", tool_call_id: "call-2" };
 
 function renderCard(data: ToolApprovalData) {
-  return render(
-    <ChatTestProviders>
-      <ToolApprovalCard data={data} />
-    </ChatTestProviders>
-  );
+  return renderInApp(<ToolApprovalCard data={data} />);
 }
 
 /** The approve-tools request bodies sent so far. */

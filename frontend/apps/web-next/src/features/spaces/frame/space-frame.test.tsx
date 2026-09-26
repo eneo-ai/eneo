@@ -37,9 +37,6 @@ vi.mock("@/lib/api/browser", () => ({
     )
   }
 }));
-vi.mock("@/components/providers/app-context", () => ({
-  useAppContext: () => ({ user: { id: "user-1" }, settings: {}, can: () => true })
-}));
 
 import { SpaceFrame } from "./space-frame";
 

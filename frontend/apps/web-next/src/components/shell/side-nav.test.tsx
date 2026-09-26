@@ -4,26 +4,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "@/lib/api/browser";
 import type { Permission } from "@/lib/auth/permissions";
 import { expectNoAxeViolations } from "@/test/axe";
+import { setRoute } from "@/test/navigation";
+import {
+  noopShell,
+  renderInApp,
+  renderToHtml,
+  testAppContext,
+  testQueryClient
+} from "@/test/render";
 import { recentConversationsQueryOptions } from "./nav-data";
 import type { NavVariant } from "./routes";
 import { DesktopSideNav } from "./side-nav";
 import { SIDE_NAV_COLLAPSED_COOKIE } from "./side-nav-preference";
-import {
-  appContext,
-  installBrowserMocks,
-  noopShell,
-  renderToHtml,
-  renderWithProviders,
-  testQueryClient
-} from "./test-support";
 
-const nav = vi.hoisted(() => ({ pathname: "/spaces/personal/chat", search: "" }));
-
-vi.mock("next/navigation", () => ({
-  usePathname: () => nav.pathname,
-  useSearchParams: () => new URLSearchParams(nav.search),
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() })
-}));
+vi.mock("next/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/jobs/job-indicator", () => ({ JobIndicator: () => null }));
 vi.mock("@/features/api-keys/expiring-keys-notification", () => ({
   ExpiringKeysNotification: () => null
@@ -65,19 +59,15 @@ function renderNav({
   conversations = true,
   shell = { ...noopShell, openPalette: vi.fn(), openCreateSpace: vi.fn() }
 } = {}) {
-  const utils = renderWithProviders(<DesktopSideNav variant={variant} navId="side-nav" />, {
+  const utils = renderInApp(<DesktopSideNav variant={variant} navId="side-nav" />, {
     queryClient: seededClient({ conversations }),
-    context: appContext({ permissions }),
+    appContext: testAppContext({ permissions }),
     shell
   });
   return { ...utils, shell };
 }
 
-beforeEach(() => {
-  installBrowserMocks();
-  nav.pathname = "/spaces/personal/chat";
-  nav.search = "";
-});
+beforeEach(() => setRoute("/spaces/personal/chat"));
 
 afterEach(() => {
   cleanup();
@@ -136,14 +126,13 @@ describe("DesktopSideNav (main)", () => {
   });
 
   it("marks the current page, one destination at a time", () => {
-    nav.pathname = "/spaces/personal/chat";
     renderNav();
     expect(screen.getByRole("link", { name: "Ny konversation" }).getAttribute("aria-current")).toBe(
       "page"
     );
     cleanup();
 
-    nav.search = "session_id=c2";
+    setRoute("/spaces/personal/chat?session_id=c2");
     renderNav();
     expect(
       screen.getByRole("link", { name: "Sammanfatta KS-protokoll" }).getAttribute("aria-current")
@@ -153,8 +142,7 @@ describe("DesktopSideNav (main)", () => {
     ).toBeNull();
     cleanup();
 
-    nav.pathname = "/spaces/s2/knowledge";
-    nav.search = "";
+    setRoute("/spaces/s2/knowledge");
     renderNav();
     const current = screen
       .getAllByRole("link")
@@ -233,7 +221,7 @@ describe("DesktopSideNav (main)", () => {
 
 describe("DesktopSideNav (admin)", () => {
   it("lists every admin section under the Administration landmark", async () => {
-    nav.pathname = "/admin/models";
+    setRoute("/admin/models");
     const { container } = renderNav({ variant: "admin", permissions: ["admin"] });
     const navigation = screen.getByRole("navigation", { name: "Administration" });
 

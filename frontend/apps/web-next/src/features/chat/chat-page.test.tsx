@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
+import { renderInApp } from "@/test/render";
 import { ChatPage } from "./chat-page";
-import { ChatTestProviders, installDomPolyfills } from "./testing";
 
 type Chunk = Record<string, unknown>;
 
@@ -120,7 +120,7 @@ const api = vi.hoisted(() => ({
   DELETE: vi.fn(async () => ({ data: null, response: new Response(null, { status: 204 }) }))
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("next/navigation", () => import("@/test/navigation"));
 vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@astryxdesign/core/hooks")>()),
   useAnnounce: () => spies.announce
@@ -133,7 +133,6 @@ vi.mock("sonner", async (importOriginal) => {
   };
 });
 
-beforeAll(() => installDomPolyfills());
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -157,16 +156,12 @@ const partner: ChatPartner = {
 const buildSessionUrl = (id: string | null) => (id ? `/chat?session_id=${id}` : "/chat");
 
 function renderPage(sessionId: string | null, pagePartner: ChatPartner = partner) {
-  const view = render(
-    <ChatTestProviders>
-      <ChatPage partner={pagePartner} sessionId={sessionId} buildSessionUrl={buildSessionUrl} />
-    </ChatTestProviders>
+  const view = renderInApp(
+    <ChatPage partner={pagePartner} sessionId={sessionId} buildSessionUrl={buildSessionUrl} />
   );
   const rerender = (next: string | null) =>
     view.rerender(
-      <ChatTestProviders>
-        <ChatPage partner={pagePartner} sessionId={next} buildSessionUrl={buildSessionUrl} />
-      </ChatTestProviders>
+      <ChatPage partner={pagePartner} sessionId={next} buildSessionUrl={buildSessionUrl} />
     );
   return rerender;
 }

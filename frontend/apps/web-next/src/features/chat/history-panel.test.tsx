@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
+import { renderInApp } from "@/test/render";
 import { HistoryAside } from "./history-panel";
 import { RenameSessionDialog } from "./session-actions";
-import { ChatTestProviders, installDomPolyfills } from "./testing";
 
 const now = Date.now();
 const day = 86_400_000;
@@ -35,7 +35,6 @@ vi.mock("sonner", async (importOriginal) => {
 });
 
 beforeAll(() => {
-  installDomPolyfills();
   api.GET.mockImplementation(
     async (_path: string, init: { params: { query: { cursor?: string } } }) => {
       const cursor = init.params.query.cursor;
@@ -82,18 +81,16 @@ function renderHistory({
   onDeleted = vi.fn(),
   onRated = vi.fn()
 } = {}) {
-  render(
-    <ChatTestProviders>
-      <HistoryAside
-        inline
-        partner={partner}
-        activeSessionId="s1"
-        onSelect={onSelect}
-        onDeleted={onDeleted}
-        onRated={onRated}
-        onClose={onClose}
-      />
-    </ChatTestProviders>
+  renderInApp(
+    <HistoryAside
+      inline
+      partner={partner}
+      activeSessionId="s1"
+      onSelect={onSelect}
+      onDeleted={onDeleted}
+      onRated={onRated}
+      onClose={onClose}
+    />
   );
   return { onClose, onSelect, onDeleted, onRated };
 }
@@ -183,15 +180,13 @@ describe("HistoryAside", () => {
 describe("RenameSessionDialog", () => {
   it("renames with a visible label and saves on Enter", () => {
     const onSave = vi.fn();
-    render(
-      <ChatTestProviders>
-        <RenameSessionDialog
-          session={{ id: "s1", name: "Gammalt namn" }}
-          pending={false}
-          onCancel={vi.fn()}
-          onSave={onSave}
-        />
-      </ChatTestProviders>
+    renderInApp(
+      <RenameSessionDialog
+        session={{ id: "s1", name: "Gammalt namn" }}
+        pending={false}
+        onCancel={vi.fn()}
+        onSave={onSave}
+      />
     );
     const input = screen.getByLabelText("Namn");
     fireEvent.change(input, { target: { value: "Nytt namn" } });
