@@ -20,10 +20,10 @@ import type { ChatPartnerSwitcherItem } from "./partner-switcher";
 import { BrandMark } from "./start-state";
 
 /**
- * Opens the app shell's navigation drawer on phones, where chat routes have
- * no shell top bar (the shell listens for OPEN_NAV_EVENT).
+ * Opens the app shell's navigation drawer on phones: the shell hides its own
+ * top bar while this header is shown and listens for OPEN_NAV_EVENT.
  */
-export function AppMenuButton() {
+function AppMenuButton() {
   const t = useTranslations();
   return (
     <IconButton

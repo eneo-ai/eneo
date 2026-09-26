@@ -567,5 +567,8 @@
   "chat_activity_running_step": "{step}…",
   "chat_assistant_thinking": "Assistenten tänker…",
   "chat_switch_assistant_named": "Byt assistent: {name}",
-  "chat_tools_named": "Verktyg: {status}"
+  "chat_tools_named": "Verktyg: {status}",
+  "chat_partner_loading": "Laddar assistenten…",
+  "chat_partner_load_failed": "Det gick inte att öppna chatten",
+  "chat_partner_load_failed_description": "Assistenten kan ha tagits bort, eller så saknar du åtkomst till den. Försök igen eller välj en annan assistent i menyn."
 }

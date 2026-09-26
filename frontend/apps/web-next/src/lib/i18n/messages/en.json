@@ -5076,5 +5076,8 @@
   "chat_activity_running_step": "{step}…",
   "chat_assistant_thinking": "The assistant is thinking…",
   "chat_switch_assistant_named": "Switch assistant: {name}",
-  "chat_tools_named": "Tools: {status}"
+  "chat_tools_named": "Tools: {status}",
+  "chat_partner_loading": "Loading the assistant…",
+  "chat_partner_load_failed": "The chat could not be opened",
+  "chat_partner_load_failed_description": "The assistant may have been removed, or you may not have access to it. Try again or choose another assistant in the menu."
 }

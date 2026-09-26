@@ -1,10 +1,14 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { LoadingState } from "@/components/composites/loading-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { ChatPartner } from "@/lib/chat/types";
+import {
+  ChatPartnerError,
+  ChatPartnerLoading,
+  retryPartnerQuery
+} from "@/features/chat/chat-partner-state";
 import { ChatPage } from "@/features/chat/chat-page";
 import { partnerKnowledge } from "@/features/chat/partner-knowledge";
 
@@ -15,17 +19,19 @@ export function DashboardChat({
   assistantId: string;
   sessionId: string | null;
 }) {
-  const { data: assistant } = useQuery({
+  const assistantQuery = useQuery({
     queryKey: ["assistants", assistantId],
     queryFn: () =>
-      unwrap(browserApi.GET("/api/v1/assistants/{id}/", { params: { path: { id: assistantId } } }))
+      unwrap(browserApi.GET("/api/v1/assistants/{id}/", { params: { path: { id: assistantId } } })),
+    retry: retryPartnerQuery
   });
+  const assistant = assistantQuery.data;
 
   if (!assistant) {
-    return (
-      <div className="mx-auto w-full max-w-[712px] p-6">
-        <LoadingState rows={4} />
-      </div>
+    return assistantQuery.isError ? (
+      <ChatPartnerError onRetry={() => void assistantQuery.refetch()} />
+    ) : (
+      <ChatPartnerLoading />
     );
   }
 
