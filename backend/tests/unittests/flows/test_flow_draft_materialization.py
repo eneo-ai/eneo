@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+from typing import get_type_hints
 from uuid import UUID, uuid4
 
 import pytest
 
 from eneo.flows.application.flow_draft_materialization import (
     FlowDraftStepChangeKind,
+    InvalidExistingStepRefReason,
+    _invalid_existing_step_ref,
     compile_flow_draft_changeset,
+    invalid_existing_step_ref_reason,
+    validate_existing_step_ref_coverage,
 )
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.flow_authoring_spec import (
@@ -284,6 +289,46 @@ def test_shared_compile_rejects_omitted_existing_step_without_explicit_removal()
         "reason": "missing_existing_step_ref",
         "missing_refs": ["existing_step_2"],
     }
+
+
+def test_an_invalid_existing_step_ref_reason_is_one_of_a_closed_set() -> None:
+    # Pyright holds every producer to this Literal: an undeclared reason, or a
+    # plain str, does not type-check. This keeps the parameter from widening.
+    assert (
+        get_type_hints(_invalid_existing_step_ref)["reason"]
+        is InvalidExistingStepRefReason
+    )
+
+
+def test_the_reason_reader_returns_only_a_declared_reason() -> None:
+    with pytest.raises(BadRequestException) as exc_info:
+        validate_existing_step_ref_coverage(
+            current_refs={"existing_step_1", "existing_step_2"},
+            preserved_refs=["existing_step_1"],
+            removed_existing_step_refs=frozenset(),
+        )
+    undeclared = [
+        BadRequestException(
+            "Undeclared.",
+            code="invalid_existing_step_ref",
+            context={"reason": "not_a_declared_reason"},
+        ),
+        BadRequestException("No reason.", code="invalid_existing_step_ref"),
+        BadRequestException(
+            "Other code.",
+            code="bad_request",
+            context={"reason": "missing_existing_step_ref"},
+        ),
+    ]
+
+    assert invalid_existing_step_ref_reason(exc_info.value) == (
+        "missing_existing_step_ref"
+    )
+    assert [invalid_existing_step_ref_reason(error) for error in undeclared] == [
+        None,
+        None,
+        None,
+    ]
 
 
 def test_shared_compile_rejects_unknown_removed_existing_step_ref() -> None:

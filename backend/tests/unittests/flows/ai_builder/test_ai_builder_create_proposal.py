@@ -29,10 +29,15 @@ from eneo.flows.ai_builder.ai_builder_create_proposal import (
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
+    TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     EMPTY_REQUESTED_OUTPUT_SECTIONS,
     RequestedOutputSections,
+)
+from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
+    AIBuilderPlanEditContext,
+    ResolvedAIBuilderEditContext,
 )
 from eneo.flows.ai_builder.ai_builder_plan_store import build_flow_builder_proposal
 from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
@@ -455,6 +460,68 @@ async def test_create_compile_disambiguates_duplicate_step_names() -> None:
         "Förbered PDF-innehåll",
         "Förbered PDF-innehåll (2)",
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_repair_that_leaves_the_selected_plan_step_unchanged_records_why() -> (
+    None
+):
+    from tests.unittests.flows.ai_builder.test_ai_builder_proposal_retry import (
+        _recorded_repair_attempt,
+    )
+
+    conversation = [ConversationMessage(role="user", content="Bygg ett textflöde.")]
+    arguments = {
+        "flow_name": "Rapport",
+        "plan_rationale": "Sammanfatta och skriv en rapport.",
+        "steps": [
+            {"name": "Sammanfatta", "instructions": "Sammanfatta texten."},
+            {"name": "Skriv rapport", "instructions": "Skriv en kort rapport."},
+        ],
+    }
+    first = await process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=conversation,
+        arguments=arguments,
+        tool_call_id="call-first",
+        available_model_refs=None,
+        available_kb_refs=None,
+    )
+    assert isinstance(first, ProposalReady), first
+    prior = first.compiled.content.spec
+    target_ref = prior.steps[0].plan_step_ref
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderPlanEditContext(
+            scope="step", plan_id=uuid4(), target_plan_step_ref=target_ref
+        ),
+        scope="step",
+        target_plan_step_ref=target_ref,
+    )
+
+    async def process(repair_arguments: dict[str, Any]) -> PreparationOutcome:
+        return await _process_create_intent_arguments(
+            turn=_make_turn(),
+            conversation=conversation,
+            arguments=repair_arguments,
+            tool_call_id="call-repair",
+            available_model_refs=None,
+            available_kb_refs=None,
+            plan_edit_context=context,
+            prior_spec_for_revision=prior,
+            compile_context=create_compile_context_from_planning_state(None),
+        )
+
+    # The whole plan again, the selected step included, exactly as before.
+    attempt = await _recorded_repair_attempt(
+        repair_arguments=arguments,
+        process_arguments=process,
+        target_kind=TargetKind.CREATE,
+    )
+
+    assert (attempt["failure_kind"], attempt["failure_codes"]) == (
+        "quality",
+        ["target_step_unchanged"],
+    )
 
 
 @pytest.mark.asyncio

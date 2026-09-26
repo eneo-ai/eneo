@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
+from typing import Literal, get_args
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -27,6 +28,22 @@ from eneo.flows.flow_review_policy import FlowStepReviewPolicy
 from eneo.flows.http_transport import redact_persisted_config
 from eneo.flows.step_lineage import existing_step_ref_for_order
 from eneo.main.exceptions import BadRequestException
+
+# The rule an invalid existing-step ref broke. The error's code says the ref
+# was invalid; this says why, in the error's context under "reason".
+InvalidExistingStepRefReason = Literal[
+    "invalid_updated_existing_step_refs",
+    "create_cannot_remove_existing_step_refs",
+    "create_cannot_use_existing_step_ref",
+    "duplicate_existing_step_ref",
+    "unknown_existing_step_ref",
+    "unknown_removed_existing_step_ref",
+    "preserved_and_removed_existing_step_ref",
+    "missing_existing_step_ref",
+]
+_INVALID_EXISTING_STEP_REF_REASONS: tuple[InvalidExistingStepRefReason, ...] = get_args(
+    InvalidExistingStepRefReason
+)
 
 
 class FlowDraftStepChangeKind(str, enum.Enum):
@@ -409,7 +426,7 @@ def _resolve_existing_step(
 def _invalid_existing_step_ref(
     message: str,
     *,
-    reason: str,
+    reason: InvalidExistingStepRefReason,
     **context: object,
 ) -> BadRequestException:
     return BadRequestException(
@@ -417,6 +434,21 @@ def _invalid_existing_step_ref(
         code="invalid_existing_step_ref",
         context={"reason": reason, **context},
     )
+
+
+def invalid_existing_step_ref_reason(
+    error: BadRequestException,
+) -> InvalidExistingStepRefReason | None:
+    """Which rule ``error`` says was broken, when it is an invalid
+    existing-step ref raised here with a reason; None for anything else."""
+
+    if error.code != "invalid_existing_step_ref":
+        return None
+    reason = (error.context or {}).get("reason")
+    for known in _INVALID_EXISTING_STEP_REF_REASONS:
+        if reason == known:
+            return known
+    return None
 
 
 def _compile_new_step(

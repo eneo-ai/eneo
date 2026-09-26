@@ -1017,6 +1017,151 @@ async def test_ordered_submission_rejects_unknown_ref_before_omitted_add() -> No
     assert "existing_step_99" in result.feedback
 
 
+def _transcript_review_summary_flow() -> SimpleNamespace:
+    return _flow(
+        _flow_step(step_order=1, user_description="Transkribera", input_type="audio"),
+        _flow_step(
+            step_order=2, user_description="Granska", input_source="previous_step"
+        ),
+        _flow_step(
+            step_order=3, user_description="Sammanfatta", input_source="previous_step"
+        ),
+    )
+
+
+async def _repair_attempt_failure_codes(
+    flow: SimpleNamespace, repair_arguments: dict[str, object]
+) -> list[str]:
+    """The codes a repair attempt records when its tool call carries
+    ``repair_arguments`` through admission and the real edit processor."""
+    from tests.unittests.flows.ai_builder.test_ai_builder_proposal_retry import (
+        _recorded_repair_attempt,
+    )
+
+    schema = build_edit_flow_tool_schema(
+        list(flow.steps),
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[]
+        ),
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
+    )
+
+    async def process(arguments):
+        return await _process(
+            flow=flow,
+            arguments=admit_propose_flow_tool_arguments(
+                arguments=arguments,
+                tool_schema=schema,  # type: ignore[arg-type]
+            ),
+        )
+
+    attempt = await _recorded_repair_attempt(
+        repair_arguments=repair_arguments,
+        process_arguments=process,
+        target_kind=TargetKind.EDIT,
+    )
+    assert attempt["failure_kind"] == "validation"
+    return attempt["failure_codes"]
+
+
+@pytest.mark.asyncio
+async def test_a_repair_that_re_adds_every_existing_step_records_the_coverage_code():
+    # The edit a model submitted on a live stack (captures-8152,
+    # fde61e5b6532): each saved step written again as a new step, none kept,
+    # none removed. Four attempts failed with empty failure_codes. The
+    # model_ref the schema offered then is dropped; it no longer does.
+    captured = {
+        "assumptions": [
+            "Användaren vill behålla den befintliga strukturen med transkribering "
+            "och granskning, men justera slutresultatets format och stil."
+        ],
+        "flow_description": None,
+        "flow_name": None,
+        "form_fields": None,
+        "plan_rationale": (
+            "Uppdaterar instruktionerna för det sista steget för att begränsa "
+            "längden till maximalt tre meningar per person och kräva lättläst "
+            "svenska."
+        ),
+        "removed_existing_step_refs": [],
+        "steps": [
+            {
+                "kind": "add",
+                "step": {
+                    "citations_requested": False,
+                    "instructions": "Transkribera ljudfilen.",
+                    "knowledge_refs": [],
+                    "name": "Transkribera ljud",
+                    "output_fields": [],
+                    "output_type": "text",
+                    "review_mode": "none",
+                    "uses_form_fields": None,
+                },
+            },
+            {
+                "kind": "add",
+                "step": {
+                    "citations_requested": False,
+                    "instructions": (
+                        "Låt användaren granska transkriptet och mappa talare "
+                        "till namn."
+                    ),
+                    "knowledge_refs": [],
+                    "name": "Granska transkript",
+                    "output_fields": [],
+                    "output_type": "json",
+                    "review_mode": "edit",
+                    "uses_form_fields": ["deltagare"],
+                },
+            },
+            {
+                "kind": "add",
+                "step": {
+                    "citations_requested": False,
+                    "instructions": (
+                        "Skapa en kort, källgrundad sammanfattning per talare. "
+                        "Sammanfattningen för varje person får vara högst tre "
+                        "meningar lång och ska skrivas på lättläst svenska."
+                    ),
+                    "knowledge_refs": [],
+                    "name": "Sammanfatta per talare",
+                    "output_fields": [],
+                    "output_type": "text",
+                    "review_mode": "none",
+                    "uses_form_fields": None,
+                },
+            },
+        ],
+    }
+
+    codes = await _repair_attempt_failure_codes(
+        _transcript_review_summary_flow(), captured
+    )
+
+    assert codes == ["invalid_existing_step_ref", "missing_existing_step_ref"]
+
+
+@pytest.mark.asyncio
+async def test_a_repair_that_keeps_and_removes_one_step_records_the_invalid_ref_code():
+    codes = await _repair_attempt_failure_codes(
+        _transcript_review_summary_flow(),
+        {
+            "plan_rationale": "Keep every step, and drop the summary.",
+            "steps": [
+                {"kind": "keep", "existing_step_ref": "existing_step_1"},
+                {"kind": "keep", "existing_step_ref": "existing_step_2"},
+                {"kind": "keep", "existing_step_ref": "existing_step_3"},
+            ],
+            "removed_existing_step_refs": ["existing_step_3"],
+        },
+    )
+
+    assert codes == [
+        "invalid_existing_step_ref",
+        "preserved_and_removed_existing_step_ref",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_ordered_submission_reports_unknown_resource_refs() -> None:
     flow = _flow(_flow_step(step_order=1, user_description="Analyze text"))
@@ -1072,6 +1217,30 @@ async def test_ordered_submission_rejects_unknown_flow_input_key() -> None:
 
     assert result.kind == "validation"
     assert "unknown flow_input key" in result.feedback
+
+
+@pytest.mark.asyncio
+async def test_an_edit_failure_records_only_a_reason_its_producer_declares() -> None:
+    flow = _flow(_flow_step(step_order=1, user_description="Analyze text"))
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
+        side_effect=BadRequestException(
+            "Edit refused.",
+            code="invalid_existing_step_ref",
+            context={"reason": "not_a_declared_reason"},
+        ),
+    ):
+        result = await _process(
+            flow=flow,
+            arguments={
+                "plan_rationale": "Keep the analysis step.",
+                "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
+            },
+        )
+
+    assert isinstance(result, CorrectableFailure), result
+    assert result.codes == frozenset({"invalid_existing_step_ref"})
 
 
 @pytest.mark.asyncio
@@ -5359,6 +5528,58 @@ async def test_saved_step_target_echoing_its_saved_value_is_not_a_change(echo):
     assert isinstance(result, CorrectableFailure), result
     assert "was unchanged" in result.feedback
     assert "Förbered" not in result.feedback
+
+
+@pytest.mark.asyncio
+async def test_a_repair_that_leaves_the_selected_saved_step_unchanged_records_why():
+    from tests.unittests.flows.ai_builder.test_ai_builder_proposal_retry import (
+        _recorded_repair_attempt,
+    )
+
+    flow, snapshots, catalog = _pdf_body_saved_flow()
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[2].id),
+        scope="step",
+        target_existing_step_ref="existing_step_3",
+    )
+    prior = _prior_spec_for_revision(
+        context=context,
+        prior_plan=None,
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+    )
+    assert prior is not None
+
+    async def process(arguments):
+        return await _process(
+            flow=flow,
+            assistant_snapshots=snapshots,
+            resource_catalog=catalog,
+            plan_edit_context=context,
+            prior_spec_for_revision=prior,
+            arguments=arguments,
+        )
+
+    attempt = await _recorded_repair_attempt(
+        repair_arguments={
+            "plan_rationale": "Samma som förut.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_3",
+                    "name": "Skriv beslutsdokument",
+                }
+            ],
+        },
+        process_arguments=process,
+        target_kind=TargetKind.EDIT,
+    )
+
+    assert (attempt["failure_kind"], attempt["failure_codes"]) == (
+        "quality",
+        ["target_step_unchanged"],
+    )
 
 
 @pytest.mark.asyncio

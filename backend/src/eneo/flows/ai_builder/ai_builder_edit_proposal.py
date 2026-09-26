@@ -85,6 +85,9 @@ from eneo.flows.ai_builder.ai_builder_validation_references import (
 )
 from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.application.flow_draft_materialization import (
+    invalid_existing_step_ref_reason,
+)
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
@@ -265,7 +268,9 @@ async def process_edit_arguments(
             )
         except BadRequestException as exc:
             return CorrectableFailure(
-                feedback=_format_edit_compilation_request_error(exc), kind="validation"
+                feedback=_format_edit_compilation_request_error(exc),
+                kind="validation",
+                codes=_edit_compilation_request_failure_codes(exc),
             )
         except AIBuilderArchitectureError as exc:
             return architecture_failure_outcome(exc)
@@ -455,7 +460,11 @@ async def process_edit_arguments(
                     },
                 )
             )
-        return CorrectableFailure(feedback=scoped_rejection.feedback, kind="quality")
+        return CorrectableFailure(
+            feedback=scoped_rejection.feedback,
+            kind="quality",
+            codes=frozenset({scoped_rejection.reason}),
+        )
 
     return ProposalReady(
         compiled=CompiledProposal(
@@ -526,6 +535,22 @@ def _format_edit_compilation_request_error(exc: BadRequestException) -> str:
             f"{overlap_refs}."
         )
     return f"Edit validation failed: {exc}"
+
+
+def _edit_compilation_request_failure_codes(
+    exc: BadRequestException,
+) -> frozenset[str]:
+    """The producer's typed code, recorded on the failed attempt.
+
+    An invalid existing-step ref also names the rule it broke (the coverage
+    check's is ``missing_existing_step_ref``). Both are diagnostic codes, not
+    public error codes: no client maps them.
+    """
+
+    if exc.code is None:
+        return frozenset()
+    reason = invalid_existing_step_ref_reason(exc)
+    return frozenset({str(exc.code)} if reason is None else {str(exc.code), reason})
 
 
 # Rejections a saved-step revision can only reach through the server: the

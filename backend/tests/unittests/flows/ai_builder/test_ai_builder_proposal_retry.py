@@ -305,6 +305,38 @@ async def _collect(request: ProposalSelfCorrectionRequest) -> list[dict[str, str
     ]
 
 
+async def _recorded_repair_attempt(
+    *,
+    repair_arguments: dict[str, Any],
+    process_arguments: Callable[[dict[str, Any]], Awaitable[Any]],
+    target_kind: TargetKind,
+) -> dict[str, Any]:
+    """The attempt one repair round records when its tool call carries
+    ``repair_arguments`` and ``process_arguments`` judges them."""
+
+    async def process(invocation: ToolRetryInvocation) -> SubmissionOutcome:
+        return await process_arguments(invocation.arguments)
+
+    usage = ProposalTurnTelemetry(
+        request_id="req-recorded-repair",
+        model="openai/gpt-5.4",
+        target_kind=target_kind,
+    )
+    await _collect(
+        _make_self_correction_request(
+            repair_completion=AsyncMock(
+                return_value=_tool_response(arguments=repair_arguments)
+            ),
+            process_tool_invocation=process,
+            calls_remaining=1,
+            usage_tracker=usage,
+        )
+    )
+    attempts = usage.build_planner_telemetry()["proposal_attempts"]
+    assert [attempt["kind"] for attempt in attempts] == ["repair"]
+    return attempts[0]
+
+
 def _process_sequence(
     *outcomes: SubmissionOutcome,
 ) -> tuple[ProcessInvocation, list[dict[str, Any]]]:

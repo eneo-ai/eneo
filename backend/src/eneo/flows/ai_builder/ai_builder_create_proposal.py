@@ -232,6 +232,7 @@ async def _process_create_spec(
             feedback=format_create_intent_quality_feedback(scoped_rejection.feedback)
             or scoped_rejection.feedback,
             kind="quality",
+            codes=frozenset({scoped_rejection.reason}),
         )
 
     # Diagnostics travel on validation: the storage boundary is the sole
