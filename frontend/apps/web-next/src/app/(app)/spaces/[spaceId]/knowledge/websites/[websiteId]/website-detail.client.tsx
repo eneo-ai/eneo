@@ -1,10 +1,12 @@
 "use client";
 
+import { Button as AstryxButton } from "@astryxdesign/core/Button";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { ChevronLeft, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import {
   AlertDialog,
@@ -16,7 +18,6 @@ import {
   AlertDialogTitle
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -34,6 +35,8 @@ import { useSpace } from "@/features/spaces/use-space";
 
 const RUNS_REFRESH_MS = 30_000;
 
+type WebsiteTab = "crawls" | "blobs";
+
 function SyncNowButton({
   websiteId,
   websiteDisplay,
@@ -47,6 +50,7 @@ function SyncNowButton({
   const queryClient = useQueryClient();
   const { trackJob } = useJobs();
   const [open, setOpen] = useState(false);
+  const reasonId = useId();
 
   const createRun = useMutation({
     mutationFn: () =>
@@ -63,14 +67,23 @@ function SyncNowButton({
 
   return (
     <>
-      <Button
-        disabled={disabled}
-        onClick={() => setOpen(true)}
-        title={disabled ? t("cant_sync_while_crawl_running") : undefined}
-      >
-        <RefreshCw className="size-4" />
-        {t("sync_now")}
-      </Button>
+      {/* While a crawl runs the button is disabled; the reason is visible text,
+          not a tooltip, so keyboard and touch users get it too. */}
+      <div className="flex flex-col items-end gap-1">
+        <AstryxButton
+          variant="primary"
+          label={t("sync_now")}
+          icon={<RefreshCw className="size-4" aria-hidden="true" />}
+          isDisabled={disabled}
+          aria-describedby={disabled ? reasonId : undefined}
+          onClick={() => setOpen(true)}
+        />
+        {disabled ? (
+          <p id={reasonId} className="text-ax-text-secondary text-sm">
+            {t("cant_sync_while_crawl_running")}
+          </p>
+        ) : null}
+      </div>
       <AlertDialog open={open} onOpenChange={setOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -100,6 +113,10 @@ export function WebsiteDetail({
 }) {
   const t = useTranslations();
   const { space, routeId } = useSpace();
+  const [tab, setTab] = useState<WebsiteTab>("crawls");
+  const baseId = useId();
+  const panelId = `${baseId}-panel`;
+  const tabId = (id: WebsiteTab) => `${baseId}-tab-${id}`;
 
   const { data: website } = useSuspenseQuery(websiteQueryOptions(browserApi, websiteId));
   const { data: runs } = useSuspenseQuery({
@@ -132,28 +149,35 @@ export function WebsiteDetail({
           )}
         </PageHeader>
       </div>
-      <Tabs defaultValue="crawls">
-        <TabsList>
-          <TabsTrigger value="crawls">{t("crawls")}</TabsTrigger>
-          <TabsTrigger value="blobs">{t("indexed_content")}</TabsTrigger>
-        </TabsList>
-        <TabsContent value="crawls" className="pt-4">
+      <div className="flex flex-col gap-4">
+        <TabList
+          role="tablist"
+          aria-label={t("ui_website_tabs_label")}
+          value={tab}
+          onChange={(value) => setTab(value === "blobs" ? "blobs" : "crawls")}
+          hasDivider
+        >
+          <Tab id={tabId("crawls")} value="crawls" label={t("crawls")} panelId={panelId} />
+          <Tab id={tabId("blobs")} value="blobs" label={t("indexed_content")} panelId={panelId} />
+        </TabList>
+        {/* One panel whose content follows the selected tab, so both tabs'
+            aria-controls point at an element that exists. */}
+        <div
+          role="tabpanel"
+          id={panelId}
+          aria-labelledby={tabId(tab)}
+          className="flex flex-col gap-4"
+        >
           {integrationRequestFormUrl ? (
-            <div className="mb-4">
-              <CrawlLimitationsBanner integrationRequestFormUrl={integrationRequestFormUrl} />
-            </div>
+            <CrawlLimitationsBanner integrationRequestFormUrl={integrationRequestFormUrl} />
           ) : null}
-          <CrawlRunsTable runs={runs} />
-        </TabsContent>
-        <TabsContent value="blobs" className="pt-4">
-          {integrationRequestFormUrl ? (
-            <div className="mb-4">
-              <CrawlLimitationsBanner integrationRequestFormUrl={integrationRequestFormUrl} />
-            </div>
-          ) : null}
-          <BlobTable blobs={blobs} canEdit={false} />
-        </TabsContent>
-      </Tabs>
+          {tab === "crawls" ? (
+            <CrawlRunsTable runs={runs} />
+          ) : (
+            <BlobTable blobs={blobs} canEdit={false} />
+          )}
+        </div>
+      </div>
     </div>
   );
 }

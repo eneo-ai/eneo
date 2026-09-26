@@ -5083,5 +5083,6 @@
   "space_sync_stale": "Over {days} days ago",
   "space_knowledge_tabs_label": "Knowledge sources",
   "ui_copy_failed_copy_by_hand": "Couldn't copy. Select the key and copy it yourself.",
-  "ui_toast_close": "Close notification"
+  "ui_toast_close": "Close notification",
+  "ui_website_tabs_label": "Crawls and content"
 }
