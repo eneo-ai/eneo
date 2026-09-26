@@ -25,6 +25,9 @@ COPY apps/web-next/package.json apps/web-next/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY apps/docs-site/package.json apps/docs-site/package.json
 COPY packages ./packages
+# The root package.json "patchedDependencies" are applied during install, and
+# bun fails when a listed patch file is missing.
+COPY patches ./patches
 # --ignore-scripts: skip workspace prepare hooks (e.g. apps/web's `svelte-kit
 # sync`) whose source isn't copied here. web-next has no workspace deps and
 # Next's native binaries ship as optional deps, not postinstall scripts.

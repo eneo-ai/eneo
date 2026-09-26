@@ -12,6 +12,10 @@ import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
+// Sonner's styles ship as a same-origin stylesheet (allowed by style-src 'self').
+// Its runtime <style> injection carries no CSP nonce, so it is patched out in
+// frontend/patches/sonner@*.patch.
+import "sonner/dist/styles.css";
 
 function isModal(dialog: HTMLDialogElement): boolean {
   // aria-modal: Astryx marks its modal dialogs, and jsdom never matches :modal.
