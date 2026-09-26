@@ -153,6 +153,40 @@ async function expectNoSidewaysPageScroll(page: Page) {
   ).toEqual({ page: false, panel: false });
 }
 
+/**
+ * Focus not obscured (2.4.11): no toast covers the focused element. Samples
+ * its centre and corners (inset past a rounded border) with elementFromPoint,
+ * which finds what is painted on top. Retries briefly: the toasts move out of
+ * the way a frame after focus does.
+ */
+async function expectFocusClearOfToasts(page: Page) {
+  await expect(async () => {
+    const focus = await page.evaluate(() => {
+      const focused = document.activeElement;
+      if (!focused || focused === document.body) return { name: "(nothing)", covered: [] };
+      const box = focused.getBoundingClientRect();
+      const inset = Math.min(8, box.width / 4, box.height / 4);
+      const points: [number, number][] = [
+        [box.left + box.width / 2, box.top + box.height / 2],
+        [box.left + inset, box.top + inset],
+        [box.right - inset, box.top + inset],
+        [box.left + inset, box.bottom - inset],
+        [box.right - inset, box.bottom - inset]
+      ];
+      return {
+        name: (focused.getAttribute("aria-label") ?? focused.textContent ?? "").trim().slice(0, 60),
+        covered: points
+          .filter(([x, y]) => document.elementFromPoint(x, y)?.closest("[data-sonner-toast]"))
+          .map(([x, y]) => `(${Math.round(x)}, ${Math.round(y)})`)
+      };
+    });
+    expect(
+      focus.covered,
+      `A toast covers the focused element "${focus.name}" at ${focus.covered.join(" ")}`
+    ).toEqual([]);
+  }).toPass({ timeout: 2_000 });
+}
+
 /** Opens a route, waits until it shows real content, then scans it. */
 async function scan(page: Page, path: string, ready: () => Promise<void>, exceptions?: Exceptions) {
   await page.goto(path);
@@ -503,6 +537,42 @@ test.describe("reflow at 320 px (1.4.10)", () => {
     await expect(page.getByText(/byt lösenord/i).first()).toBeVisible();
     await expectNoSidewaysPageScroll(page);
   });
+});
+
+// Focus not obscured (2.4.11): errors and warnings stay until closed, at the
+// bottom edge where the chat docks its composer; the toasts rise out of the way
+// of what has focus (src/components/ui/toast-lift.ts).
+test.describe("toasts never cover the focused element (2.4.11)", () => {
+  for (const [layout, options] of [
+    ["desktop (1280 × 800)", { viewport: { width: 1280, height: 800 } }],
+    ["phone (390 × 844)", { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true }]
+  ] as const) {
+    test.describe(layout, () => {
+      test.use({ ...options, contextOptions: { reducedMotion: "reduce" } });
+
+      test("an error toast over the docked chat composer", async ({ page }) => {
+        await answeredQuestion(page);
+        // A file type the chat does not take: an error that stays until closed.
+        await page.locator('input[type="file"]').setInputFiles({
+          name: "rapport.exe",
+          mimeType: "application/x-msdownload",
+          buffer: Buffer.from("MZ")
+        });
+        await expect(page.getByText(/^rapport\.exe: /)).toBeVisible();
+
+        await chatComposer(page).fill("Och nästa fråga?");
+        await expectFocusClearOfToasts(page);
+        // Through the composer's controls to Send.
+        const send = page.getByRole("button", { name: /skicka meddelande|send message/i });
+        for (let stop = 0; stop < 10; stop += 1) {
+          if (await send.evaluate((button) => button === document.activeElement)) break;
+          await page.keyboard.press("Tab");
+          await expectFocusClearOfToasts(page);
+        }
+        await expect(send).toBeFocused();
+      });
+    });
+  }
 });
 
 test("the skip link is the first tab stop and moves focus to the main content", async ({
