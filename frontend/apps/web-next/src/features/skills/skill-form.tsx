@@ -129,103 +129,108 @@ export function SkillForm(props: Props) {
       noValidate
       aria-busy={busy}
     >
-      <div className="space-y-2">
-        <Label htmlFor={`${id}-name`}>{t("skills_display_name_label")}</Label>
-        <Input
-          ref={nameRef}
-          id={`${id}-name`}
-          value={name}
-          maxLength={200}
-          required
-          disabled={busy}
-          aria-invalid={attempted && !name.trim()}
-          onChange={(event) => {
-            setName(event.target.value);
-            if (props.mode === "create" && !slugCustomized)
-              setSlug(deriveSkillSlug(event.target.value));
-          }}
-        />
-        <p className="text-muted-foreground text-xs">{t("skills_display_name_description")}</p>
-        {attempted && !name.trim() && (
-          <p className="text-destructive text-xs">{t("skills_required_field")}</p>
+      {/* The sticky footer (about 4 rem) must never cover focus (WCAG 2.4.11):
+          the fields keep 5 rem of bottom scroll margin, so Tab and focus()
+          scroll them into view above it. */}
+      <div className="flex flex-col gap-6 [&_*]:scroll-mb-20">
+        <div className="space-y-2">
+          <Label htmlFor={`${id}-name`}>{t("skills_display_name_label")}</Label>
+          <Input
+            ref={nameRef}
+            id={`${id}-name`}
+            value={name}
+            maxLength={200}
+            required
+            disabled={busy}
+            aria-invalid={attempted && !name.trim()}
+            onChange={(event) => {
+              setName(event.target.value);
+              if (props.mode === "create" && !slugCustomized)
+                setSlug(deriveSkillSlug(event.target.value));
+            }}
+          />
+          <p className="text-muted-foreground text-xs">{t("skills_display_name_description")}</p>
+          {attempted && !name.trim() && (
+            <p className="text-destructive text-xs">{t("skills_required_field")}</p>
+          )}
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor={`${id}-description`}>{t("skills_description_label")}</Label>
+          <Textarea
+            ref={descriptionRef}
+            id={`${id}-description`}
+            value={description}
+            rows={3}
+            maxLength={1024}
+            required
+            disabled={busy}
+            aria-invalid={attempted && !description.trim()}
+            onChange={(event) => setDescription(event.target.value)}
+          />
+          <p className="text-muted-foreground text-xs">{t("skills_description_description")}</p>
+          {attempted && !description.trim() && (
+            <p className="text-destructive text-xs">{t("skills_required_field")}</p>
+          )}
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor={`${id}-instructions`}>{t("skills_instructions_label")}</Label>
+          <Textarea
+            ref={instructionsRef}
+            id={`${id}-instructions`}
+            value={instructions}
+            rows={props.mode === "create" ? 8 : 12}
+            className="max-h-[50dvh] min-h-48 overflow-y-auto font-mono text-sm"
+            required
+            disabled={busy}
+            aria-invalid={attempted && !instructions.trim()}
+            onChange={(event) => setInstructions(event.target.value)}
+          />
+          <p className="text-muted-foreground text-xs">{t("skills_instructions_description")}</p>
+          {attempted && !instructions.trim() && (
+            <p className="text-destructive text-xs">{t("skills_required_field")}</p>
+          )}
+        </div>
+        {props.mode === "create" && (
+          <details id={`${id}-advanced`} className="rounded-lg border p-4">
+            <summary className="cursor-pointer text-sm font-medium">
+              {t("skills_advanced_options")}
+            </summary>
+            <div className="mt-4 space-y-2">
+              <Label htmlFor={`${id}-slug`}>{t("skills_slug_label")}</Label>
+              <Input
+                ref={slugRef}
+                id={`${id}-slug`}
+                value={slug}
+                maxLength={64}
+                autoComplete="off"
+                required
+                disabled={busy}
+                aria-invalid={attempted && !slug.trim()}
+                onChange={(event) => {
+                  setSlug(event.target.value);
+                  setSlugCustomized(true);
+                }}
+              />
+              <p className="text-muted-foreground text-xs">{t("skills_slug_description")}</p>
+              {attempted && !slug.trim() && (
+                <p className="text-destructive text-xs">{t("skills_required_field")}</p>
+              )}
+            </div>
+          </details>
+        )}
+        {error && (
+          <Alert variant="destructive" role="alert">
+            <AlertTitle>
+              {t(
+                props.mode === "create"
+                  ? "skills_form_error_title"
+                  : "skills_revision_form_error_title"
+              )}
+            </AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
       </div>
-      <div className="space-y-2">
-        <Label htmlFor={`${id}-description`}>{t("skills_description_label")}</Label>
-        <Textarea
-          ref={descriptionRef}
-          id={`${id}-description`}
-          value={description}
-          rows={3}
-          maxLength={1024}
-          required
-          disabled={busy}
-          aria-invalid={attempted && !description.trim()}
-          onChange={(event) => setDescription(event.target.value)}
-        />
-        <p className="text-muted-foreground text-xs">{t("skills_description_description")}</p>
-        {attempted && !description.trim() && (
-          <p className="text-destructive text-xs">{t("skills_required_field")}</p>
-        )}
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor={`${id}-instructions`}>{t("skills_instructions_label")}</Label>
-        <Textarea
-          ref={instructionsRef}
-          id={`${id}-instructions`}
-          value={instructions}
-          rows={props.mode === "create" ? 8 : 12}
-          className="max-h-[50dvh] min-h-48 overflow-y-auto font-mono text-sm"
-          required
-          disabled={busy}
-          aria-invalid={attempted && !instructions.trim()}
-          onChange={(event) => setInstructions(event.target.value)}
-        />
-        <p className="text-muted-foreground text-xs">{t("skills_instructions_description")}</p>
-        {attempted && !instructions.trim() && (
-          <p className="text-destructive text-xs">{t("skills_required_field")}</p>
-        )}
-      </div>
-      {props.mode === "create" && (
-        <details id={`${id}-advanced`} className="rounded-lg border p-4">
-          <summary className="cursor-pointer text-sm font-medium">
-            {t("skills_advanced_options")}
-          </summary>
-          <div className="mt-4 space-y-2">
-            <Label htmlFor={`${id}-slug`}>{t("skills_slug_label")}</Label>
-            <Input
-              ref={slugRef}
-              id={`${id}-slug`}
-              value={slug}
-              maxLength={64}
-              autoComplete="off"
-              required
-              disabled={busy}
-              aria-invalid={attempted && !slug.trim()}
-              onChange={(event) => {
-                setSlug(event.target.value);
-                setSlugCustomized(true);
-              }}
-            />
-            <p className="text-muted-foreground text-xs">{t("skills_slug_description")}</p>
-            {attempted && !slug.trim() && (
-              <p className="text-destructive text-xs">{t("skills_required_field")}</p>
-            )}
-          </div>
-        </details>
-      )}
-      {error && (
-        <Alert variant="destructive" role="alert">
-          <AlertTitle>
-            {t(
-              props.mode === "create"
-                ? "skills_form_error_title"
-                : "skills_revision_form_error_title"
-            )}
-          </AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
       <div className="bg-background sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t py-3">
         <p className="text-muted-foreground text-sm" role="status">
           {dirty ? t("skills_form_unsaved_status") : saved ? t("skills_form_saved_status") : ""}

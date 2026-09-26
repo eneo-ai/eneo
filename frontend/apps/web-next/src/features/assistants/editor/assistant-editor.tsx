@@ -182,12 +182,12 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
 
   return (
     <SaveStatusProvider>
-      {/* Cancel the space layout's p-6 so the header can sit flush at the scroll
-          top and span full width; content re-pads itself and stays centered.
-          shrink-0 keeps this taller than the scroll viewport (it's a flex item)
-          so the sticky header stays pinned through the whole scroll. */}
-      <div className="-m-6 flex shrink-0 flex-col">
-        <header className="bg-background sticky -top-6 z-30 border-b">
+      {/* Edge to edge in the space frame (data-space-full-bleed drops its
+          inset), so the header spans the page panel and pins flush to the top
+          of the scroll container (main#main-content); the content re-pads
+          itself and stays centered. */}
+      <div data-space-full-bleed className="flex shrink-0 flex-col">
+        <header className="bg-background sticky top-0 z-30 border-b">
           <div className="mx-auto w-full max-w-4xl px-6">
             <div className="flex items-center justify-between gap-3 py-3">
               <div className="flex min-w-0 items-center gap-2">
@@ -240,9 +240,15 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
           </div>
         </header>
 
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 py-8">
+        {/* The sticky header (about 7 rem) must never cover focus (WCAG
+            2.4.11): every element below it, the anchored sections included,
+            keeps 8 rem of scroll margin, so Tab, focus() and the section links
+            scroll it into view below the header. Scroll padding on the scroll
+            container would do the same, but main#main-content is shared by
+            every page. */}
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 py-8 [&_*]:scroll-mt-32">
           {sections.map((section) => (
-            <div key={section.id} id={section.id} className="scroll-mt-28">
+            <div key={section.id} id={section.id}>
               {section.node}
             </div>
           ))}
