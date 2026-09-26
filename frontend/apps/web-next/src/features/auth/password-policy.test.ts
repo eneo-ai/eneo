@@ -1,9 +1,13 @@
+import { createTranslator } from "next-intl";
 import { describe, expect, it } from "vitest";
+import sv from "@/lib/i18n/messages/sv.json";
 import {
   brokenRule,
+  newPasswordErrors,
   passwordCapability,
   type PasswordPolicy,
-  policyChecks
+  policyChecks,
+  policyRequirements
 } from "./password-policy";
 
 const localPolicy = {
@@ -81,5 +85,41 @@ describe("policyChecks", () => {
     ]);
     expect(brokenRule("langtlosenord", policy)).toBe("uppercase");
     expect(brokenRule("Langtlosenord", policy)).toBe("number");
+  });
+});
+
+// The app's Swedish catalog, looked up by any key as the forms do.
+const t = createTranslator({ locale: "sv", messages: sv as Record<string, string> });
+
+describe("the words the forms use", () => {
+  it("lists the rules a new password must meet, without bcrypt's byte limit", () => {
+    expect(policyRequirements(t, policy)).toBe(
+      "Använd minst 12 tecken. Inkludera en stor bokstav A–Z. Inkludera en siffra 0–9."
+    );
+  });
+
+  it("says what is wrong with a new password and its confirmation", () => {
+    const errors = (password: string, confirmation: string, required = true) =>
+      newPasswordErrors(t, { password, confirmation, policy, required });
+
+    expect(errors("", "")).toEqual({
+      password: "Ange ett nytt lösenord.",
+      confirmation: undefined
+    });
+    expect(errors("Kort1", "")).toEqual({
+      password: "Använd minst 12 tecken",
+      confirmation: "Skriv det nya lösenordet en gång till."
+    });
+    expect(errors("Langt-losenord-1", "Langt-losenord-2")).toEqual({
+      password: undefined,
+      confirmation: "Lösenorden matchar inte. Skriv samma lösenord i båda fälten."
+    });
+    expect(errors("Langt-losenord-1", "Langt-losenord-1")).toEqual({
+      password: undefined,
+      confirmation: undefined
+    });
+    // An admin may leave a user's password as it is.
+    expect(errors("", "", false)).toEqual({});
+    expect(errors("", "Langt-losenord-1", false).password).toBe("Ange ett nytt lösenord.");
   });
 });

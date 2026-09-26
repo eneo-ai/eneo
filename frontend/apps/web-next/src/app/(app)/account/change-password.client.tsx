@@ -7,10 +7,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import {
-  ConfirmedSecretInput,
-  confirmedSecretProblem
-} from "@/components/composites/confirmed-secret-input";
+import { ConfirmedSecretInput } from "@/components/composites/confirmed-secret-input";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
@@ -18,44 +15,11 @@ import { EneoApiError, unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import {
-  brokenRule,
+  newPasswordErrors,
   passwordCapability,
   type PasswordPolicy,
-  type PolicyRule
-} from "./password-policy";
-
-type Translate = ReturnType<typeof useTranslations>;
-
-/** A rule in the words of the SvelteKit account dialog's checklist. */
-function ruleText(t: Translate, rule: PolicyRule, policy: PasswordPolicy): string {
-  switch (rule) {
-    case "min_length":
-      return t("password_policy_min_length", { min: policy.minLength });
-    case "max_bytes":
-      return t("password_policy_max_bytes", { max: policy.maxBytes });
-    case "uppercase":
-      return t("password_policy_uppercase");
-    case "lowercase":
-      return t("password_policy_lowercase");
-    case "number":
-      return t("password_policy_number");
-    case "symbol":
-      return t("password_policy_symbol");
-  }
-}
-
-/** The rules a new password must meet, as sentences before the field. */
-function requirements(t: Translate, policy: PasswordPolicy): string {
-  const rules: PolicyRule[] = [
-    "min_length",
-    ...(policy.requiresUppercase ? (["uppercase"] as const) : []),
-    ...(policy.requiresLowercase ? (["lowercase"] as const) : []),
-    ...(policy.requiresNumber ? (["number"] as const) : []),
-    ...(policy.requiresSymbol ? (["symbol"] as const) : [])
-  ];
-  // bcrypt's byte limit is left out, as in SvelteKit: it is checked on save.
-  return rules.map((rule) => `${ruleText(t, rule, policy)}.`).join(" ");
-}
+  policyRequirements
+} from "@/features/auth/password-policy";
 
 type Field = "current" | "next" | "confirm";
 
@@ -75,22 +39,16 @@ function ChangePasswordForm({ policy, email }: { policy: PasswordPolicy; email: 
   const focusField = (field: Field) =>
     ({ current: currentRef, next: nextRef, confirm: confirmRef })[field].current?.focus();
 
-  const nextRule = next ? brokenRule(next, policy) : undefined;
+  const pair = newPasswordErrors(t, {
+    password: next,
+    confirmation: confirm,
+    policy,
+    required: true
+  });
   const errors: Record<Field, string | undefined> = {
     current: current ? serverErrors.current : t("change_password_current_required"),
-    next: !next
-      ? t("change_password_new_required")
-      : nextRule
-        ? ruleText(t, nextRule, policy)
-        : next === current
-          ? t("password_must_be_different")
-          : serverErrors.next,
-    confirm:
-      confirmedSecretProblem({ value: next, confirmation: confirm, isRequired: true }) === null
-        ? undefined
-        : confirm
-          ? t("change_password_mismatch")
-          : t("change_password_confirm_required")
+    next: pair.password ?? (next === current ? t("password_must_be_different") : serverErrors.next),
+    confirm: pair.confirmation
   };
   // Server refusals show at once; the rest once the form was submitted.
   const shown = (field: Field) =>
@@ -182,7 +140,7 @@ function ChangePasswordForm({ policy, email }: { policy: PasswordPolicy; email: 
       <ConfirmedSecretInput
         label={t("new_password")}
         confirmLabel={t("confirm_password")}
-        description={requirements(t, policy)}
+        description={policyRequirements(t, policy)}
         value={next}
         confirmation={confirm}
         onValueChange={(value) => {

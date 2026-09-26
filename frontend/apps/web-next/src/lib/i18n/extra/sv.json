@@ -324,7 +324,6 @@
   "admin_users_row_menu": "Fler åtgärder för {email}",
   "admin_users_count": "{count, plural, one {# användare} other {# användare}}",
   "admin_users_state_deleted": "Borttagen",
-  "admin_users_password_unchanged": "Lämna tomt för att behålla lösenordet",
   "admin_users_deactivated": "{email} avaktiverades",
   "admin_users_reactivated": "{email} återaktiverades",
   "admin_users_deleted": "{email} raderades",
@@ -1080,7 +1079,6 @@
   "output_format": "Utdataformat",
   "page_doesnt_exist": "Sidan du letar efter finns inte.",
   "page_not_found": "Sidan hittades inte",
-  "password_needs_7_chars": "Behöver vara minst 7 tecken långt",
   "password_placeholder": "Lösenord",
   "password_too_short": "Lösenordet måste vara minst 8 tecken",
   "pending_changes": "Väntande ändringar",
@@ -1415,5 +1413,7 @@
   "change_password_current_required": "Ange ditt nuvarande lösenord.",
   "change_password_new_required": "Ange ett nytt lösenord.",
   "change_password_confirm_required": "Skriv det nya lösenordet en gång till.",
-  "change_password_mismatch": "Lösenorden matchar inte. Skriv samma lösenord i båda fälten."
+  "change_password_mismatch": "Lösenorden matchar inte. Skriv samma lösenord i båda fälten.",
+  "admin_users_username_required": "Ange ett användarnamn.",
+  "admin_users_email_required": "Ange en e-postadress, till exempel namn@kommun.se."
 }
