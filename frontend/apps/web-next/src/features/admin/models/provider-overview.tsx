@@ -2,6 +2,7 @@
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Selector } from "@astryxdesign/core/Selector";
 import { TextInput } from "@astryxdesign/core/TextInput";
@@ -26,6 +27,7 @@ import {
   filterSections,
   KIND_FILTERS,
   type KindFilter,
+  type ModelFilters,
   type ModelsAttention,
   modelsAttention,
   UNCLASSIFIED
@@ -113,6 +115,7 @@ export function ProviderOverview({
 }) {
   const t = useTranslations();
   const typeLabel = useModelTypeLabel();
+  const announce = useAnnounce();
   const providers = useQuery(modelProvidersQueryOptions(browserApi));
   // Which provider types need an API key (static per deployment, cached).
   const capabilities = useQuery(providerCapabilitiesQueryOptions(browserApi));
@@ -121,6 +124,7 @@ export function ProviderOverview({
   const [kind, setKind] = useState<KindFilter>("all");
   const [securityFilter, setSecurityFilter] = useState("all");
   const security = securityEnabled ? securityFilter : "all";
+  const filters: ModelFilters = { search, kind, security };
 
   const sections = useMemo(
     () =>
@@ -139,8 +143,20 @@ export function ProviderOverview({
   );
   const attention = useMemo(() => modelsAttention(sections), [sections]);
 
-  const shown = rendered.reduce((total, entry) => total + entry.models.length, 0);
-  const isFiltering = search.trim() !== "" || kind !== "all" || security !== "all";
+  // The number of models a filter change leaves is announced politely,
+  // without moving focus (WCAG 4.1.3).
+  function announceResults(next: Partial<ModelFilters>) {
+    const nextFilters = { ...filters, ...next };
+    const isFiltering =
+      nextFilters.search.trim() !== "" ||
+      nextFilters.kind !== "all" ||
+      nextFilters.security !== "all";
+    const shown = filterSections(sections, nextFilters).reduce(
+      (total, entry) => total + entry.models.length,
+      0
+    );
+    announce(isFiltering ? t("admin_models_results", { count: shown }) : "");
+  }
 
   const securityOptions = [
     { value: "all", label: t("all") },
@@ -211,7 +227,10 @@ export function ProviderOverview({
           placeholder={t("search_models_and_providers")}
           startIcon={Search}
           value={search}
-          onChange={setSearch}
+          onChange={(value) => {
+            setSearch(value);
+            announceResults({ search: value });
+          }}
           hasClear
           className="w-full sm:w-72"
         />
@@ -219,7 +238,10 @@ export function ProviderOverview({
         <SegmentedControl
           label={t("model_type")}
           value={kind}
-          onChange={(value) => setKind(value as KindFilter)}
+          onChange={(value) => {
+            setKind(value as KindFilter);
+            announceResults({ kind: value as KindFilter });
+          }}
           className="max-w-full flex-wrap"
         >
           {KIND_FILTERS.map((filter) => (
@@ -239,7 +261,10 @@ export function ProviderOverview({
             isLabelHidden
             options={securityOptions}
             value={securityFilter}
-            onChange={setSecurityFilter}
+            onChange={(value) => {
+              setSecurityFilter(value);
+              announceResults({ security: value });
+            }}
             renderValue={(option) =>
               t("admin_models_filter_value", {
                 label: t("admin_models_security_filter"),
@@ -250,11 +275,6 @@ export function ProviderOverview({
           />
         )}
       </div>
-
-      {/* Filter results are announced politely without moving focus (4.1.3). */}
-      <p role="status" className="sr-only">
-        {isFiltering ? t("admin_models_results", { count: shown }) : ""}
-      </p>
 
       <AttentionBanner attention={attention} />
 

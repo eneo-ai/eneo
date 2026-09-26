@@ -234,7 +234,12 @@ describe("ModelsPage", () => {
     expect(within(vllm).getByText("Multilingual E5 Large")).toBeTruthy();
     // The type column is dropped while one type is shown.
     expect(within(vllm).queryByRole("columnheader", { name: "Typ" })).toBeNull();
-    expect(screen.getByText("1 modell visas")).toBeTruthy();
+    // Through Astryx's persistent polite live region (WCAG 4.1.3).
+    await waitFor(() =>
+      expect(document.querySelector("[data-astryx-live-region='polite']")?.textContent).toBe(
+        "1 modell visas"
+      )
+    );
   });
 
   it("searches model names, technical ids and provider names", () => {

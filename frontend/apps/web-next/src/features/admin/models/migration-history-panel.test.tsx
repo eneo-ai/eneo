@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
@@ -92,7 +92,7 @@ it("lists migrations with a status label and a disclosure per row", async () => 
   await expectNoAxeViolations(document.body);
 });
 
-it("searches and announces how many migrations match", () => {
+it("searches and announces how many migrations match", async () => {
   renderPanel();
   fireEvent.change(screen.getByRole("textbox", { name: "Sök i migreringshistoriken" }), {
     target: { value: "whisper" }
@@ -100,5 +100,10 @@ it("searches and announces how many migrations match", () => {
   const table = screen.getByRole("table", { name: "Migreringshistorik" });
   expect(within(table).queryByText("GPT-4o")).toBeNull();
   expect(within(table).getByText("KB-Whisper")).toBeTruthy();
-  expect(screen.getByText("1 migrering visas")).toBeTruthy();
+  // Through Astryx's persistent polite live region (WCAG 4.1.3).
+  await waitFor(() =>
+    expect(document.querySelector("[data-astryx-live-region='polite']")?.textContent).toBe(
+      "1 migrering visas"
+    )
+  );
 });

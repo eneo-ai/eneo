@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Selector } from "@astryxdesign/core/Selector";
 import {
   Table,
@@ -26,6 +27,27 @@ import { type ModelMigrationHistory, migrationHistoryQueryOptions } from "./mode
 
 type TypeFilter = "all" | "completion" | "transcription";
 type StatusFilter = "all" | "completed" | "failed" | "in_progress";
+type HistoryFilters = { search: string; type: TypeFilter; status: StatusFilter };
+
+// Not Astryx's filtering plugin: it filters one column from its header,
+// while this toolbar searches three columns at once next to two selects.
+function filterHistory(
+  rows: ModelMigrationHistory[],
+  { search, type, status }: HistoryFilters
+): ModelMigrationHistory[] {
+  const term = search.trim().toLowerCase();
+  return rows.filter((row) => {
+    if (type !== "all" && row.model_type !== type) return false;
+    if (status !== "all" && row.status !== status) return false;
+    return (
+      !term ||
+      [row.from_model_name, row.to_model_name, row.initiated_by_name]
+        .join(" ")
+        .toLowerCase()
+        .includes(term)
+    );
+  });
+}
 
 const DETAIL_LABELS: Record<string, string> = {
   assistants: "migration_detail_assistants",
@@ -57,25 +79,22 @@ export function MigrationHistoryPanel() {
   const [status, setStatus] = useState<StatusFilter>("all");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const baseId = useId();
+  const announce = useAnnounce();
 
-  // Not Astryx's filtering plugin: it filters one column from its header,
-  // while this toolbar searches three columns at once next to two selects.
-  const rows = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return (data ?? []).filter((row) => {
-      if (type !== "all" && row.model_type !== type) return false;
-      if (status !== "all" && row.status !== status) return false;
-      if (
-        term &&
-        ![row.from_model_name, row.to_model_name, row.initiated_by_name]
-          .join(" ")
-          .toLowerCase()
-          .includes(term)
-      )
-        return false;
-      return true;
-    });
-  }, [data, search, type, status]);
+  const rows = useMemo(
+    () => filterHistory(data ?? [], { search, type, status }),
+    [data, search, type, status]
+  );
+
+  // The number of migrations a filter change leaves is announced politely,
+  // without moving focus (WCAG 4.1.3).
+  function announceResults(next: Partial<HistoryFilters>) {
+    const filters = { search, type, status, ...next };
+    const isFiltering =
+      filters.search.trim() !== "" || filters.type !== "all" || filters.status !== "all";
+    const count = filterHistory(data ?? [], filters).length;
+    announce(isFiltering ? t("admin_models_history_results", { count }) : "");
+  }
 
   // Not useTableRowExpansion: its chevron is named "Expandera rad" on every
   // row, while these disclosures name the migration they open and point at
@@ -111,7 +130,10 @@ export function MigrationHistoryPanel() {
           placeholder={t("search")}
           startIcon={Search}
           value={search}
-          onChange={setSearch}
+          onChange={(value) => {
+            setSearch(value);
+            announceResults({ search: value });
+          }}
           hasClear
           className="w-full sm:w-72"
         />
@@ -124,7 +146,10 @@ export function MigrationHistoryPanel() {
             { value: "transcription", label: typeLabel("transcription") }
           ]}
           value={type}
-          onChange={(value) => setType(value as TypeFilter)}
+          onChange={(value) => {
+            setType(value as TypeFilter);
+            announceResults({ type: value as TypeFilter });
+          }}
           renderValue={filterValue(t("model_type"))}
           width="14rem"
         />
@@ -138,17 +163,14 @@ export function MigrationHistoryPanel() {
             { value: "in_progress", label: t("migration_status_in_progress") }
           ]}
           value={status}
-          onChange={(value) => setStatus(value as StatusFilter)}
+          onChange={(value) => {
+            setStatus(value as StatusFilter);
+            announceResults({ status: value as StatusFilter });
+          }}
           renderValue={filterValue(t("migration_history_status"))}
           width="12rem"
         />
       </div>
-
-      <p role="status" className="sr-only">
-        {search.trim() || type !== "all" || status !== "all"
-          ? t("admin_models_history_results", { count: rows.length })
-          : ""}
-      </p>
 
       <div className="bg-ax-card border-ax-border rounded-ax-container overflow-hidden border">
         <Table aria-label={t("migration_history_title")}>
