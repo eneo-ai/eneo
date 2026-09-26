@@ -58,6 +58,15 @@ export default async function RootLayout({
       className={`${figtree.variable} ${jetbrainsMono.variable} ${sourceSerif.variable} antialiased`}
       suppressHydrationWarning
     >
+      <head>
+        {/* The rule Astryx's chat stream scroller would inject at runtime
+            (scroll anchoring off while it follows new tokens), which the CSP
+            blocks. Astryx skips its own injection when <head> already holds
+            an element with this marker attribute. */}
+        <style nonce={nonce} data-astryx-chat-following-style="" suppressHydrationWarning>
+          {"[data-astryx-chat-following]{overflow-anchor:none !important}"}
+        </style>
+      </head>
       <body className="min-h-svh">
         <NextIntlClientProvider messages={messages}>
           {/* .light/.dark drive the legacy `dark:` variant and color-scheme

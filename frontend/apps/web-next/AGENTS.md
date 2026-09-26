@@ -262,16 +262,20 @@ Shared behaviour outside `composites`:
 ## CSP
 
 Production allows `<style>` elements only with the request nonce
-(`style-src 'self' 'nonce-…'`); inline `style=""` attributes are allowed. Never
-loosen the policy.
+(`style-src 'self' 'nonce-…'`); inline `style=""` attributes are allowed. It
+has no `'unsafe-eval'`. Development allows both (`src/proxy.ts`), so only the
+production build shows these violations. Never loosen the policy.
 
 - The Eneo theme is pre-built, so `Theme` injects nothing. Never pass a runtime
   `defineTheme()` object to `<Theme>`; runtime themes inject `<style>` tags.
 - Astryx parts that still inject `<style>` at runtime and are blocked in
   production: `CodeBlock`/`CodeEditor` syntax colours (don't use them; code
-  fences render through Streamdown's `@streamdown/code`), `DateInput`'s engine
-  probe (falls back to a pointer heuristic; harmless) and Chat's stream-scroll
-  rule (shipped statically in `globals.css`).
+  fences render through Streamdown's `@streamdown/code`) and `DateInput`'s
+  engine probe (falls back to a pointer heuristic). Chat's stream-scroll rule
+  is server-rendered with the nonce in `src/app/layout.tsx`; Astryx skips its
+  own injection when that element is there.
+- Zod probes for eval on its first object parse; `src/instrumentation-client.ts`
+  sets `jitless` so it doesn't (Zod's switch for strict CSPs).
 - Sonner injects its stylesheet at runtime unless patched:
   `frontend/patches/sonner@2.0.8.patch` makes the Toaster import the static
   `sonner/dist/styles.css`. After a sonner upgrade bun silently skips the stale

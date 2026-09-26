@@ -236,17 +236,7 @@
 }
 
 /*
- * 6. Astryx rules it would otherwise inject at runtime in a <style> tag, which
- *    the nonce-only production CSP blocks (see AGENTS.md → CSP). Shipped
- *    statically instead: Chat's stream scroller turns scroll anchoring off
- *    while it follows new tokens.
- */
-[data-astryx-chat-following] {
-  overflow-anchor: none !important;
-}
-
-/*
- * 7. Touch targets the theme cannot reach (ACCESSIBILITY.md → Target size).
+ * 6. Touch targets the theme cannot reach (ACCESSIBILITY.md → Target size).
  *    On a coarse pointer the Eneo theme makes Astryx controls 44 px high
  *    (eneo-theme.ts → adaptations). Checkbox, radio and switch take input on a
  *    transparent native <input> centred on their indicator, which Astryx sizes
@@ -263,7 +253,7 @@
 }
 
 /*
- * 8. Hover tint on filled legacy controls (shadcn Button and Badge fills), the
+ * 7. Hover tint on filled legacy controls (shadcn Button and Badge fills), the
  *    way Astryx does it: the neutral hover overlay is painted over the fill
  *    instead of fading the fill. A faded fill lightens the background behind
  *    white text (a 90% accent is 4.15:1); the overlay darkens it in light mode
@@ -363,7 +353,7 @@
 }
 
 /*
- * 9. The toast close button (sonner; every toast has one, see
+ * 8. The toast close button (sonner; every toast has one, see
  *    src/components/ui/sonner.tsx). Sonner draws it 20 px with a faint shadow
  *    for focus: make it 24 px (WCAG 2.5.8), 44 px to touch on a coarse
  *    pointer, and give it the app's full-strength focus outline. Sonner's

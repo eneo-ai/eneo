@@ -117,7 +117,7 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
     (`--size-element-sm/md/lg`) to 44 px: buttons (icon-only ones are
     square), menu triggers, tabs, nav items, inputs and selectors. Segmented
     control items and checkbox, radio and switch rows get `min-height: 44px`.
-  - `globals.css` (section 7) grows the transparent native input of checkboxes,
+  - `globals.css` (section 6) grows the transparent native input of checkboxes,
     radios and switches to 44 × 44; the theme cannot reach it.
   - A class that fixes a size (`size-10`, `h-8`) overrides the theme; give it
     `pointer-coarse:size-11` or drop it. Custom targets (links styled as
