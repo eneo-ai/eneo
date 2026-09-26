@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { screen } from "@testing-library/react";
+import { act, cleanup, screen } from "@testing-library/react";
 import { toast } from "sonner";
-import { expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 
 // Vitest does not process CSS, so record that the Toaster imports it.
 const stylesheet = vi.hoisted(() => ({ imported: false }));
@@ -12,6 +12,16 @@ vi.mock("sonner/dist/styles.css", () => {
 
 import { renderInApp } from "@/test/render";
 import { Toaster } from "./sonner";
+
+afterEach(() => {
+  // Unmount the toasters: each unsubscribes from sonner's store and its
+  // toasts' timers stop, so no React work runs after the test.
+  cleanup();
+  // Sonner's store is module-wide and replays the toasts still showing to
+  // the next Toaster that subscribes: dismiss them, so none outlives its test.
+  toast.dismiss();
+  vi.restoreAllMocks();
+});
 
 it("styles toasts from the bundled stylesheet instead of an injected <style>", async () => {
   // The Toaster reads its labels from next-intl, so render it in the app providers.
@@ -36,5 +46,13 @@ it("finds open dialogs without watching every DOM change on the page", () => {
     document.body,
     expect.objectContaining({ subtree: true })
   );
-  observe.mockRestore();
+});
+
+it("leaves no toaster or toast behind for the next test", async () => {
+  // Runs after the tests above, which showed "Sparat".
+  expect(screen.queryByRole("region", { name: /Aviseringar/ })).toBeNull();
+  renderInApp(<Toaster theme="light" />);
+  // A new Toaster takes over the toasts still in sonner's store a task later.
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(screen.queryByText("Sparat")).toBeNull();
 });
