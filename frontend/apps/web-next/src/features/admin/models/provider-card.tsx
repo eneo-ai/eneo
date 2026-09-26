@@ -52,31 +52,32 @@ function ModelTable({
   // Fixed layout: every column but "Modell" has a set width, so the model
   // column takes what is left and long ids truncate instead of widening the
   // table. Below the min width the table scrolls inside its own region.
+  // Each set width is also a min width (AGENTS.md → Tables).
   return (
     <Table aria-labelledby={labelledBy} hasHover className="min-w-212 table-fixed">
       <TableHeader>
         <TableRow className="bg-ax-sunken [&>th]:text-xs">
-          <TableHeaderCell scope="col" className="w-18">
+          <TableHeaderCell scope="col" className="w-18 min-w-18">
             {t("active")}
           </TableHeaderCell>
           <TableHeaderCell scope="col">{t("model")}</TableHeaderCell>
           {showKind && (
-            <TableHeaderCell scope="col" className="w-30">
+            <TableHeaderCell scope="col" className="w-30 min-w-30">
               {t("type")}
             </TableHeaderCell>
           )}
-          <TableHeaderCell scope="col" className="w-44">
+          <TableHeaderCell scope="col" className="w-44 min-w-44">
             {t("admin_models_column_capabilities")}
           </TableHeaderCell>
-          <TableHeaderCell scope="col" className="w-38 text-end">
+          <TableHeaderCell scope="col" className="w-38 min-w-38 text-end">
             {t("admin_models_column_price")}
           </TableHeaderCell>
           {securityEnabled && (
-            <TableHeaderCell scope="col" className="w-34">
+            <TableHeaderCell scope="col" className="w-34 min-w-34">
               {t("admin_models_column_security")}
             </TableHeaderCell>
           )}
-          <TableHeaderCell scope="col" className="w-14">
+          <TableHeaderCell scope="col" className="w-14 min-w-14">
             <span className="sr-only">{t("actions")}</span>
           </TableHeaderCell>
         </TableRow>

@@ -173,10 +173,12 @@ export function MigrationHistoryPanel() {
       </div>
 
       <div className="bg-ax-card border-ax-border rounded-ax-container overflow-hidden border">
-        <Table aria-label={t("migration_history_title")}>
+        {/* Below its min width the table scrolls inside its own region. */}
+        <Table aria-label={t("migration_history_title")} className="min-w-200">
           <TableHeader>
             <TableRow className="bg-ax-sunken [&>th]:text-xs">
-              <TableHeaderCell scope="col" className="w-12">
+              {/* Fits the 44 px touch-size button (AGENTS.md → Tables). */}
+              <TableHeaderCell scope="col" className="w-14 min-w-14">
                 <span className="sr-only">{t("details")}</span>
               </TableHeaderCell>
               <TableHeaderCell scope="col">{t("migration_history_date")}</TableHeaderCell>

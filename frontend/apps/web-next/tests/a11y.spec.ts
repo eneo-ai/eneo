@@ -47,7 +47,38 @@ type Exceptions = {
   disableRules?: Record<string, string>;
 };
 
-/** Scans the page as it is now. */
+// Narrowest content box a table column may have. A collapsed one has none:
+// its header cell is only padding wide.
+const MIN_COLUMN_CONTENT_PX = 16;
+
+/**
+ * Fails on a table column that collapsed (axe has no rule for it). Astryx
+ * header cells truncate with `max-width: 0`, which cancels a plain `w-*`
+ * width, so the column shrinks until its text wraps a letter per line or a
+ * control is clipped (AGENTS.md → Tables). A data table may scroll sideways
+ * instead of reflowing (1.4.10); it may not squeeze its columns.
+ */
+async function expectNoCollapsedTableColumns(page: Page) {
+  const collapsed = await page.locator("table th").evaluateAll(
+    (cells, minContent) =>
+      cells.flatMap((cell) => {
+        // A table in a hidden tab panel has no boxes to measure.
+        if (cell.getClientRects().length === 0) return [];
+        const style = getComputedStyle(cell);
+        const content =
+          cell.getBoundingClientRect().width -
+          parseFloat(style.paddingInlineStart) -
+          parseFloat(style.paddingInlineEnd);
+        return content < minContent
+          ? [`"${cell.textContent?.trim()}": ${Math.round(content)} px`]
+          : [];
+      }),
+    MIN_COLUMN_CONTENT_PX
+  );
+  expect(collapsed, `Collapsed table columns on ${page.url()}`).toEqual([]);
+}
+
+/** Scans the page as it is now: axe, then what axe cannot check. */
 async function expectNoAxeViolations(
   page: Page,
   { exclude = {}, disableRules = {} }: Exceptions = {}
@@ -78,6 +109,7 @@ async function expectNoAxeViolations(
     targets: violation.nodes.map((node) => node.target.join(" "))
   }));
   expect(report, `WCAG 2.2 A/AA violations on ${page.url()}`).toEqual([]);
+  await expectNoCollapsedTableColumns(page);
 }
 
 /** Opens a route, waits until it shows real content, then scans it. */
@@ -319,6 +351,8 @@ for (const colorScheme of ["light", "dark"] as const) {
     test("admin models", async ({ page }) => {
       await scan(page, "/admin/models", async () => {
         await expect(page.getByRole("tab", { name: /migreringshistorik/i })).toBeVisible();
+        // The seeded provider's model table (e2e/seed.py).
+        await expect(page.getByRole("main").getByRole("table").first()).toBeVisible();
       });
     });
 

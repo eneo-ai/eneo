@@ -202,6 +202,24 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
   background, and `main#main-content` is the scroll container. Pages don't
   set their own page background.
 
+## Tables
+
+- Use Astryx `Table`, preferably data-driven (`data` + `columns`) with a width
+  on every column: `pixel(n)` for fixed columns, `proportional(n)` for text
+  (it keeps a 120 px minimum). Its plugins do sorting, filtering, pagination
+  and selection.
+- In children mode (`TableHeader` / `TableRow` / `TableHeaderCell`), header
+  cells truncate with `max-width: 0`, which cancels a plain `w-*`: the column
+  collapses to its padding. Give a fixed column its min width too
+  (`w-36 min-w-36`, which is what `pixel()` does). Percentage widths (`w-2/5`)
+  and one column without a width, which takes what is left, work as they are.
+- A column with a button or menu is at least `w-14 min-w-14`: on touch,
+  Astryx controls are 44 px, plus the cell's 12 px start padding.
+- Give a table with many columns a min width (`min-w-*` on `Table`). Below it
+  the table scrolls sideways in its own focusable region instead of squeezing
+  the columns.
+- The page scans in `tests/a11y.spec.ts` fail on a column that collapsed.
+
 ## Shared building blocks (`src/components/composites`)
 
 - `PageHeader` — `title`, `description?`, `breadcrumbs?: {label, href?, current?}[]`

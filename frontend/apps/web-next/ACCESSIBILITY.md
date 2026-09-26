@@ -158,6 +158,9 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 - Usable at 200% zoom and at 320 CSS px width (1280 px at 400%) without
   scrolling in two directions. Only content that needs two dimensions (data
   tables, code, diagrams) may scroll, inside its own region.
+- A data table scrolls; it doesn't squeeze. Give it a min width so no column
+  ends up wrapping a letter per line or clipping a control (AGENTS.md →
+  Tables).
 - No fixed heights on containers with text (`min-h-*`, not `h-*`); sizes in
   `rem`. Never disable pinch zoom or lock orientation.
 - Text survives line height 1.5, paragraph spacing 2em, letter spacing 0.12em
@@ -381,7 +384,9 @@ and `target-size`; the contrast test and the page scans cover those.
 `tests/a11y.spec.ts` opens each key route, waits for real content (no
 `aria-busy` skeletons left) and fails on any violation, in light and dark
 mode. Besides the WCAG 2.2 A/AA tags it enables `page-has-heading-one`,
-`landmark-one-main` and `heading-order`. It covers the public pages, the chat
+`landmark-one-main` and `heading-order`. After axe, it fails on any table
+column that collapsed to its padding, which axe does not check (rule 6). It
+covers the public pages, the chat
 (start state, a docked conversation, the activity panel and sheet), the shell
 (catalog, collapsed rail, drawer, profile menu, ⌘K palette), spaces
 (overview, knowledge, websites, a create dialog) and admin, on desktop and at

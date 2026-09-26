@@ -53,6 +53,7 @@ export function UserTable({
   const t = useTranslations();
   const stateLabel = useStateLabel();
 
+  // Each set width is also a min width (AGENTS.md → Tables).
   return (
     <Table aria-label={label} hasHover className="min-w-160 table-fixed">
       <TableHeader>
@@ -61,10 +62,10 @@ export function UserTable({
           <TableHeaderCell scope="col" className="w-2/5">
             {t("roles")}
           </TableHeaderCell>
-          <TableHeaderCell scope="col" className="w-36">
+          <TableHeaderCell scope="col" className="w-36 min-w-36">
             {t("status")}
           </TableHeaderCell>
-          <TableHeaderCell scope="col" className="w-14">
+          <TableHeaderCell scope="col" className="w-14 min-w-14">
             <span className="sr-only">{t("actions")}</span>
           </TableHeaderCell>
         </TableRow>
