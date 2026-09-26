@@ -29,6 +29,7 @@ const MODELS = [
     name: "gpt-4o-2024-08-06",
     nickname: "GPT-4o",
     org: "OpenAI",
+    description: "Bra för snabba sammanfattningar.",
     vision: true,
     supports_tool_calling: true,
     input_cost_per_token: "0.0000025",
@@ -41,6 +42,7 @@ const MODELS = [
     nickname: "Claude Sonnet 4",
     org: "Anthropic",
     max_input_tokens: 200_000,
+    description: "Bra för längre analyser.",
     reasoning: true
   })
 ];
@@ -97,6 +99,15 @@ describe("ModelSelector", () => {
     const gpt = await screen.findByRole("option", { name: /^GPT-4o\b(?! mini)/ });
     expect(gpt.textContent).toContain("128K kontext · Vision · Verktyg");
     expect(gpt.textContent).not.toContain("$");
+  });
+
+  it("keeps the selected model's usage guidance below a form picker", async () => {
+    const { rerender } = renderSelector();
+    expect(screen.getByText("Bra för snabba sammanfattningar.")).toBeTruthy();
+
+    rerender(<ModelSelector models={MODELS} selectedId="sonnet" onSelect={vi.fn()} />);
+    expect(screen.getByText("Bra för längre analyser.")).toBeTruthy();
+    expect(screen.queryByText("Bra för snabba sammanfattningar.")).toBeNull();
   });
 
   it("searches models by name or vendor and picks one with the keyboard", async () => {

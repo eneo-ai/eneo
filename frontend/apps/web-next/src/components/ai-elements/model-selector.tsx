@@ -136,6 +136,13 @@ export function ModelSelector({
 
   const sorted = useMemo(() => sortModels(models), [models]);
   const byId = useMemo(() => new Map(sorted.map((model) => [model.id, model])), [sorted]);
+  const shownId = pendingId ?? selectedId;
+  const selected = shownId ? byId.get(shownId) : undefined;
+  const guidance = (locked ? byId.get(locked.id) : selected)?.description?.trim();
+  // The compact composer has no room for help text. Form pickers keep the
+  // administrator's advice visible after the list closes.
+  const guidanceText =
+    !compact && guidance ? <p className="text-ax-text-secondary text-sm">{guidance}</p> : null;
   const options = useMemo<SelectorOptionType[]>(() => {
     const groups = new Map<string, SelectorOptionData[]>();
     for (const model of sorted) {
@@ -174,28 +181,31 @@ export function ModelSelector({
 
   if (locked) {
     return (
-      <Selector
-        {...shared}
-        // Read-only keeps the model's name readable (disabled would dim it)
-        // and the trigger a focusable combobox whose value is the model.
-        isReadOnly
-        description={t("governance_locked_by_admin")}
-        // One name even when a settings row labels the trigger as well.
-        aria-label={label}
-        startIcon={Lock}
-        options={[{ value: locked.id, label: modelName(locked) }]}
-        value={locked.id}
-        renderValue={() => (
-          <span className={cn("block truncate", compact && COMPACT_NAME)}>{modelName(locked)}</span>
-        )}
-      />
+      <>
+        <Selector
+          {...shared}
+          // Read-only keeps the model's name readable (disabled would dim it)
+          // and the trigger a focusable combobox whose value is the model.
+          isReadOnly
+          description={t("governance_locked_by_admin")}
+          // One name even when a settings row labels the trigger as well.
+          aria-label={label}
+          startIcon={Lock}
+          options={[{ value: locked.id, label: modelName(locked) }]}
+          value={locked.id}
+          renderValue={() => (
+            <span className={cn("block truncate", compact && COMPACT_NAME)}>
+              {modelName(locked)}
+            </span>
+          )}
+        />
+        {guidanceText}
+      </>
     );
   }
 
   // A choice that is still saving is the value, in the trigger and in its
   // name. (Selector's `changeAction` would show it in the trigger only.)
-  const shownId = pendingId ?? selectedId;
-  const selected = shownId ? byId.get(shownId) : undefined;
   const valueText = selected
     ? modelName(selected)
     : shownId
@@ -203,48 +213,51 @@ export function ModelSelector({
       : t("select_a_model");
 
   return (
-    <Selector
-      {...shared}
-      // With a search field the trigger is a plain button that Astryx 0.6.3
-      // names by its label alone, so the chosen model would not be read out.
-      aria-label={t("legacy_model_selector_trigger", { label, model: valueText })}
-      options={options}
-      value={selected?.id}
-      onChange={(next) => {
-        if (next === shownId) return;
-        setPendingId(next);
-        void Promise.resolve(onSelect(next))
-          // The caller reports a failed save; the trigger shows `selectedId` again.
-          .catch(() => {})
-          .finally(() => setPendingId((current) => (current === next ? null : current)));
-      }}
-      isLoading={pendingId !== null}
-      isDisabled={disabled}
-      placeholder={valueText}
-      hasSearch
-      searchPlaceholder={t("search_models_and_providers")}
-      emptyText={t("no_models_found")}
-      emptySearchText={t("no_models_found")}
-      renderValue={(option) => {
-        const model = byId.get(option.value);
-        return model ? <ModelValue model={model} compact={compact} /> : null;
-      }}
-      renderOption={(option) => {
-        const model = byId.get(option.value);
-        if (!model) return null;
-        // Elements, not strings: Item cuts a string label or description to
-        // one line with an ellipsis, and these must wrap to stay readable.
-        return (
-          <SelectorOption
-            icon={<ProviderLogo provider={model.org ?? model.provider_type} />}
-            label={<span>{modelName(model)}</span>}
-            description={option.description ? <span>{option.description}</span> : undefined}
-            // A readable width even under a narrow trigger (the popup takes
-            // the width of its rows) that still fits a 320 px screen.
-            className="min-w-[min(18rem,calc(100vw_-_4rem))]"
-          />
-        );
-      }}
-    />
+    <>
+      <Selector
+        {...shared}
+        // With a search field the trigger is a plain button that Astryx 0.6.3
+        // names by its label alone, so the chosen model would not be read out.
+        aria-label={t("legacy_model_selector_trigger", { label, model: valueText })}
+        options={options}
+        value={selected?.id}
+        onChange={(next) => {
+          if (next === shownId) return;
+          setPendingId(next);
+          void Promise.resolve(onSelect(next))
+            // The caller reports a failed save; the trigger shows `selectedId` again.
+            .catch(() => {})
+            .finally(() => setPendingId((current) => (current === next ? null : current)));
+        }}
+        isLoading={pendingId !== null}
+        isDisabled={disabled}
+        placeholder={valueText}
+        hasSearch
+        searchPlaceholder={t("search_models_and_providers")}
+        emptyText={t("no_models_found")}
+        emptySearchText={t("no_models_found")}
+        renderValue={(option) => {
+          const model = byId.get(option.value);
+          return model ? <ModelValue model={model} compact={compact} /> : null;
+        }}
+        renderOption={(option) => {
+          const model = byId.get(option.value);
+          if (!model) return null;
+          // Elements, not strings: Item cuts a string label or description to
+          // one line with an ellipsis, and these must wrap to stay readable.
+          return (
+            <SelectorOption
+              icon={<ProviderLogo provider={model.org ?? model.provider_type} />}
+              label={<span>{modelName(model)}</span>}
+              description={option.description ? <span>{option.description}</span> : undefined}
+              // A readable width even under a narrow trigger (the popup takes
+              // the width of its rows) that still fits a 320 px screen.
+              className="min-w-[min(18rem,calc(100vw_-_4rem))]"
+            />
+          );
+        }}
+      />
+      {guidanceText}
+    </>
   );
 }
