@@ -285,8 +285,12 @@ async def test_valid_idp_token_resolves_correct_user(setup):
 
 @pytest.mark.asyncio
 async def test_eneo_hs256_jwt_still_works_with_resource_server_enabled(setup):
+    # Mint with the harness settings the token is verified against; the
+    # default audience comes from the ambient environment.
     token = setup.service.auth_service.create_access_token_for_user(
-        user=setup.user, secret_key=setup.settings.jwt_secret
+        user=setup.user,
+        secret_key=setup.settings.jwt_secret,
+        audience=setup.settings.jwt_audience,
     )
 
     user = await setup.service.authenticate(token=token)
