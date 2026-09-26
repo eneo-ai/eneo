@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
+import { router } from "@/test/navigation";
 import { renderInApp, testAppContext } from "@/test/render";
 import {
   spaceHasPermission,
@@ -17,14 +18,9 @@ import {
   makeWebsite
 } from "../testing/space-fixture";
 
-const state = vi.hoisted(() => ({
-  space: null as unknown,
-  push: (() => {}) as (href: string) => void
-}));
+const state = vi.hoisted(() => ({ space: null as unknown }));
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: (href: string) => state.push(href), prefetch: () => {} })
-}));
+vi.mock("next/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", () => ({
   useSpace: () => ({
     space: state.space,
@@ -230,8 +226,6 @@ describe("SpaceOverview", () => {
   });
 
   it("uploads to a chosen collection in the same dialog as the collection page", async () => {
-    const pushed: string[] = [];
-    state.push = (href) => pushed.push(href);
     show(busySpace());
 
     const upload = screen.getByRole("button", { name: "Ladda upp" });
@@ -245,7 +239,7 @@ describe("SpaceOverview", () => {
     const dialog = await screen.findByRole("dialog", { name: "Ladda upp filer" });
     expect(within(dialog).getByText(/Upphandlingspolicy/)).toBeTruthy();
     expect(within(dialog).getByText(/pdf/i)).toBeTruthy();
-    expect(pushed).toEqual([]);
+    expect(router.push).not.toHaveBeenCalled();
   });
 
   it("shows empty states with the create actions in an empty space", async () => {
