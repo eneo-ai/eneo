@@ -56,17 +56,26 @@ export function CapabilitiesSection({ assistant }: { assistant: Assistant }) {
               <Label htmlFor={`assistant-${capability.purpose}`}>{t(capability.purpose)}</Label>
               <p className="text-muted-foreground text-sm">{hint}</p>
             </div>
+            {/* Saving, it stays enabled so it keeps focus. A toggle meanwhile is
+                ignored: each save sends the whole selection. */}
             <Switch
               id={`assistant-${capability.purpose}`}
               checked={enabled}
-              disabled={governed || !editable || update.isPending || blocked !== null}
-              onCheckedChange={() =>
+              disabled={governed || !editable || blocked !== null}
+              aria-busy={
+                (update.isPending &&
+                  update.variables?.enabled_capabilities?.includes(capability.purpose) !==
+                    enabled) ||
+                undefined
+              }
+              onCheckedChange={() => {
+                if (update.isPending) return;
                 void autosave(() =>
                   update.mutateAsync({
                     enabled_capabilities: toggleCapability(selected, capability.purpose)
                   })
-                )
-              }
+                );
+              }}
             />
           </div>
         );

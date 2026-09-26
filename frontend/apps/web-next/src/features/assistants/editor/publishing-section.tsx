@@ -84,12 +84,15 @@ export function PublishingSection({ assistant }: { assistant: Assistant }) {
           title={canToggleInsights ? undefined : t("only_space_admins_toggle")}
         >
           {t("enable_insights")}
+          {/* Saving, it stays enabled so it keeps focus; a toggle meanwhile is ignored. */}
           <Switch
             checked={assistant.insight_enabled}
-            disabled={!canToggleInsights || update.isPending}
-            onCheckedChange={(checked) =>
-              autosave(() => update.mutateAsync({ insight_enabled: checked }))
-            }
+            disabled={!canToggleInsights}
+            aria-busy={update.isPending || undefined}
+            onCheckedChange={(checked) => {
+              if (!update.isPending)
+                void autosave(() => update.mutateAsync({ insight_enabled: checked }));
+            }}
           />
         </Label>
       </SettingsRow>

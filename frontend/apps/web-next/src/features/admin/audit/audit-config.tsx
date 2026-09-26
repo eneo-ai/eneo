@@ -1,15 +1,15 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { useSettingSwitch } from "@/features/admin/use-setting-switch";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import { toastApiError } from "@/lib/api/toast";
 import { cn } from "@/lib/utils";
 import {
   AUDIT_ACTION_CONFIG_KEY,
@@ -21,6 +21,67 @@ import {
   type ActionType,
   type CategoryType
 } from "./audit";
+
+// Category and action saves share one queue: a category cascades to its
+// actions, so its save and an action's must not overtake each other.
+const AUDIT_QUEUE = "audit-config";
+
+/** A category's switch: saves on toggle and keeps focus while it saves. */
+function CategorySwitch({
+  category,
+  enabled,
+  label,
+  onSaved
+}: {
+  category: CategoryType;
+  enabled: boolean;
+  label: string;
+  onSaved: () => void;
+}) {
+  const [value, setValue, saving] = useSettingSwitch(
+    `audit-category:${category}`,
+    enabled,
+    (next) =>
+      unwrap(
+        browserApi.PATCH("/api/v1/audit/config", {
+          body: { updates: [{ category, enabled: next }] }
+        })
+      ),
+    { onSaved, queue: AUDIT_QUEUE }
+  );
+  return (
+    <Switch
+      checked={value}
+      aria-busy={saving || undefined}
+      aria-label={label}
+      onCheckedChange={setValue}
+    />
+  );
+}
+
+/** An action's switch, labelled by the row it sits in: saves on toggle and keeps focus. */
+function ActionSwitch({
+  action,
+  enabled,
+  onSaved
+}: {
+  action: ActionType;
+  enabled: boolean;
+  onSaved: () => void;
+}) {
+  const [value, setValue, saving] = useSettingSwitch(
+    `audit-action:${action}`,
+    enabled,
+    (next) =>
+      unwrap(
+        browserApi.PATCH("/api/v1/audit/config/actions", {
+          body: { updates: [{ action, enabled: next }] }
+        })
+      ),
+    { onSaved, queue: AUDIT_QUEUE }
+  );
+  return <Switch checked={value} aria-busy={saving || undefined} onCheckedChange={setValue} />;
+}
 
 /**
  * Audit logging configuration: per-category toggles, each expandable to the
@@ -38,33 +99,10 @@ export function AuditConfig() {
   const [manuallyExpanded, setManuallyExpanded] = useState<Set<CategoryType>>(new Set());
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: AUDIT_CONFIG_KEY });
-    queryClient.invalidateQueries({ queryKey: AUDIT_ACTION_CONFIG_KEY });
+    void queryClient.invalidateQueries({ queryKey: AUDIT_CONFIG_KEY });
+    void queryClient.invalidateQueries({ queryKey: AUDIT_ACTION_CONFIG_KEY });
   };
 
-  const toggleCategory = useMutation({
-    mutationFn: (params: { category: CategoryType; enabled: boolean }) =>
-      unwrap(
-        browserApi.PATCH("/api/v1/audit/config", {
-          body: { updates: [{ category: params.category, enabled: params.enabled }] }
-        })
-      ),
-    onSuccess: invalidate,
-    onError: (error) => toastApiError(error, t)
-  });
-
-  const toggleAction = useMutation({
-    mutationFn: (params: { action: ActionType; enabled: boolean }) =>
-      unwrap(
-        browserApi.PATCH("/api/v1/audit/config/actions", {
-          body: { updates: [{ action: params.action, enabled: params.enabled }] }
-        })
-      ),
-    onSuccess: invalidate,
-    onError: (error) => toastApiError(error, t)
-  });
-
-  const busy = toggleCategory.isPending || toggleAction.isPending;
   const query = search.trim().toLowerCase();
 
   const actionsByCategory = useMemo(() => {
@@ -138,13 +176,11 @@ export function AuditConfig() {
                     </span>
                   </span>
                 </button>
-                <Switch
-                  checked={category.enabled}
-                  disabled={busy}
-                  aria-label={categoryLabel(t, category.category)}
-                  onCheckedChange={(enabled) =>
-                    toggleCategory.mutate({ category: category.category, enabled })
-                  }
+                <CategorySwitch
+                  category={category.category}
+                  enabled={category.enabled}
+                  label={categoryLabel(t, category.category)}
+                  onSaved={invalidate}
                 />
               </div>
 
@@ -154,12 +190,10 @@ export function AuditConfig() {
                     <li key={item.action}>
                       <Label className="hover:bg-muted/40 flex items-center justify-between gap-4 px-4 py-2.5 pl-10 font-normal">
                         <span className="truncate text-sm">{actionLabel(t, item.action)}</span>
-                        <Switch
-                          checked={item.enabled}
-                          disabled={busy}
-                          onCheckedChange={(enabled) =>
-                            toggleAction.mutate({ action: item.action, enabled })
-                          }
+                        <ActionSwitch
+                          action={item.action}
+                          enabled={item.enabled}
+                          onSaved={invalidate}
                         />
                       </Label>
                     </li>

@@ -212,6 +212,25 @@ describe("space Skills", () => {
     );
   });
 
+  it("keeps focus on the availability switch while it saves, and saves the press once", async () => {
+    patch.mockReturnValue(new Promise(() => {}));
+    show(<SpaceSkillDetailPage skillId="skill-1" />);
+    const toggle = await screen.findByRole("switch", {
+      name: "skills_library_availability_switch_label"
+    });
+    toggle.focus();
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(toggle.getAttribute("aria-busy")).toBe("true"));
+    // Shown at once, with its explanation, and never disabled.
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByText("skills_library_inactive_explanation")).toBeTruthy();
+    expect(toggle.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(toggle);
+    expect(patch).toHaveBeenCalledTimes(1);
+  });
+
   it("restores a reviewed space version using the shared history", async () => {
     post.mockImplementation(() =>
       ok({

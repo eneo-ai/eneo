@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { useSettingSwitch } from "@/features/admin/use-setting-switch";
 import { useSpace } from "@/features/spaces/use-space";
 import { browserApi } from "@/lib/api/browser";
 import { getErrorMessage, unwrap } from "@/lib/api/errors";
@@ -23,7 +24,6 @@ export function SpaceSkillDetailPage({ skillId }: { skillId: string }) {
   const { space, routeId, can } = useSpace();
   const queryClient = useQueryClient();
   const [dirty, setDirty] = useState(false);
-  const [statusBusy, setStatusBusy] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const key = skillQueryKey({ type: "space", spaceId: space.id });
   const base = `/spaces/${routeId}/skills`;
@@ -38,11 +38,12 @@ export function SpaceSkillDetailPage({ skillId }: { skillId: string }) {
     retry: false
   });
 
-  async function setActive(value: boolean) {
-    if (!skill.data || statusBusy) return;
-    setStatusBusy(true);
-    setStatusError(null);
-    try {
+  // Availability saves on toggle and keeps focus while it saves; a failure
+  // shows next to the switch (see useSettingSwitch).
+  const [active, saveActive, statusBusy] = useSettingSwitch(
+    `space-skill:${skillId}:active`,
+    skill.data?.is_active ?? false,
+    async (value) => {
       const next = await unwrap(
         browserApi.PATCH("/api/v1/spaces/{space_id}/skills/{skill_id}/active/", {
           params: { path: { space_id: space.id, skill_id: skillId } },
@@ -51,11 +52,13 @@ export function SpaceSkillDetailPage({ skillId }: { skillId: string }) {
       );
       queryClient.setQueryData([...key, skillId], next);
       await queryClient.invalidateQueries({ queryKey: key });
-    } catch (cause) {
-      setStatusError(getErrorMessage(cause, t));
-    } finally {
-      setStatusBusy(false);
-    }
+    },
+    { onSaved: () => {}, onError: (cause) => setStatusError(getErrorMessage(cause, t)) }
+  );
+
+  function setActive(value: boolean) {
+    setStatusError(null);
+    saveActive(value);
   }
 
   if (skill.isPending) return <p role="status">{t("loading")}</p>;
@@ -140,17 +143,18 @@ export function SpaceSkillDetailPage({ skillId }: { skillId: string }) {
               <p className="text-sm font-medium">{t("skills_library_availability_switch_label")}</p>
               <p className="text-muted-foreground text-xs">
                 {t(
-                  value.is_active
+                  active
                     ? "skills_library_active_explanation"
                     : "skills_library_inactive_explanation"
                 )}
               </p>
             </div>
             <Switch
-              checked={value.is_active}
-              disabled={!editable || statusBusy}
+              checked={active}
+              disabled={!editable}
+              aria-busy={statusBusy || undefined}
               aria-label={t("skills_library_availability_switch_label")}
-              onCheckedChange={(checked) => void setActive(checked)}
+              onCheckedChange={setActive}
             />
           </div>
           {statusError && (

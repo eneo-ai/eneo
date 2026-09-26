@@ -32,6 +32,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
+import { useSettingSwitch } from "@/features/admin/use-setting-switch";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
 import { cn } from "@/lib/utils";
@@ -112,11 +113,13 @@ function McpServerCard({
   const host = hostFromUrl(server.http_url);
   const quarantineId = `mcp-quarantine-${server.id}`;
 
-  const setEnabled = useMutation({
-    mutationFn: (next: boolean) => setMcpOrgEnabled(browserApi, server.id, next),
-    onSuccess: invalidate,
-    onError: (error) => toastApiError(error, t)
-  });
+  // Saves on toggle and keeps focus while it saves (see useSettingSwitch).
+  const [enabled, setEnabled, saving] = useSettingSwitch(
+    `mcp-server:${server.id}`,
+    server.is_org_enabled,
+    (next) => setMcpOrgEnabled(browserApi, server.id, next),
+    { onSaved: () => void invalidate() }
+  );
 
   const remove = useMutation({
     mutationFn: () => deleteMcpServer(browserApi, server.id),
@@ -128,7 +131,8 @@ function McpServerCard({
   });
 
   // Quarantine: an unclassified server can't be enabled while classifications
-  // are enforced. An already-enabled one stays toggleable so it can be turned off.
+  // are enforced. An already-enabled one stays toggleable so it can be turned
+  // off (by the saved value: turning it off must not disable it mid-save).
   const toggleBlocked = quarantined && !server.is_org_enabled;
 
   return (
@@ -178,18 +182,19 @@ function McpServerCard({
           <TooltipTrigger asChild>
             <span className="inline-flex">
               <Switch
-                checked={server.is_org_enabled}
-                disabled={setEnabled.isPending || toggleBlocked}
+                checked={enabled}
+                disabled={toggleBlocked}
+                aria-busy={saving || undefined}
                 aria-label={t("mcp_toggle_server", { name: server.name })}
                 aria-describedby={toggleBlocked ? quarantineId : undefined}
-                onCheckedChange={(checked) => setEnabled.mutate(checked)}
+                onCheckedChange={setEnabled}
               />
             </span>
           </TooltipTrigger>
           <TooltipContent>
             {toggleBlocked
               ? t("mcp_quarantine_blocks_enable")
-              : server.is_org_enabled
+              : enabled
                 ? t("mcp_toggle_to_disable")
                 : t("mcp_toggle_to_enable")}
           </TooltipContent>
