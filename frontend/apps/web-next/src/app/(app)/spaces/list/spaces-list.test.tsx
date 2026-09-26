@@ -3,6 +3,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { Suspense, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ShellContext } from "@/components/shell/shell-context";
+import { noopShell } from "@/components/shell/test-support";
 import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -70,7 +71,7 @@ const space = (overrides: Record<string, unknown>) => ({
 function Shell({ children }: { children: React.ReactNode }) {
   const [creating, setCreating] = useState(false);
   return (
-    <ShellContext value={{ openPalette: () => {}, openCreateSpace: () => setCreating(true) }}>
+    <ShellContext value={{ ...noopShell, openCreateSpace: () => setCreating(true) }}>
       {children}
       <CreateSpaceDialog open={creating} onOpenChange={setCreating} />
     </ShellContext>
