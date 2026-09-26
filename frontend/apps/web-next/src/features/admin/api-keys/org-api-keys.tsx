@@ -3,7 +3,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, Plus, RefreshCw, Settings, ShieldCheck } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
@@ -282,6 +282,7 @@ export function OrgApiKeysPage() {
   const [secret, setSecret] = useState<string | null>(null);
   const [showPolicy, setShowPolicy] = useState(false);
   const [showConstraintPolicy, setShowConstraintPolicy] = useState(false);
+  const headingId = useId();
 
   const { items, hasNextPage, hasPreviousPage, nextPage, previousPage, isPending } =
     usePaginatedQuery<ApiKey>({
@@ -304,7 +305,7 @@ export function OrgApiKeysPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <PageHeader title={t("api_keys")}>
+      <PageHeader title={t("api_keys")} headingId={headingId}>
         <Button variant="outline" onClick={() => setShowConstraintPolicy(true)}>
           <ShieldCheck className="size-4" /> {t("api_keys_admin_tenant_policy")}
         </Button>
@@ -361,7 +362,7 @@ export function OrgApiKeysPage() {
       {!isPending && items.length === 0 ? (
         <EmptyState title={t("api_keys_no_keys")} />
       ) : (
-        <Table>
+        <Table aria-labelledby={headingId}>
           <TableHeader>
             <TableRow>
               <TableHead>{t("name")}</TableHead>

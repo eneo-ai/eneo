@@ -102,7 +102,7 @@ export function ApiKeyUsageDialog({
                 {t("api_keys_admin_usage_empty")}
               </p>
             ) : (
-              <Table>
+              <Table aria-label={t("api_keys_admin_tab_usage")}>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="whitespace-nowrap">{t("audit_timestamp")}</TableHead>

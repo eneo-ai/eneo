@@ -433,7 +433,7 @@ export function ApiKeys() {
         <EmptyState title={t("api_keys_no_keys")} description={t("api_keys_no_keys_desc")} />
       ) : (
         <>
-          <Table>
+          <Table aria-label={t("api_keys")}>
             <TableHeader>
               <TableRow>
                 <TableHead>{t("name")}</TableHead>
