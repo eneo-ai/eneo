@@ -39,10 +39,27 @@ describe("expectNoAxeViolations", () => {
     await expect(expectNoAxeViolations(container)).rejects.toThrow(/autocomplete-valid/);
   });
 
-  it("skips a rule only with a documented reason", async () => {
+  it("skips a rule only with a reason and an issue link", async () => {
     const { container } = render(<input type="text" />);
     await expectNoAxeViolations(container, {
-      disableRules: { label: "Covered by the surrounding fixture in this test" }
+      disableRules: { label: "Labelled by the surrounding fixture, see #1234" }
     });
+    await expectNoAxeViolations(container, {
+      disableRules: {
+        label: "Upstream Astryx bug https://github.com/facebook/astryx/issues/1"
+      }
+    });
+  });
+
+  it.each([
+    ["an empty reason", ""],
+    ["a reason without an issue", "Covered by the surrounding fixture"],
+    ["an issue without a reason", "#1234"],
+    ["a bare link", "https://github.com/facebook/astryx/issues/1"]
+  ])("refuses to skip a rule with %s", async (_case, reason) => {
+    const { container } = render(<input type="text" />);
+    await expect(
+      expectNoAxeViolations(container, { disableRules: { label: reason } })
+    ).rejects.toThrow(/needs a reason and an issue link/);
   });
 });

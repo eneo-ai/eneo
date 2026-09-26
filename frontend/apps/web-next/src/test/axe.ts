@@ -13,13 +13,31 @@ const JSDOM_UNSUPPORTED_RULES = ["color-contrast", "link-in-text-block", "target
 
 export type AxeCheckOptions = {
   /**
-   * Rules to skip for this check, each with the reason and the issue that
-   * tracks the fix (ACCESSIBILITY.md → Exceptions). Prefer fixing the markup.
+   * Rules to skip for this check, each with the reason and a link to the
+   * issue that tracks the fix (ACCESSIBILITY.md → Exceptions): a URL or an
+   * issue number (`#1234`). Prefer fixing the markup.
    *
    * @example { "aria-allowed-role": "Upstream Astryx bug, see #1234" }
    */
   disableRules?: Record<string, string>;
 };
+
+/** An issue reference: a URL, `#1234` or `owner/repo#1234`. */
+const ISSUE_LINK = /https?:\/\/\S+|(?<![\w/])(?:[\w.-]+\/[\w.-]+)?#\d+\b/;
+
+/** An exception without a reason and an issue link is a silent pass. */
+function assertDocumented(disableRules: Record<string, string>) {
+  for (const [rule, reason] of Object.entries(disableRules)) {
+    const hasIssue = ISSUE_LINK.test(reason);
+    const hasReason = /\p{L}{3}/u.test(reason.replace(ISSUE_LINK, ""));
+    if (!hasIssue || !hasReason) {
+      throw new Error(
+        `Skipping the axe rule "${rule}" needs a reason and an issue link ` +
+          `(ACCESSIBILITY.md → Exceptions); got ${JSON.stringify(reason)}.`
+      );
+    }
+  }
+}
 
 function describeViolation(violation: axe.Result): string {
   const nodes = violation.nodes
@@ -46,6 +64,7 @@ export async function expectNoAxeViolations(
   container: Element | Document = document.body,
   options: AxeCheckOptions = {}
 ): Promise<void> {
+  assertDocumented(options.disableRules ?? {});
   const disabled = [...JSDOM_UNSUPPORTED_RULES, ...Object.keys(options.disableRules ?? {})];
   const results = await axe.run(container, {
     runOnly: { type: "tag", values: WCAG_22_AA_TAGS },
