@@ -13,11 +13,17 @@ const ruleTester = new RuleTester({
 
 const LEGACY = 'import { Button } from "@/components/ui/button";\n';
 const ASTRYX = 'import { Button } from "@astryxdesign/core/Button";\n';
+const LEGACY_SWITCH = 'import { Switch } from "@/components/ui/switch";\n';
+const ASTRYX_SWITCH = 'import { Switch } from "@/components/astryx/switch";\n';
 const ASTRYX_ALIAS =
   'import { Button as AxButton } from "@astryxdesign/core/Button";\n';
 
 const busy = (prop, name) => ({
   messageId: "disabledWhileBusy",
+  data: { prop, name },
+});
+const switchBusy = (prop, name) => ({
+  messageId: "switchDisabledWhileBusy",
   data: { prop, name },
 });
 const loading = (prop) => ({ messageId: "loadingDisables", data: { prop } });
@@ -63,6 +69,19 @@ ruleTester.run("no-busy-disabled-button", rule, {
     // `{ pending: x }` and types name no state.
     { code: `${LEGACY}<Button disabled={isBlocked({ pending: false })} />` },
     { code: `${LEGACY}<Button disabled={(state as PendingState).blocked} />` },
+    // Switches that save on toggle stay enabled while they save.
+    {
+      code: `${LEGACY_SWITCH}<Switch checked={value} aria-busy={saving || undefined} onCheckedChange={setValue} />`,
+    },
+    {
+      code: `${LEGACY_SWITCH}<Switch disabled={!canEdit || blocked !== null} />`,
+    },
+    {
+      code: `${ASTRYX_SWITCH}<Switch label={t("x")} isDisabled={!editable} value={value} />`,
+    },
+    {
+      code: `import { Switch } from "some-other-library";\n<Switch disabled={saving} />`,
+    },
     // isLoading={false} is not loading.
     { code: `${ASTRYX}<Button label={t("save")} isLoading={false} />` },
     // Names come from the option when given.
@@ -129,6 +148,32 @@ ruleTester.run("no-busy-disabled-button", rule, {
     {
       code: `${ASTRYX}<Button label={t("save")} isLoading isInterruptible={false} />`,
       errors: [loading("isLoading")],
+    },
+    // A switch disabled while its change saves.
+    {
+      code: `${LEGACY_SWITCH}<Switch checked={role.is_enabled} disabled={toggleEnabled.isPending} />`,
+      errors: [switchBusy("disabled", "isPending")],
+    },
+    {
+      code: `${LEGACY_SWITCH}<Switch disabled={!canToggleInsights || update.isPending} />`,
+      errors: [switchBusy("disabled", "isPending")],
+    },
+    {
+      code: `${ASTRYX_SWITCH}<Switch label={t("enabled")} isDisabled={saving} />`,
+      errors: [switchBusy("isDisabled", "saving")],
+    },
+    {
+      code: `import { Switch as AxSwitch } from "@/components/astryx/switch";\n<AxSwitch label={t("x")} isDisabled={pending} />`,
+      errors: [switchBusy("isDisabled", "pending")],
+    },
+    {
+      code: `import { Switch } from "@astryxdesign/core/Switch";\n<Switch label={t("x")} isDisabled={busy} />`,
+      errors: [switchBusy("isDisabled", "busy")],
+    },
+    // A switch is never a dismiss button.
+    {
+      code: `${ASTRYX_SWITCH}<Switch label={t("cancel")} isDisabled={saving} />`,
+      errors: [switchBusy("isDisabled", "saving")],
     },
     // Names come from the option when given.
     {

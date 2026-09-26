@@ -211,6 +211,7 @@ function PolicyEditor({
         </div>
         <Switch
           checked={draft.selective_activation_enabled}
+          // eslint-disable-next-line eneo/no-busy-disabled-button -- part of the draft Save sends, like the number fields; it waits while Save runs, which holds the focus.
           disabled={busy !== null}
           aria-label={t("skills_runtime_policy_selective_title")}
           onCheckedChange={(checked) =>

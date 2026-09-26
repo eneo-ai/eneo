@@ -1,19 +1,23 @@
 /**
- * Flags a button that disables itself while its own action runs (WCAG 2.4.3
- * Focus Order; web-next ACCESSIBILITY.md → Forms). The moment it turns
- * disabled, keyboard and screen reader focus drops to the page, and the user
- * has to find their way back. Busy, a button stays enabled, says so with
+ * Flags a button or switch that disables itself while its own work runs
+ * (WCAG 2.4.3 Focus Order; web-next ACCESSIBILITY.md → Forms). The moment it
+ * turns disabled, keyboard and screen reader focus drops to the page, and the
+ * user has to find their way back. Busy, a button stays enabled, says so with
  * `aria-busy` (Astryx: `isLoading` with `isInterruptible`) and ignores a
- * second press.
+ * second press; a switch that saves on toggle stays enabled too
+ * (`useSettingSwitch` shows the press at once and queues the next).
  *
  * Reported:
- *  - `disabled` or `isDisabled` on a legacy Button (`@/components/ui/button`)
- *    or an Astryx Button (`@astryxdesign/core/Button`, under any local name)
- *    whose expression reads a pending-like name that is not negated:
- *    `save.isPending`, `saving`, `busy !== null`, `isFetchingNextPage`. A name
- *    is pending-like when one of its words (camelCase or snake_case) is in
- *    `names` (default: pending, saving, busy, submitting, running, fetching,
- *    uploading, deleting, removing, restoring, connecting).
+ *  - `disabled` or `isDisabled` whose expression reads a pending-like name
+ *    that is not negated (`save.isPending`, `saving`, `busy !== null`,
+ *    `isFetchingNextPage`), on:
+ *    - a legacy Button (`@/components/ui/button`) or an Astryx Button
+ *      (`@astryxdesign/core/Button`), under any local name;
+ *    - a legacy Switch (`@/components/ui/switch`) or the Astryx Switch
+ *      (`@/components/astryx/switch`, `@astryxdesign/core/Switch`).
+ *    A name is pending-like when one of its words (camelCase or snake_case)
+ *    is in `names` (default: pending, saving, busy, submitting, running,
+ *    fetching, uploading, deleting, removing, restoring, connecting).
  *  - An Astryx Button with `isLoading` or `clickAction` and no
  *    `isInterruptible`: Astryx disables a loading button unless it is
  *    interruptible.
@@ -25,8 +29,9 @@
  *    runs, since the action holds the focus then.
  *  - A negated name: `isDisabled={!busy && !canSubmit}` is enabled while busy.
  *
- * Escape hatch, with a reason, for a gate that is not the button's own work
- * (a background job the page reports elsewhere):
+ * Escape hatch, with a reason, for a gate that is not the control's own work
+ * (a background job the page reports elsewhere, a draft field while its form
+ * saves):
  * `// eslint-disable-next-line eneo/no-busy-disabled-button -- <why>`
  *
  * @type {import('eslint').Rule.RuleModule}
@@ -47,11 +52,29 @@ const DEFAULT_NAMES = [
 ];
 const DEFAULT_DISMISS_LABELS = ["cancel", "back", "close"];
 
-const LEGACY_SOURCE = /(^|\/)components\/ui\/button$/;
-const ASTRYX_SOURCES = new Set([
-  "@astryxdesign/core/Button",
-  "@astryxdesign/core",
-]);
+/** Where the checked controls come from: the component imported under `name`. */
+const CONTROLS = [
+  {
+    name: "Button",
+    source: /(^|\/)components\/ui\/button$/,
+    control: "button",
+  },
+  {
+    name: "Button",
+    source: /^@astryxdesign\/core(\/Button)?$/,
+    control: "astryxButton",
+  },
+  {
+    name: "Switch",
+    source: /(^|\/)components\/ui\/switch$/,
+    control: "switch",
+  },
+  {
+    name: "Switch",
+    source: /^(@\/components\/astryx\/switch|@astryxdesign\/core(\/Switch)?)$/,
+    control: "switch",
+  },
+];
 const DISABLED_PROPS = new Set(["disabled", "isDisabled"]);
 
 /** `isFetchingNextPage` → is, fetching, next, page; `save_pending` → save, pending. */
@@ -93,7 +116,7 @@ const rule = {
     type: "problem",
     docs: {
       description:
-        "Disallow buttons that disable themselves while their own action runs; keep them enabled with aria-busy so they keep focus.",
+        "Disallow buttons and switches that disable themselves while their own work runs; keep them enabled with aria-busy so they keep focus.",
     },
     schema: [
       {
@@ -106,6 +129,8 @@ const rule = {
       },
     ],
     messages: {
+      switchDisabledWhileBusy:
+        "`{{ prop }}` reads `{{ name }}`: a switch disabled while its change saves drops focus to the page. Keep it enabled with aria-busy (useSettingSwitch for a setting that saves on toggle) and ignore or queue a toggle made meanwhile (ACCESSIBILITY.md → Forms).",
       disabledWhileBusy:
         "`{{ prop }}` reads `{{ name }}`: a button disabled while its own action runs drops focus to the page. Keep it enabled with aria-busy (Astryx: isLoading + isInterruptible) and ignore a second press in its handler (ACCESSIBILITY.md → Forms).",
       loadingDisables:
@@ -123,8 +148,8 @@ const rule = {
     );
     const { visitorKeys } = context.sourceCode;
 
-    /** Local name → "legacy" | "astryx", from this file's imports. */
-    const buttons = new Map();
+    /** Local name → "button" | "astryxButton" | "switch", from this file's imports. */
+    const controls = new Map();
 
     const isPendingName = (name) => words(name).some((word) => names.has(word));
 
@@ -193,27 +218,22 @@ const rule = {
     return {
       ImportDeclaration(node) {
         const source = node.source.value;
-        const kind = LEGACY_SOURCE.test(source)
-          ? "legacy"
-          : ASTRYX_SOURCES.has(source)
-            ? "astryx"
-            : null;
-        if (!kind) return;
         for (const specifier of node.specifiers) {
-          if (
-            specifier.type === "ImportSpecifier" &&
-            specifier.imported.name === "Button"
-          ) {
-            buttons.set(specifier.local.name, kind);
-          }
+          if (specifier.type !== "ImportSpecifier") continue;
+          const match = CONTROLS.find(
+            (entry) =>
+              entry.name === specifier.imported.name &&
+              entry.source.test(source),
+          );
+          if (match) controls.set(specifier.local.name, match.control);
         }
       },
 
       JSXOpeningElement(node) {
         if (node.name.type !== "JSXIdentifier") return;
-        const kind = buttons.get(node.name.name);
+        const kind = controls.get(node.name.name);
         if (!kind) return;
-        const dismiss = isDismissButton(node);
+        const dismiss = kind !== "switch" && isDismissButton(node);
 
         for (const attribute of node.attributes) {
           if (
@@ -227,13 +247,16 @@ const rule = {
           if (name) {
             context.report({
               node: attribute,
-              messageId: "disabledWhileBusy",
+              messageId:
+                kind === "switch"
+                  ? "switchDisabledWhileBusy"
+                  : "disabledWhileBusy",
               data: { prop: attribute.name.name, name },
             });
           }
         }
 
-        if (kind !== "astryx" || dismiss) return;
+        if (kind !== "astryxButton" || dismiss) return;
         if (isSet(findAttribute(node, "isInterruptible"))) return;
         for (const prop of ["isLoading", "clickAction"]) {
           const attribute = findAttribute(node, prop);
