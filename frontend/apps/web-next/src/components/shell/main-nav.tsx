@@ -173,7 +173,7 @@ function RecentSection() {
   const t = useTranslations();
   const target = useNavTarget();
   const { isCollapsed } = useSideNavCollapse();
-  const { conversations } = useRecentConversations();
+  const conversations = useRecentConversations();
 
   // Titles only (no icons): nothing to show in the icon rail.
   if (isCollapsed || conversations.length === 0) return null;

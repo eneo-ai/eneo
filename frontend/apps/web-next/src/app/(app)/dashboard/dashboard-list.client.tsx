@@ -10,82 +10,8 @@ import { useId, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { browserApi } from "@/lib/api/browser";
-import { dashboardQueryOptions, type Dashboard } from "./queries";
-
-export type CatalogEntry = {
-  id: string;
-  kind: "personal-assistant" | "assistant" | "app";
-  name: string;
-  href: string;
-};
-
-export type CatalogGroup = {
-  id: string;
-  name: string;
-  personal: boolean;
-  entries: CatalogEntry[];
-};
-
-/**
- * Assistants and apps per space, personal space first. The personal space's
- * default assistant is not part of `applications`; it opens the personal
- * chat, like "Ny konversation". Spaces with nothing to open are left out.
- */
-export function catalogGroups(
-  dashboard: Dashboard,
-  labels: { personal: string; personalAssistant: string }
-): CatalogGroup[] {
-  const groups = dashboard.spaces.items.map((space) => ({
-    id: space.id,
-    name: space.personal ? labels.personal : space.name,
-    personal: space.personal,
-    entries: [
-      ...(space.personal && space.default_assistant
-        ? [
-            {
-              id: space.default_assistant.id,
-              kind: "personal-assistant" as const,
-              name: labels.personalAssistant,
-              href: "/spaces/personal/chat"
-            }
-          ]
-        : []),
-      ...(space.applications?.assistants.items ?? []).map((assistant) => ({
-        id: assistant.id,
-        kind: "assistant" as const,
-        name: assistant.name,
-        href: `/dashboard/${assistant.id}?tab=chat`
-      })),
-      ...(space.applications?.apps.items ?? []).map((app) => ({
-        id: app.id,
-        kind: "app" as const,
-        name: app.name,
-        href: `/dashboard/app/${app.id}`
-      }))
-    ]
-  }));
-  return groups
-    .filter((group) => group.entries.length > 0)
-    .sort((a, b) => Number(b.personal) - Number(a.personal));
-}
-
-/** Keeps entries whose name, or whose space's name, contains the query. */
-export function filterCatalog(groups: CatalogGroup[], query: string): CatalogGroup[] {
-  const needle = query.toLocaleLowerCase("sv").trim();
-  if (!needle) return groups;
-  return groups
-    .map((group) =>
-      group.name.toLocaleLowerCase("sv").includes(needle)
-        ? group
-        : {
-            ...group,
-            entries: group.entries.filter((entry) =>
-              entry.name.toLocaleLowerCase("sv").includes(needle)
-            )
-          }
-    )
-    .filter((group) => group.entries.length > 0);
-}
+import { type CatalogEntry, catalogGroups, filterCatalog } from "./catalog";
+import { dashboardQueryOptions } from "./queries";
 
 function EntryCard({ entry, spaceName }: { entry: CatalogEntry; spaceName: string }) {
   const t = useTranslations();

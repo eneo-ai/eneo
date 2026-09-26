@@ -4,7 +4,6 @@ import { unwrap } from "@/lib/api/errors";
 import type { components } from "@/lib/api/schema";
 
 export type Dashboard = components["schemas"]["Dashboard"];
-export type SpaceDashboard = components["schemas"]["SpaceDashboard"];
 
 /**
  * Takes the client as a parameter so the same options (and query key) serve

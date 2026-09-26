@@ -1,5 +1,6 @@
 import { createStaticSource } from "@astryxdesign/core/Typeahead";
 import type { Schema } from "@/lib/api/models";
+import { catalogGroups } from "@/app/(app)/dashboard/catalog";
 import type { AdminNavGroup } from "./admin-nav-items";
 import { conversationHref, NEW_CONVERSATION_HREF } from "./routes";
 
@@ -7,7 +8,8 @@ import { conversationHref, NEW_CONVERSATION_HREF } from "./routes";
 export type PaletteGroup = "assistants" | "spaces" | "conversations" | "knowledge" | "actions";
 
 export type PaletteVisual =
-  | { type: "entity"; id: string; name: string }
+  /** A coloured initials tile; apps get the app glyph in it, as on the catalog page. */
+  | { type: "entity"; id: string; name: string; glyph?: "app" }
   | {
       type: "icon";
       icon: "personal" | "conversation" | "collection" | "website" | "compose" | "create" | "admin";
@@ -50,7 +52,8 @@ function spaceLabel(space: { personal: boolean; name: string }, t: Translate) {
 /**
  * Everything the ⌘K palette can find, in group order. Built from queries the
  * app already has (dashboard, spaces list, personal conversations, the
- * current space); no search endpoint is involved.
+ * current space); no search endpoint is involved. "Assistenter" lists what
+ * the "Assistenter" page lists (`catalogGroups`): assistants and apps.
  */
 export function buildPaletteEntries(
   data: PaletteData,
@@ -59,27 +62,41 @@ export function buildPaletteEntries(
 ): PaletteEntry[] {
   const entries: PaletteEntry[] = [];
 
-  for (const space of data.dashboard?.spaces.items ?? []) {
-    const spaceName = spaceLabel(space, t);
-    if (space.personal && space.default_assistant) {
+  const catalog = data.dashboard
+    ? catalogGroups(data.dashboard, {
+        personal: t("personal"),
+        personalAssistant: t("personal_assistant")
+      })
+    : [];
+  for (const group of catalog) {
+    for (const entry of group.entries) {
+      const common = {
+        id: `${entry.kind}:${entry.id}`,
+        label: entry.name,
+        group: "assistants" as const,
+        action: { type: "navigate" as const, href: entry.href }
+      };
+      if (entry.kind === "personal-assistant") {
+        entries.push({
+          ...common,
+          subtitle: group.name,
+          visual: { type: "icon", icon: "personal" }
+        });
+        continue;
+      }
       entries.push({
-        id: `assistant:${space.default_assistant.id}`,
-        label: t("personal_assistant"),
-        subtitle: t("personal"),
-        group: "assistants",
-        action: { type: "navigate", href: NEW_CONVERSATION_HREF },
-        visual: { type: "icon", icon: "personal" }
-      });
-    }
-    for (const assistant of space.applications?.assistants.items ?? []) {
-      entries.push({
-        id: `assistant:${assistant.id}`,
-        label: assistant.name,
-        subtitle: t("shell_palette_assistant_in_space", { space: spaceName }),
-        group: "assistants",
-        action: { type: "navigate", href: `/dashboard/${assistant.id}?tab=chat` },
-        visual: { type: "entity", id: assistant.id, name: assistant.name },
-        keywords: [spaceName]
+        ...common,
+        subtitle:
+          entry.kind === "app"
+            ? t("shell_catalog_app_in_space", { space: group.name })
+            : t("shell_palette_assistant_in_space", { space: group.name }),
+        visual: {
+          type: "entity",
+          id: entry.id,
+          name: entry.name,
+          glyph: entry.kind === "app" ? "app" : undefined
+        },
+        keywords: [group.name]
       });
     }
   }

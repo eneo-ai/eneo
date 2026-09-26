@@ -10,6 +10,7 @@ import { Kbd } from "@astryxdesign/core/Kbd";
 import type { SearchableItem, SearchSource } from "@astryxdesign/core/Typeahead";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
+  AppWindow,
   Globe,
   Library,
   MessageSquare,
@@ -65,26 +66,28 @@ async function settle<T>(promise: Promise<T>): Promise<T | null> {
 }
 
 /**
- * Loads what the palette searches, lazily (only once it opens) and from the
- * shared query cache, so data the page already fetched is reused. A source
- * that fails just contributes no results.
+ * Loads what the palette searches, lazily (only once it opens) and through the
+ * shared query cache: data the page fetched recently is reused, while stale or
+ * invalidated data (a deleted conversation, a new assistant) is fetched again
+ * first, so a result never leads to a page that is gone. A source that fails
+ * just contributes no results.
  */
 async function loadPaletteData(
   queryClient: QueryClient,
   currentSpaceRouteId: string | null
 ): Promise<PaletteData> {
   const [dashboard, spaces, currentSpace] = await Promise.all([
-    settle(queryClient.ensureQueryData(dashboardQueryOptions(browserApi))),
-    settle(queryClient.ensureQueryData(spacesListQueryOptions(browserApi))),
+    settle(queryClient.query(dashboardQueryOptions(browserApi))),
+    settle(queryClient.query(spacesListQueryOptions(browserApi))),
     currentSpaceRouteId
-      ? settle(queryClient.ensureQueryData(spaceQueryOptions(browserApi, currentSpaceRouteId)))
+      ? settle(queryClient.query(spaceQueryOptions(browserApi, currentSpaceRouteId)))
       : Promise.resolve(null)
   ]);
   const personalAssistantId = dashboard?.spaces.items.find((space) => space.personal)
     ?.default_assistant?.id;
   const conversations = personalAssistantId
     ? await settle(
-        queryClient.ensureQueryData(
+        queryClient.query(
           recentConversationsQueryOptions(browserApi, personalAssistantId, PALETTE_CONVERSATIONS)
         )
       )
@@ -115,7 +118,15 @@ function Highlighted({ text, query }: { text: string; query: string }) {
 
 function EntryVisual({ entry }: { entry: PaletteEntry }) {
   if (entry.visual.type === "entity") {
-    return <EntityAvatar id={entry.visual.id} name={entry.visual.name} size="md" />;
+    const { id, name, glyph } = entry.visual;
+    return (
+      <EntityAvatar
+        id={id}
+        name={name}
+        icon={glyph === "app" ? <AppWindow /> : undefined}
+        size="md"
+      />
+    );
   }
   const Glyph = ICONS[entry.visual.icon];
   return (

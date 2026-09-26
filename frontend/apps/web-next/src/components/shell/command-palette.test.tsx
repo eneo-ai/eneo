@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "@/lib/api/browser";
+import { makeQueryClient } from "@/lib/api/query";
 import type { Permission } from "@/lib/auth/permissions";
 import { expectNoAxeViolations } from "@/test/axe";
 import ShellCommandPalette from "./command-palette";
@@ -81,11 +82,18 @@ function search(query: string) {
   fireEvent.change(screen.getByRole("combobox"), { target: { value: query } });
 }
 
-beforeEach(() => installBrowserMocks());
+beforeEach(() => {
+  installBrowserMocks();
+  nav.pathname = "/spaces/s1/knowledge";
+});
 afterEach(() => {
   cleanup();
   router.push.mockReset();
+  vi.restoreAllMocks();
 });
+
+const ok = (data: unknown) =>
+  Promise.resolve({ data, error: undefined, response: new Response("{}", { status: 200 }) });
 
 describe("ShellCommandPalette", () => {
   it("is a named dialog with a labelled combobox and grouped results", async () => {
@@ -148,6 +156,67 @@ describe("ShellCommandPalette", () => {
     search("skapa");
     fireEvent.click(await screen.findByRole("option", { name: /^Skapa ?yta$/ }));
     await waitFor(() => expect(onCreateSpace).toHaveBeenCalledTimes(1));
+  });
+
+  it("fetches what the cache holds as stale or invalidated before listing it", async () => {
+    nav.pathname = "/dashboard";
+    // The app's own client (30 s staleTime), not the test client that never goes stale.
+    const queryClient = makeQueryClient();
+    const dashboard = (assistant: string) => ({
+      spaces: {
+        items: [
+          {
+            id: "p",
+            name: "Personal",
+            personal: true,
+            organization: false,
+            default_assistant: { id: "default-assistant" },
+            applications: { assistants: { items: [] }, apps: { items: [] } }
+          },
+          {
+            id: "s1",
+            name: "Upphandling",
+            personal: false,
+            organization: false,
+            applications: {
+              assistants: { items: [{ id: "a1", name: assistant }] },
+              apps: { items: [] }
+            }
+          }
+        ]
+      }
+    });
+    // Older than the stale time: an assistant was renamed since.
+    queryClient.setQueryData(["dashboard"], dashboard("Gammalt namn"), {
+      updatedAt: Date.now() - 60_000
+    });
+    queryClient.setQueryData(["spaces"], []);
+    // Fresh, but the chat invalidated it: a conversation was deleted.
+    const conversationsKey = recentConversationsQueryOptions(
+      browserApi,
+      "default-assistant",
+      20
+    ).queryKey;
+    queryClient.setQueryData(conversationsKey, [{ id: "c1", name: "Raderad konversation" }]);
+    await queryClient.invalidateQueries({
+      queryKey: ["conversations", "assistant", "default-assistant"]
+    });
+    const get = vi.spyOn(browserApi, "GET").mockImplementation(((path: string) => {
+      if (path === "/api/v1/dashboard/") return ok(dashboard("Nytt namn"));
+      if (path === "/api/v1/conversations/") return ok({ items: [{ id: "c2", name: "Ny fråga" }] });
+      return ok({});
+    }) as unknown as typeof browserApi.GET);
+
+    renderWithProviders(
+      <ShellCommandPalette isOpen onOpenChange={vi.fn()} onCreateSpace={vi.fn()} />,
+      { queryClient, context: appContext() }
+    );
+
+    expect(await screen.findByRole("option", { name: /Nytt namn/ })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /Ny fråga/ })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: /Gammalt namn|Raderad konversation/ })).toBeNull();
+    // The fresh spaces list came from the cache.
+    expect(get).not.toHaveBeenCalledWith("/api/v1/spaces/", expect.anything());
   });
 
   it("hides Skapa yta and admin pages from others", async () => {

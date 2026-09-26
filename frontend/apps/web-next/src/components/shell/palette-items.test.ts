@@ -36,7 +36,7 @@ const data = {
                 { id: "a2", name: "Avtalsgranskaren" }
               ]
             },
-            apps: { items: [] }
+            apps: { items: [{ id: "app1", name: "Avtalsanalys" }] }
           }
         }
       ]
@@ -83,15 +83,28 @@ describe("buildPaletteEntries", () => {
     expect(groups).toEqual(["assistants", "spaces", "conversations", "knowledge", "actions"]);
   });
 
-  it("opens the personal assistant in the personal chat and others in their chat", () => {
-    const entries = buildPaletteEntries(data, member, t);
-    expect(entries.find((entry) => entry.id === "assistant:default")?.action).toEqual({
-      type: "navigate",
-      href: "/spaces/personal/chat"
+  it("lists what the Assistenter page lists: the personal assistant first, then assistants and apps", () => {
+    const assistants = buildPaletteEntries(data, member, t).filter(
+      (entry) => entry.group === "assistants"
+    );
+    expect(assistants.map((entry) => [entry.id, entry.action])).toEqual([
+      ["personal-assistant:default", { type: "navigate", href: "/spaces/personal/chat" }],
+      ["assistant:a1", { type: "navigate", href: "/dashboard/a1?tab=chat" }],
+      ["assistant:a2", { type: "navigate", href: "/dashboard/a2?tab=chat" }],
+      ["app:app1", { type: "navigate", href: "/dashboard/app/app1" }]
+    ]);
+    expect(assistants.map((entry) => entry.subtitle)).toEqual([
+      "personal",
+      "shell_palette_assistant_in_space(Upphandling)",
+      "shell_palette_assistant_in_space(Upphandling)",
+      "shell_catalog_app_in_space(Upphandling)"
+    ]);
+    expect(assistants[3]?.visual).toEqual({
+      type: "entity",
+      id: "app1",
+      name: "Avtalsanalys",
+      glyph: "app"
     });
-    const upphandling = entries.find((entry) => entry.id === "assistant:a1");
-    expect(upphandling?.action).toEqual({ type: "navigate", href: "/dashboard/a1?tab=chat" });
-    expect(upphandling?.subtitle).toBe("shell_palette_assistant_in_space(Upphandling)");
   });
 
   it("links conversations with ?session_id= and names untitled ones", () => {
@@ -140,10 +153,11 @@ describe("bootstrapEntries / searchEntries", () => {
   it("matches labels, subtitles and keywords case-insensitively, in group order", async () => {
     const entries = buildPaletteEntries(data, admin, t);
     const ids = (await searchEntries(entries, "UPPH")).map((entry) => entry.id);
-    // a2 and the website match through the space name in their subtitle.
+    // a2, the app and the website match through the space name in their subtitle.
     expect(ids).toEqual([
       "assistant:a1",
       "assistant:a2",
+      "app:app1",
       "space:s1",
       "conversation:c1",
       "collection:col1",

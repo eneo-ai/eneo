@@ -52,5 +52,5 @@ export function useRecentConversations(limit = RECENT_CONVERSATIONS_IN_NAV) {
     ...recentConversationsQueryOptions(browserApi, assistantId ?? "", limit),
     enabled: Boolean(assistantId)
   });
-  return { conversations: recent.data ?? [], isPending: recent.isPending };
+  return recent.data ?? [];
 }
