@@ -30,6 +30,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { useJobs } from "@/features/jobs/use-jobs";
+import { useRemovalMutation } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
 import type { IntegrationKnowledge } from "../knowledge";
 
@@ -78,7 +79,7 @@ export function IntegrationActions({ item }: { item: IntegrationKnowledge }) {
     onError: (error) => toastApiError(error, t)
   });
 
-  const deleteKnowledge = useMutation({
+  const deleteKnowledge = useRemovalMutation({
     mutationFn: () =>
       unwrap(
         browserApi.DELETE(
@@ -86,11 +87,8 @@ export function IntegrationActions({ item }: { item: IntegrationKnowledge }) {
           { params: { path: { id: space.id, integration_knowledge_id: item.id } } }
         )
       ),
-    onSuccess: () => {
-      invalidate();
-      setShowDelete(false);
-    },
-    onError: (error) => toastApiError(error, t)
+    refresh: invalidate,
+    onRemoved: () => setShowDelete(false)
   });
 
   if (!canEdit && !canDelete) return null;
@@ -212,19 +210,18 @@ export function WrapperActions({
     onError: (error) => toastApiError(error, t)
   });
 
-  const deleteWrapper = useMutation({
+  const deleteWrapper = useRemovalMutation({
     mutationFn: () =>
       unwrap(
         browserApi.DELETE("/api/v1/spaces/{id}/knowledge/integrations/wrappers/{wrapper_id}/", {
           params: { path: { id: space.id, wrapper_id: wrapperId } }
         })
       ),
-    onSuccess: () => {
-      invalidate();
+    refresh: invalidate,
+    onRemoved: () => {
       setShowDelete(false);
       onDeleted?.();
-    },
-    onError: (error) => toastApiError(error, t)
+    }
   });
 
   if (!canEdit && !canDelete) return null;

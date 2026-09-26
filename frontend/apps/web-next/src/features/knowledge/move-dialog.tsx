@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -49,6 +49,7 @@ export function MoveResourceDialog({
 }) {
   const t = useTranslations();
   const { space } = useSpace();
+  const destinationId = useId();
   const [targetId, setTargetId] = useState<string | undefined>();
 
   const { data: spaces } = useQuery({ ...spacesListQueryOptions(browserApi), enabled: open });
@@ -61,9 +62,9 @@ export function MoveResourceDialog({
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-2">
-          <Label>{t("destination")}</Label>
+          <Label htmlFor={destinationId}>{t("destination")}</Label>
           <Select value={targetId} onValueChange={setTargetId}>
-            <SelectTrigger className="w-full">
+            <SelectTrigger id={destinationId} className="w-full">
               <SelectValue placeholder={t("select_ellipsis")} />
             </SelectTrigger>
             <SelectContent>

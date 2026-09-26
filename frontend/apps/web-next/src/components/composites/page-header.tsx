@@ -12,8 +12,19 @@ export type PageHeaderCrumb = {
 };
 
 export type PageHeaderProps = {
-  /** The page's h1. */
+  /** The page's h1 (or h2, see `headingLevel`). */
   title: string;
+  /**
+   * Outline level of the title. 1 (default) for a page's own heading; 2 for a
+   * page inside a frame that already renders the h1, such as a space tab.
+   */
+  headingLevel?: 1 | 2;
+  /**
+   * Ref to the title heading. Setting it also makes the heading a programmatic
+   * focus target (`tabIndex={-1}`), e.g. for focus after a delete removed the
+   * focused row (`RemovalFocusScope`).
+   */
+  headingRef?: React.Ref<HTMLHeadingElement>;
   /** One-line summary under the title. */
   description?: string;
   /**
@@ -32,8 +43,9 @@ export type PageHeaderProps = {
 };
 
 /**
- * Page title block: optional breadcrumbs, h1, optional description and an
- * actions slot. Server-component safe (Astryx parts are client components).
+ * Page title block: optional breadcrumbs, h1 (or h2), optional description
+ * and an actions slot. Server-component safe (Astryx parts are client
+ * components; `headingRef` is for client callers).
  *
  * @example
  * <PageHeader
@@ -45,6 +57,8 @@ export type PageHeaderProps = {
  */
 export function PageHeader({
   title,
+  headingLevel = 1,
+  headingRef,
   description,
   breadcrumbs,
   actions,
@@ -72,7 +86,15 @@ export function PageHeader({
       ) : null}
       <div className="flex min-h-9 flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div className="flex min-w-0 flex-col gap-1">
-          <Heading level={1} className="break-words">
+          <Heading
+            level={headingLevel}
+            className={cn(
+              "break-words",
+              headingRef &&
+                "focus-visible:outline-ring rounded-ax-inner focus-visible:outline-2 focus-visible:outline-offset-2"
+            )}
+            {...(headingRef ? { ref: headingRef, tabIndex: -1 } : {})}
+          >
             {title}
           </Heading>
           {description ? (

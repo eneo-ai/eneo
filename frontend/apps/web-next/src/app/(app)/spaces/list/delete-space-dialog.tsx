@@ -4,12 +4,12 @@ import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import { toastApiError } from "@/lib/api/toast";
+import { useRemovalMutation } from "@/features/spaces/removal";
 import type { SpaceSparse } from "@/features/spaces/space";
 
 /**
@@ -30,14 +30,11 @@ export function DeleteSpaceDialog({
   const formId = useId();
   const [typed, setTyped] = useState("");
 
-  const deleteSpace = useMutation({
+  const deleteSpace = useRemovalMutation({
     mutationFn: (id: string) =>
       unwrap(browserApi.DELETE("/api/v1/spaces/{id}/", { params: { path: { id } } })),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["spaces"] });
-      close();
-    },
-    onError: (error) => toastApiError(error, t)
+    refresh: () => queryClient.invalidateQueries({ queryKey: ["spaces"] }),
+    onRemoved: () => close()
   });
 
   function close() {

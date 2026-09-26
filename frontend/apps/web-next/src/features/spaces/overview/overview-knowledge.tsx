@@ -6,15 +6,17 @@ import { pixel, proportional, Table, type TableColumn } from "@astryxdesign/core
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { BookOpen, FolderClosed, Globe, Plug, Upload, type LucideIcon } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { StatusLabel } from "@/components/composites/status-label";
 import { CollectionActions, CreateCollectionButton } from "@/features/knowledge/collections";
 import { IntegrationActions, WrapperActions } from "@/features/knowledge/integrations/actions";
+import type { Collection } from "@/features/knowledge/knowledge";
 import { KnowledgeNameCell } from "@/features/knowledge/table-controls-ui";
-import { SpaceTableFrame } from "../table-frame";
+import { UploadBlobsDialog } from "@/features/knowledge/upload-dialog";
 import { WebsiteActions } from "@/features/knowledge/websites";
+import { SpaceTableFrame } from "../table-frame";
 import { ClientTime } from "../client-time";
 import { useSpace } from "../use-space";
 import {
@@ -39,36 +41,52 @@ const TYPE_ICONS: Record<KnowledgeKind, LucideIcon> = {
   integration: Plug
 };
 
-/** "Ladda upp": pick one of the space's collections; its page holds the upload. */
+/**
+ * "Ladda upp": pick one of the space's collections, then the same upload
+ * dialog as on the collection's page (formats, limits, duplicate check).
+ */
 function UploadMenu() {
   const t = useTranslations();
-  const router = useRouter();
-  const { space, routeId } = useSpace();
+  const { space } = useSpace();
   const collator = useCollator();
+  const [target, setTarget] = useState<Collection | null>(null);
   const targets = uploadTargets(space, collator.compare);
   if (targets.length === 0) return null;
 
   return (
-    <DropdownMenu
-      button={{
-        label: t("upload"),
-        size: "sm",
-        icon: <Upload aria-hidden="true" />
-      }}
-      alignment="end"
-      items={[
-        {
-          type: "section",
-          title: t("space_upload_choose_collection"),
-          items: targets.map((collection) => ({
-            id: collection.id,
-            label: collection.name,
-            icon: <FolderClosed aria-hidden="true" />,
-            onClick: () => router.push(`/spaces/${routeId}/knowledge/collections/${collection.id}`)
-          }))
-        }
-      ]}
-    />
+    <>
+      <DropdownMenu
+        button={{
+          label: t("upload"),
+          size: "sm",
+          icon: <Upload aria-hidden="true" />
+        }}
+        alignment="end"
+        items={[
+          {
+            type: "section",
+            title: t("space_upload_choose_collection"),
+            items: targets.map((collection) => ({
+              id: collection.id,
+              label: collection.name,
+              icon: <FolderClosed aria-hidden="true" />,
+              onClick: () => setTarget(collection)
+            }))
+          }
+        ]}
+      />
+      {target ? (
+        <UploadBlobsDialog
+          key={target.id}
+          collectionId={target.id}
+          collectionName={target.name}
+          open
+          onOpenChange={(open) => {
+            if (!open) setTarget(null);
+          }}
+        />
+      ) : null}
+    </>
   );
 }
 

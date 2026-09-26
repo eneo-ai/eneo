@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -57,6 +58,37 @@ describe("BlobTable", () => {
     });
     expect(names()).toEqual(["fil-104.pdf"]);
     expect(screen.queryByRole("navigation", { name: /Bläddra bland filer/ })).toBeNull();
+  });
+
+  it("stays on a page with files when the list shrinks under it", () => {
+    const files = (count: number) =>
+      Array.from({ length: count }, (_, index) =>
+        blob(String(index), `fil-${String(index).padStart(3, "0")}.pdf`, index)
+      );
+    let setBlobs: (blobs: InfoBlob[]) => void = () => {};
+    function Files() {
+      const [blobs, set] = useState(() => files(105));
+      setBlobs = set;
+      return <BlobTable blobs={blobs} canEdit={false} />;
+    }
+    renderInApp(<Files />);
+    fireEvent.click(screen.getByRole("button", { name: "Gå till nästa sida" }));
+    expect(names()).toEqual([
+      "fil-100.pdf",
+      "fil-101.pdf",
+      "fil-102.pdf",
+      "fil-103.pdf",
+      "fil-104.pdf"
+    ]);
+
+    // Files deleted (or a recrawl indexed fewer pages): page 2 no longer exists.
+    act(() => setBlobs(files(100)));
+    expect(names()).toHaveLength(100);
+    expect(names()[0]).toBe("fil-000.pdf");
+
+    // It grew again: the pager is back, so the second page is reachable.
+    act(() => setBlobs(files(103)));
+    expect(screen.getByRole("navigation", { name: /Bläddra bland filer/ })).toBeTruthy();
   });
 
   it("explains an empty list", () => {

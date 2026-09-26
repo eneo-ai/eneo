@@ -1,11 +1,13 @@
 import type { TableSortComparator, TableSortState } from "@astryxdesign/core/Table";
 import { formatWebsiteName, type Collection, type CrawlRun, type Website } from "./knowledge";
+import { crawlRunStatus, statusRank, websiteStatus, websiteSyncedAt } from "./website-status";
 
 /**
  * Column comparators for the knowledge tables, fed to Astryx Table's
  * `useTableSortableState`. They compare values, never labels: derived names
  * through the provider-bound collator (`useCollator`), dates as timestamps,
- * states by severity. Astryx reverses them for descending order.
+ * states by the severity of the status the table shows (`statusRank`).
+ * Astryx reverses them for descending order.
  */
 
 type Compare = (a: string, b: string) => number;
@@ -35,30 +37,6 @@ export const WEBSITE_DEFAULT_SORT: TableSortState<WebsiteSortKey> = [
   { sortKey: "name", direction: "ascending" }
 ];
 
-/** Problems first: failed, then warnings, running, queued, never crawled, done. */
-function crawlStatusRank(crawl: CrawlRun | null | undefined): number {
-  if (!crawl) return 4;
-  switch (crawl.status) {
-    case "complete":
-      return (crawl.pages_failed ?? 0) > 0 || (crawl.files_failed ?? 0) > 0 ? 1 : 5;
-    case "in progress":
-      return 2;
-    case "queued":
-      return 3;
-    default:
-      return 0;
-  }
-}
-
-export function websiteStatusRank(website: Website): number {
-  return crawlStatusRank(website.latest_crawl);
-}
-
-/** When the latest crawl finished (or started, while it runs). */
-export function websiteSyncedAt(website: Website): string | null {
-  return website.latest_crawl?.finished_at ?? website.latest_crawl?.created_at ?? null;
-}
-
 const INTERVAL_ORDER: Record<Website["update_interval"], number> = {
   daily: 0,
   every_other_day: 1,
@@ -71,7 +49,7 @@ export function websiteComparators(
 ): Record<WebsiteSortKey, TableSortComparator<Website>> {
   return {
     name: (a, b) => compare(formatWebsiteName(a), formatWebsiteName(b)),
-    status: (a, b) => websiteStatusRank(a) - websiteStatusRank(b),
+    status: (a, b) => statusRank(websiteStatus(a)) - statusRank(websiteStatus(b)),
     synced: (a, b) => time(websiteSyncedAt(a)) - time(websiteSyncedAt(b)),
     interval: (a, b) => INTERVAL_ORDER[a.update_interval] - INTERVAL_ORDER[b.update_interval]
   };
@@ -98,7 +76,7 @@ function crawlRunDurationMs(crawl: CrawlRun): number {
 
 export const CRAWL_RUN_COMPARATORS: Record<CrawlRunSortKey, TableSortComparator<CrawlRun>> = {
   started: (a, b) => time(a.created_at) - time(b.created_at),
-  status: (a, b) => crawlStatusRank(a) - crawlStatusRank(b),
+  status: (a, b) => statusRank(crawlRunStatus(a)) - statusRank(crawlRunStatus(b)),
   results: (a, b) => crawlRunResultCount(a) - crawlRunResultCount(b),
   duration: (a, b) => crawlRunDurationMs(a) - crawlRunDurationMs(b)
 };

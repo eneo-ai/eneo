@@ -37,7 +37,7 @@ import { Switch } from "@/components/ui/switch";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
-import { formatDateTime } from "@/lib/format";
+import { ClientTime } from "@/features/spaces/client-time";
 import { useSpace } from "@/features/spaces/use-space";
 import { EmbeddingModelSelect } from "./embedding-model-select";
 import type { Website } from "./knowledge";
@@ -446,9 +446,11 @@ export function WebsiteDialog({
             <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 rounded-md border p-4 text-sm">
               <span className="text-muted-foreground">{t("website_last_crawled")}:</span>
               <span>
-                {existingOnOrg.last_crawled_at
-                  ? formatDateTime(existingOnOrg.last_crawled_at)
-                  : t("website_not_yet_crawled")}
+                {existingOnOrg.last_crawled_at ? (
+                  <ClientTime value={existingOnOrg.last_crawled_at} format="date_time" />
+                ) : (
+                  t("website_not_yet_crawled")
+                )}
               </span>
               {crawlResult && (
                 <>

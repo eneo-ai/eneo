@@ -45,13 +45,21 @@ describe("CRAWL_RUN_COMPARATORS", () => {
       crawlRun({ id: "queued", status: "queued" }),
       crawlRun({ id: "running", status: "in progress" }),
       crawlRun({ id: "warnings", pages_failed: 1 }),
+      crawlRun({
+        id: "skipped",
+        status: "failed",
+        result_location: "Skipped duplicate crawl: another crawl is running"
+      }),
       crawlRun({ id: "failed", status: "failed" })
     ];
+    // A skipped crawl stood aside for a running one: not a failure (its label is
+    // grey "Hoppad över"), so it sorts with the other neutral states.
     expect(ids(runs.sort(CRAWL_RUN_COMPARATORS.status))).toEqual([
       "failed",
       "warnings",
       "running",
       "queued",
+      "skipped",
       "done"
     ]);
   });

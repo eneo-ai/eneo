@@ -8,10 +8,11 @@ import {
   type TableColumn
 } from "@astryxdesign/core/Table";
 import { SearchX } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
-import { formatDateTime, formatDuration, formatRelativeTime } from "@/lib/format";
+import { formatDuration } from "@/lib/format";
+import { ClientTime } from "@/features/spaces/client-time";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import type { CrawlRun } from "./knowledge";
 import {
@@ -20,11 +21,10 @@ import {
   type CrawlRunSortKey
 } from "./knowledge-sort";
 import { filterCrawlRuns } from "./table-controls";
-import { KnowledgeTableControls } from "./table-controls-ui";
-import { crawlRunStatus, isSkippedCrawl } from "./website-status";
-import { KnowledgeLabel } from "./websites";
+import { KnowledgeLabel, KnowledgeTableControls } from "./table-controls-ui";
+import { crawlRunStatus, isSkippedCrawl, pagesAndFilesText } from "./website-status";
 
-type Translate = (key: string, params?: Record<string, string>) => string;
+type Translate = (key: string, values?: Record<string, string | number>) => string;
 
 const FAILURE_REASON_KEYS = [
   "EMPTY_CONTENT",
@@ -36,16 +36,16 @@ const FAILURE_REASON_KEYS = [
   "MISSING_PROVIDER"
 ];
 
-function failureTooltip(crawl: CrawlRun, t: Translate): string | undefined {
+/** Why pages or files failed, per reason: "Tomma sidor: 2, Ingen indexerbar text: 1". */
+function failureBreakdown(crawl: CrawlRun, t: Translate): string | undefined {
   const summary = crawl.failure_summary;
   if (!summary || Object.keys(summary).length === 0) return undefined;
-  const lines = Object.entries(summary)
+  return Object.entries(summary)
     .map(([reason, count]) => {
       const label = FAILURE_REASON_KEYS.includes(reason) ? t(`failure_reason_${reason}`) : reason;
       return `${label}: ${count}`;
     })
-    .join("\n");
-  return `${t("failure_reasons_tooltip")}:\n${lines}`;
+    .join(", ");
 }
 
 /** The run's state as a status dot and text, with the reason it was skipped or failed. */
@@ -61,7 +61,7 @@ function CrawlStatusCell({ crawl }: { crawl: CrawlRun }) {
     <KnowledgeLabel
       tone={status.tone}
       label={t(status.labelKey)}
-      tooltip={detail}
+      detail={detail}
       isPulsing={status.isPulsing}
     />
   );
@@ -80,48 +80,41 @@ function CrawlResultCell({ crawl }: { crawl: CrawlRun }) {
   const successFiles = files - filesFailed;
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+    <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
       <KnowledgeLabel
         tone="accent"
-        label={
-          files > 0
-            ? t("crawled_pages_and_files", { pages: String(pages), files: String(files) })
-            : t("crawled_pages", { count: String(pages) })
-        }
+        label={t("space_crawl_crawled", { items: pagesAndFilesText(t, pages, files) })}
       />
-      {(successPages > 0 || successFiles > 0) && (
+      {successPages > 0 || successFiles > 0 ? (
         <KnowledgeLabel
           tone="success"
-          label={
-            successPages > 0 && successFiles > 0
-              ? t("pages_and_files_succeeded", {
-                  pages: String(successPages),
-                  files: String(successFiles)
-                })
-              : successPages > 0
-                ? t("pages_succeeded", { count: String(successPages) })
-                : t("files_succeeded", { count: String(successFiles) })
-          }
+          label={t("space_crawl_succeeded", {
+            items: pagesAndFilesText(t, Math.max(0, successPages), Math.max(0, successFiles))
+          })}
         />
-      )}
-      {(pagesFailed > 0 || filesFailed > 0) && (
+      ) : null}
+      {pagesFailed > 0 || filesFailed > 0 ? (
         <KnowledgeLabel
           tone="error"
-          label={
-            pagesFailed > 0 && filesFailed > 0
-              ? t("pages_and_files_failed", {
-                  pages: String(pagesFailed),
-                  files: String(filesFailed)
-                })
-              : pagesFailed > 0
-                ? t("pages_failed", { count: String(pagesFailed) })
-                : t("files_failed", { count: String(filesFailed) })
-          }
-          tooltip={failureTooltip(crawl, t)}
+          label={t("space_crawl_failed", { items: pagesAndFilesText(t, pagesFailed, filesFailed) })}
+          detail={failureBreakdown(crawl, t)}
         />
-      )}
+      ) : null}
     </div>
   );
+}
+
+/** How long a finished run took; for a running one, when it started. */
+function CrawlDurationCell({ crawl }: { crawl: CrawlRun }) {
+  const t = useTranslations();
+  if (crawl.finished_at && crawl.created_at) {
+    return formatDuration(crawl.created_at, crawl.finished_at);
+  }
+  if (!crawl.created_at) return "—";
+  const startedAt = crawl.created_at;
+  return t.rich("space_crawl_started_ago", {
+    time: () => <ClientTime value={startedAt} format="relative" />
+  });
 }
 
 /**
@@ -130,7 +123,6 @@ function CrawlResultCell({ crawl }: { crawl: CrawlRun }) {
  */
 export function CrawlRunsTable({ runs }: { runs: CrawlRun[] }) {
   const t = useTranslations();
-  const locale = useLocale();
   const [filter, setFilter] = useState("");
   const { sortedData, sortConfig } = useTableSortableState<CrawlRun, CrawlRunSortKey>({
     data: filterCrawlRuns(runs, filter),
@@ -149,9 +141,8 @@ export function CrawlRunsTable({ runs }: { runs: CrawlRun[] }) {
       header: t("fix_crawl_started_column"),
       width: proportional(1),
       sortable: true,
-      renderCell: (run) => (
-        <span className="font-mono text-sm">{formatDateTime(run.created_at)}</span>
-      )
+      renderCell: (run) =>
+        run.created_at ? <ClientTime value={run.created_at} format="date_time" /> : "—"
     },
     {
       key: "status",
@@ -172,12 +163,7 @@ export function CrawlRunsTable({ runs }: { runs: CrawlRun[] }) {
       header: t("duration"),
       width: proportional(1),
       sortable: true,
-      renderCell: (run) =>
-        run.finished_at && run.created_at
-          ? formatDuration(run.created_at, run.finished_at)
-          : run.created_at
-            ? t("started_time_ago", { timeAgo: formatRelativeTime(run.created_at, locale) })
-            : "—"
+      renderCell: (run) => <CrawlDurationCell crawl={run} />
     }
   ];
 
@@ -187,7 +173,8 @@ export function CrawlRunsTable({ runs }: { runs: CrawlRun[] }) {
         filterValue={filter}
         onFilterChange={setFilter}
         filterLabel={t("fix_crawls_filter_label")}
-        filterPlaceholder={t("ui_filter_items", { resourceName: t("resource_crawls") })}
+        filterPlaceholder={t("space_filter_crawls_placeholder")}
+        resultCount={sortedData.length}
       />
       {sortedData.length === 0 ? (
         <EmptyState

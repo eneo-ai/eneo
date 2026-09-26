@@ -1,32 +1,31 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
-import {
-  spaceHasPermission,
-  type ResourcePermission,
-  type Space,
-  type SpaceResource
-} from "./space";
+import type { Space } from "./space";
 import { makeAssistant, makeSpace } from "./testing/space-fixture";
 
-const state = vi.hoisted(() => ({ space: null as unknown }));
+const state = vi.hoisted(() => ({
+  space: null as unknown,
+  pushed: [] as string[],
+  deleted: [] as string[]
+}));
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: () => {}, prefetch: () => {} })
+  useRouter: () => ({ push: (href: string) => state.pushed.push(href), prefetch: () => {} })
 }));
-vi.mock("@/features/spaces/use-space", () => ({
-  useSpace: () => ({
-    space: state.space,
-    routeId: "space-1",
-    can: (action: ResourcePermission, resource: SpaceResource) =>
-      spaceHasPermission(state.space as Space, action, resource)
-  })
-}));
+vi.mock("@/features/spaces/use-space", async () => {
+  const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
+  return { useSpace: () => useSpaceFromQuery(() => state.space as Space) };
+});
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
-    GET: () => Promise.resolve({ data: { items: [] }, response: new Response("{}") })
+    GET: () => Promise.resolve({ data: { items: [] }, response: new Response("{}") }),
+    DELETE: (path: string, { params }: { params: { path: { id: string } } }) => {
+      state.deleted.push(`${path} ${params.path.id}`);
+      return Promise.resolve({ data: null, response: new Response(null, { status: 204 }) });
+    }
   }
 }));
 vi.mock("@/components/providers/app-context", () => ({
@@ -42,7 +41,17 @@ import { AppsPage } from "@/features/apps/apps-page";
 import { AssistantsPage } from "@/features/assistants/assistants-page";
 import { ServicesPage } from "@/features/services/services-page";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  state.pushed = [];
+  state.deleted = [];
+});
+
+const liveRegion = () => document.querySelector("[data-astryx-live-region='polite']");
+
+/** The menu a MoreMenu button opens (every card has one in the DOM). */
+const menuOf = (button: HTMLElement) =>
+  within(document.getElementById(button.getAttribute("aria-controls")!)!);
 
 function show(space: Space, page: React.ReactNode) {
   state.space = space;
@@ -72,8 +81,60 @@ describe("AssistantsPage", () => {
     ).toBeTruthy();
     await expectNoAxeViolations(container);
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Sök" }), { target: { value: "avtal" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Filtrera assistenter" }), {
+      target: { value: "avtal" }
+    });
     expect(screen.queryByRole("link", { name: "Upphandlingsassistenten" })).toBeNull();
+    await waitFor(() => expect(liveRegion()?.textContent).toBe("1 träff"));
+    fireEvent.change(screen.getByRole("textbox", { name: "Filtrera assistenter" }), {
+      target: { value: "saknas" }
+    });
+    // Under the tab's h2, the empty result is an h3.
+    expect(screen.getByRole("heading", { level: 3, name: "Inga resultat hittades" })).toBeTruthy();
+    await waitFor(() => expect(liveRegion()?.textContent).toBe("Inga träffar"));
+  });
+
+  it("keeps each card's named menu apart from the card's link", () => {
+    show(makeSpace({ assistants }), <AssistantsPage />);
+    const card = screen.getByRole("link", { name: "Upphandlingsassistenten" });
+    const menu = screen.getByRole("button", {
+      name: "Fler åtgärder för Upphandlingsassistenten"
+    });
+    // Tab order: the card's link, then its menu (document order, no tabindex tricks).
+    const item = card.closest("li")!;
+    expect(Array.from(item.querySelectorAll("a[href], button"))).toEqual([card, menu]);
+    expect(item.querySelector("[tabindex]:not([tabindex='-1']):not([tabindex='0'])")).toBeNull();
+
+    const opened = vi.fn();
+    card.addEventListener("click", opened);
+    fireEvent.click(menu);
+    fireEvent.click(menuOf(menu).getByRole("menuitem", { name: "Redigera" }));
+    expect(opened).not.toHaveBeenCalled();
+    expect(state.pushed).toEqual(["/spaces/space-1/assistants/assistant-1/edit"]);
+  });
+
+  it("moves focus to the heading when a deleted assistant's card goes away", async () => {
+    show(makeSpace({ assistants }), <AssistantsPage />);
+    const menu = screen.getByRole("button", {
+      name: "Fler åtgärder för Upphandlingsassistenten"
+    });
+    menu.focus();
+    fireEvent.click(menu);
+    fireEvent.click(menuOf(menu).getByRole("menuitem", { name: "Ta bort" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Radera assistent" });
+    // What the space holds once the assistant is gone.
+    state.space = makeSpace({ assistants: [assistants[1]!] });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
+
+    await waitFor(() => expect(state.deleted).toEqual(["/api/v1/assistants/{id}/ assistant-1"]));
+    await waitFor(() =>
+      expect(screen.queryByRole("link", { name: "Upphandlingsassistenten" })).toBeNull()
+    );
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("heading", { level: 2, name: "Assistenter" })
+      )
+    );
   });
 
   it("shows the status on each card for users who cannot publish", () => {
@@ -92,7 +153,7 @@ describe("AssistantsPage", () => {
 
   it("puts the create menu in the empty state", async () => {
     const { container } = show(makeSpace(), <AssistantsPage />);
-    expect(screen.getByRole("heading", { name: "Inga assistenter ännu" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 3, name: "Inga assistenter ännu" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Skapa assistent" })).toHaveLength(1);
     await expectNoAxeViolations(container);
   });
@@ -128,6 +189,10 @@ describe("AppsPage and ServicesPage", () => {
       "/spaces/space-1/apps/app-1"
     );
     expect(screen.getByText("Sammanfattar protokoll.")).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Filtrera appar" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Fler åtgärder för Protokollsammanfattning" })
+    ).toBeTruthy();
     await expectNoAxeViolations(apps.container);
     cleanup();
 
@@ -136,12 +201,18 @@ describe("AppsPage and ServicesPage", () => {
       "/spaces/space-1/services/service-1?tab=playground"
     );
     expect(screen.getByText("JSON")).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Filtrera tjänster" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Fler åtgärder för Klassificering" })).toBeTruthy();
     await expectNoAxeViolations(services.container);
   });
 
   it("explain empty lists and offer the create action", () => {
     show(makeSpace(), <ServicesPage />);
-    expect(screen.getByRole("heading", { name: "Inga tjänster ännu" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 3, name: "Inga tjänster ännu" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Skapa tjänst" })).toHaveLength(1);
+    cleanup();
+
+    show(makeSpace(), <AppsPage />);
+    expect(screen.getByRole("heading", { level: 3, name: "Inga appar ännu" })).toBeTruthy();
   });
 });

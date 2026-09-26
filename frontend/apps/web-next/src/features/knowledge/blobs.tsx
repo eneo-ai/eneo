@@ -38,6 +38,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { formatBytes } from "@/lib/format";
+import { useRemovalMutation } from "@/features/spaces/removal";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
 import { matchesSearch } from "@/features/spaces/resource-filter";
 import type { InfoBlob } from "./knowledge";
@@ -47,12 +48,13 @@ const PAGE_SIZE = 100;
 
 function useInvalidateBlobs() {
   const queryClient = useQueryClient();
-  return () => {
-    // Blob lists hang off collections/websites; counts live on the space.
-    void queryClient.invalidateQueries({ queryKey: ["collections"] });
-    void queryClient.invalidateQueries({ queryKey: ["websites"] });
-    void queryClient.invalidateQueries({ queryKey: ["spaces"] });
-  };
+  // Blob lists hang off collections/websites; counts live on the space.
+  return () =>
+    Promise.all(
+      ["collections", "websites", "spaces"].map((key) =>
+        queryClient.invalidateQueries({ queryKey: [key] })
+      )
+    );
 }
 
 /** Dialog that lazily loads and renders a blob's text content. */
@@ -122,20 +124,17 @@ function BlobActions({ blob }: { blob: InfoBlob }) {
         })
       ),
     onSuccess: () => {
-      invalidateBlobs();
+      void invalidateBlobs();
       setShowEdit(false);
     },
     onError: (error) => toastApiError(error, t)
   });
 
-  const remove = useMutation({
+  const remove = useRemovalMutation({
     mutationFn: () =>
       unwrap(browserApi.DELETE("/api/v1/info-blobs/{id}/", { params: { path: { id: blob.id } } })),
-    onSuccess: () => {
-      invalidateBlobs();
-      setShowDelete(false);
-    },
-    onError: (error) => toastApiError(error, t)
+    refresh: invalidateBlobs,
+    onRemoved: () => setShowDelete(false)
   });
 
   return (
@@ -237,7 +236,8 @@ function blobComparators(
 
 /**
  * Files of a collection or website: a search box, name and size sortable by
- * their headers (unsorted keeps the upload order), and pages of 100.
+ * their headers (unsorted keeps the upload order), and pages of 100 (the
+ * pager only shows when there is more than one).
  */
 export function BlobTable({ blobs, canEdit }: { blobs: InfoBlob[]; canEdit: boolean }) {
   const t = useTranslations();
@@ -253,14 +253,16 @@ export function BlobTable({ blobs, canEdit }: { blobs: InfoBlob[]; canEdit: bool
     allowUnsortedState: true
   });
   const sortPlugin = useTableSortable<InfoBlob, BlobSortKey>(sortConfig);
-  const hasPages = sortedData.length > PAGE_SIZE;
+  // The list can shrink under the current page (a delete on the last page, a
+  // recrawl with fewer pages): show its last page instead of an empty one.
+  const pageCount = Math.max(1, Math.ceil(sortedData.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
   const paginationPlugin = useTablePagination<InfoBlob>({
-    page,
+    page: currentPage,
     onPageChange: setPage,
     totalItems: sortedData.length,
     pageSize: PAGE_SIZE,
     variant: "count",
-    position: hasPages ? "below" : "none",
     align: "end",
     label: t("space_files_pagination_label")
   });
@@ -299,6 +301,7 @@ export function BlobTable({ blobs, canEdit }: { blobs: InfoBlob[]; canEdit: bool
         value={filter}
         label={t("space_filter_files_label")}
         placeholder={t("space_filter_files_label")}
+        resultCount={filtered.length}
         onChange={(value) => {
           setFilter(value);
           setPage(1);
@@ -309,7 +312,7 @@ export function BlobTable({ blobs, canEdit }: { blobs: InfoBlob[]; canEdit: bool
       ) : (
         <SpaceTableFrame>
           <Table
-            data={paginateData(sortedData, page, PAGE_SIZE)}
+            data={paginateData(sortedData, currentPage, PAGE_SIZE)}
             columns={columns}
             idKey="id"
             plugins={{ sort: sortPlugin, pagination: paginationPlugin }}
@@ -343,7 +346,7 @@ export function AddTextDialog({
         })
       ),
     onSuccess: () => {
-      invalidateBlobs();
+      void invalidateBlobs();
       setOpen(false);
       setTitle("");
       setText("");

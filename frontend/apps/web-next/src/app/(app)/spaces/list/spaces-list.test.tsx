@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ShellContext } from "@/components/shell/shell-context";
+import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 
@@ -64,11 +66,24 @@ const space = (overrides: Record<string, unknown>) => ({
   ...overrides
 });
 
+/** The app shell's part: it hosts the one create-space dialog. */
+function Shell({ children }: { children: React.ReactNode }) {
+  const [creating, setCreating] = useState(false);
+  return (
+    <ShellContext value={{ openPalette: () => {}, openCreateSpace: () => setCreating(true) }}>
+      {children}
+      <CreateSpaceDialog open={creating} onOpenChange={setCreating} />
+    </ShellContext>
+  );
+}
+
 async function show() {
   const view = renderInApp(
-    <Suspense fallback={null}>
-      <SpacesList title="Ytor" />
-    </Suspense>
+    <Shell>
+      <Suspense fallback={null}>
+        <SpacesList title="Ytor" />
+      </Suspense>
+    </Shell>
   );
   await screen.findByRole("heading", { level: 1, name: "Ytor" });
   return view;
@@ -111,6 +126,21 @@ describe("SpacesList", () => {
     expect(screen.getByRole("heading", { name: "Inga resultat hittades" })).toBeTruthy();
   });
 
+  it("announces how many spaces match the filter", async () => {
+    api.spaces = [space({}), space({ id: "s2", name: "HR" })];
+    await show();
+    const status = () => document.querySelector("[data-astryx-live-region='polite']");
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Filtrera ytor" }), {
+      target: { value: "hr" }
+    });
+    await waitFor(() => expect(status()?.textContent).toBe("1 träff"));
+    fireEvent.change(screen.getByRole("textbox", { name: "Filtrera ytor" }), {
+      target: { value: "saknas" }
+    });
+    await waitFor(() => expect(status()?.textContent).toBe("Inga träffar"));
+  });
+
   it("deletes a space from its more-menu only after the name is typed", async () => {
     api.spaces = [space({})];
     await show();
@@ -130,8 +160,14 @@ describe("SpacesList", () => {
       }
     );
     expect(confirm.hasAttribute("disabled")).toBe(false);
+    api.spaces = [];
     fireEvent.click(confirm);
     await waitFor(() => expect(api.deleted).toEqual(["s1"]));
+    // The card and its menu button are gone: focus goes to the page heading.
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Radera yta" })).toBeNull());
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("heading", { level: 1, name: "Ytor" }))
+    );
   });
 
   it("closes the delete dialog with Escape without deleting", async () => {

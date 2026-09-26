@@ -566,5 +566,18 @@
   "fix_crawls_filter_label": "Filtrera indexeringar",
   "fix_integrations_empty_title": "Inga integrationer ännu",
   "space_edit_title": "Redigera {name}",
-  "space_app_result_title": "Resultat från {name}"
+  "space_app_result_title": "Resultat från {name}",
+  "space_filter_result_count": "{count, plural, =0 {Inga träffar} one {# träff} other {# träffar}}",
+  "space_filter_assistants_label": "Filtrera assistenter",
+  "space_filter_apps_label": "Filtrera appar",
+  "space_filter_services_label": "Filtrera tjänster",
+  "space_filter_crawls_placeholder": "Filtrera indexeringar…",
+  "space_pages_and_files": "{pages} och {files}",
+  "space_crawl_crawled": "Indexerade {items}",
+  "space_crawl_succeeded": "{items} lyckades",
+  "space_crawl_failed": "{items} misslyckades",
+  "space_crawl_started_ago": "Startad <time></time>",
+  "space_next_crawl": "Nästa indexering: <time></time>",
+  "space_sync_stale": "Över {days} dagar sedan",
+  "space_knowledge_tabs_label": "Kunskapskällor"
 }

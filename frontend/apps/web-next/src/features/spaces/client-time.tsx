@@ -3,16 +3,28 @@
 import { Timestamp } from "@astryxdesign/core/Timestamp";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 
+export type ClientTimeFormat = "date" | "date_long" | "date_time" | "relative";
+
 /**
- * An Astryx Timestamp that renders only after hydration. Timestamp writes the
- * date in the viewer's time zone and the server renders in its own, so the
- * server output would not match; until hydration the cell stays empty.
- * Absolute formats only: they carry no hover card and add no tab stop.
+ * The one way to show a date or time on the space pages: an Astryx Timestamp
+ * that renders only after hydration. Timestamp writes the date in the
+ * viewer's time zone and a relative time against the viewer's clock, while
+ * the server renders with its own, so server output would not match; until
+ * hydration the cell stays empty. No hover card, so no extra tab stop: an
+ * absolute format is the full information, and a relative one ("för 3
+ * minuter sedan", kept current) is read out as its absolute time.
  */
-export function ClientTime({ value, format }: { value: string; format: "date" | "date_long" }) {
+export function ClientTime({ value, format }: { value: string; format: ClientTimeFormat }) {
   const hydrated = useHydrated();
   if (!hydrated) return null;
   return (
-    <Timestamp value={value} format={format} type="inherit" color="inherit" hasTooltip={false} />
+    <Timestamp
+      value={value}
+      format={format}
+      type="inherit"
+      color="inherit"
+      hasTooltip={false}
+      isLive={format === "relative"}
+    />
   );
 }

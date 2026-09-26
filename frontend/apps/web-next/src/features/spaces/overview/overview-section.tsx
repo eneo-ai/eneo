@@ -1,6 +1,10 @@
+"use client";
+
 import { Heading } from "@astryxdesign/core/Heading";
 import Link from "next/link";
+import { useRef } from "react";
 import { cn } from "@/lib/utils";
+import { RemovalFocusScope } from "../removal";
 
 /** "Visa alla" and friends: a standalone text link with a 24 px target. */
 export function OverviewLink({
@@ -24,7 +28,10 @@ export function OverviewLink({
   );
 }
 
-/** A titled block on the space overview: h2, optional end content, body. */
+/**
+ * A titled block on the space overview: h2, optional end content, body. When
+ * a row inside is deleted or moved away, focus goes to the heading.
+ */
 export function OverviewSection({
   id,
   title,
@@ -38,15 +45,24 @@ export function OverviewSection({
   children: React.ReactNode;
   className?: string;
 }) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
   return (
-    <section aria-labelledby={id} className={cn("flex min-w-0 flex-col gap-3", className)}>
-      <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <Heading level={2} id={id} className="text-base leading-snug font-bold">
-          {title}
-        </Heading>
-        {end ? <div className="flex flex-wrap items-center gap-3">{end}</div> : null}
-      </div>
-      {children}
-    </section>
+    <RemovalFocusScope target={headingRef}>
+      <section aria-labelledby={id} className={cn("flex min-w-0 flex-col gap-3", className)}>
+        <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-3 gap-y-2">
+          <Heading
+            ref={headingRef}
+            level={2}
+            id={id}
+            tabIndex={-1}
+            className="focus-visible:outline-ring rounded-ax-inner text-base leading-snug font-bold focus-visible:outline-2 focus-visible:outline-offset-2"
+          >
+            {title}
+          </Heading>
+          {end ? <div className="flex flex-wrap items-center gap-3">{end}</div> : null}
+        </div>
+        {children}
+      </section>
+    </RemovalFocusScope>
   );
 }
