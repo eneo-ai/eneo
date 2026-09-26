@@ -221,7 +221,9 @@ async def test_only_the_conversation_owner_can_rate_its_answers(
     )
     assert wrong_session.status_code == 404, wrong_session.text
     unknown = await client.put(
-        _feedback_url(session_id, uuid4()), json={"value": 1}, headers=_auth(owner_token)
+        _feedback_url(session_id, uuid4()),
+        json={"value": 1},
+        headers=_auth(owner_token),
     )
     assert unknown.status_code == 404, unknown.text
 
@@ -248,7 +250,9 @@ async def test_deleting_a_conversation_removes_its_answer_ratings(
         _feedback_url(session_id, message_id), json={"value": -1}, headers=headers
     )
 
-    deleted = await client.delete(f"/api/v1/conversations/{session_id}/", headers=headers)
+    deleted = await client.delete(
+        f"/api/v1/conversations/{session_id}/", headers=headers
+    )
     assert deleted.status_code == 204, deleted.text
     assert await _stored_rows(message_id) == 0
 
