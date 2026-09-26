@@ -12,6 +12,7 @@ import eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session as proxy_module
 from eneo.main.exceptions import MCPAuthenticationError, MCPClientError
 from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+from eneo.mcp_servers.infrastructure.client.mcp_client import MCPClient
 from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import MCPProxySession
 from eneo.roles.permissions import Permission
 
@@ -901,6 +902,31 @@ async def test_tool_error_result_does_not_trip_server_circuit_breaker():
         proxy_module._settings.mcp_circuit_breaker_failure_threshold + 1
     )
     assert server.id not in proxy_module._CIRCUIT_BREAKER_STATE
+
+
+@pytest.mark.asyncio
+async def test_cancelled_tool_call_does_not_count_as_a_server_failure():
+    # A user leaving mid tool call cancels it; the server did nothing wrong.
+    server = _make_server()
+    proxy = MCPProxySession([server])
+    client = MCPClient(server)
+
+    async def never_responds(*_args, **_kwargs):
+        await asyncio.Event().wait()
+
+    client.session = AsyncMock()
+    client.session.call_tool.side_effect = never_responds
+    proxy._clients[server.id] = client
+    call = asyncio.create_task(proxy.call_tool("server__tool", {}))
+    for _ in range(3):
+        await asyncio.sleep(0)
+
+    call.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await call
+    assert server.id not in proxy_module._CIRCUIT_BREAKER_STATE
+    assert server.id not in proxy._failed_server_ids
 
 
 @pytest.mark.asyncio
