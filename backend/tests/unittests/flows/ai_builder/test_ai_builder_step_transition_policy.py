@@ -688,6 +688,35 @@ def test_normalize_ai_builder_spec_disambiguates_duplicate_step_names() -> None:
     ]
 
 
+def test_an_edit_leaves_a_saved_all_previous_step_reading_all_previous_steps() -> None:
+    # Renaming step 1 must not narrow a saved fan-in to its predecessor.
+    spec = FlowDraftSpecCore(
+        flow_name="Linear report",
+        steps=[
+            _step(ref="step_a", name="Extract", input_source=InputSource.FLOW_INPUT),
+            _step(
+                ref="step_b",
+                name="Analyze",
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+            ).model_copy(update={"existing_step_ref": "existing_step_2"}),
+            _step(
+                ref="step_c",
+                name="Summarize",
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(spec)
+
+    assert normalized.steps[1].input_source is InputSource.ALL_PREVIOUS_STEPS
+    assert not [
+        change
+        for _step_spec, change in changes
+        if change.code == "input_source_all_previous_rewired"
+    ]
+
+
 def test_normalize_ai_builder_spec_renames_pre_terminal_docx_body_step() -> None:
     spec = FlowDraftSpecCore(
         flow_name="Audio DOCX",

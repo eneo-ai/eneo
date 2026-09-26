@@ -172,20 +172,26 @@ def normalize_ai_builder_step_topology(
 def disambiguate_ai_builder_step_names(
     spec: FlowDraftSpecCore,
 ) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
+    # Saved steps are named first: a step this plan adds always takes the
+    # suffix. A saved name still changes when two saved steps share it,
+    # whether the flow already had that duplicate or this edit made it.
+    order = sorted(
+        range(len(spec.steps)),
+        key=lambda index: spec.steps[index].existing_step_ref is None,
+    )
     used_names: set[str] = set()
-    updated_steps: list[StepSpec] = []
+    updated_steps = list(spec.steps)
     changes: list[tuple[StepSpec, StepNormalizationChange]] = []
 
-    for step in spec.steps:
+    for index in order:
+        step = spec.steps[index]
         next_name = _unique_step_name(step.name, used_names=used_names)
+        used_names.add(_step_name_key(next_name))
         if next_name == step.name:
-            used_names.add(_step_name_key(next_name))
-            updated_steps.append(step)
             continue
 
         normalized_step = step.model_copy(update={"name": next_name})
-        used_names.add(_step_name_key(next_name))
-        updated_steps.append(normalized_step)
+        updated_steps[index] = normalized_step
         changes.append(
             (
                 normalized_step,
@@ -405,7 +411,8 @@ def _can_rewire_all_previous_to_previous_step(
     repeated_all_previous: bool,
     preserve_as_final_fan_in: bool,
 ) -> bool:
-    if step_index == 0:
+    # A saved step's input is the user's; only a step this plan invents is narrowed.
+    if step_index == 0 or step.existing_step_ref is not None:
         return False
     if step.input_source != InputSource.ALL_PREVIOUS_STEPS:
         return False

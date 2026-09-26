@@ -70,6 +70,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_schema_evidence,
 )
+from eneo.flows.ai_builder.ai_builder_step_reads import step_reads
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_tools import (
     admit_propose_flow_tool_arguments,
@@ -1780,9 +1781,9 @@ async def test_approval_diff_describes_the_prepared_spec_not_the_compiled_one() 
 
 
 @pytest.mark.asyncio
-async def test_approval_diff_reports_an_existing_step_renamed_by_preparation() -> None:
-    # The added step comes first, so preparation suffixes the EXISTING step's
-    # name; that rename is a field change the user must see before approving.
+async def test_an_added_step_named_like_a_saved_step_takes_the_suffix() -> None:
+    # The added step comes first, yet the saved step keeps the name the user
+    # gave it: the step this edit authors takes the suffix.
     flow = _flow(_flow_step(step_order=1, user_description="Sammanfatta ärendet"))
 
     result = await _process(
@@ -1809,15 +1810,11 @@ async def test_approval_diff_reports_an_existing_step_renamed_by_preparation() -
 
     assert isinstance(result, ProposalReady)
     assert result.compiled.content.edit is not None
-    existing_step = result.compiled.content.spec.steps[-1]
-    assert existing_step.name == "Sammanfatta ärendet (2)"
+    added_step, existing_step = result.compiled.content.spec.steps
+    assert added_step.name == "sammanfatta ärendet (2)"
+    assert existing_step.name == "Sammanfatta ärendet"
     existing_change = result.compiled.content.edit.diff.step_changes[-1]
-    assert existing_change.kind == "modified"
-    assert existing_change.step_name == existing_step.name
-    assert ("name", "Sammanfatta ärendet", "Sammanfatta ärendet (2)") in [
-        (change.field, change.previous, change.current)
-        for change in existing_change.field_changes
-    ]
+    assert "name" not in [change.field for change in existing_change.field_changes]
 
 
 async def test_strict_shaped_edit_compiles_like_the_sparse_one_and_passes_review_scope() -> (
@@ -2218,6 +2215,140 @@ def test_edit_binds_the_step_at_position_27_not_saved_alias_step_27() -> None:
     assert kept.input_bindings["question"] == (
         "{{ " + plan_ref["existing_step_27"] + ".output.structured.summary }}"
     )
+
+
+@pytest.mark.parametrize(
+    ("added", "expected_names"),
+    [
+        (False, ["Läs ärendet noga", "Skriv motivering", "Fyll mall"]),
+        (True, ["Läs ärendet noga", "Skriv motivering", "Korrekturläs", "Fyll mall"]),
+    ],
+)
+def test_an_edit_keeps_template_predecessors_no_placeholder_reads(
+    added: bool, expected_names: list[str]
+) -> None:
+    # No placeholder reads step 2 or the added step; the edit still keeps both.
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Läs ärendet", output_type="json"),
+        _flow_step(
+            step_order=2,
+            user_description="Skriv motivering",
+            input_source="previous_step",
+        ),
+        _flow_step(
+            step_order=3,
+            user_description="Fyll mall",
+            input_source="previous_step",
+            output_mode="template_fill",
+            output_type="docx",
+            output_config={"bindings": {"namn": "{{ step_1.output.text }}"}},
+        ),
+    )
+    proposal = OrderedEditProposal.model_validate(
+        {
+            "plan_rationale": "Rename the reading step.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "name": "Läs ärendet noga",
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                *(
+                    [
+                        {
+                            "kind": "add",
+                            "step": {"name": "Korrekturläs", "instructions": "Rätta."},
+                        }
+                    ]
+                    if added
+                    else []
+                ),
+                {"kind": "modify", "existing_step_ref": "existing_step_3"},
+            ],
+        }
+    )
+
+    result = compile_edit_proposal(
+        proposal,
+        current_steps=flow.steps,
+        base_flow_revision=flow.draft_revision,
+        selected_template_count=1,
+        selected_template_placeholders=("namn",),
+    )
+
+    assert [step.name for step in result.spec.steps] == expected_names
+    assert [
+        step.existing_step_ref
+        for step in result.spec.steps
+        if step.name != "Korrekturläs"
+    ] == [
+        "existing_step_1",
+        "existing_step_2",
+        "existing_step_3",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_unrelated_edit_keeps_every_producer_a_saved_fan_in_step_reads() -> (
+    None
+):
+    # Step 3 reads the extracted facts (step 1) and the assessment (step 2).
+    # Renaming step 1 must not narrow it to step 2 alone.
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Extrahera fakta",
+            output_type="json",
+            output_contract={
+                "type": "object",
+                "properties": {"fakta": {"type": "string"}},
+            },
+        ),
+        _flow_step(
+            step_order=2, user_description="Bedöm ärendet", input_source="previous_step"
+        ),
+        _flow_step(
+            step_order=3,
+            user_description="Sammanställ underlag",
+            input_source="all_previous_steps",
+        ),
+        _flow_step(
+            step_order=4,
+            user_description="Skriv beslut",
+            input_source="all_previous_steps",
+        ),
+    )
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Rename the extraction step.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "name": "Extrahera sakuppgifter",
+                },
+                *(
+                    {"kind": "keep", "existing_step_ref": f"existing_step_{order}"}
+                    for order in (2, 3, 4)
+                ),
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady), getattr(result, "feedback", result)
+    spec = result.compiled.content.spec
+    step_refs = {step.plan_step_ref: order for order, step in enumerate(spec.steps, 1)}
+    fan_in = spec.steps[2]
+    assert fan_in.existing_step_ref == "existing_step_3"
+    assert {
+        read.producer_order
+        for read in step_reads(
+            fan_in, order=3, step_refs=step_refs, form_field_names=set()
+        )
+    } == {1, 2}
 
 
 @pytest.mark.asyncio

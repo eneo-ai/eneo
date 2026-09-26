@@ -93,6 +93,7 @@ def apply_template_attachment_contract(
     placeholders: tuple[str, ...] | None,
     existing_bindings: Mapping[str, str] | None = None,
     inherited_template_asset_id: UUID | None = None,
+    drop_unused_predecessor: bool = True,
 ) -> FlowDraftSpecCore:
     """Compile one selected DOCX's exact runtime contract before approval.
 
@@ -102,7 +103,8 @@ def apply_template_attachment_contract(
     never re-derived behind the user's back. `inherited_template_asset_id` is
     the flow's own asset when the edit keeps the flow's template: the final
     template-fill step names it, wherever that step now is, so the apply has
-    nothing to materialize. A create session passes neither.
+    nothing to materialize. A create session passes neither. Only create
+    drops an unused predecessor: in an edit every step is saved or authored.
     """
 
     template_step_indexes = [
@@ -230,9 +232,10 @@ def apply_template_attachment_contract(
     portable_output_config["bindings"] = bindings
     if inherited_template_asset_id is not None:
         portable_output_config["template_asset_id"] = str(inherited_template_asset_id)
-    preparation_steps = _drop_unused_template_predecessor(
-        steps=spec.steps[:-1],
-        bindings=bindings,
+    preparation_steps = (
+        _drop_unused_template_predecessor(steps=spec.steps[:-1], bindings=bindings)
+        if drop_unused_predecessor
+        else spec.steps[:-1]
     )
     dropped_predecessor = len(preparation_steps) != len(spec.steps) - 1
     terminal_update: dict[str, object] = {"output_config": portable_output_config}

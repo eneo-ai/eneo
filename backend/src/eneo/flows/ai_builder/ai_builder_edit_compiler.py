@@ -308,6 +308,8 @@ def compile_edit_proposal(
             # placeholder without one is derived.
             existing_bindings=inherited_template_bindings,
             inherited_template_asset_id=inherited_template_asset_id,
+            # A saved step and a step the edit adds are the user's to remove.
+            drop_unused_predecessor=False,
         )
     if mutation_scope is not None:
         normalization_changes = [
