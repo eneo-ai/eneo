@@ -13,7 +13,7 @@ function Field({ error }: { error?: string }) {
         description="Minst 12 tecken"
         value=""
         onChange={() => {}}
-        describedBy="extra"
+        aria-describedby="extra"
         status={error ? { type: "error", message: error } : undefined}
       />
     </>
@@ -26,9 +26,10 @@ const describedBy = () =>
     .map((id) => document.getElementById(id)?.textContent);
 
 // Astryx 0.6.3 sets aria-describedby from its own description and status
-// only, over any the caller passes; the wrapper adds `describedBy` after them.
-// When Astryx lets callers add ids, drop the wrapper and this test.
-it("adds describedBy after Astryx's own description and status, and keeps it", () => {
+// only, over any the caller passes; the wrapper adds the caller's after them.
+// When Astryx keeps the caller's ids, drop the wrapper, its lint rule and this
+// test.
+it("adds the caller's aria-describedby after Astryx's own description and status", () => {
   const { rerender } = renderInApp(<Field />);
   expect(describedBy()).toEqual(["Minst 12 tecken", "Kraven"]);
 

@@ -118,7 +118,7 @@ export function ConfirmedSecretInput({
         type="password"
         label={label}
         description={description}
-        describedBy={describedBy}
+        aria-describedby={describedBy}
         value={value}
         onChange={onValueChange}
         isRequired={isRequired}
@@ -131,7 +131,7 @@ export function ConfirmedSecretInput({
         ref={confirmationRef}
         type="password"
         label={confirmLabel}
-        describedBy={describedBy}
+        aria-describedby={describedBy}
         value={confirmation}
         onChange={onConfirmationChange}
         // Required whenever there is a secret to confirm.

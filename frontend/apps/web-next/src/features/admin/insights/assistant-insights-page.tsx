@@ -9,7 +9,7 @@ import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
 import { TextArea } from "@astryxdesign/core/TextArea";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { useInfiniteQuery, useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   BarChart3,

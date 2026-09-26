@@ -8,7 +8,7 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { Token } from "@astryxdesign/core/Token";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, RefreshCw, Search } from "lucide-react";

@@ -4,7 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { Pagination } from "@astryxdesign/core/Pagination";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Search, UserPlus } from "lucide-react";
 import { useSearchParams } from "next/navigation";

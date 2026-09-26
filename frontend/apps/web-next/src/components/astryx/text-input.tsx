@@ -1,28 +1,20 @@
 "use client";
 
 import { useMergedRefs } from "@astryxdesign/core/hooks";
-import {
-  TextInput as AstryxTextInput,
-  type TextInputProps as AstryxTextInputProps
-} from "@astryxdesign/core/TextInput";
+import { TextInput as AstryxTextInput, type TextInputProps } from "@astryxdesign/core/TextInput";
 import { useLayoutEffect, useRef } from "react";
 
-export type TextInputProps = AstryxTextInputProps & {
-  /**
-   * Ids of more elements that describe the field, such as a password policy
-   * checklist next to it, read after its own description and status.
-   */
-  describedBy?: string;
-};
+export type { TextInputProps };
 
 /**
- * Astryx TextInput that other elements can describe. Astryx 0.6.3 sets the
- * input's aria-describedby to its own description and status, over any the
- * caller passes, so `describedBy` is added to it after each render: Astryx
- * rewrites the attribute only when its own ids change, which a render of this
- * wrapper follows.
+ * Astryx TextInput whose `aria-describedby` works. Astryx 0.6.3 sets the
+ * input's aria-describedby to its own description and status and drops the
+ * caller's, so the caller's ids (a password policy checklist next to the
+ * field, say) are added after Astryx's own after each render: Astryx rewrites
+ * the attribute only when its own ids change, which a render of this wrapper
+ * follows. Lint sends every TextInput import here.
  */
-export function TextInput({ describedBy, ref, ...props }: TextInputProps) {
+export function TextInput({ "aria-describedby": describedBy, ref, ...props }: TextInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const mergedRef = useMergedRefs(ref, inputRef);
 

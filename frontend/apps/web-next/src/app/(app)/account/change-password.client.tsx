@@ -2,7 +2,7 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { Text } from "@astryxdesign/core/Text";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { useMutation } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";

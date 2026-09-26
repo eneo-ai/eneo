@@ -11,7 +11,7 @@ import {
   TableRow
 } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { Token } from "@astryxdesign/core/Token";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
