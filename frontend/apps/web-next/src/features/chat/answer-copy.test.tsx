@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EneoUIMessage } from "@/lib/chat/types";
+import { renderInApp } from "@/test/render";
 import { ChatMessage } from "./chat-message";
-import { ChatTestProviders, installDomPolyfills } from "./testing";
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("@/lib/toast", () => ({ toast }));
@@ -33,10 +33,8 @@ const answer: EneoUIMessage = {
 };
 
 function renderAnswer() {
-  render(
-    <ChatTestProviders>
-      <ChatMessage message={answer} assistant={{ id: "assistant-1", name: "Upphandling" }} />
-    </ChatTestProviders>
+  renderInApp(
+    <ChatMessage message={answer} assistant={{ id: "assistant-1", name: "Upphandling" }} />
   );
 }
 
@@ -47,7 +45,6 @@ function copyAsRichText() {
   fireEvent.click(within(menu).getByRole("menuitem", { name: "Kopiera som Rich text" }));
 }
 
-beforeAll(() => installDomPolyfills());
 beforeEach(() => {
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: clipboard });
 });

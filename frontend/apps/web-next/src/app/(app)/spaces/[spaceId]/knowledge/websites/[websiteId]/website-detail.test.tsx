@@ -17,9 +17,6 @@ vi.mock("@/features/spaces/use-space", async () => {
   const { makeSpace } = await import("@/features/spaces/testing/space-fixture");
   return { useSpace: () => useSpaceFromQuery(() => makeSpace() as Space) };
 });
-vi.mock("@/components/providers/app-context", () => ({
-  useAppContext: () => ({ can: () => true, settings: {}, user: { id: "user-1" } })
-}));
 vi.mock("@/features/jobs/use-jobs", () => ({
   useJobs: () => ({ trackJob: () => {}, queueUploads: () => {} })
 }));
