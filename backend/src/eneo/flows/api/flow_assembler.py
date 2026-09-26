@@ -211,6 +211,7 @@ class FlowAssembler:
         result: FlowStepResult,
         *,
         runtime_input_file_ids: Sequence[UUID] = (),
+        runtime_input_single_recording: bool = False,
         result_files: Sequence[FlowRunStepResultFile] = (),
         transcript_source: "TranscriptSourceReference | None" = None,
     ) -> FlowRunStepPublic:
@@ -229,6 +230,7 @@ class FlowAssembler:
                 "input_payload_json": input_payload,
                 "diagnostics": _project_step_diagnostics(result),
                 "runtime_input_file_ids": list(runtime_input_file_ids),
+                "runtime_input_single_recording": runtime_input_single_recording,
                 "result_files": list(result_files),
             }
         )

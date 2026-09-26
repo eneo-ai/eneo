@@ -315,6 +315,19 @@ def test_step_public_defaults_runtime_input_file_ids_to_empty_list():
     public_step = FlowAssembler().to_step_public(built)
 
     assert public_step.runtime_input_file_ids == []
+    assert public_step.runtime_input_single_recording is False
+
+
+def test_step_public_says_its_files_are_one_recording():
+    built = _step_result(1, status=FlowStepResultStatus.COMPLETED, text="answer")
+
+    public_step = FlowAssembler().to_step_public(
+        built,
+        runtime_input_file_ids=(uuid4(), uuid4()),
+        runtime_input_single_recording=True,
+    )
+
+    assert public_step.runtime_input_single_recording is True
 
 
 def test_build_transcribe_only_rag_metadata_rounds_timeout_to_int():

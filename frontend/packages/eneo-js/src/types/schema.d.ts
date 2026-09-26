@@ -23145,6 +23145,12 @@ export interface components {
        * @description File ids submitted as runtime input for the current attempt of this step result.
        */
       runtime_input_file_ids?: string[];
+      /**
+       * Runtime Input Single Recording
+       * @description Whether the run submitted this step's files as the parts of one recording (`single_recording`). Send it again when starting a new run with the same files, where the run contract offers it.
+       * @default false
+       */
+      runtime_input_single_recording?: boolean;
       /** Started At */
       started_at?: string | null;
       status: components["schemas"]["FlowStepResultStatus"];

@@ -39,6 +39,7 @@ from eneo.flows.application.flow_trace_audit import (
 from eneo.flows.domain.flow import FlowRun
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_input_envelope import read_single_recording_steps
 from eneo.flows.published_runtime import load_published_definition
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
@@ -204,10 +205,13 @@ async def list_flow_run_steps(
                 run_id=run_id,
                 step_results=[view.step_result for view in step_result_views],
             )
+            single_recording_steps = read_single_recording_steps(run.input_payload_json)
             response = [
                 assembler.to_step_public(
                     view.step_result,
                     runtime_input_file_ids=view.runtime_input_file_ids,
+                    runtime_input_single_recording=view.step_result.step_id
+                    in single_recording_steps,
                     result_files=view.result_files,
                     transcript_source=transcript_sources.get(view.step_result.step_id),
                 )

@@ -1366,6 +1366,110 @@ async def test_list_flow_run_steps_handles_non_list_diagnostics(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_list_flow_run_steps_says_which_steps_hold_one_recording(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    run_service = AsyncMock()
+    step_result_id = uuid4()
+    recorded_step_id, separate_step_id = uuid4(), uuid4()
+    parts = (uuid4(), uuid4())
+    separate = (uuid4(), uuid4())
+    run = _run(flow_id=flow_id, tenant_id=uuid4()).model_copy(
+        update={
+            "input_payload_json": {
+                "step_inputs": {str(recorded_step_id): {"single_recording": True}}
+            }
+        }
+    )
+    run_id = run.id
+    run_service.get_run.return_value = run
+    result_file = _result_file(run=run, step_result_id=step_result_id)
+    first_step_result = cast(
+        FlowStepResult,
+        SimpleNamespace(
+            id=step_result_id,
+            flow_run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_id=recorded_step_id,
+            step_order=1,
+            assistant_id=uuid4(),
+            status="completed",
+            input_payload_json={"diagnostics": {"code": "not-a-list"}},
+            output_payload_json={"text": "ok"},
+            num_tokens_input=10,
+            num_tokens_output=20,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        ),
+    )
+    second_step_result = cast(
+        FlowStepResult,
+        SimpleNamespace(
+            id=uuid4(),
+            flow_run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_id=separate_step_id,
+            step_order=2,
+            assistant_id=uuid4(),
+            status="completed",
+            input_payload_json=None,
+            output_payload_json={"text": "ok"},
+            num_tokens_input=10,
+            num_tokens_output=20,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        ),
+    )
+    run_service.list_step_results_with_files.return_value = (
+        FlowRunStepResultWithFiles(
+            step_result=first_step_result,
+            runtime_input_file_ids=parts,
+            result_files=(result_file,),
+        ),
+        FlowRunStepResultWithFiles(
+            step_result=second_step_result,
+            runtime_input_file_ids=separate,
+            result_files=(),
+        ),
+    )
+    container.flow_run_service.return_value = run_service
+    container.flow_transcript_source_service.return_value = AsyncMock(
+        get_references_for_step_results=AsyncMock(return_value={})
+    )
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=run.tenant_id,
+        username="tester",
+        email="t@e.com",
+    )
+    container.audit_service.return_value = AsyncMock()
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_service.return_value = flow_service
+
+    monkeypatch.setattr(
+        flow_access_context_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+    _enable_space_access(container)
+
+    response = await list_flow_run_steps(
+        id=flow_id,
+        run_id=run_id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    assert [
+        (step.runtime_input_file_ids, step.runtime_input_single_recording)
+        for step in response
+    ] == [(list(parts), True), (list(separate), False)]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("audit_failure", ["write", "commit"])
 async def test_list_flow_run_steps_fails_closed_when_required_audit_is_unavailable(
     monkeypatch,

@@ -3586,6 +3586,9 @@ def test_openapi_flow_run_step_public_exposes_runtime_input_file_ids(
     )
     assert items.get("type") == "string"
     assert items.get("format") == "uuid"
+    single_recording = step_result["properties"]["runtime_input_single_recording"]
+    assert single_recording["type"] == "boolean"
+    assert "one recording" in single_recording["description"]
 
 
 @pytest.mark.parametrize(
