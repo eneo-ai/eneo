@@ -90,6 +90,9 @@ class ErrorCodes(int, Enum):
     LOCAL_PASSWORD_CHANGE_UNAVAILABLE = 9060
     CURRENT_PASSWORD_INCORRECT = 9061
     SKILL_REMOVAL_BUSY = 9062
+    # A prompt library entry the personal assistant governance policy uses
+    # cannot be deleted until the policy stops using it.
+    PROMPT_IN_USE_BY_GOVERNANCE = 9069
 
 
 class NotFoundException(Exception):
@@ -359,6 +362,18 @@ class NameCollisionException(Exception):
     pass
 
 
+class PromptInUseException(Exception):
+    """Raised when deleting a prompt library entry that the personal assistant
+    governance policy still uses.
+
+    Surfaced as 409 with its own error code, so a client can say what blocks
+    the delete and how to clear it; it used to borrow NAME_COLLISION, whose
+    text is about a taken name.
+    """
+
+    pass
+
+
 class SkillRevisionConflictException(Exception):
     pass
 
@@ -504,6 +519,7 @@ EXCEPTION_MAP = {
         ErrorCodes.CHUNK_EMBEDDING_MISMATCH,
     ),
     NameCollisionException: (409, None, ErrorCodes.NAME_COLLISION),
+    PromptInUseException: (409, None, ErrorCodes.PROMPT_IN_USE_BY_GOVERNANCE),
     SkillRevisionConflictException: (
         409,
         None,

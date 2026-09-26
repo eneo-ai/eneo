@@ -69,6 +69,9 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   // --- Model lifecycle ---
   9039: () => m.eneo_error_9039(), // MODEL_IN_USE
 
+  // --- Governance ---
+  9069: () => m.eneo_error_9069(), // PROMPT_IN_USE_BY_GOVERNANCE
+
   // --- Concurrent changes ---
   9043: () => m.eneo_error_9043(), // SKILL_REVISION_CONFLICT
   9052: () => m.eneo_error_9052(), // SKILL_EXECUTION_BLOCK_CONFLICT

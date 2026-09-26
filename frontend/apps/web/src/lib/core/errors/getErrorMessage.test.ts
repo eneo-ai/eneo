@@ -11,6 +11,7 @@ vi.mock("$lib/paraglide/messages", () => ({
     eneo_error_9050: () => "An App run needs it.",
     eneo_error_9051: () => "Still attached.",
     eneo_error_9052: () => "The execution block changed.",
+    eneo_error_9069: () => "Deactivate it in the governance first.",
     request_failed: () => "Request failed."
   }
 }));
@@ -57,6 +58,24 @@ describe("getErrorMessage", () => {
       9051: "Still attached.",
       9052: "The execution block changed."
     });
+  });
+
+  it("says what blocks deleting a prompt the governance uses", () => {
+    const error = new EneoError(
+      "Prompt 'Standard' is referenced by the personal assistant governance policy.",
+      "RESPONSE",
+      409,
+      9069,
+      {},
+      { endpoint: "DELETE@/api/v1/admin/prompt-library/p1/" }
+    );
+
+    expect(getErrorMessage(error)).toBe("Deactivate it in the governance first.");
+    for (const catalogue of [en, sv] as Record<string, string>[]) {
+      // Its own copy: it used to arrive as a taken name (9017).
+      expect(catalogue.eneo_error_9069).toBeTruthy();
+      expect(catalogue.eneo_error_9069).not.toBe(catalogue.eneo_error_9017);
+    }
   });
 
   it("never answers a Skill conflict with the model display-name copy", () => {

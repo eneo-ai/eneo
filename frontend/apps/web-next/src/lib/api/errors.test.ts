@@ -132,6 +132,17 @@ describe("getErrorMessage", () => {
     expect(getErrorMessage(undefined, t)).toBe("t(request_failed)");
   });
 
+  it("says what blocks deleting a prompt the governance uses, not a taken name", () => {
+    const error = new EneoApiError("Prompt 'Standard' is referenced by the governance policy.", {
+      status: 409,
+      code: 9069
+    });
+
+    expect(getErrorMessage(error, translator("sv", sv))).toBe(
+      "Prompten är aktiv i styrningen för personlig assistent. Avaktivera den där först, och ta sedan bort den."
+    );
+  });
+
   it("words a taken name for every resource that answers with it, not only models", () => {
     // Providers, MCP servers, templates, files, modules and models all send 9017.
     const error = new EneoApiError("An MCP server with this name already exists.", {

@@ -158,6 +158,8 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9038: "eneo_error_9038", // RESOURCE_NOT_READY
   // Model lifecycle
   9039: "eneo_error_9039", // MODEL_IN_USE
+  // Governance
+  9069: "eneo_error_9069", // PROMPT_IN_USE_BY_GOVERNANCE
   // Skill lifecycle
   9048: "eneo_error_9048", // SKILL_SLUG_CONFLICT
   9049: "eneo_error_9049", // SKILL_PUBLISHED_DELETE_FORBIDDEN
