@@ -5086,5 +5086,6 @@
   "ui_toast_close": "Close notification",
   "ui_website_tabs_label": "Crawls and content",
   "legacy_result_tabs_label": "Result and transcription",
-  "legacy_insights_tabs_label": "Analysis and question history"
+  "legacy_insights_tabs_label": "Analysis and question history",
+  "legacy_model_selector_trigger": "{label}: {model}"
 }

@@ -5086,5 +5086,6 @@
   "ui_toast_close": "Stäng aviseringen",
   "ui_website_tabs_label": "Indexeringar och innehåll",
   "legacy_result_tabs_label": "Resultat och transkription",
-  "legacy_insights_tabs_label": "Analys och frågehistorik"
+  "legacy_insights_tabs_label": "Analys och frågehistorik",
+  "legacy_model_selector_trigger": "{label}: {model}"
 }
