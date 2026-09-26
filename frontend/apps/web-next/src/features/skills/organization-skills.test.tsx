@@ -98,6 +98,31 @@ describe("organisation skill catalogue", () => {
     );
   });
 
+  it("keeps focus on a busy remove and removes once", async () => {
+    post.mockReturnValue(new Promise(() => {}));
+    show("list");
+    await screen.findByText("Search reports");
+    fireEvent.click(screen.getByRole("checkbox", { name: "organization_skills_select_skill" }));
+    fireEvent.click(screen.getByRole("button", { name: "organization_skills_remove_selected" }));
+    const dialog = screen.getByRole("alertdialog");
+    const remove = within(dialog).getByRole("button", {
+      name: "organization_skills_remove_action"
+    });
+    remove.focus();
+
+    fireEvent.click(remove);
+
+    const busy = await within(dialog).findByRole("button", {
+      name: "organization_skills_removing"
+    });
+    expect(busy).toBe(remove);
+    expect(busy.getAttribute("aria-busy")).toBe("true");
+    expect(busy.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(busy);
+    fireEvent.click(busy);
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
   it("requires explicit detachment when an existing binding is shown", async () => {
     get.mockImplementation(() =>
       ok({ items: [{ ...skill, usage: { ...usage, assistant_count: 1 } }], next_cursor: null })

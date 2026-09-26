@@ -199,6 +199,36 @@ describe("resource Skill bindings", () => {
     expect(document.activeElement).toBe(saveButton);
   });
 
+  it("keeps focus on a busy upgrade and loads the newer version once", async () => {
+    let previews = 0;
+    get.mockImplementation((path?: string) => {
+      if (String(path).includes("/revisions/")) {
+        previews += 1;
+        return new Promise(() => {});
+      }
+      return ok({
+        bindings: [{ ...summary("a", 1), attachable_revision_id: "revision-a2" }],
+        runtime: {
+          fallback_reason: null,
+          effective_mode: "selective",
+          skill_context_tokens: 10,
+          skill_context_token_limit: 100
+        }
+      });
+    });
+    show("assistant", vi.fn());
+    const upgrade = await screen.findByRole("button", { name: "skills_use_latest_revision" });
+    upgrade.focus();
+
+    fireEvent.click(upgrade);
+
+    await waitFor(() => expect(upgrade.getAttribute("aria-busy")).toBe("true"));
+    expect(upgrade.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(upgrade);
+    fireEvent.click(upgrade);
+    expect(previews).toBe(1);
+  });
+
   it("keeps focus on Discard after it discards the draft", async () => {
     get.mockImplementation(() =>
       ok({

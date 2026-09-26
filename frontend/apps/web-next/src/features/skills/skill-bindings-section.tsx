@@ -281,6 +281,7 @@ export function SkillBindingsEditor({
   }
 
   async function upgradeToLatest(summary: BindingSummary, revisionId: string) {
+    if (upgradeBusy !== null) return;
     setUpgradeBusy(summary.skill_id);
     setUpgradeError(null);
     try {
@@ -557,13 +558,16 @@ export function SkillBindingsEditor({
                     active &&
                     !blocked &&
                     summary && (
+                      // Busy, it stays enabled so it keeps focus; while one
+                      // upgrade loads, presses are ignored.
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={!canEdit || upgradeBusy !== null}
+                        disabled={!canEdit}
+                        aria-busy={upgradeBusy === binding.skill_id || undefined}
                         onClick={() => void upgradeToLatest(summary, attachableId)}
                       >
-                        <RefreshCw className="size-4" />
+                        {upgradeBusy !== binding.skill_id && <RefreshCw className="size-4" />}
                         {t("skills_use_latest_revision")}
                       </Button>
                     )}
@@ -664,8 +668,11 @@ export function SkillBindingsEditor({
           {catalogue.hasNextPage && (
             <Button
               variant="ghost"
-              disabled={catalogue.isFetchingNextPage}
-              onClick={() => void catalogue.fetchNextPage()}
+              aria-busy={catalogue.isFetchingNextPage || undefined}
+              onClick={() => {
+                // Loading, it stays enabled so it keeps focus; a second press is ignored.
+                if (!catalogue.isFetchingNextPage) void catalogue.fetchNextPage();
+              }}
             >
               {catalogue.isFetchingNextPage ? t("loading") : t("load_more")}
             </Button>

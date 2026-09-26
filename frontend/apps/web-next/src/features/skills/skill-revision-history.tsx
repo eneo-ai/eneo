@@ -195,8 +195,11 @@ export function SkillRevisionHistory({
           {revisions.hasNextPage && (
             <Button
               variant="outline"
-              disabled={revisions.isFetchingNextPage}
-              onClick={() => void revisions.fetchNextPage()}
+              aria-busy={revisions.isFetchingNextPage || undefined}
+              onClick={() => {
+                // Loading, it stays enabled so it keeps focus; a second press is ignored.
+                if (!revisions.isFetchingNextPage) void revisions.fetchNextPage();
+              }}
             >
               {revisions.isFetchingNextPage
                 ? t("skills_library_loading_older")
@@ -287,7 +290,12 @@ export function SkillRevisionHistory({
           )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={restoring}>{t("cancel")}</AlertDialogCancel>
-            <Button disabled={restoring || unsaved} onClick={() => void restore()}>
+            {/* Busy, it stays enabled so it keeps focus; restore() ignores a second press. */}
+            <Button
+              disabled={unsaved}
+              aria-busy={restoring || undefined}
+              onClick={() => void restore()}
+            >
               {restoring ? t("skills_library_restoring") : t("skills_library_restore_action")}
             </Button>
           </AlertDialogFooter>

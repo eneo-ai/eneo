@@ -54,6 +54,7 @@ export function WhatsNewAnnouncement() {
   }
 
   async function primary() {
+    if (running) return;
     if (!release || steps.length === 0) return openPage();
     setOpen(false);
     try {
@@ -90,7 +91,8 @@ export function WhatsNewAnnouncement() {
               <Button
                 className="bg-background text-foreground hover:bg-background/90 w-full"
                 size="lg"
-                disabled={running}
+                // The dialog closes as the tour starts; a press while one runs is ignored.
+                aria-busy={running || undefined}
                 onClick={() => void primary()}
               >
                 {t(steps.length ? "whats_new_announcement_tour" : "whats_new_announcement_action")}

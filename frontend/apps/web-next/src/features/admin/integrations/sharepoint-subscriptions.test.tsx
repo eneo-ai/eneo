@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 
+const post = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
+    POST: post,
     GET: () =>
       Promise.resolve({
         data: [
@@ -27,7 +29,10 @@ vi.mock("@/lib/api/browser", () => ({
 
 import { SharePointSubscriptions } from "./sharepoint-subscriptions";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  post.mockReset();
+});
 
 describe("SharePointSubscriptions", () => {
   it("names the subscription table by its title", async () => {
@@ -36,5 +41,22 @@ describe("SharePointSubscriptions", () => {
     const table = await screen.findByRole("table", { name: "SharePoint Webhook-prenumerationer" });
     expect(within(table).getByText("anna.lind@example.se")).toBeTruthy();
     await expectNoAxeViolations(container);
+  });
+
+  it("keeps focus on a busy Förnya and renews once", async () => {
+    post.mockReturnValue(new Promise(() => {}));
+    renderInApp(<SharePointSubscriptions />);
+    const renew = await screen.findByRole("button", { name: "Förnya" });
+    renew.focus();
+
+    fireEvent.click(renew);
+
+    const busy = await screen.findByRole("button", { name: "Förnyar..." });
+    expect(busy).toBe(renew);
+    expect(busy.getAttribute("aria-busy")).toBe("true");
+    expect(busy.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(busy);
+    fireEvent.click(busy);
+    expect(post).toHaveBeenCalledTimes(1);
   });
 });

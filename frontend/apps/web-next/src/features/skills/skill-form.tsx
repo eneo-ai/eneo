@@ -234,7 +234,8 @@ export function SkillForm(props: Props) {
               {t("discard_all_changes")}
             </Button>
           )}
-          <Button type="submit" disabled={busy}>
+          {/* Busy, it stays enabled so it keeps focus; submit() ignores a second press. */}
+          <Button type="submit" aria-busy={busy || undefined}>
             {busy
               ? t(props.mode === "create" ? "skills_creating" : "saving")
               : t(props.mode === "create" ? "skills_create_action" : "save_changes")}

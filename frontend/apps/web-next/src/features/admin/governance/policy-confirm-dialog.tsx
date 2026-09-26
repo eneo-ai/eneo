@@ -42,7 +42,13 @@ export function PolicyConfirmDialog({
           <Button variant="outline" onClick={onCancel} disabled={saving}>
             {t("cancel")}
           </Button>
-          <Button onClick={onConfirm} disabled={saving} aria-busy={saving}>
+          {/* Busy, it stays enabled so it keeps focus; a second press is ignored. */}
+          <Button
+            aria-busy={saving || undefined}
+            onClick={() => {
+              if (!saving) onConfirm();
+            }}
+          >
             {saving ? t("governance_saving") : t("governance_confirm_and_save")}
           </Button>
         </DialogFooter>

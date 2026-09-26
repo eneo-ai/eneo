@@ -86,7 +86,8 @@ export function StorageConnectionSection({
   const [alreadyConfigured, setAlreadyConfigured] = useState(false);
   const [revisionConflict, setRevisionConflict] = useState(false);
   const [success, setSuccess] = useState<SuccessKind | null>(null);
-  const [previousBusy, setPreviousBusy] = useState(false);
+  // Which action on the previous destination is running.
+  const [previousBusy, setPreviousBusy] = useState<"switch-back" | "forget" | null>(null);
   const [previousReason, setPreviousReason] = useState<string | null>(null);
   const [previousFailed, setPreviousFailed] = useState(false);
   const [unresolvedPrevious, setUnresolvedPrevious] = useState<PreviousAction | null>(null);
@@ -328,7 +329,7 @@ export function StorageConnectionSection({
             revision: previous.revision
           }
         : { kind, revision: previous.revision };
-    setPreviousBusy(true);
+    setPreviousBusy(kind);
     setPreviousFailed(false);
     setPreviousReason(null);
     try {
@@ -360,7 +361,7 @@ export function StorageConnectionSection({
         await readConnection();
       }
     } finally {
-      setPreviousBusy(false);
+      setPreviousBusy(null);
     }
   }
 
@@ -586,17 +587,21 @@ export function StorageConnectionSection({
                         {t("retry")}
                       </Button>
                     )}
+                    {/* Busy, an action stays enabled so it keeps focus; presses while
+                        one runs are ignored (actOnPrevious, abandonPending). */}
                     <div className="flex flex-wrap gap-2">
                       <Button
                         variant="outline"
-                        disabled={!canManage || previousBusy || unresolvedPrevious !== null}
+                        disabled={!canManage || unresolvedPrevious !== null}
+                        aria-busy={previousBusy === "switch-back" || undefined}
                         onClick={() => void actOnPrevious("switch-back")}
                       >
                         {t("storage_switch_back_action")}
                       </Button>
                       <Button
                         variant="ghost"
-                        disabled={!canManage || previousBusy || unresolvedPrevious !== null}
+                        disabled={!canManage || unresolvedPrevious !== null}
+                        aria-busy={previousBusy === "forget" || undefined}
                         onClick={() => void actOnPrevious("forget")}
                       >
                         {t("storage_switch_forget_action")}
@@ -622,7 +627,8 @@ export function StorageConnectionSection({
                 )}
                 <Button
                   variant="ghost"
-                  disabled={!canManage || previousBusy || pendingBusy || unresolvedPending !== null}
+                  disabled={!canManage || unresolvedPending !== null}
+                  aria-busy={pendingBusy || undefined}
                   onClick={() => void abandonPending()}
                 >
                   {t("storage_pending_abandon_action")}

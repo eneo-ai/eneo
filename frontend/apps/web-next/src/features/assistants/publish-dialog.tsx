@@ -54,10 +54,13 @@ export function PublishDialog({
         )}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>{t("cancel")}</AlertDialogCancel>
+          {/* Busy, it stays enabled so it keeps focus; a second press is ignored. */}
           <Button
             variant={published ? "destructive" : "default"}
-            disabled={pending}
-            onClick={onConfirm}
+            aria-busy={pending || undefined}
+            onClick={() => {
+              if (!pending) onConfirm();
+            }}
           >
             {pending ? t("loading") : action}
           </Button>

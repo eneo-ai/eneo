@@ -5,6 +5,7 @@ import {
   Check,
   ChevronRight,
   Eye,
+  Loader2,
   Pencil,
   RefreshCw,
   Search,
@@ -94,11 +95,12 @@ function ParamList({ schema }: { schema: McpServerTool["input_schema"] }) {
 
 function ActiveToolRow({
   tool,
-  disabled,
+  busy,
   onToggle
 }: {
   tool: McpServerTool;
-  disabled: boolean;
+  /** Its own toggle is saving. */
+  busy: boolean;
   onToggle: (enabled: boolean) => void;
 }) {
   const t = useTranslations();
@@ -127,7 +129,7 @@ function ActiveToolRow({
         </CollapsibleTrigger>
         <Switch
           checked={tool.is_enabled_by_default}
-          disabled={disabled}
+          aria-busy={busy || undefined}
           aria-label={t("mcp_activate_tool", { name: tool.name })}
           onCheckedChange={onToggle}
         />
@@ -144,12 +146,13 @@ function ActiveToolRow({
 
 function PendingToolRow({
   tool,
-  disabled,
+  busy,
   onApprove,
   onReject
 }: {
   tool: McpServerTool;
-  disabled: boolean;
+  /** Which of its decisions is being saved. */
+  busy: "approve" | "reject" | null;
   onApprove: () => void;
   onReject: () => void;
 }) {
@@ -213,21 +216,29 @@ function PendingToolRow({
             variant="ghost"
             size="icon"
             className="size-7"
-            disabled={disabled}
+            aria-busy={busy === "approve" || undefined}
             onClick={onApprove}
             aria-label={`${t("approve")} ${tool.name}`}
           >
-            <Check className="text-success size-4" />
+            {busy === "approve" ? (
+              <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden="true" />
+            ) : (
+              <Check className="text-success size-4" />
+            )}
           </Button>
           <Button
             variant="ghost"
             size="icon"
             className="size-7"
-            disabled={disabled}
+            aria-busy={busy === "reject" || undefined}
             onClick={onReject}
             aria-label={`${t("reject")} ${tool.name}`}
           >
-            <X className="text-destructive size-4" />
+            {busy === "reject" ? (
+              <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden="true" />
+            ) : (
+              <X className="text-destructive size-4" />
+            )}
           </Button>
         </div>
       </div>
@@ -295,7 +306,17 @@ export function ToolsTab({ serverId }: { serverId: string }) {
     onError: (error) => toastApiError(error, t)
   });
 
+  // One change at a time, as before; the control whose change is saving shows
+  // it (aria-busy) and keeps focus, and presses while one runs are ignored.
   const busy = sync.isPending || toggle.isPending || bulkToggle.isPending || review.isPending;
+  const [running, setRunning] = useState<string | null>(null);
+  const settle = { onSettled: () => setRunning(null) };
+  function run(control: string, start: () => void) {
+    if (busy || running !== null) return;
+    setRunning(control);
+    start();
+  }
+  const busyOn = (control: string) => running === control || undefined;
 
   const pending = useMemo(() => (tools ?? []).filter((tool) => tool.requires_approval), [tools]);
   const active = useMemo(() => (tools ?? []).filter((tool) => !tool.requires_approval), [tools]);
@@ -314,8 +335,15 @@ export function ToolsTab({ serverId }: { serverId: string }) {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-base font-semibold">{t("mcp_server_tools")}</h2>
-        <Button variant="outline" size="sm" disabled={sync.isPending} onClick={() => sync.mutate()}>
-          <RefreshCw className={sync.isPending ? "size-4 animate-spin" : "size-4"} />
+        <Button
+          variant="outline"
+          size="sm"
+          aria-busy={sync.isPending || undefined}
+          onClick={() => {
+            if (!sync.isPending) sync.mutate();
+          }}
+        >
+          {!sync.isPending && <RefreshCw className="size-4" />}
           {sync.isPending ? t("syncing") : t("sync_tools")}
         </Button>
       </div>
@@ -337,20 +365,27 @@ export function ToolsTab({ serverId }: { serverId: string }) {
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled={busy}
-                    onClick={() => review.mutate({ kind: "approve-all" })}
+                    aria-busy={busyOn("approve-all")}
+                    onClick={() =>
+                      run("approve-all", () => review.mutate({ kind: "approve-all" }, settle))
+                    }
                   >
-                    <Check className="size-3.5" /> {t("approve_all")}
+                    {!busyOn("approve-all") && <Check className="size-3.5" />} {t("approve_all")}
                   </Button>
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled={busy}
+                    aria-busy={busyOn("reject-all")}
                     onClick={() =>
-                      review.mutate({ kind: "reject", toolIds: pending.map((tool) => tool.id) })
+                      run("reject-all", () =>
+                        review.mutate(
+                          { kind: "reject", toolIds: pending.map((tool) => tool.id) },
+                          settle
+                        )
+                      )
                     }
                   >
-                    <X className="size-3.5" /> {t("reject_all")}
+                    {!busyOn("reject-all") && <X className="size-3.5" />} {t("reject_all")}
                   </Button>
                 </div>
               </div>
@@ -362,9 +397,23 @@ export function ToolsTab({ serverId }: { serverId: string }) {
                   <PendingToolRow
                     key={tool.id}
                     tool={tool}
-                    disabled={busy}
-                    onApprove={() => review.mutate({ kind: "approve", toolIds: [tool.id] })}
-                    onReject={() => review.mutate({ kind: "reject", toolIds: [tool.id] })}
+                    busy={
+                      busyOn(`approve:${tool.id}`)
+                        ? "approve"
+                        : busyOn(`reject:${tool.id}`)
+                          ? "reject"
+                          : null
+                    }
+                    onApprove={() =>
+                      run(`approve:${tool.id}`, () =>
+                        review.mutate({ kind: "approve", toolIds: [tool.id] }, settle)
+                      )
+                    }
+                    onReject={() =>
+                      run(`reject:${tool.id}`, () =>
+                        review.mutate({ kind: "reject", toolIds: [tool.id] }, settle)
+                      )
+                    }
                   />
                 ))}
               </ul>
@@ -396,16 +445,16 @@ export function ToolsTab({ serverId }: { serverId: string }) {
                   <Button
                     variant="ghost"
                     size="sm"
-                    disabled={busy}
-                    onClick={() => bulkToggle.mutate(true)}
+                    aria-busy={busyOn("all-on")}
+                    onClick={() => run("all-on", () => bulkToggle.mutate(true, settle))}
                   >
                     {t("mcp_all_on")}
                   </Button>
                   <Button
                     variant="ghost"
                     size="sm"
-                    disabled={busy}
-                    onClick={() => bulkToggle.mutate(false)}
+                    aria-busy={busyOn("all-off")}
+                    onClick={() => run("all-off", () => bulkToggle.mutate(false, settle))}
                   >
                     {t("mcp_all_off")}
                   </Button>
@@ -422,9 +471,11 @@ export function ToolsTab({ serverId }: { serverId: string }) {
                     <li key={tool.id}>
                       <ActiveToolRow
                         tool={tool}
-                        disabled={busy}
+                        busy={busyOn(`toggle:${tool.id}`) ?? false}
                         onToggle={(checked) =>
-                          toggle.mutate({ toolId: tool.id, isEnabled: checked })
+                          run(`toggle:${tool.id}`, () =>
+                            toggle.mutate({ toolId: tool.id, isEnabled: checked }, settle)
+                          )
                         }
                       />
                     </li>

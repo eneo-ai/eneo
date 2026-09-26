@@ -256,18 +256,18 @@ function TemplateWizard({
               />
               <TemplateAttachmentList attachments={attachments} onRemove={onRemoveAttachment} />
               <p className="text-muted-foreground text-sm">{t("upload_dropzone_prompt")}</p>
+              {/* Uploading, it stays enabled so it keeps focus (the busy spinner
+                  replaces its icon); a press meanwhile is ignored. */}
               <Button
                 type="button"
                 variant="outline"
                 className="w-fit"
-                disabled={uploading}
-                onClick={() => fileInputRef.current?.click()}
+                aria-busy={uploading || undefined}
+                onClick={() => {
+                  if (!uploading) fileInputRef.current?.click();
+                }}
               >
-                {uploading ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Paperclip className="size-4" />
-                )}
+                {!uploading && <Paperclip className="size-4" />}
                 {t("upload_files")}
               </Button>
               <FileFormatDetails

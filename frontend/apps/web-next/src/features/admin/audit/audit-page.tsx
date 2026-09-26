@@ -30,6 +30,7 @@ function LogsTab() {
   const [filters, setFilters] = useState<AuditFilters>(() => parseAuditFilters(searchParams));
   const [searchInput, setSearchInput] = useState(() => parseAuditFilters(searchParams).search);
   const [showExport, setShowExport] = useState(false);
+  const [paging, setPaging] = useState<"previous" | "next" | null>(null);
 
   // Debounce the free-text search into the committed filters.
   const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -66,6 +67,17 @@ function LogsTab() {
 
   const logs = data?.logs ?? [];
   const totalPages = data?.total_pages ?? 1;
+
+  // While the next page loads, the pressed button stays enabled so it keeps
+  // focus (aria-busy), and presses are ignored.
+  function turnPage(direction: "previous" | "next") {
+    if (isPlaceholderData) return;
+    setPaging(direction);
+    setFilters((current) => ({
+      ...current,
+      page: current.page + (direction === "next" ? 1 : -1)
+    }));
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -112,16 +124,18 @@ function LogsTab() {
             <Button
               variant="outline"
               size="sm"
-              disabled={(data?.page ?? 1) <= 1 || isPlaceholderData}
-              onClick={() => setFilters((current) => ({ ...current, page: current.page - 1 }))}
+              disabled={(data?.page ?? 1) <= 1}
+              aria-busy={(isPlaceholderData && paging === "previous") || undefined}
+              onClick={() => turnPage("previous")}
             >
               {t("previous")}
             </Button>
             <Button
               variant="outline"
               size="sm"
-              disabled={(data?.page ?? 1) >= totalPages || isPlaceholderData}
-              onClick={() => setFilters((current) => ({ ...current, page: current.page + 1 }))}
+              disabled={(data?.page ?? 1) >= totalPages}
+              aria-busy={(isPlaceholderData && paging === "next") || undefined}
+              onClick={() => turnPage("next")}
             >
               {t("next")}
             </Button>

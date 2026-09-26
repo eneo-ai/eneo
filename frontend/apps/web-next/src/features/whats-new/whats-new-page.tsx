@@ -40,6 +40,10 @@ export function WhatsNewPage({ title }: { title: string }) {
   );
   const [filters, setFilters] = useState<ReleaseFilters>({ area: null, showMeOnly: false });
   const [resetting, setResetting] = useState(false);
+  // What started the running tour: the release's tour or one entry's "Visa mig".
+  // Its button shows the tour is running (aria-busy) and keeps focus; while a
+  // tour runs, starting another is ignored.
+  const [tourFrom, setTourFrom] = useState<string | null>(null);
   const current = releases.find((release) => release.version === selectedVersion) ?? null;
   const entries = current ? filterEntries(current, filters, isAdmin) : [];
   const total = current ? visibleEntries(current, isAdmin).length : 0;
@@ -56,7 +60,9 @@ export function WhatsNewPage({ title }: { title: string }) {
     }
   }
 
-  async function startEntries(selected: ReleaseEntry[], version: string) {
+  async function startEntries(from: string, selected: ReleaseEntry[], version: string) {
+    if (running) return;
+    setTourFrom(from);
     try {
       const outcome = await start(selected, version);
       if (outcome === "unavailable") toast.info(t("whats_new_show_me_unavailable"));
@@ -147,8 +153,10 @@ export function WhatsNewPage({ title }: { title: string }) {
                   size="sm"
                   variant={isReadRelease(current, seenAtOpen) ? "outline" : "default"}
                   className="ml-auto"
-                  disabled={running}
-                  onClick={() => void startEntries(tourEntries(current, isAdmin), current.version)}
+                  aria-busy={(running && tourFrom === "release") || undefined}
+                  onClick={() =>
+                    void startEntries("release", tourEntries(current, isAdmin), current.version)
+                  }
                 >
                   {t("whats_new_tour_start")}
                 </Button>
@@ -232,8 +240,8 @@ export function WhatsNewPage({ title }: { title: string }) {
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={running}
-                      onClick={() => void startEntries([entry], current.version)}
+                      aria-busy={(running && tourFrom === entry.id) || undefined}
+                      onClick={() => void startEntries(entry.id, [entry], current.version)}
                     >
                       {t("whats_new_show_me")}
                     </Button>

@@ -56,17 +56,27 @@ function IntegrationCard({ integration }: { integration: TenantIntegration }) {
         {linked && <Badge>{t("integration_status_configured")}</Badge>}
       </div>
       <p className="text-muted-foreground flex-1 text-sm">{integration.description}</p>
+      {/* Busy, a button stays enabled so it keeps focus; a second press is ignored. */}
       {linked ? (
         <Button
           variant="outline"
           size="sm"
-          disabled={unlink.isPending || !integration.id}
-          onClick={() => unlink.mutate()}
+          disabled={!integration.id}
+          aria-busy={unlink.isPending || undefined}
+          onClick={() => {
+            if (!unlink.isPending) unlink.mutate();
+          }}
         >
           {t("disable")}
         </Button>
       ) : (
-        <Button size="sm" disabled={link.isPending} onClick={() => link.mutate()}>
+        <Button
+          size="sm"
+          aria-busy={link.isPending || undefined}
+          onClick={() => {
+            if (!link.isPending) link.mutate();
+          }}
+        >
           {t("enable")}
         </Button>
       )}

@@ -141,6 +141,28 @@ describe("organisation skill detail", () => {
     expect(post).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps focus on a busy publish and publishes once", async () => {
+    post.mockReturnValue(new Promise(() => {}));
+    show(<OrganizationSkillPublication skill={skill} unsaved={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "organization_skills_publish_action" }));
+    const dialog = screen.getByRole("alertdialog");
+    for (const checkbox of within(dialog).getAllByRole("checkbox")) fireEvent.click(checkbox);
+    const publish = within(dialog).getByRole("button", {
+      name: "organization_skills_publish_action"
+    });
+    publish.focus();
+
+    fireEvent.click(publish);
+
+    const busy = await within(dialog).findByRole("button", { name: "saving" });
+    expect(busy).toBe(publish);
+    expect(busy.getAttribute("aria-busy")).toBe("true");
+    expect(busy.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(busy);
+    fireEvent.click(busy);
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
   it("shows a missing reason at the field, which takes focus, before blocking", async () => {
     show(<OrganizationSkillExecution skillId="skill-1" />);
     fireEvent.click(

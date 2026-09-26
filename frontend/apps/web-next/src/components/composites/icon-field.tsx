@@ -35,24 +35,29 @@ export function IconField({
 }) {
   const t = useTranslations();
   const fileInput = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
+  const uploadButton = useRef<HTMLButtonElement>(null);
+  // Which button's work is running: busy, it stays enabled so it keeps focus,
+  // and a second press (of either) is ignored.
+  const [busy, setBusy] = useState<"upload" | "remove" | null>(null);
 
   const icon = iconUrl(iconId);
 
   async function replaceIcon(file: File) {
-    setBusy(true);
+    if (busy) return;
+    setBusy("upload");
     try {
       const uploaded = await uploadIcon(file);
       await onSave(uploaded.id);
     } catch {
       toast.error(t("avatar_upload_failed"));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
   async function removeIcon() {
-    setBusy(true);
+    if (busy) return;
+    setBusy("remove");
     try {
       if (iconId) {
         await unwrap(
@@ -60,10 +65,12 @@ export function IconField({
         );
       }
       await onSave(null);
+      // Delete goes with the icon: focus moves to Upload instead of the page.
+      uploadButton.current?.focus();
     } catch {
       toast.error(t("avatar_delete_failed"));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
@@ -92,16 +99,24 @@ export function IconField({
         }}
       />
       <Button
+        ref={uploadButton}
         variant="outline"
         size="sm"
-        disabled={busy}
-        onClick={() => fileInput.current?.click()}
+        aria-busy={busy === "upload" || undefined}
+        onClick={() => {
+          if (!busy) fileInput.current?.click();
+        }}
       >
         {t("upload")}
       </Button>
       {iconId && (
-        <Button variant="ghost" size="sm" disabled={busy} onClick={() => void removeIcon()}>
-          <Trash2 className="size-4" /> {t("delete")}
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-busy={busy === "remove" || undefined}
+          onClick={() => void removeIcon()}
+        >
+          {busy !== "remove" && <Trash2 className="size-4" />} {t("delete")}
         </Button>
       )}
     </div>

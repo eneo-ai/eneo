@@ -98,13 +98,17 @@ export function SharePointSubscriptions() {
           )}
         </div>
         {expiredCount > 0 && (
+          // Busy, it stays enabled so it keeps focus (and shows the busy
+          // spinner instead of its icon); a second press is ignored.
           <Button
             variant="outline"
             size="sm"
-            disabled={renewAll.isPending}
-            onClick={() => renewAll.mutate()}
+            aria-busy={renewAll.isPending || undefined}
+            onClick={() => {
+              if (!renewAll.isPending) renewAll.mutate();
+            }}
           >
-            <RefreshCw className={renewAll.isPending ? "size-4 animate-spin" : "size-4"} />
+            {!renewAll.isPending && <RefreshCw className="size-4" />}
             {t("sharepoint_subscriptions_renew_all_expired", { count: expiredCount })}
           </Button>
         )}
@@ -157,8 +161,10 @@ export function SharePointSubscriptions() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      disabled={recreate.isPending && renewingId === sub.id}
-                      onClick={() => recreate.mutate(sub.id)}
+                      aria-busy={(recreate.isPending && renewingId === sub.id) || undefined}
+                      onClick={() => {
+                        if (!(recreate.isPending && renewingId === sub.id)) recreate.mutate(sub.id);
+                      }}
                     >
                       {recreate.isPending && renewingId === sub.id
                         ? t("sharepoint_subscription_renewing")

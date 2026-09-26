@@ -31,6 +31,8 @@ export function RetentionPanel() {
     onSuccess: (updated) => {
       queryClient.setQueryData(retentionPolicyQueryOptions(browserApi).queryKey, updated);
       setDays(null);
+      // Save goes once nothing is unsaved: focus returns to the field.
+      document.getElementById("audit-retention")?.focus();
     },
     onError: (error) => toastApiError(error, t)
   });
@@ -51,7 +53,14 @@ export function RetentionPanel() {
           />
           <span className="text-muted-foreground text-sm">{t("days")}</span>
           {dirty && (
-            <Button size="sm" disabled={update.isPending} onClick={() => update.mutate()}>
+            // Busy, it stays enabled so it keeps focus; a second press is ignored.
+            <Button
+              size="sm"
+              aria-busy={update.isPending || undefined}
+              onClick={() => {
+                if (!update.isPending) update.mutate();
+              }}
+            >
               {update.isPending ? t("audit_config_saving") : t("save")}
             </Button>
           )}

@@ -125,6 +125,25 @@ describe("space Skills", () => {
     expect(screen.getByText("skills_library_deleted_success").getAttribute("role")).toBe("status");
   });
 
+  it("keeps focus on a busy delete and deletes once", async () => {
+    remove.mockReturnValue(new Promise(() => {}));
+    show(<SpaceSkillsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "skills_library_delete_aria" }));
+    const dialog = screen.getByRole("alertdialog");
+    const confirm = within(dialog).getByRole("button", { name: "delete" });
+    confirm.focus();
+
+    fireEvent.click(confirm);
+
+    const busy = await within(dialog).findByRole("button", { name: "skills_library_deleting" });
+    expect(busy).toBe(confirm);
+    expect(busy.getAttribute("aria-busy")).toBe("true");
+    expect(busy.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(busy);
+    fireEvent.click(busy);
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps a failed delete's error in the dialog", async () => {
     remove.mockImplementation(() => Promise.reject(new Error("offline")));
     show(<SpaceSkillsPage />);

@@ -157,11 +157,20 @@ export function CapabilityProvidersPage() {
                         </p>
                       )}
                       <div className="flex flex-wrap gap-2">
+                        {/* Busy, it stays enabled so it keeps focus; while one source
+                            changes, presses are ignored. */}
                         <Button
                           size="sm"
                           variant="outline"
-                          disabled={activate.isPending || (!active && blocked)}
-                          onClick={() => activate.mutate({ server: source, active: !active })}
+                          disabled={!active && blocked}
+                          aria-busy={
+                            (activate.isPending && activate.variables?.server.id === source.id) ||
+                            undefined
+                          }
+                          onClick={() => {
+                            if (!activate.isPending)
+                              activate.mutate({ server: source, active: !active });
+                          }}
                         >
                           {t(active ? "deactivate" : "activate")}
                         </Button>

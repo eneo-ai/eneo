@@ -295,9 +295,12 @@ function SecuritySection() {
               </div>
               <AlertDialogFooter>
                 <AlertDialogCancel disabled={update.isPending}>{t("cancel")}</AlertDialogCancel>
+                {/* Busy, it stays enabled so it keeps focus; a second press is ignored. */}
                 <Button
-                  disabled={update.isPending}
-                  onClick={() => void confirmSecurityClassificationChange()}
+                  aria-busy={update.isPending || undefined}
+                  onClick={() => {
+                    if (!update.isPending) void confirmSecurityClassificationChange();
+                  }}
                 >
                   {update.isPending ? t("saving") : t("confirm")}
                 </Button>

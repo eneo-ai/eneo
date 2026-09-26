@@ -69,7 +69,7 @@ function PolicyForm({ policy, onClose }: { policy: Policy; onClose: () => void }
       className="flex flex-col gap-4"
       onSubmit={(event) => {
         event.preventDefault();
-        save.mutate();
+        if (!save.isPending) save.mutate();
       }}
     >
       <Label className="flex items-center justify-between gap-2 font-normal">
@@ -114,7 +114,8 @@ function PolicyForm({ policy, onClose }: { policy: Policy; onClose: () => void }
         <Button type="button" variant="outline" onClick={onClose}>
           {t("cancel")}
         </Button>
-        <Button type="submit" disabled={save.isPending}>
+        {/* Busy, it stays enabled so it keeps focus; a second submit is ignored. */}
+        <Button type="submit" aria-busy={save.isPending || undefined}>
           {save.isPending ? t("saving") : t("save")}
         </Button>
       </DialogFooter>

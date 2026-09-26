@@ -228,6 +228,24 @@ describe("object-store connection lifecycle", () => {
     expect(onConnectionChanged).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps focus on a busy switch-back and switches back once", async () => {
+    post.mockReturnValue(new Promise(() => {}));
+    show();
+    fireEvent.click(await screen.findByRole("button", { name: /storage_switch_previous_title/ }));
+    const switchBack = screen.getByRole("button", { name: "storage_switch_back_action" });
+    switchBack.focus();
+
+    fireEvent.click(switchBack);
+
+    await waitFor(() => expect(switchBack.getAttribute("aria-busy")).toBe("true"));
+    expect(switchBack.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(switchBack);
+    fireEvent.click(switchBack);
+    fireEvent.click(screen.getByRole("button", { name: "storage_switch_forget_action" }));
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(remove).not.toHaveBeenCalled();
+  });
+
   it("forgets only the archived revision selected by the administrator", async () => {
     get
       .mockImplementationOnce(() => ok(current))

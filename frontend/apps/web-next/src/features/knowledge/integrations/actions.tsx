@@ -155,7 +155,13 @@ export function IntegrationActions({ item }: { item: IntegrationKnowledge }) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={fullSync.isPending}>{t("cancel")}</AlertDialogCancel>
-            <Button disabled={fullSync.isPending} onClick={() => fullSync.mutate()}>
+            {/* Busy, it stays enabled so it keeps focus; a second press is ignored. */}
+            <Button
+              aria-busy={fullSync.isPending || undefined}
+              onClick={() => {
+                if (!fullSync.isPending) fullSync.mutate();
+              }}
+            >
               {fullSync.isPending ? t("syncing") : t("start_full_sync")}
             </Button>
           </AlertDialogFooter>

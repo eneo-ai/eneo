@@ -109,6 +109,36 @@ describe("BlobTable", () => {
   });
 });
 
+describe("BlobActions", () => {
+  it("keeps focus on a busy Spara ändringar and renames once", async () => {
+    api.POST.mockReturnValue(new Promise(() => {}));
+    renderInApp(
+      <>
+        <h1 id="collection-title">Upphandlingspolicy</h1>
+        <BlobTable blobs={[blob("1", "a.pdf", 100)]} canEdit labelledBy="collection-title" />
+      </>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för a.pdf" }));
+    const edit = await screen.findByRole("menuitem", { name: "Redigera" });
+    // The menu moves focus into itself on the next frame; let it, as a user would.
+    await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    fireEvent.click(edit);
+    const dialog = await screen.findByRole("dialog", { name: "Redigera fil" });
+    const save = within(dialog).getByRole("button", { name: "Spara ändringar" });
+    save.focus();
+
+    fireEvent.click(save);
+
+    const busy = await within(dialog).findByRole("button", { name: "Sparar…" });
+    expect(busy).toBe(save);
+    expect(busy.getAttribute("aria-busy")).toBe("true");
+    expect(busy.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(busy);
+    fireEvent.click(busy);
+    expect(api.POST).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("AddTextDialog", () => {
   it("shows what is missing at its field on submit, and keeps focus on a busy submit", async () => {
     api.POST.mockReturnValue(new Promise(() => {}));

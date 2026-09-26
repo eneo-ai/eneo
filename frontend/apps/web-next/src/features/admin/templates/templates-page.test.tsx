@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -15,8 +15,10 @@ const template = (id: string, name: string) => ({
   deleted_at: null
 });
 
+const post = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
+    POST: post,
     GET: (path: string) => {
       const items =
         path === "/api/v1/admin/templates/assistants/"
@@ -33,7 +35,10 @@ vi.mock("@/lib/api/browser", () => ({
 
 import { TemplatesPage } from "./templates-page";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  post.mockReset();
+});
 
 describe("TemplatesPage", () => {
   it("names each tab's table after the tab", async () => {
@@ -55,5 +60,22 @@ describe("TemplatesPage", () => {
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Borttagna mallar" }));
     const deleted = await screen.findByRole("table", { name: "Borttagna mallar" });
     expect(within(deleted).getAllByText("Gammal mall")).toHaveLength(2);
+  });
+
+  it("keeps focus on a busy Återställ and restores once", async () => {
+    post.mockReturnValue(new Promise(() => {}));
+    renderInApp(<TemplatesPage />);
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: "Borttagna mallar" }));
+    const deleted = await screen.findByRole("table", { name: "Borttagna mallar" });
+    const restore = within(deleted).getAllByRole("button", { name: "Återställ" })[0]!;
+    restore.focus();
+
+    fireEvent.click(restore);
+
+    await waitFor(() => expect(restore.getAttribute("aria-busy")).toBe("true"));
+    expect(restore.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(restore);
+    fireEvent.click(restore);
+    expect(post).toHaveBeenCalledTimes(1);
   });
 });

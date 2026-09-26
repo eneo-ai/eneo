@@ -123,4 +123,36 @@ describe("WebsiteDialog", () => {
     expect(document.activeElement).toBe(field(dialog, /^Användarnamn/));
     expect(api.POST).not.toHaveBeenCalled();
   });
+
+  it("creates once after Skapa ändå, and the form's busy button keeps the focus", async () => {
+    api.GET.mockImplementation(() =>
+      ok({
+        space_name: "Organisationen",
+        last_crawled_at: null,
+        update_interval: "never",
+        pages_crawled: null,
+        pages_failed: null,
+        files_downloaded: null,
+        files_failed: null,
+        crawl_status: null
+      })
+    );
+    api.POST.mockReturnValue(new Promise(() => {}));
+    const dialog = renderDialog();
+    fireEvent.change(field(dialog, /^URL/), { target: { value: "https://sundsvall.se" } });
+    const create = within(dialog).getByRole("button", { name: "Skapa webbplats" });
+    create.focus();
+    fireEvent.click(create);
+
+    const warning = await screen.findByRole("alertdialog", {
+      name: "Denna webbplats finns redan"
+    });
+    fireEvent.click(within(warning).getByRole("button", { name: "Skapa ändå" }));
+
+    await waitFor(() => expect(create.getAttribute("aria-busy")).toBe("true"));
+    await waitFor(() => expect(document.activeElement).toBe(create));
+    expect(create.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(create);
+    expect(api.POST).toHaveBeenCalledTimes(1);
+  });
 });
