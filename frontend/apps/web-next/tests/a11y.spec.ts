@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { WCAG_22_AA_TAGS } from "../src/test/wcag";
+import { expect, test } from "./csp";
 import { createSpace, uniqueName } from "./helpers";
 
 // Page-level WCAG 2.2 A/AA scans (ACCESSIBILITY.md → Automated checks). axe-core

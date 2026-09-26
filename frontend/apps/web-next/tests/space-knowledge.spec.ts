@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./csp";
 import { uniqueName } from "./helpers";
 
 test("creates a shared space and opens the knowledge collection flow", async ({ page }) => {
