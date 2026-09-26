@@ -112,6 +112,47 @@ async function expectNoAxeViolations(
   await expectNoCollapsedTableColumns(page);
 }
 
+/**
+ * Reflow (1.4.10): at 320 CSS px wide (1280 px at 400 % zoom) the page
+ * scrolls only vertically. Content that needs two dimensions (a data table,
+ * code) scrolls sideways inside its own region, never the page: neither the
+ * document nor the page panel (main#main-content, the shell's scroll
+ * container) may be wider than the viewport.
+ */
+async function expectNoSidewaysPageScroll(page: Page) {
+  const overflow = await page.evaluate(() => {
+    const main = document.getElementById("main-content");
+    const root = main ?? document.body;
+    const right = main ? main.getBoundingClientRect().right : window.innerWidth;
+    // To name the culprit when the check fails: what sticks out of the page,
+    // not out of a region that scrolls (or clips) on its own. A region clips
+    // only the boxes it contains as a containing block, so an absolutely
+    // positioned child (a visually hidden text, say) escapes a scroll box
+    // that is not positioned; a fixed box is outside the page's width.
+    const clipped = (el: Element): boolean => {
+      const { position } = getComputedStyle(el);
+      if (position === "fixed") return true;
+      const next =
+        position === "absolute" && el instanceof HTMLElement ? el.offsetParent : el.parentElement;
+      if (!next || next === root || !root.contains(next)) return false;
+      return getComputedStyle(next).overflowX !== "visible" || clipped(next);
+    };
+    const offenders = [...root.querySelectorAll("*")]
+      .filter((el) => el.getBoundingClientRect().right > right + 1 && !clipped(el))
+      .slice(0, 5)
+      .map((el) => `${el.tagName.toLowerCase()}.${(el.getAttribute("class") ?? "").slice(0, 60)}`);
+    return {
+      page: document.documentElement.scrollWidth > window.innerWidth,
+      panel: main ? main.scrollWidth > main.clientWidth : false,
+      offenders
+    };
+  });
+  expect(
+    { page: overflow.page, panel: overflow.panel },
+    `Sideways scroll at ${page.viewportSize()?.width} px on ${page.url()}: ${overflow.offenders.join(", ")}`
+  ).toEqual({ page: false, panel: false });
+}
+
 /** Opens a route, waits until it shows real content, then scans it. */
 async function scan(page: Page, path: string, ready: () => Promise<void>, exceptions?: Exceptions) {
   await page.goto(path);
@@ -410,6 +451,59 @@ for (const colorScheme of ["light", "dark"] as const) {
     });
   });
 }
+
+// Reflow at 320 px with a mouse: what a desktop user gets at 400 % zoom.
+test.describe("reflow at 320 px (1.4.10)", () => {
+  test.use({ viewport: { width: 320, height: 640 }, contextOptions: { reducedMotion: "reduce" } });
+
+  test("personal chat", async ({ page }) => {
+    await page.goto("/spaces/personal/chat");
+    await chatStartReady(page);
+    await expectNoSidewaysPageScroll(page);
+  });
+
+  test("spaces list", async ({ page }) => {
+    await spacesList(page);
+    await expectNoSidewaysPageScroll(page);
+  });
+
+  test("space overview and knowledge", async ({ page }) => {
+    const name = uniqueName("E2E Reflow Space");
+    const space = await createSpace(page, name);
+
+    await page.goto(`${space}/overview`);
+    await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+    await expectNoSidewaysPageScroll(page);
+
+    await page.goto(`${space}/knowledge`);
+    await expect(
+      page.getByRole("heading", { level: 2, name: /^(Kunskap|Knowledge)$/ })
+    ).toBeVisible();
+    await expectNoSidewaysPageScroll(page);
+  });
+
+  test("admin users", async ({ page }) => {
+    await page.goto("/admin/users");
+    await expect(
+      page.getByRole("heading", { level: 1, name: /^(Användare|Users)$/ })
+    ).toBeVisible();
+    await expect(page.getByRole("main").getByText(/^\d+ (användare|users?)$/)).toBeVisible();
+    await expectNoSidewaysPageScroll(page);
+  });
+
+  test("admin models", async ({ page }) => {
+    await page.goto("/admin/models");
+    await expect(page.getByRole("tab", { name: /migreringshistorik/i })).toBeVisible();
+    await expect(page.getByRole("main").getByRole("table").first()).toBeVisible();
+    await expectNoSidewaysPageScroll(page);
+  });
+
+  test("account", async ({ page }) => {
+    await page.goto("/account");
+    await expect(page.getByText(/byt lösenord/i).first()).toBeVisible();
+    await expectNoSidewaysPageScroll(page);
+  });
+});
 
 test("the skip link is the first tab stop and moves focus to the main content", async ({
   page
