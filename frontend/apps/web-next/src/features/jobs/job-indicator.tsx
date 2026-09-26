@@ -9,7 +9,7 @@ import { Bell, BellDot, ChevronDown } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { cn } from "@/lib/utils";
-import { isJobActive, useJobs, type Job, type Upload } from "./use-jobs";
+import { isJobActive, useJobActivity, type Job, type Upload } from "./use-jobs";
 
 /** Job task → i18n key for the panel section heading. */
 const TASK_SECTIONS: [Job["task"], string][] = [
@@ -125,7 +125,7 @@ function JobRow({ job }: { job: Job }) {
  */
 export function JobIndicator({ alignment = "end" }: { alignment?: "start" | "end" }) {
   const t = useTranslations();
-  const { jobs, uploads, runningCount } = useJobs();
+  const { jobs, uploads, runningCount } = useJobActivity();
 
   const sections = TASK_SECTIONS.map(([task, titleKey]) => ({
     titleKey,

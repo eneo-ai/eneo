@@ -9,7 +9,8 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState
+  useState,
+  useSyncExternalStore
 } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
@@ -53,18 +54,45 @@ export function isJobActive(job: Job): boolean {
   return job.status === "in progress" || job.status === "queued";
 }
 
+/** The client-side upload queue, as a store the job indicator subscribes to. */
+type UploadStore = {
+  subscribe: (listener: () => void) => () => void;
+  getSnapshot: () => Upload[];
+  set: (uploads: Upload[]) => void;
+};
+
+const NO_UPLOADS: Upload[] = [];
+
+function createUploadStore(): UploadStore {
+  let uploads = NO_UPLOADS;
+  const listeners = new Set<() => void>();
+  return {
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    getSnapshot: () => uploads,
+    set: (next) => {
+      uploads = next;
+      listeners.forEach((listener) => listener());
+    }
+  };
+}
+
+/*
+ * Only actions, which hold still: the provider sits above every page, and a
+ * context that changes while React is still hydrating a page (the jobs
+ * arriving, an upload's progress) makes React throw the page's server HTML
+ * away and render it again. The job indicator reads jobs and uploads itself
+ * (useJobActivity).
+ */
 type JobsContextValue = {
-  /** Jobs the backend reports for this user (active + recently finished). */
-  jobs: Job[];
-  /** Client-side upload queue entries (removed once the backend job exists). */
-  uploads: Upload[];
-  /** Active jobs + active uploads, for the header badge. */
-  runningCount: number;
   /** Register a backend job: switches to fast polling for quick feedback. */
   trackJob: () => void;
   /** Queue files for upload into a collection. */
   queueUploads: (collectionId: string, files: File[]) => void;
   clearFinishedUploads: () => void;
+  uploadStore: UploadStore;
 };
 
 const JobsContext = createContext<JobsContextValue | null>(null);
@@ -113,8 +141,10 @@ function uploadInfoBlob(
   });
 }
 
-// One empty list until the jobs load, so the context value holds still.
+// One empty list until the jobs load.
 const NO_JOBS: Job[] = [];
+
+const fetchJobs = async (): Promise<Job[]> => (await unwrap(browserApi.GET("/api/v1/jobs/"))).items;
 
 export function JobsProvider({ children }: { children: React.ReactNode }) {
   const t = useTranslations();
@@ -128,10 +158,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
   const { data: jobs = NO_JOBS } = useQuery({
     queryKey: ["jobs"],
-    queryFn: async (): Promise<Job[]> => {
-      const page = await unwrap(browserApi.GET("/api/v1/jobs/"));
-      return page.items;
-    },
+    queryFn: fetchJobs,
     refetchInterval: (query) => {
       // Backend keeps finished jobs visible for a few minutes; only active
       // ones warrant polling. trackJob() restarts a stopped poll.
@@ -178,15 +205,15 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   }, [queryClient]);
 
   // Upload queue: canonical state in refs (mutated by async callbacks),
-  // mirrored into React state for rendering.
+  // mirrored into the store the job indicator renders from.
   const uploadsRef = useRef<Map<string, Upload>>(new Map());
   const waitingRef = useRef<string[]>([]);
   const runningRef = useRef<Set<string>>(new Set());
-  const [uploads, setUploads] = useState<Upload[]>([]);
+  const [uploadStore] = useState(createUploadStore);
 
   const sync = useCallback(() => {
-    setUploads([...uploadsRef.current.values()]);
-  }, []);
+    uploadStore.set([...uploadsRef.current.values()]);
+  }, [uploadStore]);
 
   const patchUpload = useCallback(
     (id: string, patch: Partial<Upload>) => {
@@ -262,13 +289,9 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     sync();
   }, [sync]);
 
-  const runningCount =
-    jobs.filter(isJobActive).length +
-    uploads.filter((upload) => upload.status === "queued" || upload.status === "uploading").length;
-
   const value = useMemo<JobsContextValue>(
-    () => ({ jobs, uploads, runningCount, trackJob, queueUploads, clearFinishedUploads }),
-    [jobs, uploads, runningCount, trackJob, queueUploads, clearFinishedUploads]
+    () => ({ trackJob, queueUploads, clearFinishedUploads, uploadStore }),
+    [trackJob, queueUploads, clearFinishedUploads, uploadStore]
   );
 
   return (
@@ -287,4 +310,24 @@ export function useJobs(): JobsContextValue {
   const context = useContext(JobsContext);
   if (!context) throw new Error("useJobs must be used inside the (app) layout");
   return context;
+}
+
+/**
+ * What the job indicator shows: the jobs the backend reports for this user
+ * (active and recently finished), the client-side uploads (until the backend
+ * job exists), and how many of both run. The provider polls the jobs; this
+ * only reads them.
+ */
+export function useJobActivity(): { jobs: Job[]; uploads: Upload[]; runningCount: number } {
+  const { uploadStore } = useJobs();
+  const { data: jobs = NO_JOBS } = useQuery({ queryKey: ["jobs"], queryFn: fetchJobs });
+  const uploads = useSyncExternalStore(
+    uploadStore.subscribe,
+    uploadStore.getSnapshot,
+    uploadStore.getSnapshot
+  );
+  const runningCount =
+    jobs.filter(isJobActive).length +
+    uploads.filter((upload) => upload.status === "queued" || upload.status === "uploading").length;
+  return { jobs, uploads, runningCount };
 }

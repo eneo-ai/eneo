@@ -13,7 +13,7 @@ const jobs = vi.hoisted(() => ({
 
 vi.mock("./use-jobs", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./use-jobs")>()),
-  useJobs: () => jobs.state
+  useJobActivity: () => jobs.state
 }));
 
 afterEach(() => {
