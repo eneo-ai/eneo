@@ -10,9 +10,15 @@ from typing_extensions import TypedDict
 from eneo.authentication.auth_dependencies import get_current_active_user
 from eneo.database.database import AsyncSession, get_session_with_transaction
 from eneo.main.config import get_settings
+from eneo.model_providers.domain.connection_check import (
+    ConnectionCheckError,
+    ConnectionCheckStatus,
+)
 from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
 from eneo.model_providers.domain.model_provider_service import (
     LITELLM_MODE_TO_OUR_MODE,
+    UNCHANGED,
+    ConnectionCheckNotSupportedException,
     ModelProviderService,
     per_image_cost,
 )
@@ -416,6 +422,7 @@ async def create_provider(
         credentials=data.credentials,
         config=data.config,
         is_active=data.is_active,
+        key_expires_on=data.key_expires_on,
     )
     return ModelProviderPublic(**provider.to_dict())
 
@@ -440,6 +447,11 @@ async def update_provider(
         credentials=data.credentials,
         config=data.config,
         is_active=data.is_active,
+        key_expires_on=(
+            data.key_expires_on
+            if "key_expires_on" in data.model_fields_set
+            else UNCHANGED
+        ),
     )
     return ModelProviderPublic(**provider.to_dict())
 
@@ -472,17 +484,67 @@ async def list_provider_models(
 
 
 @router.post(
+    "/{provider_id}/connection-check/",
+    response_model=ModelProviderPublic,
+    summary="Check a model provider's connection",
+    description=(
+        "Call the provider with its stored credentials the cheap way (its "
+        "model list, 10 second timeout) and store the result on the provider "
+        "as `connection_check`. The response never contains the key, the "
+        "provider's headers or its response body. Returns 400 when "
+        "`connection_check_supported` is false. Requires admin."
+    ),
+    responses=responses.get_responses([400, 403, 404, 503]),
+)
+async def check_provider_connection(
+    provider_id: UUID,
+    user: CurrentUser,
+    service: ServiceDep,
+) -> ModelProviderPublic:
+    validate_permission(user, Permission.ADMIN)
+    provider, _check = await service.check_connection(provider_id)
+    return ModelProviderPublic(**provider.to_dict())
+
+
+# What the deprecated /test/ endpoint said before it ran the connection check.
+_LEGACY_TEST_ERRORS: dict[ConnectionCheckError, str] = {
+    ConnectionCheckError.AUTHENTICATION_FAILED: "Invalid API key",
+    ConnectionCheckError.TIMEOUT: "Could not connect to the API",
+    ConnectionCheckError.UNREACHABLE: "Could not connect to the API",
+}
+
+
+@router.post(
     "/{provider_id}/test/",
     response_model=dict[str, Any],
-    description="Test connectivity to a model provider.",
-    responses=responses.get_responses([404, 503]),
+    deprecated=True,
+    description=(
+        "Deprecated: use POST /{provider_id}/connection-check/. Runs the same "
+        "check, stores its result, and answers in the older "
+        "`{success, message | error}` shape. Requires admin."
+    ),
+    responses=responses.get_responses([403, 404, 503]),
 )
 async def test_provider(
     provider_id: UUID,
+    user: CurrentUser,
     service: ServiceDep,
 ) -> dict[str, Any]:
     """Test connectivity to a model provider."""
-    return await service.test_connection(provider_id)
+    validate_permission(user, Permission.ADMIN)
+    try:
+        _provider, check = await service.check_connection(provider_id)
+    except ConnectionCheckNotSupportedException as exc:
+        return {"success": False, "error": str(exc)}
+    if check.status is ConnectionCheckStatus.OK:
+        return {"success": True, "message": "Connection successful"}
+    error = check.error or ConnectionCheckError.PROVIDER_ERROR
+    return {
+        "success": False,
+        "error": _LEGACY_TEST_ERRORS.get(
+            error, f"Connection test failed: {error.value}"
+        ),
+    }
 
 
 @router.post(
