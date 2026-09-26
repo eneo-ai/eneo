@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/table";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import { ClientTime } from "@/components/composites/client-time";
+import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { toastApiError } from "@/lib/api/toast";
 import { appRunsQueryOptions, getResultTitle, isRunActive, type AppRunSparse } from "../apps";
 import { AppRunStatusBadge } from "../status-badge";
@@ -40,6 +40,9 @@ function ResultActions({ appId, run }: { appId: string; run: AppRunSparse }) {
   const queryClient = useQueryClient();
   const [showDelete, setShowDelete] = useState(false);
   const titleLabels = resultTitleLabels(t);
+  // A run has no name of its own; its row shows when it was made, so the
+  // menu is named by that time (null until hydration, like the time itself).
+  const time = useClientTimeText(run.created_at, "date_time");
 
   const deleteRun = useMutation({
     mutationFn: () =>
@@ -55,7 +58,11 @@ function ResultActions({ appId, run }: { appId: string; run: AppRunSparse }) {
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" aria-label={t("actions")}>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={time ? t("ui_more_actions_for", { name: time }) : t("actions")}
+          >
             <MoreHorizontal className="size-4" />
           </Button>
         </DropdownMenuTrigger>
@@ -127,7 +134,8 @@ export function ResultsTable({
 
   return (
     <div className="overflow-x-auto">
-      <Table>
+      {/* The runs fill the app page's "Resultat" tab, so the table takes its name. */}
+      <Table aria-label={t("results")}>
         <TableHeader>
           <TableRow>
             <TableHead>{t("name")}</TableHead>

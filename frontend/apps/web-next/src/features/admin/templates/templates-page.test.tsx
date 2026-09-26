@@ -41,6 +41,10 @@ describe("TemplatesPage", () => {
 
     const assistants = await screen.findByRole("table", { name: "Assistenter" });
     expect(within(assistants).getByText("Upphandlingsassistent")).toBeTruthy();
+    // Each row's menu says whose it is.
+    expect(
+      within(assistants).getByRole("button", { name: "Fler åtgärder för Upphandlingsassistent" })
+    ).toBeTruthy();
     await expectNoAxeViolations(container);
 
     // Radix tabs switch on mouse down.

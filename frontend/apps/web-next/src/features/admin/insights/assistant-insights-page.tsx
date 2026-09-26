@@ -31,7 +31,7 @@ import {
   useState
 } from "react";
 import { MessageResponse } from "@/components/ai-elements/message";
-import { ClientTime } from "@/components/composites/client-time";
+import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
@@ -230,6 +230,32 @@ function AnalysisTab({
   );
 }
 
+/**
+ * Opens the conversation a question was asked in. Every row has one, so its
+ * name adds the question's time, as the row's Skapad cell shows it.
+ */
+function SessionLink({
+  assistantId,
+  question
+}: {
+  assistantId: string;
+  question: AssistantInsightQuestion;
+}) {
+  const t = useTranslations();
+  const time = useClientTimeText(question.created_at, "date_time");
+  return (
+    <Button
+      href={`/dashboard/${assistantId}/${question.session_id}`}
+      variant="ghost"
+      size="sm"
+      label={time ? t("insights_session_from", { time }) : t("session")}
+      icon={<ExternalLink className="size-4" aria-hidden="true" />}
+    >
+      {t("session")}
+    </Button>
+  );
+}
+
 function QuestionsTab({
   assistantId,
   filters
@@ -287,15 +313,7 @@ function QuestionsTab({
       key: "session_id",
       header: t("session"),
       width: pixel(136),
-      renderCell: (item) => (
-        <Button
-          href={`/dashboard/${assistantId}/${item.session_id}`}
-          variant="ghost"
-          size="sm"
-          label={t("session")}
-          icon={<ExternalLink className="size-4" aria-hidden="true" />}
-        />
-      )
+      renderCell: (item) => <SessionLink assistantId={assistantId} question={item} />
     }
   ];
 

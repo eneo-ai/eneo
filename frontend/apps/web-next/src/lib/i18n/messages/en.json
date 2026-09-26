@@ -5381,7 +5381,7 @@
   "server_type": "Server Type",
   "service_description": "Service description",
   "service_name": "Service name",
-  "session": "session",
+  "session": "Session",
   "set_as_default": "Set as Default",
   "set_as_default_model": "Set as default model",
   "share": "Share",
@@ -5556,5 +5556,7 @@
   "feedback_comment": "Comment",
   "feedback_summary_title": "Feedback on answers",
   "feedback_good_answers": "Good answers",
-  "feedback_bad_answers": "Bad answers"
+  "feedback_bad_answers": "Bad answers",
+  "ui_more_actions_for": "More actions for {name}",
+  "insights_session_from": "Session from {time}"
 }
