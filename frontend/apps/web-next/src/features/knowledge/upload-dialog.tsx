@@ -23,30 +23,63 @@ import { cn } from "@/lib/utils";
 import { collectDroppedFiles } from "@/features/files/collect-dropped-files";
 import { FileFormatDetails } from "@/features/files/file-format-details";
 import { useJobs } from "@/features/jobs/use-jobs";
-import type { InfoBlob } from "./knowledge";
+import { collectionBlobsQueryOptions } from "./knowledge";
 
 type ValidationError = { fileName?: string; message: string };
 
-/**
- * Upload documents into a collection: validates type/size against the tenant
- * limits and remaining quota, warns about duplicate titles, then hands the
- * files to the jobs upload queue (progress shows in the header indicator).
- */
-export function UploadBlobsDialog({
+/** "Ladda upp filer" on a collection's page: the button and its upload dialog. */
+export function UploadBlobsButton({
   collectionId,
   collectionName,
-  currentBlobs,
   disabled
 }: {
   collectionId: string;
   collectionName: string;
-  currentBlobs: InfoBlob[];
   disabled?: boolean;
+}) {
+  const t = useTranslations();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button disabled={disabled} onClick={() => setOpen(true)}>
+        {t("upload_files")}
+      </Button>
+      <UploadBlobsDialog
+        collectionId={collectionId}
+        collectionName={collectionName}
+        open={open}
+        onOpenChange={setOpen}
+      />
+    </>
+  );
+}
+
+/**
+ * The one upload flow for a collection (its page and the space overview's
+ * "Ladda upp"): shows the accepted formats and size limits, validates type
+ * and size against them and the remaining quota, warns about duplicate titles,
+ * then hands the files to the jobs upload queue (progress shows in the header
+ * indicator). Controlled; the caller renders the trigger.
+ */
+export function UploadBlobsDialog({
+  collectionId,
+  collectionName,
+  open,
+  onOpenChange
+}: {
+  collectionId: string;
+  collectionName: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations();
   const { limits, user, tenant, can } = useAppContext();
   const { queueUploads } = useJobs();
-  const [open, setOpen] = useState(false);
+  // The collection's files, for the duplicate-title warning (cached on its page).
+  const currentBlobs = useQuery({
+    ...collectionBlobsQueryOptions(browserApi, collectionId),
+    enabled: open
+  });
   const [files, setFiles] = useState<File[]>([]);
   const [skippedFiles, setSkippedFiles] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -100,7 +133,7 @@ export function UploadBlobsDialog({
   function startUpload() {
     if (errors.length > 0 || files.length === 0) return;
 
-    const existingTitles = new Set(currentBlobs.map((blob) => blob.metadata.title));
+    const existingTitles = new Set((currentBlobs.data ?? []).map((blob) => blob.metadata.title));
     const duplicates = files.filter((file) => existingTitles.has(file.name));
     if (duplicates.length > 0) {
       setDuplicateFileNames(duplicates.map((file) => file.name));
@@ -109,12 +142,17 @@ export function UploadBlobsDialog({
     queueSelectedFiles();
   }
 
-  function queueSelectedFiles() {
-    queueUploads(collectionId, files);
-    setDuplicateFileNames([]);
-    setOpen(false);
+  function reset() {
     setFiles([]);
     setSkippedFiles([]);
+    setDragging(false);
+    setDuplicateFileNames([]);
+  }
+
+  function queueSelectedFiles() {
+    queueUploads(collectionId, files);
+    reset();
+    onOpenChange(false);
   }
 
   function addSelectedFiles(selected: File[]) {
@@ -139,19 +177,11 @@ export function UploadBlobsDialog({
 
   return (
     <>
-      <Button disabled={disabled} onClick={() => setOpen(true)}>
-        {t("upload_files")}
-      </Button>
       <Dialog
         open={open}
         onOpenChange={(next) => {
-          setOpen(next);
-          if (!next) {
-            setFiles([]);
-            setSkippedFiles([]);
-            setDragging(false);
-            setDuplicateFileNames([]);
-          }
+          onOpenChange(next);
+          if (!next) reset();
         }}
       >
         <DialogContent>
@@ -240,10 +270,20 @@ export function UploadBlobsDialog({
                 {t("clear_list")}
               </Button>
             )}
-            <Button variant="outline" onClick={() => setOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                onOpenChange(false);
+                reset();
+              }}
+            >
               {t("cancel")}
             </Button>
-            <Button disabled={files.length === 0 || errors.length > 0} onClick={startUpload}>
+            <Button
+              // Wait for the collection's files so the duplicate warning can run.
+              disabled={files.length === 0 || errors.length > 0 || currentBlobs.isPending}
+              onClick={startUpload}
+            >
               {t("upload_files")}
             </Button>
           </DialogFooter>

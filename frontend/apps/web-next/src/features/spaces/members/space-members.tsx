@@ -4,7 +4,7 @@ import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trash2, UserPlus, Users } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { ConfirmDialog } from "@/components/composites/confirm-dialog";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
@@ -30,9 +30,10 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
+import { RemovalFocusScope, useRemovalMutation } from "@/features/spaces/removal";
 import type { SpaceMember, SpaceRoleValue } from "@/features/spaces/space";
 import { useSpace } from "@/features/spaces/use-space";
-import { SpaceSectionHeader } from "../frame/space-section-header";
+import { PageHeader } from "@/components/composites/page-header";
 
 function useInvalidateSpace() {
   const { routeId } = useSpace();
@@ -74,7 +75,7 @@ function RoleSelect({
 
 function MemberRow({ member }: { member: SpaceMember }) {
   const t = useTranslations();
-  const { space, routeId, can } = useSpace();
+  const { space, can } = useSpace();
   const { user } = useAppContext();
   const invalidate = useInvalidateSpace();
   const isSelf = member.id === user.id;
@@ -91,18 +92,15 @@ function MemberRow({ member }: { member: SpaceMember }) {
     onError: (error) => toastApiError(error, t)
   });
 
-  const removeMember = useMutation({
+  const removeMember = useRemovalMutation({
     mutationFn: () =>
       unwrap(
         browserApi.DELETE("/api/v1/spaces/{id}/members/{user_id}/", {
           params: { path: { id: space.id, user_id: member.id } }
         })
       ),
-    onSuccess: invalidate,
-    onError: (error) => toastApiError(error, t)
+    refresh: invalidate
   });
-
-  void routeId;
 
   return (
     <div className="border-border flex items-center justify-between gap-4 border-b py-3">
@@ -139,10 +137,11 @@ function MemberRow({ member }: { member: SpaceMember }) {
 }
 
 /**
- * Adds an existing user to the space. `variant="invite"` is the space
- * header's "Bjud in" button; the members page uses the default trigger.
+ * "Lägg till medlem": adds an existing user to the space. The members page
+ * shows it as its primary action; `variant="header"` is the quieter button in
+ * the space header on the other tabs (same name, same dialog).
  */
-export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "invite" }) {
+export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "header" }) {
   const t = useTranslations();
   const roleId = useId();
   const { space } = useSpace();
@@ -188,9 +187,9 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "invi
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        {variant === "invite" ? (
+        {variant === "header" ? (
           <AstryxButton
-            label={t("space_invite")}
+            label={t("add_member")}
             variant="secondary"
             icon={<UserPlus aria-hidden="true" />}
           />
@@ -283,15 +282,14 @@ function GroupMemberRow({ group }: { group: Schema<"SpaceGroupMember"> }) {
     onError: (error) => toastApiError(error, t)
   });
 
-  const removeGroup = useMutation({
+  const removeGroup = useRemovalMutation({
     mutationFn: () =>
       unwrap(
         browserApi.DELETE("/api/v1/spaces/{id}/group-members/{group_id}/", {
           params: { path: { id: space.id, group_id: group.id } }
         })
       ),
-    onSuccess: invalidate,
-    onError: (error) => toastApiError(error, t)
+    refresh: invalidate
   });
 
   return (
@@ -429,6 +427,7 @@ function AddGroupMemberDialog() {
 export function SpaceMembers() {
   const t = useTranslations();
   const { space, can } = useSpace();
+  const headingRef = useRef<HTMLHeadingElement>(null);
 
   const editors = space.members.items.filter(
     (member) => member.role === "admin" || member.role === "editor"
@@ -438,51 +437,58 @@ export function SpaceMembers() {
   const groupMembers = space.group_members?.items ?? [];
 
   return (
-    <div className="flex w-full max-w-5xl flex-col gap-8">
-      <SpaceSectionHeader
-        title={t("members")}
-        actions={
-          can("add", "group_member") || can("add", "member") ? (
-            <>
-              {can("add", "group_member") && <AddGroupMemberDialog />}
-              {can("add", "member") && <AddMemberDialog />}
-            </>
-          ) : undefined
-        }
-      />
+    // Removing a member or group takes its row (and remove button) away: focus goes to the title.
+    <RemovalFocusScope target={headingRef}>
+      <div className="flex w-full max-w-5xl flex-col gap-8">
+        <PageHeader
+          headingLevel={2}
+          headingRef={headingRef}
+          title={t("members")}
+          actions={
+            can("add", "group_member") || can("add", "member") ? (
+              <>
+                {can("add", "group_member") && <AddGroupMemberDialog />}
+                {can("add", "member") && <AddMemberDialog />}
+              </>
+            ) : undefined
+          }
+        />
 
-      <SettingsGroup title={t("current_members")}>
-        <SettingsRow title={t("admins_editors")} description={t("admins_editors_description")}>
-          <div className="flex flex-col">
-            {editors.map((member) => (
-              <MemberRow key={member.id} member={member} />
-            ))}
-          </div>
-        </SettingsRow>
-        {viewerRoleAvailable && (
-          <SettingsRow title={t("viewers")} description={t("viewers_description")}>
+        <SettingsGroup title={t("current_members")}>
+          <SettingsRow title={t("admins_editors")} description={t("admins_editors_description")}>
             <div className="flex flex-col">
-              {viewers.length === 0 ? (
-                <p className="text-muted-foreground py-3 text-sm">{t("no_viewers_in_space")}</p>
+              {editors.map((member) => (
+                <MemberRow key={member.id} member={member} />
+              ))}
+            </div>
+          </SettingsRow>
+          {viewerRoleAvailable && (
+            <SettingsRow title={t("viewers")} description={t("viewers_description")}>
+              <div className="flex flex-col">
+                {viewers.length === 0 ? (
+                  <p className="text-muted-foreground py-3 text-sm">{t("no_viewers_in_space")}</p>
+                ) : (
+                  viewers.map((member) => <MemberRow key={member.id} member={member} />)
+                )}
+              </div>
+            </SettingsRow>
+          )}
+        </SettingsGroup>
+
+        <SettingsGroup title={t("group_members")}>
+          <SettingsRow title={t("user_groups")} description={t("user_groups_description")}>
+            <div className="flex flex-col">
+              {groupMembers.length === 0 ? (
+                <p className="text-muted-foreground py-3 text-sm">
+                  {t("no_group_members_in_space")}
+                </p>
               ) : (
-                viewers.map((member) => <MemberRow key={member.id} member={member} />)
+                groupMembers.map((group) => <GroupMemberRow key={group.id} group={group} />)
               )}
             </div>
           </SettingsRow>
-        )}
-      </SettingsGroup>
-
-      <SettingsGroup title={t("group_members")}>
-        <SettingsRow title={t("user_groups")} description={t("user_groups_description")}>
-          <div className="flex flex-col">
-            {groupMembers.length === 0 ? (
-              <p className="text-muted-foreground py-3 text-sm">{t("no_group_members_in_space")}</p>
-            ) : (
-              groupMembers.map((group) => <GroupMemberRow key={group.id} group={group} />)
-            )}
-          </div>
-        </SettingsRow>
-      </SettingsGroup>
-    </div>
+        </SettingsGroup>
+      </div>
+    </RemovalFocusScope>
   );
 }

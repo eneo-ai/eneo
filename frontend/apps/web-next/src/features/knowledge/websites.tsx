@@ -24,80 +24,44 @@ import { useId, useMemo, useState, type Dispatch, type SetStateAction } from "re
 import { toast } from "sonner";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
-import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
+import type { StatusTone } from "@/components/composites/status-label";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
-import { ClientTime } from "@/features/spaces/client-time";
+import { daysSince } from "@/lib/format";
+import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { useJobs } from "@/features/jobs/use-jobs";
+import { ClientTime } from "@/features/spaces/client-time";
+import { useRemovalMutation } from "@/features/spaces/removal";
+import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
 import { embeddingModelsInUse, formatWebsiteName, type Website } from "./knowledge";
-import {
-  WEBSITE_DEFAULT_SORT,
-  websiteComparators,
-  websiteSyncedAt,
-  type WebsiteSortKey
-} from "./knowledge-sort";
+import { WEBSITE_DEFAULT_SORT, websiteComparators, type WebsiteSortKey } from "./knowledge-sort";
 import { MoveResourceDialog } from "./move-dialog";
 import { NoCreatePermissionInfo } from "./no-create-permission-info";
-import { SpaceTableFrame } from "@/features/spaces/table-frame";
-import { KnowledgeNameCell, KnowledgeTableControls } from "./table-controls-ui";
 import { filterWebsites } from "./table-controls";
+import { KnowledgeLabel, KnowledgeNameCell, KnowledgeTableControls } from "./table-controls-ui";
 import { WebsiteDialog } from "./website-dialog";
-import { isSkippedCrawl, websiteStatus } from "./website-status";
+import {
+  crawlFailuresText,
+  isSkippedCrawl,
+  nextCrawlAt,
+  STALE_SYNC_DAYS,
+  websiteStatus,
+  websiteSyncedAt
+} from "./website-status";
 
-/**
- * Status dot plus label for knowledge tables (crawl state, update interval).
- * The optional tooltip is extra detail: a `title` for pointer users and text
- * screen readers read with the label, never the only place information lives.
- */
-export function KnowledgeLabel({
-  tone,
-  label,
-  tooltip,
-  isPulsing
-}: {
-  tone: StatusTone;
-  label: string;
-  tooltip?: string;
-  /** Pulse the dot for work in progress (respects reduced motion). */
-  isPulsing?: boolean;
-}) {
-  const detailId = useId();
-  return (
-    <span
-      title={tooltip}
-      aria-describedby={tooltip ? detailId : undefined}
-      className="inline-flex whitespace-nowrap"
-    >
-      <StatusLabel status={tone} label={label} isPulsing={isPulsing} />
-      {tooltip ? (
-        <span id={detailId} className="sr-only">
-          {tooltip}
-        </span>
-      ) : null}
-    </span>
-  );
-}
-
-/** The latest crawl's state; failed pages or the failure reason as extra detail. */
+/** The latest crawl's state, with why it was skipped or failed, or what failed. */
 function WebsiteStatusCell({ website }: { website: Website }) {
   const t = useTranslations();
   const status = websiteStatus(website);
   const crawl = website.latest_crawl;
-  const pagesFailed = crawl?.pages_failed ?? 0;
-  const filesFailed = crawl?.files_failed ?? 0;
 
   let detail: string | undefined;
   if (isSkippedCrawl(crawl)) {
     detail = t("crawl_skipped_duplicate");
-  } else if (status.tone === "warning") {
-    detail =
-      pagesFailed > 0 && filesFailed > 0
-        ? t("pages_and_files_failed", { pages: String(pagesFailed), files: String(filesFailed) })
-        : pagesFailed > 0
-          ? t("pages_failed", { count: String(pagesFailed) })
-          : t("files_failed", { count: String(filesFailed) });
+  } else if (status.tone === "warning" && crawl) {
+    detail = crawlFailuresText(t, crawl);
   } else if (status.tone === "error") {
     detail = crawl?.result_location ?? undefined;
   }
@@ -106,9 +70,29 @@ function WebsiteStatusCell({ website }: { website: Website }) {
     <KnowledgeLabel
       tone={status.tone}
       label={t(status.labelKey)}
-      tooltip={detail}
+      detail={detail}
       isPulsing={status.isPulsing}
     />
+  );
+}
+
+/**
+ * When the latest crawl completed; a sync older than ten days is flagged.
+ * The age depends on the viewer's clock, so it is judged after hydration.
+ */
+function WebsiteSyncedCell({ website }: { website: Website }) {
+  const t = useTranslations();
+  const hydrated = useHydrated();
+  const syncedAt = websiteSyncedAt(website);
+  if (!syncedAt) return "—";
+  const isStale = hydrated && daysSince(syncedAt) >= STALE_SYNC_DAYS;
+  return (
+    <span className="flex flex-col items-start gap-0.5">
+      <ClientTime value={syncedAt} format="date" />
+      {isStale ? (
+        <KnowledgeLabel tone="warning" label={t("space_sync_stale", { days: STALE_SYNC_DAYS })} />
+      ) : null}
+    </span>
   );
 }
 
@@ -119,14 +103,23 @@ const INTERVAL_LABELS: Record<Website["update_interval"], { key: string; tone: S
   never: { key: "never", tone: "neutral" }
 };
 
-/** Automatic re-crawl interval: on (green) or off (grey), in words. */
+/** Automatic re-crawl interval: on (green) or off (grey), and when the next crawl runs. */
 function WebsiteIntervalLabel({ website }: { website: Website }) {
   const t = useTranslations();
   const item = INTERVAL_LABELS[website.update_interval] ?? {
     key: "not_found",
     tone: "error" as const
   };
-  return <KnowledgeLabel tone={item.tone} label={t(item.key)} />;
+  const next = nextCrawlAt(website);
+  const detail =
+    next === undefined
+      ? undefined
+      : next === null
+        ? t("next_crawl_after_first_run")
+        : t.rich("space_next_crawl", {
+            time: () => <ClientTime value={next} format="date" />
+          });
+  return <KnowledgeLabel tone={item.tone} label={t(item.key)} detail={detail} />;
 }
 
 /** Row menu for a website: edit, move to another space, delete. */
@@ -141,17 +134,14 @@ export function WebsiteActions({ website }: { website: Website }) {
   const canDelete = website.permissions?.includes("delete") ?? false;
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
 
-  const deleteWebsite = useMutation({
+  const deleteWebsite = useRemovalMutation({
     mutationFn: () =>
       unwrap(browserApi.DELETE("/api/v1/websites/{id}/", { params: { path: { id: website.id } } })),
-    onSuccess: () => {
-      invalidate();
-      setShowDelete(false);
-    },
-    onError: (error) => toastApiError(error, t)
+    refresh: invalidate,
+    onRemoved: () => setShowDelete(false)
   });
 
-  const moveWebsite = useMutation({
+  const moveWebsite = useRemovalMutation({
     mutationFn: (targetSpaceId: string) =>
       unwrap(
         browserApi.POST("/api/v1/websites/{id}/transfer/", {
@@ -159,11 +149,8 @@ export function WebsiteActions({ website }: { website: Website }) {
           body: { target_space_id: targetSpaceId }
         })
       ),
-    onSuccess: () => {
-      invalidate();
-      setShowMove(false);
-    },
-    onError: (error) => toastApiError(error, t)
+    refresh: invalidate,
+    onRemoved: () => setShowMove(false)
   });
 
   const websiteDisplay = website.name ? `${website.name} (${website.url})` : website.url;
@@ -224,20 +211,23 @@ export function WebsiteActions({ website }: { website: Website }) {
 /**
  * One embedding model's websites. Sorting is shared across the groups; the
  * checkboxes (for bulk sync) select into one set, the header one selects this
- * group's rows.
+ * group's rows. A grouped table is named by its model heading, which tells
+ * the groups' "select all" checkboxes apart.
  */
 function WebsitesTable({
   websites,
   sortConfig,
   selectable,
   selectedKeys,
-  setSelectedKeys
+  setSelectedKeys,
+  labelledBy
 }: {
   websites: Website[];
   sortConfig: UseTableSortableConfig<WebsiteSortKey>;
   selectable: boolean;
   selectedKeys: Set<string>;
   setSelectedKeys: Dispatch<SetStateAction<Set<string>>>;
+  labelledBy?: string;
 }) {
   const t = useTranslations();
   const { routeId } = useSpace();
@@ -291,10 +281,7 @@ function WebsitesTable({
       header: t("space_synced_column"),
       width: proportional(1),
       sortable: true,
-      renderCell: (website) => {
-        const syncedAt = websiteSyncedAt(website);
-        return syncedAt ? <ClientTime value={syncedAt} format="date" /> : "—";
-      }
+      renderCell: (website) => <WebsiteSyncedCell website={website} />
     },
     {
       key: "interval",
@@ -318,6 +305,7 @@ function WebsitesTable({
         data={websites}
         columns={columns}
         idKey="id"
+        aria-labelledby={labelledBy}
         plugins={
           selectable ? { sort: sortPlugin, selection: selectionPlugin } : { sort: sortPlugin }
         }
@@ -332,6 +320,7 @@ export function WebsitesTab({ canCreate }: { canCreate: boolean }) {
   const queryClient = useQueryClient();
   const { trackJob } = useJobs();
   const collator = useCollator();
+  const groupId = useId();
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [showCreate, setShowCreate] = useState(false);
   const [filter, setFilter] = useState("");
@@ -340,6 +329,11 @@ export function WebsitesTab({ canCreate }: { canCreate: boolean }) {
     (website) => website.space_id === space.id
   );
   const visibleWebsites = filterWebsites(websites, filter);
+  // Only what is on screen counts as selected: rows the filter hides and
+  // websites that were deleted meanwhile are never synced.
+  const selectedIds = visibleWebsites
+    .filter((website) => selected.has(website.id))
+    .map((website) => website.id);
   const comparators = useMemo(() => websiteComparators(collator.compare), [collator]);
   // Sorted by the column headers; one sort order across the model groups.
   const { sortedData, sortConfig } = useTableSortableState<Website, WebsiteSortKey>({
@@ -354,12 +348,8 @@ export function WebsitesTab({ canCreate }: { canCreate: boolean }) {
     models.some((model) => !model.inSpace);
 
   const bulkRecrawl = useMutation({
-    mutationFn: () =>
-      unwrap(
-        browserApi.POST("/api/v1/websites/bulk/run/", {
-          body: { website_ids: [...selected] }
-        })
-      ),
+    mutationFn: (websiteIds: string[]) =>
+      unwrap(browserApi.POST("/api/v1/websites/bulk/run/", { body: { website_ids: websiteIds } })),
     onSuccess: (result) => {
       if (result.failed > 0) {
         const details = result.errors
@@ -415,18 +405,18 @@ export function WebsitesTab({ canCreate }: { canCreate: boolean }) {
 
   const action = (
     <>
-      {canCreate && selected.size > 0 ? (
+      {canCreate && selectedIds.length > 0 ? (
         <AstryxButton
           label={
-            bulkRecrawl.isPending ? t("syncing") : t("sync_selected", { count: selected.size })
+            bulkRecrawl.isPending ? t("syncing") : t("sync_selected", { count: selectedIds.length })
           }
           variant="primary"
           icon={<RefreshCw aria-hidden="true" />}
           isDisabled={bulkRecrawl.isPending}
-          onClick={() => bulkRecrawl.mutate()}
+          onClick={() => bulkRecrawl.mutate(selectedIds)}
         />
       ) : null}
-      {canCreate && selected.size === 0 ? connectButton : null}
+      {canCreate && selectedIds.length === 0 ? connectButton : null}
       {!canCreate ? <NoCreatePermissionInfo resourceType={t("resource_websites")} /> : null}
       {createDialog}
     </>
@@ -438,6 +428,7 @@ export function WebsitesTab({ canCreate }: { canCreate: boolean }) {
       onFilterChange={setFilter}
       filterLabel={t("space_filter_websites_label")}
       filterPlaceholder={t("ui_filter_items", { resourceName: t("resource_websites") })}
+      resultCount={visibleWebsites.length}
     >
       {action}
     </KnowledgeTableControls>
@@ -464,10 +455,11 @@ export function WebsitesTab({ canCreate }: { canCreate: boolean }) {
         const rows = model
           ? sortedData.filter((website) => website.embedding_model.id === model.id)
           : sortedData;
+        const headingId = model ? `${groupId}-${model.id}` : undefined;
         return (
           <div key={model?.id ?? "all"} className="flex flex-col gap-2">
             {model && (
-              <h3 className="text-ax-text-secondary text-sm font-semibold">
+              <h3 id={headingId} className="text-ax-text-secondary text-sm font-semibold">
                 {model.name}
                 {model.inSpace ? "" : ` (${t("disabled")})`}
               </h3>
@@ -478,6 +470,7 @@ export function WebsitesTab({ canCreate }: { canCreate: boolean }) {
               selectable={canCreate}
               selectedKeys={selected}
               setSelectedKeys={setSelected}
+              labelledBy={headingId}
             />
           </div>
         );

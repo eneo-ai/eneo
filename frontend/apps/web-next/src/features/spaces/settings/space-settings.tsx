@@ -44,7 +44,7 @@ import {
 } from "@/features/capabilities/capabilities";
 import { mcpServersQueryOptions } from "@/features/admin/mcp/mcp";
 import { useSpace } from "@/features/spaces/use-space";
-import { SpaceSectionHeader } from "../frame/space-section-header";
+import { PageHeader } from "@/components/composites/page-header";
 import {
   pruneUnknownMcpServerIds,
   selectedVisibleMcpServerCount,
@@ -603,7 +603,7 @@ export function SpaceSettings() {
   return (
     <SaveStatusProvider>
       <div className="flex w-full max-w-5xl flex-col gap-10">
-        <SpaceSectionHeader title={t("settings")} actions={<SaveStatusIndicator />} />
+        <PageHeader headingLevel={2} title={t("settings")} actions={<SaveStatusIndicator />} />
         {!isOrgSpace && <GeneralSection />}
         {!isOrgSpace && <SecuritySection />}
         <ModelsSection />

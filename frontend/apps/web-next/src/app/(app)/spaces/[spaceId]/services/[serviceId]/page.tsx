@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { notFound } from "next/navigation";
 import { EneoApiError } from "@/lib/api/errors";
@@ -5,6 +6,19 @@ import { getQueryClient } from "@/lib/api/query";
 import { eneoApi } from "@/lib/api/server";
 import { serviceQueryOptions } from "@/features/services/services";
 import { ServiceDetail } from "@/features/services/service-detail";
+import { spacePageTitle } from "@/features/spaces/page-title";
+
+export async function generateMetadata({
+  params
+}: {
+  params: Promise<{ serviceId: string }>;
+}): Promise<Metadata> {
+  const { serviceId } = await params;
+  return spacePageTitle(
+    async () => (await getQueryClient().fetchQuery(serviceQueryOptions(eneoApi(), serviceId))).name,
+    "services"
+  );
+}
 
 export default async function ServiceDetailPage({
   params

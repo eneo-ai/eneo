@@ -3,7 +3,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Plug } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { useAppContext } from "@/components/providers/app-context";
 import { useSpace } from "@/features/spaces/use-space";
@@ -56,6 +56,7 @@ export function IntegrationsTab({
 }) {
   const t = useTranslations();
   const { space } = useSpace();
+  const groupId = useId();
 
   const items = space.knowledge.integration_knowledge_list.items.filter(
     (item) => item.space_id === space.id
@@ -93,15 +94,16 @@ export function IntegrationsTab({
               ? rows.filter((row) => row.embeddingModelId === model.id)
               : rows;
             if (modelRows.length === 0) return null;
+            const headingId = model ? `${groupId}-${model.id}` : undefined;
             return (
               <div key={model?.id ?? "all"} className="flex flex-col gap-2">
                 {model && (
-                  <h3 className="text-ax-text-secondary text-sm font-semibold">
+                  <h3 id={headingId} className="text-ax-text-secondary text-sm font-semibold">
                     {model.name}
                     {model.inSpace ? "" : ` (${t("disabled")})`}
                   </h3>
                 )}
-                <IntegrationItemsTable rows={modelRows} />
+                <IntegrationItemsTable rows={modelRows} labelledBy={headingId} />
               </div>
             );
           })}

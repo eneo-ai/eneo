@@ -2,13 +2,12 @@
 
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { pixel, proportional, Table, type TableColumn } from "@astryxdesign/core/Table";
-import { Timestamp } from "@astryxdesign/core/Timestamp";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { BookOpenCheck, Plus, Search, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -27,8 +26,10 @@ import { Input } from "@/components/ui/input";
 import { browserApi } from "@/lib/api/browser";
 import { getErrorMessage, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { PageHeader } from "@/components/composites/page-header";
+import { ClientTime } from "@/features/spaces/client-time";
+import { useRemovalMutation } from "@/features/spaces/removal";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
-import { SpaceSectionHeader } from "@/features/spaces/frame/space-section-header";
 import { useSpace } from "@/features/spaces/use-space";
 import { skillQueryKey } from "./skill-revisions";
 
@@ -41,8 +42,8 @@ export function SpaceSkillsPage() {
   const queryClient = useQueryClient();
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const [deleteTarget, setDeleteTarget] = useState<Skill | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const base = `/spaces/${routeId}/skills`;
@@ -69,24 +70,28 @@ export function SpaceSkillsPage() {
     setSearch(searchInput.trim());
   }
 
-  async function deleteSkill() {
-    if (!deleteTarget || deleting) return;
-    setDeleting(true);
-    setDeleteError(null);
-    try {
-      await unwrap(
+  // The error stays in the dialog, next to the action that failed.
+  const removeSkill = useRemovalMutation({
+    mutationFn: (skill: Skill) =>
+      unwrap(
         browserApi.DELETE("/api/v1/spaces/{space_id}/skills/{skill_id}/", {
-          params: { path: { space_id: space.id, skill_id: deleteTarget.id } }
+          params: { path: { space_id: space.id, skill_id: skill.id } }
         })
-      );
+      ),
+    refresh: () => queryClient.invalidateQueries({ queryKey: key }),
+    onRemoved: () => {
       setDeleteTarget(null);
       setAnnouncement(t("skills_library_deleted_success"));
-      await queryClient.invalidateQueries({ queryKey: key });
-    } catch (cause) {
-      setDeleteError(getErrorMessage(cause, t));
-    } finally {
-      setDeleting(false);
-    }
+    },
+    onError: (cause) => setDeleteError(getErrorMessage(cause, t)),
+    focusTarget: headingRef
+  });
+  const deleting = removeSkill.isPending;
+
+  function deleteSkill() {
+    if (!deleteTarget || deleting) return;
+    setDeleteError(null);
+    removeSkill.mutate(deleteTarget);
   }
 
   const columns: TableColumn<Skill>[] = [
@@ -134,9 +139,7 @@ export function SpaceSkillsPage() {
       key: "updated_at",
       header: t("skills_library_updated_column"),
       width: proportional(1),
-      renderCell: (skill) => (
-        <Timestamp value={skill.updated_at} format="date_time" type="inherit" color="inherit" />
-      )
+      renderCell: (skill) => <ClientTime value={skill.updated_at} format="date_time" />
     },
     ...(can("delete", "skill")
       ? [
@@ -163,7 +166,9 @@ export function SpaceSkillsPage() {
 
   return (
     <div className="flex w-full max-w-5xl flex-col gap-6 pb-16">
-      <SpaceSectionHeader
+      <PageHeader
+        headingLevel={2}
+        headingRef={headingRef}
         title={t("skills")}
         description={t("skills_library_intro")}
         tour="space-skills"
@@ -213,6 +218,7 @@ export function SpaceSkillsPage() {
       ) : items.length === 0 ? (
         <EmptyState
           icon={<BookOpenCheck />}
+          headingLevel={3}
           title={search ? t("skills_library_no_results") : t("skills_library_empty_title")}
           description={search ? undefined : t("skills_library_empty_description")}
           actions={
@@ -281,7 +287,7 @@ export function SpaceSkillsPage() {
           )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>{t("cancel")}</AlertDialogCancel>
-            <Button variant="destructive" disabled={deleting} onClick={() => void deleteSkill()}>
+            <Button variant="destructive" disabled={deleting} onClick={deleteSkill}>
               {deleting ? t("skills_library_deleting") : t("delete")}
             </Button>
           </AlertDialogFooter>

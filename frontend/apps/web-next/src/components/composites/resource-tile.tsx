@@ -2,7 +2,6 @@
 
 import { ClickableCard } from "@astryxdesign/core/ClickableCard";
 import { Text } from "@astryxdesign/core/Text";
-import { Card as LegacyCard } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 /** Grid for `ResourceCard`s on a full-width space page (render it as a `<ul>`). */
@@ -86,29 +85,4 @@ export function ResourceCard({
       {actions ? <div className="absolute end-2.5 top-2.5">{actions}</div> : null}
     </div>
   );
-}
-
-/** Legacy tile frame; new grids use `ResourceCard`. */
-export function ResourceTileCard({
-  className,
-  children
-}: {
-  className?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <LegacyCard
-      className={cn(
-        "group hover:border-primary/40 focus-within:outline-ring relative gap-0 p-4 transition-colors focus-within:outline-2 focus-within:outline-offset-2",
-        className
-      )}
-    >
-      {children}
-    </LegacyCard>
-  );
-}
-
-/** Legacy corner slot for `ResourceTileCard`; always visible (no hover-only actions). */
-export function ResourceTileActions({ children }: { children: React.ReactNode }) {
-  return <div className="absolute top-2 right-2 z-10">{children}</div>;
 }

@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { notFound } from "next/navigation";
 import { EneoApiError } from "@/lib/api/errors";
@@ -7,7 +8,21 @@ import {
   collectionBlobsQueryOptions,
   collectionQueryOptions
 } from "@/features/knowledge/knowledge";
+import { spacePageTitle } from "@/features/spaces/page-title";
 import { CollectionDetail } from "./collection-detail.client";
+
+export async function generateMetadata({
+  params
+}: {
+  params: Promise<{ collectionId: string }>;
+}): Promise<Metadata> {
+  const { collectionId } = await params;
+  return spacePageTitle(
+    async () =>
+      (await getQueryClient().fetchQuery(collectionQueryOptions(eneoApi(), collectionId))).name,
+    "collections"
+  );
+}
 
 export default async function CollectionPage({
   params

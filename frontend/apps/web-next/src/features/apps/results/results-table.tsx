@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/table";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import { formatDateTime } from "@/lib/format";
+import { ClientTime } from "@/features/spaces/client-time";
 import { toastApiError } from "@/lib/api/toast";
 import { appRunsQueryOptions, getResultTitle, isRunActive, type AppRunSparse } from "../apps";
 import { AppRunStatusBadge } from "../status-badge";
@@ -148,7 +148,7 @@ export function ResultsTable({
                 <AppRunStatusBadge status={run.status} />
               </TableCell>
               <TableCell className="text-muted-foreground font-mono text-sm">
-                {formatDateTime(run.created_at)}
+                {run.created_at ? <ClientTime value={run.created_at} format="date_time" /> : "—"}
               </TableCell>
               <TableCell>
                 <ResultActions appId={appId} run={run} />

@@ -10,7 +10,7 @@ import { PageHeader } from "@/components/composites/page-header";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
-import { formatDateTime } from "@/lib/format";
+import { ClientTime } from "@/features/spaces/client-time";
 import {
   appRunQueryOptions,
   fileSignedUrl,
@@ -210,12 +210,16 @@ export function ResultDetail({
         <aside className="flex w-full flex-col gap-3 lg:sticky lg:top-6 lg:w-64">
           <div className="border-border flex items-center justify-between border-b pb-1">
             <span>{t("started")}</span>
-            <span className="font-mono text-sm">{formatDateTime(run.created_at)}</span>
+            <span className="text-sm">
+              {run.created_at ? <ClientTime value={run.created_at} format="date_time" /> : "—"}
+            </span>
           </div>
           {complete && (
             <div className="border-border flex items-center justify-between border-b pb-1">
               <span>{t("finished")}</span>
-              <span className="font-mono text-sm">{formatDateTime(run.finished_at)}</span>
+              <span className="text-sm">
+                {run.finished_at ? <ClientTime value={run.finished_at} format="date_time" /> : "—"}
+              </span>
             </div>
           )}
           <AppRunStatusBadge status={run.status} variant="full" />

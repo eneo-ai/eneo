@@ -154,9 +154,16 @@ function NameCell({ row }: { row: IntegrationRow }) {
 /**
  * The integrations of a space (or of one SharePoint folder): a bordered
  * Astryx table that sorts by name or last sync, with the sync history one
- * click away and a named row menu per item or folder.
+ * click away and a named row menu per item or folder. `labelledBy` names a
+ * table that is one of several (one per embedding model).
  */
-export function IntegrationItemsTable({ rows }: { rows: IntegrationRow[] }) {
+export function IntegrationItemsTable({
+  rows,
+  labelledBy
+}: {
+  rows: IntegrationRow[];
+  labelledBy?: string;
+}) {
   const t = useTranslations();
   const [syncHistoryItem, setSyncHistoryItem] = useState<IntegrationKnowledge | null>(null);
   const { sortedData, sortConfig } = useTableSortableState<IntegrationTableRow, IntegrationSortKey>(
@@ -226,7 +233,13 @@ export function IntegrationItemsTable({ rows }: { rows: IntegrationRow[] }) {
   return (
     <>
       <SpaceTableFrame>
-        <Table data={sortedData} columns={columns} idKey="id" plugins={{ sort: sortPlugin }} />
+        <Table
+          data={sortedData}
+          columns={columns}
+          idKey="id"
+          aria-labelledby={labelledBy}
+          plugins={{ sort: sortPlugin }}
+        />
       </SpaceTableFrame>
       <SyncHistoryDialog
         item={syncHistoryItem}

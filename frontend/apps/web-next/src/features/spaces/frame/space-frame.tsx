@@ -6,13 +6,15 @@ import { spaceRoute } from "./space-sections";
 
 /**
  * Chrome around every route of one space. The chat renders full-bleed (it has
- * its own header and pins its composer to the bottom). Everything else scrolls
- * in one container: the space header and tabs scroll away with the content, so
- * nothing sticky ever covers focus and the page reflows at 320 px / 400 %.
+ * its own header and pins its composer to the bottom). Every other page gets
+ * the space header and tabs above it and scrolls with them in the app shell's
+ * page panel, `main#main-content`, the one scroll container: the header
+ * scrolls away (nothing sticky covers focus), Page Down works right after the
+ * skip link, and the page reflows at 320 px / 400 %.
  *
- * The container keeps the `p-6` inset the space pages were built against: the
- * assistant editor cancels it with `-m-6` and pins its own header with
- * `sticky -top-6`.
+ * Pages sit in a `p-6` inset. A page that spans the frame edge to edge, such
+ * as the assistant editor with its sticky header, marks its root element with
+ * `data-space-full-bleed` and the inset goes away.
  */
 export function SpaceFrame({ children }: { children: React.ReactNode }) {
   const route = spaceRoute(useSelectedLayoutSegments());
@@ -22,9 +24,11 @@ export function SpaceFrame({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-6">
-      <SpaceHeader route={route} className="-mx-6 -mt-6" />
-      <div className="flex min-w-0 flex-1 flex-col pt-6">{children}</div>
+    <div className="flex min-w-0 flex-1 flex-col">
+      <SpaceHeader route={route} />
+      <div className="flex min-w-0 flex-1 flex-col p-6 has-[[data-space-full-bleed]]:p-0">
+        {children}
+      </div>
     </div>
   );
 }

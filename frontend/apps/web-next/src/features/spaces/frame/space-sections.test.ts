@@ -1,13 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { spaceHasPermission, type ResourcePermission, type SpaceResource } from "../space";
 import { makeCollection, makeSpace, makeWebsite } from "../testing/space-fixture";
-import {
-  ownKnowledgeCount,
-  spaceLandingHref,
-  spaceNameIsPageHeading,
-  spaceRoute,
-  spaceSections
-} from "./space-sections";
+import { ownKnowledgeCount, spaceLandingHref, spaceRoute, spaceSections } from "./space-sections";
 
 const canFor =
   (space: ReturnType<typeof makeSpace>) => (action: ResourcePermission, resource: SpaceResource) =>
@@ -115,19 +109,5 @@ describe("spaceRoute", () => {
       isSectionRoot: false
     });
     expect(spaceRoute([])).toEqual({ kind: "page", section: null, isSectionRoot: false });
-  });
-});
-
-describe("spaceNameIsPageHeading", () => {
-  it("is the h1 on a tab's own page only, the organization's Skills tab included", () => {
-    expect(spaceNameIsPageHeading({ kind: "page", section: "overview", isSectionRoot: true })).toBe(
-      true
-    );
-    expect(spaceNameIsPageHeading({ kind: "page", section: "skills", isSectionRoot: true })).toBe(
-      true
-    );
-    expect(
-      spaceNameIsPageHeading({ kind: "page", section: "knowledge", isSectionRoot: false })
-    ).toBe(false);
   });
 });

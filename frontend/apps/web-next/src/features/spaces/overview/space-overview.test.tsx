@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -41,8 +41,14 @@ vi.mock("@/lib/api/browser", () => ({
 vi.mock("@/components/providers/app-context", () => ({
   useAppContext: () => ({
     user: { id: "user-1" },
+    tenant: { id: "tenant-1" },
     settings: { using_templates: true },
-    limits: { attachments: { formats: [] }, info_blobs: { formats: [] } },
+    limits: {
+      attachments: { formats: [] },
+      info_blobs: {
+        formats: [{ mimetype: "application/pdf", extensions: ["pdf"], size: 10_000_000 }]
+      }
+    },
     can: () => true
   })
 }));
@@ -161,7 +167,7 @@ describe("SpaceOverview", () => {
     await expectNoAxeViolations(container);
   });
 
-  it("offers the space's collections as upload targets", async () => {
+  it("uploads to a chosen collection in the same dialog as the collection page", async () => {
     const pushed: string[] = [];
     state.push = (href) => pushed.push(href);
     show(busySpace());
@@ -171,9 +177,13 @@ describe("SpaceOverview", () => {
     const item = await screen.findByRole("menuitem", { name: "Upphandlingspolicy" });
     await expectNoAxeViolations(document.body);
     fireEvent.click(item);
-    await waitFor(() =>
-      expect(pushed).toEqual(["/spaces/space-1/knowledge/collections/collection-1"])
-    );
+
+    // No detour to the collection page: the upload flow opens here, with the
+    // accepted formats and limits.
+    const dialog = await screen.findByRole("dialog", { name: "Ladda upp filer" });
+    expect(within(dialog).getByText(/Upphandlingspolicy/)).toBeTruthy();
+    expect(within(dialog).getByText(/pdf/i)).toBeTruthy();
+    expect(pushed).toEqual([]);
   });
 
   it("shows empty states with the create actions in an empty space", async () => {

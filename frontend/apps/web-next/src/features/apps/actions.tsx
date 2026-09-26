@@ -1,21 +1,17 @@
 "use client";
 
+import type { DropdownMenuOption } from "@astryxdesign/core/DropdownMenu";
+import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowDownToLine, ArrowUpToLine, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
-import Link from "next/link";
+import { ArrowDownToLine, ArrowUpToLine, Pencil, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { useRemovalMutation } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
 import { PublishDialog } from "@/features/assistants/publish-dialog";
 import type { AppSparse } from "./apps";
@@ -23,6 +19,7 @@ import type { AppSparse } from "./apps";
 /** Edit/publish/delete menu for an app, shown on its tile. */
 export function AppActions({ app }: { app: AppSparse }) {
   const t = useTranslations();
+  const router = useRouter();
   const { routeId } = useSpace();
   const queryClient = useQueryClient();
   const [showPublish, setShowPublish] = useState(false);
@@ -39,62 +36,65 @@ export function AppActions({ app }: { app: AppSparse }) {
         })
       ),
     onSuccess: () => {
-      invalidate();
+      void invalidate();
       setShowPublish(false);
     },
     onError: (error) => toastApiError(error, t)
   });
 
-  const deleteApp = useMutation({
+  const deleteApp = useRemovalMutation({
     mutationFn: () =>
       unwrap(browserApi.DELETE("/api/v1/apps/{id}/", { params: { path: { id: app.id } } })),
-    onSuccess: () => {
-      invalidate();
-      setShowDelete(false);
-    },
-    onError: (error) => toastApiError(error, t)
+    refresh: invalidate,
+    onRemoved: () => setShowDelete(false)
   });
 
   if (!permissions.some((permission) => ["edit", "publish", "delete"].includes(permission))) {
     return null;
   }
 
+  const items: DropdownMenuOption[] = [
+    ...(permissions.includes("edit")
+      ? [
+          {
+            label: t("edit"),
+            icon: <Pencil aria-hidden="true" />,
+            onClick: () => router.push(`/spaces/${routeId}/apps/${app.id}/edit`)
+          }
+        ]
+      : []),
+    ...(permissions.includes("publish")
+      ? [
+          {
+            label: app.published ? t("unpublish") : t("publish"),
+            icon: app.published ? (
+              <ArrowDownToLine aria-hidden="true" />
+            ) : (
+              <ArrowUpToLine aria-hidden="true" />
+            ),
+            onClick: () => setShowPublish(true)
+          }
+        ]
+      : []),
+    ...(permissions.includes("delete")
+      ? [
+          {
+            label: t("delete"),
+            icon: <Trash2 aria-hidden="true" />,
+            variant: "destructive" as const,
+            onClick: () => setShowDelete(true)
+          }
+        ]
+      : [])
+  ];
+
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" aria-label={t("actions")}>
-            <MoreHorizontal className="size-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          {permissions.includes("edit") && (
-            <DropdownMenuItem asChild>
-              <Link href={`/spaces/${routeId}/apps/${app.id}/edit`}>
-                <Pencil className="size-4" /> {t("edit")}
-              </Link>
-            </DropdownMenuItem>
-          )}
-          {permissions.includes("publish") && (
-            <DropdownMenuItem onSelect={() => setShowPublish(true)}>
-              {app.published ? (
-                <>
-                  <ArrowDownToLine className="size-4" /> {t("unpublish")}
-                </>
-              ) : (
-                <>
-                  <ArrowUpToLine className="size-4" /> {t("publish")}
-                </>
-              )}
-            </DropdownMenuItem>
-          )}
-          {permissions.includes("delete") && (
-            <DropdownMenuItem variant="destructive" onSelect={() => setShowDelete(true)}>
-              <Trash2 className="size-4" /> {t("delete")}
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <MoreMenu
+        label={t("space_more_actions_for", { name: app.name })}
+        alignment="end"
+        items={items}
+      />
       <PublishDialog
         open={showPublish}
         onOpenChange={setShowPublish}

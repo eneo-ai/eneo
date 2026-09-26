@@ -103,8 +103,43 @@ describe("space Skills", () => {
     );
   });
 
+  it("moves focus to the heading when the deleted skill's row goes away", async () => {
+    remove.mockImplementation(() => {
+      get.mockImplementation(() => ok({ items: [], next_cursor: null }));
+      return ok(undefined);
+    });
+    show(<SpaceSkillsPage />);
+    const trigger = await screen.findByRole("button", { name: "skills_library_delete_aria" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "delete" })
+    );
+
+    await screen.findByRole("heading", { level: 3, name: "skills_library_empty_title" });
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("heading", { level: 2, name: "skills" }))
+    );
+    expect(screen.getByText("skills_library_deleted_success").getAttribute("role")).toBe("status");
+  });
+
+  it("keeps a failed delete's error in the dialog", async () => {
+    remove.mockImplementation(() => Promise.reject(new Error("offline")));
+    show(<SpaceSkillsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "skills_library_delete_aria" }));
+    const dialog = screen.getByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "delete" }));
+    const alert = await within(dialog).findByRole("alert");
+    expect(within(alert).getAllByText("request_failed").length).toBeGreaterThan(0);
+  });
+
   it("creates a Skill in the current space using the shared form", async () => {
     show(<SpaceSkillNewPage />);
+    // The sticky footer never covers a focused field: the fields keep a
+    // bottom scroll margin as tall as the footer.
+    expect(
+      screen.getByLabelText("skills_display_name_label").closest(".\\[\\&_\\*\\]\\:scroll-mb-20")
+    ).toBeTruthy();
     fireEvent.change(screen.getByLabelText("skills_display_name_label"), {
       target: { value: "Reports" }
     });

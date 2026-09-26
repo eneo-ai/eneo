@@ -3,7 +3,7 @@
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
-import { SPACE_SECTION_LABEL_KEYS, type SpaceSection, type SpaceSectionId } from "./space-sections";
+import type { SpaceSection, SpaceSectionId } from "./space-sections";
 
 // Links navigate; the TabList only needs the value to mark the current tab.
 function ignoreSelection() {}
@@ -39,7 +39,7 @@ export function SpaceTabs({
       )}
     >
       {sections.map((section) => {
-        const label = t(SPACE_SECTION_LABEL_KEYS[section.id]);
+        const label = t(section.id);
         const count = section.count;
         return (
           <Tab

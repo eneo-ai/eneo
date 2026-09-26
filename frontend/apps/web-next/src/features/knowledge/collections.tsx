@@ -17,7 +17,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { FolderClosed, FolderInput, Pencil, SearchX, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { StatusLabel } from "@/components/composites/status-label";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { ClientTime } from "@/features/spaces/client-time";
+import { useRemovalMutation } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
 import { EmbeddingModelSelect } from "./embedding-model-select";
 import { embeddingModelsInUse, type Collection } from "./knowledge";
@@ -186,19 +187,16 @@ export function CollectionActions({ collection }: { collection: Collection }) {
 
   const canDelete = collection.permissions?.includes("delete") ?? false;
 
-  const deleteCollection = useMutation({
+  const deleteCollection = useRemovalMutation({
     mutationFn: () =>
       unwrap(
         browserApi.DELETE("/api/v1/groups/{id}/", { params: { path: { id: collection.id } } })
       ),
-    onSuccess: () => {
-      invalidateSpace();
-      setShowDelete(false);
-    },
-    onError: (error) => toastApiError(error, t)
+    refresh: invalidateSpace,
+    onRemoved: () => setShowDelete(false)
   });
 
-  const moveCollection = useMutation({
+  const moveCollection = useRemovalMutation({
     mutationFn: (targetSpaceId: string) =>
       unwrap(
         browserApi.POST("/api/v1/groups/{id}/transfer/", {
@@ -206,11 +204,8 @@ export function CollectionActions({ collection }: { collection: Collection }) {
           body: { target_space_id: targetSpaceId }
         })
       ),
-    onSuccess: () => {
-      invalidateSpace();
-      setShowMove(false);
-    },
-    onError: (error) => toastApiError(error, t)
+    refresh: invalidateSpace,
+    onRemoved: () => setShowMove(false)
   });
 
   const items: DropdownMenuOption[] = [
@@ -270,12 +265,15 @@ export function CollectionActions({ collection }: { collection: Collection }) {
   );
 }
 
+/** One embedding model's collections; a grouped table is named by its model heading. */
 function CollectionsTable({
   collections,
-  sortConfig
+  sortConfig,
+  labelledBy
 }: {
   collections: Collection[];
   sortConfig: UseTableSortableConfig<CollectionSortKey>;
+  labelledBy?: string;
 }) {
   const t = useTranslations();
   const { routeId } = useSpace();
@@ -336,7 +334,13 @@ function CollectionsTable({
 
   return (
     <SpaceTableFrame>
-      <Table data={collections} columns={columns} idKey="id" plugins={{ sort: sortPlugin }} />
+      <Table
+        data={collections}
+        columns={columns}
+        idKey="id"
+        aria-labelledby={labelledBy}
+        plugins={{ sort: sortPlugin }}
+      />
     </SpaceTableFrame>
   );
 }
@@ -344,6 +348,7 @@ function CollectionsTable({
 export function CollectionsTab({ canCreate }: { canCreate: boolean }) {
   const t = useTranslations();
   const { space } = useSpace();
+  const groupId = useId();
   const [filter, setFilter] = useState("");
 
   const collections = space.knowledge.groups.items.filter(
@@ -387,6 +392,7 @@ export function CollectionsTab({ canCreate }: { canCreate: boolean }) {
       onFilterChange={setFilter}
       filterLabel={t("space_filter_collections_label")}
       filterPlaceholder={t("ui_filter_items", { resourceName: t("resource_collections") })}
+      resultCount={visibleCollections.length}
     >
       {action}
     </KnowledgeTableControls>
@@ -413,15 +419,16 @@ export function CollectionsTab({ canCreate }: { canCreate: boolean }) {
         const rows = model
           ? sortedData.filter((collection) => collection.embedding_model.id === model.id)
           : sortedData;
+        const headingId = model ? `${groupId}-${model.id}` : undefined;
         return (
           <div key={model?.id ?? "all"} className="flex flex-col gap-2">
             {model && (
-              <h3 className="text-ax-text-secondary text-sm font-semibold">
+              <h3 id={headingId} className="text-ax-text-secondary text-sm font-semibold">
                 {model.name}
                 {model.inSpace ? "" : ` (${t("disabled")})`}
               </h3>
             )}
-            <CollectionsTable collections={rows} sortConfig={sortConfig} />
+            <CollectionsTable collections={rows} sortConfig={sortConfig} labelledBy={headingId} />
           </div>
         );
       })}

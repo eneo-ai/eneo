@@ -14,7 +14,8 @@ import {
 } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import { browserApi } from "@/lib/api/browser";
-import { formatDateTime, formatDuration } from "@/lib/format";
+import { formatDuration } from "@/lib/format";
+import { ClientTime } from "@/features/spaces/client-time";
 import type { IntegrationKnowledge } from "../knowledge";
 import { syncLogsQueryOptions, type SyncLog } from "./queries";
 
@@ -62,7 +63,7 @@ function SyncLogEntry({ log }: { log: SyncLog }) {
           <StatusBadge status={log.status} />
         </div>
         <span className="text-muted-foreground shrink-0 text-xs">
-          {formatDateTime(log.started_at)}
+          <ClientTime value={log.started_at} format="date_time" />
         </span>
       </div>
       <div className="text-muted-foreground mb-1 text-xs">{syncSummary(log, t)}</div>

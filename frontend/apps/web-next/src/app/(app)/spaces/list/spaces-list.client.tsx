@@ -6,15 +6,16 @@ import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { LayoutGrid, SearchX, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { iconUrl } from "@/components/composites/icon-field";
 import { PageHeader } from "@/components/composites/page-header";
 import { RESOURCE_GRID_CLASS, ResourceCard } from "@/components/composites/resource-tile";
 import { useAppContext } from "@/components/providers/app-context";
+import { useShell } from "@/components/shell/shell-context";
 import { browserApi } from "@/lib/api/browser";
-import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
+import { RemovalFocusScope } from "@/features/spaces/removal";
 import { filterSpaceResources } from "@/features/spaces/resource-filter";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
 import { spaceRouteId, spacesListQueryOptions, type SpaceSparse } from "@/features/spaces/space";
@@ -79,14 +80,20 @@ function SpaceCard({
   );
 }
 
+/**
+ * "Ytor": the shared spaces as cards with a filter. "Skapa yta" opens the
+ * app's one create-space dialog (the shell hosts it for the SideNav "+" and
+ * ⌘K too); deleting a space from its card menu moves focus to the heading.
+ */
 export function SpacesList({ title }: { title: string }) {
   const t = useTranslations();
   const { can } = useAppContext();
+  const { openCreateSpace } = useShell();
   const { data: spaces } = useSuspenseQuery(spacesListQueryOptions(browserApi));
   const collator = useCollator();
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const [filter, setFilter] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<SpaceSparse | null>(null);
-  const [creating, setCreating] = useState(false);
 
   // Personal and organization spaces have their own surfaces.
   const sharedSpaces = spaces
@@ -95,13 +102,14 @@ export function SpacesList({ title }: { title: string }) {
   const visibleSpaces = filterSpaceResources(sharedSpaces, filter);
   const canCreate = can("shared_spaces");
   const createButton = (
-    <AstryxButton label={t("create_space")} variant="primary" onClick={() => setCreating(true)} />
+    <AstryxButton label={t("create_space")} variant="primary" onClick={openCreateSpace} />
   );
 
   return (
-    <>
+    <RemovalFocusScope target={headingRef}>
       <PageHeader
         title={title}
+        headingRef={headingRef}
         description={t("space_list_description")}
         actions={canCreate && sharedSpaces.length > 0 ? createButton : undefined}
       />
@@ -121,6 +129,7 @@ export function SpacesList({ title }: { title: string }) {
             onChange={setFilter}
             label={t("space_list_filter_label")}
             placeholder={t("space_list_filter_placeholder")}
+            resultCount={visibleSpaces.length}
           />
           {visibleSpaces.length === 0 ? (
             <EmptyState icon={<SearchX />} title={t("no_results_found")} isCompact />
@@ -135,8 +144,7 @@ export function SpacesList({ title }: { title: string }) {
           )}
         </>
       )}
-      {canCreate ? <CreateSpaceDialog open={creating} onOpenChange={setCreating} /> : null}
       <DeleteSpaceDialog space={deleteTarget} onClose={() => setDeleteTarget(null)} />
-    </>
+    </RemovalFocusScope>
   );
 }
