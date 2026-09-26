@@ -1,13 +1,13 @@
 "use client";
 
+import { Button } from "@astryxdesign/core/Button";
+import { TextInput } from "@/components/astryx/text-input";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
-import {
-  ConfirmedSecretInput,
-  confirmedSecretProblem
-} from "@/components/composites/confirmed-secret-input";
-import { Button } from "@/components/ui/button";
+import { useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { ConfirmedSecretInput } from "@/components/composites/confirmed-secret-input";
+import { LoadingState } from "@/components/composites/loading-state";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -17,10 +17,11 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { newPasswordErrors, passwordPolicyQueryOptions } from "@/features/auth/password-policy";
+import { PasswordPolicyChecklist } from "@/features/auth/password-policy-checklist";
 import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
+import { EneoApiError, unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { rolesQueryOptions, type Role } from "@/features/admin/roles/roles";
@@ -69,14 +70,25 @@ function RolePicker({
   );
 }
 
+type Field = "username" | "email" | "policy" | "password" | "confirmation";
+
 /**
  * Form body, mounted fresh each time the dialog opens so its initial values
  * seed from the target user without a reset effect.
+ *
+ * A password is checked against the backend's local policy (fetched, like
+ * SvelteKit's admin users page). Problems show at their fields on submit and
+ * focus moves to the first (WCAG 3.3.1); what the backend refuses about a
+ * password shows at the password field.
  */
 function UserEditorForm({ user, onDone }: { user?: AdminUser; onDone: () => void }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
+  const formId = useId();
+  const checklistId = useId();
   const mode = user ? "update" : "create";
+  const policyQuery = useQuery(passwordPolicyQueryOptions(browserApi));
+  const policy = policyQuery.data ?? null;
 
   const [email, setEmail] = useState(user?.email ?? "");
   const [username, setUsername] = useState(user?.username ?? "");
@@ -85,8 +97,33 @@ function UserEditorForm({ user, onDone }: { user?: AdminUser; onDone: () => void
   const [roleIds, setRoleIds] = useState<Set<string>>(
     new Set((user?.roles ?? []).map((role) => role.id))
   );
+  const [submitted, setSubmitted] = useState(false);
+  /** What the backend refused about the password, until it is edited. */
+  const [refused, setRefused] = useState<string>();
+  const usernameRef = useRef<HTMLInputElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const retryRef = useRef<HTMLButtonElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const confirmationRef = useRef<HTMLInputElement>(null);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+
+  // A password the backend refuses is said at its field; the rest is toasted.
+  function onError(error: Error) {
+    const code = error instanceof EneoApiError ? error.code : undefined;
+    const message =
+      code === 9058
+        ? t("password_must_be_different")
+        : code === 9059
+          ? t("password_policy_rejected")
+          : undefined;
+    if (message) {
+      flushSync(() => setRefused(message));
+      passwordRef.current?.focus();
+    } else {
+      toastApiError(error, t);
+    }
+  }
 
   const create = useMutation({
     mutationFn: () =>
@@ -104,7 +141,7 @@ function UserEditorForm({ user, onDone }: { user?: AdminUser; onDone: () => void
       invalidate();
       onDone();
     },
-    onError: (error) => toastApiError(error, t)
+    onError
   });
 
   const updateUser = useMutation({
@@ -125,48 +162,58 @@ function UserEditorForm({ user, onDone }: { user?: AdminUser; onDone: () => void
       invalidate();
       onDone();
     },
-    onError: (error) => toastApiError(error, t)
+    onError
   });
 
   const pending = create.isPending || updateUser.isPending;
-  const passwordTouched = password.length > 0 || passwordConfirmation.length > 0;
-  const passwordRequired = mode === "create";
-  const passwordConfirmed =
-    confirmedSecretProblem({
-      value: password,
-      confirmation: passwordConfirmation,
-      isRequired: passwordRequired || passwordTouched
-    }) === null;
-  const passwordLongEnough = !passwordTouched || password.length >= 7;
-  const formValid =
-    email.trim().length > 0 &&
-    (mode === "update" || username.trim().length > 0) &&
-    passwordConfirmed &&
-    passwordLongEnough;
+  const policyUnavailable = !policyQuery.isPending && policy === null;
+  const pair = policy
+    ? newPasswordErrors(t, {
+        password,
+        confirmation: passwordConfirmation,
+        policy,
+        required: mode === "create"
+      })
+    : {};
+  const errors: Record<Field, string | undefined> = {
+    username:
+      mode === "create" && !username.trim() ? t("admin_users_username_required") : undefined,
+    email: email.trim() ? undefined : t("admin_users_email_required"),
+    // A new account needs a password, which cannot be checked without the policy.
+    policy: mode === "create" && policyUnavailable ? t("password_policy_unavailable") : undefined,
+    password: pair.password ?? refused,
+    confirmation: pair.confirmation
+  };
+  const shown = (field: Field) => (submitted ? errors[field] : undefined);
+  const fields: Record<Field, React.RefObject<HTMLElement | null>> = {
+    username: usernameRef,
+    email: emailRef,
+    policy: retryRef,
+    password: passwordRef,
+    confirmation: confirmationRef
+  };
 
-  function submit() {
-    if (!email.trim() || (mode === "create" && !username.trim())) {
-      toast.warning(t("required_field"));
-      return;
-    }
-    if (!passwordConfirmed) {
-      toast.warning(t("passwords_do_not_match"));
-      return;
-    }
-    if (!passwordLongEnough) {
-      toast.warning(t("password_needs_7_chars"));
+  function submit(event: React.SubmitEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (pending || policyQuery.isPending) return;
+    const first = (Object.keys(errors) as Field[]).find((field) => errors[field]);
+    if (first) {
+      // Rendered before focus moves, so the field is read with its error.
+      flushSync(() => setSubmitted(true));
+      fields[first].current?.focus();
       return;
     }
     if (mode === "create") {
       create.mutate();
+    } else if (!user?.username) {
+      toast.warning(t("cant_edit_user_without_username"));
     } else {
-      if (!user?.username) {
-        toast.warning(t("cant_edit_user_without_username"));
-        return;
-      }
       updateUser.mutate();
     }
   }
+
+  const usernameError = shown("username");
+  const emailError = shown("email");
 
   return (
     <DialogContent className="max-h-[85vh] overflow-y-auto">
@@ -177,47 +224,79 @@ function UserEditorForm({ user, onDone }: { user?: AdminUser; onDone: () => void
         </DialogDescription>
       </DialogHeader>
 
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="user-username">{t("username")}</Label>
-          <Input
-            id="user-username"
-            value={username}
-            disabled={mode === "update"}
-            onChange={(event) => setUsername(event.target.value)}
-          />
-          <p className="text-muted-foreground text-xs">
-            {mode === "update"
-              ? t("username_change_logout_hint")
-              : t("unique_username_description")}
-          </p>
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="user-email">{t("email")}</Label>
-          <Input
-            id="user-email"
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-          />
-        </div>
-
-        <ConfirmedSecretInput
-          label={t("password")}
-          confirmLabel={t("confirm_password")}
-          value={password}
-          confirmation={passwordConfirmation}
-          onValueChange={setPassword}
-          onConfirmationChange={setPasswordConfirmation}
-          mismatchMessage={t("passwords_do_not_match")}
-          description={t("password_needs_7_chars")}
-          isRequired={passwordRequired}
-          // Someone else's password: never the admin's own, and a password
-          // manager may offer a generated one.
-          autoComplete="new-password"
-          placeholder={mode === "update" ? t("admin_users_password_unchanged") : undefined}
+      <form id={formId} className="flex flex-col gap-4" noValidate onSubmit={submit}>
+        <TextInput
+          ref={usernameRef}
+          label={t("username")}
+          description={
+            mode === "update" ? t("username_change_logout_hint") : t("unique_username_description")
+          }
+          value={username}
+          onChange={setUsername}
+          isRequired={mode === "create"}
+          isDisabled={mode === "update"}
+          autoComplete="off"
+          status={usernameError ? { type: "error", message: usernameError } : undefined}
         />
+        <TextInput
+          ref={emailRef}
+          type="email"
+          label={t("email")}
+          value={email}
+          onChange={setEmail}
+          isRequired
+          autoComplete="off"
+          status={emailError ? { type: "error", message: emailError } : undefined}
+        />
+
+        {policyQuery.isPending ? (
+          <LoadingState rows={2} label={t("loading")} />
+        ) : policy === null ? (
+          <div className="flex flex-col items-start gap-2">
+            <p className="text-ax-error text-sm">{t("password_policy_unavailable")}</p>
+            <Button
+              ref={retryRef}
+              label={t("retry")}
+              size="sm"
+              isLoading={policyQuery.isFetching}
+              isInterruptible
+              onClick={() => {
+                if (!policyQuery.isFetching) void policyQuery.refetch();
+              }}
+            />
+          </div>
+        ) : (
+          <>
+            <PasswordPolicyChecklist
+              id={checklistId}
+              password={password}
+              confirmation={passwordConfirmation}
+              policy={policy}
+            />
+            <ConfirmedSecretInput
+              label={t("password")}
+              confirmLabel={t("confirm_password")}
+              description={mode === "update" ? t("admin_password_optional_hint") : undefined}
+              describedBy={checklistId}
+              value={password}
+              confirmation={passwordConfirmation}
+              onValueChange={(value) => {
+                setPassword(value);
+                setRefused(undefined);
+              }}
+              onConfirmationChange={setPasswordConfirmation}
+              isRequired={mode === "create"}
+              // Someone else's password: never the admin's own, and a password
+              // manager may offer a generated one.
+              autoComplete="new-password"
+              valueError={submitted ? errors.password : refused}
+              mismatchMessage={errors.confirmation ?? t("change_password_mismatch")}
+              showErrors={submitted}
+              valueRef={passwordRef}
+              confirmationRef={confirmationRef}
+            />
+          </>
+        )}
 
         <RolePicker
           selected={roleIds}
@@ -230,16 +309,19 @@ function UserEditorForm({ user, onDone }: { user?: AdminUser; onDone: () => void
             })
           }
         />
-      </div>
 
-      <DialogFooter>
-        <Button variant="outline" disabled={pending} onClick={onDone}>
-          {t("cancel")}
-        </Button>
-        <Button disabled={pending || !formValid} onClick={submit}>
-          {pending ? t("loading") : mode === "create" ? t("create_user") : t("save_changes")}
-        </Button>
-      </DialogFooter>
+        <DialogFooter>
+          <Button label={t("cancel")} isDisabled={pending} onClick={onDone} />
+          <Button
+            type="submit"
+            variant="primary"
+            label={mode === "create" ? t("create_user") : t("save_changes")}
+            // Keeps focus while saving; a second press is ignored above.
+            isLoading={pending}
+            isInterruptible
+          />
+        </DialogFooter>
+      </form>
     </DialogContent>
   );
 }

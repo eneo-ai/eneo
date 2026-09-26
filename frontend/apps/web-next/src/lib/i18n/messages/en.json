@@ -4519,7 +4519,6 @@
   "admin_users_row_menu": "More actions for {email}",
   "admin_users_count": "{count, plural, one {# user} other {# users}}",
   "admin_users_state_deleted": "Deleted",
-  "admin_users_password_unchanged": "Leave empty to keep the password",
   "admin_users_deactivated": "{email} was deactivated",
   "admin_users_reactivated": "{email} was reactivated",
   "admin_users_deleted": "{email} was deleted",
@@ -5269,7 +5268,6 @@
   "output_format": "Output format",
   "page_doesnt_exist": "The page you're looking for doesn't exist.",
   "page_not_found": "Page not found",
-  "password_needs_7_chars": "Needs to be at least 7 characters long",
   "password_placeholder": "Password",
   "password_too_short": "Password must be at least 8 characters",
   "pending_changes": "Pending changes",
@@ -5588,5 +5586,7 @@
   "change_password_current_required": "Enter your current password.",
   "change_password_new_required": "Enter a new password.",
   "change_password_confirm_required": "Type the new password again.",
-  "change_password_mismatch": "The passwords don't match. Type the same password in both fields."
+  "change_password_mismatch": "The passwords don't match. Type the same password in both fields.",
+  "admin_users_username_required": "Enter a username.",
+  "admin_users_email_required": "Enter an email address, for example name@example.com."
 }

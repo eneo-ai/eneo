@@ -195,6 +195,11 @@ const eslintConfig = defineConfig([
               importNames: ["Table"],
               message:
                 'Use `Table` from "@/components/astryx/table": it must be named, and names its scroll region.'
+            },
+            {
+              name: "@astryxdesign/core/TextInput",
+              message:
+                'Use `TextInput` from "@/components/astryx/text-input": Astryx drops a caller\'s aria-describedby.'
             }
           ]
         }

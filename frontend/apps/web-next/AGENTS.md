@@ -104,6 +104,10 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
   - `Switch` announces a hard-coded English "Loading" in its busy state: use
     `Switch` from `@/components/astryx/switch`, which leaves
     `isLoading`/`changeAction` out.
+  - `TextInput` drops a caller's `aria-describedby` (it sets the attribute
+    from its own description and status only): use `TextInput` from
+    `@/components/astryx/text-input`, which adds the caller's ids after
+    Astryx's own (as the password policy checklist needs).
   - CommandPalette marks only a picked value as selected, and DateInput passes
     `nativePicker` on to the DOM: both patched.
   - BottomSheet skips `data-autofocus` when opening the dialog already focused

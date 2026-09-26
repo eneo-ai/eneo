@@ -1,6 +1,6 @@
 "use client";
 
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { useState } from "react";
 
 /** What is wrong with a secret and its confirmation, if anything. */
@@ -32,6 +32,11 @@ export type ConfirmedSecretInputProps = {
   onConfirmationChange: (value: string) => void;
   /** Shown under the first label (what the secret is for, how it is stored). */
   description?: string;
+  /**
+   * Ids of elements that describe both fields, such as a password policy
+   * checklist (PasswordPolicyChecklist), read after their own texts.
+   */
+  describedBy?: string;
   isRequired?: boolean;
   isDisabled?: boolean;
   /** Password managers read it: "new-password" (default), "off" for API keys. */
@@ -88,6 +93,7 @@ export function ConfirmedSecretInput({
   onValueChange,
   onConfirmationChange,
   description,
+  describedBy,
   isRequired = false,
   isDisabled = false,
   autoComplete = "new-password",
@@ -112,6 +118,7 @@ export function ConfirmedSecretInput({
         type="password"
         label={label}
         description={description}
+        aria-describedby={describedBy}
         value={value}
         onChange={onValueChange}
         isRequired={isRequired}
@@ -124,6 +131,7 @@ export function ConfirmedSecretInput({
         ref={confirmationRef}
         type="password"
         label={confirmLabel}
+        aria-describedby={describedBy}
         value={confirmation}
         onChange={onConfirmationChange}
         // Required whenever there is a secret to confirm.

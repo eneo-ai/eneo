@@ -38,12 +38,14 @@ function renderCard(passwordChange: unknown = eneo) {
 const field = (name: RegExp) => screen.getByLabelText(name) as HTMLInputElement;
 const type = (name: RegExp, value: string) => fireEvent.change(field(name), { target: { value } });
 const save = () => fireEvent.submit(screen.getByRole("button", { name: "Spara" }).closest("form")!);
-/** The field's error, read from the text its aria-describedby points at. */
+/** The field's error: the Astryx status message its aria-describedby names. */
 const errorOf = (input: HTMLInputElement) =>
   input.getAttribute("aria-invalid") === "true"
     ? (input.getAttribute("aria-describedby") ?? "")
         .split(" ")
-        .map((id) => document.getElementById(id)?.textContent ?? "")
+        .map((id) => document.getElementById(id))
+        .filter((element) => element?.closest(".astryx-field-status"))
+        .map((element) => element?.textContent ?? "")
         .join(" ")
     : null;
 
@@ -68,15 +70,50 @@ describe("ChangePasswordCard", () => {
     for (const input of [field(/^Nytt lösenord/), field(/^Bekräfta lösenord/)]) {
       expect(input.getAttribute("autocomplete")).toBe("new-password");
     }
-    // The policy's rules, not a length of its own (WCAG 3.3.2).
-    const rules = within(container).getByText(
-      "Använd minst 12 tecken. Inkludera en stor bokstav A–Z. Inkludera en siffra 0–9."
-    );
-    expect(field(/^Nytt lösenord/).getAttribute("aria-describedby")).toContain(rules.id);
+    // The policy's rules, not a length of its own (WCAG 3.3.2), before the
+    // fields and read with them.
+    const checklist = within(container).getByText(
+      "Det nya lösenordet måste uppfylla följande krav:"
+    ).parentElement!;
+    expect(
+      within(checklist)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent)
+    ).toEqual([
+      "Använd minst 12 tecken – Inte uppfyllt ännu",
+      "Inkludera en stor bokstav A–Z – Inte uppfyllt ännu",
+      "Inkludera en siffra 0–9 – Inte uppfyllt ännu",
+      "Lösenorden matchar – Inte uppfyllt ännu"
+    ]);
+    for (const input of [field(/^Nytt lösenord/), field(/^Bekräfta lösenord/)]) {
+      expect(input.getAttribute("aria-describedby")?.split(" ")).toContain(checklist.id);
+    }
+    expect(
+      checklist.compareDocumentPosition(field(/^Nytt lösenord/)) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
     expect((screen.getByRole("button", { name: "Spara" }) as HTMLButtonElement).disabled).toBe(
       false
     );
     await expectNoAxeViolations(container);
+  });
+
+  it("marks the policy's rules as the new password is typed, without announcing them", () => {
+    const { container } = renderCard();
+    const checklist = within(container).getByText(
+      "Det nya lösenordet måste uppfylla följande krav:"
+    ).parentElement!;
+    const states = () =>
+      within(checklist)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent?.endsWith("– Uppfyllt"));
+
+    type(/^Nytt lösenord/, "Nytt-lösenord");
+    expect(states()).toEqual([true, true, false, false]);
+    type(/^Nytt lösenord/, "Nytt-lösenord-2026");
+    type(/^Bekräfta lösenord/, "Nytt-lösenord-2026");
+    expect(states()).toEqual([true, true, true, true]);
+    // Read with the field when it gets focus; no live region.
+    expect(checklist.closest("[aria-live], [role=status], [role=alert]")).toBeNull();
   });
 
   it("shows each problem at its field on submit and moves focus to the first", async () => {
