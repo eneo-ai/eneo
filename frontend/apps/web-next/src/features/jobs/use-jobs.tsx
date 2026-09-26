@@ -113,6 +113,9 @@ function uploadInfoBlob(
   });
 }
 
+// One empty list until the jobs load, so the context value holds still.
+const NO_JOBS: Job[] = [];
+
 export function JobsProvider({ children }: { children: React.ReactNode }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -123,7 +126,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     setAnnouncement({ id: Date.now(), message });
   }, []);
 
-  const { data: jobs = [] } = useQuery({
+  const { data: jobs = NO_JOBS } = useQuery({
     queryKey: ["jobs"],
     queryFn: async (): Promise<Job[]> => {
       const page = await unwrap(browserApi.GET("/api/v1/jobs/"));
