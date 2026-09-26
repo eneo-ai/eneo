@@ -135,4 +135,14 @@ describe("globals.css", () => {
     expect(rules.get(":focus-visible")).toMatchObject({ outline: "2px solid var(--ring)" });
     expect(rules.get("::after")).toMatchObject({ inset: "-10px" });
   });
+
+  it("keeps what an Astryx table scrolls inside its scroll box", () => {
+    let position: string | undefined;
+    postcss.parse(css).walkRules(".astryx-table-scroll-wrapper", (rule: Rule) => {
+      rule.walkDecls("position", (decl) => {
+        position = decl.value;
+      });
+    });
+    expect(position).toBe("relative");
+  });
 });

@@ -375,3 +375,16 @@
     inset: -10px;
   }
 }
+
+/*
+ * 9. An Astryx table's horizontal scroll box contains what it scrolls. Screen
+ *    reader-only texts in cells are absolutely positioned; with no positioned
+ *    ancestor they escaped the scroll box and widened the page, so a 320 px
+ *    screen scrolled sideways (1.4.10). The legacy Table's container is
+ *    `relative` for the same reason.
+ */
+@layer components {
+  .astryx-table-scroll-wrapper {
+    position: relative;
+  }
+}
