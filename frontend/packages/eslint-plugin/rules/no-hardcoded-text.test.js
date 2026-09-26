@@ -93,5 +93,32 @@ jsxRuleTester.run("no-hardcoded-text-jsx", rule, {
       code: '<input placeholder={"Search users"} />',
       errors: [{ messageId: "hardcodedAttr" }],
     },
+    // `attributes` narrows which attributes are checked.
+    {
+      code: '<Field hint="Pick a file" aria-label="Close" />',
+      options: [{ attributes: ["hint"] }],
+      errors: [
+        {
+          messageId: "hardcodedAttr",
+          data: { attr: "hint", text: '"Pick a file"' },
+        },
+      ],
+    },
+  ],
+});
+
+jsxRuleTester.run("no-hardcoded-text-jsx (attributes option)", rule, {
+  valid: [
+    // Attribute literals left to eneo/no-literal-accessible-name.
+    { code: '<button aria-label="Close" />', options: [{ attributes: [] }] },
+    { code: '<Button label="Save" />', options: [{ attributes: ["hint"] }] },
+  ],
+  invalid: [
+    // Text between tags is still checked.
+    {
+      code: '<button aria-label="Close">Close</button>',
+      options: [{ attributes: [] }],
+      errors: [{ messageId: "hardcodedText" }],
+    },
   ],
 });

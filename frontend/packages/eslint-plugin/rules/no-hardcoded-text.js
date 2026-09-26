@@ -12,6 +12,12 @@
  *  - `{m.foo()}` and any other mustache expression (those are not text nodes)
  *  - Anything matching an `ignore` regex from the rule options
  *
+ * Options:
+ *  - `ignore`: regex patterns for text that is allowed inline.
+ *  - `attributes`: the attributes whose literals are checked (default: the
+ *    human-facing ones below). Set `[]` where `eneo/no-literal-accessible-name`
+ *    owns attribute literals (web-next), so each literal is reported once.
+ *
  * Escape hatch: `<!-- eslint-disable-next-line eneo/no-hardcoded-text -->`
  * for the rare genuinely-untranslatable literal (brand names, symbols).
  *
@@ -53,6 +59,12 @@ const rule = {
             items: { type: "string" },
             description: "Regex patterns for text that is allowed inline.",
           },
+          attributes: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Attributes whose literal values are checked (default: the human-facing ones).",
+          },
         },
         additionalProperties: false,
       },
@@ -68,6 +80,7 @@ const rule = {
   create(context) {
     const opts = context.options[0] ?? {};
     const ignore = (opts.ignore ?? []).map((p) => new RegExp(p, "u"));
+    const humanAttrs = opts.attributes ? new Set(opts.attributes) : HUMAN_ATTRS;
 
     const allowed = (raw) => {
       const text = raw.trim();
@@ -82,7 +95,7 @@ const rule = {
 
     const reportAttrLiteral = (node, attr, value) => {
       const name = attr?.key?.name ?? attr?.name?.name;
-      if (typeof name !== "string" || !HUMAN_ATTRS.has(name)) return;
+      if (typeof name !== "string" || !humanAttrs.has(name)) return;
       if (allowed(value)) return;
       context.report({
         node,

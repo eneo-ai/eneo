@@ -60,13 +60,18 @@ const eslintConfig = defineConfig([
   },
   {
     // Block hardcoded human-facing JSX text in app code; route copy through
-    // next-intl messages instead.
+    // next-intl messages instead. Accessible names and descriptions in
+    // attributes (aria-label, title, alt, placeholder, label, tooltip, …)
+    // belong to eneo/no-literal-accessible-name below, so each literal is
+    // reported once; this rule checks the text between tags and the other
+    // display props.
     files: ["src/**/*.tsx"],
     ignores: generatedAndVendored,
     rules: {
       "eneo/no-hardcoded-text": [
         "error",
         {
+          attributes: ["hint", "submitLabel"],
           ignore: [
             "Eneo\\.ai",
             "^(web-next|· backend)$",
