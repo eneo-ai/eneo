@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import (
@@ -49,6 +49,29 @@ class QuestionsFiles(BaseModel):
     file: FileMetadata
 
     model_config = ConfigDict(from_attributes=True)
+
+
+MESSAGE_FEEDBACK_TEXT_MAX_LENGTH = 2000
+
+
+class MessageFeedback(BaseModel):
+    """A rating of one answer: 1 (good) or -1 (bad), with an optional comment."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    value: Literal[-1, 1]
+    text: Optional[str] = Field(
+        default=None,
+        max_length=MESSAGE_FEEDBACK_TEXT_MAX_LENGTH,
+        description="Optional comment on the answer. Blank text is stored as null.",
+    )
+
+    @field_validator("text", mode="before")
+    @classmethod
+    def _blank_text_is_none(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
 
 
 class McpToolReferencePublic(InDB):
@@ -168,6 +191,7 @@ class Question(QuestionAdd, InDB):
     questions_files: list[QuestionsFiles] = []
     mcp_tool_references: list[McpToolReferencePublic] = []
     tool_calls: Optional[list[ToolCallInfo]] = None
+    feedback: Optional[MessageFeedback] = None
 
     def attach_hydrated_files(self, files_by_id: dict[UUID, File]) -> None:
         """Attach byte-complete Files after the persistent row is authorized."""
@@ -194,6 +218,13 @@ class Message(QuestionBase, InDB):
     tool_calls: list[ToolCallInfo] = []
     skill_provenance: Optional[list[SkillExecutionReference]] = None
     reasoning: Optional[str] = None
+    feedback: Optional[MessageFeedback] = Field(
+        default=None,
+        description=(
+            "The conversation owner's rating of this answer; null when it is not "
+            "rated. Separate from the conversation-level feedback."
+        ),
+    )
     # Cumulative turn usage across provider requests. Historical rows from
     # before measurement was introduced use 0 for unmeasured usage.
     num_tokens_question: int = Field(
