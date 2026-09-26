@@ -1399,3 +1399,126 @@ async def test_forced_final_drops_ignored_tool_calls_without_pending_events():
     # Text streamed by the final response is preserved and the turn stops.
     assert "partial answer" in "".join(c.text for c in completions if c.text)
     assert any(c.stop for c in completions)
+
+
+async def _stream_rounds(rounds: list[list[SimpleNamespace]]):
+    """Stream scripted provider rounds; every round but the last calls a tool."""
+    first_round, *follow_up_rounds = rounds
+    stream = _AsyncChunkStream(
+        first_round,
+        eneo_context={
+            "mcp_proxy": _FakeMCPProxy(),
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=[_AsyncChunkStream(r) for r in follow_up_rounds]),
+    ):
+        return await _collect(
+            _make_adapter(),
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+
+def _streamed_texts(completions) -> list[str]:
+    return [c.text for c in completions if c.text]
+
+
+async def test_iterate_stream_separates_text_of_rounds_around_a_tool_call():
+    completions = await _stream_rounds(
+        [
+            [_text_chunk("Jag hämtar aktuell tid åt dig."), _tool_call_chunk()],
+            [
+                _text_chunk("**Aktuell tid:**"),
+                _text_chunk("\n- **Sverige:** 10:00", finish_reason="stop"),
+            ],
+        ]
+    )
+
+    assert _streamed_texts(completions) == [
+        "Jag hämtar aktuell tid åt dig.",
+        "\n\n**Aktuell tid:**",
+        "\n- **Sverige:** 10:00",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("before_tool", "after_tool"),
+    [
+        ("Checking.\n", "Result"),
+        ("Checking.\n\n", "Result"),
+        ("Checking.", "\nResult"),
+        ("Checking.", "\n\nResult"),
+    ],
+)
+async def test_iterate_stream_keeps_a_newline_that_already_separates_rounds(
+    before_tool: str, after_tool: str
+):
+    completions = await _stream_rounds(
+        [
+            [_text_chunk(before_tool), _tool_call_chunk()],
+            [_text_chunk(after_tool, finish_reason="stop")],
+        ]
+    )
+
+    assert "".join(_streamed_texts(completions)) == before_tool + after_tool
+
+
+async def test_iterate_stream_leaves_text_within_a_round_unchanged():
+    # The round's text continues after its tool call starts streaming (the
+    # pending step is emitted in between); only the next round is separated.
+    completions = await _stream_rounds(
+        [
+            [
+                _text_chunk("Let me check"),
+                _tool_call_delta_chunk(tool_call_id="call_1", tool_name="server__tool"),
+                _text_chunk(" the time."),
+                _tool_call_delta_chunk(
+                    arguments='{"q":"x"}', finish_reason="tool_calls"
+                ),
+            ],
+            [_text_chunk("It is ten."), _text_chunk(" Done.", finish_reason="stop")],
+        ]
+    )
+
+    assert _streamed_texts(completions) == [
+        "Let me check",
+        " the time.",
+        "\n\nIt is ten.",
+        " Done.",
+    ]
+    pending_at = next(
+        i
+        for i, c in enumerate(completions)
+        if c.tool_calls_metadata and c.tool_calls_metadata[0].result_status == "pending"
+    )
+    assert completions[pending_at - 1].text == "Let me check"
+    assert completions[pending_at + 1].text == " the time."
+
+
+async def test_iterate_stream_single_round_text_is_unchanged():
+    completions = await _stream_rounds(
+        [[_text_chunk("Hel"), _text_chunk("lo", finish_reason="stop")]]
+    )
+
+    assert _streamed_texts(completions) == ["Hel", "lo"]
+
+
+async def test_iterate_stream_separates_only_rounds_that_stream_text():
+    completions = await _stream_rounds(
+        [
+            [_tool_call_chunk(tool_call_id="call_1")],
+            [_text_chunk("Found it."), _tool_call_chunk(tool_call_id="call_2")],
+            [_tool_call_chunk(tool_call_id="call_3")],
+            [_text_chunk("Answer", finish_reason="stop")],
+        ]
+    )
+
+    assert _streamed_texts(completions) == ["Found it.", "\n\nAnswer"]

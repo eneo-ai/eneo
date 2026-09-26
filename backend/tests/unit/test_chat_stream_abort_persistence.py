@@ -1205,6 +1205,86 @@ async def test_streaming_handle_response_count_tokens_failure_still_persists_par
     assert persist_calls[0]["num_tokens_answer"] == 0
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("aborted", "expected_answer"),
+    [
+        (False, "Jag hämtar tiden.\n\n**Aktuell tid:** 10:00"),
+        (True, "Jag hämtar tiden.\n\n**Aktuell tid:**"),
+    ],
+)
+async def test_streaming_handle_response_persists_round_break_verbatim(
+    aborted: bool, expected_answer: str
+):
+    """The adapter opens a later model round's text with a paragraph break; the
+    persisted answer keeps it as streamed and adds no break of its own around
+    tool calls, whether the stream completes or is aborted."""
+
+    async def fake_completion_stream():
+        yield Completion(response_type=ResponseType.TEXT, text="Jag hämtar tiden.")
+        yield Completion(
+            response_type=ResponseType.TOOL_CALL,
+            tool_calls_metadata=[
+                ToolCallMetadata(
+                    server_name="time",
+                    tool_name="now",
+                    tool_call_id="call-1",
+                    result_status="succeeded",
+                )
+            ],
+        )
+        yield Completion(response_type=ResponseType.TEXT, text="\n\n**Aktuell tid:**")
+        yield Completion(response_type=ResponseType.TEXT, text=" 10:00")
+
+    response = SimpleNamespace(
+        completion=fake_completion_stream(),
+        total_token_count=3,
+        usage=None,
+        extended_logging=None,
+    )
+    session_service_mock = AsyncMock()
+    session_service_mock.complete_question_with_answer = AsyncMock()
+    svc = _make_assistant_service_for_streaming(session_service_mock)
+    persist_calls: list[dict[str, object]] = []
+
+    async def tracking_persist(**kwargs: object) -> None:
+        persist_calls.append(kwargs)
+
+    with patch.object(
+        session_service_module,
+        "persist_partial_question_answer",
+        tracking_persist,
+    ):
+        from eneo.assistants.assistant_service import AssistantService
+
+        gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+            svc,  # pyright: ignore[reportArgumentType]
+            response=response,
+            datastore_result=SimpleNamespace(info_blobs=[], no_duplicate_chunks=[]),
+            question="Vad är klockan?",
+            files=[],
+            completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+            session=_make_session_in_db(),
+            stream=True,
+            assistant_id=uuid4(),
+            question_id=uuid4(),
+            **_skill_runtime_args(),
+        )
+        if aborted:
+            await _drain_until(gen, 3)
+            await gen.aclose()
+            await asyncio.sleep(0)
+        else:
+            async for _ in gen:
+                pass
+
+    if aborted:
+        assert [call["answer"] for call in persist_calls] == [expected_answer]
+    else:
+        persisted = session_service_mock.complete_question_with_answer.call_args
+        assert persisted.kwargs["answer"] == expected_answer
+
+
 # ----- _schedule_background_save strong-ref invariant -----------------------
 
 

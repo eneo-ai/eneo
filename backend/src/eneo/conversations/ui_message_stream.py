@@ -272,12 +272,19 @@ async def _ui_message_chunks(
             if reasoning_open and reasoning_id is not None:
                 yield {"type": "reasoning-end", "id": reasoning_id}
                 reasoning_open = False
-            if text_id is None:
-                text_id = f"text-{text_index}"
-                text_index += 1
-                yield {"type": "text-start", "id": text_id}
-            if completion.text:
-                yield {"type": "text-delta", "id": text_id, "delta": completion.text}
+            delta = completion.text or ""
+            if text_id is None and text_index > 0:
+                # Text parts render as separate blocks, so the part boundary
+                # already divides this text from the previous part; the
+                # paragraph break that starts a later model round's text
+                # would only add a blank line.
+                delta = delta.lstrip("\n")
+            if delta:
+                if text_id is None:
+                    text_id = f"text-{text_index}"
+                    text_index += 1
+                    yield {"type": "text-start", "id": text_id}
+                yield {"type": "text-delta", "id": text_id, "delta": delta}
             for blob in completion.reference_chunks or []:
                 chunk_dict = _source_document_chunk(blob)
                 if chunk_dict["sourceId"] not in seen_source_ids:

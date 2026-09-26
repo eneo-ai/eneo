@@ -311,6 +311,64 @@ async def test_reasoning_can_resume_after_text():
     ]
 
 
+def _text_parts(chunks: list[dict]) -> dict[str, str]:
+    parts: dict[str, str] = {}
+    for chunk in chunks:
+        if chunk["type"] == "text-delta":
+            parts[chunk["id"]] = parts.get(chunk["id"], "") + chunk["delta"]
+    return parts
+
+
+@pytest.mark.asyncio
+async def test_round_break_stays_in_a_continuing_part_but_never_starts_one():
+    # The adapter opens a later model round's text with a paragraph break.
+    completions = [
+        Completion(response_type=ResponseType.TEXT, text="Checking."),
+        Completion(
+            response_type=ResponseType.TOOL_CALL,
+            tool_calls_metadata=[_tool(status="succeeded")],
+        ),
+        Completion(response_type=ResponseType.TEXT, text="\n\nFound it."),
+        Completion(response_type=ResponseType.REASONING, reasoning_content="Again"),
+        Completion(response_type=ResponseType.TEXT, text="\n\nAnswer"),
+    ]
+
+    chunks = await _collect(_response(completions))
+
+    assert _text_parts(chunks) == {
+        "text-0": "Checking.\n\nFound it.",
+        "text-1": "Answer",
+    }
+
+
+@pytest.mark.asyncio
+async def test_later_text_part_opens_at_its_first_text():
+    completions = [
+        Completion(response_type=ResponseType.TEXT, text="First"),
+        Completion(response_type=ResponseType.REASONING, reasoning_content="Hmm"),
+        Completion(response_type=ResponseType.TEXT, text="\n"),
+        Completion(response_type=ResponseType.TEXT, text="\nSecond"),
+    ]
+
+    chunks = await _collect(_response(completions))
+
+    assert [chunk["type"] for chunk in chunks] == [
+        "start",
+        "data-session",
+        "text-start",
+        "text-delta",
+        "text-end",
+        "reasoning-start",
+        "reasoning-delta",
+        "reasoning-end",
+        "text-start",
+        "text-delta",
+        "text-end",
+        "finish",
+    ]
+    assert _text_parts(chunks) == {"text-0": "First", "text-1": "Second"}
+
+
 @pytest.mark.asyncio
 async def test_tool_calls_and_approval_pause_resume():
     completions = [
