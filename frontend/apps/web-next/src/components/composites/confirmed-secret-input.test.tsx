@@ -114,6 +114,30 @@ describe("ConfirmedSecretInput", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("lets another element describe both fields, such as a policy checklist", () => {
+    renderInApp(
+      <>
+        <p id="rules">Minst 12 tecken</p>
+        <ConfirmedSecretInput
+          label="Nytt lösenord"
+          confirmLabel="Bekräfta lösenord"
+          value=""
+          confirmation=""
+          onValueChange={() => {}}
+          onConfirmationChange={() => {}}
+          mismatchMessage="Lösenorden matchar inte."
+          describedBy="rules"
+        />
+      </>
+    );
+
+    for (const name of [/^Nytt lösenord/, /^Bekräfta lösenord/]) {
+      expect(screen.getByLabelText(name).getAttribute("aria-describedby")?.split(" ")).toContain(
+        "rules"
+      );
+    }
+  });
+
   it("asks for the confirmation of an optional secret once one is typed", () => {
     renderInApp(<Harness isRequired={false} showErrors />);
     expect(key().getAttribute("aria-required")).toBeNull();

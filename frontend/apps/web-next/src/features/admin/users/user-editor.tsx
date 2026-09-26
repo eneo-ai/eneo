@@ -18,11 +18,8 @@ import {
   DialogTitle
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import {
-  newPasswordErrors,
-  passwordPolicyQueryOptions,
-  policyRequirements
-} from "@/features/auth/password-policy";
+import { newPasswordErrors, passwordPolicyQueryOptions } from "@/features/auth/password-policy";
+import { PasswordPolicyChecklist } from "@/features/auth/password-policy-checklist";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -88,6 +85,7 @@ function UserEditorForm({ user, onDone }: { user?: AdminUser; onDone: () => void
   const t = useTranslations();
   const queryClient = useQueryClient();
   const formId = useId();
+  const checklistId = useId();
   const mode = user ? "update" : "create";
   const policyQuery = useQuery(passwordPolicyQueryOptions(browserApi));
   const policy = policyQuery.data ?? null;
@@ -268,31 +266,36 @@ function UserEditorForm({ user, onDone }: { user?: AdminUser; onDone: () => void
             />
           </div>
         ) : (
-          <ConfirmedSecretInput
-            label={t("password")}
-            confirmLabel={t("confirm_password")}
-            description={
-              mode === "update"
-                ? `${t("admin_password_optional_hint")} ${policyRequirements(t, policy)}`
-                : policyRequirements(t, policy)
-            }
-            value={password}
-            confirmation={passwordConfirmation}
-            onValueChange={(value) => {
-              setPassword(value);
-              setRefused(undefined);
-            }}
-            onConfirmationChange={setPasswordConfirmation}
-            isRequired={mode === "create"}
-            // Someone else's password: never the admin's own, and a password
-            // manager may offer a generated one.
-            autoComplete="new-password"
-            valueError={submitted ? errors.password : refused}
-            mismatchMessage={errors.confirmation ?? t("change_password_mismatch")}
-            showErrors={submitted}
-            valueRef={passwordRef}
-            confirmationRef={confirmationRef}
-          />
+          <>
+            <PasswordPolicyChecklist
+              id={checklistId}
+              password={password}
+              confirmation={passwordConfirmation}
+              policy={policy}
+            />
+            <ConfirmedSecretInput
+              label={t("password")}
+              confirmLabel={t("confirm_password")}
+              description={mode === "update" ? t("admin_password_optional_hint") : undefined}
+              describedBy={checklistId}
+              value={password}
+              confirmation={passwordConfirmation}
+              onValueChange={(value) => {
+                setPassword(value);
+                setRefused(undefined);
+              }}
+              onConfirmationChange={setPasswordConfirmation}
+              isRequired={mode === "create"}
+              // Someone else's password: never the admin's own, and a password
+              // manager may offer a generated one.
+              autoComplete="new-password"
+              valueError={submitted ? errors.password : refused}
+              mismatchMessage={errors.confirmation ?? t("change_password_mismatch")}
+              showErrors={submitted}
+              valueRef={passwordRef}
+              confirmationRef={confirmationRef}
+            />
+          </>
         )}
 
         <RolePicker

@@ -5,7 +5,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { useMutation } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { ConfirmedSecretInput } from "@/components/composites/confirmed-secret-input";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
@@ -17,9 +17,9 @@ import { toast } from "@/lib/toast";
 import {
   newPasswordErrors,
   passwordCapability,
-  type PasswordPolicy,
-  policyRequirements
+  type PasswordPolicy
 } from "@/features/auth/password-policy";
+import { PasswordPolicyChecklist } from "@/features/auth/password-policy-checklist";
 
 type Field = "current" | "next" | "confirm";
 
@@ -36,6 +36,7 @@ function ChangePasswordForm({ policy, email }: { policy: PasswordPolicy; email: 
   const currentRef = useRef<HTMLInputElement>(null);
   const nextRef = useRef<HTMLInputElement>(null);
   const confirmRef = useRef<HTMLInputElement>(null);
+  const checklistId = useId();
   const focusField = (field: Field) =>
     ({ current: currentRef, next: nextRef, confirm: confirmRef })[field].current?.focus();
 
@@ -137,10 +138,16 @@ function ChangePasswordForm({ policy, email }: { policy: PasswordPolicy; email: 
         isRequired
         status={currentError ? { type: "error", message: currentError } : undefined}
       />
+      <PasswordPolicyChecklist
+        id={checklistId}
+        password={next}
+        confirmation={confirm}
+        policy={policy}
+      />
       <ConfirmedSecretInput
         label={t("new_password")}
         confirmLabel={t("confirm_password")}
-        description={policyRequirements(t, policy)}
+        describedBy={checklistId}
         value={next}
         confirmation={confirm}
         onValueChange={(value) => {

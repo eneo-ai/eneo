@@ -66,12 +66,14 @@ const submit = (dialog: HTMLElement) =>
       .getByRole("button", { name: /^(Skapa användare|Spara ändringar)$/ })
       .closest("form")!
   );
-/** The field's error, read from the text its aria-describedby points at. */
+/** The field's error: the Astryx status message its aria-describedby names. */
 const errorOf = (input: HTMLInputElement) =>
   input.getAttribute("aria-invalid") === "true"
     ? (input.getAttribute("aria-describedby") ?? "")
         .split(" ")
-        .map((id) => document.getElementById(id)?.textContent ?? "")
+        .map((id) => document.getElementById(id))
+        .filter((element) => element?.closest(".astryx-field-status"))
+        .map((element) => element?.textContent ?? "")
         .join(" ")
     : null;
 
@@ -86,9 +88,23 @@ describe("UserEditorDialog", () => {
       expect(input.getAttribute("autocomplete")).toBe("new-password");
       expect(input.getAttribute("aria-required")).toBe("true");
     }
-    // The policy's rules, not a length of its own (WCAG 3.3.2).
-    const rules = within(dialog).getByText("Använd minst 12 tecken. Inkludera en siffra 0–9.");
-    expect(field(dialog, /^Lösenord/).getAttribute("aria-describedby")).toContain(rules.id);
+    // The policy's rules, not a length of its own (WCAG 3.3.2), before the
+    // fields and read with them.
+    const checklist = within(dialog).getByText(
+      "Det nya lösenordet måste uppfylla följande krav:"
+    ).parentElement!;
+    expect(
+      within(checklist)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent)
+    ).toEqual([
+      "Använd minst 12 tecken – Inte uppfyllt ännu",
+      "Inkludera en siffra 0–9 – Inte uppfyllt ännu",
+      "Lösenorden matchar – Inte uppfyllt ännu"
+    ]);
+    for (const input of [field(dialog, /^Lösenord/), field(dialog, /^Bekräfta lösenord/)]) {
+      expect(input.getAttribute("aria-describedby")?.split(" ")).toContain(checklist.id);
+    }
     expect(api.GET).toHaveBeenCalledWith("/api/v1/users/password-policy/");
     await expectNoAxeViolations(document.body);
   });
@@ -196,11 +212,10 @@ describe("UserEditorDialog", () => {
     const password = field(dialog, /^Lösenord/);
 
     expect(password.getAttribute("aria-required")).toBeNull();
-    expect(
-      within(dialog).getByText(
-        /^Lämna båda fälten tomma för att behålla lösenordet\. .*Använd minst 12 tecken\./
-      )
-    ).toBeTruthy();
+    const hint = within(dialog).getByText(
+      "Lämna båda fälten tomma för att behålla lösenordet. För att byta anger du ett nytt lösenord i båda fälten. Nuvarande lösenord behövs inte."
+    );
+    expect(password.getAttribute("aria-describedby")?.split(" ")).toContain(hint.id);
 
     // A new password needs its confirmation…
     type(dialog, /^Lösenord/, "vinterlovet-2026");

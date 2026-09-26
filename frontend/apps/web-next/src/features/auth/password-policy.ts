@@ -132,15 +132,6 @@ export function policyRuleText(t: Translate, rule: PolicyRule, policy: PasswordP
   }
 }
 
-/** The rules a new password must meet, as sentences for a field's description. */
-export function policyRequirements(t: Translate, policy: PasswordPolicy): string {
-  // bcrypt's byte limit is left out, as in SvelteKit: it is checked on save.
-  return policyChecks("", policy)
-    .filter(({ rule }) => rule !== "max_bytes")
-    .map(({ rule }) => `${policyRuleText(t, rule, policy)}.`)
-    .join(" ");
-}
-
 /**
  * What is wrong with a new password and its confirmation, in words for each
  * field. `required`: a password must be set (a new account, one's own change);

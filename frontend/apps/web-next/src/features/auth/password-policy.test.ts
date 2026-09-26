@@ -6,8 +6,7 @@ import {
   newPasswordErrors,
   passwordCapability,
   type PasswordPolicy,
-  policyChecks,
-  policyRequirements
+  policyChecks
 } from "./password-policy";
 
 const localPolicy = {
@@ -92,12 +91,6 @@ describe("policyChecks", () => {
 const t = createTranslator({ locale: "sv", messages: sv as Record<string, string> });
 
 describe("the words the forms use", () => {
-  it("lists the rules a new password must meet, without bcrypt's byte limit", () => {
-    expect(policyRequirements(t, policy)).toBe(
-      "Använd minst 12 tecken. Inkludera en stor bokstav A–Z. Inkludera en siffra 0–9."
-    );
-  });
-
   it("says what is wrong with a new password and its confirmation", () => {
     const errors = (password: string, confirmation: string, required = true) =>
       newPasswordErrors(t, { password, confirmation, policy, required });
