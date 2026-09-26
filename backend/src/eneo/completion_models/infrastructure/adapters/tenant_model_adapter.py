@@ -986,27 +986,26 @@ class TenantModelAdapter(CompletionModelAdapter):
         eneo_tools: list[dict[str, Any]],
         tool_names: list[str],
         litellm_kwargs: dict[str, Any],
-        allowed_tools: set[str],
         skill_runtime: SkillActivationRuntime | None = None,
-    ) -> set[str]:
-        """Re-list MCP tools after a tool round; update the advertised set if changed.
+    ) -> None:
+        """Re-list MCP tools after a tool round; re-advertise them if changed.
 
         Progressive-discovery MCP servers reveal tools lazily: a tool such as
         ``load_tools`` activates new tools and the server emits
         ``notifications/tools/list_changed``. Without re-listing, the model never
         sees the activated tools and loops calling the activator. When the tool
         set changed, rewrite ``litellm_kwargs["tools"]`` (consumed by the
-        follow-up request) and return a refreshed allow-list; otherwise return
-        the current allow-list unchanged.
+        follow-up request). The proxy's allow-list follows the refreshed set, so
+        both tool loops validate each round against ``get_allowed_tool_names()``.
         """
         try:
             tools_changed = await mcp_proxy.refresh_tools(touched_tool_names=tool_names)
         except Exception as exc:
             logger.warning(f"[MCP] Tool refresh failed: {exc}")
-            return allowed_tools
+            return
 
         if not tools_changed:
-            return allowed_tools
+            return
 
         refreshed_tools = self._merge_mcp_tools(
             eneo_tools,
@@ -1015,7 +1014,6 @@ class TenantModelAdapter(CompletionModelAdapter):
         )
         if refreshed_tools:
             litellm_kwargs["tools"] = refreshed_tools
-        return mcp_proxy.get_allowed_tool_names()
 
     def _create_messages_from_context(self, context: "Context") -> list[dict[str, Any]]:
         """
@@ -1516,6 +1514,15 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 meta=result.get("meta") or None,
                             )
                         )
+                    if external_calls:
+                        assert mcp_proxy is not None
+                        await self._refresh_mcp_tools_after_round(
+                            mcp_proxy=mcp_proxy,
+                            eneo_tools=provider_input.built_in_tools,
+                            tool_names=[call.name for call in external_calls],
+                            litellm_kwargs=litellm_kwargs,
+                            skill_runtime=skill_runtime,
+                        )
                     if not await _follow_up_completion():
                         break
 
@@ -1709,11 +1716,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                     tool_calls_metadata=always_active_metadata,
                 )
             mcp_tools_active = bool(mcp_proxy and prepared and prepared.has_tools)
-            pending_allowed_tools: set[str] = (
-                mcp_proxy.get_allowed_tool_names()
-                if mcp_proxy is not None and mcp_tools_active
-                else set()
-            )
+
+            def _allowed_tool_names() -> set[str]:
+                # Read live: a refresh after a tool round can activate tools.
+                return mcp_proxy.get_allowed_tool_names() if mcp_proxy else set()
 
             def _resolve_tool_names(name: str) -> tuple[str, str, str | None]:
                 info = mcp_proxy.get_tool_info(name) if mcp_proxy else None
@@ -1862,7 +1868,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 if (
                                     not call_id
                                     or not name
-                                    or name not in pending_allowed_tools
+                                    or name not in _allowed_tool_names()
                                 ):
                                     continue
                                 server_name, tool_name, title = _resolve_tool_names(
@@ -1982,11 +1988,6 @@ class TenantModelAdapter(CompletionModelAdapter):
                 messages = prepared.messages
                 litellm_kwargs = prepared.kwargs
                 eneo_tools: list[dict[str, Any]] = prepared.eneo_tools
-                allowed_tools: set[str] = (
-                    mcp_proxy.get_allowed_tool_names()
-                    if mcp_proxy is not None
-                    else set()
-                )
 
                 max_rounds = self.MAX_TOOL_ROUNDS
                 tool_round = 0
@@ -2105,6 +2106,7 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                     # Security validation
                     assert mcp_proxy is not None
+                    allowed_tools = _allowed_tool_names()
                     for tc in tool_calls:
                         name = tc["function"]["name"]
                         if name not in allowed_tools:
@@ -2457,15 +2459,13 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                     # Re-fetch tools in case a tool we just ran (e.g. load_tools
                     # on a progressive-discovery server) activated new tools via
-                    # notifications/tools/list_changed. Updates the advertised
-                    # tools on litellm_kwargs (consumed by the follow-up below)
-                    # and returns a fresh allow-list for next round's validation.
-                    allowed_tools = await self._refresh_mcp_tools_after_round(
+                    # notifications/tools/list_changed; the follow-up below then
+                    # advertises them.
+                    await self._refresh_mcp_tools_after_round(
                         mcp_proxy=mcp_proxy,
                         eneo_tools=eneo_tools,
                         tool_names=[tc["function"]["name"] for tc in tool_calls],
                         litellm_kwargs=litellm_kwargs,
-                        allowed_tools=allowed_tools,
                         skill_runtime=skill_runtime,
                     )
 

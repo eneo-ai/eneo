@@ -110,10 +110,10 @@ def _response(
     return SimpleNamespace(choices=[choice], usage=None)
 
 
-def _response_tool_call(tool_call_id: str, arguments: str):
+def _response_tool_call(tool_call_id: str, arguments: str, name: str = "server__tool"):
     return SimpleNamespace(
         id=tool_call_id,
-        function=SimpleNamespace(name="server__tool", arguments=arguments),
+        function=SimpleNamespace(name=name, arguments=arguments),
     )
 
 
@@ -143,6 +143,38 @@ class _FakeMCPProxy:
         # A static tool set: re-listing after a round never changes it.
         self.refreshed.append(touched_tool_names)
         return False
+
+
+class _ProgressiveMCPProxy(_FakeMCPProxy):
+    """A progressive-discovery server: calling its loader activates a tool."""
+
+    def __init__(self):
+        super().__init__()
+        self.tools = {"server__load_tools"}
+
+    def get_allowed_tool_names(self):
+        return set(self.tools)
+
+    def get_tools_for_llm(self):
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": name,
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+            for name in sorted(self.tools)
+        ]
+
+    async def refresh_tools(self, touched_tool_names: list[str] | None = None) -> bool:
+        self.refreshed.append(touched_tool_names)
+        if "server__load_tools" not in (touched_tool_names or []):
+            return False
+        before = set(self.tools)
+        self.tools.add("server__search")
+        return self.tools != before
 
 
 class _ResourceMCPProxy(_FakeMCPProxy):
@@ -1471,6 +1503,104 @@ async def test_iterate_stream_refreshes_tools_after_each_tool_round():
         )
 
     assert mcp_proxy.refreshed == [["server__tool"], ["server__tool"]]
+
+
+def _advertised_tools(completion_call) -> list[set[str]]:
+    return [
+        {tool["function"]["name"] for tool in call.kwargs.get("tools", [])}
+        for call in completion_call.await_args_list
+    ]
+
+
+async def test_non_streaming_refreshes_tools_after_each_tool_round():
+    adapter = _make_completion_adapter()
+    del adapter._merge_mcp_tools  # the real merge builds the advertised tools
+    adapter.model.supports_tool_calling = True
+    mcp_proxy = _ProgressiveMCPProxy()
+    responses = [
+        _response(
+            tool_calls=[_response_tool_call("call_1", "{}", name="server__load_tools")],
+            finish_reason="tool_calls",
+        ),
+        _response(
+            tool_calls=[
+                _response_tool_call("call_2", '{"q":"x"}', name="server__search")
+            ],
+            finish_reason="tool_calls",
+        ),
+        _response(content="Found it."),
+    ]
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=responses),
+    ) as completion_call:
+        completion = await adapter.get_response(
+            context=SimpleNamespace(), model_kwargs={}, mcp_proxy=mcp_proxy
+        )
+
+    loaded = {"server__load_tools", "server__search"}
+    assert _advertised_tools(completion_call) == [
+        {"server__load_tools"},
+        loaded,
+        loaded,
+    ]
+    assert mcp_proxy.calls == [
+        [("server__load_tools", {})],
+        [("server__search", {"q": "x"})],
+    ]
+    assert completion.text == "Found it."
+
+
+async def test_iterate_stream_announces_tools_activated_by_a_refresh():
+    adapter = _make_adapter()
+    adapter.model.supports_tool_calling = True
+    mcp_proxy = _ProgressiveMCPProxy()
+    stream = _AsyncChunkStream(
+        [
+            _tool_call_chunk(
+                tool_call_id="call_1", tool_name="server__load_tools", arguments="{}"
+            )
+        ],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+    follow_ups = [
+        _AsyncChunkStream(
+            [_tool_call_chunk(tool_call_id="call_2", tool_name="server__search")]
+        ),
+        _AsyncChunkStream([_text_chunk("Found it.", finish_reason="stop")]),
+    ]
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=follow_ups),
+    ) as completion_call:
+        completions = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    loaded = {"server__load_tools", "server__search"}
+    assert _advertised_tools(completion_call) == [loaded, loaded]
+    assert [
+        metadata.tool_call_id
+        for event in _tool_call_events(completions)
+        for metadata in event.tool_calls_metadata
+        if metadata.result_status == "pending"
+    ] == ["call_1", "call_2"]
+    assert mcp_proxy.calls == [
+        [("server__load_tools", {})],
+        [("server__search", {"q": "x"})],
+    ]
 
 
 def _streamed_texts(completions) -> list[str]:
