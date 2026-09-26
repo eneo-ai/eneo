@@ -49,5 +49,8 @@ async def test_scope_revoker_updates_and_audits():
         repo.update.call_args.kwargs["revoked_reason_code"]
         == ApiKeyStateReasonCode.SCOPE_REMOVED.value
     )
-    audit.log_async.assert_awaited()
-    assert audit.log_async.call_args.kwargs["action"] == ActionType.API_KEY_REVOKED
+    # Written in the caller's transaction, never queued outside it.
+    audit.log_async.assert_not_awaited()
+    audit.log.assert_awaited_once()
+    assert audit.log.call_args.kwargs["action"] == ActionType.API_KEY_REVOKED
+    assert audit.log.call_args.kwargs["user"] is user

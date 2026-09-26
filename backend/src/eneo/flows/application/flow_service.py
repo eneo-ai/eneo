@@ -260,14 +260,34 @@ class FlowService:
                 "metadata_json": next_metadata,
             },
         )
-        return await self.flow_repo.update(
+        persisted = await self.flow_repo.update(
             flow=updated,
             tenant_id=self.user.tenant_id,
             expected_revision=expected_revision,
         )
+        # A flow-managed assistant goes with its last step. Flow edit access
+        # authorizes the deletion: the flow owns the assistant.
+        unreferenced_ids = {step.assistant_id for step in existing.steps} - {
+            step.assistant_id for step in persisted_steps
+        }
+        if unreferenced_ids:
+            await self.assistant_service.delete_flow_managed_assistants(
+                flow_id=flow_id,
+                assistant_ids=await self.flow_repo.orphaned_flow_managed_assistant_ids(
+                    flow_id=flow_id,
+                    tenant_id=self.user.tenant_id,
+                    assistant_ids=unreferenced_ids,
+                ),
+            )
+        return persisted
 
     async def delete_flow(self, flow_id: UUID) -> None:
-        await self.flow_repo.delete(flow_id=flow_id, tenant_id=self.user.tenant_id)
+        await self.assistant_service.delete_flow_managed_assistants(
+            flow_id=flow_id,
+            assistant_ids=await self.flow_repo.delete(
+                flow_id=flow_id, tenant_id=self.user.tenant_id
+            ),
+        )
 
     async def create_flow_assistant(
         self,
@@ -358,7 +378,9 @@ class FlowService:
         self._ensure_flow_is_mutable(flow)
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
         self._assert_flow_assistant_owned_by_flow(flow=flow, assistant=assistant)
-        await self.assistant_service.delete_assistant(assistant_id)
+        await self.assistant_service.delete_flow_managed_assistants(
+            flow_id=flow_id, assistant_ids={assistant_id}
+        )
 
     async def unpublish_flow(self, *, flow_id: UUID) -> Flow:
         flow = await self.get_flow(flow_id)

@@ -537,7 +537,7 @@ class AppService:
         await self.repo.delete(app_id)
 
         if icon_id:
-            await self.icon_repo.delete(icon_id)
+            await self.icon_repo.delete_unused(icon_id, tenant_id=self.user.tenant_id)
 
     async def _get_runnable_app(self, app_id: UUID) -> App:
         space = await self.space_repo.get_space_by_app(app_id=app_id)

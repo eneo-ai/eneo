@@ -884,7 +884,11 @@ class FlowRepository:
 
         return await self.get(flow_id, tenant_id)
 
-    async def delete(self, flow_id: UUID, tenant_id: UUID) -> None:
+    async def delete(self, flow_id: UUID, tenant_id: UUID) -> frozenset[UUID]:
+        """Soft-delete the flow; return the flow-managed assistants to delete.
+
+        A flow with runs keeps its steps and assistants, so it returns none.
+        """
         stmt = (
             sa.update(Flows)
             .where(Flows.id == flow_id)
@@ -906,19 +910,15 @@ class FlowRepository:
             )
         )
         if has_runs:
-            return
+            return frozenset()
 
         await self.session.execute(
             sa.delete(FlowSteps)
             .where(FlowSteps.flow_id == flow_id)
             .where(FlowSteps.tenant_id == tenant_id)
         )
-        await self.session.execute(
-            sa.delete(Assistants)
-            .where(getattr(Assistants, "origin") == "flow_managed")
-            .where(getattr(Assistants, "managing_flow_id") == flow_id)
-            .where(self._managed_assistant_belongs_to_tenant(tenant_id=tenant_id))
-            .where(self._managed_assistant_has_no_step_references(tenant_id=tenant_id))
+        return await self.orphaned_flow_managed_assistant_ids(
+            flow_id=flow_id, tenant_id=tenant_id
         )
 
     async def get_step_result(
@@ -961,7 +961,6 @@ class FlowRepository:
         existing_by_id = {row.id: row for row in existing_rows}
         incoming_ids = {step.id for step in steps if step.id is not None}
 
-        cleanup_candidates: set[UUID] = set()
         retained_steps: list[tuple[FlowStep, FlowSteps]] = []
         new_steps: list[FlowStep] = []
         for step in steps:
@@ -976,8 +975,6 @@ class FlowRepository:
                     "Flow update references an unknown draft step id.",
                     code="unknown_step_id",
                 )
-            if existing.assistant_id != step.assistant_id:
-                cleanup_candidates.add(existing.assistant_id)
             retained_steps.append((step, existing))
 
         changed_order_rows = [
@@ -1009,9 +1006,6 @@ class FlowRepository:
 
         stale_id_set = {row.id for row in existing_rows if row.id not in incoming_ids}
         if stale_id_set:
-            cleanup_candidates.update(
-                row.assistant_id for row in existing_rows if row.id in stale_id_set
-            )
             await self.session.execute(
                 sa.delete(FlowSteps)
                 .where(FlowSteps.flow_id == flow_id)
@@ -1039,30 +1033,30 @@ class FlowRepository:
                 )
             )
 
-        await self._delete_orphan_flow_managed_assistants(
-            flow_id=flow_id,
-            tenant_id=tenant_id,
-            assistant_ids=cleanup_candidates,
-        )
-
-    async def _delete_orphan_flow_managed_assistants(
+    async def orphaned_flow_managed_assistant_ids(
         self,
         *,
         flow_id: UUID,
         tenant_id: UUID,
-        assistant_ids: set[UUID],
-    ) -> None:
-        if not assistant_ids:
-            return
+        assistant_ids: Collection[UUID] | None = None,
+    ) -> frozenset[UUID]:
+        """Assistants ``flow_id`` manages that no step references.
 
-        await self.session.execute(
-            sa.delete(Assistants)
-            .where(Assistants.id.in_(assistant_ids))
-            .where(getattr(Assistants, "origin") == "flow_managed")
+        Only among ``assistant_ids`` when given, else every one the flow manages.
+        """
+        if assistant_ids is not None and not assistant_ids:
+            return frozenset()
+
+        query = sa.select(Assistants.id)
+        if assistant_ids is not None:
+            query = query.where(Assistants.id.in_(assistant_ids))
+        orphaned_ids = await self.session.scalars(
+            query.where(getattr(Assistants, "origin") == "flow_managed")
             .where(getattr(Assistants, "managing_flow_id") == flow_id)
             .where(self._managed_assistant_belongs_to_tenant(tenant_id=tenant_id))
             .where(self._managed_assistant_has_no_step_references(tenant_id=tenant_id))
         )
+        return frozenset(orphaned_ids)
 
     @staticmethod
     def _managed_assistant_belongs_to_tenant(

@@ -20,6 +20,7 @@ from eneo.flows.api.flow_models import (
     FlowAssistantUpdateRequest,
 )
 from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.container.container import Container
 from eneo.main.exceptions import ErrorCodes, UnauthorizedException
 from eneo.server.dependencies.container import get_container
@@ -305,11 +306,29 @@ async def update_flow_assistant(
     summary="Delete Flow Assistant",
     description=(
         "Delete a flow-managed assistant from the specified draft flow. The assistant id "
-        "must belong to this flow; deleting it removes the flow-owned assistant resource "
-        "and writes an audit event. Clients should remove or replace step references to "
-        "the assistant before publishing a draft that no longer has this assistant."
+        "must belong to this flow. Deleting it removes the assistant, revokes the API "
+        "keys scoped to it, deletes its icon when the icon is the tenant's own and "
+        "nothing else uses it, and writes an audit event. An assistant that a step of "
+        "the flow still uses cannot be deleted (400 `flow_managed_assistant`); remove "
+        "or replace that step first."
     ),
     responses={
+        400: error_response(
+            description=(
+                "A step of the flow still uses the assistant; remove or replace that "
+                "step first. A published flow is refused with 400 `bad_request`."
+            ),
+            message=(
+                "Only assistants the flow manages and no step uses can be deleted "
+                "with it."
+            ),
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            code=FlowApiErrorCode.FLOW_MANAGED_ASSISTANT,
+            context={
+                "flow_id": "00000000-0000-4000-8000-000000000001",
+                "assistant_ids": ["00000000-0000-4000-8000-000000000002"],
+            },
+        ),
         403: error_response(
             description="Caller lacks permission or API key scope to delete assistants for this flow.",
             message="API key space scope does not match requested flow.",

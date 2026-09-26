@@ -1065,14 +1065,12 @@ def test_apply_failure_log_uses_typed_apply_payload() -> None:
             steps_removed=0,
             assistants_to_create=1,
             assistants_to_update=2,
-            assistants_to_delete=0,
         ),
         materializer_progress=MaterializerProgressSnapshot(
             stage="flow_updated",
             assistants_created=1,
             assistants_configured=1,
             assistants_updated=2,
-            assistants_deleted=0,
             flow_created=False,
             flow_updated=True,
         ),
@@ -1100,14 +1098,12 @@ def test_apply_failure_log_uses_typed_apply_payload() -> None:
             "steps_removed": 0,
             "assistants_to_create": 1,
             "assistants_to_update": 2,
-            "assistants_to_delete": 0,
         },
         "materializer_progress": {
             "stage": "flow_updated",
             "assistants_created": 1,
             "assistants_configured": 1,
             "assistants_updated": 2,
-            "assistants_deleted": 0,
             "flow_created": False,
             "flow_updated": True,
         },
@@ -1125,7 +1121,6 @@ def test_changeset_count_summary_maps_preview_counts_to_log_projection() -> None
         steps_removed=3,
         assistants_to_create=4,
         assistants_to_update=5,
-        assistants_to_delete=6,
         resource_bindings_count=7,
         step_changes=(),
     )
@@ -1138,7 +1133,6 @@ def test_changeset_count_summary_maps_preview_counts_to_log_projection() -> None
         "steps_removed": 3,
         "assistants_to_create": 4,
         "assistants_to_update": 5,
-        "assistants_to_delete": 6,
     }
 
 

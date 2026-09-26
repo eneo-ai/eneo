@@ -120,7 +120,7 @@ class GroupChatService:
         await self.space_repo.update(space=space)
 
         if icon_id:
-            await self.icon_repo.delete(icon_id)
+            await self.icon_repo.delete_unused(icon_id, tenant_id=self.user.tenant_id)
 
     async def update_group_chat(
         self,

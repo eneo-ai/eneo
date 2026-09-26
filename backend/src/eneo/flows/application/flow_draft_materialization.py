@@ -67,10 +67,6 @@ def _default_assistants_to_update() -> list[FlowDraftAssistantToUpdate]:
     return []
 
 
-def _default_assistants_to_delete() -> list[FlowDraftAssistantToDelete]:
-    return []
-
-
 def _default_compiled_steps() -> list[FlowDraftCompiledStep]:
     return []
 
@@ -85,12 +81,6 @@ class FlowDraftAssistantToUpdate(BaseModel):
     existing_step_id: UUID | None = None
     existing_assistant_id: UUID | None = None
     assistant_spec: AssistantSpec
-
-
-class FlowDraftAssistantToDelete(BaseModel):
-    existing_step_ref: str | None = None
-    step_id: UUID | None = None
-    assistant_id: UUID | None = None
 
 
 class FlowDraftCompiledStep(BaseModel):
@@ -121,9 +111,9 @@ class FlowDraftChangeSet(BaseModel):
     assistants_to_update: list[FlowDraftAssistantToUpdate] = Field(
         default_factory=_default_assistants_to_update
     )
-    assistants_to_delete: list[FlowDraftAssistantToDelete] = Field(
-        default_factory=_default_assistants_to_delete
-    )
+    # The flow update deletes these steps, and with them every flow-managed
+    # assistant no remaining step references; the executor deletes nothing.
+    removed_existing_step_refs: frozenset[str] = Field(default_factory=frozenset)
     compiled_steps: list[FlowDraftCompiledStep] = Field(
         default_factory=_default_compiled_steps
     )
@@ -136,7 +126,6 @@ class FlowDraftMaterializationStage(str, enum.Enum):
     ASSISTANTS_CONFIGURED = "assistants_configured"
     ASSISTANTS_UPDATED = "assistants_updated"
     FLOW_UPDATED = "flow_updated"
-    ASSISTANTS_DELETED = "assistants_deleted"
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,7 +134,6 @@ class FlowDraftMaterializationProgress:
     assistants_created: int = 0
     assistants_configured: int = 0
     assistants_updated: int = 0
-    assistants_deleted: int = 0
     flow_created: bool = False
     flow_updated: bool = False
 
@@ -234,23 +222,12 @@ def compile_flow_draft_changeset(
             )
         )
 
-    assistants_to_delete: list[FlowDraftAssistantToDelete] = []
-    if current_flow:
-        for ref in sorted(removed_existing_step_refs):
-            existing_step = existing_by_ref[ref]
-            assistants_to_delete.append(
-                FlowDraftAssistantToDelete(
-                    step_id=existing_step.id,
-                    assistant_id=existing_step.assistant_id,
-                )
-            )
-
     return FlowDraftChangeSet(
         flow_name=spec.flow_name,
         flow_description=spec.flow_description,
         assistants_to_create=assistants_to_create,
         assistants_to_update=assistants_to_update,
-        assistants_to_delete=assistants_to_delete,
+        removed_existing_step_refs=removed_existing_step_refs,
         compiled_steps=compiled_steps,
         metadata_json=build_flow_draft_metadata_json(
             spec=spec,

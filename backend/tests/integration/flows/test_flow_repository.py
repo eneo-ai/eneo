@@ -604,7 +604,7 @@ async def test_flow_repository_soft_delete_hides_row(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_flow_update_deletes_orphaned_flow_managed_assistant(
+async def test_flow_update_reports_orphaned_flow_managed_assistant(
     db_container,
     completion_model_factory,
     space_factory,
@@ -664,14 +664,22 @@ async def test_flow_update_deletes_orphaned_flow_managed_assistant(
         )
         await repo.update(updated, tenant_id=admin_user.tenant_id)
 
-        deleted_assistant = await session.scalar(
-            sa.select(Assistants).where(Assistants.id == assistant_one.id)
+        orphaned_ids = await repo.orphaned_flow_managed_assistant_ids(
+            flow_id=created.id,
+            tenant_id=admin_user.tenant_id,
+            assistant_ids={assistant_one.id, assistant_two.id},
         )
-        remaining_assistant = await session.scalar(
-            sa.select(Assistants).where(Assistants.id == assistant_two.id)
+        # FlowService deletes what the repository reports, with every effect
+        # of assistant deletion; the repository itself deletes no assistant.
+        persisted_assistant_ids = set(
+            await session.scalars(
+                sa.select(Assistants.id).where(
+                    Assistants.id.in_([assistant_one.id, assistant_two.id])
+                )
+            )
         )
-        assert deleted_assistant is None
-        assert remaining_assistant is not None
+        assert orphaned_ids == {assistant_one.id}
+        assert persisted_assistant_ids == {assistant_one.id, assistant_two.id}
 
 
 @pytest.mark.asyncio
@@ -875,7 +883,7 @@ async def test_flow_repository_update_allows_transcribe_only_output_mode(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_flow_delete_cascades_owned_flow_managed_assistants(
+async def test_flow_delete_reports_owned_flow_managed_assistants(
     db_container,
     completion_model_factory,
     space_factory,
@@ -913,19 +921,18 @@ async def test_flow_delete_cascades_owned_flow_managed_assistants(
                 hidden=True,
             )
         )
-        await repo.delete(created.id, tenant_id=admin_user.tenant_id)
+        to_delete = await repo.delete(created.id, tenant_id=admin_user.tenant_id)
 
         step_count = await session.scalar(
             sa.select(sa.func.count())
             .select_from(FlowSteps)
             .where(FlowSteps.flow_id == created.id)
         )
-        assistant_row = await session.scalar(
-            sa.select(Assistants).where(Assistants.id == assistant.id)
-        )
 
+        # FlowService deletes the reported assistants with every effect of
+        # assistant deletion.
         assert step_count == 0
-        assert assistant_row is None
+        assert to_delete == {assistant.id}
 
 
 @pytest.mark.asyncio
@@ -993,19 +1000,16 @@ async def test_flow_delete_preserves_steps_and_flow_managed_assistant_when_runs_
         session.add(run_row)
         await session.flush()
 
-        await repo.delete(created.id, tenant_id=admin_user.tenant_id)
+        to_delete = await repo.delete(created.id, tenant_id=admin_user.tenant_id)
 
         step_count = await session.scalar(
             sa.select(sa.func.count())
             .select_from(FlowSteps)
             .where(FlowSteps.flow_id == created.id)
         )
-        assistant_row = await session.scalar(
-            sa.select(Assistants).where(Assistants.id == assistant.id)
-        )
 
         assert step_count == 1
-        assert assistant_row is not None
+        assert to_delete == frozenset()
 
 
 @pytest.mark.asyncio
@@ -1088,7 +1092,7 @@ async def test_flow_delete_keeps_shared_flow_managed_assistant_referenced_by_oth
             tenant_id=admin_user.tenant_id,
         )
 
-        await repo.delete(owner_flow.id, tenant_id=admin_user.tenant_id)
+        to_delete = await repo.delete(owner_flow.id, tenant_id=admin_user.tenant_id)
 
         shared_assistant_row = await session.scalar(
             sa.select(Assistants).where(Assistants.id == shared_assistant.id)
@@ -1099,6 +1103,7 @@ async def test_flow_delete_keeps_shared_flow_managed_assistant_referenced_by_oth
             .where(FlowSteps.flow_id == referencing_flow.id)
         )
 
+        assert to_delete == frozenset()
         assert shared_assistant_row is not None
         assert shared_assistant_row.managing_flow_id == owner_flow.id
         assert referencing_steps == 1

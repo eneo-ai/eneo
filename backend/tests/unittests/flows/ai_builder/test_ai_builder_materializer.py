@@ -19,9 +19,6 @@ from eneo.flows.application.flow_draft_materialization import (
     FlowDraftAssistantToCreate as AssistantToCreate,
 )
 from eneo.flows.application.flow_draft_materialization import (
-    FlowDraftAssistantToDelete as AssistantToDelete,
-)
-from eneo.flows.application.flow_draft_materialization import (
     FlowDraftAssistantToUpdate as AssistantToUpdate,
 )
 from eneo.flows.application.flow_draft_materialization import (
@@ -281,7 +278,7 @@ class TestCompileCreateFlow:
         assert changeset.flow_description == "A test flow"
         assert changeset.assistants_to_create == []
         assert changeset.assistants_to_update == []
-        assert changeset.assistants_to_delete == []
+        assert changeset.removed_existing_step_refs == frozenset()
         assert changeset.compiled_steps == []
 
     def test_single_step_creates_one_assistant(self) -> None:
@@ -639,9 +636,10 @@ class TestCompileEditFlow:
             current_flow=flow,
             removed_existing_step_refs=frozenset({"existing_step_2"}),
         )
-        assert len(changeset.assistants_to_delete) == 1
-        assert changeset.assistants_to_delete[0].step_id == step2.id
-        assert changeset.assistants_to_delete[0].assistant_id == step2.assistant_id
+        assert changeset.removed_existing_step_refs == frozenset({"existing_step_2"})
+        assert [step.assistant_id for step in changeset.compiled_steps] == [
+            step1.assistant_id
+        ]
 
     def test_mixed_add_modify_remove(self) -> None:
         """Complex scenario: modify one, add one, remove one."""
@@ -671,8 +669,7 @@ class TestCompileEditFlow:
         )
         assert len(changeset.assistants_to_create) == 1
         assert len(changeset.assistants_to_update) == 1
-        assert len(changeset.assistants_to_delete) == 1
-        assert changeset.assistants_to_delete[0].assistant_id == step2.assistant_id
+        assert changeset.removed_existing_step_refs == frozenset({"existing_step_2"})
         # Step orders should be sequential
         assert changeset.compiled_steps[0].step_order == 1
         assert changeset.compiled_steps[1].step_order == 2
@@ -1407,7 +1404,6 @@ class TestExecuteCreateFlow:
             assistants_created=2,
             assistants_configured=2,
             assistants_updated=0,
-            assistants_deleted=0,
             flow_created=True,
             flow_updated=True,
         )
@@ -1462,7 +1458,6 @@ class TestExecuteCreateFlow:
             assistants_created=1,
             assistants_configured=1,
             assistants_updated=0,
-            assistants_deleted=0,
             flow_created=True,
             flow_updated=False,
         )
@@ -1939,47 +1934,11 @@ class TestExecuteEditFlow:
         assert update_kwargs["assistant_id"] == assistant_id
 
     @pytest.mark.asyncio
-    async def test_delete_removed_assistants(self) -> None:
-        flow_id = uuid4()
-        space_id = uuid4()
-        deleted_assistant_id = uuid4()
-        deleted_step_id = uuid4()
-
-        mock_flow_service = AsyncMock()
-        updated_flow = _make_flow(flow_id=flow_id, space_id=space_id)
-        mock_flow_service.update_flow.return_value = updated_flow
-
-        changeset = FlowDraftChangeSet(
-            flow_name="Trimmed",
-            flow_description="",
-            assistants_to_delete=[
-                AssistantToDelete(
-                    step_id=deleted_step_id,
-                    assistant_id=deleted_assistant_id,
-                ),
-            ],
-            compiled_steps=[],
-        )
-
-        await execute_draft_materialization(
-            changeset=changeset,
-            flow_service=mock_flow_service,
-            space_id=space_id,
-            flow_id=flow_id,
-        )
-
-        mock_flow_service.delete_flow_assistant.assert_called_once_with(
-            flow_id=flow_id,
-            assistant_id=deleted_assistant_id,
-        )
-
-    @pytest.mark.asyncio
-    async def test_mixed_create_update_delete(self) -> None:
-        """Full scenario: create new, update existing, delete removed."""
+    async def test_mixed_create_update_remove(self) -> None:
+        """Full scenario: create new, update existing, remove a step."""
         flow_id = uuid4()
         space_id = uuid4()
         existing_assistant_id = uuid4()
-        deleted_assistant_id = uuid4()
         new_assistant_id = uuid4()
 
         mock_flow_service = AsyncMock()
@@ -2007,12 +1966,7 @@ class TestExecuteEditFlow:
                     assistant_spec=AssistantSpec(instructions="Updated"),
                 ),
             ],
-            assistants_to_delete=[
-                AssistantToDelete(
-                    step_id=uuid4(),
-                    assistant_id=deleted_assistant_id,
-                ),
-            ],
+            removed_existing_step_refs=frozenset({"existing_step_2"}),
             compiled_steps=[
                 _compiled_step(
                     plan_step_ref="step_a",
@@ -2036,10 +1990,8 @@ class TestExecuteEditFlow:
             flow_id=flow_id,
         )
 
-        # Verify all three operations happened
         assert mock_flow_service.create_flow_assistant.call_count == 1
         assert mock_flow_service.update_flow_assistant.call_count >= 1
-        assert mock_flow_service.delete_flow_assistant.call_count == 1
         assert result.steps_created == 1
         assert result.steps_updated == 1
         assert result.steps_removed == 1
@@ -2051,7 +2003,6 @@ class TestExecuteEditFlow:
         flow_id = uuid4()
         space_id = uuid4()
         assistant_id = uuid4()
-        deleted_assistant_id = uuid4()
         binding = _resource_binding()
 
         mock_flow_service = AsyncMock()
@@ -2074,12 +2025,7 @@ class TestExecuteEditFlow:
                     assistant_spec=AssistantSpec(instructions="New prompt"),
                 ),
             ],
-            assistants_to_delete=[
-                AssistantToDelete(
-                    step_id=uuid4(),
-                    assistant_id=deleted_assistant_id,
-                ),
-            ],
+            removed_existing_step_refs=frozenset({"existing_step_2"}),
             compiled_steps=[
                 _compiled_step(
                     plan_step_ref="step_a",
@@ -2101,7 +2047,6 @@ class TestExecuteEditFlow:
 
         mock_flow_service.update_flow.assert_awaited_once()
         mock_flow_service.delete_flow.assert_not_awaited()
-        mock_flow_service.delete_flow_assistant.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_no_model_ref_skips_model_update(self) -> None:
@@ -2317,10 +2262,9 @@ class TestExecuteResultCounting:
                     assistant_spec=AssistantSpec(instructions="y"),
                 ),
             ],
-            assistants_to_delete=[
-                AssistantToDelete(step_id=uuid4(), assistant_id=uuid4()),
-                AssistantToDelete(step_id=uuid4(), assistant_id=uuid4()),
-            ],
+            removed_existing_step_refs=frozenset(
+                {"existing_step_2", "existing_step_3"}
+            ),
             compiled_steps=[
                 _compiled_step(
                     plan_step_ref="mod",

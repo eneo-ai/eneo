@@ -119,7 +119,6 @@ def _make_authoring_preview(
     steps_removed: int = 0,
     assistants_to_create: int = 0,
     assistants_to_update: int = 0,
-    assistants_to_delete: int = 0,
 ) -> FlowAuthoringPreview:
     return FlowAuthoringPreview(
         kind="edit" if flow_id is not None else "create",
@@ -131,7 +130,6 @@ def _make_authoring_preview(
         steps_removed=steps_removed,
         assistants_to_create=assistants_to_create,
         assistants_to_update=assistants_to_update,
-        assistants_to_delete=assistants_to_delete,
         resource_bindings_count=0,
         step_changes=(),
     )
@@ -1788,7 +1786,6 @@ class TestAIBuilderPlanLifecycle:
             flow_description="Desc",
             assistants_to_create=[],
             assistants_to_update=[],
-            assistants_to_delete=[],
             compiled_steps=[],
         )
         authoring_service = _make_authoring_service(flow_id=flow_id)
@@ -1801,7 +1798,6 @@ class TestAIBuilderPlanLifecycle:
                 steps_removed=3,
                 assistants_to_create=4,
                 assistants_to_update=5,
-                assistants_to_delete=6,
             ),
         )
         progress = FlowDraftMaterializationProgress(
@@ -1809,7 +1805,6 @@ class TestAIBuilderPlanLifecycle:
             assistants_created=0,
             assistants_configured=0,
             assistants_updated=1,
-            assistants_deleted=0,
             flow_created=False,
             flow_updated=False,
         )
@@ -1841,7 +1836,6 @@ class TestAIBuilderPlanLifecycle:
             "steps_removed": 3,
             "assistants_to_create": 4,
             "assistants_to_update": 5,
-            "assistants_to_delete": 6,
         }
         assert mock_log_apply_failed.call_args.kwargs[
             "materializer_progress"
@@ -1850,7 +1844,6 @@ class TestAIBuilderPlanLifecycle:
             assistants_created=0,
             assistants_configured=0,
             assistants_updated=1,
-            assistants_deleted=0,
             flow_created=False,
             flow_updated=False,
         )

@@ -146,7 +146,7 @@ async def test_delete_space_rejects_flow_delete_blockers_before_side_effects(
     )
     service.api_key_scope_revoker.revoke_scope.assert_not_awaited()
     service.repo.delete.assert_not_awaited()
-    service.icon_repo.delete.assert_not_awaited()
+    service.icon_repo.delete_unused.assert_not_awaited()
 
 
 async def test_only_admins_can_add_members(service: SpaceService, actor: MagicMock):

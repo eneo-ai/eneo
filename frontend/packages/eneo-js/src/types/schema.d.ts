@@ -4501,7 +4501,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Flow Assistant
-     * @description Delete a flow-managed assistant from the specified draft flow. The assistant id must belong to this flow; deleting it removes the flow-owned assistant resource and writes an audit event. Clients should remove or replace step references to the assistant before publishing a draft that no longer has this assistant.
+     * @description Delete a flow-managed assistant from the specified draft flow. The assistant id must belong to this flow. Deleting it removes the assistant, revokes the API keys scoped to it, deletes its icon when the icon is the tenant's own and nothing else uses it, and writes an audit event. An assistant that a step of the flow still uses cannot be deleted (400 `flow_managed_assistant`); remove or replace that step first.
      */
     delete: operations["delete_flow_assistant"];
     options?: never;
@@ -16847,6 +16847,7 @@ export interface components {
       | "flow_review_history_too_large"
       | "flow_deleted"
       | "flow_owner_required"
+      | "flow_managed_assistant"
       | "flow_service_key_admin_required"
       | "flow_service_key_principal_not_supported"
       | "flow_service_key_space_id_required"
@@ -54155,6 +54156,28 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description A step of the flow still uses the assistant; remove or replace that step first. A published flow is refused with 400 `bad_request`. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_managed_assistant",
+           *       "context": {
+           *         "assistant_ids": [
+           *           "00000000-0000-4000-8000-000000000002"
+           *         ],
+           *         "flow_id": "00000000-0000-4000-8000-000000000001"
+           *       },
+           *       "eneo_error_code": 9007,
+           *       "message": "Only assistants the flow manages and no step uses can be deleted with it."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Caller lacks permission or API key scope to delete assistants for this flow. */
       403: {

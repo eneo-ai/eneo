@@ -4,11 +4,15 @@ from uuid import UUID
 import sqlalchemy as sa
 
 from eneo.database.database import AsyncSession
+from eneo.database.tables.app_table import Apps
+from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.icons_table import Icons
 from eneo.database.tables.object_content_table import (
     IconContentReferences,
     ObjectContents,
 )
+from eneo.database.tables.spaces_table import Spaces
 from eneo.icons.icon import IconMetadata, IconMetadataCreate
 from eneo.object_content.content import ContentAccessClass, ContentState
 from eneo.object_content.file_icon_cleanup import file_icon_legacy_is_cleaned
@@ -27,6 +31,16 @@ class IconContentReferenceRecord:
 class LegacyIconContentRecord:
     payload: bytes
     media_type: str
+
+
+# Every column through which a resource uses an icon. Icon content references
+# belong to the icon itself and go with it.
+ICON_USER_COLUMNS = (
+    Apps.icon_id,
+    Assistants.icon_id,
+    GroupChatsTable.icon_id,
+    Spaces.icon_id,
+)
 
 
 class IconRepository:
@@ -156,6 +170,17 @@ class IconRepository:
         ).scalar_one_or_none()
         return deleted_id is not None
 
-    async def delete(self, icon_id: UUID) -> None:
-        """Delete an icon after its owning aggregate has authorized removal."""
-        await self.session.execute(sa.delete(Icons).where(Icons.id == icon_id))
+    async def delete_unused(self, icon_id: UUID, *, tenant_id: UUID) -> None:
+        """Delete an icon of ``tenant_id`` that no resource uses any more.
+
+        A resource's icon_id can name any icon, including another tenant's or
+        one a space still shows, so removing the resource deletes the icon only
+        when it is the tenant's own and nothing else uses it.
+        """
+        await self.session.execute(
+            sa.delete(Icons)
+            .where(Icons.id == icon_id, Icons.tenant_id == tenant_id)
+            .where(
+                *(~sa.exists().where(column == icon_id) for column in ICON_USER_COLUMNS)
+            )
+        )

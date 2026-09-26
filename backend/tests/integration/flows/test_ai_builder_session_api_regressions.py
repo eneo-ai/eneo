@@ -36,6 +36,7 @@ from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.authentication.auth_models import ApiKeyState
 from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
@@ -50,6 +51,7 @@ from eneo.database.database import (
     sessionmanager,
 )
 from eneo.database.tables.ai_models_table import CompletionModels, TranscriptionModels
+from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.files_table import Files
@@ -169,6 +171,7 @@ from eneo.flows.flow_authoring_spec import (
 from eneo.flows.runtime.document_rendering.docx_content_controls import (
     append_text_control,
 )
+from eneo.icons.icon import IconMetadataCreate
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import ModelId
@@ -176,6 +179,7 @@ from eneo.prompts.api.prompt_models import PromptCreate
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
 from eneo.users.user import UserUpdate
+from tests.fixtures import mint_v2_api_key
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
@@ -8726,6 +8730,351 @@ async def test_ai_builder_api_edit_mode_invalid_existing_step_ref_returns_typed_
     payload = apply_response.json()
     assert payload["code"] == "invalid_existing_step_ref"
     assert payload["eneo_error_code"] == 9007
+
+
+async def _apply_approved_edit_plan(
+    *,
+    client,
+    bearer_token: str,
+    db_container,
+    session_id: str,
+    spec: FlowDraftSpecCore,
+    edit: FlowBuilderEditApproval,
+):
+    """Store an approved edit plan for the session and apply it over the API."""
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        builder_session = await repo.get_session(
+            session_id=UUID(session_id),
+            tenant_id=container.user().tenant_id,
+        )
+        plan = await repo.create_plan(
+            session_id=builder_session.id,
+            tenant_id=builder_session.tenant_id,
+            proposal=FlowBuilderProposal(
+                content=FlowBuilderProposalContent(spec=spec, edit=edit),
+            ),
+        )
+        await repo.update_plan_status(
+            plan_id=plan.id,
+            tenant_id=builder_session.tenant_id,
+            status=PlanStatus.APPROVED,
+        )
+        await repo.update_session_status_without_send_lease(
+            session_id=builder_session.id,
+            tenant_id=builder_session.tenant_id,
+            status=SessionStatus.AWAITING_APPROVAL,
+        )
+        await repo.update_session_latest_plan_without_send_lease(
+            session_id=builder_session.id,
+            tenant_id=builder_session.tenant_id,
+            plan_id=plan.id,
+        )
+        await repo.save_planning_state(
+            session_id=builder_session.id,
+            tenant_id=builder_session.tenant_id,
+            state=PlanningState.empty(),
+            base_version=None,
+        )
+
+    return await client.post(
+        f"/api/v1/flows/ai-builder/plans/{plan.id}/apply",
+        json={"expected_revision": edit.base_flow_revision},
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_ai_builder_api_edit_apply_removes_a_step_and_its_assistant(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder API edit remove step",
+    )
+    step_prompts = {
+        "Plocka ut fakta": "Plocka ut fakta ur texten.",
+        "Granska fakta": "Granska fakta mot texten.",
+        "Sammanfatta": "Sammanfatta fakta kort.",
+    }
+    async with db_container() as container:
+        flow_service = container.flow_service()
+        flow = await flow_service.create_flow(
+            space_id=UUID(space_id),
+            name="Faktasammanfattning",
+            description="Plockar ut, granskar och sammanfattar fakta.",
+            steps=[],
+        )
+        assistant_ids: list[UUID] = []
+        for step_name, prompt in step_prompts.items():
+            assistant, _ = await flow_service.create_flow_assistant(
+                flow_id=flow.id,
+                name=step_name,
+            )
+            await flow_service.update_flow_assistant(
+                flow_id=flow.id,
+                assistant_id=assistant.id,
+                update=AssistantUpdateCommand(prompt=PromptCreate(text=prompt)),
+            )
+            assistant_ids.append(assistant.id)
+        flow = await flow_service.update_flow(
+            flow_id=flow.id,
+            steps=[
+                _make_flow_step(
+                    assistant_id=assistant_id,
+                    step_order=order,
+                    user_description=step_name,
+                    input_source="flow_input" if order == 1 else "previous_step",
+                )
+                for order, (assistant_id, step_name) in enumerate(
+                    zip(assistant_ids, step_prompts, strict=True), start=1
+                )
+            ],
+        )
+        flow_id = flow.id
+        flow_revision = flow.draft_revision
+    first_assistant_id, _, last_assistant_id = assistant_ids
+
+    session_id = await _create_ai_builder_session(
+        client=client,
+        bearer_token=bearer_token,
+        space_id=space_id,
+        target_kind="edit",
+        flow_id=str(flow_id),
+    )
+
+    # The middle step is removed and the last one is rewired to read the
+    # first step's output.
+    spec = FlowDraftSpecCore(
+        flow_name="Faktasammanfattning",
+        flow_description="Plockar ut och sammanfattar fakta.",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                existing_step_ref="existing_step_1",
+                name="Plocka ut fakta",
+                assistant_spec=AssistantSpec(instructions="Plocka ut fakta ur texten."),
+                input_source=InputSource.FLOW_INPUT,
+            ),
+            StepSpec(
+                plan_step_ref="step_b",
+                existing_step_ref="existing_step_3",
+                name="Sammanfatta",
+                assistant_spec=AssistantSpec(
+                    instructions="Sammanfatta de utplockade fakta kort."
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+        ],
+    )
+    apply_response = await _apply_approved_edit_plan(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        session_id=session_id,
+        spec=spec,
+        edit=FlowBuilderEditApproval(
+            base_flow_revision=flow_revision,
+            removed_existing_step_refs=frozenset({"existing_step_2"}),
+            diff=FlowEditDiff(
+                step_changes=[
+                    StepChange(
+                        kind="unchanged",
+                        step_name="Plocka ut fakta",
+                        step_ref="existing_step_1",
+                    ),
+                    StepChange(
+                        kind="removed",
+                        step_name="Granska fakta",
+                        step_ref="existing_step_2",
+                    ),
+                    StepChange(
+                        kind="modified",
+                        step_name="Sammanfatta",
+                        step_ref="existing_step_3",
+                    ),
+                ]
+            ),
+        ),
+    )
+
+    assert apply_response.status_code == 200, apply_response.text
+    assert apply_response.json()["steps_removed"] == 1
+    async with db_container() as container:
+        flow_service = container.flow_service()
+        applied_flow = await flow_service.get_flow(flow_id)
+        snapshots = await flow_service.get_flow_assistant_snapshots(applied_flow)
+        remaining_assistant_ids = set(
+            (
+                await container.session().execute(
+                    select(Assistants.id).where(Assistants.id.in_(assistant_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert remaining_assistant_ids == {first_assistant_id, last_assistant_id}
+    assert [
+        (step.step_order, step.assistant_id, step.input_source)
+        for step in applied_flow.steps
+    ] == [
+        (1, first_assistant_id, "flow_input"),
+        (2, last_assistant_id, "previous_step"),
+    ]
+    assert snapshots[first_assistant_id].instructions == "Plocka ut fakta ur texten."
+    assert (
+        snapshots[last_assistant_id].instructions
+        == "Sammanfatta de utplockade fakta kort."
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_ai_builder_api_edit_apply_keeps_an_assistant_another_step_uses(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder API edit remove shared-assistant step",
+    )
+    async with db_container() as container:
+        flow_service = container.flow_service()
+        flow = await flow_service.create_flow(
+            space_id=UUID(space_id),
+            name="Dubbel sammanfattning",
+            description="Sammanfattar texten två gånger.",
+            steps=[],
+        )
+        shared_assistant, _ = await flow_service.create_flow_assistant(
+            flow_id=flow.id,
+            name="shared",
+        )
+        await flow_service.update_flow_assistant(
+            flow_id=flow.id,
+            assistant_id=shared_assistant.id,
+            update=AssistantUpdateCommand(
+                prompt=PromptCreate(text="Sammanfatta texten kort.")
+            ),
+        )
+        flow = await flow_service.update_flow(
+            flow_id=flow.id,
+            steps=[
+                _make_flow_step(
+                    assistant_id=shared_assistant.id,
+                    step_order=order,
+                    user_description=f"Sammanfatta {order}",
+                    input_source="flow_input" if order == 1 else "previous_step",
+                )
+                for order in (1, 2)
+            ],
+        )
+        flow_id = flow.id
+        flow_revision = flow.draft_revision
+        shared_icon = await container.icon_repo().add_metadata(
+            IconMetadataCreate(tenant_id=container.user().tenant_id)
+        )
+        await container.session().execute(
+            update(Assistants)
+            .where(Assistants.id == shared_assistant.id)
+            .values(icon_id=shared_icon.id)
+        )
+        shared_key = await mint_v2_api_key(
+            container.api_key_v2_repo(),
+            tenant_id=container.user().tenant_id,
+            user_id=container.user().id,
+            permission="read",
+            scope_type="assistant",
+            scope_id=shared_assistant.id,
+        )
+
+    session_id = await _create_ai_builder_session(
+        client=client,
+        bearer_token=bearer_token,
+        space_id=space_id,
+        target_kind="edit",
+        flow_id=str(flow_id),
+    )
+    apply_response = await _apply_approved_edit_plan(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        session_id=session_id,
+        spec=FlowDraftSpecCore(
+            flow_name="Dubbel sammanfattning",
+            flow_description="Sammanfattar texten.",
+            steps=[
+                StepSpec(
+                    plan_step_ref="step_a",
+                    existing_step_ref="existing_step_1",
+                    name="Sammanfatta 1",
+                    assistant_spec=AssistantSpec(
+                        instructions="Sammanfatta texten kort."
+                    ),
+                    input_source=InputSource.FLOW_INPUT,
+                ),
+            ],
+        ),
+        edit=FlowBuilderEditApproval(
+            base_flow_revision=flow_revision,
+            removed_existing_step_refs=frozenset({"existing_step_2"}),
+            diff=FlowEditDiff(
+                step_changes=[
+                    StepChange(
+                        kind="unchanged",
+                        step_name="Sammanfatta 1",
+                        step_ref="existing_step_1",
+                    ),
+                    StepChange(
+                        kind="removed",
+                        step_name="Sammanfatta 2",
+                        step_ref="existing_step_2",
+                    ),
+                ]
+            ),
+        ),
+    )
+
+    # One step is removed; the shared assistant stays, and no count claims
+    # an assistant deletion.
+    assert apply_response.status_code == 200, apply_response.text
+    assert apply_response.json() == {
+        "flow_id": str(flow_id),
+        "flow_name": "Dubbel sammanfattning",
+        "steps_created": 0,
+        "steps_updated": 0,
+        "steps_removed": 1,
+    }
+    async with db_container() as container:
+        applied_flow = await container.flow_service().get_flow(flow_id)
+        # The assistant stays whole: its row, its icon and its scoped key.
+        shared_assistant_icon_ids = (
+            await container.session().scalars(
+                select(Assistants.icon_id).where(Assistants.id == shared_assistant.id)
+            )
+        ).all()
+        shared_key_state = await container.session().scalar(
+            select(ApiKeysV2.state).where(ApiKeysV2.id == shared_key.id)
+        )
+    assert [(step.step_order, step.assistant_id) for step in applied_flow.steps] == [
+        (1, shared_assistant.id)
+    ]
+    assert (shared_assistant_icon_ids, shared_key_state) == (
+        [shared_icon.id],
+        ApiKeyState.ACTIVE.value,
+    )
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,6 @@ from uuid import UUID, uuid4
 
 from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.flows.application.flow_draft_materialization import (
-    FlowDraftAssistantToDelete,
     FlowDraftChangeSet,
     FlowDraftCompiledStep,
     FlowDraftMaterializationProgress,
@@ -192,15 +191,6 @@ class FlowDraftMaterializer:
             source=binding_source,
         )
 
-        for assistant_to_delete in changeset.assistants_to_delete:
-            await _delete_removed_assistant(
-                flow_service=flow_service,
-                flow_id=flow_id,
-                assistant_to_delete=assistant_to_delete,
-            )
-            progress.assistants_deleted += 1
-            progress.emit(FlowDraftMaterializationStage.ASSISTANTS_DELETED)
-
         return FlowDraftMaterializationResult(
             flow_id=flow_id,
             flow_name=flow_name,
@@ -215,7 +205,7 @@ class FlowDraftMaterializer:
                 for step in changeset.compiled_steps
                 if step.change_kind == FlowDraftStepChangeKind.MODIFIED
             ),
-            steps_removed=len(changeset.assistants_to_delete),
+            steps_removed=len(changeset.removed_existing_step_refs),
         )
 
 
@@ -229,7 +219,6 @@ class _MaterializationProgressAccumulator:
         self.assistants_created = 0
         self.assistants_configured = 0
         self.assistants_updated = 0
-        self.assistants_deleted = 0
         self.flow_created = False
         self.flow_updated = False
 
@@ -242,7 +231,6 @@ class _MaterializationProgressAccumulator:
                 assistants_created=self.assistants_created,
                 assistants_configured=self.assistants_configured,
                 assistants_updated=self.assistants_updated,
-                assistants_deleted=self.assistants_deleted,
                 flow_created=self.flow_created,
                 flow_updated=self.flow_updated,
             )
@@ -370,30 +358,6 @@ def _completion_required_for_assistant_id(
         raise RuntimeError(
             f"Compiled step missing for assistant update operation: {assistant_id}"
         ) from exc
-
-
-async def _delete_removed_assistant(
-    *,
-    flow_service: FlowService,
-    flow_id: UUID,
-    assistant_to_delete: FlowDraftAssistantToDelete,
-) -> None:
-    if assistant_to_delete.assistant_id is None:
-        raise BadRequestException(
-            "Assistant id missing while deleting removed flow step assistant.",
-            code="missing_removed_assistant_id",
-            context={
-                "step_id": (
-                    str(assistant_to_delete.step_id)
-                    if assistant_to_delete.step_id is not None
-                    else None
-                )
-            },
-        )
-    await flow_service.delete_flow_assistant(
-        flow_id=flow_id,
-        assistant_id=assistant_to_delete.assistant_id,
-    )
 
 
 async def _configure_assistant(

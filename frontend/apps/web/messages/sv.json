@@ -5452,6 +5452,7 @@
   "flow_error_flow_missing_principal": "Körningen kan inte fortsätta eftersom kontot den ska köras som saknas. Be en administratör kontrollera vem som äger flödet.",
   "flow_error_flow_not_published": "Publicera flödet innan du startar en körning.",
   "flow_error_flow_owner_required": "Endast den som äger utkastet, en administratör eller ytans ägare kan ändra flödet.",
+  "flow_error_flow_managed_assistant": "Ett steg i flödet använder fortfarande assistenten. Ta bort eller byt ut steget innan du tar bort assistenten.",
   "flow_error_flow_review_open_active_conflict_invariant": "Körningen har motstridiga aktiva granskningspunkter. Läs om körningen, och kontakta support med körnings-ID om problemet kvarstår.",
   "flow_error_flow_review_open_multiple_active_checkpoints_invariant": "Körningen har fler än en aktiv granskningspunkt. Läs om körningen, och kontakta support med körnings-ID om problemet kvarstår.",
   "flow_error_flow_review_open_step_result_incomplete_invariant": "Granskningspunkten är öppen innan stegresultatet är färdigt. Läs om körningen, och kontakta support med körnings-ID om problemet kvarstår.",

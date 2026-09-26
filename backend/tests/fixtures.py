@@ -26,11 +26,15 @@ async def mint_v2_api_key(
     tenant_id: UUID,
     user_id: UUID,
     prefix: str = "test",
+    permission: str = "admin",
+    scope_type: str = "tenant",
+    scope_id: UUID | None = None,
 ) -> SimpleNamespace:
-    """Mint an active tenant-scoped admin API key in api_keys_v2.
+    """Mint an active user-owned API key in api_keys_v2, tenant-scoped admin
+    unless told otherwise.
 
     Stored with sha256 hash_version; the resolver accepts it and
-    auto-upgrades to HMAC on first use. Returns the plain key.
+    auto-upgrades to HMAC on first use. Returns the plain key and its id.
     """
     from eneo.authentication.auth_models import (
         ApiKeyHashVersion,
@@ -41,13 +45,13 @@ async def mint_v2_api_key(
     )
 
     plain_key = f"{prefix}_{secrets.token_hex(32)}"
-    await api_key_v2_repo.create(
+    created = await api_key_v2_repo.create(
         tenant_id=tenant_id,
         owner_user_id=user_id,
         created_by_user_id=user_id,
-        scope_type=ApiKeyScopeType.TENANT.value,
-        scope_id=None,
-        permission=ApiKeyPermission.ADMIN.value,
+        scope_type=ApiKeyScopeType(scope_type).value,
+        scope_id=scope_id,
+        permission=ApiKeyPermission(permission).value,
         key_type=ApiKeyType.SK.value,
         key_hash=hashlib.sha256(plain_key.encode()).hexdigest(),
         hash_version=ApiKeyHashVersion.SHA256.value,
@@ -57,7 +61,7 @@ async def mint_v2_api_key(
         description=None,
         state=ApiKeyState.ACTIVE.value,
     )
-    return SimpleNamespace(key=plain_key, truncated_key=plain_key[-4:])
+    return SimpleNamespace(key=plain_key, truncated_key=plain_key[-4:], id=created.id)
 
 
 TEST_EMBEDDING_MODEL = EmbeddingModelLegacy(

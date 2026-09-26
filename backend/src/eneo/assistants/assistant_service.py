@@ -2,6 +2,7 @@ import copy
 import re
 from collections import defaultdict
 from collections.abc import AsyncGenerator, Callable, Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional, TypeVar, cast
@@ -2167,25 +2168,70 @@ class AssistantService:
         assistant = space.get_assistant(assistant_id=assistant_id)
         icon_id = assistant.icon_id
 
-        if self.api_key_scope_revoker is not None:
-            try:
-                await self.api_key_scope_revoker.revoke_scope(
-                    scope_type=ApiKeyScopeType.ASSISTANT,
-                    scope_id=assistant_id,
-                    reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
-                    reason_text="Assistant deleted",
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to revoke API keys for deleted assistant",
-                    extra={"assistant_id": str(assistant_id)},
-                )
+        try:
+            await self._revoke_assistant_api_keys(assistant_id)
+        except Exception:
+            logger.exception(
+                "Failed to revoke API keys for deleted assistant",
+                extra={"assistant_id": str(assistant_id)},
+            )
 
         space.remove_assistant(assistant)
         await self.space_repo.update(space)
 
         if icon_id:
-            await self.icon_repo.delete(icon_id)
+            await self.icon_repo.delete_unused(icon_id, tenant_id=self.user.tenant_id)
+
+    async def delete_flow_managed_assistants(
+        self,
+        *,
+        flow_id: UUID,
+        assistant_ids: AbstractSet[UUID],
+    ) -> None:
+        """Delete assistants ``flow_id`` manages, with every deletion effect.
+
+        Flow edit access authorizes this, so there is no assistant permission
+        check. It is all or nothing: the delete statement itself decides which
+        assistants go, so one the flow does not manage, or one a step uses by
+        the time the statement runs, refuses the whole call; so does a failed
+        key revocation. Either way the savepoint undoes every change. The space
+        aggregate never deletes flow-managed rows, so they go in one statement.
+        """
+        if not assistant_ids:
+            return
+        async with self.repo.session.begin_nested():
+            icon_ids = await self.repo.delete_removable_flow_managed(
+                flow_id=flow_id,
+                assistant_ids=assistant_ids,
+            )
+            refused = assistant_ids - icon_ids.keys()
+            if refused:
+                raise BadRequestException(
+                    "Only assistants the flow manages and no step uses can be "
+                    "deleted with it.",
+                    code="flow_managed_assistant",
+                    context={
+                        "flow_id": str(flow_id),
+                        "assistant_ids": sorted(str(id) for id in refused),
+                    },
+                )
+            for assistant_id in sorted(icon_ids):
+                await self._revoke_assistant_api_keys(assistant_id)
+            for icon_id in icon_ids.values():
+                if icon_id is not None:
+                    await self.icon_repo.delete_unused(
+                        icon_id, tenant_id=self.user.tenant_id
+                    )
+
+    async def _revoke_assistant_api_keys(self, assistant_id: UUID) -> None:
+        if self.api_key_scope_revoker is None:
+            return
+        await self.api_key_scope_revoker.revoke_scope(
+            scope_type=ApiKeyScopeType.ASSISTANT,
+            scope_id=assistant_id,
+            reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
+            reason_text="Assistant deleted",
+        )
 
     async def get_prompts_by_assistant(self, assistant_id: UUID) -> list[Prompt]:
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)

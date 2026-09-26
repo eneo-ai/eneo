@@ -56,50 +56,9 @@ class ApiKeyScopeRevoker:
             scope_type=scope_type,
             scope_id=scope_id,
         )
-        if not keys:
-            return 0
-
-        now = datetime.now(timezone.utc)
-        revoked = 0
-        for key in keys:
-            if key.revoked_at is not None:
-                continue
-            updated = await self.api_key_repo.update(
-                key_id=key.id,
-                tenant_id=key.tenant_id,
-                state=ApiKeyState.REVOKED.value,
-                revoked_at=now,
-                revoked_reason_code=reason_code.value,
-                revoked_reason_text=reason_text,
-            )
-            updated_key = updated or key
-            revoked += 1
-
-            if self.audit_service is not None:
-                await self.audit_service.log_async(
-                    tenant_id=self.user.tenant_id,
-                    user=self.user,
-                    action=ActionType.API_KEY_REVOKED,
-                    entity_type=EntityType.API_KEY,
-                    entity_id=updated_key.id,
-                    description=f"Revoked API key '{updated_key.name}'",
-                    metadata=AuditMetadata.standard(
-                        actor=self.user,
-                        target=updated_key,
-                        changes={
-                            "state": {
-                                "old": key.state,
-                                "new": ApiKeyState.REVOKED.value,
-                            }
-                        },
-                        extra={
-                            "reason_code": reason_code.value,
-                            "reason_text": reason_text,
-                        },
-                    ),
-                )
-
-        return revoked
+        return await self._revoke_keys(
+            keys, reason_code=reason_code, reason_text=reason_text
+        )
 
     async def _revoke_keys(
         self,
@@ -109,7 +68,11 @@ class ApiKeyScopeRevoker:
         reason_text: str | None = None,
         actor: "UserInDB | None" = None,
     ) -> int:
-        """Revoke a list of keys with audit logging. Shared helper."""
+        """Revoke a list of keys with audit logging. Shared helper.
+
+        The audit rows are written in the caller's transaction, so a
+        revocation that rolls back leaves no audit behind.
+        """
         actor = actor or self.user
         if actor is None:
             return 0
@@ -131,9 +94,9 @@ class ApiKeyScopeRevoker:
             revoked += 1
 
             if self.audit_service is not None:
-                await self.audit_service.log_async(
+                await self.audit_service.log(
                     tenant_id=actor.tenant_id,
-                    actor_id=actor.id,
+                    user=actor,
                     action=ActionType.API_KEY_REVOKED,
                     entity_type=EntityType.API_KEY,
                     entity_id=updated_key.id,

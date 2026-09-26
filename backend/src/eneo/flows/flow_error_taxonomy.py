@@ -124,6 +124,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Retry with a principal that can own or administer the draft.",
         user_action="Ask an owner or administrator to change the flow.",
     ),
+    FlowApiErrorCode.FLOW_MANAGED_ASSISTANT: _entry(
+        category="Flow access",
+        surfaced_through="API error response",
+        cause="A step of the flow still uses the flow-managed assistant being deleted.",
+        consumer_action="Remove or replace the step that uses the assistant, then retry.",
+        user_action="Remove or replace the step before you delete its assistant.",
+    ),
     FlowApiErrorCode.SERVICE_KEY_ADMIN_REQUIRED: _entry(
         category="Flow access",
         surfaced_through="API error response",

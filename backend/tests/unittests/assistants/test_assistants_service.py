@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -229,6 +230,46 @@ async def test_delete_space_assistant_not_member(setup: Setup):
 
 async def test_delete_space_assistant_member(setup: Setup):
     await setup.service.delete_assistant(TEST_UUID)
+
+
+async def test_delete_flow_managed_assistants_has_every_deletion_effect(
+    setup: Setup,
+):
+    flow_id, assistant_id, other_id, icon_id = uuid4(), uuid4(), uuid4(), uuid4()
+    service = setup.service
+    service.api_key_scope_revoker = AsyncMock()
+    service.repo.session.begin_nested = MagicMock(return_value=nullcontext())
+    service.repo.delete_removable_flow_managed.return_value = {
+        assistant_id: icon_id,
+        other_id: None,
+    }
+
+    await service.delete_flow_managed_assistants(
+        flow_id=flow_id, assistant_ids={assistant_id, other_id}
+    )
+
+    # Flow edit access authorizes it: no assistant permission check, and one
+    # delete statement instead of a space write per assistant.
+    service.actor_manager.get_space_actor_from_space.assert_not_called()
+    service.space_repo.update.assert_not_awaited()
+    assert {
+        call.kwargs["scope_id"]
+        for call in service.api_key_scope_revoker.revoke_scope.await_args_list
+    } == {assistant_id, other_id}
+    service.repo.delete_removable_flow_managed.assert_awaited_once()
+    assert (
+        service.repo.delete_removable_flow_managed.await_args.kwargs["flow_id"]
+        == flow_id
+    )
+    assert set(
+        service.repo.delete_removable_flow_managed.await_args.kwargs["assistant_ids"]
+    ) == {
+        assistant_id,
+        other_id,
+    }
+    service.icon_repo.delete_unused.assert_awaited_once_with(
+        icon_id, tenant_id=service.user.tenant_id
+    )
 
 
 async def test_update_assistant_completion_model_not_in_space(setup: Setup):

@@ -113,7 +113,6 @@ class FlowAuthoringPreview:
     steps_removed: int
     assistants_to_create: int
     assistants_to_update: int
-    assistants_to_delete: int
     resource_bindings_count: int
     step_changes: tuple[FlowAuthoringStepPreview, ...]
 
@@ -304,10 +303,9 @@ def _build_preview(
             for step in changeset.compiled_steps
             if step.change_kind == FlowDraftStepChangeKind.MODIFIED
         ),
-        steps_removed=len(changeset.assistants_to_delete),
+        steps_removed=len(changeset.removed_existing_step_refs),
         assistants_to_create=len(changeset.assistants_to_create),
         assistants_to_update=len(changeset.assistants_to_update),
-        assistants_to_delete=len(changeset.assistants_to_delete),
         resource_bindings_count=len(command.resource_bindings),
         step_changes=tuple(
             FlowAuthoringStepPreview(

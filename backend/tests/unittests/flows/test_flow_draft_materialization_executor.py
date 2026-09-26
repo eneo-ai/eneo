@@ -10,7 +10,6 @@ from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.flows.application.flow_authoring_command import TemplateAttachmentIntent
 from eneo.flows.application.flow_draft_materialization import (
     FlowDraftAssistantToCreate,
-    FlowDraftAssistantToDelete,
     FlowDraftAssistantToUpdate,
     FlowDraftChangeSet,
     FlowDraftCompiledStep,
@@ -267,12 +266,9 @@ async def test_create_mode_propagates_update_failure_without_cleanup() -> None:
 
 
 @pytest.mark.asyncio
-async def test_edit_mode_updates_assistants_before_flow_and_deletes_after_flow() -> (
-    None
-):
+async def test_edit_mode_updates_assistants_before_flow_and_deletes_nothing() -> None:
     flow_id = uuid4()
     existing_assistant_id = uuid4()
-    deleted_assistant_id = uuid4()
     service = _flow_service()
 
     result = await FlowDraftMaterializer().execute(
@@ -286,12 +282,7 @@ async def test_edit_mode_updates_assistants_before_flow_and_deletes_after_flow()
                     assistant_spec=AssistantSpec(instructions="Updated prompt"),
                 )
             ],
-            assistants_to_delete=[
-                FlowDraftAssistantToDelete(
-                    step_id=uuid4(),
-                    assistant_id=deleted_assistant_id,
-                )
-            ],
+            removed_existing_step_refs=frozenset({"existing_step_2"}),
             compiled_steps=[
                 _compiled_step(
                     change_kind=FlowDraftStepChangeKind.MODIFIED,
@@ -308,13 +299,11 @@ async def test_edit_mode_updates_assistants_before_flow_and_deletes_after_flow()
 
     service.update_flow_assistant.assert_awaited_once()
     service.update_flow.assert_awaited_once()
-    service.delete_flow_assistant.assert_awaited_once_with(
-        flow_id=flow_id,
-        assistant_id=deleted_assistant_id,
-    )
+    # The flow update deletes the removed step's assistant; a second delete
+    # here would fail on the row the update already removed.
+    service.delete_flow_assistant.assert_not_awaited()
     call_names = [call[0] for call in service.mock_calls]
     assert call_names.index("update_flow_assistant") < call_names.index("update_flow")
-    assert call_names.index("update_flow") < call_names.index("delete_flow_assistant")
     assert result.steps_updated == 1
     assert result.steps_removed == 1
 

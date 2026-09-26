@@ -554,7 +554,6 @@ class AIBuilderPlanLifecycle:
                 assistants_created=progress.assistants_created,
                 assistants_configured=progress.assistants_configured,
                 assistants_updated=progress.assistants_updated,
-                assistants_deleted=progress.assistants_deleted,
                 flow_created=progress.flow_created,
                 flow_updated=progress.flow_updated,
             )

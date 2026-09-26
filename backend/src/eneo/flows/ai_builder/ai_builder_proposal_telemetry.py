@@ -111,13 +111,12 @@ MaterializerProgressStage = Literal[
     "assistants_configured",
     "assistants_updated",
     "flow_updated",
-    "assistants_deleted",
 ]
 
 PROPOSAL_TELEMETRY_LOG_KEY = "ai_builder_proposal_telemetry"
 PROPOSAL_TELEMETRY_SCHEMA_VERSION = 2
 APPLY_TELEMETRY_LOG_KEY = "ai_builder_apply_telemetry"
-APPLY_TELEMETRY_SCHEMA_VERSION = 1
+APPLY_TELEMETRY_SCHEMA_VERSION = 2
 
 logger = get_logger(__name__)
 _FAILURE_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -555,7 +554,6 @@ class ChangesetCountSummary(BaseModel):
     steps_removed: int
     assistants_to_create: int
     assistants_to_update: int
-    assistants_to_delete: int
 
     @classmethod
     def from_preview(cls, preview: FlowAuthoringPreview) -> ChangesetCountSummary:
@@ -565,7 +563,6 @@ class ChangesetCountSummary(BaseModel):
             steps_removed=preview.steps_removed,
             assistants_to_create=preview.assistants_to_create,
             assistants_to_update=preview.assistants_to_update,
-            assistants_to_delete=preview.assistants_to_delete,
         )
 
 
@@ -576,7 +573,6 @@ class MaterializerProgressSnapshot(BaseModel):
     assistants_created: int = 0
     assistants_configured: int = 0
     assistants_updated: int = 0
-    assistants_deleted: int = 0
     flow_created: bool = False
     flow_updated: bool = False
 

@@ -357,7 +357,7 @@ def test_shared_compile_preserves_every_existing_step_without_removals() -> None
 
     changeset = compile_flow_draft_changeset(spec, current_flow=current_flow)
 
-    assert len(changeset.assistants_to_delete) == 0
+    assert changeset.removed_existing_step_refs == frozenset()
     assert [step.change_kind for step in changeset.compiled_steps] == [
         FlowDraftStepChangeKind.MODIFIED,
         FlowDraftStepChangeKind.MODIFIED,
@@ -398,7 +398,7 @@ def test_shared_compile_only_updates_explicitly_modified_existing_steps() -> Non
     ]
 
 
-def test_shared_compile_deletes_only_explicit_removed_existing_step() -> None:
+def test_shared_compile_removes_only_explicit_removed_existing_step() -> None:
     removed_assistant_id = uuid4()
     current_flow = _flow(
         _flow_step(step_order=1),
@@ -417,8 +417,10 @@ def test_shared_compile_deletes_only_explicit_removed_existing_step() -> None:
         removed_existing_step_refs=frozenset({"existing_step_2"}),
     )
 
-    assert len(changeset.assistants_to_delete) == 1
-    assert changeset.assistants_to_delete[0].assistant_id == removed_assistant_id
+    assert changeset.removed_existing_step_refs == frozenset({"existing_step_2"})
+    assert removed_assistant_id not in {
+        step.assistant_id for step in changeset.compiled_steps
+    }
 
 
 def test_shared_compile_rejects_omitted_existing_step_without_explicit_removal() -> (
@@ -593,7 +595,7 @@ def test_shared_compile_reorder_preserves_existing_step_identity() -> None:
         second_assistant_id,
         first_assistant_id,
     ]
-    assert len(changeset.assistants_to_delete) == 0
+    assert changeset.removed_existing_step_refs == frozenset()
 
 
 def test_shared_compile_rejects_create_spec_with_existing_step_ref() -> None:
@@ -675,7 +677,7 @@ def test_shared_compile_compiles_generic_edit_changeset_shape() -> None:
     assert shared.metadata_json["form_schema"]["fields"][0]["name"] == "case_id"
     assert shared.compiled_steps[0].change_kind is FlowDraftStepChangeKind.MODIFIED
     assert shared.compiled_steps[1].change_kind is FlowDraftStepChangeKind.ADDED
-    assert len(shared.assistants_to_delete) == 1
+    assert shared.removed_existing_step_refs == removed_refs
 
 
 def test_shared_compile_preserves_source_refs_with_runtime_step_refs() -> None:

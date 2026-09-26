@@ -1,5 +1,6 @@
 from collections import defaultdict
 from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
@@ -10,7 +11,7 @@ from sqlalchemy import Select
 from sqlalchemy.engine import ScalarResult
 from sqlalchemy.orm import selectinload
 
-from eneo.assistants.assistant import Assistant
+from eneo.assistants.assistant import Assistant, AssistantOrigin
 from eneo.assistants.assistant_factory import AssistantFactory
 from eneo.database.database import AsyncSession
 from eneo.database.tables.assistant_table import (
@@ -24,6 +25,7 @@ from eneo.database.tables.assistant_table import (
 from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.capabilities_table import AssistantCapabilities
 from eneo.database.tables.collections_table import CollectionsTable
+from eneo.database.tables.flow_tables import FlowSteps
 from eneo.database.tables.help_assistant_assignment_history_table import (
     HelpAssistantAssignmentHistory,
 )
@@ -704,6 +706,27 @@ class AssistantRepository:
             query = query.options(option)
 
         return await self.session.scalars(query)
+
+    async def delete_removable_flow_managed(
+        self,
+        *,
+        flow_id: UUID,
+        assistant_ids: AbstractSet[UUID],
+    ) -> dict[UUID, UUID | None]:
+        """Delete the given assistants ``flow_id`` manages that no step uses.
+
+        Returns the deleted assistants' icon ids, keyed by assistant id, as the
+        statement saw them; anything else it skipped.
+        """
+        rows = await self.session.execute(
+            sa.delete(Assistants)
+            .where(Assistants.id.in_(assistant_ids))
+            .where(Assistants.origin == AssistantOrigin.FLOW_MANAGED.value)
+            .where(Assistants.managing_flow_id == flow_id)
+            .where(~sa.exists().where(FlowSteps.assistant_id == Assistants.id))
+            .returning(Assistants.id, Assistants.icon_id)
+        )
+        return {row.id: row.icon_id for row in rows}
 
     async def add(self, assistant: Assistant):
         completion_model_id = (

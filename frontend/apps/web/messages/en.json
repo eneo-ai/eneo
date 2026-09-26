@@ -5452,6 +5452,7 @@
   "flow_error_flow_missing_principal": "The run cannot continue because the account it should run as is missing. Ask an administrator to check who owns the flow.",
   "flow_error_flow_not_published": "Publish the flow before starting a run.",
   "flow_error_flow_owner_required": "Only the draft owner, an administrator or the space owner can change this flow.",
+  "flow_error_flow_managed_assistant": "A step in the flow still uses this assistant. Remove or replace that step before you delete the assistant.",
   "flow_error_flow_review_open_active_conflict_invariant": "The run has conflicting active review checkpoints. Reload the run; contact support with the run ID if the problem remains.",
   "flow_error_flow_review_open_multiple_active_checkpoints_invariant": "The run has more than one active review checkpoint. Reload the run; contact support with the run ID if the problem remains.",
   "flow_error_flow_review_open_step_result_incomplete_invariant": "The review checkpoint is open before the step result is complete. Reload the run; contact support with the run ID if the problem remains.",

@@ -5,8 +5,10 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ChangesetCountSummary
 from eneo.flows.application.flow_authoring_command import (
     CreateFlowAuthoringCommand,
+    EditFlowAuthoringCommand,
     FlowAuthoringCommandService,
     FlowPackageAuthoringOrigin,
 )
@@ -17,6 +19,7 @@ from eneo.flows.application.flow_draft_materialization import (
 from eneo.flows.application.flow_draft_materialization_executor import (
     FlowDraftMaterializer,
 )
+from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -141,6 +144,66 @@ async def test_prepare_accepts_bound_canonical_resource_refs() -> None:
 
     assert prepared.preview.resource_bindings_count == 1
     assert prepared.preview.assistants_to_create == 1
+
+
+@pytest.mark.anyio
+async def test_prepare_counts_a_removed_step_without_claiming_its_shared_assistant() -> (
+    None
+):
+    shared_assistant_id = uuid4()
+    flow = Flow(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        name="Flow",
+        description="",
+        steps=[
+            FlowStep(
+                id=uuid4(),
+                flow_id=uuid4(),
+                tenant_id=uuid4(),
+                assistant_id=shared_assistant_id,
+                step_order=order,
+                user_description=f"Step {order}",
+                input_source="flow_input",
+                input_type="text",
+                output_mode="pass_through",
+                output_type="text",
+            )
+            for order in (1, 2)
+        ],
+    )
+
+    async def get_flow(flow_id: UUID) -> Flow:
+        assert flow_id == flow.id
+        return flow
+
+    prepared = await FlowAuthoringCommandService().prepare(
+        command=EditFlowAuthoringCommand(
+            space_id=flow.space_id,
+            flow_id=flow.id,
+            expected_revision=flow.draft_revision,
+            spec=_spec(existing_step_ref="existing_step_1"),
+            removed_existing_step_refs=frozenset({"existing_step_2"}),
+            updated_existing_step_refs=frozenset(),
+            origin=FlowPackageAuthoringOrigin(
+                package_id="se.demo.flow",
+                package_version="1.0.0",
+                content_checksum="sha256:abc",
+            ),
+        ),
+        flow_service=SimpleNamespace(get_flow=get_flow),
+    )
+
+    # The removed step's assistant stays because step 1 still uses it, so no
+    # count may claim an assistant deletion.
+    assert ChangesetCountSummary.from_preview(prepared.preview).model_dump() == {
+        "steps_created": 0,
+        "steps_updated": 0,
+        "steps_removed": 1,
+        "assistants_to_create": 0,
+        "assistants_to_update": 0,
+    }
 
 
 @pytest.mark.anyio
