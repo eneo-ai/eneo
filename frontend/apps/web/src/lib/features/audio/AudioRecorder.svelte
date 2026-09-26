@@ -846,8 +846,7 @@
     return handedOver;
   }
 
-  function toggleRecording(e: Event) {
-    e.preventDefault();
+  function toggleRecording() {
     if (!isRecording) {
       if (!canStart) return;
       void startRecording("user");
@@ -1148,22 +1147,29 @@
 <div class="flex flex-col items-center justify-center gap-2">
   <div data-is-recording={isRecording} data-state={recordingState} class="recording-widget">
     <Tooltip.Root>
-      <Tooltip.Trigger>
-        <button
-          class="record-button"
-          onclick={toggleRecording}
-          data-is-recording={isRecording}
-          disabled={recordingState === "preparing" ||
-            recordingState === "processing" ||
-            (!isRecording && !canStart)}
-          aria-label={isRecording ? m.stop_recording() : m.start_recording()}
-        >
-          {#if !isRecording}
-            <IconMicrophone />
-          {:else}
-            <IconStop />
-          {/if}
-        </button>
+      <!-- The trigger owns the click (its own closes the tooltip) and the disabled
+           state; the Button renders both. -->
+      <Tooltip.Trigger
+        onclick={toggleRecording}
+        disabled={recordingState === "preparing" ||
+          recordingState === "processing" ||
+          (!isRecording && !canStart)}
+      >
+        {#snippet child({ props })}
+          <Button
+            {...props}
+            size="icon"
+            class="record-button bg-negative-default text-on-fill hover:bg-negative-stronger relative size-12 rounded-full [&_svg:not([class*='size-'])]:size-6"
+            data-is-recording={isRecording}
+            aria-label={isRecording ? m.stop_recording() : m.start_recording()}
+          >
+            {#if !isRecording}
+              <IconMicrophone />
+            {:else}
+              <IconStop />
+            {/if}
+          </Button>
+        {/snippet}
       </Tooltip.Trigger>
       <Tooltip.Content>{isRecording ? m.stop_recording() : m.start_recording()}</Tooltip.Content>
     </Tooltip.Root>
@@ -1316,15 +1322,8 @@
     }
   }
 
-  .record-button {
-    @apply bg-negative-default text-on-fill hover:bg-negative-stronger relative flex h-12 w-12 items-center justify-center rounded-full transition-all duration-200;
-  }
-
-  .record-button[data-is-recording="true"] {
-    @apply bg-negative-default text-on-fill hover:bg-negative-stronger;
-  }
-
-  .record-button[data-is-recording="true"]::before {
+  /* The button is the shadcn Button, rendered by its own component. */
+  .recording-widget :global(.record-button[data-is-recording="true"]::before) {
     content: "";
     position: absolute;
     inset: -4px;
@@ -1334,14 +1333,10 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .record-button[data-is-recording="true"]::before {
+    .recording-widget :global(.record-button[data-is-recording="true"]::before) {
       animation: none;
       opacity: 0;
     }
-  }
-
-  .record-button:disabled {
-    @apply cursor-not-allowed opacity-50;
   }
 
   .recording-widget {

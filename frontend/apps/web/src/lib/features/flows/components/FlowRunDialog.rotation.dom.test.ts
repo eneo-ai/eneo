@@ -9,7 +9,7 @@ import type {
   UploadedFile
 } from "@eneo/eneo-js";
 import { EneoError } from "@eneo/eneo-js";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import {
   markSegmentUploaded,
@@ -109,6 +109,39 @@ afterEach(async () => {
 });
 
 describe("FlowRunDialog recording rotation", () => {
+  it("offers one record button, not a button inside the tooltip's own", async () => {
+    await openDialog(vi.fn());
+    const [record, ...others] = screen.getAllByRole("button", { name: m.start_recording() });
+    expect(others).toHaveLength(0);
+    expect(record?.parentElement?.closest("button")).toBeNull();
+  });
+
+  it("starts recording and closes the record tooltip on press", async () => {
+    // jsdom lacks the observer the tooltip positions itself with.
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+    );
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+    await openDialog(vi.fn());
+    const record = screen.getByRole("button", { name: m.start_recording() });
+    await fireEvent.focus(record);
+    await flush();
+    expect(record.getAttribute("data-state")).toMatch(/open$/);
+
+    await fireEvent.click(record);
+    await flush();
+
+    expect(media.recorders).toHaveLength(1);
+    expect(record.getAttribute("data-state")).toBe("closed");
+  });
+
   it("records on with the same microphone while the rotated segment's upload is pending", async () => {
     const upload = vi.fn(() => new Promise<UploadedFile>(() => undefined));
     await openDialogAndStartRecording(upload);
