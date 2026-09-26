@@ -157,6 +157,14 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
   `Theme`, Astryx's own strings in the active locale and `next/link` for Astryx
   links. Don't add another app-wide `Theme`; a nested `<Theme>` for one region
   is fine.
+- **Contexts above the page hold still.** The page is its own Suspense
+  boundary and hydrates after the shell. A context provided above it (root
+  layout, `(app)` layout, the shell) that changes before the page has
+  hydrated — data arriving, a value flipped after hydration — makes React
+  throw the page's server HTML away and render it again. Keep such a
+  context's value to what doesn't change (actions); let the component that
+  shows changing data read it itself (a query, or a store it subscribes to,
+  as `useJobActivity` does).
 - **Colour mode**: next-themes owns it (the profile menu's `ThemeSubMenu` calls
   `setTheme`). Its
   nonce'd blocking script sets `.light`/`.dark` and `data-theme` on `<html>`
@@ -391,7 +399,9 @@ production build shows these violations. Never loosen the policy.
 - `bun run test:e2e` — Playwright against a running backend: the axe page scans
   in `tests/a11y.spec.ts` (light and dark, desktop and 390 px touch, with
   dialogs, menus and the palette open) and the flows in the other specs, all
-  under the CSP fixture from `tests/csp.ts` (CI: "Frontend E2E (web-next)").
+  under the fixture from `tests/csp.ts` (CI: "Frontend E2E (web-next)"): it
+  fails a test on a CSP violation, and its `goto` and `reload` wait until the
+  page has hydrated, since a click on server HTML before that goes nowhere.
 - Check new UI in light and dark mode, with the keyboard, and at phone width
   (the full manual protocol is in ACCESSIBILITY.md).
 
