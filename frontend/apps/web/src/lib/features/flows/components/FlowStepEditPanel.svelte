@@ -32,6 +32,7 @@
     getFlowStepValidationIssues,
     getSelectableInputSourceOptions,
     getSelectableInputTypeOptions,
+    outputModeShowsUnderlagSection,
     outputModeUsesCompletionModel
   } from "$lib/features/flows/flowStepTypes";
   import {
@@ -1208,7 +1209,7 @@
             />
           {/if}
 
-          {#if !isTranscribeOnly && !isTemplateFill}
+          {#if outputModeShowsUnderlagSection(activeStep.output_mode)}
             <FlowStepInputTemplateSection
               resetKey={activeStepStateKey}
               step={activeStep}

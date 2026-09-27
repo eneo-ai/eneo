@@ -33,6 +33,11 @@
     type FlowTextProcessingMode
   } from "$lib/features/flows/flowTextProcessingConfig";
   import { getFlowStepUnderlag } from "$lib/features/flows/flowInputBindings";
+  import {
+    outputModeHonoursUnderlag,
+    outputModeShowsUnderlagSection,
+    outputModeUsesCompletionModel
+  } from "$lib/features/flows/flowStepTypes";
   import HttpConfigPanel from "./http/HttpConfigPanel.svelte";
   import { parseHttpAuthoredConfig, type HttpAuthoredConfig } from "./http/httpConfigTypes";
   import { createDefaultHttpConfig } from "./http/httpConfigDefaults";
@@ -101,7 +106,20 @@
   const isHttpSource = $derived(step.input_source === "http_get");
   // Explicit underlag is the whole step input, so the source choice has no
   // effect until the underlag is removed.
-  const underlagDecidesInput = $derived(getFlowStepUnderlag(step) !== null);
+  const underlagDecidesInput = $derived(
+    outputModeHonoursUnderlag(step.output_mode) && getFlowStepUnderlag(step) !== null
+  );
+  // Points at the section that holds the underlag, named as FlowStepInputTemplateSection
+  // titles it, or says what applies when the editor shows no such section.
+  const underlagDecidesHint = $derived(
+    !outputModeShowsUnderlagSection(step.output_mode)
+      ? m.flow_step_input_source_underlag_decides_unshown()
+      : m.flow_step_input_source_underlag_decides({
+          section: outputModeUsesCompletionModel(step.output_mode)
+            ? m.flow_material_title()
+            : m.flow_material_title_step()
+        })
+  );
   const httpMethod = "GET" as const;
   const defaultHttpConfig = $derived(createDefaultHttpConfig("input", httpMethod));
   const httpConfig = $derived(
@@ -214,9 +232,7 @@
         </Select.Content>
       </Select.Root>
       <p class="text-muted text-xs leading-relaxed" aria-live="polite">
-        {underlagDecidesInput
-          ? m.flow_step_input_source_underlag_decides()
-          : getSourceHintText(sourceHintKind)}
+        {underlagDecidesInput ? underlagDecidesHint : getSourceHintText(sourceHintKind)}
       </p>
       {#if sourceValidationMessage || inputSourceFeedback}
         <p class="text-warning-stronger text-xs leading-relaxed" aria-live="polite">
