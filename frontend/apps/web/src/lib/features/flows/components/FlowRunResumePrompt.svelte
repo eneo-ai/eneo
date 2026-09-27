@@ -27,6 +27,13 @@
     return formatFlowRunDuration(Number.isFinite(totalMs) ? totalMs : 0, locale);
   }
 
+  function formatTime(epochMs: number): string {
+    return new Date(epochMs).toLocaleTimeString(locale === "sv" ? "sv-SE" : "en-GB", {
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
+
   function formatWhen(epochMs: number): string {
     try {
       return new Date(epochMs).toLocaleString(locale === "sv" ? "sv-SE" : "en-GB", {
@@ -45,13 +52,17 @@
   <Alert.Title>{m.recording_resume_prompt_title()}</Alert.Title>
   <Alert.Description class="text-accent-stronger/90">
     {m.recording_resume_prompt_body({
-      time: formatWhen(hint.earliestCapturedAt),
+      time: formatWhen(hint.startedAt),
       duration: formatDuration(hint.totalDurationMs),
       parts:
         hint.segmentCount === 1
           ? m.recording_parts_one()
           : m.recording_parts_many({ count: String(hint.segmentCount) })
     })}
+    {#if hint.interruptedAt !== null}
+      {m.recording_resume_interrupted({ time: formatTime(hint.interruptedAt) })}
+    {/if}
+    {m.recording_resume_prompt_choice()}
   </Alert.Description>
   <div class="mt-3 flex flex-wrap gap-2">
     <Button size="sm" disabled={busy} onclick={() => onContinue(hint)}>

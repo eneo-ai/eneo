@@ -33,10 +33,12 @@
     recordingLimitsForStep,
     recordingTimeLeftMs
   } from "$lib/features/audio/recordingLimits";
-  import type {
-    SegmentRecord,
-    SessionRecoveryHint
+  import {
+    recordingSessionStore,
+    type SegmentRecord,
+    type SessionRecoveryHint
   } from "$lib/features/audio/recordingSessionStore";
+  import { RecordingJournal, type RecorderJournal } from "$lib/features/audio/recordingJournal";
   import { LiveTranscriptPreview } from "$lib/features/audio/live/LiveTranscriptPreview.svelte";
   import { ConnectionState } from "$lib/features/audio/connection.svelte";
   import {
@@ -123,6 +125,9 @@
 
   const launchInputState = new FlowRunLaunchInputState();
   const fileInputState = new FlowRunFileInputState();
+  const recordingJournal = new RecordingJournal(recordingSessionStore, (reason) =>
+    fileInputState.storageFailed(reason)
+  );
   let currentPageIndex = $state(0);
   let showCloseConfirmation = $state(false);
   let pageContentEl = $state<HTMLElement | null>(null);
@@ -1042,6 +1047,28 @@
       void handleRecordedAudio(step, params);
   }
 
+  // Bound to its step and flow like the handler above.
+  function recordingJournalFor(step: DialogRuntimeStepInput): RecorderJournal {
+    const flowId = flow.id;
+    return {
+      begin: (partId, mimeType) =>
+        recordingJournal.begin(partId, {
+          flowId,
+          stepId: step.step_id,
+          sessionId: fileInputState.recordingSessionId(step.step_id),
+          mimeType,
+          startedAt: Date.now(),
+          contractSnapshot: buildContractSnapshotFromStep(
+            step,
+            runContract?.published_flow_version ?? null
+          )
+        }),
+      append: (partId, blob) => recordingJournal.append(partId, blob),
+      leave: (partId) => void recordingJournal.leave(partId),
+      discard: (partId) => void recordingJournal.discard(partId)
+    };
+  }
+
   function recordingStateHandler(stepId: string) {
     return (active: boolean, meta?: { origin: "user" | "external" }) =>
       setStepRecordingState(stepId, active, meta);
@@ -1195,7 +1222,13 @@
 
   async function handleRecordedAudio(
     step: FlowRunContractStepInput,
-    params: { blob: Blob | null; mimeType: string; reason: RecordingStopReason; durationMs: number }
+    params: {
+      blob: Blob | null;
+      mimeType: string;
+      reason: RecordingStopReason;
+      durationMs: number;
+      partId: string;
+    }
   ) {
     const operationGeneration = dialogGeneration;
     const operationFlowId = flow.id;
@@ -1216,7 +1249,10 @@
         disposeRecordingSession(step.step_id);
       }
     }
-    if (!params.blob) return;
+    if (!params.blob) {
+      void recordingJournal.discard(params.partId);
+      return;
+    }
     const prepared = {
       ...fileInputState.prepareRecordedSegment(step.step_id, params.durationMs),
       liveRecordingId: params.reason === "rotation" ? null : livePreview.recordingId
@@ -1249,8 +1285,12 @@
       contractSnapshot: buildContractSnapshotFromStep(
         step,
         runContract?.published_flow_version ?? null
-      )
+      ),
+      partId: params.partId
     });
+    // Stored on the device: the journal is no longer needed. A part only memory
+    // holds keeps its journal, to rebuild it after a reload.
+    if (!persistResult.degraded) void recordingJournal.commit(params.partId);
     if (isStale(operationGeneration, operationFlowId)) return;
     fileInputState.recordSegmentPersistence({
       stepId: step.step_id,
@@ -1653,7 +1693,7 @@
             resumeHint={fileInputState.getResumeHint(currentRuntimeStep.step_id)}
             showResumePrompt={fileInputState.isResumePromptForStep(currentRuntimeStep.step_id)}
             resumeBusy={fileInputState.isResumeBusyForStep(currentRuntimeStep.step_id)}
-            storageDegraded={fileInputState.isStorageDegraded}
+            storageNotice={fileInputState.storageNotice}
             {recoveryScanFailed}
             onRetryRecoveryScan={retryRecoveryScan}
             offline={!connection.online}
@@ -1673,6 +1713,7 @@
             onDismissResumePrompt={dismissResumePrompt}
             sessionPhase={fileInputState.getSessionPhase(currentRuntimeStep.step_id)}
             onRecordingDone={recordedAudioHandler(currentRuntimeStep)}
+            recordingJournal={recordingJournalFor(currentRuntimeStep)}
             onRecordingStateChange={recordingStateHandler(currentRuntimeStep.step_id)}
             onRecorderRef={handleRecorderRefChange}
             onSessionRetry={() => retryRecordingSession(currentRuntimeStep.step_id)}

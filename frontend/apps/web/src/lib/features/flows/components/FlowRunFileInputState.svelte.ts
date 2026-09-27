@@ -2,6 +2,7 @@ import type { UploadedFile } from "@eneo/eneo-js";
 import { SvelteMap } from "svelte/reactivity";
 import { parseSegmentFilename, type SessionState } from "$lib/features/audio/recordingSession";
 import type { SegmentRecord, SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
+import type { JournalDegradation } from "$lib/features/audio/recordingJournal";
 import {
   bumpSegmentCountInState,
   clearStepSessionInState,
@@ -89,7 +90,11 @@ export class FlowRunFileInputState {
   }
 
   get isStorageDegraded(): boolean {
-    return this.#recordingSessionState.storageDegraded;
+    return this.#recordingSessionState.storageNotice === "failed";
+  }
+
+  get storageNotice(): JournalDegradation | null {
+    return this.#recordingSessionState.storageNotice;
   }
 
   get sessionIdsByStepIdSnapshot(): Record<string, string> {
@@ -280,6 +285,25 @@ export class FlowRunFileInputState {
     };
   }
 
+  // The step's recording session, made as its first part starts: the journal files
+  // the part under the session it will be stored in.
+  recordingSessionId(stepId: string): string {
+    const ensured = ensureSessionIdInState(this.#recordingSessionState.sessionIdsByStepId, stepId);
+    this.#recordingSessionState = {
+      ...this.#recordingSessionState,
+      sessionIdsByStepId: ensured.sessionIdsByStepId
+    };
+    return ensured.sessionId;
+  }
+
+  // Part of a recording is only in this tab: storage failed or fell behind ("failed"),
+  // or this browser keeps a part on the device only once it is done ("unavailable").
+  storageFailed(reason: JournalDegradation = "failed"): void {
+    const current = this.#recordingSessionState.storageNotice;
+    if (current === "failed" || current === reason) return;
+    this.#recordingSessionState = { ...this.#recordingSessionState, storageNotice: reason };
+  }
+
   prepareRecordedSegment(stepId: string, durationMs = 0): PreparedRecordedSegment {
     const ensured = ensureSessionIdInState(this.#recordingSessionState.sessionIdsByStepId, stepId);
     const bumped = bumpSegmentCountInState(
@@ -316,9 +340,7 @@ export class FlowRunFileInputState {
     notice: string | null;
     degraded: boolean;
   }): void {
-    if (degraded) {
-      this.#recordingSessionState = { ...this.#recordingSessionState, storageDegraded: true };
-    }
+    if (degraded) this.storageFailed();
     this.#recordingNoticesByStepId = { ...this.#recordingNoticesByStepId, [stepId]: notice };
     this.#setPendingSegmentState(stepId, segment, "uploading");
   }

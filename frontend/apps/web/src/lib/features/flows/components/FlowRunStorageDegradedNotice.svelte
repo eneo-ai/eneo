@@ -1,6 +1,9 @@
 <script lang="ts">
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { m } from "$lib/paraglide/messages";
+  import type { JournalDegradation } from "$lib/features/audio/recordingJournal";
+
+  let { reason = "failed" }: { reason?: JournalDegradation } = $props();
 </script>
 
 <Alert.Root
@@ -8,6 +11,8 @@
   role="status"
 >
   <Alert.Description class="text-warning-stronger/90">
-    {m.recording_session_storage_degraded()}
+    {reason === "failed"
+      ? m.recording_session_storage_degraded()
+      : m.recording_session_storage_on_part_end()}
   </Alert.Description>
 </Alert.Root>

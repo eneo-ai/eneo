@@ -707,6 +707,24 @@ describe("FlowRunDialog recording upload reconciliation", () => {
     expect(markSegmentUploaded).not.toHaveBeenCalled();
   });
 
+  it("says a saved recording was cut off when the page closed, and that its audio until then is kept", async () => {
+    vi.mocked(scanRecoverableSessionsForSteps).mockResolvedValue({
+      hints: { "step-audio": [{ ...recoveryHint(), interruptedAt: Date.UTC(2026, 6, 20, 9, 41) }] },
+      incomplete: false
+    });
+
+    renderDialog(buildEneo({ upload: vi.fn() }));
+
+    // The audio is saved up to the last chunk the journal kept, said in the page's time.
+    const time = new Date(Date.UTC(2026, 6, 20, 9, 41)).toLocaleTimeString("sv-SE", {
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+    expect(
+      await screen.findByText(m.recording_resume_interrupted({ time }), { exact: false })
+    ).toBeTruthy();
+  });
+
   it("says so when the saved recording cannot be read, and keeps the offer to try again", async () => {
     const upload = vi.fn(async () => uploadedFile("should-not-upload", "recording.webm"));
     vi.mocked(scanRecoverableSessionsForSteps).mockResolvedValue({
@@ -1177,8 +1195,9 @@ function recoveryHint(publishedFlowVersion = 7): SessionRecoveryHint {
     sessionId: "session-1",
     segmentCount: 1,
     totalDurationMs: 1_000,
-    earliestCapturedAt: Date.UTC(2026, 6, 20),
+    startedAt: Date.UTC(2026, 6, 20),
     uploadedCount: 0,
+    interruptedAt: null,
     contractSnapshot: {
       ...matchingContractSnapshot,
       publishedFlowVersion

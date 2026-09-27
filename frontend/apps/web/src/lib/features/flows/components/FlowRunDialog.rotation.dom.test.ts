@@ -30,7 +30,12 @@ import {
 import { PCM16_FLUSH, PCM16_FLUSHED } from "$lib/features/audio/live/pcm16-worklet.js";
 import { RETRY_BACKOFF_MS, ROTATION_OVERLAP_MS } from "$lib/features/audio/recordingSession";
 import { RECORDED_UPLOAD_RETRY_MS } from "$lib/features/audio/uploadRetry";
-import type { SegmentRecord, SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
+import { fakeLocks } from "$lib/features/audio/recordingJournalTestLocks";
+import {
+  recordingSessionStore,
+  type SegmentRecord,
+  type SessionRecoveryHint
+} from "$lib/features/audio/recordingSessionStore";
 import { toast } from "$lib/components/toast";
 import { m } from "$lib/paraglide/messages";
 import FlowRunDialog from "./FlowRunDialog.svelte";
@@ -531,6 +536,84 @@ describe("FlowRunDialog recording rotation", () => {
     media.recorders[0]?.finish();
     await flush();
     expect(release).toHaveBeenCalledOnce();
+  });
+
+  it("journals every part as it records and drops a part's journal once the part is stored", async () => {
+    const journal = spyOnJournal();
+    // The second part is kept only in memory: its journal stays, to rebuild it after a reload.
+    vi.mocked(persistRecordingSegment)
+      .mockResolvedValueOnce({ degraded: false })
+      .mockResolvedValueOnce({ degraded: true });
+    await openDialogAndStartRecording(vi.fn(() => new Promise<UploadedFile>(() => undefined)));
+    await rotate();
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    media.recorders[1]?.finish();
+    await flush();
+    await endOverlap();
+
+    const persisted = vi.mocked(persistRecordingSegment).mock.calls.map(([args]) => args);
+    expect(journal.begin.mock.calls.map(([part]) => part)).toEqual(
+      persisted.map((args) =>
+        expect.objectContaining({
+          flowId: "flow-1",
+          stepId: args.stepId,
+          sessionId: args.sessionId,
+          partId: args.partId,
+          mimeType: "audio/webm;codecs=opus"
+        })
+      )
+    );
+    expect(journal.append.mock.calls.map(([key, seq]) => [key, seq])).toEqual(
+      persisted.map((args) => [`key-${args.partId}`, 0])
+    );
+    expect(journal.drop.mock.calls).toEqual([[`key-${persisted[0]?.partId}`]]);
+    expect(screen.getByText(m.recording_session_storage_degraded())).toBeTruthy();
+  });
+
+  it("drops the journal of a part that captured nothing", async () => {
+    const journal = spyOnJournal();
+    await openDialogAndStartRecording(vi.fn(() => new Promise<UploadedFile>(() => undefined)));
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish({ withAudio: false });
+    await flush();
+
+    expect(persistRecordingSegment).not.toHaveBeenCalled();
+    expect(journal.drop).toHaveBeenCalledWith(`key-${journal.begin.mock.calls[0]?.[0].partId}`);
+  });
+
+  it("leaves a part still recording when the dialog goes away in the journal, to rebuild later", async () => {
+    const journal = spyOnJournal();
+    const rendered = await openDialogAndStartRecording(
+      vi.fn(() => new Promise<UploadedFile>(() => undefined))
+    );
+    const recorder = media.recorders[0];
+
+    rendered.unmount();
+    recorder?.finish();
+    await flush();
+
+    expect(persistRecordingSegment).not.toHaveBeenCalled();
+    expect(journal.append).toHaveBeenCalledOnce();
+    expect(journal.drop).not.toHaveBeenCalled();
+  });
+
+  it("says, where the browser cannot keep a part as it records, that each part is kept once done", async () => {
+    // No Web Locks here, as in a browser without them.
+    await openDialogAndStartRecording(vi.fn(() => new Promise<UploadedFile>(() => undefined)));
+    await flush();
+
+    expect(screen.getByText(m.recording_session_storage_on_part_end())).toBeTruthy();
+    expect(screen.queryByText(m.recording_session_storage_degraded())).toBeNull();
+  });
+
+  it("says so while recording when the device refuses to keep the recording as it goes", async () => {
+    const journal = spyOnJournal();
+    journal.begin.mockRejectedValue(new DOMException("quota", "QuotaExceededError"));
+    await openDialogAndStartRecording(vi.fn(() => new Promise<UploadedFile>(() => undefined)));
+    await flush();
+
+    expect(screen.getByText(m.recording_session_storage_degraded())).toBeTruthy();
   });
 
   it("gives a recording started while the last segment uploads its own rotation schedule", async () => {
@@ -1454,6 +1537,22 @@ function recorderStatesAtRelease() {
   return states;
 }
 
+// The device's journal and Web Locks, which jsdom has none of: every part gets a key
+// and its writes succeed.
+function spyOnJournal() {
+  Object.defineProperty(navigator, "locks", { value: fakeLocks(), configurable: true });
+  onTestFinished(() => {
+    Reflect.deleteProperty(navigator, "locks");
+  });
+  return {
+    begin: vi
+      .spyOn(recordingSessionStore, "beginJournalPart")
+      .mockImplementation(async (part) => `key-${part.partId}`),
+    append: vi.spyOn(recordingSessionStore, "appendJournalChunk").mockResolvedValue(undefined),
+    drop: vi.spyOn(recordingSessionStore, "dropJournalPart").mockResolvedValue(undefined)
+  };
+}
+
 function persistedSegments() {
   return vi
     .mocked(persistRecordingSegment)
@@ -1695,8 +1794,9 @@ function recoveryHint(): SessionRecoveryHint {
     sessionId: "session-1",
     segmentCount: 4,
     totalDurationMs: 4_000,
-    earliestCapturedAt: Date.UTC(2026, 8, 23),
+    startedAt: Date.UTC(2026, 8, 23),
     uploadedCount: 1,
+    interruptedAt: null,
     contractSnapshot: audioStepSnapshot
   };
 }

@@ -4,8 +4,11 @@
 import type { RecordingStopReason } from "./recordedAudioFile";
 
 const DB_NAME = "eneo-recording-sessions";
-const DB_VERSION = 1;
+// Version 2 adds the journal a running recording writes as it goes.
+const DB_VERSION = 2;
 const STORE_NAME = "segments";
+const JOURNAL_PARTS = "journalParts";
+const JOURNAL_CHUNKS = "journalChunks";
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const ROUND_TRIP_VERIFY_TIMEOUT_MS = 2_000;
 
@@ -21,6 +24,8 @@ export type SegmentRecord = {
   uploadedFileId: string | null;
   reason: RecordingStopReason;
   contractSnapshot: ContractSnapshot;
+  // The journal part it was recorded as: recovery never rebuilds a part that is stored.
+  partId?: string;
 };
 
 export type ContractSnapshot = {
@@ -37,12 +42,50 @@ export type SessionRecoveryHint = {
   sessionId: string;
   segmentCount: number;
   totalDurationMs: number;
-  earliestCapturedAt: number;
+  // When the recording began: its first part's save time less that part's length.
+  startedAt: number;
   uploadedCount: number;
+  // When the audio of a part rebuilt from the journal ends (the page closed while
+  // it recorded), or null.
+  interruptedAt: number | null;
   contractSnapshot: ContractSnapshot;
 };
 
 export type StoreMode = "indexeddb" | "memory";
+
+// A part being recorded: what the journal knows without reading its audio.
+export type JournalPart = {
+  key: string;
+  flowId: string;
+  stepId: string;
+  sessionId: string;
+  partId: string;
+  mimeType: string;
+  startedAt: number;
+  lastChunkAt: number;
+  chunkCount: number;
+  contractSnapshot: ContractSnapshot;
+};
+
+// Size and first byte: reading one byte makes the engine open the stored bytes, so a
+// Blob that only referenced a temporary file the tab lost fails here, not at upload.
+async function readsBack(blob: Blob): Promise<boolean> {
+  if (blob.size === 0) return true;
+  try {
+    return (await blob.slice(0, 1).arrayBuffer()).byteLength > 0;
+  } catch {
+    return false;
+  }
+}
+
+// The whole check, the read of the record and of its bytes, has one time bound.
+// Null when it had no answer by then: slow is not the same as gone.
+function withinVerifyTime(check: Promise<boolean>): Promise<boolean | null> {
+  return Promise.race([
+    check.catch(() => false),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), ROUND_TRIP_VERIFY_TIMEOUT_MS))
+  ]);
+}
 
 class RecordingSessionStoreImpl {
   private db: IDBDatabase | null = null;
@@ -82,11 +125,27 @@ class RecordingSessionStoreImpl {
             store.createIndex("by_session", ["flowId", "stepId", "sessionId"]);
             store.createIndex("by_capturedAt", "capturedAt");
           }
+          // The earlier version's saved parts stay as they are.
+          if (!db.objectStoreNames.contains(JOURNAL_PARTS)) {
+            db.createObjectStore(JOURNAL_PARTS, { keyPath: "key" });
+          }
+          if (!db.objectStoreNames.contains(JOURNAL_CHUNKS)) {
+            db.createObjectStore(JOURNAL_CHUNKS, { keyPath: "key" });
+          }
         };
         request.onsuccess = () => {
           // A blocked attempt can still open after a later one did: keep one connection.
           if (this.db) request.result.close();
-          else this.db = request.result;
+          else {
+            const db = request.result;
+            this.db = db;
+            // Another tab opening a newer version: let it, and open again when needed.
+            db.onversionchange = () => {
+              db.close();
+              if (this.db === db) this.db = null;
+              this.openPromise = null;
+            };
+          }
           resolve(this.db);
         };
         request.onerror = () => {
@@ -143,31 +202,19 @@ class RecordingSessionStoreImpl {
     return { persisted: false, mode: "memory" };
   }
 
-  private async verifyRoundTrip(compositeKey: string, expectedSize: number): Promise<boolean> {
-    // runTransaction now normalizes IDBRequest → Promise<value> and waits for
-    // the transaction to complete, so the work fn can hand the request back
-    // directly. The cast resolves to the stored object, not the IDBRequest.
-    const fetched = await Promise.race([
-      this.runTransaction<unknown>("readonly", (store) => store.get(compositeKey)),
-      new Promise<undefined>((resolve) =>
-        setTimeout(() => resolve(undefined), ROUND_TRIP_VERIFY_TIMEOUT_MS)
+  private verifyRoundTrip(
+    compositeKey: string,
+    expectedSize: number,
+    storeName: string = STORE_NAME
+  ): Promise<boolean | null> {
+    return withinVerifyTime(
+      this.runTransaction<unknown>("readonly", (store) => store.get(compositeKey), storeName).then(
+        (record) => {
+          const blob = (record as { blob?: unknown } | undefined)?.blob;
+          return blob instanceof Blob && blob.size === expectedSize && readsBack(blob);
+        }
       )
-    ]);
-
-    const record = (fetched as { blob?: Blob } | undefined) ?? undefined;
-    if (!record || !(record.blob instanceof Blob)) return false;
-    if (record.blob.size !== expectedSize) return false;
-    if (expectedSize === 0) return true;
-
-    // Reading even one byte forces the engine to materialize the underlying
-    // file handle; lazy-Blob bugs surface here instead of at upload time.
-    try {
-      const slice = record.blob.slice(0, Math.min(1, expectedSize));
-      const buffer = await slice.arrayBuffer();
-      return buffer.byteLength > 0;
-    } catch {
-      return false;
-    }
+    );
   }
 
   async readSession(flowId: string, stepId: string, sessionId: string): Promise<SegmentRecord[]> {
@@ -235,16 +282,22 @@ class RecordingSessionStoreImpl {
   }
 
   // Rejects when IndexedDB could not delete the stored parts; the parts only memory
-  // holds are then kept too, so the whole session stays for another try.
+  // holds are then kept too, so the whole session stays for another try. The
+  // session's journal goes with it.
   async deleteSession(flowId: string, stepId: string, sessionId: string): Promise<void> {
     const prefix = this.sessionPrefix(flowId, stepId, sessionId);
     if ((await this.openDb()) !== null) {
+      const range = IDBKeyRange.bound(prefix, prefix + "\uffff");
       await this.runTransaction("readwrite", (store) => {
         return new Promise<void>((resolve, reject) => {
-          const request = store.delete(IDBKeyRange.bound(prefix, prefix + "\uffff"));
+          const request = store.delete(range);
           request.onsuccess = () => resolve();
           request.onerror = () => reject(request.error);
         });
+      });
+      await this.runJournal("readwrite", (parts, chunks) => {
+        parts.delete(range);
+        chunks.delete(range);
       });
     }
     for (const key of Array.from(this.memoryFallback.keys())) {
@@ -286,16 +339,19 @@ class RecordingSessionStoreImpl {
         continue;
       }
       const totalDurationMs = list.reduce((sum, s) => sum + (s.durationMs || 0), 0);
-      const earliestCapturedAt = Math.min(...list.map((s) => s.capturedAt));
+      // A part is saved as it ends: the recording began its length earlier.
+      const startedAt = Math.min(...list.map((s) => s.capturedAt - (s.durationMs || 0)));
       const uploadedCount = list.filter((s) => s.uploadedFileId !== null).length;
+      const interrupted = list.filter((s) => s.reason === "interrupted").map((s) => s.capturedAt);
       hints.push({
         flowId,
         stepId,
         sessionId,
         segmentCount: list.length,
         totalDurationMs,
-        earliestCapturedAt,
+        startedAt,
         uploadedCount,
+        interruptedAt: interrupted.length > 0 ? Math.max(...interrupted) : null,
         contractSnapshot: list[0]?.contractSnapshot ?? {
           publishedFlowVersion: null,
           maxFiles: null,
@@ -306,7 +362,7 @@ class RecordingSessionStoreImpl {
       });
     }
 
-    hints.sort((a, b) => b.earliestCapturedAt - a.earliestCapturedAt);
+    hints.sort((a, b) => b.startedAt - a.startedAt);
     return { hints, complete: stored };
   }
 
@@ -348,14 +404,15 @@ class RecordingSessionStoreImpl {
 
   private async runTransaction<T>(
     mode: IDBTransactionMode,
-    work: (store: IDBObjectStore) => T | PromiseLike<T> | IDBRequest<T>
+    work: (store: IDBObjectStore) => T | PromiseLike<T> | IDBRequest<T>,
+    storeName: string = STORE_NAME
   ): Promise<T> {
     const db = await this.openDb();
     if (!db) throw new Error("IndexedDB not available");
 
     return new Promise<T>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, mode);
-      const store = tx.objectStore(STORE_NAME);
+      const tx = db.transaction(storeName, mode);
+      const store = tx.objectStore(storeName);
 
       const txDone = new Promise<void>((txResolve, txReject) => {
         tx.oncomplete = () => txResolve();
@@ -399,6 +456,168 @@ class RecordingSessionStoreImpl {
         .then(([value]) => resolve(value))
         .catch(reject);
     });
+  }
+
+  // ---- Journal: a running recording's parts, written chunk by chunk ----
+
+  private journalKey(flowId: string, stepId: string, sessionId: string, partId: string): string {
+    return `${flowId}::${stepId}::${sessionId}::${partId}`;
+  }
+
+  private chunkKey(key: string, seq: number): string {
+    return `${key}::${seq.toString().padStart(6, "0")}`;
+  }
+
+  // One transaction over the journal's two stores; `work` issues its requests.
+  private async runJournal(
+    mode: IDBTransactionMode,
+    work: (parts: IDBObjectStore, chunks: IDBObjectStore) => void
+  ): Promise<void> {
+    const db = await this.openDb();
+    if (!db) throw new Error("IndexedDB not available");
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([JOURNAL_PARTS, JOURNAL_CHUNKS], mode);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error ?? new Error("IndexedDB transaction failed"));
+      tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted"));
+      try {
+        work(tx.objectStore(JOURNAL_PARTS), tx.objectStore(JOURNAL_CHUNKS));
+      } catch (error) {
+        try {
+          tx.abort();
+        } catch {
+          // Already finished.
+        }
+        reject(error);
+      }
+    });
+  }
+
+  private async readAll<T>(storeName: string, range: IDBKeyRange): Promise<T[]> {
+    const db = await this.openDb();
+    if (!db) throw new Error("IndexedDB not available");
+    return new Promise<T[]>((resolve, reject) => {
+      const request = db.transaction(storeName, "readonly").objectStore(storeName).getAll(range);
+      request.onsuccess = () => resolve(request.result as T[]);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  // Null outside a browser, where memory is the whole ledger and nothing outlives the page.
+  async beginJournalPart(
+    part: Omit<JournalPart, "key" | "lastChunkAt" | "chunkCount">
+  ): Promise<string | null> {
+    if (!this.isBrowser()) return null;
+    const key = this.journalKey(part.flowId, part.stepId, part.sessionId, part.partId);
+    const meta: JournalPart = { ...part, key, lastChunkAt: part.startedAt, chunkCount: 0 };
+    await this.runJournal("readwrite", (parts) => {
+      parts.put(meta);
+    });
+    return key;
+  }
+
+  // The chunk and the part's count go in one transaction: a crash keeps both or neither.
+  // Rejects when the chunk does not read back, as a stored part must.
+  async appendJournalChunk(key: string, seq: number, blob: Blob, at: number): Promise<void> {
+    const chunkKey = this.chunkKey(key, seq);
+    await this.runJournal("readwrite", (parts, chunks) => {
+      chunks.put({ key: chunkKey, blob, at });
+      const get = parts.get(key);
+      get.onsuccess = () => {
+        const meta = get.result as JournalPart | undefined;
+        if (meta) parts.put({ ...meta, lastChunkAt: at, chunkCount: seq + 1 });
+      };
+    });
+    if (!(await this.verifyRoundTrip(chunkKey, blob.size, JOURNAL_CHUNKS))) {
+      throw new Error("RecordingSessionStore: a journal chunk did not read back");
+    }
+  }
+
+  // Metadata only: the scan never reads audio.
+  async listJournalParts(flowId: string, stepId: string): Promise<JournalPart[]> {
+    if (!this.isBrowser()) return [];
+    const prefix = `${flowId}::${stepId}::`;
+    return this.readAll<JournalPart>(JOURNAL_PARTS, IDBKeyRange.bound(prefix, prefix + "\uffff"));
+  }
+
+  // The run of chunks from the first that are in sequence and read back: a gap or a
+  // chunk whose bytes are gone ends what can be played. Null when a chunk gave no
+  // answer in time: the whole journal is kept for another try.
+  async readJournalChunks(key: string): Promise<{ blob: Blob; at: number }[] | null> {
+    const prefix = `${key}::`;
+    const rows = await this.readAll<{ key: string; blob: Blob; at: number }>(
+      JOURNAL_CHUNKS,
+      IDBKeyRange.bound(prefix, prefix + "\uffff")
+    );
+    // Keys sort by their zero-padded sequence.
+    const playable: { blob: Blob; at: number }[] = [];
+    for (const [seq, row] of rows.entries()) {
+      if (row.key !== this.chunkKey(key, seq)) break;
+      const plays = await withinVerifyTime(readsBack(row.blob));
+      if (plays === null) return null;
+      if (!plays) break;
+      playable.push({ blob: row.blob, at: row.at });
+    }
+    return playable;
+  }
+
+  async dropJournalPart(key: string): Promise<void> {
+    const prefix = `${key}::`;
+    await this.runJournal("readwrite", (parts, chunks) => {
+      parts.delete(key);
+      chunks.delete(IDBKeyRange.bound(prefix, prefix + "\uffff"));
+    });
+  }
+
+  // A part the journal holds but the store does not becomes its recording's next
+  // part: a closed tab, a reload or a crash cut it off. A stored copy counts only
+  // when it reads back; one that does not is replaced in its place. The journal is
+  // dropped once the part is stored, or when there is nothing to rebuild. False
+  // when the part could not be stored: the journal stays for another try. The
+  // caller holds the step's recovery lock, so no other tab numbers parts meanwhile.
+  async recoverJournalPart(part: JournalPart, now: number = Date.now()): Promise<boolean> {
+    const { records } = await this.readRange(
+      this.sessionPrefix(part.flowId, part.stepId, part.sessionId)
+    );
+    const stored = records.find((r) => r.partId === part.partId);
+    const segmentIndex =
+      stored?.segmentIndex ?? Math.max(-1, ...records.map((r) => r.segmentIndex)) + 1;
+    const compositeKey = this.compositeKey(part.flowId, part.stepId, part.sessionId, segmentIndex);
+    // Only this tab's memory holds it: the journal stays, for after a reload.
+    if (stored && this.memoryFallback.has(compositeKey)) return true;
+    const kept = stored ? await this.verifyRoundTrip(compositeKey, stored.blob.size) : false;
+    const expired = part.lastChunkAt < now - SESSION_TTL_MS;
+    const chunks = kept || expired ? [] : await this.readJournalChunks(part.key);
+    // Slow to read is not gone: nothing is replaced or dropped until an answer comes.
+    if (kept === null || chunks === null) return false;
+    // The part ends with its last chunk that plays, when the recorder handed it over.
+    const savedUntil = chunks.at(-1)?.at ?? part.lastChunkAt;
+    if (chunks.length > 0) {
+      const { persisted } = await this.writeSegment({
+        flowId: part.flowId,
+        stepId: part.stepId,
+        sessionId: part.sessionId,
+        segmentIndex,
+        blob: new Blob(
+          chunks.map((chunk) => chunk.blob),
+          { type: part.mimeType }
+        ),
+        mimeType: part.mimeType,
+        durationMs: Math.max(0, savedUntil - part.startedAt),
+        capturedAt: savedUntil,
+        uploadedFileId: null,
+        reason: "interrupted",
+        contractSnapshot: part.contractSnapshot,
+        partId: part.partId
+      });
+      if (!persisted) {
+        // The journal, not this tab's memory, stays the part's one copy.
+        this.memoryFallback.delete(compositeKey);
+        return false;
+      }
+    }
+    await this.dropJournalPart(part.key);
+    return true;
   }
 
   __resetForTests(): void {

@@ -28,7 +28,8 @@
   import { buildRecordedAudioFile } from "./recordedAudioFile";
   import type { RecordingStopReason } from "./recordedAudioFile";
   import { downloadRecordedAudioFile } from "./downloadRecordedAudioFile";
-  import { ROTATION_OVERLAP_MS } from "./recordingSession";
+  import type { RecorderJournal } from "./recordingJournal";
+  import { generateSessionId, ROTATION_OVERLAP_MS } from "./recordingSession";
   import type { RecorderAudioGraph } from "./live/LiveTranscriptPreview.svelte";
 
   // Every stop reports once. `blob` is null when nothing was captured, so a
@@ -40,6 +41,8 @@
     // Captured at finalize-time from the rAF tick clock; useful so callers
     // can label resumed segments by length without having to read the blob.
     durationMs: number;
+    // The segment's part in the journal.
+    partId: string;
   }) => void;
   // `false` comes once every segment of the recording has been reported
   // through onRecordingDone; the last one arrives a moment after the stop.
@@ -75,9 +78,13 @@
   // False while the caller cannot take another recording; stopping stays possible.
   export let canStart = true;
 
+  // Every segment's audio as it arrives, so a closed tab or a crash keeps what
+  // was recorded; the caller commits or discards the part it is handed.
+  export let journal: RecorderJournal | null = null;
+
   // A recording reports to the callbacks it started with: its last segment
   // arrives after the stop, when the caller may have moved on.
-  let reportTo = { onRecordingDone, onRecordingStateChange };
+  let reportTo = { onRecordingDone, onRecordingStateChange, journal };
 
   let isRecording: boolean = false;
   let startedRecordingAt = dayjs();
@@ -529,7 +536,7 @@
   }
 
   async function doStartRecording(origin: RecordingStartOrigin): Promise<void> {
-    reportTo = { onRecordingDone, onRecordingStateChange };
+    reportTo = { onRecordingDone, onRecordingStateChange, journal };
     try {
       recordedBlob = null;
       recordedMimeType = "";
@@ -622,6 +629,8 @@
     const chunks: Blob[] = [];
     const segmentStartedAt = monotonicNow();
     const handOver = reportTo.onRecordingDone;
+    const partJournal = reportTo.journal;
+    const partId = generateSessionId();
     const isReplaced = () => replacedRecorders.has(recorder);
     let stopHandled = () => {};
     recorderStops.set(
@@ -639,7 +648,8 @@
       return {
         blob: new Blob(chunks, { type: mimeType }),
         mimeType,
-        durationMs: Math.max(0, monotonicNow() - segmentStartedAt)
+        durationMs: Math.max(0, monotonicNow() - segmentStartedAt),
+        partId
       };
     };
 
@@ -650,6 +660,7 @@
         // already produced; a few hundred bytes over the cap is the
         // less-bad outcome.
         chunks.push(event.data);
+        partJournal?.append(partId, event.data);
         // A replaced recorder's last chunk belongs to its own file, not to
         // the live segment's size and stall bookkeeping.
         if (isReplaced()) return;
@@ -712,10 +723,14 @@
         // complete, so not even an unmount drops it.
         if (chunks.length > 0) {
           handOver({ ...finishedSegment(), reason: "rotation" });
+        } else {
+          partJournal?.discard(partId);
         }
         return;
       }
       if (discardRecordingOnStop) {
+        // Unmounted while recording (the page went elsewhere): the journal keeps it.
+        partJournal?.leave(partId);
         releaseMediaCapture();
         return;
       }
@@ -756,7 +771,8 @@
         blob: segment?.blob ?? null,
         mimeType: segment?.mimeType ?? "",
         reason,
-        durationMs: segment?.durationMs ?? 0
+        durationMs: segment?.durationMs ?? 0,
+        partId
       });
     }
 
@@ -772,6 +788,7 @@
 
     recorder.start(TIMESLICE_MS);
     recordingStats.recorderMimeType = recorder.mimeType || initialMimeType;
+    partJournal?.begin(partId, recordingStats.recorderMimeType || "audio/webm");
     return recorder;
   }
 
@@ -1130,8 +1147,9 @@
     // A replaced recorder's segment is complete, so it is still handed over.
     void stopOverlappingRecorder();
 
-    // A recording still running at unmount is dropped; one stopped just
-    // before (the dialog stops it as it closes) still hands over its file.
+    // A recording still running at unmount is not handed over (its journal keeps
+    // it for recovery); one stopped just before (the dialog stops it as it
+    // closes) still hands over its file.
     if (mediaRecorder && mediaRecorder.state !== "inactive") {
       discardRecordingOnStop = true;
       try {

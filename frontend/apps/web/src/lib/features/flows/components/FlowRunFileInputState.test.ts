@@ -77,8 +77,9 @@ function recoveryHint(stepId: string, sessionId: string): SessionRecoveryHint {
     sessionId,
     segmentCount: 2,
     totalDurationMs: 20_000,
-    earliestCapturedAt: Date.UTC(2026, 4, 1, 8, 0, 0),
+    startedAt: Date.UTC(2026, 4, 1, 8, 0, 0),
     uploadedCount: 1,
+    interruptedAt: null,
     contractSnapshot: snapshot
   };
 }

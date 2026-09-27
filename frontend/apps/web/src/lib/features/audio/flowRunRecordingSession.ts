@@ -3,6 +3,7 @@
 import type { FlowRunContractStepInput, Eneo, UploadedFile } from "@eneo/eneo-js";
 
 import type { RecordingStopReason } from "./recordedAudioFile";
+import { journalLockName, type JournalDegradation } from "./recordingJournal";
 import {
   buildSegmentFilenameBase,
   generateSessionId,
@@ -25,7 +26,8 @@ export type RecordingSessionState = {
   resumeHintsByStepId: Record<string, SessionRecoveryHint[]>;
   resumePromptStepId: string | null;
   resumeBusyStepId: string | null;
-  storageDegraded: boolean;
+  // Part of a recording is only in this tab, and why; "failed" outweighs "unavailable".
+  storageNotice: JournalDegradation | null;
 };
 
 export function emptyRecordingSessionState(): RecordingSessionState {
@@ -36,7 +38,7 @@ export function emptyRecordingSessionState(): RecordingSessionState {
     resumeHintsByStepId: {},
     resumePromptStepId: null,
     resumeBusyStepId: null,
-    storageDegraded: false
+    storageNotice: null
   };
 }
 
@@ -155,6 +157,7 @@ export type PersistSegmentArgs = {
   durationMs: number;
   capturedAt: number;
   contractSnapshot: ContractSnapshot;
+  partId?: string;
 };
 
 export async function persistRecordingSegment(args: PersistSegmentArgs): Promise<{
@@ -172,7 +175,8 @@ export async function persistRecordingSegment(args: PersistSegmentArgs): Promise
       capturedAt: args.capturedAt,
       uploadedFileId: null,
       reason: args.reason,
-      contractSnapshot: args.contractSnapshot
+      contractSnapshot: args.contractSnapshot,
+      partId: args.partId
     });
     return { degraded: result.mode === "memory" };
   } catch (error) {
@@ -204,6 +208,32 @@ export async function markSegmentUploaded(args: {
   }
 }
 
+// Parts a closed tab, a reload or a crash left in the journal become stored parts
+// of their recording, in the order they were recorded. One tab recovers a step at a
+// time, so parts are numbered once; a part another tab is still recording holds its
+// lock and is left alone. False when a part could not be stored. Without Web Locks
+// a part cannot be told from one still recording, and none was journaled.
+export async function recoverInterruptedParts(
+  flowId: string,
+  stepId: string,
+  locks: LockManager | null = (globalThis.navigator as Navigator | undefined)?.locks ?? null,
+  now: number = Date.now()
+): Promise<boolean> {
+  if (!locks) return true;
+  const recover = async () => {
+    let complete = true;
+    const parts = await recordingSessionStore.listJournalParts(flowId, stepId);
+    for (const part of parts.sort((a, b) => a.startedAt - b.startedAt)) {
+      await locks.request(journalLockName(part.partId), { ifAvailable: true }, async (lock) => {
+        if (lock)
+          complete = (await recordingSessionStore.recoverJournalPart(part, now)) && complete;
+      });
+    }
+    return complete;
+  };
+  return locks.request(`eneo-recording-recovery:${flowId}::${stepId}`, recover);
+}
+
 export type RecoveryScan = {
   hints: Record<string, SessionRecoveryHint[]>;
   incomplete: boolean;
@@ -219,9 +249,10 @@ export async function scanRecoverableSessionsForSteps(args: {
   let incomplete = false;
   for (const step of args.steps) {
     try {
+      const recovered = await recoverInterruptedParts(args.flowId, step.step_id);
       const list = await recordingSessionStore.listRecoverableSessions(args.flowId, step.step_id);
       if (list.hints.length > 0) hints[step.step_id] = list.hints;
-      incomplete ||= !list.complete;
+      incomplete ||= !recovered || !list.complete;
     } catch (error) {
       console.warn("flowRunRecordingSession: saved recordings could not be read", {
         stepId: step.step_id,

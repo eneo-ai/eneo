@@ -32,6 +32,7 @@
     RecorderAudioGraph
   } from "$lib/features/audio/live/LiveTranscriptPreview.svelte";
   import type { RecordingStopReason } from "$lib/features/audio/recordedAudioFile";
+  import type { JournalDegradation, RecorderJournal } from "$lib/features/audio/recordingJournal";
   import type { SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
   import { formatBytes } from "$lib/features/flows/flowByteSize";
   import type { FlowRunDialogLabels } from "./flowRunDialogLabels";
@@ -63,7 +64,7 @@
     resumeHint = null,
     showResumePrompt = false,
     resumeBusy = false,
-    storageDegraded = false,
+    storageNotice = null,
     offline = false,
     recoveryScanFailed = false,
     onRetryRecoveryScan,
@@ -82,6 +83,7 @@
     onDiscardResume,
     onDismissResumePrompt,
     onRecordingDone,
+    recordingJournal = null,
     onRecordingStateChange,
     onRecorderRef,
     onSessionRetry,
@@ -117,7 +119,7 @@
     resumeHint?: SessionRecoveryHint | null;
     showResumePrompt?: boolean;
     resumeBusy?: boolean;
-    storageDegraded?: boolean;
+    storageNotice?: JournalDegradation | null;
     // The browser has no connection: recording goes on, uploads wait.
     offline?: boolean;
     // The saved recordings could not be read; Retry reads them again.
@@ -146,7 +148,9 @@
       mimeType: string;
       reason: RecordingStopReason;
       durationMs: number;
+      partId: string;
     }) => void;
+    recordingJournal?: RecorderJournal | null;
     onRecordingStateChange?: (isRecording: boolean, meta?: { origin: "user" | "external" }) => void;
     // Lets the dialog grab an imperative handle on the recorder so the
     // session controller can call startExternal/stopExternal during retries.
@@ -262,8 +266,8 @@
       />
     {/if}
 
-    {#if storageDegraded}
-      <FlowRunStorageDegradedNotice />
+    {#if storageNotice}
+      <FlowRunStorageDegradedNotice reason={storageNotice} />
     {/if}
 
     {#if recoveryScanFailed && supportsAudioRecording}
@@ -571,6 +575,7 @@
           resetToken={recorderResetToken}
           canStart={canStartRecording}
           {onRecordingDone}
+          journal={recordingJournal}
           onRecordingStateChange={onRecordingStateChange ?? (() => {})}
           onAudioGraph={handleAudioGraph}
           onCaptureInterrupted={() => livePreview.lose()}
