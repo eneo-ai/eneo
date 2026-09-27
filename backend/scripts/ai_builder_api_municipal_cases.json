@@ -184,7 +184,8 @@
               "motivering",
               "beslutsmotivering",
               "motivation",
-              "justification"
+              "justification",
+              "en_motivering"
             ],
             [
               "handlaggare",
@@ -720,7 +721,8 @@
               "manatligt_bistand",
               "beraknat_forsorjningsstod",
               "resultat",
-              "differens"
+              "differens",
+              "beraknat_underskott"
             ]
           ],
           "target_must_be_non_terminal": true
@@ -739,7 +741,7 @@
           {
             "review_mode": "edit",
             "output_type": "json",
-            "action": "approve"
+            "action": "edit_target"
           }
         ],
         "expect": {
@@ -820,7 +822,10 @@
               "omedelbar_skyddsbedomning",
               "behov_av_omedelbart_skydd",
               "akut_skyddsbehov_finns",
-              "akut_behov"
+              "akut_behov",
+              "akut_skyddsbehov_enligt_rutin",
+              "akut_skyddssignal_finns",
+              "akut_skyddsbehov_analys"
             ]
           ],
           "target_must_be_non_terminal": true
@@ -834,7 +839,7 @@
           {
             "review_mode": "edit",
             "output_type": "json",
-            "action": "approve"
+            "action": "edit_target"
           }
         ],
         "expect": {
@@ -1148,7 +1153,8 @@
               "forslag_beslut",
               "foreslaget_beslut",
               "rekommenderat_beslut",
-              "bifall_eller_avslag"
+              "bifall_eller_avslag",
+              "forslag_till_beslut_bifall_eller_avslag_med_skal"
             ]
           ],
           "target_must_be_non_terminal": true
@@ -1524,7 +1530,7 @@
           {
             "review_mode": "edit",
             "output_type": "json",
-            "action": "approve"
+            "action": "edit_target"
           }
         ],
         "expect": {
@@ -1792,7 +1798,7 @@
           {
             "review_mode": "edit",
             "output_type": "json",
-            "action": "approve"
+            "action": "edit_target"
           }
         ],
         "expect": {
@@ -1892,7 +1898,7 @@
           {
             "review_mode": "edit",
             "output_type": "json",
-            "action": "approve"
+            "action": "edit_target"
           }
         ],
         "expect": {
@@ -2826,7 +2832,7 @@
           {
             "review_mode": "edit",
             "output_type": "json",
-            "action": "approve"
+            "action": "edit_target"
           }
         ],
         "expect": {
@@ -3438,7 +3444,7 @@
           {
             "review_mode": "edit",
             "output_type": "json",
-            "action": "approve"
+            "action": "edit_target"
           }
         ],
         "expect": {
@@ -3692,7 +3698,8 @@
               "skalig_kostnad",
               "lagsta_kostnad",
               "hogsta_belopp",
-              "bidragsbelopp"
+              "bidragsbelopp",
+              "lagsta_skaliga_kostnad"
             ]
           ],
           "target_must_be_non_terminal": true
@@ -3712,7 +3719,7 @@
           {
             "review_mode": "edit",
             "output_type": "json",
-            "action": "approve"
+            "action": "edit_target"
           }
         ],
         "expect": {
@@ -4069,7 +4076,7 @@
           {
             "review_mode": "edit",
             "output_type": "json",
-            "action": "approve"
+            "action": "edit_target"
           }
         ],
         "expect": {
@@ -4488,7 +4495,7 @@
           {
             "review_mode": "edit",
             "output_type": "json",
-            "action": "approve"
+            "action": "edit_target"
           }
         ],
         "expect": {
@@ -5068,7 +5075,7 @@
           {
             "review_mode": "edit",
             "output_type": "json",
-            "action": "approve"
+            "action": "edit_target"
           }
         ],
         "expect": {
@@ -5368,7 +5375,7 @@
           {
             "review_mode": "edit",
             "output_type": "json",
-            "action": "approve"
+            "action": "edit_target"
           }
         ],
         "expect": {

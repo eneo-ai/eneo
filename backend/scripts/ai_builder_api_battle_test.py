@@ -9,6 +9,7 @@ Set ENEO_API_KEY in the environment; never commit local keys into this file.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import io
 import itertools
@@ -27,6 +28,7 @@ from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from dataclasses import field as dataclass_field
 from dataclasses import fields as dataclass_fields
+from decimal import Decimal
 from http.client import HTTPException
 from pathlib import Path
 from threading import Lock
@@ -1827,6 +1829,15 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
         if isinstance(expected, Mapping):
             _validate_classifier_expectations(path, case_id, expected)
             _validate_release_expectations(path, case_id, expected)
+        if (
+            execution is not None
+            and any(item.action == "edit_target" for item in execution.checkpoints)
+            and not _review_target_names(expected)
+        ):
+            raise ValueError(
+                f"{path} case {case_id} edits its review target but declares no "
+                "expected_review_policy.target_field_groups."
+            )
         profile_name = raw_case.get("synthetic_user_profile")
         if profile_name is not None and (
             not isinstance(profile_name, str) or profile_name not in profiles
@@ -1948,7 +1959,9 @@ def _case_fixture_names(
 # A run's final output kind is the published final step's output type.
 _OUTPUT_KINDS = frozenset(output_type.value for output_type in FlowOutputType)
 _REVIEW_MODES = frozenset(mode.value for mode in FlowStepReviewMode)
-_CHECKPOINT_ACTIONS = frozenset({"approve", "edit"})
+# `edit_target` is the review edit oracle: the harness edits one leaf the case's
+# review target names and checks that the new value reaches delivery.
+_CHECKPOINT_ACTIONS = frozenset({"approve", "edit", "edit_target"})
 
 
 def _field_names(cls: type[object]) -> frozenset[str]:
@@ -2055,8 +2068,10 @@ def _expected_checkpoint(value: object, *, owner: str) -> ExpectedCheckpoint:
             raise ValueError(
                 f"{owner}.edited_value must be the corrected text or JSON value."
             )
-    elif "edited_value" in raw:
-        raise ValueError(f"{owner} approves as is and takes no edited_value.")
+    elif action == "edit_target" and review_mode != FlowStepReviewMode.EDIT.value:
+        raise ValueError(f"{owner} edits a checkpoint whose review_mode is view.")
+    if action != "edit" and "edited_value" in raw:
+        raise ValueError(f"{owner} takes no edited_value.")
     return ExpectedCheckpoint(
         review_mode=review_mode,
         output_type=output_type,
@@ -4997,6 +5012,7 @@ def _apply_execute_and_cleanup_flow(
                     artifact_output_dir=artifact_output_dir,
                     case_id=case.case_id,
                     record=runtime_record,
+                    review_target_names=_review_target_names(case.expected),
                 )
                 if runtime_record.get(
                     "outcome"
@@ -5011,9 +5027,18 @@ def _apply_execute_and_cleanup_flow(
                         "the runtime files."
                     )
                 final_file = runtime_evidence.get("final_artifact") or {}
-                if unmeasured := final_file.get("unmeasured"):
-                    # Past a read bound the output cannot be judged, so the
-                    # slot is re-measurable and no acceptance check scores it.
+                # Past a read bound the output cannot be judged, and a review
+                # edit whose delivery is not checkable proves nothing: the slot
+                # is re-measurable and no acceptance check scores it.
+                unmeasured = final_file.get("unmeasured") or next(
+                    (
+                        cast(JsonObject, failure["edit_oracle"])["unmeasured"]
+                        for failure in _mapping_list(runtime_record.get("failures"))
+                        if failure.get("kind") == "review_target_unmeasured"
+                    ),
+                    None,
+                )
+                if unmeasured:
                     runtime_record["unmeasured"] = unmeasured
                     raise ValueError(
                         f"case {case.case_id} final output is unmeasured: {unmeasured}"
@@ -5124,6 +5149,7 @@ def _execute_and_collect_runtime_evidence(
     artifact_output_dir: Path,
     case_id: str,
     record: JsonObject,
+    review_target_names: tuple[str, ...] = (),
 ) -> JsonObject:
     """Run the applied Flow once, as the case declares, and keep what it made.
 
@@ -5200,6 +5226,7 @@ def _execute_and_collect_runtime_evidence(
             checkpoints=execution.checkpoints,
             timeout_seconds=timeout_seconds,
             record=record,
+            review_target_names=review_target_names,
         )
     except Exception:
         # Deleting the Flow does not stop a run it has, so an error must not
@@ -5276,6 +5303,7 @@ def _drive_run(
     checkpoints: tuple[ExpectedCheckpoint, ...],
     timeout_seconds: int,
     record: JsonObject,
+    review_target_names: tuple[str, ...] = (),
 ) -> JsonObject:
     """Poll one run to its end, acting on each review pause the case declared.
 
@@ -5315,6 +5343,7 @@ def _drive_run(
                 checkpoints=checkpoints,
                 handled=handled,
                 deadline=deadline,
+                review_target_names=review_target_names,
             )
         ):
             failures.append(failure)
@@ -5376,6 +5405,7 @@ def _resolve_review_pause(
     checkpoints: tuple[ExpectedCheckpoint, ...],
     handled: list[JsonObject],
     deadline: float,
+    review_target_names: tuple[str, ...] = (),
 ) -> JsonObject | None:
     """Act on the open checkpoint as declared; the failure when that is impossible.
 
@@ -5417,8 +5447,27 @@ def _resolve_review_pause(
     # Each mutation first checks the deadline: a slow read can cross it.
     deadline_reached = {"kind": "deadline_reached", "checkpoint": observed}
     failed_kind = "checkpoint_edit_failed"
+    edited_value = expected.edited_value
+    edit_oracle: JsonObject = {}
+    if expected.action == "edit_target":
+        edit_oracle = _review_target_edit(
+            active.get("current_payload_json"),
+            review_target_names,
+            sentinel=f"REVIEW-EDIT-{checkpoint_id}",
+        )
+        edited_value = edit_oracle.pop("edited_value", None)
+        if edited_value is None:
+            # Nothing to edit, or nothing checkable: stop here rather than pay
+            # for the rest of the run.
+            return {
+                "kind": "review_target_unmeasured"
+                if "unmeasured" in edit_oracle
+                else "review_target_missing",
+                "checkpoint": observed,
+                "edit_oracle": edit_oracle,
+            }
     try:
-        if expected.action == "edit":
+        if edited_value is not None:
             if time.monotonic() >= deadline:
                 return deadline_reached
             revision = _request_json(
@@ -5427,7 +5476,7 @@ def _resolve_review_pause(
                 path=_flow_api_path(FLOW_REVIEW_CHECKPOINT_PATH, **ids),
                 payload={
                     "expected_checkpoint_revision": revision,
-                    "edited_value": expected.edited_value,
+                    "edited_value": edited_value,
                 },
             ).get("revision")
         failed_kind = "checkpoint_continue_failed"
@@ -5447,10 +5496,202 @@ def _resolve_review_pause(
         return {
             "kind": failed_kind,
             "checkpoint": observed,
+            **({"edit_oracle": edit_oracle} if edit_oracle else {}),
             **_http_error_detail(error, config),
         }
-    handled.append({"checkpoint": observed, "action": expected.action})
+    handled.append(
+        {
+            "checkpoint": observed,
+            "action": expected.action,
+            **({"edit_oracle": edit_oracle} if edit_oracle else {}),
+        }
+    )
     return None
+
+
+def _review_target_names(expected: Mapping[str, Any] | None) -> tuple[str, ...]:
+    policy = (expected or {}).get("expected_review_policy")
+    if not isinstance(policy, Mapping):
+        return ()
+    groups = _field_groups_from_expected_key(
+        cast(Mapping[str, Any], policy), "target_field_groups"
+    )
+    return tuple(name for group in groups for name in group)
+
+
+def _json_leaves(
+    value: object, path: tuple[str | int, ...] = ()
+) -> Iterator[tuple[tuple[str | int, ...], object]]:
+    if isinstance(value, Mapping):
+        for key, item in cast(Mapping[str, object], value).items():
+            yield from _json_leaves(item, (*path, key))
+    elif isinstance(value, list):
+        for index, item in enumerate(cast(list[object], value)):
+            yield from _json_leaves(item, (*path, index))
+    else:
+        yield path, value
+
+
+def _leaf_kind(value: object) -> str | None:
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    return "string" if isinstance(value, str) and value.strip() else None
+
+
+def _review_target_edit(
+    current_payload: object,
+    target_names: tuple[str, ...],
+    *,
+    sentinel: str,
+) -> JsonObject:
+    """The edit oracle's one change to a reviewed value, and the whole edited value.
+
+    The first leaf the case's target group names, preferring a string, then a
+    number: a string becomes `sentinel`, a number old + 7919. The rest of the
+    value is sent back unchanged, since the edit API takes the whole value and
+    validates it against the output contract. A boolean-only target is not
+    edited: its delivery is not checkable, so the observation is unmeasured.
+    """
+
+    structured = (
+        cast(Mapping[str, object], current_payload).get("structured")
+        if isinstance(current_payload, Mapping)
+        else None
+    )
+    wanted = {_normalized_field_name(name) for name in target_names}
+    leaves = list(_json_leaves(structured))
+    kinds = ("string", "number", "boolean")
+    named = [
+        (kind, path, value)
+        for path, value in leaves
+        if _normalized_field_name(
+            next((key for key in reversed(path) if isinstance(key, str)), "")
+        )
+        in wanted
+        and (kind := _leaf_kind(value)) is not None
+    ]
+    if not named:
+        return {"missing": "the reviewed value has no leaf the target group names"}
+    value_type, path, old = min(named, key=lambda item: kinds.index(item[0]))
+    if value_type == "boolean":
+        return {
+            "path": list(path),
+            "value_type": value_type,
+            "old": old,
+            "unmeasured": (
+                "boolean reviewed value: delivery not checkable without "
+                "case-specific wording gold"
+            ),
+        }
+    new = sentinel if value_type == "string" else _json_number(_decimal(old) + 7919)
+    edited = copy.deepcopy(structured)
+    parent: Any = edited
+    for key in path[:-1]:
+        parent = parent[key]
+    parent[path[-1]] = new
+    return {
+        "path": list(path),
+        "value_type": value_type,
+        "old": old,
+        "new": new,
+        "old_unique_in_review": sum(
+            _value_occurs(old, str(value)) for _, value in leaves
+        )
+        == 1,
+        "edited_value": edited,
+    }
+
+
+def _decimal(value: object) -> Decimal:
+    return Decimal(str(value))
+
+
+def _json_number(value: Decimal) -> int | float:
+    return int(value) if value == value.to_integral_value() else float(value)
+
+
+def _delivered_amounts(text: str) -> set[Decimal]:
+    """Each formatted amount in `text` as a decimal value.
+
+    A thousands group is joined only by a single (non-breaking) space; a comma
+    or period is a decimal or list separator, never a thousands join, so
+    "7 932,60 kr", "7932.6" and "13,60" read as 7932.6, 7932.6 and 13.6.
+    """
+
+    return {
+        _decimal(re.sub(r"\D", "", match.group(1)) + "." + (match.group(2) or "0"))
+        for match in re.finditer(
+            r"(\d{1,3}(?:[ \u00a0\u202f]\d{3})+|\d+)(?:[.,](\d+))?", text
+        )
+    }
+
+
+def _value_occurs(value: object, text: str) -> bool:
+    """Whether a reviewed string or number appears in `text` (numbers by value)."""
+
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return _decimal(value) in _delivered_amounts(text)
+    return _normalized_output_text(str(value)) in _normalized_output_text(text)
+
+
+def _review_edit_delivery_check(evidence: Mapping[str, object] | None) -> JsonObject:
+    """The review edit oracle's verdict: every edited target reached delivery.
+
+    The new string or number must appear in the delivered output, and the old
+    one must not where it is attributable: unique in the reviewed value, the
+    run had no file inputs, and its sent input does not hold it. A target
+    none of whose leaves is named fails, as does no edit.
+    """
+
+    evidence = evidence or {}
+    record = evidence.get("execution")
+    record = cast(JsonObject, record if isinstance(record, Mapping) else {})
+    run_request = record.get("run_request")
+    run_request = cast(
+        JsonObject, run_request if isinstance(run_request, Mapping) else {}
+    )
+    sent_input = json.dumps(run_request.get("input_payload_json"), ensure_ascii=False)
+    delivered = _delivered_text(evidence) or ""
+    results: list[JsonObject] = []
+    for entry in [
+        *_mapping_list(record.get("checkpoints")),
+        *_mapping_list(record.get("failures")),
+    ]:
+        oracle = entry.get("edit_oracle")
+        if not isinstance(oracle, Mapping):
+            continue
+        oracle = cast(JsonObject, oracle)
+        old, new = oracle.get("old"), oracle.get("new")
+        if new is None:
+            results.append({**oracle, "passed": False})
+        else:
+            attributable = (
+                oracle.get("old_unique_in_review") is True
+                and not run_request.get("step_inputs")
+                and not _value_occurs(old, sent_input)
+            )
+            new_delivered = _value_occurs(new, delivered)
+            old_delivered = (
+                _value_occurs(old, delivered) if attributable else "unattributable"
+            )
+            results.append(
+                {
+                    **oracle,
+                    "new_delivered": new_delivered,
+                    "old_delivered": old_delivered,
+                    "passed": new_delivered and old_delivered is not True,
+                }
+            )
+    return {
+        "name": "review_edit_reaches_delivery",
+        "passed": bool(results) and all(result["passed"] is True for result in results),
+        "actual": results or "no reviewed value was edited",
+        "expected": "each edited review target reaches delivery; the old value does not",
+    }
 
 
 _HTTP_ERROR_DETAIL_CHARS = 2000
@@ -5717,6 +5958,29 @@ def _normalized_output_text(value: str) -> str:
     return _collapse_whitespace(unicodedata.normalize("NFKC", value).casefold())
 
 
+def _delivered_text(runtime_evidence: Mapping[str, object]) -> str | None:
+    """The run's delivered output as text: inline text, structured JSON or the file."""
+
+    run, final_file = (
+        cast(Mapping[str, Any], value if isinstance(value, Mapping) else {})
+        for value in (
+            runtime_evidence.get("run"),
+            runtime_evidence.get("final_artifact"),
+        )
+    )
+    result = run.get("result")
+    result = cast(Mapping[str, Any], result if isinstance(result, Mapping) else {})
+    value = result.get("value")
+    raw_text = (
+        result.get("text")
+        if result.get("kind") == "inline_text"
+        else json.dumps(value, ensure_ascii=False, sort_keys=True)
+        if result.get("kind") == "structured" and value not in (None, "", [], {})
+        else final_file.get("text")
+    )
+    return raw_text if isinstance(raw_text, str) else None
+
+
 def _output_report(
     expect: OutputExpectation | None,
     runtime_evidence: Mapping[str, object] | None,
@@ -5747,14 +6011,7 @@ def _output_report(
         cast(Mapping[str, Any], value if isinstance(value, Mapping) else {})
         for value in (run.get("result"), contract.get("final_output"))
     )
-    value = result.get("value")
-    raw_text = (
-        result.get("text")
-        if result.get("kind") == "inline_text"
-        else json.dumps(value, ensure_ascii=False, sort_keys=True)
-        if result.get("kind") == "structured" and value not in (None, "", [], {})
-        else final_file.get("text")
-    )
+    raw_text = _delivered_text(runtime_evidence)
     text = _normalized_output_text(raw_text) if isinstance(raw_text, str) else ""
     outcome = record.get("outcome")
     failure_kinds = [
@@ -10175,21 +10432,28 @@ def _quality_report(
         )
     expected_review_policy = expected.get("expected_review_policy")
     if isinstance(expected_review_policy, Mapping):
-        checks.extend(
-            _review_policy_checks(
-                scope="proposed",
-                summary=summary,
-                expected=expected_review_policy,
-            )
-        )
+        review_scopes = [("proposed", summary)]
         if applied_flow is not None:
+            review_scopes.append(("applied", _summarize_applied_flow(applied_flow)))
+        for scope, scope_summary in review_scopes:
             checks.extend(
                 _review_policy_checks(
-                    scope="applied",
-                    summary=_summarize_applied_flow(applied_flow),
+                    scope=scope,
+                    summary=scope_summary,
                     expected=expected_review_policy,
                 )
             )
+            topology_warning = _review_topology_warning(
+                scope=scope, summary=scope_summary
+            )
+            if topology_warning is not None:
+                warnings.append(topology_warning)
+        # An executed edit review is scored by what reaches delivery.
+        if (
+            cast(Mapping[str, object], expected_review_policy).get("mode") == "edit"
+            and output_expectation is not None
+        ):
+            checks.append(_review_edit_delivery_check(runtime_evidence))
     expected_first_pass = expected.get("expected_first_pass_authoring")
     if isinstance(expected_first_pass, Mapping):
         checks.extend(
@@ -10719,30 +10983,6 @@ def _review_policy_checks(
         )
         and not missing_field_groups
     )
-    target_position = steps.index(target) if target is not None else None
-    next_step = (
-        steps[target_position + 1]
-        if target_position is not None and target_position + 1 < len(steps)
-        else None
-    )
-    review_bypass_step = (
-        next_step
-        if target is not None
-        and next_step is not None
-        and not isinstance(next_step.get("review_policy"), Mapping)
-        and next_step.get("output_type") == target.get("output_type")
-        and next_step.get("output_mode") == "pass_through"
-        else None
-    )
-    structural_topology = [
-        {
-            "order": step.get("order"),
-            "output_type": step.get("output_type"),
-            "output_mode": step.get("output_mode"),
-            "has_review_policy": isinstance(step.get("review_policy"), Mapping),
-        }
-        for step in steps
-    ]
     target_order = _int_value(target.get("order")) if target is not None else None
     target_is_terminal_or_delivery = target is None or (
         expected.get("target_must_be_non_terminal") is True
@@ -10788,21 +11028,46 @@ def _review_policy_checks(
             },
         },
         {
-            "name": f"{scope}_review_policy_topology",
-            "passed": target is not None and review_bypass_step is None,
-            "actual": structural_topology,
-            "expected": (
-                "reviewed structured output is consumed without an unreviewed "
-                "same-type pass-through"
-            ),
-        },
-        {
             "name": f"{scope}_review_policy_not_terminal_or_delivery",
             "passed": not target_is_terminal_or_delivery,
             "actual": actual_target,
             "expected": "non-terminal non-delivery step",
         },
     ]
+
+
+def _review_topology_warning(
+    *,
+    scope: str,
+    summary: Mapping[str, object],
+) -> str | None:
+    """Evidence, never a verdict: an unreviewed same-type pass-through follows the
+    reviewed step. The static shape cannot tell a writer that consumes the reviewed
+    result from a copy that bypasses it; `review_edit_reaches_delivery` decides.
+    """
+
+    steps = _step_summaries(summary)
+    review_steps = [
+        step for step in steps if isinstance(step.get("review_policy"), Mapping)
+    ]
+    if len(review_steps) != 1:
+        return None
+    target = review_steps[0]
+    position = steps.index(target)
+    next_step = steps[position + 1] if position + 1 < len(steps) else None
+    if (
+        next_step is None
+        or isinstance(next_step.get("review_policy"), Mapping)
+        or next_step.get("output_type") != target.get("output_type")
+        or next_step.get("output_mode") != "pass_through"
+    ):
+        return None
+    return (
+        f"{scope} review topology: unreviewed {next_step.get('output_type')} "
+        f"pass-through step {next_step.get('order')} ({next_step.get('name')}) "
+        f"follows reviewed step {target.get('order')} ({target.get('name')}); "
+        "inspect whether it consumes or copies the reviewed result"
+    )
 
 
 def _first_pass_authoring_plan_checks(

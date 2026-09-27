@@ -7265,6 +7265,192 @@ def test_a_review_target_modelled_as_a_record_array_is_found_by_its_own_name() -
     assert checks["proposed_review_policy_target"]["passed"] is False
 
 
+def _reviewed_step_plan(
+    *,
+    reviewed_fields: list[str],
+    writer_after_review: bool = False,
+) -> dict[str, object]:
+    reviewed_step: dict[str, object] = {
+        "plan_step_ref": "review_values",
+        "name": "Review values",
+        "input_source": "previous_step",
+        "input_type": "json",
+        "output_type": "json",
+        "output_mode": "pass_through",
+        "review_policy": {"mode": "edit"},
+        "output_contract": {
+            "type": "object",
+            "properties": {field: {"type": "string"} for field in reviewed_fields},
+        },
+    }
+    overview_writer: dict[str, object] = {
+        "plan_step_ref": "write_overview",
+        "name": "Write overview",
+        "input_source": "previous_step",
+        "input_type": "json",
+        "output_type": "json",
+        "output_mode": "pass_through",
+        "output_contract": {
+            "type": "object",
+            "properties": {"overall_overview": {"type": "string"}},
+        },
+    }
+    steps: list[dict[str, object]] = [
+        {
+            "plan_step_ref": "read_case",
+            "name": "Read case",
+            "input_source": "flow_input",
+            "input_type": "document",
+            "output_type": "json",
+            "output_mode": "pass_through",
+            "output_contract": {
+                "type": "object",
+                "properties": {"source_facts": {"type": "string"}},
+            },
+        },
+        reviewed_step,
+        *([overview_writer] if writer_after_review else []),
+        {
+            "plan_step_ref": "compose_letter",
+            "name": "Compose letter",
+            "input_source": "previous_step",
+            "input_type": "json",
+            "output_type": "text",
+            "output_mode": "compose_text",
+        },
+        {
+            "plan_step_ref": "render_letter",
+            "name": "Render letter",
+            "input_source": "previous_step",
+            "input_type": "text",
+            "output_type": "docx",
+            "output_mode": "render_verbatim",
+        },
+    ]
+    return {"proposal": {"spec": {"flow_name": "Reviewed case", "steps": steps}}}
+
+
+def _municipal_review_policy(case_id: str) -> Mapping[str, Any]:
+    harness = _battle_harness()
+    cases_path = (
+        Path(__file__).resolve().parents[4]
+        / "scripts"
+        / "ai_builder_api_municipal_cases.json"
+    )
+    case = next(
+        case for case in harness._read_cases_file(cases_path) if case.case_id == case_id
+    )
+    assert case.expected is not None
+    return case.expected["expected_review_policy"]
+
+
+def _review_target_passes(
+    expected: Mapping[str, Any], reviewed_fields: list[str]
+) -> bool:
+    harness = _battle_harness()
+    plan = _reviewed_step_plan(reviewed_fields=reviewed_fields)
+    checks = {
+        check["name"]: check
+        for check in harness._review_policy_checks(
+            scope="proposed", summary=harness._summarize_plan(plan), expected=expected
+        )
+    }
+    return checks["proposed_review_policy_target"]["passed"]
+
+
+@mark.parametrize(
+    ("case_id", "reviewed_field"),
+    [
+        # Names the screening models gave the reviewed value, each checked by hand
+        # against its bundle (screenrr-{a,b}-luna/r1, screenrr-c-gemma/r1).
+        ("mc_oms01_ekonomiskt_bistand", "beraknat_underskott"),
+        ("mc_oms03_lss", "forslag_till_beslut_bifall_eller_avslag_med_skal"),
+        ("mc_oms04_orosanmalan", "akut_skyddsbehov_enligt_rutin"),
+        ("mc_oms04_orosanmalan", "akut_skyddssignal_finns"),
+        ("mc_oms04_orosanmalan", "akut_skyddsbehov_analys"),
+        ("mc_byg20_bostadsanpassning", "lagsta_skaliga_kostnad"),
+    ],
+)
+def test_an_observed_reviewed_value_name_is_an_explicit_gold_alias(
+    case_id: str, reviewed_field: str
+) -> None:
+    expected = _municipal_review_policy(case_id)
+
+    assert _review_target_passes(expected, ["other_value", reviewed_field])
+
+
+def test_date_fields_never_stand_in_for_the_decision() -> None:
+    """Gold names match exactly: two date fields leave the decision group unmet."""
+
+    expected = _municipal_review_policy("md_allt_angivet")
+
+    assert not _review_target_passes(
+        expected, ["beslutsdatum", "decision_date", "motivering", "handlaggare"]
+    )
+    # `en_motivering`: observed alias (screenrrfloor-luna r1, "Ta fram beslutsförslag").
+    assert _review_target_passes(
+        expected, ["beslut", "beslutsdatum", "en_motivering", "handlaggare"]
+    )
+
+
+def test_a_writer_after_the_reviewed_step_is_a_warning_not_a_failed_check() -> None:
+    """The static topology cannot tell a writer that consumes the reviewed result
+    from a copy of it, so it is recorded as a warning and never decides the verdict.
+    """
+
+    harness = _battle_harness()
+    plan = _reviewed_step_plan(
+        reviewed_fields=["totala_inkomster", "underskott"],
+        writer_after_review=True,
+    )
+    expected = {
+        "expected_review_policy": {
+            "mode": "edit",
+            "target_output_type": "json",
+            "target_field_groups": [["underskott"]],
+            "target_must_be_non_terminal": True,
+        }
+    }
+    report = harness._quality_report(
+        plan=plan,
+        summary=harness._summarize_plan(plan),
+        expected=expected,
+        event_summary={},
+        applied_flow=_applied_flow_from_plan(plan),
+    )
+
+    review_checks = {
+        check["name"]: check
+        for check in report["checks"]
+        if "review_policy" in check["name"]
+    }
+    assert set(review_checks) == {
+        f"{scope}_review_policy_{name}"
+        for scope in ("proposed", "applied")
+        for name in ("count", "mode", "target", "not_terminal_or_delivery")
+    }
+    assert all(check["passed"] is True for check in review_checks.values())
+    topology_warnings = [
+        warning for warning in report["warnings"] if "review topology" in warning
+    ]
+    assert [warning.split(":")[0] for warning in topology_warnings] == [
+        "proposed review topology",
+        "applied review topology",
+    ]
+    assert all("Write overview" in warning for warning in topology_warnings)
+
+    without_writer = _reviewed_step_plan(reviewed_fields=["underskott"])
+    clean_report = harness._quality_report(
+        plan=without_writer,
+        summary=harness._summarize_plan(without_writer),
+        expected=expected,
+        event_summary={},
+    )
+    assert not [
+        warning for warning in clean_report["warnings"] if "review topology" in warning
+    ]
+
+
 def test_complex_authoring_case_enforces_first_pass_topology_independently() -> None:
     harness = _battle_harness()
     cases_path = (
@@ -11254,10 +11440,12 @@ def _execute(
     runtime_file_paths: tuple[Path, ...] = (),
     timeout_seconds: int = 5,
     record: dict[str, Any] | None = None,
+    review_target_names: tuple[str, ...] = (),
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Collect one run's evidence, then score it as the quality report does."""
 
     evidence = harness._execute_and_collect_runtime_evidence(
+        review_target_names=review_target_names,
         config=harness.ApiConfig(
             base_url="http://localhost:8123/api/v1",
             api_key="test-key",
@@ -11455,6 +11643,358 @@ def test_execution_edits_a_declared_checkpoint_then_continues_and_checks_output(
         ("forbidden_literal", True),
     ]
     assert report["output_success"] is True
+
+
+def _review_oracle(
+    harness: ModuleType,
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    *,
+    structured: dict[str, object],
+    delivered: str,
+    target_group: list[str],
+) -> tuple[_RuntimeApi, dict[str, Any], dict[str, Any]]:
+    """Run one reviewed checkpoint through the edit oracle and score it."""
+
+    api = _RuntimeApi(
+        runs=[_awaiting_review_run(), _completed_text_run(delivered)],
+        checkpoints=[
+            _checkpoint(
+                output_type="json", current_payload_json={"structured": structured}
+            )
+        ],
+    )
+    api.install(harness, monkeypatch)
+    execution = _execution(
+        harness,
+        checkpoints=(
+            harness.ExpectedCheckpoint(
+                review_mode="edit", output_type="json", action="edit_target"
+            ),
+        ),
+    )
+    evidence, _ = _execute(
+        harness,
+        execution,
+        tmp_path=tmp_path,
+        review_target_names=tuple(target_group),
+    )
+    return api, evidence, harness._review_edit_delivery_check(evidence)
+
+
+_EDITED_PATH = f"{_RUN_PATH}/review-checkpoints/cp-1/"
+
+
+@mark.parametrize(
+    ("structured", "target_group", "edited", "delivered"),
+    [
+        (
+            {"totala_inkomster": 4834, "beraknat_underskott": 13602},
+            ["underskott", "beraknat_underskott"],
+            {"totala_inkomster": 4834, "beraknat_underskott": 21521},
+            "Beslut: underskottet är 21 521 kr.",
+        ),
+        # A string leaf is preferred to a number, at any depth.
+        (
+            {"poster": [{"belopp": 12500}, {"belopp": 8000, "beslut": "Avslag"}]},
+            ["belopp", "beslut"],
+            {
+                "poster": [
+                    {"belopp": 12500},
+                    {"belopp": 8000, "beslut": "REVIEW-EDIT-cp-1"},
+                ]
+            },
+            "Beslut: review-edit-cp-1 för posten.",
+        ),
+    ],
+)
+def test_an_edited_review_target_is_sent_whole_and_must_reach_delivery(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    structured: dict[str, object],
+    target_group: list[str],
+    edited: dict[str, object],
+    delivered: str,
+) -> None:
+    harness = _battle_harness()
+    api, _, oracle = _review_oracle(
+        harness,
+        monkeypatch,
+        tmp_path,
+        structured=structured,
+        delivered=delivered,
+        target_group=target_group,
+    )
+
+    assert api.call("PATCH", _EDITED_PATH)["payload"] == {
+        "expected_checkpoint_revision": 1,
+        "edited_value": edited,
+    }
+    assert oracle["passed"] is True
+
+
+@mark.parametrize(
+    ("old", "new", "delivered", "run_request", "passed"),
+    [
+        (13602, 21521, "Underskott: 21 521 kr.", {}, True),
+        # Stale output: a comma lists amounts, it never joins thousands.
+        (13602, 21521, "21 521 kr; old 13 602, 1 000 kr", {}, False),
+        (13602, 21521, "Beslut: 21 521 kr. Enligt beräkningen: 13 602 kr.", {}, False),
+        (13602, 21521, "Underskott: 13 602 kr.", {}, False),
+        # Decimals compare by value, however they are padded or formatted.
+        (13.6, 7932.6, "Summa: 7 932,60 kr.", {}, True),
+        (13.6, 7932.6, "Summa: 7932.6", {}, True),
+        (13.6, 7932.6, "Summa: 7 932,60 kr; tidigare 13,60 kr.", {}, False),
+        # The old amount is in the run's own input, or files were read:
+        # its presence is not attributable to the reviewed value.
+        (
+            13602,
+            21521,
+            "21 521 kr. Hyran 13 602 kr.",
+            {"input_payload_json": {"text": "Hyra: 13 602 kr"}},
+            True,
+        ),
+        (
+            13602,
+            21521,
+            "21 521 kr. Hyran 13 602 kr.",
+            {"step_inputs": {"step-1": {"file_ids": ["file-1"]}}},
+            True,
+        ),
+    ],
+)
+def test_an_edited_number_must_replace_the_old_one_where_attributable(
+    old: float,
+    new: float,
+    delivered: str,
+    run_request: dict[str, object],
+    passed: bool,
+) -> None:
+    harness = _battle_harness()
+    evidence = {
+        "run": {"result": {"kind": "inline_text", "text": delivered}},
+        "execution": {
+            "run_request": run_request,
+            "checkpoints": [
+                {
+                    "action": "edit_target",
+                    "edit_oracle": {
+                        "path": ["belopp"],
+                        "value_type": "number",
+                        "old": old,
+                        "new": new,
+                        "old_unique_in_review": True,
+                    },
+                }
+            ],
+        },
+    }
+
+    assert harness._review_edit_delivery_check(evidence)["passed"] is passed
+
+
+def test_a_boolean_only_review_target_is_an_unmeasured_observation(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A boolean has no delivered text to find, so its edit cannot be scored.
+
+    The run is cancelled at the checkpoint (no further model work) and the slot
+    is unmeasured, like a final output past a read bound: neither pass nor fail,
+    out of the denominator and re-measurable. Case-specific wording gold is the
+    way to measure it.
+    """
+
+    harness = _battle_harness()
+    api = _RuntimeApi(
+        runs=[_awaiting_review_run(), {"id": "run-1", "status": "cancelled"}],
+        checkpoints=[
+            _checkpoint(
+                output_type="json",
+                current_payload_json={
+                    "structured": {"akut_skyddsbehov": True, "barn": "Wilma"}
+                },
+            )
+        ],
+    )
+    api.install(harness, monkeypatch)
+    case = harness.BattleCase(
+        case_id="boolean-review",
+        prompt="Build and run the Flow.",
+        apply_plan=True,
+        expected={
+            "expected_review_policy": {
+                "mode": "edit",
+                "target_output_type": "json",
+                "target_field_groups": [["akut_skyddsbehov"]],
+                "target_must_be_non_terminal": True,
+            }
+        },
+        execution=_execution(
+            harness,
+            checkpoints=(
+                harness.ExpectedCheckpoint(
+                    review_mode="edit", output_type="json", action="edit_target"
+                ),
+            ),
+        ),
+    )
+
+    with raises(harness.BattleFlowLifecycleError) as raised:
+        harness._apply_execute_and_cleanup_flow(
+            case=case,
+            config=harness.ApiConfig(
+                base_url="http://localhost:8123/api/v1",
+                api_key="test-key",
+                timeout_seconds=1,
+            ),
+            plan_id="plan-1",
+            runtime_file_paths=(),
+            timeout_seconds=5,
+            artifact_output_dir=tmp_path,
+        )
+
+    assert api.paths("PATCH") == []
+    assert f"{_EDITED_PATH}approve-and-continue/" not in api.paths("POST")
+    assert f"{_RUN_PATH}/cancel/" in api.paths("POST")
+    reason = (
+        "boolean reviewed value: delivery not checkable without "
+        "case-specific wording gold"
+    )
+    execution = raised.value.flow_lifecycle["execution"]
+    assert execution["unmeasured"] == reason
+    assert execution["failures"][0]["kind"] == "review_target_unmeasured"
+    assert execution["failures"][0]["edit_oracle"]["path"] == ["akut_skyddsbehov"]
+    failure = {
+        "artifact_mode": "live_execution_failure",
+        "case_identity": harness._case_identity(case),
+        "case_contract_sha256": harness._case_contract_sha256(case),
+        "repetition": 1,
+        **harness._failure_error_fields(raised.value),
+    }
+    assert failure["failure_class"] == "harness_configuration"
+    assert failure["flow_lifecycle"]["execution"] == execution
+    bundle_path = tmp_path / "boolean-review-failure.json"
+    bundle_path.write_text(json.dumps(failure), encoding="utf-8")
+
+    row = harness._suite_result(harness.seal_observation(failure), bundle_path)
+
+    assert reason in row["error"]
+    assert row["observation_status"] == "execution_failure"
+    assert row["expectation_verdict"] == "not_evaluated"
+    assert row["failed_checks"] == []
+    observation = harness.observation_from_row(row, where="boolean review")
+    assert harness.observation_is_replacement_eligible(observation) is True
+
+
+def test_a_review_without_an_editable_target_fails_and_stops_the_run(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    harness = _battle_harness()
+    api, evidence, oracle = _review_oracle(
+        harness,
+        monkeypatch,
+        tmp_path,
+        structured={"totala_inkomster": 4834},
+        delivered="unused",
+        target_group=["beraknat_underskott"],
+    )
+
+    assert api.paths("PATCH") == []
+    assert f"{_EDITED_PATH}approve-and-continue/" not in api.paths("POST")
+    assert f"{_RUN_PATH}/cancel/" in api.paths("POST")
+    assert [failure["kind"] for failure in evidence["execution"]["failures"]] == [
+        "review_target_missing"
+    ]
+    assert oracle["passed"] is False
+    # An edit review that was only approved has no evidence either.
+    approved_only = {"execution": {"checkpoints": [{"action": "approve"}]}}
+    assert harness._review_edit_delivery_check(approved_only)["passed"] is False
+
+
+@mark.parametrize(("mode", "scored"), [("view", False), ("edit", True)])
+def test_an_executed_edit_review_is_scored_and_absent_evidence_fails(
+    mode: str, scored: bool
+) -> None:
+    harness = _battle_harness()
+    report = harness._quality_report(
+        plan=None,
+        summary={},
+        expected={
+            "expected_review_policy": {
+                "mode": mode,
+                "target_output_type": "json",
+                "target_field_groups": [["beslut"]],
+                "target_must_be_non_terminal": True,
+            }
+        },
+        runtime_evidence=None,
+        output_expectation=harness.OutputExpectation(output_kind="docx"),
+    )
+
+    oracle = [
+        check
+        for check in report["checks"]
+        if check["name"] == "review_edit_reaches_delivery"
+    ]
+    assert [check["passed"] for check in oracle] == ([False] if scored else [])
+    with raises(ValueError, match="view"):
+        harness._expected_checkpoint(
+            {"review_mode": "view", "action": "edit_target"}, owner="checkpoint"
+        )
+
+
+def test_a_case_that_edits_its_review_target_must_declare_the_target(
+    tmp_path: Path,
+) -> None:
+    harness = _battle_harness()
+    cases_path = tmp_path / "edit-target-without-gold.json"
+    cases_path.write_text(
+        json.dumps(
+            {
+                "version": harness.SUPPORTED_CASES_FILE_VERSION,
+                "cases": [
+                    {
+                        "id": "edit-target-without-gold",
+                        "prompt": "Build a reviewed flow.",
+                        "apply_plan": True,
+                        "execution": {
+                            "inputs": {"text": "Ärendet."},
+                            "checkpoints": [
+                                {"review_mode": "edit", "action": "edit_target"}
+                            ],
+                            "expect": {"output_kind": "text"},
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with raises(ValueError, match="declares no expected_review_policy"):
+        harness._read_cases_file(cases_path)
+
+
+def test_every_executed_edit_review_case_edits_its_review_target() -> None:
+    harness = _battle_harness()
+    cases_path = (
+        Path(__file__).resolve().parents[4]
+        / "scripts"
+        / "ai_builder_api_municipal_cases.json"
+    )
+    edit_review_cases = [
+        case
+        for case in harness._read_cases_file(cases_path)
+        if case.execution is not None
+        and case.expected is not None
+        and case.expected.get("expected_review_policy", {}).get("mode") == "edit"
+    ]
+
+    assert len(edit_review_cases) >= 10
+    for case in edit_review_cases:
+        assert [checkpoint.action for checkpoint in case.execution.checkpoints] == [
+            "edit_target"
+        ], case.case_id
 
 
 def test_execution_records_an_undeclared_checkpoint_and_cancels_the_run(
