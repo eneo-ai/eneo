@@ -111,6 +111,7 @@ class _Observer:
         declared_output: str = "text",
         usage: dict[str, object] | None = None,
         executes: bool = True,
+        runs: bool = True,
         edit: Callable[[dict[str, Any]], None] | None = None,
         required_facts: tuple[str, ...] = _FACTS,
     ) -> dict[str, Any]:
@@ -128,7 +129,9 @@ class _Observer:
         )
         bundle["journey"] = {"outcome_class": "plan_first_pass"}
         bundle["repetition"] = repetition
-        if executes:
+        # A case that declares execution but never reaches a run (no plan, a
+        # refused run) has no runtime evidence at all.
+        if executes and runs:
             evidence = _evidence(finishes)
             if edit is not None:
                 edit(evidence)
@@ -179,6 +182,7 @@ def _compare(
     current: list[dict[str, Any]],
     *,
     allowance: int | None = 1,
+    **gate: Any,
 ) -> dict[str, Any]:
     paths: list[Path] = []
     for name, rows in (("base.json", baseline), ("cur.json", current)):
@@ -186,7 +190,7 @@ def _compare(
         path.write_text(json.dumps(_summary(rows)), encoding="utf-8")
         paths.append(path)
     return _compare_module().compare(
-        paths[0], paths[1], runtime_call_allowance=allowance
+        paths[0], paths[1], runtime_call_allowance=allowance, **gate
     )
 
 
@@ -223,7 +227,8 @@ def test_calls_within_the_allowance_pass_and_are_reported(
     assert parent[0]["output_required_facts"] == {"Kvissleby": True, "Njurunda": True}
     assert parent[2]["runtime_cost"] is None
 
-    report = _compare(tmp_path, parent, candidate)
+    # Calls alone are under test; tokens scale with them here.
+    report = _compare(tmp_path, parent, candidate, runtime_token_tolerance=2)
 
     assert report["runtime_cost_failed_cases"] == {}
     case = next(item for item in report["cases"] if item["case_id"] == "case-a")
@@ -250,7 +255,7 @@ def test_calls_over_the_allowance_fail_and_exit_nonzero(
     parent = [observer.row()]
     candidate = [observer.row(finishes=("stop",) * 4)]
 
-    report = _compare(tmp_path, parent, candidate)
+    report = _compare(tmp_path, parent, candidate, runtime_token_tolerance=2)
 
     assert _failures(report) == {
         "case-a": [
@@ -475,7 +480,7 @@ def test_a_receipt_without_runtime_cost_is_refused(
 
     with raises(SystemExit, match="case-a r1: no runtime_cost"):
         _compare(tmp_path, [older], [observer.row()])
-    with raises(SystemExit, match="allowance must be >= 0"):
+    with raises(SystemExit, match="allowance and the new-case budget must be >= 0"):
         _compare(tmp_path, [observer.row()], [observer.row()], allowance=-1)
 
 
@@ -500,3 +505,205 @@ def test_a_malformed_complete_row_is_refused(
 
     with raises(SystemExit, match=f"case-a r1: .*{reason}"):
         _compare(tmp_path, [row], [malformed])
+
+
+def _usage(total: int) -> dict[str, object]:
+    return {
+        "num_tokens_input": total - 20,
+        "num_tokens_output": 20,
+        "num_tokens_total": total,
+        "input_completeness": "complete",
+        "output_completeness": "complete",
+    }
+
+
+def test_a_newly_executable_case_is_held_to_the_absolute_budget(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    observer = _Observer(monkeypatch, tmp_path)
+    # The parent never reached a run: a known non-execution, not a gap.
+    parent = [observer.row(runs=False)]
+    assert parent[0]["output_executed"] is False
+    assert parent[0]["runtime_cost"]["complete"] is False
+    candidate = [observer.row()]
+    budget = {"new_case_max_runtime_calls": 2, "new_case_max_runtime_tokens": 240}
+
+    report = _compare(tmp_path, parent, candidate, **budget)
+
+    assert report["runtime_cost_failed_cases"] == {}
+    assert report["new_case_runtime_budget"] == {"max_calls": 2, "max_tokens": 240}
+    case = report["cases"][0]["runtime_cost"]
+    assert case["newly_executable"] is True
+    assert case["failures"] == []
+
+    over = _compare(
+        tmp_path,
+        parent,
+        candidate,
+        new_case_max_runtime_calls=1,
+        new_case_max_runtime_tokens=239,
+    )
+    assert _failures(over) == {
+        "case-a": [
+            "current r1 made 2 runtime calls; a newly executable case's budget is 1",
+            "current r1 used 240 tokens; a newly executable case's budget is 239",
+        ]
+    }
+
+    short = [observer.row(text="Förskolan i Kvissleby avvecklas.")]
+    assert short[0]["output_success"] is False
+    assert _failures(_compare(tmp_path, parent, short, **budget)) == {
+        "case-a": [
+            "current r1 did not deliver successfully; a newly executable case must",
+            "current r1 misses required literal(s): ['Njurunda']",
+        ]
+    }
+    # A length finish is not free just because the parent had no run.
+    truncated = [observer.row(finishes=("stop", "length"))]
+    assert _failures(_compare(tmp_path, parent, truncated, **budget)) == {
+        "case-a": [
+            "current r1 has 1 finish_reason=length attempt(s); a newly executable "
+            "case's budget is 0"
+        ]
+    }
+
+
+def test_missing_telemetry_on_a_run_still_fails(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    observer = _Observer(monkeypatch, tmp_path)
+    ran_blind = observer.row(edit=_truncated)
+    # The run happened; only its evidence is short.
+    assert ran_blind["output_executed"] is True
+    assert ran_blind["runtime_cost"]["complete"] is False
+
+    assert _failures(_compare(tmp_path, [ran_blind], [observer.row()])) == {
+        "case-a": ["baseline r1 runtime evidence is missing or incomplete"]
+    }
+    # A newly executable candidate owes whole evidence too.
+    assert _failures(_compare(tmp_path, [observer.row(runs=False)], [ran_blind])) == {
+        "case-a": ["current r1 runtime evidence is missing or incomplete"]
+    }
+    # A candidate that stops reaching a run the parent reached fails.
+    assert _failures(
+        _compare(tmp_path, [observer.row()], [observer.row(runs=False)])
+    ) == {"case-a": ["current r1 did not run; the baseline did"]}
+    # A row that does not say whether it ran is refused, never read as "did not".
+    unknown = {
+        key: value
+        for key, value in observer.row(runs=False).items()
+        if key != "output_executed"
+    }
+    with raises(SystemExit, match="case-a r1: output_executed must be a boolean"):
+        _compare(tmp_path, [unknown], [observer.row()])
+
+
+def test_a_parent_repetition_without_a_run_leaves_the_others_as_reference(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    observer = _Observer(monkeypatch, tmp_path)
+    parent = [observer.row(repetition=1), observer.row(repetition=2, runs=False)]
+    candidate = [observer.row(finishes=("stop",) * 4)]
+
+    assert _failures(_compare(tmp_path, parent, candidate)) == {
+        "case-a": [
+            "current r1 made 4 runtime calls; the baseline's most is 2, allowance 1",
+            "current r1 used 480 tokens; the baseline's most is 240, tolerance 1.25",
+        ]
+    }
+
+
+def test_token_inflation_beyond_the_tolerance_fails(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    observer = _Observer(monkeypatch, tmp_path)
+    parent = [observer.row(usage=_usage(1000))]
+
+    within = _compare(
+        tmp_path,
+        parent,
+        [observer.row(usage=_usage(1250))],
+        runtime_token_tolerance=1.25,
+    )
+    assert within["runtime_cost_failed_cases"] == {}
+    assert within["runtime_token_tolerance"] == 1.25
+
+    # Same calls, a hundred times the tokens.
+    inflated = _compare(
+        tmp_path,
+        parent,
+        [observer.row(usage=_usage(100_000))],
+        runtime_token_tolerance=1.25,
+    )
+    assert _failures(inflated) == {
+        "case-a": [
+            "current r1 used 100000 tokens; the baseline's most is 1000, tolerance 1.25"
+        ]
+    }
+    with raises(SystemExit, match="tolerance must be >= 1"):
+        _compare(tmp_path, parent, parent, runtime_token_tolerance=0.9)
+
+
+def test_a_run_with_a_null_cost_fails(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    observer = _Observer(monkeypatch, tmp_path)
+    ran = observer.row()
+    null_cost = {**ran, "runtime_cost": None}
+    assert null_cost["output_executed"] is True
+
+    assert _failures(_compare(tmp_path, [null_cost], [ran])) == {
+        "case-a": ["baseline r1 runtime evidence is missing or incomplete"]
+    }
+    assert _failures(_compare(tmp_path, [ran], [null_cost])) == {
+        "case-a": ["current r1 runtime evidence is missing or incomplete"]
+    }
+    # Even where no row carries a cost object, each run is gated.
+    assert _failures(_compare(tmp_path, [null_cost], [null_cost])) == {
+        "case-a": [
+            "baseline r1 runtime evidence is missing or incomplete",
+            "current r1 runtime evidence is missing or incomplete",
+        ]
+    }
+    not_run = {**observer.row(runs=False), "runtime_cost": None}
+    assert _failures(_compare(tmp_path, [not_run], [null_cost])) == {
+        "case-a": ["current r1 runtime evidence is missing or incomplete"]
+    }
+
+
+def test_a_scored_output_without_its_facts_is_refused(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    observer = _Observer(monkeypatch, tmp_path)
+    ran = observer.row()
+    assert ran["output_success"] is True
+    unscored_facts = {**ran, "output_required_facts": None}
+
+    with raises(SystemExit, match="case-a r1: a scored output .* needs output_req"):
+        _compare(tmp_path, [observer.row(runs=False)], [unscored_facts])
+
+
+def test_an_acquisition_failure_leaves_the_case_unknown(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    observer = _Observer(monkeypatch, tmp_path)
+    # The instrument failed before any run: no run, no cost object. That
+    # proves nothing about whether the product could run the case.
+    failed = {
+        **observer.row(runs=False),
+        "observation_status": "acquisition_failure",
+        "failure_class": "provider_request",
+        "runtime_cost": None,
+    }
+    assert failed["output_executed"] is False
+
+    report = _compare(tmp_path, [failed], [observer.row()])
+
+    assert _failures(report) == {
+        "case-a": ["baseline r1 is an acquisition failure; re-measure"]
+    }
+    assert "newly_executable" not in report["cases"][0]["runtime_cost"]
+    assert _failures(_compare(tmp_path, [failed], [failed])) == {
+        "case-a": [
+            "baseline r1 is an acquisition failure; re-measure",
+            "current r1 is an acquisition failure; re-measure",
+        ]
+    }

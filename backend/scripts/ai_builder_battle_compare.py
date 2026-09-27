@@ -47,6 +47,7 @@ if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
 from ai_builder_receipt import (  # noqa: E402
+    ACQUISITION_FAILURE_CLASSES,
     ReceiptError,
     executed_output_report,
     load_release_receipt,
@@ -61,6 +62,12 @@ from ai_builder_release_gate import (  # noqa: E402
     feasibility_audit,
     matrix_state_from_payload,
 )
+
+# The runtime cost gate's defaults, conservative on purpose: a slice that
+# needs more declares it before the run.
+DEFAULT_RUNTIME_TOKEN_TOLERANCE = 1.25
+DEFAULT_NEW_CASE_MAX_RUNTIME_CALLS = 6
+DEFAULT_NEW_CASE_MAX_RUNTIME_TOKENS = 20_000
 
 DEFAULT_MATRIX_STATE = (
     Path(__file__).resolve().with_name("ai_builder_release_matrix_state.json")
@@ -227,7 +234,7 @@ def _case_delta(
     *,
     baseline_repetitions: list[dict[str, Any]] | None = None,
     current_repetitions: list[dict[str, Any]] | None = None,
-    runtime_call_allowance: int | None = None,
+    runtime_gate: RuntimeGate | None = None,
 ) -> dict[str, Any]:
     before = str((baseline or {}).get("outcome_class") or "absent")
     after = str((current or {}).get("outcome_class") or "absent")
@@ -311,86 +318,176 @@ def _case_delta(
     runtime_cost = _runtime_cost_delta(
         baseline_repetitions or [],
         current_repetitions or [],
-        allowance=runtime_call_allowance,
+        gate=runtime_gate,
     )
     if runtime_cost is not None:
         delta["runtime_cost"] = runtime_cost
     return delta
 
 
+@dataclass(frozen=True)
+class RuntimeGate:
+    """The declared runtime cost bounds; each current observation is held to them."""
+
+    call_allowance: int
+    token_tolerance: float
+    new_case_max_calls: int
+    new_case_max_tokens: int
+
+
+def _acquisition_failure(row: dict[str, Any]) -> bool:
+    """The instrument failed: the row proves neither a run nor its absence."""
+
+    return row.get("failure_class") in ACQUISITION_FAILURE_CLASSES
+
+
+def _ran(row: dict[str, Any]) -> bool:
+    """The row created a run, so it owes runtime evidence. A row that did not
+    and is no acquisition failure is a KNOWN non-execution (no plan, a
+    refused run)."""
+
+    return row.get("output_executed") is True and not _acquisition_failure(row)
+
+
 def _runtime_cost_delta(
     before_rows: list[dict[str, Any]],
     after_rows: list[dict[str, Any]],
     *,
-    allowance: int | None,
+    gate: RuntimeGate | None,
 ) -> dict[str, Any] | None:
     """Each side's runtime cost per observation, for a case either side executes.
 
-    With an allowance, each current observation is held to the baseline's
-    worst observation: calls up to its most plus the allowance and no more
-    length finishes. It must deliver successfully where every baseline
-    observation did, and always every required literal they all delivered.
+    With a gate, each current run is held to the baseline's worst run: calls
+    up to its most plus the allowance, tokens up to its most times the
+    tolerance, and no more length finishes. It must deliver successfully
+    where every baseline run did, and always every required literal they all
+    delivered. A case no baseline observation ran is newly executable: its
+    runs are held to the absolute budget, must deliver, and must hold every
+    required literal. A current observation that does not run where the
+    baseline ran fails; missing evidence of a run always fails, and so does
+    an acquisition failure on either side, since it leaves the case unknown.
     """
 
     costs = {
         side: [row.get("runtime_cost") for row in rows]
         for side, rows in (("before", before_rows), ("after", after_rows))
     }
-    if not any(isinstance(cost, dict) for side in costs.values() for cost in side):
-        return None
+    has_cost = any(isinstance(cost, dict) for side in costs.values() for cost in side)
     report: dict[str, Any] = dict(costs)
-    if allowance is None:
-        return report
-    failures: list[str] = []
+    if gate is None:
+        return report if has_cost else None
+    ran_before = [row for row in before_rows if _ran(row)]
+    ran_after = [row for row in after_rows if _ran(row)]
+    unknown = [
+        f"{side} r{row.get('repetition')} is an acquisition failure; re-measure"
+        for side, rows in (("baseline", before_rows), ("current", after_rows))
+        for row in rows
+        if _acquisition_failure(row)
+    ]
+    # A run with a null cost is missing evidence, not a case without one.
+    if not (has_cost or ran_before or ran_after or unknown):
+        return None
+    newly_executable = (
+        bool(before_rows) and not ran_before and bool(ran_after) and not unknown
+    )
+    if newly_executable:
+        report["newly_executable"] = True
+    failures: list[str] = list(unknown)
     if not before_rows or not after_rows:
         failures.append("the case was observed on one side only")
-    for side, rows in (("baseline", before_rows), ("current", after_rows)):
+    for side, rows in (("baseline", ran_before), ("current", ran_after)):
         failures.extend(
             f"{side} r{row.get('repetition')} runtime evidence is missing or incomplete"
             for row in rows
             if cast(dict[str, Any], row.get("runtime_cost") or {}).get("complete")
             is not True
         )
-    if not failures:
-        before = [cast(dict[str, Any], row["runtime_cost"]) for row in before_rows]
-        most_calls = max(cast(int, cost["provider_calls"]) for cost in before)
-        most_lengths = max(cast(int, cost["length_finishes"]) for cost in before)
-        for row in after_rows:
-            cost = cast(dict[str, Any], row["runtime_cost"])
-            label = f"current r{row.get('repetition')}"
-            if cost["provider_calls"] > most_calls + allowance:
-                failures.append(
-                    f"{label} made {cost['provider_calls']} runtime calls; the "
-                    f"baseline's most is {most_calls}, allowance {allowance}"
-                )
-            if cost["length_finishes"] > most_lengths:
-                failures.append(
-                    f"{label} has {cost['length_finishes']} finish_reason=length "
-                    f"attempt(s); the baseline's most is {most_lengths}"
-                )
-    if before_rows and all(row.get("output_success") is True for row in before_rows):
+    if ran_before:
         failures.extend(
-            f"current r{row.get('repetition')} did not deliver successfully; "
-            "every baseline observation did"
+            f"current r{row.get('repetition')} did not run; the baseline did"
             for row in after_rows
+            if not _ran(row) and not _acquisition_failure(row)
+        )
+    if not failures and ran_after:
+        if ran_before:
+            before = [cast(dict[str, Any], row["runtime_cost"]) for row in ran_before]
+            most = {
+                key: max(cast(int, cost[key]) for cost in before)
+                for key in ("provider_calls", "total_tokens", "length_finishes")
+            }
+            bounds = {
+                "provider_calls": (
+                    most["provider_calls"] + gate.call_allowance,
+                    f"the baseline's most is {most['provider_calls']}, "
+                    f"allowance {gate.call_allowance}",
+                ),
+                "total_tokens": (
+                    most["total_tokens"] * gate.token_tolerance,
+                    f"the baseline's most is {most['total_tokens']}, "
+                    f"tolerance {gate.token_tolerance}",
+                ),
+                "length_finishes": (
+                    most["length_finishes"],
+                    f"the baseline's most is {most['length_finishes']}",
+                ),
+            }
+        else:
+            budget = "a newly executable case's budget is"
+            bounds = {
+                "provider_calls": (
+                    gate.new_case_max_calls,
+                    f"{budget} {gate.new_case_max_calls}",
+                ),
+                "total_tokens": (
+                    gate.new_case_max_tokens,
+                    f"{budget} {gate.new_case_max_tokens}",
+                ),
+                "length_finishes": (0, f"{budget} 0"),
+            }
+        observed = {
+            "provider_calls": "made {} runtime calls",
+            "total_tokens": "used {} tokens",
+            "length_finishes": "has {} finish_reason=length attempt(s)",
+        }
+        for row in ran_after:
+            cost = cast(dict[str, Any], row["runtime_cost"])
+            failures.extend(
+                f"current r{row.get('repetition')} "
+                f"{observed[key].format(cost[key])}; {basis}"
+                for key, (ceiling, basis) in bounds.items()
+                if cost[key] > ceiling
+            )
+    if newly_executable or (
+        ran_before and all(row.get("output_success") is True for row in ran_before)
+    ):
+        reason = (
+            "a newly executable case must"
+            if newly_executable
+            else "every baseline observation did"
+        )
+        failures.extend(
+            f"current r{row.get('repetition')} did not deliver successfully; {reason}"
+            for row in ran_after
             if row.get("output_success") is not True
         )
     baseline_facts = [
         cast(dict[str, Any], row.get("output_required_facts") or {})
-        for row in before_rows
+        for row in ran_before
     ]
     delivered = {
         fact
         for fact in (baseline_facts[0] if baseline_facts else {})
         if all(facts.get(fact) is True for facts in baseline_facts)
     }
-    for row in after_rows:
+    for row in ran_after:
         facts = cast(dict[str, Any], row.get("output_required_facts") or {})
-        missing = sorted(fact for fact in delivered if facts.get(fact) is not True)
+        required = facts if newly_executable else delivered
+        missing = sorted(fact for fact in required if facts.get(fact) is not True)
         if missing:
             failures.append(
-                f"current r{row.get('repetition')} misses required literal(s) "
-                f"the baseline delivered: {missing}"
+                f"current r{row.get('repetition')} misses required literal(s)"
+                + ("" if newly_executable else " the baseline delivered")
+                + f": {missing}"
             )
     report["failures"] = failures
     return report
@@ -425,6 +522,12 @@ def _runtime_row_error(row: dict[str, Any]) -> str | None:
             )
     if not isinstance(row.get("output_required_facts"), (dict, type(None))):
         return "output_required_facts must be null or an object"
+    if not isinstance(row.get("output_executed"), bool):
+        return "output_executed must be a boolean"
+    if isinstance(row.get("output_success"), bool) and not isinstance(
+        row.get("output_required_facts"), dict
+    ):
+        return "a scored output (boolean output_success) needs output_required_facts"
     return None
 
 
@@ -589,6 +692,9 @@ def compare(
     allow_harness_change: bool = False,
     noise_margin: int | None = None,
     runtime_call_allowance: int | None = None,
+    runtime_token_tolerance: float = DEFAULT_RUNTIME_TOKEN_TOLERANCE,
+    new_case_max_runtime_calls: int = DEFAULT_NEW_CASE_MAX_RUNTIME_CALLS,
+    new_case_max_runtime_tokens: int = DEFAULT_NEW_CASE_MAX_RUNTIME_TOKENS,
 ) -> dict[str, Any]:
     baseline_rows, baseline_summary, baseline_executed_output = _load_rows(
         baseline_path
@@ -608,7 +714,14 @@ def compare(
             f"baseline={_identity_marker(baseline_summary)!r} "
             f"current={_identity_marker(current_summary)!r}"
         )
+    runtime_gate = None
     if runtime_call_allowance is not None:
+        runtime_gate = RuntimeGate(
+            call_allowance=runtime_call_allowance,
+            token_tolerance=runtime_token_tolerance,
+            new_case_max_calls=new_case_max_runtime_calls,
+            new_case_max_tokens=new_case_max_runtime_tokens,
+        )
         malformed = [
             f"{row.get('case_id')} r{row.get('repetition')}: {error}"
             for rows in (baseline_rows, current_rows)
@@ -616,10 +729,21 @@ def compare(
             for row in case_rows
             if (error := _runtime_row_error(row)) is not None
         ]
-        if runtime_call_allowance < 0 or malformed:
+        if (
+            min(
+                runtime_call_allowance,
+                new_case_max_runtime_calls,
+                new_case_max_runtime_tokens,
+            )
+            < 0
+            or not runtime_token_tolerance >= 1
+            or not math.isfinite(runtime_token_tolerance)
+            or malformed
+        ):
             raise SystemExit(
-                "Refusing the runtime cost gate: the allowance must be >= 0 "
-                f"(got {runtime_call_allowance}) and every row well-formed; "
+                "Refusing the runtime cost gate: the allowance and the new-case "
+                f"budget must be >= 0 and the token tolerance must be >= 1 "
+                f"(got {runtime_gate}) and every row well-formed; "
                 f"malformed: {malformed[:5]}"
             )
     rescored_cases = _case_contract_changes(baseline_summary, current_summary)
@@ -636,7 +760,7 @@ def compare(
                 _representative_row(current_rows.get(case_id)),
                 baseline_repetitions=baseline_rows.get(case_id) or [],
                 current_repetitions=current_rows.get(case_id) or [],
-                runtime_call_allowance=runtime_call_allowance,
+                runtime_gate=runtime_gate,
             ),
             "cohorts": _cohorts(current_rows.get(case_id))
             or _cohorts(baseline_rows.get(case_id)),
@@ -724,6 +848,12 @@ def compare(
         "remaining_failed_checks_ranked": remaining_failed_checks.most_common(),
         "unstable_cases": unstable,
         "runtime_call_allowance": runtime_call_allowance,
+        "runtime_token_tolerance": runtime_gate and runtime_gate.token_tolerance,
+        "new_case_runtime_budget": runtime_gate
+        and {
+            "max_calls": runtime_gate.new_case_max_calls,
+            "max_tokens": runtime_gate.new_case_max_tokens,
+        },
         "runtime_cost_failed_cases": (
             {
                 delta["case_id"]: cost["failures"]
@@ -992,7 +1122,11 @@ def _render_markdown(report: dict[str, Any], *, only_changed: bool) -> str:
     runtime_failed = report["runtime_cost_failed_cases"]
     if runtime_failed is not None:
         lines.append(
-            f"## Runtime cost gate (allowance {report['runtime_call_allowance']}): "
+            f"## Runtime cost gate (allowance {report['runtime_call_allowance']}, "
+            f"token tolerance {report['runtime_token_tolerance']}, "
+            "new-case budget {max_calls} calls, {max_tokens} tokens): ".format(
+                **report["new_case_runtime_budget"]
+            )
             + ("FAIL" if runtime_failed else "pass")
         )
         for case_id, reasons in cast(dict[str, list[str]], runtime_failed).items():
@@ -1727,6 +1861,33 @@ def main() -> None:
             "whole evidence on both sides, no new length finish or lost literal."
         ),
     )
+    compare_mode.add_argument(
+        "--runtime-token-tolerance",
+        type=float,
+        default=DEFAULT_RUNTIME_TOKEN_TOLERANCE,
+        help=(
+            "With the gate: a run's total_tokens at most the baseline's most "
+            "times this ratio (default %(default)s)."
+        ),
+    )
+    compare_mode.add_argument(
+        "--new-case-max-runtime-calls",
+        type=int,
+        default=DEFAULT_NEW_CASE_MAX_RUNTIME_CALLS,
+        help=(
+            "With the gate: the runtime call budget of a case no baseline "
+            "observation ran (default %(default)s)."
+        ),
+    )
+    compare_mode.add_argument(
+        "--new-case-max-runtime-tokens",
+        type=int,
+        default=DEFAULT_NEW_CASE_MAX_RUNTIME_TOKENS,
+        help=(
+            "With the gate: the total_tokens budget of a case no baseline "
+            "observation ran (default %(default)s)."
+        ),
+    )
 
     release_mode = modes.add_parser(
         "release-verdict", help="Judge one receipt against the release gate."
@@ -1819,6 +1980,9 @@ def main() -> None:
         allow_harness_change=args.allow_harness_change,
         noise_margin=args.noise_margin,
         runtime_call_allowance=args.runtime_call_allowance,
+        runtime_token_tolerance=args.runtime_token_tolerance,
+        new_case_max_runtime_calls=args.new_case_max_runtime_calls,
+        new_case_max_runtime_tokens=args.new_case_max_runtime_tokens,
     )
     if args.format == "json":
         json.dump(report, sys.stdout, ensure_ascii=False, indent=2)
