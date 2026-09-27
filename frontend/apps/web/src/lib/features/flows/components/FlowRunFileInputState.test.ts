@@ -236,7 +236,58 @@ describe("FlowRunFileInputState", () => {
     expect(state.getSessionPhase("step-a")).toBe("idle");
     expect(state.sessionIdsByStepIdSnapshot).toEqual({});
     expect(state.segmentsAwaitingUpload("step-a")).toBe(0);
-    expect(state.isStorageDegraded).toBe(true);
+    // The only part kept just in this tab went with the discard.
+    expect(state.isStorageDegraded).toBe(false);
+  });
+
+  it("knows a kept recording has a part only this tab holds, until that recording is discarded", () => {
+    const state = new FlowRunFileInputState();
+    persistedSegment(state, "step-a", { degraded: false });
+    expect(state.hasPartsOnlyInTab).toBe(false);
+
+    persistedSegment(state, "step-a", { degraded: true });
+    persistedSegment(state, "step-b", { degraded: false });
+    expect(state.hasPartsOnlyInTab).toBe(true);
+
+    state.discardStepRecording("step-a");
+    expect(state.hasPartsOnlyInTab).toBe(false);
+    // A journal warning alone is not a part kept only here.
+    state.journalDegraded("failed", "step-a", "part-1");
+    expect(state.hasPartsOnlyInTab).toBe(false);
+  });
+
+  it("warns while a part's journal is behind, until that part is stored or held nothing", () => {
+    const state = new FlowRunFileInputState();
+    state.journalDegraded("failed", "step-a", "part-1");
+    expect(state.storageNotice).toBe("failed");
+
+    const segment = state.prepareRecordedSegment("step-a");
+    state.recordedSegmentArrived("step-a", segment, recordingFile("seg0.webm"));
+    state.recordSegmentPersistence({
+      stepId: "step-a",
+      segment,
+      notice: null,
+      degraded: false,
+      partId: "part-1"
+    });
+    expect(state.storageNotice).toBeNull();
+
+    state.journalDegraded("failed", "step-a", "part-2");
+    state.journalPartEnded("step-a", "part-2");
+    expect(state.storageNotice).toBeNull();
+    state.journalDegraded("unavailable", "step-a", "part-3");
+    expect(state.storageNotice).toBe("unavailable");
+  });
+
+  it("forgets a part kept only in this tab once that part is removed", () => {
+    const state = new FlowRunFileInputState();
+    const segment = persistedSegment(state, "step-a", { degraded: true });
+    const name = `${buildSegmentFilenameBase(segment.sessionId, segment.segmentIndex, Date.UTC(2026, 8, 27))}.webm`;
+    state.recordUploadedFile("step-a", { id: "file-0", name } as UploadedFile, segment.sessionId);
+    expect(state.hasPartsOnlyInTab).toBe(true);
+
+    state.removeUploadedFile("step-a", "file-0");
+    expect(state.hasPartsOnlyInTab).toBe(false);
   });
 
   it("prepares recorded segment counters per step", () => {

@@ -127,8 +127,8 @@
 
   const launchInputState = new FlowRunLaunchInputState();
   const fileInputState = new FlowRunFileInputState();
-  const recordingJournal = new RecordingJournal(recordingSessionStore, (reason) =>
-    fileInputState.storageFailed(reason)
+  const recordingJournal = new RecordingJournal(recordingSessionStore, (reason, partId, stepId) =>
+    fileInputState.journalDegraded(reason, stepId, partId)
   );
   let currentPageIndex = $state(0);
   let showCloseConfirmation = $state(false);
@@ -342,6 +342,14 @@
   // save for later.
   const recordingSettled = $derived(
     !fileInputState.hasActiveRecording && !fileInputState.hasPersistingRecordedSegments
+  );
+  // Why the recording cannot be saved for later yet, or null.
+  const saveForLaterBlockedReason = $derived(
+    !recordingSettled
+      ? labels.saveForLaterBusy
+      : fileInputState.hasPartsOnlyInTab
+        ? labels.saveForLaterOnlyInTab
+        : null
   );
   const currentStepRecorderResetToken = $derived(
     currentRuntimeStep ? fileInputState.getRecorderResetToken(currentRuntimeStep.step_id) : 0
@@ -1279,6 +1287,7 @@
     }
     if (!params.blob) {
       void recordingJournal.discard(params.partId);
+      fileInputState.journalPartEnded(step.step_id, params.partId);
       return;
     }
     const prepared = {
@@ -1324,7 +1333,8 @@
       stepId: step.step_id,
       segment: prepared,
       notice: recordingNoticeForReason(step.step_id, params.reason),
-      degraded: persistResult.degraded
+      degraded: persistResult.degraded,
+      partId: params.partId
     });
     await uploadRecordedSegment(step, { ...prepared, file }, operationGeneration, operationFlowId);
   }
@@ -1503,17 +1513,14 @@
   }
 
   function saveForLater() {
+    // Refused, as its disabled control says: not yet stopped and stored, or stored
+    // only in this tab.
+    if (saveForLaterBlockedReason) return;
     // The IDB ledger persists for 24 h regardless of the dialog state, so
     // closing without resetting state is exactly the "save and continue
     // later" semantics the user expects.
     open = false;
-    if (fileInputState.isStorageDegraded) {
-      // In memory-only mode the ledger does not survive a page reload, so
-      // the success toast would lie. Tell the user the truth.
-      toast.warning(m.recording_session_storage_degraded());
-    } else {
-      toast.success(m.recording_save_for_later_toast());
-    }
+    toast.success(m.recording_save_for_later_toast());
   }
 
   // Each step's stored live transcript, where the step's files are exactly
@@ -1734,7 +1741,8 @@
             onRetryRecordedAudio={() => void retryRecordedFileUpload(currentRuntimeStep)}
             onDiscardRecordedAudio={() => void discardRecordedFile(currentRuntimeStep.step_id)}
             canDiscardRecording={!fileInputState.hasWorkInFlight(currentRuntimeStep.step_id)}
-            onSaveForLater={recordingSettled ? saveForLater : undefined}
+            onSaveForLater={saveForLater}
+            {saveForLaterBlockedReason}
             onContinueResume={(hint) =>
               void continueResumedSession(currentRuntimeStep.step_id, hint)}
             onDiscardResume={(hint) => void discardResumedSession(currentRuntimeStep.step_id, hint)}

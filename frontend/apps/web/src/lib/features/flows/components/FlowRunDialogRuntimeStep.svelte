@@ -69,6 +69,7 @@
     onRetryRecoveryScan,
     canStartRecording = true,
     canDiscardRecording = true,
+    saveForLaterBlockedReason = null,
     sessionPhase = "idle",
     onOpenFilePicker,
     onRemoveFile,
@@ -131,6 +132,8 @@
     canStartRecording?: boolean;
     // False while the step's recording or an upload is still on its way.
     canDiscardRecording?: boolean;
+    // Shown disabled with this reason while the recording cannot be saved for later.
+    saveForLaterBlockedReason?: string | null;
     // The session-level state surfaces a "trying to reconnect" hint and a
     // paused-failed CTA right next to the recorder so the user knows the
     // system is still working without scrolling.
@@ -188,6 +191,7 @@
   }
 
   const DISCARD_REASON_ID = "flow-run-discard-reason";
+  const SAVE_REASON_ID = "flow-run-save-for-later-reason";
   const supportsAudioRecording = $derived(step.input_format === "audio");
   const acceptedMimetypes = $derived(step.accepted_mimetypes ?? []);
 
@@ -645,7 +649,14 @@
                 {m.save_as_file()}
               </Button>
               {#if onSaveForLater}
-                <Button variant="outline" size="sm" onclick={onSaveForLater}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onclick={onSaveForLater}
+                  disabled={saveForLaterBlockedReason !== null}
+                  title={saveForLaterBlockedReason ?? undefined}
+                  aria-describedby={saveForLaterBlockedReason ? SAVE_REASON_ID : undefined}
+                >
                   {m.recording_save_for_later()}
                 </Button>
               {/if}
@@ -661,6 +672,11 @@
                 {m.discard()}
               </Button>
             </div>
+            {#if onSaveForLater && saveForLaterBlockedReason}
+              <p id={SAVE_REASON_ID} class="mt-2 leading-relaxed">
+                {saveForLaterBlockedReason}
+              </p>
+            {/if}
             {#if !canDiscardRecording}
               <p id={DISCARD_REASON_ID} class="mt-2 leading-relaxed">
                 {labels.discardRecordingBusy}

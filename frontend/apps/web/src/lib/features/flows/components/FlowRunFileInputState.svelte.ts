@@ -39,6 +39,13 @@ export class FlowRunFileInputState {
   #uploadErrorsByStepId = $state<Record<string, string | null>>({});
   #recordingNoticesByStepId = $state<Record<string, string | null>>({});
   #skippedMessagesByStepId = $state<Record<string, string | null>>({});
+  // Recorded parts the device could not store ("step::session::index"): kept only in
+  // this tab until uploaded, removed or discarded.
+  #partsOnlyInTab = $state<string[]>([]);
+  // Parts still recording or being stored whose journal fell behind ("step::part").
+  #partsJournalBehind = $state<string[]>([]);
+  // This browser keeps a part on the device only once it is done (no journal).
+  #journalUnavailable = $state(false);
   #activeUploadCountByStepId = $state<Record<string, number>>({});
   // File slots chosen files hold from the moment they are accepted until their
   // upload settles, so a recording cannot promise them to a part meanwhile.
@@ -89,12 +96,20 @@ export class FlowRunFileInputState {
     return this.#recordingStepIds.length > 0;
   }
 
-  get isStorageDegraded(): boolean {
-    return this.#recordingSessionState.storageNotice === "failed";
+  // A kept recording has a part only this tab holds: it cannot be saved for later.
+  get hasPartsOnlyInTab(): boolean {
+    return this.#partsOnlyInTab.length > 0;
   }
 
+  get isStorageDegraded(): boolean {
+    return this.storageNotice === "failed";
+  }
+
+  // Part of a recording is only in this tab now ("failed"), or this browser keeps a
+  // part on the device only once it is done ("unavailable").
   get storageNotice(): JournalDegradation | null {
-    return this.#recordingSessionState.storageNotice;
+    if (this.#partsOnlyInTab.length > 0 || this.#partsJournalBehind.length > 0) return "failed";
+    return this.#journalUnavailable ? "unavailable" : null;
   }
 
   get sessionIdsByStepIdSnapshot(): Record<string, string> {
@@ -245,6 +260,13 @@ export class FlowRunFileInputState {
   // chosen from the device: its ledger entry lives under that session.
   removeUploadedFile(stepId: string, fileId: string): string | null {
     const recordedIn = this.#recorderSessionByFileId.get(fileId) ?? null;
+    // A removed part kept only in this tab no longer blocks saving the rest for later.
+    const name = this.#runtimeFilesByStepId[stepId]?.find((file) => file.id === fileId)?.name;
+    const part = name ? parseSegmentFilename(name) : null;
+    if (part) {
+      const key = `${stepId}::${part.sessionId}::${part.segmentIndex}`;
+      this.#partsOnlyInTab = this.#partsOnlyInTab.filter((kept) => kept !== key);
+    }
     this.#recorderSessionByFileId.delete(fileId);
     this.#runtimeFilesByStepId = {
       ...this.#runtimeFilesByStepId,
@@ -296,12 +318,23 @@ export class FlowRunFileInputState {
     return ensured.sessionId;
   }
 
-  // Part of a recording is only in this tab: storage failed or fell behind ("failed"),
-  // or this browser keeps a part on the device only once it is done ("unavailable").
-  storageFailed(reason: JournalDegradation = "failed"): void {
-    const current = this.#recordingSessionState.storageNotice;
-    if (current === "failed" || current === reason) return;
-    this.#recordingSessionState = { ...this.#recordingSessionState, storageNotice: reason };
+  // The journal of a part fell behind or was refused ("failed"), or this browser has
+  // none ("unavailable").
+  journalDegraded(reason: JournalDegradation, stepId: string, partId: string): void {
+    if (reason === "unavailable") {
+      this.#journalUnavailable = true;
+      return;
+    }
+    const key = `${stepId}::${partId}`;
+    if (!this.#partsJournalBehind.includes(key)) {
+      this.#partsJournalBehind = [...this.#partsJournalBehind, key];
+    }
+  }
+
+  // The part was stored, or held nothing: its journal no longer matters.
+  journalPartEnded(stepId: string, partId: string): void {
+    const key = `${stepId}::${partId}`;
+    this.#partsJournalBehind = this.#partsJournalBehind.filter((kept) => kept !== key);
   }
 
   prepareRecordedSegment(stepId: string, durationMs = 0): PreparedRecordedSegment {
@@ -333,14 +366,22 @@ export class FlowRunFileInputState {
     stepId,
     segment,
     notice,
-    degraded
+    degraded,
+    partId
   }: {
     stepId: string;
     segment: PreparedRecordedSegment;
     notice: string | null;
     degraded: boolean;
+    partId?: string;
   }): void {
-    if (degraded) this.storageFailed();
+    if (partId) this.journalPartEnded(stepId, partId);
+    if (degraded) {
+      this.#partsOnlyInTab = [
+        ...this.#partsOnlyInTab,
+        `${stepId}::${segment.sessionId}::${segment.segmentIndex}`
+      ];
+    }
     this.#recordingNoticesByStepId = { ...this.#recordingNoticesByStepId, [stepId]: notice };
     this.#setPendingSegmentState(stepId, segment, "uploading");
   }
@@ -379,6 +420,10 @@ export class FlowRunFileInputState {
     this.#uploadErrorsByStepId = { ...this.#uploadErrorsByStepId, [stepId]: null };
     this.#recordingNoticesByStepId = { ...this.#recordingNoticesByStepId, [stepId]: null };
     this.#skippedMessagesByStepId = { ...this.#skippedMessagesByStepId, [stepId]: null };
+    this.#partsOnlyInTab = this.#partsOnlyInTab.filter((key) => !key.startsWith(`${stepId}::`));
+    this.#partsJournalBehind = this.#partsJournalBehind.filter(
+      (key) => !key.startsWith(`${stepId}::`)
+    );
     this.#runtimeFilesByStepId = { ...this.#runtimeFilesByStepId, [stepId]: [] };
     this.#recordingStepIds = this.#recordingStepIds.filter((id) => id !== stepId);
     this.#recordingSessionState = clearStepSessionInState(this.#recordingSessionState, stepId);
@@ -485,6 +530,9 @@ export class FlowRunFileInputState {
     this.#uploadErrorsByStepId = {};
     this.#recordingNoticesByStepId = {};
     this.#skippedMessagesByStepId = {};
+    this.#partsOnlyInTab = [];
+    this.#partsJournalBehind = [];
+    this.#journalUnavailable = false;
     this.#activeUploadCountByStepId = {};
     this.#reservedSlotsByStepId = {};
     this.#recordingStepIds = [];

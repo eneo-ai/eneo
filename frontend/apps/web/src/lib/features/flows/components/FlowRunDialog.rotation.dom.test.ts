@@ -952,6 +952,58 @@ describe("FlowRunDialog recording rotation", () => {
     );
   });
 
+  it("refuses save for later when the recording is kept only in this tab, and says what to do instead", async () => {
+    vi.mocked(persistRecordingSegment).mockResolvedValue({ degraded: true });
+    const upload = vi.fn(async () => {
+      throw new Error("Network down");
+    });
+    await openDialogAndStartRecording(upload);
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+
+    await expectSaveForLaterRefused(
+      "Inspelningen finns bara i den här fliken och kan inte sparas till senare. Spara den som fil eller försök ladda upp igen."
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("closes the dialog when a stored recording is saved for later", async () => {
+    const upload = vi.fn(async () => {
+      throw new Error("Network down");
+    });
+    await openDialogAndStartRecording(upload);
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+
+    await fireEvent.click(queryInFailedRecordingAlert(m.recording_save_for_later())!);
+    vi.advanceTimersByTime(1_000);
+    await flush();
+    expect(toast.success).toHaveBeenCalledWith(m.recording_save_for_later_toast());
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("warns while the journal is behind, and lets the stored recording be saved for later", async () => {
+    // The journal fell behind: the part is only in this tab until it is stored.
+    const journal = spyOnJournal();
+    journal.begin.mockRejectedValue(new DOMException("quota", "QuotaExceededError"));
+    const upload = vi.fn(async () => {
+      throw new Error("Network down");
+    });
+    await openDialogAndStartRecording(upload);
+    await flush();
+    expect(screen.getByText(m.recording_session_storage_degraded())).toBeTruthy();
+
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+    // Stored now: no warning, and it can be saved for later.
+    expect(screen.queryByText(m.recording_session_storage_degraded())).toBeNull();
+    const save = queryInFailedRecordingAlert(m.recording_save_for_later()) as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+  });
+
   it("offers save for later once every segment is handed over and persisted, and discard once none is in flight", async () => {
     const pendingUploads: PendingUpload[] = [];
     const upload = vi.fn(({ file }: { file: File }) => pendingUpload(pendingUploads, file));
@@ -966,7 +1018,7 @@ describe("FlowRunDialog recording rotation", () => {
 
     // Capture continues: Retry is offered, the actions that end the recording are not.
     expect(queryInFailedRecordingAlert("Försök igen")).toBeTruthy();
-    expect(queryInFailedRecordingAlert(m.recording_save_for_later())).toBeNull();
+    await expectSaveForLaterRefused();
     await expectDiscardRefused();
 
     let finishPersisting = () => {};
@@ -979,15 +1031,17 @@ describe("FlowRunDialog recording rotation", () => {
     await fireEvent.click(screen.getByLabelText(m.stop_recording()));
     await flush();
     // Stopped, but the browser has not handed over the last segment yet.
-    expect(queryInFailedRecordingAlert(m.recording_save_for_later())).toBeNull();
+    await expectSaveForLaterRefused();
     await expectDiscardRefused();
     media.recorders[1]?.finish();
     await flush();
-    expect(queryInFailedRecordingAlert(m.recording_save_for_later())).toBeNull();
+    await expectSaveForLaterRefused();
 
     finishPersisting();
     await flush();
-    expect(queryInFailedRecordingAlert(m.recording_save_for_later())).toBeTruthy();
+    const save = queryInFailedRecordingAlert(m.recording_save_for_later()) as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+    expect(save.getAttribute("aria-describedby")).toBeNull();
     // The last segment still uploads.
     await expectDiscardRefused();
 
@@ -1827,6 +1881,20 @@ function discardButton() {
 }
 
 // Discard shows why it is disabled, and a click on it changes nothing.
+const SAVE_BUSY_REASON =
+  "Du kan spara och fortsätta senare när inspelningen har stoppats och sparats på enheten.";
+
+// Shown, disabled, with its reason: the same idiom as a refused discard.
+async function expectSaveForLaterRefused(reason = SAVE_BUSY_REASON) {
+  const save = queryInFailedRecordingAlert(m.recording_save_for_later()) as HTMLButtonElement;
+  expect(save.disabled).toBe(true);
+  const reasonId = save.getAttribute("aria-describedby") ?? "";
+  expect(document.getElementById(reasonId)?.textContent?.trim()).toBe(reason);
+  await fireEvent.click(save);
+  await flush();
+  expect(failedRecordingAlert()).toBeTruthy();
+}
+
 async function expectDiscardRefused() {
   const discard = discardButton();
   expect(discard.disabled).toBe(true);

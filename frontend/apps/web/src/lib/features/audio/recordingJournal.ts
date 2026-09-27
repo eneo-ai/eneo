@@ -52,6 +52,8 @@ type JournalledPart = {
   failed: boolean;
   // The part ended: a lock granted from now on is let go at once.
   ended: boolean;
+  partId: string;
+  stepId: string;
   // Settles the wait for the lock: a part dropped before it, or left without it in
   // time, writes nothing (the latter says so).
   settleGrant: (held: boolean) => void;
@@ -63,8 +65,13 @@ export class RecordingJournal {
 
   constructor(
     private readonly store: JournalStore,
-    // Once for a part: what it wrote stays, the rest of it is only in this tab.
-    private readonly onDegraded: (reason: JournalDegradation) => void,
+    // Once for a part: what it wrote stays, the rest of it is only in this tab until
+    // the part is stored.
+    private readonly onDegraded: (
+      reason: JournalDegradation,
+      partId: string,
+      stepId: string
+    ) => void,
     // The recording tab holds each part's lock: recovery in another tab skips a
     // part whose lock is held. Without Web Locks nothing is journaled.
     private readonly locks: LockManager | null = (globalThis.navigator as Navigator | undefined)
@@ -73,7 +80,9 @@ export class RecordingJournal {
 
   begin(partId: string, meta: Omit<JournalPart, "key" | "partId" | "lastChunkAt" | "chunkCount">) {
     const locks = this.locks;
-    if (!locks || !JOURNALED_TYPE.test(meta.mimeType)) return this.onDegraded("unavailable");
+    if (!locks || !JOURNALED_TYPE.test(meta.mimeType)) {
+      return this.onDegraded("unavailable", partId, meta.stepId);
+    }
     const part: JournalledPart = {
       key: Promise.resolve(null),
       tail: Promise.resolve(),
@@ -82,6 +91,8 @@ export class RecordingJournal {
       stopped: false,
       failed: false,
       ended: false,
+      partId,
+      stepId: meta.stepId,
       settleGrant: () => {},
       releaseLock: () => {}
     };
@@ -185,6 +196,6 @@ export class RecordingJournal {
   #stop(part: JournalledPart): void {
     if (part.stopped) return;
     part.stopped = true;
-    this.onDegraded("failed");
+    this.onDegraded("failed", part.partId, part.stepId);
   }
 }

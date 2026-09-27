@@ -29,6 +29,10 @@ export function getFlowRunDialogLabels(locale: FlowLocale) {
       runtimeUploadingHint: "Uppladdning pågår. Vänta tills filen är klar innan du går vidare.",
       discardRecordingBusy:
         "Du kan kassera inspelningen när den har stoppats och uppladdningen är klar.",
+      saveForLaterBusy:
+        "Du kan spara och fortsätta senare när inspelningen har stoppats och sparats på enheten.",
+      saveForLaterOnlyInTab:
+        "Inspelningen finns bara i den här fliken och kan inte sparas till senare. Spara den som fil eller försök ladda upp igen.",
       allowedTypesToggle: "Visa tillåtna filtyper",
       maxFiles: (count: number) => (count === 1 ? "Högst 1 fil" : `Högst ${count} filer`),
       maxFileSize: (size: string) => `Högst ${size} per fil`,
@@ -77,6 +81,10 @@ export function getFlowRunDialogLabels(locale: FlowLocale) {
     runtimeUploadingHint: "Upload in progress. Wait until the file is finished before continuing.",
     discardRecordingBusy:
       "You can discard the recording once it has stopped and the upload has finished.",
+    saveForLaterBusy:
+      "You can save and continue later once the recording has stopped and is saved on this device.",
+    saveForLaterOnlyInTab:
+      "The recording exists only in this tab and cannot be saved for later. Save it as a file or try the upload again.",
     allowedTypesToggle: "Show allowed file types",
     maxFiles: (count: number) => (count === 1 ? "Up to 1 file" : `Up to ${count} files`),
     maxFileSize: (size: string) => `Up to ${size} per file`,
