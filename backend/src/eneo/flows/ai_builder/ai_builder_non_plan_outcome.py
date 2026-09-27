@@ -380,12 +380,18 @@ def stale_saved_step_revision_message(*, ui_language: str | None) -> str:
 
 
 # The unread answer holds on the turn that could not read the text and on any
-# later turn (a click included) that waits for it to be sent again.
+# later turn (a click included) that waits for it to be sent again. Whatever
+# left it unread (an empty, cut-off, filtered or unparsable reply), the text is
+# not at fault, and a later turn cannot tell which it was.
 _UNSETTLED_TEXT_ANSWERS: Final[dict[UnsettledUserText, dict[str, str]]] = {
     "unread": {
-        "sv": "Jag kunde inte läsa det du skrev. Skicka det igen, så fortsätter vi.",
+        "sv": (
+            "Något gick fel när jag läste ditt meddelande den här gången. "
+            "Skicka det igen, så fortsätter vi."
+        ),
         "en": (
-            "I couldn't read what you wrote. Please send it again, and we'll continue."
+            "Something went wrong while I was reading your message this time. "
+            "Please send it again, and we'll continue."
         ),
     },
     "speaker_naming_without_edit": {

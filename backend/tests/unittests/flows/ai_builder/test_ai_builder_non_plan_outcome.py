@@ -18,6 +18,7 @@ from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
     decline_message,
     decline_reason_from_arguments,
     scoped_revision_out_of_reach_answer,
+    unsettled_text_answer,
     user_action_answer,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
@@ -496,3 +497,27 @@ def test_the_scoped_revision_answer_asks_for_a_whole_plan_edit() -> None:
         "edit_whole_plan",
     )
     assert answer.outcome.affected == ("step_b",)
+
+
+@pytest.mark.parametrize(
+    ("ui_language", "expected"),
+    [
+        (
+            "sv",
+            "Något gick fel när jag läste ditt meddelande den här gången. "
+            "Skicka det igen, så fortsätter vi.",
+        ),
+        (
+            "en",
+            "Something went wrong while I was reading your message this time. "
+            "Please send it again, and we'll continue.",
+        ),
+    ],
+)
+def test_the_unread_answer_does_not_blame_the_text(
+    ui_language: str, expected: str
+) -> None:
+    # eneo-do2n: an empty or cut-off classifier reply told the user their text
+    # could not be read. A message stays unread for any of those causes, and a
+    # later turn cannot tell which, so one answer holds for all of them.
+    assert unsettled_text_answer("unread", ui_language=ui_language) == expected
