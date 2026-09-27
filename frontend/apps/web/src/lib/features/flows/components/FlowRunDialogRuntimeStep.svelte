@@ -65,6 +65,8 @@
     resumeBusy = false,
     storageDegraded = false,
     offline = false,
+    recoveryScanFailed = false,
+    onRetryRecoveryScan,
     canStartRecording = true,
     canDiscardRecording = true,
     sessionPhase = "idle",
@@ -118,6 +120,9 @@
     storageDegraded?: boolean;
     // The browser has no connection: recording goes on, uploads wait.
     offline?: boolean;
+    // The saved recordings could not be read; Retry reads them again.
+    recoveryScanFailed?: boolean;
+    onRetryRecoveryScan?: () => void;
     canStartRecording?: boolean;
     // False while the step's recording or an upload is still on its way.
     canDiscardRecording?: boolean;
@@ -259,6 +264,26 @@
 
     {#if storageDegraded}
       <FlowRunStorageDegradedNotice />
+    {/if}
+
+    {#if recoveryScanFailed && supportsAudioRecording}
+      <Alert.Root
+        class="border-warning-default/30 bg-warning-dimmer/60 text-warning-stronger mb-4"
+        role="status"
+      >
+        <Alert.Title>{m.recording_resume_scan_failed_title()}</Alert.Title>
+        <Alert.Description class="text-warning-stronger/90">
+          {m.recording_resume_scan_failed_description()}
+        </Alert.Description>
+        {#if onRetryRecoveryScan}
+          <div class="mt-3">
+            <Button variant="outline" size="sm" onclick={onRetryRecoveryScan}>
+              <IconRefresh data-icon="inline-start" />
+              {m.recording_resume_scan_retry()}
+            </Button>
+          </div>
+        {/if}
+      </Alert.Root>
     {/if}
 
     {#if offline && supportsAudioRecording}

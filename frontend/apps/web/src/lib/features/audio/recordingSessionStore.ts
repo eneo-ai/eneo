@@ -171,7 +171,7 @@ class RecordingSessionStoreImpl {
   }
 
   async readSession(flowId: string, stepId: string, sessionId: string): Promise<SegmentRecord[]> {
-    const records = await this.readRange(this.sessionPrefix(flowId, stepId, sessionId));
+    const { records } = await this.readRange(this.sessionPrefix(flowId, stepId, sessionId));
     return records.sort((a, b) => a.segmentIndex - b.segmentIndex);
   }
 
@@ -188,51 +188,41 @@ class RecordingSessionStoreImpl {
       this.memoryFallback.set(compositeKey, { ...memoryRecord, uploadedFileId });
     }
 
+    // Rejects when IndexedDB could not mark it: the part would upload again after a reload.
     if ((await this.openDb()) === null) return;
-
-    try {
-      await this.runTransaction("readwrite", (store) => {
-        return new Promise<void>((resolve, reject) => {
-          const get = store.get(compositeKey);
-          get.onsuccess = () => {
-            const record = get.result as (SegmentRecord & { compositeKey: string }) | undefined;
-            if (!record) {
-              resolve();
-              return;
-            }
+    await this.runTransaction("readwrite", (store) => {
+      return new Promise<void>((resolve, reject) => {
+        const get = store.get(compositeKey);
+        get.onsuccess = () => {
+          const record = get.result as (SegmentRecord & { compositeKey: string }) | undefined;
+          if (!record) {
+            resolve();
+            return;
+          }
+          try {
             const put = store.put({ ...record, uploadedFileId });
             put.onsuccess = () => resolve();
             put.onerror = () => reject(put.error);
-          };
-          get.onerror = () => reject(get.error);
-        });
+          } catch (error) {
+            reject(error);
+          }
+        };
+        get.onerror = () => reject(get.error);
       });
-    } catch (error) {
-      console.warn("RecordingSessionStore: patchUploadedFileId failed", error);
-    }
+    });
   }
 
-  // Drops the single record whose uploadedFileId matches. Used when the
-  // user removes a recorded segment from the dialog — without this, the
-  // IDB ledger keeps the upload reference and resume re-attaches the
-  // deleted audio. Returns true if a record was actually deleted.
-  async detachUploadedFileId(
+  // Removes one recorded part, named by its session and index (a part whose
+  // upload mark failed has no upload ID in the store). Rejects when IndexedDB could
+  // not remove it: the part stays, to remove on another try.
+  async deleteSegment(
     flowId: string,
     stepId: string,
     sessionId: string,
-    uploadedFileId: string
-  ): Promise<boolean> {
-    if (!uploadedFileId) return false;
-    const records = await this.readSession(flowId, stepId, sessionId);
-    const match = records.find((r) => r.uploadedFileId === uploadedFileId);
-    if (!match) return false;
-
-    const compositeKey = this.compositeKey(flowId, stepId, sessionId, match.segmentIndex);
-    this.memoryFallback.delete(compositeKey);
-
-    if ((await this.openDb()) === null) return true;
-
-    try {
+    segmentIndex: number
+  ): Promise<void> {
+    const compositeKey = this.compositeKey(flowId, stepId, sessionId, segmentIndex);
+    if ((await this.openDb()) !== null) {
       await this.runTransaction("readwrite", (store) => {
         return new Promise<void>((resolve, reject) => {
           const request = store.delete(compositeKey);
@@ -240,10 +230,8 @@ class RecordingSessionStoreImpl {
           request.onerror = () => reject(request.error);
         });
       });
-    } catch (error) {
-      console.warn("RecordingSessionStore: detachUploadedFileId failed", error);
     }
-    return true;
+    this.memoryFallback.delete(compositeKey);
   }
 
   // Rejects when IndexedDB could not delete the stored parts; the parts only memory
@@ -268,9 +256,10 @@ class RecordingSessionStoreImpl {
     flowId: string,
     stepId: string,
     now: number = Date.now()
-  ): Promise<SessionRecoveryHint[]> {
+  ): Promise<{ hints: SessionRecoveryHint[]; complete: boolean }> {
     const cutoff = now - SESSION_TTL_MS;
-    const segments = await this.readRange(`${flowId}::${stepId}::`);
+    // Without the store only what memory holds is known: offered, and said to be incomplete.
+    const { records: segments, stored } = await this.readRange(`${flowId}::${stepId}::`);
 
     // Group first, then decide expiry per session — never list and delete
     // the same session in one pass, and never expire a multi-hour session
@@ -318,7 +307,7 @@ class RecordingSessionStoreImpl {
     }
 
     hints.sort((a, b) => b.earliestCapturedAt - a.earliestCapturedAt);
-    return hints;
+    return { hints, complete: stored };
   }
 
   // Every part whose composite key starts with `prefix`: the stored ones and the ones
@@ -326,7 +315,9 @@ class RecordingSessionStoreImpl {
   // not finish rejects: stored parts have no copy in memory, so part of a recording must
   // not pass for all of it. When IndexedDB does not open, this tab stored nothing there,
   // and memory holds everything it recorded.
-  private async readRange(prefix: string): Promise<SegmentRecord[]> {
+  // `stored` is false when IndexedDB did not open in a browser: only what memory
+  // holds is known then (outside a browser memory is the whole ledger).
+  private async readRange(prefix: string): Promise<{ records: SegmentRecord[]; stored: boolean }> {
     const db = await this.openDb();
     const byKey = new Map<string, SegmentRecord>();
     if (db !== null) {
@@ -352,7 +343,7 @@ class RecordingSessionStoreImpl {
     for (const [key, record] of this.memoryFallback) {
       if (key.startsWith(prefix)) byKey.set(key, record);
     }
-    return [...byKey.values()];
+    return { records: [...byKey.values()], stored: db !== null || !this.isBrowser() };
   }
 
   private async runTransaction<T>(

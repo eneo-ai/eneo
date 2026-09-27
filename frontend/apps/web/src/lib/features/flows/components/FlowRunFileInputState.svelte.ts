@@ -236,7 +236,10 @@ export class FlowRunFileInputState {
       .map(([stepId]) => stepId);
   }
 
+  // The recording session the removed file was recorded in, or null for a file
+  // chosen from the device: its ledger entry lives under that session.
   removeUploadedFile(stepId: string, fileId: string): string | null {
+    const recordedIn = this.#recorderSessionByFileId.get(fileId) ?? null;
     this.#recorderSessionByFileId.delete(fileId);
     this.#runtimeFilesByStepId = {
       ...this.#runtimeFilesByStepId,
@@ -244,7 +247,7 @@ export class FlowRunFileInputState {
     };
     this.#recordingNoticesByStepId = { ...this.#recordingNoticesByStepId, [stepId]: null };
     this.#skippedMessagesByStepId = { ...this.#skippedMessagesByStepId, [stepId]: null };
-    return this.#recordingSessionState.sessionIdsByStepId[stepId] ?? null;
+    return recordedIn;
   }
 
   dragEnteredStep(stepId: string): void {

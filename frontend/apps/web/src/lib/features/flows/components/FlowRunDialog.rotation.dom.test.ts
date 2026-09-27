@@ -39,11 +39,12 @@ import FlowRunDialog from "./FlowRunDialog.svelte";
 // the browser's media APIs replaced by the fakes below.
 
 const recordingMocks = vi.hoisted(() => ({
+  detachUploadedSegmentFromLedger: vi.fn(async () => true),
   markSegmentUploaded: vi.fn(async () => undefined),
   persistRecordingSegment: vi.fn(async () => ({ degraded: false })),
   purgeSession: vi.fn(async () => true),
   readSessionRecords: vi.fn(async () => []),
-  scanRecoverableSessionsForSteps: vi.fn(async () => ({}))
+  scanRecoverableSessionsForSteps: vi.fn(async () => ({ hints: {}, incomplete: false }))
 }));
 
 // Recorded time runs on the recording clock; here it follows the faked Date,
@@ -94,8 +95,11 @@ beforeEach(() => {
   vi.mocked(markSegmentUploaded).mockReset().mockResolvedValue(undefined);
   vi.mocked(persistRecordingSegment).mockReset().mockResolvedValue({ degraded: false });
   vi.mocked(purgeSession).mockReset().mockResolvedValue(true);
+  recordingMocks.detachUploadedSegmentFromLedger.mockReset().mockResolvedValue(true);
   vi.mocked(readSessionRecords).mockReset().mockResolvedValue([]);
-  vi.mocked(scanRecoverableSessionsForSteps).mockReset().mockResolvedValue({});
+  vi.mocked(scanRecoverableSessionsForSteps)
+    .mockReset()
+    .mockResolvedValue({ hints: {}, incomplete: false });
 });
 
 afterEach(async () => {
@@ -831,7 +835,10 @@ describe("FlowRunDialog recording rotation", () => {
 
   it("counts recovered segments whose upload fails and retries them in segment order", async () => {
     vi.mocked(scanRecoverableSessionsForSteps).mockResolvedValue({
-      "step-audio": [recoveryHint()]
+      hints: {
+        "step-audio": [recoveryHint()]
+      },
+      incomplete: false
     });
     vi.mocked(readSessionRecords).mockResolvedValue([
       segmentRecord(0, "recovered-0"),
@@ -866,7 +873,10 @@ describe("FlowRunDialog recording rotation", () => {
 
   it("submits a recovered recording's parts as one recording where Eneo offers it", async () => {
     vi.mocked(scanRecoverableSessionsForSteps).mockResolvedValue({
-      "step-audio": [recoveryHint()]
+      hints: {
+        "step-audio": [recoveryHint()]
+      },
+      incomplete: false
     });
     vi.mocked(readSessionRecords).mockResolvedValue([
       segmentRecord(0, "recovered-0"),
@@ -914,6 +924,22 @@ describe("FlowRunDialog recording rotation", () => {
     await flush();
 
     expect(screen.getByRole("button", { name: `${m.delete()} ${name}` })).toBeTruthy();
+  });
+
+  it("says so when a removed part is still on the device and may show again after a reload", async () => {
+    recordingMocks.detachUploadedSegmentFromLedger.mockResolvedValueOnce(false);
+    const upload = vi.fn(async ({ file }: { file: File }) => uploadedFile("segment-0", file.name));
+    await openDialogAndStartRecording(upload);
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+    const name = upload.mock.calls[0]?.[0].file.name;
+
+    await fireEvent.click(screen.getByRole("button", { name: `${m.delete()} ${name}` }));
+    await flush();
+
+    expect(recordingMocks.detachUploadedSegmentFromLedger).toHaveBeenCalledOnce();
+    expect(toast.warning).toHaveBeenCalledWith(m.recording_removed_part_kept());
   });
 
   it("keeps one live text session across a rotation and ends it with the recording", async () => {

@@ -114,7 +114,9 @@ describe("recordingSessionStore — fake-indexeddb path", () => {
     expect(recordingSessionStore.__unpersistedCountForTests()).toBe(1);
     const records = await recordingSessionStore.readSession("flow-1", "step-1", "sess-A");
     expect(records.map((r) => r.segmentIndex)).toEqual([0, 1]);
-    const [hint] = await recordingSessionStore.listRecoverableSessions("flow-1", "step-1");
+    const {
+      hints: [hint]
+    } = await recordingSessionStore.listRecoverableSessions("flow-1", "step-1");
     expect(hint?.segmentCount).toBe(2);
 
     await recordingSessionStore.patchUploadedFileId("flow-1", "step-1", "sess-A", 0, "file-0");
@@ -163,18 +165,20 @@ describe("recordingSessionStore — fake-indexeddb path", () => {
     expect(records.map((r) => r.segmentIndex)).toEqual([0, 1]);
   });
 
-  it("reads what memory holds while IndexedDB does not open at all (a private window)", async () => {
+  it("reads the recording from memory while IndexedDB does not open, but cannot say nothing else is saved", async () => {
     recordingSessionStore.__resetForTests();
     const open = vi.spyOn(indexedDB, "open").mockImplementation(() => {
       throw new DOMException("open failed", "InvalidStateError");
     });
     await recordingSessionStore.writeSegment(makeRecord({ segmentIndex: 0 }));
     const records = await recordingSessionStore.readSession("flow-1", "step-1", "sess-A");
-    const [hint] = await recordingSessionStore.listRecoverableSessions("flow-1", "step-1");
+    // What memory holds is offered; one saved before this page may be in the store that did not open.
+    const scan = await recordingSessionStore.listRecoverableSessions("flow-1", "step-1");
     open.mockRestore();
 
     expect(records.map((r) => r.segmentIndex)).toEqual([0]);
-    expect(hint?.segmentCount).toBe(1);
+    expect(scan.hints.map((hint) => hint.segmentCount)).toEqual([1]);
+    expect(scan.complete).toBe(false);
   });
 
   it("keeps the whole session, stored and memory parts, when IndexedDB cannot delete it", async () => {
@@ -195,6 +199,39 @@ describe("recordingSessionStore — fake-indexeddb path", () => {
 
     const records = await recordingSessionStore.readSession("flow-1", "step-1", "sess-A");
     expect(records.map((r) => r.segmentIndex)).toEqual([0, 1]);
+  });
+
+  it("says when IndexedDB could not mark a part uploaded or remove it, instead of passing for done", async () => {
+    await recordingSessionStore.writeSegment(makeRecord({ segmentIndex: 0 }));
+    const put = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementationOnce(() => {
+      throw new DOMException("quota", "QuotaExceededError");
+    });
+    await expect(
+      recordingSessionStore.patchUploadedFileId("flow-1", "step-1", "sess-A", 0, "file-0")
+    ).rejects.toThrow();
+    put.mockRestore();
+    await recordingSessionStore.patchUploadedFileId("flow-1", "step-1", "sess-A", 0, "file-0");
+
+    const remove = vi.spyOn(IDBObjectStore.prototype, "delete").mockImplementationOnce(() => {
+      throw new DOMException("delete failed", "UnknownError");
+    });
+    await expect(
+      recordingSessionStore.deleteSegment("flow-1", "step-1", "sess-A", 0)
+    ).rejects.toThrow();
+    remove.mockRestore();
+    // Still there to remove on another try.
+    const records = await recordingSessionStore.readSession("flow-1", "step-1", "sess-A");
+    expect(records.map((r) => r.uploadedFileId)).toEqual(["file-0"]);
+  });
+
+  it("removes a part by its session and index, even one whose upload was never marked", async () => {
+    await recordingSessionStore.writeSegment(makeRecord({ segmentIndex: 0 }));
+    await recordingSessionStore.writeSegment(makeRecord({ segmentIndex: 1 }));
+
+    await recordingSessionStore.deleteSegment("flow-1", "step-1", "sess-A", 0);
+
+    const records = await recordingSessionStore.readSession("flow-1", "step-1", "sess-A");
+    expect(records.map((r) => r.segmentIndex)).toEqual([1]);
   });
 
   it("patchUploadedFileId mutates only the targeted segment via IDB", async () => {

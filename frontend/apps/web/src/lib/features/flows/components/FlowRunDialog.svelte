@@ -23,6 +23,7 @@
   import {
     buildSegmentFilenameBase,
     canStartRecording,
+    parseSegmentFilename,
     RecordingSession,
     type RecordingSessionDeps,
     type SessionState
@@ -126,6 +127,13 @@
   let showCloseConfirmation = $state(false);
   let pageContentEl = $state<HTMLElement | null>(null);
   let resumeScannedForFlowId: string | null = null;
+  // The saved recordings could not be read: not "none", and the step offers to read them again.
+  let recoveryScanFailed = $state(false);
+
+  function retryRecoveryScan() {
+    resumeScannedForFlowId = null;
+    void refreshRecoverableSessions();
+  }
 
   // The RecordingSession class owns the per-step state machine (idle →
   // recording → reconnecting → paused-failed) and schedules getUserMedia
@@ -523,6 +531,7 @@
     currentPageIndex = 0;
     showCloseConfirmation = false;
     resumeScannedForFlowId = null;
+    recoveryScanFailed = false;
     disposeAllRecordingSessions();
     discardLivePreviews();
   }
@@ -532,11 +541,21 @@
     const operationFlowId = flow.id;
     if (!runContract || resumeScannedForFlowId === operationFlowId) return;
     resumeScannedForFlowId = operationFlowId;
-    const hints = await scanRecoverableSessionsForSteps({
+    recoveryScanFailed = false;
+    const scan = await scanRecoverableSessionsForSteps({
       flowId: operationFlowId,
       steps: stepsRequiringInput
     });
     if (isStale(operationGeneration, operationFlowId)) return;
+    recoveryScanFailed = scan.incomplete;
+    // A recording already continued in this dialog is not offered again (a Retry reads it too).
+    const attached = new Set(Object.values(fileInputState.sessionIdsByStepIdSnapshot));
+    const hints = Object.fromEntries(
+      Object.entries(scan.hints).map(([stepId, list]) => [
+        stepId,
+        list.filter((hint) => !attached.has(hint.sessionId))
+      ])
+    );
     const firstWithHints = stepsRequiringInput.find((s) => hints[s.step_id]?.length);
     fileInputState.applyResumeScan(hints, firstWithHints?.step_id ?? null);
   }
@@ -826,6 +845,7 @@
   }
 
   function removeFile(stepId: string, fileId: string) {
+    const name = fileInputState.getUploadedFiles(stepId).find((file) => file.id === fileId)?.name;
     const sessionId = fileInputState.removeUploadedFile(stepId, fileId);
 
     // Drop any matching IDB record so resume cannot reattach the file
@@ -833,11 +853,14 @@
     // file came from a non-recorded upload, or from a different
     // session), the call silently no-ops.
     if (flow?.id && sessionId) {
-      void detachUploadedSegmentFromLedger({
-        flowId: flow.id,
-        stepId,
-        sessionId,
-        uploadedFileId: fileId
+      // A recorded part is named by its session and index, which its file name carries.
+      const segmentIndex = name ? parseSegmentFilename(name)?.segmentIndex : undefined;
+      const removed =
+        segmentIndex === undefined
+          ? Promise.resolve(false)
+          : detachUploadedSegmentFromLedger({ flowId: flow.id, stepId, sessionId, segmentIndex });
+      void removed.then((ok) => {
+        if (!ok) toast.warning(m.recording_removed_part_kept());
       });
     }
   }
@@ -1631,6 +1654,8 @@
             showResumePrompt={fileInputState.isResumePromptForStep(currentRuntimeStep.step_id)}
             resumeBusy={fileInputState.isResumeBusyForStep(currentRuntimeStep.step_id)}
             storageDegraded={fileInputState.isStorageDegraded}
+            {recoveryScanFailed}
+            onRetryRecoveryScan={retryRecoveryScan}
             offline={!connection.online}
             canStartRecording={currentStepCanStartRecording}
             onOpenFilePicker={() => openFilePicker(currentRuntimeStep)}

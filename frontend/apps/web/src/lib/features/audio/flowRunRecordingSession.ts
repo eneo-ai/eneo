@@ -181,6 +181,9 @@ export async function persistRecordingSegment(args: PersistSegmentArgs): Promise
   }
 }
 
+// A mark the local store could not write only means the part is offered and
+// uploaded once more after a reload (the server removes the unused copy), which
+// nobody can act on: it is logged.
 export async function markSegmentUploaded(args: {
   flowId: string;
   stepId: string;
@@ -201,23 +204,33 @@ export async function markSegmentUploaded(args: {
   }
 }
 
+export type RecoveryScan = {
+  hints: Record<string, SessionRecoveryHint[]>;
+  incomplete: boolean;
+};
+
 export async function scanRecoverableSessionsForSteps(args: {
   flowId: string;
   steps: ReadonlyArray<FlowRunContractStepInput>;
-}): Promise<Record<string, SessionRecoveryHint[]>> {
-  const collected: Record<string, SessionRecoveryHint[]> = {};
+}): Promise<RecoveryScan> {
+  // What could be read is offered; `incomplete` says some saved recordings could not
+  // be read (the store did not open or answer), which is not "none".
+  const hints: Record<string, SessionRecoveryHint[]> = {};
+  let incomplete = false;
   for (const step of args.steps) {
     try {
       const list = await recordingSessionStore.listRecoverableSessions(args.flowId, step.step_id);
-      if (list.length > 0) collected[step.step_id] = list;
+      if (list.hints.length > 0) hints[step.step_id] = list.hints;
+      incomplete ||= !list.complete;
     } catch (error) {
-      console.warn("flowRunRecordingSession: listRecoverableSessions failed", {
+      console.warn("flowRunRecordingSession: saved recordings could not be read", {
         stepId: step.step_id,
         error
       });
+      incomplete = true;
     }
   }
-  return collected;
+  return { hints, incomplete };
 }
 
 // Deletes server-side files for every uploaded segment of this session,
@@ -288,16 +301,20 @@ export async function detachUploadedSegmentFromLedger(args: {
   flowId: string;
   stepId: string;
   sessionId: string;
-  uploadedFileId: string;
-}): Promise<void> {
+  segmentIndex: number;
+}): Promise<boolean> {
+  // False when the part could not be removed from the local store: it may be
+  // offered again after a reload.
   try {
-    await recordingSessionStore.detachUploadedFileId(
+    await recordingSessionStore.deleteSegment(
       args.flowId,
       args.stepId,
       args.sessionId,
-      args.uploadedFileId
+      args.segmentIndex
     );
+    return true;
   } catch (error) {
     console.warn("flowRunRecordingSession.detachUploadedSegmentFromLedger failed", error);
+    return false;
   }
 }

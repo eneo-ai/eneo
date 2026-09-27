@@ -110,13 +110,23 @@ describe("FlowRunFileInputState", () => {
     state.recordSkippedFiles("step-a", "too many files");
     persistedSegment(state, "step-a", { notice: "recording stopped" });
 
+    // A file chosen from the device was recorded in no session: nothing to remove from the ledger.
     const session = state.removeUploadedFile("step-a", "file-a");
 
-    expect(session).toBe(state.sessionIdsByStepIdSnapshot["step-a"]);
+    expect(session).toBeNull();
     expect(state.getUploadedFiles("step-a")).toEqual([]);
     expect(state.getUploadedFiles("step-b")).toEqual([uploadedFile("file-b")]);
     expect(state.getRecordingNotice("step-a")).toBeNull();
     expect(state.getSkippedMessage("step-a")).toBeNull();
+  });
+
+  it("names the session a removed recorded file was recorded in, not the step's current one", () => {
+    const state = new FlowRunFileInputState();
+    state.recordUploadedFile("step-a", uploadedFile("earlier-part"), "session-earlier");
+    persistedSegment(state, "step-a", { notice: null });
+    expect(state.sessionIdsByStepIdSnapshot["step-a"]).not.toBe("session-earlier");
+
+    expect(state.removeUploadedFile("step-a", "earlier-part")).toBe("session-earlier");
   });
 
   it("tracks concurrent uploads independently across steps", () => {

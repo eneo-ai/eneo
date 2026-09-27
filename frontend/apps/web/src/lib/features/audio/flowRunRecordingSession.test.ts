@@ -219,7 +219,7 @@ describe("scanRecoverableSessionsForSteps", () => {
       durationMs: 1000,
       contractSnapshot: snapshot
     });
-    const hints = await scanRecoverableSessionsForSteps({
+    const { hints } = await scanRecoverableSessionsForSteps({
       flowId: "flow-1",
       steps: [
         {

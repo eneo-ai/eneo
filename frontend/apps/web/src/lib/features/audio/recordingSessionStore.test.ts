@@ -66,7 +66,7 @@ describe("recordingSessionStore", () => {
     await recordingSessionStore.writeSegment(makeRecord({ sessionId: "sess-A", segmentIndex: 0 }));
     await recordingSessionStore.writeSegment(makeRecord({ sessionId: "sess-A", segmentIndex: 1 }));
     await recordingSessionStore.writeSegment(makeRecord({ sessionId: "sess-B", segmentIndex: 0 }));
-    const hints = await recordingSessionStore.listRecoverableSessions("flow-1", "step-1");
+    const { hints } = await recordingSessionStore.listRecoverableSessions("flow-1", "step-1");
     const bySession = new Map(hints.map((h) => [h.sessionId, h]));
     expect(bySession.get("sess-A")?.segmentCount).toBe(2);
     expect(bySession.get("sess-B")?.segmentCount).toBe(1);
@@ -83,7 +83,7 @@ describe("recordingSessionStore", () => {
     await recordingSessionStore.writeSegment(
       makeRecord({ sessionId: "fresh", capturedAt: now - 1_000 })
     );
-    const hints = await recordingSessionStore.listRecoverableSessions("flow-1", "step-1", now);
+    const { hints } = await recordingSessionStore.listRecoverableSessions("flow-1", "step-1", now);
     expect(hints.map((h) => h.sessionId)).toEqual(["fresh"]);
   });
 

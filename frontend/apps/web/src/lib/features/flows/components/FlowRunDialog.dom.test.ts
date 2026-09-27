@@ -33,7 +33,7 @@ const recordingMocks = vi.hoisted(() => ({
   persistRecordingSegment: vi.fn(async () => ({ degraded: false })),
   purgeSession: vi.fn(async () => true),
   readSessionRecords: vi.fn(async () => []),
-  scanRecoverableSessionsForSteps: vi.fn(async () => ({}))
+  scanRecoverableSessionsForSteps: vi.fn(async () => ({ hints: {}, incomplete: false }))
 }));
 
 vi.mock("$lib/features/audio/flowRunRecordingSession", async (importOriginal) => {
@@ -131,7 +131,9 @@ beforeEach(() => {
   vi.mocked(persistRecordingSegment).mockReset().mockResolvedValue({ degraded: false });
   vi.mocked(purgeSession).mockReset().mockResolvedValue(true);
   vi.mocked(readSessionRecords).mockReset().mockResolvedValue([]);
-  vi.mocked(scanRecoverableSessionsForSteps).mockReset().mockResolvedValue({});
+  vi.mocked(scanRecoverableSessionsForSteps)
+    .mockReset()
+    .mockResolvedValue({ hints: {}, incomplete: false });
 });
 
 describe("FlowRunDialog recording upload reconciliation", () => {
@@ -190,7 +192,10 @@ describe("FlowRunDialog recording upload reconciliation", () => {
     );
     const hint = recoveryHint();
     vi.mocked(scanRecoverableSessionsForSteps).mockResolvedValue({
-      "step-audio": [hint]
+      hints: {
+        "step-audio": [hint]
+      },
+      incomplete: false
     });
     vi.mocked(readSessionRecords).mockResolvedValue([segmentRecord()]);
 
@@ -490,7 +495,10 @@ describe("FlowRunDialog recording upload reconciliation", () => {
     const hint = recoveryHint();
     const readResolvers: Array<(records: SegmentRecord[]) => void> = [];
     vi.mocked(scanRecoverableSessionsForSteps).mockResolvedValue({
-      "step-audio": [hint]
+      hints: {
+        "step-audio": [hint]
+      },
+      incomplete: false
     });
     vi.mocked(readSessionRecords).mockImplementation(
       () =>
@@ -558,7 +566,10 @@ describe("FlowRunDialog recording upload reconciliation", () => {
     const readResolvers: Array<(records: SegmentRecord[]) => void> = [];
     const pendingUploads: PendingUpload[] = [];
     vi.mocked(scanRecoverableSessionsForSteps).mockResolvedValue({
-      "step-audio": [hint]
+      hints: {
+        "step-audio": [hint]
+      },
+      incomplete: false
     });
     vi.mocked(readSessionRecords).mockImplementation(
       () =>
@@ -679,7 +690,10 @@ describe("FlowRunDialog recording upload reconciliation", () => {
     const hint = recoveryHint();
     hint.contractSnapshot.acceptedMimetypes = ["audio/webm", "audio/ogg"];
     vi.mocked(scanRecoverableSessionsForSteps).mockResolvedValue({
-      "step-audio": [hint]
+      hints: {
+        "step-audio": [hint]
+      },
+      incomplete: false
     });
     vi.mocked(readSessionRecords).mockResolvedValue([segmentRecord("audio/ogg")]);
 
@@ -696,7 +710,10 @@ describe("FlowRunDialog recording upload reconciliation", () => {
   it("says so when the saved recording cannot be read, and keeps the offer to try again", async () => {
     const upload = vi.fn(async () => uploadedFile("should-not-upload", "recording.webm"));
     vi.mocked(scanRecoverableSessionsForSteps).mockResolvedValue({
-      "step-audio": [recoveryHint()]
+      hints: {
+        "step-audio": [recoveryHint()]
+      },
+      incomplete: false
     });
     vi.mocked(readSessionRecords).mockRejectedValueOnce(new Error("IndexedDB read failed"));
 
@@ -714,7 +731,10 @@ describe("FlowRunDialog recording upload reconciliation", () => {
 
   it("keeps the offer when a discard could not reach the saved recording, so it can be tried again", async () => {
     vi.mocked(scanRecoverableSessionsForSteps).mockResolvedValue({
-      "step-audio": [recoveryHint()]
+      hints: {
+        "step-audio": [recoveryHint()]
+      },
+      incomplete: false
     });
     vi.mocked(purgeSession).mockResolvedValueOnce(false);
 
@@ -727,6 +747,45 @@ describe("FlowRunDialog recording upload reconciliation", () => {
       expect(toast.error).toHaveBeenCalledWith(m.recording_resume_discard_failed())
     );
     expect(screen.getByRole("button", { name: m.recording_resume_discard() })).toBeTruthy();
+  });
+
+  it("offers to read the saved recordings again when the browser's storage did not answer", async () => {
+    vi.mocked(scanRecoverableSessionsForSteps)
+      .mockResolvedValueOnce({ hints: {}, incomplete: true })
+      .mockResolvedValueOnce({ hints: { "step-audio": [recoveryHint()] }, incomplete: false });
+
+    renderDialog(buildEneo({ upload: vi.fn() }));
+    await fireEvent.click(
+      await screen.findByRole("button", { name: m.recording_resume_scan_retry() })
+    );
+
+    expect(
+      await screen.findByRole("button", { name: m.recording_resume_continue_recording() })
+    ).toBeTruthy();
+    expect(screen.queryByText(m.recording_resume_scan_failed_title())).toBeNull();
+    expect(scanRecoverableSessionsForSteps).toHaveBeenCalledTimes(2);
+  });
+
+  it("never offers again a recording already continued in this dialog, when the saved recordings are read again", async () => {
+    const hint = recoveryHint();
+    vi.mocked(scanRecoverableSessionsForSteps)
+      .mockResolvedValueOnce({ hints: { "step-audio": [hint] }, incomplete: true })
+      .mockResolvedValueOnce({ hints: { "step-audio": [hint] }, incomplete: false });
+    vi.mocked(readSessionRecords).mockResolvedValue([segmentRecord()]);
+
+    renderDialog(
+      buildEneo({ upload: vi.fn(async () => uploadedFile("file-1", "recording.webm")) })
+    );
+    await fireEvent.click(
+      await screen.findByRole("button", { name: m.recording_resume_continue_recording() })
+    );
+    await waitFor(() => expect(readSessionRecords).toHaveBeenCalledOnce());
+
+    await fireEvent.click(screen.getByRole("button", { name: m.recording_resume_scan_retry() }));
+    await waitFor(() => expect(scanRecoverableSessionsForSteps).toHaveBeenCalledTimes(2));
+    expect(
+      screen.queryByRole("button", { name: m.recording_resume_continue_recording() })
+    ).toBeNull();
   });
 
   it("submits with the idempotency key derived from the uploaded-file intent", async () => {
