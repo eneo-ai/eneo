@@ -554,6 +554,16 @@ afterEach(() => {
 
 // ---- Bootstrap and resume -----------------------------------------------------
 
+// The nearest element, from the composer up, that caps its width: the column it lines up with.
+function composerMeasure(): HTMLElement {
+  const composer = document.querySelector<HTMLElement>(".composer");
+  expect(composer).not.toBeNull();
+  for (let element: HTMLElement | null = composer; element; element = element.parentElement) {
+    if (/(^|\s)max-w-/.test(element.getAttribute("class") ?? "")) return element;
+  }
+  throw new Error("no width cap above the composer");
+}
+
 describe("FlowAIBuilder bootstrap", () => {
   it("creates one new session in create mode and shows the task screen", async () => {
     const { fetch, posts } = makeFetch();
@@ -567,6 +577,14 @@ describe("FlowAIBuilder bootstrap", () => {
     await fireEvent.input(textbox(), { target: { value: "Sammanfatta rapporter" } });
     await waitFor(() => expect(send.disabled).toBe(false));
     expect(posts).toHaveLength(1);
+  });
+
+  it("sizes the task screen's composer by the column its heading sets", async () => {
+    const { fetch } = makeFetch();
+    renderShell({ fetch, stream: makeStream().stream });
+    const heading = await screen.findByRole("heading", { name: m.ai_builder_task_title() });
+
+    expect(composerMeasure().contains(heading)).toBe(true);
   });
 
   it("initializes an edit session for edit mode", async () => {
@@ -1267,6 +1285,21 @@ describe("FlowAIBuilder discovery screens", () => {
     expect(screen.getByText(m.ai_builder_question_why_lead())).toBeTruthy();
     expect(screen.getByText(/Jag behöver veta formatet\./)).toBeTruthy();
     calls[0]!.finish();
+  });
+
+  it("sizes the reply screen's composer by the column its reply sets", async () => {
+    const { fetch } = makeFetch();
+    const { stream, calls } = makeStream(() => "hold");
+    renderShell({ fetch, stream });
+    await sendTask();
+    await waitFor(() => expect(calls).toHaveLength(1));
+
+    calls[0]!.emit([textEvent("Vilka rapporter gäller det?")]);
+    calls[0]!.finish();
+    const reply = await screen.findByText(/Vilka rapporter gäller det\?/);
+    await waitFor(() => expect(document.querySelector(".composer")).not.toBeNull());
+
+    expect(composerMeasure().contains(reply)).toBe(true);
   });
 
   it("sends a single choice as a structured answer once confirmed", async () => {

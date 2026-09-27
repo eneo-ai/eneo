@@ -479,7 +479,8 @@
   }
 </script>
 
-<div class="relative mx-auto w-full max-w-[71ch]">
+<!-- Its width is the caller's: the column it sits in. -->
+<div class="relative w-full">
   {#if refinement}
     <!-- The textarea keeps the same accessible name when the visible label is hidden. -->
     <Label
