@@ -118,6 +118,147 @@ def test_consistent_change_between_builds_is_not_unstable(tmp_path: Path) -> Non
     assert report["unstable_cases"] == {"baseline": [], "current": []}
 
 
+def _scored(row: dict[str, Any], missed: int, unnecessary: int) -> dict[str, Any]:
+    return {
+        **row,
+        "decision_score": {
+            "necessary_questions": 1,
+            "missed_decisions": missed,
+            "unnecessary_questions": unnecessary,
+        },
+    }
+
+
+def test_questions_are_held_to_the_parents_decisions_not_its_question_count(
+    tmp_path: Path,
+) -> None:
+    # The floor is per case: no more missed decisions and no more unnecessary
+    # questions than the parent's worst repetition. Asking more is fine when
+    # the extra question was a necessary decision the parent missed.
+    module = _compare_module()
+    baseline = _write(
+        tmp_path,
+        "base.json",
+        [
+            _scored(_row("held", "plan_first_pass", repetition=1), 1, 0),
+            _scored(_row("held", "plan_first_pass", repetition=2), 1, 1),
+            _scored(_row("worse", "plan_first_pass", repetition=1), 0, 0),
+            _row("unscored", "plan_first_pass"),
+        ],
+    )
+    current = _write(
+        tmp_path,
+        "cur.json",
+        [
+            _scored(_row("held", "plan_first_pass", repetition=1), 0, 1),
+            _scored(_row("held", "plan_first_pass", repetition=2), 1, 1),
+            _scored(_row("worse", "plan_first_pass", repetition=1), 1, 1),
+            _scored(_row("unscored", "plan_first_pass"), 0, 3),
+        ],
+    )
+
+    report = module.compare(baseline, current)
+
+    assert _case(report, "held")["decisions"]["failures"] == []
+    assert _case(report, "worse")["decisions"]["failures"] == [
+        "current r1 missed 1 necessary decision(s); the baseline's most is 0",
+        "current r1 asked 1 unnecessary question(s); the baseline's most is 0",
+    ]
+    assert _case(report, "held")["decisions"]["state"] == "compared"
+    assert report["decision_floor_failed_cases"] == {
+        "worse": _case(report, "worse")["decisions"]["failures"],
+        "unscored": _case(report, "unscored")["decisions"]["failures"],
+    }
+
+
+@pytest.mark.parametrize("unscored_side", ["baseline", "current"])
+def test_a_missing_decision_score_on_either_side_is_incomparable(
+    tmp_path: Path, unscored_side: str
+) -> None:
+    # A receipt from before the gold, or a repetition that lost its score,
+    # must fail the gate by name rather than pass as a floor that held.
+    module = _compare_module()
+    rows = {
+        side: [
+            _scored(_row("case-a", "plan_first_pass", repetition=1), 0, 0),
+            _scored(_row("case-a", "plan_first_pass", repetition=2), 0, 0),
+        ]
+        for side in ("baseline", "current")
+    }
+    rows[unscored_side][1] = _row("case-a", "plan_first_pass", repetition=2)
+    report = module.compare(
+        _write(tmp_path, "base.json", rows["baseline"]),
+        _write(tmp_path, "cur.json", rows["current"]),
+    )
+
+    decisions = _case(report, "case-a")["decisions"]
+    assert decisions["state"] == "incomparable"
+    assert decisions["failures"] == [
+        "decision scores are incomplete (baseline "
+        f"{1 if unscored_side == 'baseline' else 2}/2, current "
+        f"{1 if unscored_side == 'current' else 2}/2 scored); acquire or "
+        "reanalyse a scored baseline with the same case contract"
+    ]
+    assert list(report["decision_floor_failed_cases"]) == ["case-a"]
+
+
+def test_a_case_obliged_to_be_scored_is_incomparable_without_any_score(
+    tmp_path: Path,
+) -> None:
+    # The sealed contract declares necessary_decisions, but neither receipt
+    # holds a score: that is a failure, never an unscored case.
+    module = _compare_module()
+    rows = [{**_row("case-a", "plan_first_pass"), "decision_score_required": True}]
+    report = module.compare(
+        _write(tmp_path, "base.json", rows), _write(tmp_path, "cur.json", rows)
+    )
+
+    decisions = _case(report, "case-a")["decisions"]
+    assert decisions["state"] == "incomparable"
+    assert decisions["failures"] == [
+        "decision scores are incomplete (baseline 0/1, current 0/1 scored); "
+        "acquire or reanalyse a scored baseline with the same case contract"
+    ]
+
+
+def test_scores_under_a_changed_case_contract_are_incomparable(
+    tmp_path: Path,
+) -> None:
+    # A rewritten gold asks a different question; its scores are no floor.
+    module = _compare_module()
+    baseline = _scored(_row("case-a", "plan_first_pass"), 0, 0)
+    current = {**_scored(_row("case-a", "plan_first_pass"), 0, 0)}
+    current["case_contract_sha256"] = "d" * 64
+    report = module.compare(
+        _write(tmp_path, "base.json", [baseline]),
+        _write(tmp_path, "cur.json", [current]),
+    )
+
+    assert _case(report, "case-a")["decisions"]["failures"] == [
+        "the case contract differs between the receipts; acquire or reanalyse a "
+        "scored baseline with the same case contract"
+    ]
+
+
+def test_a_malformed_decision_score_is_an_invalid_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _compare_module()
+    row = _scored(_row("case-a", "plan_first_pass"), 0, 0)
+    del row["decision_score"]["missed_decisions"]
+    good = _write(
+        tmp_path, "base.json", [_scored(_row("case-a", "plan_first_pass"), 0, 0)]
+    )
+    bad = _write(tmp_path, "cur.json", [row])
+
+    with pytest.raises(module.ReceiptError, match="decision_score must be null"):
+        module.compare(good, bad)
+    monkeypatch.setattr(sys, "argv", ["compare", "compare", str(good), str(bad)])
+    with pytest.raises(SystemExit) as excinfo:
+        module.main()
+    assert excinfo.value.code == module._INVALID_RECEIPT_EXIT
+
+
 def test_build_that_disagrees_with_itself_is_marked_unstable(tmp_path: Path) -> None:
     module = _compare_module()
     baseline = _write(

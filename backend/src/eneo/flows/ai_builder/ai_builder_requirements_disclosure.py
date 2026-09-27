@@ -218,6 +218,7 @@ def _named_content_fields(
             ),
             unplaced=isinstance(obligation.placement, UnplacedNamedResultPlacement),
             can_contain_fields=obligation.declared_shape is not None,
+            declared_shape=obligation.declared_shape,
             origin=obligation.origin,
         )
         for obligation in session_state.named_result_evidence

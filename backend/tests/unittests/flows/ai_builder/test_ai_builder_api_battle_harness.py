@@ -9520,6 +9520,9 @@ def test_suite_demand_for_the_frozen_corpus_exceeds_the_space_default_ceiling() 
     # and this test should be the thing that says so.
     harness = _battle_harness()
     cases = harness._read_cases_file(harness.DEFAULT_CASES_FILE)
+    # A run never acquires the protocol cases it reports not_supported_on_parent.
+    unsupported = harness._parent_unsupported_case_ids(cases)
+    cases = [case for case in cases if case.case_id not in unsupported]
 
     demand = harness.suite_request_demand(
         cases=cases, repetitions=3, timeout_seconds=900
@@ -9542,7 +9545,9 @@ def test_suite_demand_for_the_frozen_corpus_exceeds_the_space_default_ceiling() 
     # 9,949 + 15 + 3 x 954 = 12,826.
     # 2026-09-27: the audio meeting case executes. Its run adds 105 requests
     # per observation and its recording one upload: 12,826 + 1 + 3 x 105 = 13,142.
-    assert demand["total"] == 13_142
+    # 2026-09-27 (slice H): the scripted correction case runs like any other
+    # conversation case: 13,142 + 3 x 17 = 13,193.
+    assert demand["total"] == 13_193
     # The measurement key is space-scoped (the preflight refuses any other),
     # so the space default is the ceiling that binds; the tenant default of
     # 10,000 no longer does.
@@ -10192,6 +10197,31 @@ def _drive_key_decision_case(
             "expected_key_decisions": declared,
         },
     )
+    return _drive_cards(
+        monkeypatch,
+        tmp_path,
+        harness=harness,
+        case=case,
+        cards=[{"assumptions": [], "key_decisions": disclosed}],
+        via_metadata=via_metadata,
+    )
+
+
+def _drive_cards(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    *,
+    harness: ModuleType,
+    case: object,
+    cards: list[dict[str, object]],
+    via_metadata: bool = False,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    """Run _run_case against a Builder that shows ``cards`` one per turn.
+
+    Turn n answers with card n (versions v1, v2, ...) while cards remain, and
+    with a plan after that; every send is recorded.
+    """
+
     config = harness.ApiConfig(
         base_url="http://localhost:8123/api/v1",
         api_key="test-key",
@@ -10202,11 +10232,10 @@ def _drive_key_decision_case(
 
     def send_and_fetch(**kwargs: object) -> dict[str, object]:
         send_calls.append(dict(kwargs))
-        if len(send_calls) == 1:
+        if len(send_calls) <= len(cards):
             summary_data = {
-                "requirements_version": "v1",
-                "assumptions": [],
-                "key_decisions": disclosed,
+                "requirements_version": f"v{len(send_calls)}",
+                **cards[len(send_calls) - 1],
             }
             if via_metadata:
                 events: list[dict[str, object]] = []
@@ -10223,9 +10252,9 @@ def _drive_key_decision_case(
                 events = [{"event": "requirements_summary", "data": summary_data}]
                 latest_session = {"latest_plan_id": None}
             return {
-                "client_turn_id": "turn-1",
+                "client_turn_id": f"turn-{len(send_calls)}",
                 "message": kwargs["message"],
-                "question_answer": None,
+                "question_answer": kwargs.get("question_answer"),
                 "events": events,
                 "latest_session": latest_session,
                 "plan_id": None,
@@ -10393,6 +10422,525 @@ def test_metadata_only_mismatch_withholds_and_reports_the_real_reason(
     # phantom "topic missing".
     assert checks["key_decision_topic:Syfte"]["passed"] is True
     assert checks["key_decision_answered:Syfte"]["passed"] is False
+
+
+_NAMED_RESULT_GOLD: dict[str, object] = {
+    "allow_question_instead_of_plan": True,
+    "expected_named_results": [
+        {"name": "validation_status", "parent": [], "declared_shape": None},
+        {"name": "violations", "parent": [], "declared_shape": "array"},
+        {"name": "normalized_payload", "parent": [], "declared_shape": "object"},
+        {"name": "rule_reference", "parent": ["violations"], "declared_shape": None},
+    ],
+    "forbidden_named_results": ["debug_trace"],
+    "expected_removals": ["legacy_id"],
+}
+
+
+def _card_field(
+    name: str,
+    *,
+    parent: list[str] | None = None,
+    shape: str | None = None,
+) -> dict[str, object]:
+    """One `named_content_fields` item as the Builder streams it; parent None is unplaced."""
+
+    return {
+        "id": f"id:{name}",
+        "label": name,
+        "name": name,
+        "segments": parent or [],
+        "unplaced": parent is None,
+        "can_contain_fields": shape is not None,
+        "declared_shape": shape,
+        "origin": "described",
+    }
+
+
+def _gold_card() -> list[dict[str, object]]:
+    return [
+        _card_field("validation_status", parent=[]),
+        _card_field("violations", parent=[], shape="array"),
+        _card_field("normalized_payload", parent=[], shape="object"),
+        _card_field("rule_reference", parent=["violations"]),
+    ]
+
+
+def _replaced(
+    card: list[dict[str, object]], name: str, **changes: object
+) -> list[dict[str, object]]:
+    return [{**field, **changes} if field["name"] == name else field for field in card]
+
+
+def _named_result_case(harness: ModuleType, script: object = None) -> object:
+    return harness.BattleCase(
+        case_id="named-result-gold",
+        prompt="Returnera JSON med validation_status, violations[] och normalized_payload{}.",
+        expected=dict(_NAMED_RESULT_GOLD),
+        script=script,
+    )
+
+
+def _drive_named_result_card(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    cards: list[list[dict[str, object]]],
+    *,
+    script: object = None,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    harness = _battle_harness()
+    case = _named_result_case(harness, script)
+    return _drive_cards(
+        monkeypatch,
+        tmp_path,
+        harness=harness,
+        case=case,
+        cards=[
+            {"assumptions": [], "key_decisions": [], "named_content_fields": card}
+            for card in cards
+        ],
+    )
+
+
+@mark.parametrize(
+    ("card", "mismatch"),
+    [
+        (
+            _replaced(_gold_card(), "normalized_payload", declared_shape="array"),
+            {
+                "kind": "wrong_shape",
+                "name": "normalized_payload",
+                "expected": "object",
+                "actual": ["array"],
+            },
+        ),
+        (
+            _replaced(_gold_card(), "validation_status", declared_shape="array"),
+            {
+                "kind": "wrong_shape",
+                "name": "validation_status",
+                "expected": None,
+                "actual": ["array"],
+            },
+        ),
+        (
+            _replaced(_gold_card(), "validation_status", unplaced=True),
+            {
+                "kind": "wrong_parent",
+                "name": "validation_status",
+                "expected": [],
+                "actual": ["unplaced"],
+            },
+        ),
+        (
+            _replaced(_gold_card(), "rule_reference", segments=["normalized_payload"]),
+            {
+                "kind": "wrong_parent",
+                "name": "rule_reference",
+                "expected": ["violations"],
+                "actual": [["normalized_payload"]],
+            },
+        ),
+        (
+            [field for field in _gold_card() if field["name"] != "violations"],
+            {"kind": "missing", "name": "violations", "expected": [], "actual": []},
+        ),
+        (
+            [*_gold_card(), _card_field("debug_trace", parent=[])],
+            {
+                "kind": "forbidden_present",
+                "name": "debug_trace",
+                "expected": "absent",
+                "actual": [[]],
+            },
+        ),
+        (
+            [*_gold_card(), _card_field("legacy_id")],
+            {
+                "kind": "removal_not_applied",
+                "name": "legacy_id",
+                "expected": "absent",
+                "actual": ["unplaced"],
+            },
+        ),
+    ],
+    ids=[
+        "array_vs_object",
+        "null_vs_array",
+        "root_vs_unplaced",
+        "wrong_parent",
+        "missing",
+        "forbidden",
+        "removal",
+    ],
+)
+def test_each_named_result_mismatch_withholds_the_confirmation(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    card: list[dict[str, object]],
+    mismatch: dict[str, object],
+) -> None:
+    bundle, send_calls = _drive_named_result_card(monkeypatch, tmp_path, [card])
+
+    # The card contradicts the frozen gold: it is never confirmed, and the
+    # quality report names exactly what the card got wrong.
+    assert len(send_calls) == 1
+    assert bundle["plan_id"] is None
+    checks = {check["name"]: check for check in bundle["quality_report"]["checks"]}
+    check = checks["pre_confirmation_semantic_mismatch"]
+    assert check["passed"] is False
+    assert check["actual"]["mismatches"] == [mismatch]
+
+
+def test_a_card_matching_the_named_result_gold_is_confirmed(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    # Names without a declared shape carry an explicit null, which is scored
+    # against the gold like any other shape.
+    bundle, send_calls = _drive_named_result_card(monkeypatch, tmp_path, [_gold_card()])
+
+    assert bundle["plan_id"] == "plan-1"
+    assert len(send_calls) == 2
+    assert send_calls[1]["question_answer"]["requirements_version"] == "v1"
+    checks = {check["name"]: check for check in bundle["quality_report"]["checks"]}
+    assert checks["pre_confirmation_semantic_mismatch"]["passed"] is True
+    assert _card_evidence_passes(bundle) is True
+
+
+def test_a_card_without_shape_telemetry_is_withheld_and_invalidates_the_observation(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    # A build that reports no shapes cannot tell arrays from objects, so the
+    # card is neither confirmed nor scored as a pass or a product mismatch.
+    card = [
+        {key: value for key, value in field.items() if key != "declared_shape"}
+        for field in _gold_card()
+    ]
+    bundle, send_calls = _drive_named_result_card(monkeypatch, tmp_path, [card])
+
+    assert len(send_calls) == 1
+    checks = {check["name"] for check in bundle["quality_report"]["checks"]}
+    assert "pre_confirmation_semantic_mismatch" not in checks
+    assert _card_evidence_passes(bundle) is False
+
+
+@mark.parametrize("scripted", [False, True], ids=["no_card", "no_corrected_card"])
+def test_a_case_with_card_gold_but_no_scored_card_is_invalid_evidence(
+    tmp_path: Path, monkeypatch: MonkeyPatch, scripted: bool
+) -> None:
+    # The Builder never shows a card (or none after the correction): the
+    # gold was never checked, so the observation cannot pass.
+    harness = _battle_harness()
+    script = (
+        harness.CaseScript(kind="correction", message="Ta bort legacy_id.")
+        if scripted
+        else None
+    )
+    bundle, send_calls = _drive_named_result_card(
+        monkeypatch, tmp_path, [_gold_card()] if scripted else [], script=script
+    )
+
+    assert len(send_calls) == (2 if scripted else 1)
+    assert bundle["plan_id"] == "plan-1"
+    assert _card_evidence_passes(bundle, script=script) is False
+
+
+def _card_evidence_passes(
+    bundle: Mapping[str, object],
+    *,
+    script: object = None,
+    check_name: str = "observation_named_result_card",
+) -> bool:
+    """Seal a driven observation's interactions and recompute its card evidence."""
+
+    harness = _battle_harness()
+    if script is not None:
+        script = harness.CaseScript(**{"kind": script.kind, "message": script.message})
+    case = _named_result_case(harness, script)
+    sealed = _complete_live_case_bundle(harness, case)
+    sealed["interactions"] = bundle["interactions"]
+    report = harness._observation_evidence_report(sealed)
+    (check,) = [check for check in report["checks"] if check["name"] == check_name]
+    return check["passed"] is True
+
+
+def test_a_scripted_correction_is_sent_before_the_corrected_card_is_confirmed(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    harness = _battle_harness()
+    correction = "legacy_id ska inte finnas med i resultatet."
+    bundle, send_calls = _drive_named_result_card(
+        monkeypatch,
+        tmp_path,
+        [[*_gold_card(), _card_field("legacy_id", parent=[])], _gold_card()],
+        script=harness.CaseScript(kind="correction", message=correction),
+    )
+
+    # The first card is answered with the correction, as ordinary text; only
+    # the corrected card is checked against the gold and confirmed.
+    assert [call["message"] for call in send_calls] == [
+        "Returnera JSON med validation_status, violations[] och normalized_payload{}.",
+        correction,
+        harness.CONFIRM_MESSAGE,
+    ]
+    assert send_calls[1]["question_answer"] is None
+    assert send_calls[2]["question_answer"]["requirements_version"] == "v2"
+    assert bundle["plan_id"] == "plan-1"
+    assert (
+        _card_evidence_passes(
+            bundle, script=harness.CaseScript(kind="correction", message=correction)
+        )
+        is True
+    )
+    checks = {check["name"]: check for check in bundle["quality_report"]["checks"]}
+    assert checks["pre_confirmation_semantic_mismatch"]["passed"] is True
+
+
+@mark.parametrize("on_the_corrected_card", [True, False])
+def test_a_removal_counts_only_when_the_corrected_card_showed_it(
+    tmp_path: Path, monkeypatch: MonkeyPatch, on_the_corrected_card: bool
+) -> None:
+    # A name the Builder never showed was not removed by the correction; its
+    # absence afterwards proves nothing, so the observation is invalid.
+    harness = _battle_harness()
+    script = harness.CaseScript(kind="correction", message="Ta bort legacy_id.")
+    first_card = [
+        *_gold_card(),
+        *([_card_field("legacy_id", parent=[])] if on_the_corrected_card else []),
+    ]
+    bundle, _ = _drive_named_result_card(
+        monkeypatch, tmp_path, [first_card, _gold_card()], script=script
+    )
+
+    assert bundle["plan_id"] == "plan-1"
+    assert (
+        _card_evidence_passes(
+            bundle, script=script, check_name="observation_removal_exercised"
+        )
+        is on_the_corrected_card
+    )
+
+
+def test_named_result_gold_and_scripts_are_validated_in_the_cases_file(
+    tmp_path: Path,
+) -> None:
+    harness = _battle_harness()
+
+    def read(case: dict[str, object]) -> list[object]:
+        path = tmp_path / "cases.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "version": harness.SUPPORTED_CASES_FILE_VERSION,
+                    "cases": [{"id": "gold", "prompt": "Bygg.", **case}],
+                }
+            )
+        )
+        return harness._read_cases_file(path)
+
+    (case,) = read(
+        {
+            "expected": dict(_NAMED_RESULT_GOLD) | {"necessary_decisions": []},
+            "script": {"kind": "correction", "message": "Ta bort legacy_id."},
+        }
+    )
+    assert case.script == harness.CaseScript(
+        kind="correction", message="Ta bort legacy_id."
+    )
+    # The script is part of the question the case asks, so it is sealed.
+    assert harness._case_contract_payload(case)["script"] == {
+        "kind": "correction",
+        "message": "Ta bort legacy_id.",
+    }
+    (plain,) = read({"expected": {"necessary_decisions": ["report_disposition"]}})
+    assert "script" not in harness._case_contract_payload(plain)
+    for invalid in (
+        {"expected": {"expected_named_results": [{"name": "a", "parent": []}]}},
+        {
+            "expected": {
+                "expected_named_results": [
+                    {"name": "a", "parent": [], "declared_shape": "list"}
+                ]
+            }
+        },
+        {
+            "expected": {
+                "expected_named_results": [
+                    {"name": "a", "parent": "root", "declared_shape": None}
+                ]
+            }
+        },
+        {
+            "expected": {
+                "expected_named_results": [
+                    {"name": "a", "parent": [], "declared_shape": ["array"]}
+                ]
+            }
+        },
+        {
+            "expected": {
+                "expected_named_results": [
+                    {"name": "a", "parent": [], "declared_shape": {"kind": "array"}}
+                ]
+            }
+        },
+        {"expected": {"expected_removals": ["a"]}},
+        {"expected": {"forbidden_named_results": ["a", "a"]}},
+        {"expected": {"expected_removals": [""]}},
+        {"expected": {"necessary_decisions": ["q", "q"]}},
+        {"script": {"kind": "correction"}},
+        {"script": {"kind": "decline", "message": "nej"}},
+        {"script": {"kind": "undo"}},
+    ):
+        with raises(ValueError):
+            read(invalid)
+
+
+def test_protocol_cases_are_reported_not_supported_on_parent_and_never_run(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    harness = _battle_harness()
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(
+        json.dumps(
+            {
+                "version": harness.SUPPORTED_CASES_FILE_VERSION,
+                "cases": [
+                    {"id": "live", "prompt": "Bygg en rapport."},
+                    {"id": "live-2", "prompt": "Bygg en sammanställning."},
+                    {
+                        "id": "stale",
+                        "prompt": "Bygg ett flöde.",
+                        "script": {"kind": "stale_replay"},
+                    },
+                    {
+                        "id": "decline",
+                        "prompt": "Bygg ett annat flöde.",
+                        "script": {"kind": "decline"},
+                    },
+                ],
+            }
+        )
+    )
+    args = SimpleNamespace(
+        reanalyze_bundle=None,
+        api_key="test-key",
+        output_dir=str(tmp_path / "out"),
+        replacement_suite_dir=None,
+        space_id="space-1",
+        base_url="http://localhost:8123/api/v1",
+        timeout_seconds=1,
+        cases_file=str(cases_path),
+        run_suite=False,
+        sealed_targeted_suite=False,
+        case_id=None,
+        cohort=None,
+        max_cases=None,
+        file_ids=None,
+        repetitions=1,
+        concurrency=1,
+        model_id="model-a",
+        seed_calibration=False,
+    )
+    monkeypatch.setattr(harness, "_parse_args", lambda: args)
+    captured: dict[str, object] = {}
+
+    def run_suite(**kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(harness, "_run_suite", run_suite)
+
+    assert harness.main() == 0
+    assert [case.case_id for case in captured["cases"]] == ["live", "live-2"]
+    assert captured["not_supported_on_parent"] == ["stale", "decline"]
+
+    # Selecting only protocol cases runs nothing, says so with its own exit
+    # status, and leaves a receipt naming them.
+    args.case_id = ["stale"]
+    monkeypatch.setattr(
+        harness,
+        "_run_case",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("ran a protocol case")),
+    )
+    assert harness.main() == harness.NOT_SUPPORTED_ON_PARENT_EXIT != 0
+    (receipt_path,) = (tmp_path / "out").glob("not-supported-on-parent-*.json")
+    receipt = json.loads(receipt_path.read_text())
+    assert receipt["artifact_mode"] == "not_supported_on_parent_refusal"
+    assert receipt["not_supported_on_parent"] == ["stale"]
+
+
+def test_questions_are_scored_against_the_frozen_necessary_decisions() -> None:
+    harness = _battle_harness()
+
+    report = harness._quality_report(
+        plan=None,
+        summary={"has_plan": False},
+        expected={
+            "allow_question_instead_of_plan": True,
+            "necessary_decisions": ["report_disposition", "terminal_output"],
+        },
+        event_summary={
+            "question_event_ids": [
+                "report_disposition",
+                "post_processing_goal",
+                "report_disposition",
+            ]
+        },
+    )
+
+    # A second ask of a settled decision is as unnecessary as an unrelated one.
+    assert report["decision_score"] == {
+        "necessary_decisions": ["report_disposition", "terminal_output"],
+        "necessary_questions": ["report_disposition"],
+        "missed_decisions": ["terminal_output"],
+        "unnecessary_questions": ["post_processing_goal", "report_disposition"],
+    }
+    unscored = harness._quality_report(
+        plan=None,
+        summary={"has_plan": False},
+        expected={"allow_question_instead_of_plan": True},
+        event_summary={"question_event_ids": ["report_disposition"]},
+    )
+    assert "decision_score" not in unscored
+
+
+def test_decision_scores_are_reported_per_observation_and_per_run() -> None:
+    harness = _battle_harness()
+    rows = [
+        {
+            "decision_score": {
+                "necessary_questions": 1,
+                "missed_decisions": 1,
+                "unnecessary_questions": 2,
+            }
+        },
+        {
+            "decision_score": {
+                "necessary_questions": 2,
+                "missed_decisions": 0,
+                "unnecessary_questions": 0,
+            }
+        },
+        {"decision_score": None},
+    ]
+
+    assert harness._suite_decision_scores(rows) == {
+        "scored_observations": 2,
+        "necessary_questions": 3,
+        "missed_decisions": 1,
+        "unnecessary_questions": 2,
+    }
+    assert harness._observation_decision_score(
+        {
+            "decision_score": {
+                "necessary_decisions": ["a", "b"],
+                "necessary_questions": ["a"],
+                "missed_decisions": ["b"],
+                "unnecessary_questions": ["c", "a"],
+            }
+        }
+    ) == {"necessary_questions": 1, "missed_decisions": 1, "unnecessary_questions": 2}
 
 
 def test_journey_economics_split_out_classifier_spend_from_provider_calls() -> None:

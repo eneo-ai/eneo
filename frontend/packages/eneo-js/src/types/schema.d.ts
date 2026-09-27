@@ -28212,6 +28212,8 @@ export interface components {
     NamedContentFieldPayload: {
       /** Can Contain Fields */
       can_contain_fields: boolean;
+      /** Declared Shape */
+      declared_shape?: ("array" | "object") | null;
       /** Id */
       id: string;
       /** Label */
