@@ -1538,7 +1538,10 @@
           "required_facts": [
             "VON-2026-01184",
             "Elin Sjöberg",
+            "VON-2026-00977-4",
+            "VON-2026-00977-5",
             "VON-2026-00977-7",
+            "VON-2026-00977-9",
             "26 kap. 1 §",
             "Kammarrätten i Sundsvall"
           ],
@@ -1552,7 +1555,17 @@
             "070-318 44 92",
             "070-3184492",
             "0703184492",
-            "Vattjom"
+            "Vattjom",
+            "hypoglykemi",
+            "blodsocker",
+            "mmol",
+            "ambulans",
+            "akuten",
+            "akutvård",
+            "kallsvettig",
+            "Sundsvalls sjukhus",
+            "lex Maria",
+            "påtagligt hot"
           ]
         }
       }
@@ -2069,7 +2082,9 @@
             "900708-2390",
             "9007082390",
             "Skönsbergsvägen",
-            "NK-22-1102-04"
+            "NK-22-1102-04",
+            "lgh 1102",
+            "lägenhet 1102"
           ]
         }
       }
@@ -2851,7 +2866,10 @@
             "ADHD",
             "WISC",
             "10 kap. 39",
-            "10 kap 39"
+            "10 kap 39",
+            "BUP Sundsvall",
+            "medicinering",
+            "arbetsminne"
           ]
         }
       }
@@ -6469,7 +6487,8 @@
                 "ADHD",
                 "Theo",
                 "150615-2386",
-                "1506152386"
+                "1506152386",
+                "extra anpassningar"
               ]
             }
           }
@@ -6499,7 +6518,8 @@
             "Theo",
             "ADHD",
             "150615-2386",
-            "1506152386"
+            "1506152386",
+            "extra anpassningar"
           ]
         }
       }
@@ -7285,7 +7305,10 @@
             "20220106-2383",
             "073-552 19 04",
             "stressreaktion",
-            "fraktur"
+            "fraktur",
+            "gips",
+            "underarm",
+            "Sundsvalls sjukhus"
           ]
         }
       }
