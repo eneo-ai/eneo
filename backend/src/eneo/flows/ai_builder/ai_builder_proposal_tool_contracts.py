@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import (
@@ -408,6 +409,61 @@ RequiredAction: TypeAlias = Literal[
 # template can carry a thousand placeholders, and neither should.
 MAX_DIAGNOSTIC_NAMES = 8
 MAX_DIAGNOSTIC_NAME_LENGTH = 80
+MAX_DIAGNOSTIC_MESSAGE_LENGTH = 1500
+# Control characters (C0, C1) and the line and paragraph separators.
+_LINE_BREAKING_CATEGORIES = frozenset({"Cc", "Zl", "Zp"})
+
+
+def display_value(text: str) -> str:
+    """An untrusted name, path or label as one bounded line of a diagnostic.
+
+    Control characters and line separators are escaped, so a saved name can
+    never start a line of its own in the list it is shown in.
+    """
+
+    shown = ""
+    for char in text:
+        piece = (
+            char.encode("unicode_escape").decode("ascii")
+            if unicodedata.category(char) in _LINE_BREAKING_CATEGORIES
+            else char
+        )
+        # Whole pieces only, and no more work than the shown value needs.
+        if len(shown) + len(piece) > MAX_DIAGNOSTIC_NAME_LENGTH:
+            break
+        shown += piece
+    return shown
+
+
+@dataclass(slots=True)
+class BoundedListing:
+    """The first entries of a model-facing list and how many there were.
+
+    An entry is formatted only when it is kept, so a list of any length
+    costs the same. Entries build their names with `display_value`.
+    """
+
+    entries: list[str] = field(default_factory=lambda: list[str]())
+    total: int = 0
+
+    def add(self, entry: Callable[[], str]) -> None:
+        self.total += 1
+        if len(self.entries) < MAX_DIAGNOSTIC_NAMES:
+            self.entries.append(entry())
+
+    def render(self, heading: str) -> str:
+        """Whole entries within MAX_DIAGNOSTIC_MESSAGE_LENGTH, then how many
+        were left out."""
+
+        budget = MAX_DIAGNOSTIC_MESSAGE_LENGTH - len(f"\n... and {self.total} more.")
+        text, shown = heading, 0
+        for entry in self.entries:
+            line = f"\n- {entry}"
+            if len(text) + len(line) > budget:
+                break
+            text, shown = text + line, shown + 1
+        remaining = self.total - shown
+        return text + (f"\n... and {remaining} more." if remaining else "")
 
 
 @dataclass(frozen=True)

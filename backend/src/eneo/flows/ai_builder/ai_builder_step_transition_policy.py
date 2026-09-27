@@ -443,6 +443,18 @@ def _can_rewire_all_previous_to_previous_step(
     return False
 
 
+def discarded_output_config_keys(step: StepSpec) -> frozenset[str]:
+    """The output_config keys normalization deletes: the template-fill fields
+    of a step that will not fill a DOCX template."""
+
+    if (
+        step.output_mode == OutputMode.TEMPLATE_FILL
+        and step.output_type == OutputType.DOCX
+    ):
+        return frozenset()
+    return _TEMPLATE_FILL_ONLY_KEYS & set(step.output_config or {})
+
+
 def normalize_ai_builder_step(
     step: StepSpec,
     *,
@@ -470,23 +482,20 @@ def normalize_ai_builder_step(
 
     if output_config is not None:
         next_output_config = dict(output_config)
-        if output_mode != OutputMode.TEMPLATE_FILL:
-            removed_template_keys = sorted(
-                key for key in _TEMPLATE_FILL_ONLY_KEYS if key in next_output_config
-            )
-            for key in removed_template_keys:
-                del next_output_config[key]
-            if removed_template_keys:
-                changes.append(
-                    StepNormalizationChange(
-                        code="output_config_template_fill_keys_cleared",
-                        field_suffix="output_config",
-                        message=(
-                            "Removed template-fill-only output_config fields because this step "
-                            "no longer uses output_mode 'template_fill'."
-                        ),
-                    )
+        removed_template_keys = sorted(discarded_output_config_keys(step))
+        for key in removed_template_keys:
+            del next_output_config[key]
+        if removed_template_keys:
+            changes.append(
+                StepNormalizationChange(
+                    code="output_config_template_fill_keys_cleared",
+                    field_suffix="output_config",
+                    message=(
+                        "Removed template-fill-only output_config fields because this step "
+                        "no longer uses output_mode 'template_fill'."
+                    ),
                 )
+            )
 
         normalized_output_config = next_output_config or None
         if normalized_output_config != step.output_config:

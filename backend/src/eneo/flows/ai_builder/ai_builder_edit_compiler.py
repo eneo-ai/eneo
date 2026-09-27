@@ -34,6 +34,10 @@ from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     StepChangeField,
     StepFieldChange,
 )
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+)
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import FlowInputFieldProvenance
 from eneo.flows.ai_builder.ai_builder_form_fields import (
     extract_form_fields_from_metadata,
@@ -56,10 +60,13 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     MAX_DIAGNOSTIC_NAME_LENGTH,
     MAX_DIAGNOSTIC_NAMES,
+    BoundedListing,
+    display_value,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
 from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
     StepNormalizationChange,
+    discarded_output_config_keys,
     normalize_ai_builder_spec,
 )
 from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
@@ -284,7 +291,15 @@ def compile_edit_proposal(
     )
     compiled_steps = compiled_spec.steps
 
-    compiled_steps = _canonicalize_existing_runtime_aliases(compiled_steps)
+    compiled_steps = _canonicalize_existing_runtime_aliases(
+        compiled_steps,
+        saved_step_names={
+            step.step_order: step.user_description
+            for step in current_steps
+            if step.user_description
+        },
+        template_contract_runs=selected_template_count is not None,
+    )
     if mutation_scope is not None:
         mutation_scope = mutation_scope.protecting_unchanged(compiled_steps)
     inherited_template_bindings = _inherited_template_bindings(
@@ -1250,34 +1265,127 @@ def _inherited_template_bindings(
     # rejects it if the placeholder is retained, never by position.
     return cast(
         dict[str, str],
-        _rewrite_runtime_alias_value(bindings, existing_order_to_plan_ref),
+        _rewrite_runtime_alias_value(bindings, _resolve_by(existing_order_to_plan_ref)),
     )
+
+
+# The plan ref a saved alias's order names now, given the alias as written.
+AliasResolver = Callable[[int, str], str | None]
+
+
+def _resolve_by(existing_order_to_plan_ref: Mapping[int, str]) -> AliasResolver:
+    return lambda order, _expression: existing_order_to_plan_ref.get(order)
+
+
+@dataclass(frozen=True, slots=True)
+class _StaleReadGuard:
+    """Refuses a saved read whose producer the edit removed or moved after it.
+
+    Left alone, the alias would name whichever step now has that position:
+    validation reads `step_N` as the Nth step of the edited flow. When the
+    template attachment contract runs, the template's placeholder mappings are
+    its to judge: it drops the unused ones and refuses a retained one whose
+    producer is gone (`template_binding_dependency_broken`).
+    """
+
+    existing_order_to_plan_ref: Mapping[int, str]
+    positions: Mapping[str, int]
+    saved_step_names: Mapping[int, str]
+    template_contract_runs: bool
+    stale: BoundedListing
+
+    def resolver(self, step: StepSpec, site: str) -> AliasResolver:
+        position = self.positions[step.plan_step_ref]
+
+        def resolve(order: int, expression: str) -> str | None:
+            plan_ref = self.existing_order_to_plan_ref.get(order)
+            if plan_ref is not None and self.positions[plan_ref] < position:
+                return plan_ref
+            fate = (
+                "is removed by this edit" if plan_ref is None else "is moved after it"
+            )
+
+            def entry() -> str:
+                reader, read, where = map(display_value, (step.name, expression, site))
+                producer = display_value(
+                    self.saved_step_names.get(order, f"step {order}")
+                )
+                return (
+                    f'Step {position + 1} "{reader}" reads {read} in its {where}; '
+                    f'saved step {order} "{producer}" {fate}.'
+                )
+
+            self.stale.add(entry)
+            return plan_ref
+
+        return resolve
+
+    def raise_if_stale(self) -> None:
+        if not self.stale.total:
+            return
+        raise AIBuilderBadRequestException(
+            self.stale.render(
+                "This edit removes or moves steps that other kept steps still "
+                "read. Change those steps' reads, or keep each producer before "
+                "the steps that read it:"
+            ),
+            code=AIBuilderErrorCode.INVALID_PLAN_STEP_REF,
+            context={"stale_read_count": self.stale.total},
+        )
 
 
 def _canonicalize_existing_runtime_aliases(
     step_specs: list[StepSpec],
+    *,
+    saved_step_names: Mapping[int, str] | None = None,
+    template_contract_runs: bool = False,
 ) -> list[StepSpec]:
+    """Rewrite saved aliases to plan refs. Given the saved step names (an edit),
+    a read of a removed or moved-after producer is refused, never redirected."""
+
     existing_order_to_plan_ref = _existing_order_to_plan_ref(step_specs)
     if not existing_order_to_plan_ref:
         return step_specs
-
-    return [
-        _rewrite_runtime_aliases_for_existing_step(step, existing_order_to_plan_ref)
+    guard = (
+        _StaleReadGuard(
+            existing_order_to_plan_ref=existing_order_to_plan_ref,
+            positions={step.plan_step_ref: i for i, step in enumerate(step_specs)},
+            saved_step_names=saved_step_names,
+            template_contract_runs=template_contract_runs,
+            stale=BoundedListing(),
+        )
+        if saved_step_names is not None
+        else None
+    )
+    steps = [
+        _rewrite_runtime_aliases_for_existing_step(
+            step, existing_order_to_plan_ref, guard=guard
+        )
         for step in step_specs
     ]
+    if guard is not None:
+        guard.raise_if_stale()
+    return steps
 
 
 def _rewrite_runtime_aliases_for_existing_step(
     step: StepSpec,
     existing_order_to_plan_ref: dict[int, str],
+    *,
+    guard: _StaleReadGuard | None = None,
 ) -> StepSpec:
     if step.existing_step_ref is None:
         return step
 
+    def resolve_at(site: str) -> AliasResolver:
+        if guard is None:
+            return _resolve_by(existing_order_to_plan_ref)
+        return guard.resolver(step, site)
+
     updates: dict[str, Any] = {}
     rewritten_instructions = _rewrite_runtime_alias_string(
         step.assistant_spec.instructions,
-        existing_order_to_plan_ref,
+        resolve_at("instructions"),
     )
     if rewritten_instructions != step.assistant_spec.instructions:
         updates["assistant_spec"] = step.assistant_spec.model_copy(
@@ -1286,40 +1394,47 @@ def _rewrite_runtime_aliases_for_existing_step(
 
     if step.input_bindings is not None:
         rewritten_bindings = _rewrite_source_ref_step_aliases(
-            _rewrite_runtime_alias_value(
-                step.input_bindings,
-                existing_order_to_plan_ref,
-            ),
-            existing_order_to_plan_ref,
+            {
+                key: _rewrite_runtime_alias_value(value, resolve_at(key))
+                for key, value in step.input_bindings.items()
+            },
+            resolve_at(SOURCE_REFS_BINDING_KEY),
         )
         if rewritten_bindings != step.input_bindings:
             updates["input_bindings"] = rewritten_bindings
 
     if step.output_config is not None:
-        rewritten_output_config = _rewrite_runtime_alias_value(
-            step.output_config,
-            existing_order_to_plan_ref,
+        # A key normalization deletes reads nothing; the template's mappings
+        # are the attachment contract's when it runs.
+        unguarded = discarded_output_config_keys(step) | frozenset(
+            ["bindings"] if guard is not None and guard.template_contract_runs else []
         )
+        rewritten_output_config = {
+            key: _rewrite_runtime_alias_value(
+                value,
+                _resolve_by(existing_order_to_plan_ref)
+                if key in unguarded
+                else resolve_at("output_config"),
+            )
+            for key, value in step.output_config.items()
+        }
         if rewritten_output_config != step.output_config:
             updates["output_config"] = rewritten_output_config
 
     return step.model_copy(update=updates) if updates else step
 
 
-def _rewrite_runtime_alias_value(
-    value: Any,
-    existing_order_to_plan_ref: dict[int, str],
-) -> Any:
+def _rewrite_runtime_alias_value(value: Any, resolve: AliasResolver) -> Any:
     if isinstance(value, str):
-        return _rewrite_runtime_alias_string(value, existing_order_to_plan_ref)
+        return _rewrite_runtime_alias_string(value, resolve)
     if isinstance(value, dict):
         return {
-            key: _rewrite_runtime_alias_value(inner, existing_order_to_plan_ref)
+            key: _rewrite_runtime_alias_value(inner, resolve)
             for key, inner in cast(dict[str, Any], value).items()
         }
     if isinstance(value, list):
         return [
-            _rewrite_runtime_alias_value(item, existing_order_to_plan_ref)
+            _rewrite_runtime_alias_value(item, resolve)
             for item in cast(list[Any], value)
         ]
     return value
@@ -1327,7 +1442,7 @@ def _rewrite_runtime_alias_value(
 
 def _rewrite_source_ref_step_aliases(
     input_bindings: Any,
-    existing_order_to_plan_ref: dict[int, str],
+    resolve: AliasResolver,
 ) -> Any:
     # A persisted source_refs entry names its producer by runtime alias
     # ("step_2") in its `step_ref` value, not in a template. The compiled spec
@@ -1353,8 +1468,12 @@ def _rewrite_source_ref_step_aliases(
             if isinstance(step_ref, str)
             else None
         )
+        path = (step_ref, "output", ref.get("output"), ref.get("field_path"))
         plan_ref = (
-            existing_order_to_plan_ref.get(int(match.group(1)))
+            resolve(
+                int(match.group(1)),
+                ".".join(part for part in path if isinstance(part, str) and part),
+            )
             if match is not None
             else None
         )
@@ -1364,13 +1483,10 @@ def _rewrite_source_ref_step_aliases(
     return {**bindings, SOURCE_REFS_BINDING_KEY: rewritten_refs}
 
 
-def _rewrite_runtime_alias_string(
-    text: str,
-    existing_order_to_plan_ref: dict[int, str],
-) -> str:
+def _rewrite_runtime_alias_string(text: str, resolve: AliasResolver) -> str:
     def _replace(match: re.Match[str]) -> str:
         old_order = int(match.group(1))
-        plan_ref = existing_order_to_plan_ref.get(old_order)
+        plan_ref = resolve(old_order, f"step_{old_order}{match.group(2)}")
         if plan_ref is None:
             return match.group(0)
         return "{{ " + plan_ref + match.group(2) + " }}"
