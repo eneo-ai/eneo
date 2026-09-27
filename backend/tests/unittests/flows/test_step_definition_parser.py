@@ -846,3 +846,36 @@ def test_parse_runtime_steps_rejects_invalid_retrieval_policy(
         parse_runtime_steps(
             _definition(_step_snapshot(output_config={"retrieval_policy": raw_policy}))
         )
+
+
+def test_parse_runtime_steps_loads_published_section_step_reading_json_step() -> None:
+    # Publish refuses this read now; versions published before load unchanged
+    # and the runtime reports the read when the section step runs.
+    parsed = parse_runtime_steps(
+        _definition(
+            _step_snapshot(input_type="text", output_type="json"),
+            _step_snapshot(
+                step_order=2,
+                input_source="previous_step",
+                input_type="text",
+                output_type="json",
+                input_bindings={"question": "{{ step_1.output.text }}"},
+                input_config={"text_processing": {"mode": "process_each_section"}},
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "records": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {"note": {"type": "string"}},
+                            },
+                        }
+                    },
+                },
+            ),
+        )
+    )
+
+    assert [step.step_order for step in parsed] == [1, 2]
+    assert parsed[1].input_bindings == {"question": "{{ step_1.output.text }}"}

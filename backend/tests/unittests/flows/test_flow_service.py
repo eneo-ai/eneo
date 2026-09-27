@@ -433,6 +433,231 @@ async def test_publish_flow_creates_version_and_updates_published_version(user):
 
 
 @pytest.mark.asyncio
+async def test_publish_flow_snapshots_the_assistants_it_validated(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    section_step = _step(step_order=2).model_copy(
+        update={
+            "input_bindings": {"question": "{{ flow_input.text }}"},
+            "input_config": {"text_processing": {"mode": "process_each_section"}},
+            "output_contract": {
+                "type": "object",
+                "properties": {
+                    "records": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {"note": {"type": "string"}},
+                        },
+                    }
+                },
+            },
+        }
+    )
+    fetches: dict[object, int] = {}
+
+    def edited_after_first_read(assistant_id):
+        # A second read would see an edit made after validation: a prompt
+        # selecting the JSON step's output, which publish refuses.
+        fetches[assistant_id] = fetches.get(assistant_id, 0) + 1
+        prompt = (
+            "Sammanfatta." if fetches[assistant_id] == 1 else "{{ step_1.output.text }}"
+        )
+        return (
+            Assistant(
+                id=assistant_id,
+                user=None,
+                space_id=uuid4(),
+                completion_model=None,
+                name="Assistant",
+                prompt=SimpleNamespace(text=prompt),
+                completion_model_kwargs=ModelKwargs(),
+                logging_enabled=False,
+                websites=[],
+                collections=[],
+                attachments=[],
+                published=False,
+            ),
+            [],
+        )
+
+    service.assistant_service.get_assistant.side_effect = edited_after_first_read
+    flow = Flow(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Sectioned Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        draft_revision=1,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[_step(step_order=1), section_step],
+    )
+    flow_repo.get.return_value = flow
+    flow_repo.allocate_next_version.return_value = 1
+
+    await service.publish_flow(flow_id=flow.id)
+
+    definition = version_repo.create.await_args.kwargs["definition_json"]
+    assert [
+        step["assistant_snapshot"]["instructions"] for step in definition["steps"]
+    ] == ["Sammanfatta.", "Sammanfatta."]
+    assert set(fetches.values()) == {1}
+
+
+@pytest.mark.asyncio
+async def test_publish_flow_refuses_section_step_reading_json_step_text(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    section_step = _step(step_order=2).model_copy(
+        update={
+            "input_bindings": {"question": "{{ step_1.output.text }}"},
+            "input_config": {"text_processing": {"mode": "process_each_section"}},
+            "output_contract": {
+                "type": "object",
+                "properties": {
+                    "records": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {"note": {"type": "string"}},
+                        },
+                    }
+                },
+            },
+        }
+    )
+    flow = Flow(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Sectioned Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        draft_revision=1,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[_step(step_order=1), section_step],
+    )
+    flow_repo.get.return_value = flow
+
+    with pytest.raises(FlowStepValidationError) as caught:
+        await service.publish_flow(flow_id=flow.id)
+
+    assert caught.value.code == (
+        FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value
+    )
+    assert caught.value.step_order == 2
+    assert caught.value.context["reference"] == "step_1.output.text"
+    version_repo.create.assert_not_awaited()
+    flow_repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("question", "prompt", "field", "reference"),
+    [
+        pytest.param(
+            "{{ föregående_steg }}",
+            "",
+            "input_bindings.question",
+            "föregående_steg",
+            id="previous-step-alias",
+        ),
+        pytest.param(
+            "{{ flow_input.text }}",
+            "Notera {{ step_1.output.text }}",
+            "prompt",
+            "step_1.output.text",
+            id="assistant-prompt",
+        ),
+    ],
+)
+async def test_publish_flow_refuses_section_step_selecting_json_step(
+    user, question, prompt, field, reference
+):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    section_step = _step(step_order=2).model_copy(
+        update={
+            "input_bindings": {"question": question},
+            "input_config": {"text_processing": {"mode": "process_each_section"}},
+            "output_contract": {
+                "type": "object",
+                "properties": {
+                    "records": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {"note": {"type": "string"}},
+                        },
+                    }
+                },
+            },
+        }
+    )
+    prompts = {section_step.assistant_id: prompt}
+    service.assistant_service.get_assistant.side_effect = lambda assistant_id: (
+        Assistant(
+            id=assistant_id,
+            user=None,
+            space_id=uuid4(),
+            completion_model=None,
+            name="Assistant",
+            prompt=SimpleNamespace(text=prompts.get(assistant_id, "")),
+            completion_model_kwargs=ModelKwargs(),
+            logging_enabled=False,
+            websites=[],
+            collections=[],
+            attachments=[],
+            published=False,
+        ),
+        [],
+    )
+    flow = Flow(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Sectioned Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        draft_revision=1,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[_step(step_order=1), section_step],
+    )
+    flow_repo.get.return_value = flow
+
+    with pytest.raises(FlowStepValidationError) as caught:
+        await service.publish_flow(flow_id=flow.id)
+
+    assert caught.value.code == (
+        FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value
+    )
+    assert caught.value.step_order == 2
+    assert caught.value.context["field"] == field
+    assert caught.value.context["reference"] == reference
+    version_repo.create.assert_not_awaited()
+    flow_repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "binding", ["missing", "missing_id", "missing_type", "provider_backed"]
 )
@@ -729,6 +954,7 @@ async def test_publish_flow_rejects_mcp_assistant_before_version_creation(user):
             origin=AssistantOrigin.FLOW_MANAGED,
             managing_flow_id=flow_id,
             prompt=SimpleNamespace(text="Use the weather tool only when needed."),
+            get_prompt_text=lambda: "Use the weather tool only when needed.",
             completion_model=None,
             completion_model_kwargs=ModelKwargs(),
             collections=[],
@@ -2111,6 +2337,87 @@ async def test_publish_flow_rejects_assistant_model_below_required_security_leve
 
     with pytest.raises(BadRequestException, match="security classification"):
         await service.publish_flow(flow_id=flow_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "question",
+    [
+        pytest.param("{{ step_1.output }}", id="direct"),
+        pytest.param("{{ föregående_steg }}", id="previous-step-shorthand"),
+    ],
+)
+async def test_publish_flow_rejects_write_down_of_a_read_previous_step(user, question):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    flow_id = uuid4()
+    assistant_a = uuid4()
+    assistant_b = uuid4()
+    flow_repo.get_assistant_scope_rows.return_value = [
+        SimpleNamespace(
+            id=assistant_id,
+            origin=AssistantOrigin.FLOW_MANAGED.value,
+            managing_flow_id=flow_id,
+        )
+        for assistant_id in (assistant_a, assistant_b)
+    ]
+    flow_repo.get.return_value = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Draft",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[
+            _step(step_order=1).model_copy(
+                update={
+                    "assistant_id": assistant_a,
+                    "output_classification_override": 3,
+                }
+            ),
+            _step(step_order=2).model_copy(
+                update={
+                    "assistant_id": assistant_b,
+                    # The question is the whole input; input_source is unused.
+                    "input_bindings": {"question": question},
+                    "output_classification_override": 1,
+                }
+            ),
+        ],
+    )
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=AsyncMock(),
+        space_service=AsyncMock(),
+    )
+    service.space_service.get_space.return_value = SimpleNamespace(
+        security_classification=SimpleNamespace(security_level=1)
+    )
+    service.assistant_service.get_assistant.return_value = (
+        SimpleNamespace(
+            get_prompt_text=lambda: "",
+            completion_model=SimpleNamespace(
+                security_classification=SimpleNamespace(security_level=3)
+            ),
+            collections=[],
+            websites=[],
+            integration_knowledge_list=[],
+            mcp_servers=[],
+        ),
+        [],
+    )
+
+    with pytest.raises(BadRequestException, match="output classification override"):
+        await service.publish_flow(flow_id=flow_id)
+    version_repo.create.assert_not_awaited()
 
 
 @pytest.mark.asyncio

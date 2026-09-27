@@ -7,6 +7,8 @@ from dataclasses import replace
 from enum import Enum
 from typing import Any, cast
 
+from pydantic import ValidationError
+
 from eneo.database.tables.flow_tables import (
     FLOW_STEP_INPUT_SOURCE_VALUES,
     FLOW_STEP_INPUT_TYPE_VALUES,
@@ -95,8 +97,13 @@ from eneo.flows.output_processing import (
     schema_expects_structured,
     validate_schema_syntax,
 )
+from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.step_chain_rules import iter_step_chain_violations
-from eneo.flows.step_lineage import build_step_ref_mapping
+from eneo.flows.step_lineage import (
+    build_step_ref_mapping,
+    resolve_upstream_step_orders,
+    selected_source_step_order,
+)
 from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,
@@ -136,9 +143,13 @@ def validate_steps(
     *,
     metadata_json: FlowPersistedJsonObject | None = None,
     require_complete_template_fill_config: bool = False,
+    prompt_templates: Mapping[int, str] | None = None,
 ) -> None:
+    """Validate the step graph; ``prompt_templates`` are the assistant prompts by step order."""
     validate_step_graph(
-        flow_step_validation_views_from_flow_steps(steps),
+        flow_step_validation_views_from_flow_steps(
+            steps, prompt_templates=prompt_templates
+        ),
         metadata_json=metadata_json,
         require_complete_template_fill_config=require_complete_template_fill_config,
     )
@@ -499,6 +510,16 @@ def collect_step_graph_issues(
                         if require_complete_template_fill_config
                         else {}
                     ),
+                ),
+            )
+        if require_complete_template_fill_config:
+            _capture_flow_step_validation(
+                issues,
+                FlowGraphIssueCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION,
+                lambda: _validate_section_source_reads(
+                    step=step,
+                    steps_by_order=steps_by_order,
+                    step_ref_mapping=step_ref_mapping,
                 ),
             )
         _capture_bad_request_validation(
@@ -1780,6 +1801,83 @@ def _validate_runtime_input_publish_rules(*, step: FlowStepValidationView) -> No
                 step_order=step.step_order,
                 code=FlowGraphIssueCode.FLOW_INPUT_BINDING_RUNTIME_INPUT_UNUSED.value,
             )
+
+
+def _validate_section_source_reads(
+    *,
+    step: FlowStepValidationView,
+    steps_by_order: dict[int, FlowStepValidationView],
+    step_ref_mapping: dict[str, int],
+) -> None:
+    """Refuse at publish the structured source section processing refuses at run.
+
+    Which steps are read is the runtime's selection rule; whether one yields
+    structured output is its output format's rule, the one the runtime writes by.
+    """
+    try:
+        if text_processing_config(step.input_config) is None:
+            return
+        question = question_binding(step.input_bindings)
+        source_refs = source_ref_bindings(step.input_bindings)
+    except (ValidationError, InputBindingContractError):
+        return  # the mapped-execution and binding checks report these
+    # (field, template, reported reference) for each authored place a read
+    # comes from; source_refs are named by their step_ref as authored.
+    authored: list[tuple[str, str | None, str | None]] = [
+        ("input_bindings.question", question, None),
+        *(
+            (
+                f"input_bindings.source_refs[{index}].step_ref",
+                ref.template_expression(),
+                ref.step_ref,
+            )
+            for index, ref in enumerate(source_refs)
+        ),
+        ("prompt", step.prompt_template, None),
+    ]
+    reads: list[tuple[str, str, int]] = []
+    for field, template, authored_reference in authored:
+        for reference in analyze_template(
+            template or "", step_refs=step_ref_mapping, form_field_names=set()
+        ):
+            order = selected_source_step_order(
+                reference, step_order=step.step_order, section_processing=True
+            )
+            if order is not None:
+                reads.append((field, authored_reference or reference.expression, order))
+    if question is None and not source_refs:
+        reads.extend(
+            ("input_source", str(_enum_value(step.input_source)), order)
+            for order in resolve_upstream_step_orders(
+                input_source=step.input_source,
+                step_order=step.step_order,
+                binding_references=None,
+                max_prior_step_order=step.step_order - 1,
+            )
+        )
+    for field, reference, source_order in reads:
+        source = steps_by_order.get(source_order)
+        if source is None or not _yields_structured_output(source):
+            continue
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: section processing reads text, but "
+            f"'{reference}' reads step {source_order}, whose output is structured, not text.",
+            code=FlowGraphIssueCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
+            context={
+                "field": field,
+                "reference": reference,
+                "source_step_order": source_order,
+            },
+            step_order=step.step_order,
+        )
+
+
+def _yields_structured_output(step: FlowStepValidationView) -> bool:
+    try:
+        spec = resolve_format_spec(str(_enum_value(step.output_type)))
+    except TypedIOValidationException:
+        return False  # the enum check reports an unknown output_type
+    return spec.requests_structured_output(step.output_contract)
 
 
 def _validate_step_mapped_execution(*, step: FlowStepValidationView) -> None:

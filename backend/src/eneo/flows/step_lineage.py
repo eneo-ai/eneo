@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Literal, Protocol, TypeAlias, TypeGuard
 
+from eneo.flows.flow_variable_definitions import PREVIOUS_STEP_TEXT_ALIAS
 from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.template_reference_analyzer import TemplateReference, analyze_template
 
@@ -82,6 +83,7 @@ def resolve_upstream_step_orders(
     if binding_references is not None:
         return resolve_reference_step_orders(
             references=binding_references,
+            step_order=step_order,
             max_prior_step_order=max_prior_step_order,
         )
     if input_source == "previous_step" and step_order > 1:
@@ -133,20 +135,58 @@ def resolve_step_upstream_orders(
                     step_refs=step_ref_mapping,
                     form_field_names=set(),
                 ),
+                step_order=step_order,
                 max_prior_step_order=max_prior_step_order,
             )
         )
     return sorted(orders)
 
 
+def selected_source_step_order(
+    reference: TemplateReference,
+    *,
+    step_order: int,
+    section_processing: bool,
+) -> int | None:
+    """Return the prior step whose result a step's input reference selects.
+
+    The runtime selects step material by this rule and publish checks it, so
+    the two cannot drift. ``föregående_steg`` selects the previous step. A step
+    reference selects that step for its text (bare, ``output``,
+    ``output.text``) and, under section processing, for any ``output.`` path.
+    """
+    if reference.tail not in {"", "output", "output.text"} and not (
+        section_processing and reference.tail.startswith("output.")
+    ):
+        return None
+    order = referenced_step_order(reference, step_order=step_order)
+    if order is None or not 1 <= order < step_order:
+        return None
+    return order
+
+
+def referenced_step_order(
+    reference: TemplateReference, *, step_order: int
+) -> int | None:
+    """Return the step a reference in step ``step_order`` names, if any.
+
+    A step reference names its step; ``föregående_steg`` names the previous
+    step (``0`` on the first step, which no step has).
+    """
+    if reference.head == PREVIOUS_STEP_TEXT_ALIAS and not reference.tail:
+        return step_order - 1
+    return reference.step_order
+
+
 def resolve_reference_step_orders(
     *,
     references: Iterable[TemplateReference],
+    step_order: int,
     max_prior_step_order: int,
 ) -> list[int]:
     orders: set[int] = set()
     for reference in references:
-        referenced_order = reference.step_order
+        referenced_order = referenced_step_order(reference, step_order=step_order)
         if (
             isinstance(referenced_order, int)
             and 1 <= referenced_order <= max_prior_step_order

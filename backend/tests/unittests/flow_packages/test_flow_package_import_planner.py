@@ -624,6 +624,54 @@ def test_planner_rejects_invalid_flow_graph_before_install() -> None:
     assert exc_info.value.context["reason"] == "duplicate_step_name"
 
 
+def test_planner_rejects_section_step_whose_prompt_reads_json_step() -> None:
+    original = _envelope(
+        requirements=[],
+        extra_steps=[
+            StepSpec(
+                plan_step_ref="summary",
+                name="Summary",
+                assistant_spec=AssistantSpec(instructions="Sammanfatta."),
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+            StepSpec(
+                plan_step_ref="notes",
+                name="Notes",
+                # The input reads the text summary; the prompt reads the JSON step.
+                assistant_spec=AssistantSpec(
+                    instructions="Anteckna utifrån {{ extract.output.text }}."
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_config={"text_processing": {"mode": "process_each_section"}},
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "records": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {"note": {"type": "string"}},
+                            },
+                        }
+                    },
+                },
+            ),
+        ],
+    )
+    original.spec.steps[0].output_type = OutputType.JSON
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        build_flow_package_import_plan(
+            original, candidates=FlowPackageImportPlannerCandidates()
+        )
+
+    assert exc_info.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+    assert exc_info.value.context == {
+        "reason": FlowGraphIssueCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value
+    }
+
+
 def test_planner_rejects_empty_flow_before_reporting_publishable() -> None:
     envelope = _envelope(
         requirements=[],

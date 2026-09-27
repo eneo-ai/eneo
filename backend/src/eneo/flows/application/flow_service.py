@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, cast
@@ -416,19 +416,30 @@ class FlowService:
     async def publish_flow(self, *, flow_id: UUID) -> Flow:
         flow = await self.get_flow(flow_id)
         normalized_metadata = normalize_persisted_flow_metadata(flow.metadata_json)
-        self._validate_publishable(flow, metadata_json=normalized_metadata)
-        self._validate_variable_alias_collisions(
-            steps=flow.steps,
-            metadata_json=normalized_metadata,
-        )
+        # The graph check reads each assistant's prompt (an input channel), so
+        # the assistants load first, once the scope check has cleared them.
         await self._validate_assistant_scope_for_steps(
             space_id=flow.space_id,
             steps=flow.steps,
             owning_flow_id=flow.id,
         )
+        assistants_by_id = await self._load_step_assistants(flow.steps)
+        self._validate_publishable(
+            flow,
+            metadata_json=normalized_metadata,
+            prompt_templates={
+                step.step_order: assistants_by_id[step.assistant_id].get_prompt_text()
+                for step in flow.steps
+            },
+        )
+        self._validate_variable_alias_collisions(
+            steps=flow.steps,
+            metadata_json=normalized_metadata,
+        )
         await self._validate_step_security_classification_for_steps(
             space_id=flow.space_id,
             steps=flow.steps,
+            assistants_by_id=assistants_by_id,
         )
         self._reject_unprotected_stored_secrets(flow.steps)
 
@@ -436,7 +447,10 @@ class FlowService:
             update={"metadata_json": normalized_metadata},
             deep=True,
         )
-        definition = await self._build_definition(flow_with_normalized_metadata)
+        # The version snapshots the assistants validated above, not a re-read.
+        definition = await self._build_definition(
+            flow_with_normalized_metadata, assistants_by_id=assistants_by_id
+        )
 
         # Lock after reading the draft so a concurrent publisher retains its
         # stale revision and gets the revision conflict when updating the pointer.
@@ -475,12 +489,17 @@ class FlowService:
         )
 
     def _validate_publishable(
-        self, flow: Flow, *, metadata_json: FlowPersistedJsonObject | None
+        self,
+        flow: Flow,
+        *,
+        metadata_json: FlowPersistedJsonObject | None,
+        prompt_templates: Mapping[int, str],
     ) -> None:
         self._validate_steps(
             flow.steps,
             metadata_json=metadata_json,
             require_complete_template_fill_config=True,
+            prompt_templates=prompt_templates,
         )
         if not flow.steps:
             raise BadRequestException(
@@ -493,11 +512,13 @@ class FlowService:
         *,
         metadata_json: FlowPersistedJsonObject | None = None,
         require_complete_template_fill_config: bool = False,
+        prompt_templates: Mapping[int, str] | None = None,
     ) -> None:
         validate_steps(
             steps,
             metadata_json=metadata_json,
             require_complete_template_fill_config=require_complete_template_fill_config,
+            prompt_templates=prompt_templates,
         )
 
     def _validate_variable_alias_collisions(
@@ -558,20 +579,30 @@ class FlowService:
         *,
         space_id: UUID,
         steps: list[FlowStep],
+        assistants_by_id: dict[UUID, Assistant] | None = None,
     ) -> None:
         if self.space_service is None or not steps:
             return
 
         space = await self.space_service.get_space(space_id)
+        self._validate_step_security_classification_with_assistants(
+            steps=steps,
+            assistants_by_id=(
+                assistants_by_id
+                if assistants_by_id is not None
+                else await self._load_step_assistants(steps)
+            ),
+            space=space,
+        )
+
+    async def _load_step_assistants(
+        self, steps: list[FlowStep]
+    ) -> dict[UUID, Assistant]:
         assistants_by_id: dict[UUID, Assistant] = {}
         for step in sorted(steps, key=lambda item: item.step_order):
             assistant, _ = await self.assistant_service.get_assistant(step.assistant_id)
             assistants_by_id[step.assistant_id] = assistant
-        self._validate_step_security_classification_with_assistants(
-            steps=steps,
-            assistants_by_id=assistants_by_id,
-            space=space,
-        )
+        return assistants_by_id
 
     def _validate_step_security_classification_with_assistants(
         self,
@@ -893,14 +924,18 @@ class FlowService:
         merged = merge_secrets_on_update(incoming_config, stored_config)
         return merged.model_dump(mode="json")
 
-    async def _build_definition(self, flow: Flow) -> FlowPersistedJsonObject:
+    async def _build_definition(
+        self, flow: Flow, *, assistants_by_id: dict[UUID, Assistant]
+    ) -> FlowPersistedJsonObject:
         return build_published_definition_json(
             flow_id=cast(UUID, flow.id),
             name=flow.name,
             description=flow.description,
             metadata_json=flow.metadata_json,
             steps=[
-                await self._step_to_definition(step, flow=flow)
+                await self._step_to_definition(
+                    step, flow=flow, assistant=assistants_by_id[step.assistant_id]
+                )
                 for step in sorted(flow.steps, key=lambda item: item.step_order)
             ],
         )
@@ -931,6 +966,7 @@ class FlowService:
         step: FlowStep,
         *,
         flow: Flow,
+        assistant: Assistant,
     ) -> FlowPersistedJsonObject:
         output_config = step.output_config
         if step.output_mode == "template_fill":
@@ -938,7 +974,6 @@ class FlowService:
                 step,
                 flow=flow,
             )
-        assistant, _ = await self.assistant_service.get_assistant(step.assistant_id)
         if assistant.mcp_servers:
             raise BadRequestException(
                 f"Step {step.step_order}: Flow MCP is unsupported. Remove MCP servers and tools from the step assistant before publishing."

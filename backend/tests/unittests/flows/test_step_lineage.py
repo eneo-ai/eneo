@@ -134,6 +134,7 @@ def test_resolve_reference_step_orders_keeps_completed_prior_references() -> Non
             _reference(3),
             _reference(None),
         ],
+        step_order=3,
         max_prior_step_order=2,
     )
 
@@ -225,3 +226,38 @@ def test_resolve_step_upstream_orders_prompt_only_reads_the_referenced_step() ->
     )
 
     assert orders == [1]
+
+
+@pytest.mark.parametrize(
+    ("question", "prompt"),
+    [
+        pytest.param("Samtal: {{ föregående_steg }}", None, id="question"),
+        pytest.param("Sammanfatta.", "Bakgrund: {{ föregående_steg }}", id="prompt"),
+    ],
+)
+def test_resolve_step_upstream_orders_reads_previous_step_through_shorthand(
+    question: str, prompt: str | None
+) -> None:
+    orders = resolve_step_upstream_orders(
+        input_source="flow_input",
+        step_order=3,
+        input_bindings={"question": question},
+        prompt_template=prompt,
+        step_ref_mapping={},
+        max_prior_step_order=2,
+    )
+
+    assert orders == [2]
+
+
+def test_resolve_step_upstream_orders_shorthand_on_first_step_reads_no_step() -> None:
+    orders = resolve_step_upstream_orders(
+        input_source="flow_input",
+        step_order=1,
+        input_bindings={"question": "{{ föregående_steg }}"},
+        prompt_template="{{ föregående_steg }}",
+        step_ref_mapping={},
+        max_prior_step_order=0,
+    )
+
+    assert orders == []
