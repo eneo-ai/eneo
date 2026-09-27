@@ -40,9 +40,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     attested_violation_message,
     resolve_attested_result_contract,
 )
-from eneo.flows.ai_builder.ai_builder_result_contract import (
-    fold_result_field_name,
-)
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     RuntimeInputFieldHint,
 )
@@ -62,6 +59,7 @@ from eneo.flows.flow_authoring_spec import (
 )
 from eneo.flows.flow_variable_definitions import (
     FLOW_INPUT_JSON_ALIAS,
+    template_placeholder_form_field_name,
 )
 from eneo.json_types import JsonObject, JsonValue
 from eneo.main.logging import get_logger
@@ -99,20 +97,6 @@ def compile_create_intent_to_spec(
         runtime_input_type=runtime_input_type,
         field_diagnostics=field_diagnostics,
     )
-    prepared_template_field_names = _template_fields_prepared_by_intent(
-        intent=intent,
-        context=context,
-    )
-    if prepared_template_field_names:
-        # A placeholder the flow prepares itself must not also demand a
-        # runtime form field: the template contract binds it to the prepared
-        # step output, and a leftover required field would shadow that
-        # content with an empty runtime prompt.
-        form_fields = [
-            field
-            for field in form_fields
-            if field.name not in prepared_template_field_names
-        ]
     final_output_mode = context.final_output_mode if context is not None else None
     pattern_ids = context.pattern_ids if context is not None else ()
     chain_steps = context.pattern_chain_steps if context is not None else ()
@@ -135,17 +119,9 @@ def compile_create_intent_to_spec(
         ui_language=context.ui_language if context is not None else None,
     )
     field_provenance: dict[str, FlowInputFieldProvenance] = {
-        hint.variable_name: hint.provenance
-        for hint in (
-            context.template_placeholder_field_hints if context is not None else ()
-        )
+        record.value.variable_name: record.value.provenance
+        for record in (context.runtime_input_fields if context is not None else ())
     }
-    field_provenance.update(
-        {
-            record.value.variable_name: record.value.provenance
-            for record in (context.runtime_input_fields if context is not None else ())
-        }
-    )
     assembly_spec = try_compile_create_intent_with_assembly(
         intent,
         runtime_input_type=runtime_input_type,
@@ -160,7 +136,9 @@ def compile_create_intent_to_spec(
         ),
         template_form_field_names=(
             tuple(
-                hint.variable_name for hint in context.template_placeholder_field_hints
+                name
+                for placeholder in context.selected_template_placeholders or ()
+                if (name := template_placeholder_form_field_name(placeholder))
             )
             if context is not None and context.selected_template_count == 1
             else ()
@@ -211,10 +189,6 @@ def compile_create_intent_to_spec(
             },
         )
     else:
-        assembly_spec = _apply_flow_input_schema(
-            assembly_spec,
-            flow_input_schema=context.flow_input_schema if context else None,
-        )
         _log_dropped_primary_input_shadow_fields(
             field_names=dropped_primary_input_field_names,
             runtime_input_type=runtime_input_type,
@@ -238,6 +212,12 @@ def compile_create_intent_to_spec(
                 selected_template_count=context.selected_template_count,
                 placeholders=context.selected_template_placeholders,
             )
+        # After the template contract: the run fields it declares belong to
+        # the JSON input contract and its name-conflict check too.
+        compiled_spec = _apply_flow_input_schema(
+            compiled_spec,
+            flow_input_schema=context.flow_input_schema if context else None,
+        )
         if context is not None and context.checkpoint_intents is not None:
             compiled_spec = project_checkpoint_intents(
                 compiled_spec,
@@ -586,39 +566,6 @@ def _raise_flow_input_schema_form_conflict(
     )
 
 
-def _template_fields_prepared_by_intent(
-    *,
-    intent: CreateFlowIntent,
-    context: CreateCompileContext | None,
-) -> set[str]:
-    """Template-derived field names the proposed steps already prepare.
-
-    A bare template placeholder normally becomes a required runtime form
-    field, but when a semantic step declares a string output field whose
-    folded name matches the placeholder, the template contract binds the
-    placeholder to that prepared value instead. User-confirmed runtime
-    fields and intent-declared input fields keep their runtime ownership.
-    """
-
-    if context is None or not context.template_placeholder_field_hints:
-        return set()
-    runtime_hint_names = {
-        hint.variable_name for hint in context.runtime_input_field_hints
-    }
-    prepared_folded_names = {
-        fold_result_field_name(field.name)
-        for step in intent.steps
-        for field in step.output_fields or ()
-        if field.field_type == "string"
-    }
-    return {
-        hint.variable_name
-        for hint in context.template_placeholder_field_hints
-        if hint.variable_name not in runtime_hint_names
-        and fold_result_field_name(hint.variable_name) in prepared_folded_names
-    }
-
-
 def _compile_form_fields(
     *,
     context: CreateCompileContext | None,
@@ -628,13 +575,10 @@ def _compile_form_fields(
     runtime_input_field_hints = (
         context.runtime_input_field_hints if context is not None else ()
     )
-    template_placeholder_field_hints = (
-        context.template_placeholder_field_hints if context is not None else ()
-    )
     fields: list[FormFieldSpec] = []
     dropped_primary_input_field_names: list[str] = []
     seen: set[str] = set()
-    for hint in (*runtime_input_field_hints, *template_placeholder_field_hints):
+    for hint in runtime_input_field_hints:
         if is_primary_runtime_input_shadow_field(
             variable_name=hint.variable_name,
             field_type=hint.field_type,

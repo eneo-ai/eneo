@@ -36,6 +36,7 @@ from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
+    FormFieldSpec,
     InputSource,
     InputType,
     OutputMode,
@@ -538,6 +539,11 @@ async def test_template_contract_materializes_and_renders_without_tokens() -> No
     approved_spec = apply_template_attachment_contract(
         FlowDraftSpecCore(
             flow_name="Builder template flow",
+            # The values the person types at run time: nothing else fills them.
+            form_fields=[
+                FormFieldSpec(name=name, type="text", label=name, required=True)
+                for name in ("title", "author", "customer name")
+            ],
             steps=[
                 StepSpec(
                     plan_step_ref="step_a",

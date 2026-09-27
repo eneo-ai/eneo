@@ -74,10 +74,13 @@ sent again at Flow runtime. A published Flow that accepts runtime files receives
 separately uploaded files when a run starts.
 
 A terminal DOCX template-fill Flow requires exactly one confirmed DOCX
-template. Before approval, AI Builder inspects the real document, compiles every
-exact placeholder into a required form field, an injected transcription value,
-the current date (`datum`), or a typed earlier-step output, and refuses
-placeholders it cannot prove will exist. A transcription placeholder also makes
+template. Before approval, AI Builder inspects the real document, binds every
+exact placeholder to an injected transcription value, the current date
+(`datum`), a typed earlier-step output, or a form field, and refuses
+placeholders it cannot prove will exist. A placeholder nothing in the Flow
+fills sends the plan back to add a step that prepares it; it becomes a form
+field only when you ask to type it at run time or it names a Flow input
+(`flow_input.x`). A transcription placeholder also makes
 the Flow's audio input required. Zero or multiple selected templates produce a
 typed refusal instead of a publishable-looking incomplete Flow.
 

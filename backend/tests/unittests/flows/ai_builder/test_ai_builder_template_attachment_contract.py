@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from uuid import uuid4
 
 import pytest
@@ -9,6 +10,9 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
 )
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import make_plan_step_ref
 from eneo.flows.ai_builder.ai_builder_non_plan_outcome import user_action_answer
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    MAX_DIAGNOSTIC_NAMES,
+)
 from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
     MAX_TEMPLATE_MATERIALIZED_PATHS,
     apply_template_attachment_contract,
@@ -100,7 +104,9 @@ def test_contract_is_complete_before_approval_and_hashing() -> None:
 
     fields = {field.name: field for field in contracted.form_fields or []}
     assert fields["case_id"].label == "Case ID"
-    assert fields["case_id"].required is True
+    # A declared text field keeps its own requirement (empty text renders);
+    # a placeholder naming a run input is a required run field.
+    assert fields["case_id"].required is False
     assert fields["reference_number"].required is True
     assert contracted.steps[-1].output_config == {
         "bindings": {
@@ -767,19 +773,82 @@ def test_contract_prefers_latest_preparation_step_for_prepared_fields() -> None:
 
 
 def test_contract_ignores_non_string_prepared_fields() -> None:
-    contracted = apply_template_attachment_contract(
-        _prepared_fields_spec(),
-        selected_template_count=1,
-        placeholders=("metadata",),
+    # The object-typed prepared field is not bindable content, and nothing
+    # says the placeholder may stay empty: the plan must produce it.
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        apply_template_attachment_contract(
+            _prepared_fields_spec(),
+            selected_template_count=1,
+            placeholders=("metadata",),
+        )
+
+    assert exc_info.value.repair_disposition == "model_correctable"
+    assert exc_info.value.failure_code == "template_placeholder_unproduced"
+
+
+def test_contract_repair_names_placeholders_escaped_and_bounded() -> None:
+    placeholders = ("rad\u2028två", *(f"falt_{index}" for index in range(10)))
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        apply_template_attachment_contract(
+            _prepared_fields_spec(),
+            selected_template_count=1,
+            placeholders=placeholders,
+        )
+
+    error = exc_info.value
+    assert error.affected == ("rad\\u2028två", *placeholders[1:MAX_DIAGNOSTIC_NAMES])
+    assert "\n- rad\\u2028två\n- falt_0\n" in error.detail
+    assert "\u2028" not in error.detail
+    assert error.detail.endswith(
+        f"\n... and {len(placeholders) - MAX_DIAGNOSTIC_NAMES} more."
     )
 
-    # The object-typed prepared field is not bindable content, so the
-    # placeholder falls back to a required runtime form field.
-    assert contracted.steps[-1].output_config == {
-        "bindings": {"metadata": "{{ flow_input.metadata }}"}
-    }
-    fields = {field.name: field for field in contracted.form_fields or ()}
-    assert fields["metadata"].required is True
+
+def test_contract_placeholder_a_step_leaves_optional_asks_for_a_producer() -> None:
+    spec = _prepared_fields_spec()
+    extract = spec.steps[1]
+    assert extract.output_contract is not None
+    contract = deepcopy(extract.output_contract)
+    contract["properties"]["handlaggare"] = {"type": ["string", "null"]}
+    spec = spec.model_copy(
+        update={
+            "steps": [
+                spec.steps[0],
+                extract.model_copy(update={"output_contract": contract}),
+                spec.steps[2],
+            ]
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        apply_template_attachment_contract(
+            spec, selected_template_count=1, placeholders=("handlaggare",)
+        )
+
+    assert exc_info.value.failure_code == "template_placeholder_unproduced"
+
+
+def test_contract_requires_a_declared_field_that_renders_nothing_when_empty() -> None:
+    # An omitted optional date reads as null, and a placeholder bound to null
+    # fails the render, so the template makes that field required.
+    spec = _template_spec().model_copy(
+        update={
+            "form_fields": [
+                FormFieldSpec(
+                    name="beslutsdatum", type="date", label="Datum", required=False
+                )
+            ]
+        }
+    )
+
+    contracted = apply_template_attachment_contract(
+        spec, selected_template_count=1, placeholders=("beslutsdatum",)
+    )
+
+    assert [(field.name, field.required) for field in contracted.form_fields or ()] == [
+        ("beslutsdatum", True)
+    ]
 
 
 @pytest.mark.parametrize("selected_template_count", [0, 2])

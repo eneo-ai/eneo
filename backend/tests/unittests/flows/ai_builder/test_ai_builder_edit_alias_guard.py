@@ -199,17 +199,18 @@ def test_an_attached_template_judges_its_own_placeholder_mappings() -> None:
 def test_a_placeholder_the_attached_template_drops_is_left_to_that_contract() -> None:
     flow = _flow(**READS_OF_THE_SUMMARY["output_config"])
 
-    result = _compile(
-        flow,
-        (1, 3, 4),
-        removed=(2,),
-        selected_template_count=1,
-        selected_template_placeholders=("beslut",),
-    )
+    # The template contract, not the stale-read guard, answers: nothing in
+    # the edited flow produces `beslut` any more.
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        _compile(
+            flow,
+            (1, 3, 4),
+            removed=(2,),
+            selected_template_count=1,
+            selected_template_placeholders=("beslut",),
+        )
 
-    assert result.spec.steps[-1].output_config == {
-        "bindings": {"beslut": "{{ flow_input.beslut }}"}
-    }
+    assert exc_info.value.failure_code == "template_placeholder_unproduced"
 
 
 def test_int04_keeping_the_writer_while_its_summary_step_goes_is_refused() -> None:

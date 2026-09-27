@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -35,7 +34,6 @@ from eneo.flows.ai_builder.planning_state import (
     ReportDisposition,
 )
 from eneo.flows.flow_authoring_spec import InputType, OutputMode, OutputType
-from eneo.flows.flow_variable_definitions import template_placeholder_form_field_name
 from eneo.json_types import JsonObject
 
 
@@ -57,7 +55,6 @@ class CreateCompileContext:
     pattern_chain_steps: tuple[str, ...] = ()
     ui_language: str | None = None
     runtime_input_fields: tuple[ConfirmedRuntimeMetadataField, ...] = ()
-    template_placeholder_field_hints: tuple[RuntimeInputFieldHint, ...] = ()
     selected_template_count: int | None = None
     selected_template_placeholders: tuple[str, ...] | None = None
     # The flow's own asset when an edit inherits its template; the compiled
@@ -121,10 +118,7 @@ class CreateCompileContext:
         return tuple(
             dict.fromkeys(
                 hint.variable_name
-                for hint in (
-                    *self.runtime_input_field_hints,
-                    *self.template_placeholder_field_hints,
-                )
+                for hint in self.runtime_input_field_hints
                 if hint.provenance == "user_confirmed"
                 and is_primary_runtime_input_shadow_field(
                     variable_name=hint.variable_name,
@@ -168,21 +162,16 @@ def create_compile_context_from_planning_state(
     ),
 ) -> CreateCompileContext | None:
     runtime_input_fields = _runtime_input_fields_from_planning_state(planning_state)
-    template_placeholder_field_hints = (
-        _template_placeholder_field_hints_from_planning_state(planning_state)
-    )
     if planning_state is None:
         if (
             ui_language is None
             and not runtime_input_fields
-            and not template_placeholder_field_hints
             and not requested_output_sections.sections
         ):
             return None
         return CreateCompileContext(
             ui_language=ui_language,
             runtime_input_fields=runtime_input_fields,
-            template_placeholder_field_hints=template_placeholder_field_hints,
             selected_template_count=None,
             requested_output_sections=requested_output_sections,
         )
@@ -199,7 +188,6 @@ def create_compile_context_from_planning_state(
         pattern_chain_steps=_pattern_chain_steps_from_architecture(architecture),
         ui_language=ui_language,
         runtime_input_fields=runtime_input_fields,
-        template_placeholder_field_hints=template_placeholder_field_hints,
         selected_template_count=template_selection.count,
         selected_template_placeholders=template_selection.placeholders,
         inherited_template_asset_id=template_selection.template_asset_id,
@@ -390,45 +378,6 @@ def _runtime_input_fields_from_planning_state(
     if planning_state is None:
         return ()
     return tuple(planning_state.input_fields)
-
-
-def _template_placeholder_field_hints_from_planning_state(
-    planning_state: PlanningState | None,
-) -> tuple[RuntimeInputFieldHint, ...]:
-    if planning_state is None:
-        return ()
-    selected_templates = [
-        role for role in planning_state.file_roles if role.role == "template"
-    ]
-    raw_placeholders: tuple[str, ...]
-    if len(selected_templates) == 1:
-        if selected_templates[0].template_placeholders is None:
-            return ()
-        raw_placeholders = tuple(selected_templates[0].template_placeholders)
-    else:
-        evidence = planning_state.output_schema_evidence
-        if evidence is None or evidence.source != "template_placeholders":
-            return ()
-        raw_properties = evidence.json_schema.get("properties")
-        if not isinstance(raw_properties, Mapping):
-            return ()
-        raw_placeholders = tuple(str(name) for name in raw_properties)
-    hints: list[RuntimeInputFieldHint] = []
-    seen: set[str] = set()
-    for raw_placeholder in raw_placeholders:
-        field_name = template_placeholder_form_field_name(raw_placeholder)
-        if field_name is None or field_name in seen:
-            continue
-        hints.append(
-            RuntimeInputFieldHint(
-                variable_name=field_name,
-                label=field_name,
-                required=True,
-                provenance="template_derived",
-            )
-        )
-        seen.add(field_name)
-    return tuple(hints)
 
 
 def _runtime_input_type_from_architecture(

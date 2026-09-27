@@ -65,9 +65,6 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     ResultOutputFieldRole,
 )
-from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
-    RuntimeInputFieldHint,
-)
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_schema_evidence,
 )
@@ -330,9 +327,6 @@ def test_compile_context_keeps_template_placeholder_evidence_out_of_terminal_sch
     assert context is not None
     assert context.final_output_type == OutputType.DOCX
     assert context.terminal_output_schema is None
-    assert [
-        hint.variable_name for hint in context.template_placeholder_field_hints
-    ] == ["kundnamn"]
 
 
 def test_policy_default_does_not_override_confirmed_runtime_fields() -> None:
@@ -363,40 +357,6 @@ def test_policy_default_does_not_override_confirmed_runtime_fields() -> None:
 
     assert [field.name for field in compiled.form_fields or ()] == ["case_type"]
     assert "{{ flow_input.case_type }}" in _question(compiled.steps[0].input_bindings)
-
-
-def test_compile_context_keeps_distinct_long_template_placeholder_names() -> None:
-    shared_prefix = "a" * 80
-    first = f"{shared_prefix}_first"
-    second = f"{shared_prefix}_second"
-    state = PlanningState.empty()
-    state.resolved_slots["terminal_output"] = _slot(
-        "terminal_output",
-        "docx_document",
-    )
-    state.output_schema_evidence = build_schema_evidence(
-        json_schema={
-            "type": "object",
-            "properties": {
-                first: {"type": "string"},
-                second: {"type": "string"},
-            },
-        },
-        source="template_placeholders",
-        source_file_ids=("00000000-0000-0000-0000-000000000001",),
-        confidence="high",
-        evidence=[
-            f"file:file_id:content:template_placeholder:{first}",
-            f"file:file_id:content:template_placeholder:{second}",
-        ],
-    )
-
-    context = create_compile_context_from_planning_state(state)
-
-    assert context is not None
-    assert [
-        hint.variable_name for hint in context.template_placeholder_field_hints
-    ] == [first, second]
 
 
 def test_compile_context_binds_declared_output_schema_to_json_terminal() -> None:
@@ -4440,17 +4400,9 @@ def test_compiler_binds_human_named_placeholders_from_prepared_terminal(
         aggregation_intent=cast(AggregationIntent, aggregation_intent),
         selected_template_count=1,
         selected_template_placeholders=(
-            "diarienummer",
+            "flow_input.diarienummer",
             "sections.ärendet.text",
             "sections.bakgrund.text",
-        ),
-        template_placeholder_field_hints=(
-            RuntimeInputFieldHint(
-                variable_name="diarienummer",
-                label="diarienummer",
-                required=True,
-                provenance="template_derived",
-            ),
         ),
     )
     compiled = compile_create_intent_to_spec(intent, context=context)
@@ -4462,7 +4414,7 @@ def test_compiler_binds_human_named_placeholders_from_prepared_terminal(
     assert template_step.output_mode == OutputMode.TEMPLATE_FILL
     assert template_step.output_config == {
         "bindings": {
-            "diarienummer": "{{ flow_input.diarienummer }}",
+            "flow_input.diarienummer": "{{ flow_input.diarienummer }}",
             "sections.ärendet.text": (
                 "{{ "
                 + str(prepare_step.plan_step_ref)
@@ -4475,9 +4427,11 @@ def test_compiler_binds_human_named_placeholders_from_prepared_terminal(
             ),
         }
     }
-    # The metadata placeholder stays a required runtime form field even
-    # though no semantic step references it: the template is its consumer.
-    assert [field.name for field in compiled.form_fields or ()] == ["diarienummer"]
+    # The template addresses the run input by name, so it is a required run
+    # field the template alone reads.
+    assert [(field.name, field.required) for field in compiled.form_fields or ()] == [
+        ("diarienummer", True)
+    ]
 
 
 def test_compiler_drops_template_form_field_when_flow_prepares_it() -> None:
@@ -4515,14 +4469,6 @@ def test_compiler_drops_template_form_field_when_flow_prepares_it() -> None:
         ),
         selected_template_count=1,
         selected_template_placeholders=("diarienummer",),
-        template_placeholder_field_hints=(
-            RuntimeInputFieldHint(
-                variable_name="diarienummer",
-                label="diarienummer",
-                required=True,
-                provenance="template_derived",
-            ),
-        ),
     )
     compiled = compile_create_intent_to_spec(intent, context=context)
 
@@ -4537,6 +4483,279 @@ def test_compiler_drops_template_form_field_when_flow_prepares_it() -> None:
         }
     }
     assert not compiled.form_fields
+
+
+def _decision_template_context(
+    *placeholders: str,
+    input_fields: tuple[ConfirmedRuntimeMetadataField, ...] = (),
+) -> CreateCompileContext:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "documents"),
+        "terminal_output": _slot("terminal_output", "docx_document"),
+        "docx_output_mode": _slot("docx_output_mode", "template_fill_docx"),
+        "document_material_scope": _slot(
+            "document_material_scope", "single_document_case"
+        ),
+    }
+    if input_fields:
+        state.resolved_slots["runtime_metadata_fields"] = _slot(
+            "runtime_metadata_fields", "detailed_runtime_metadata"
+        )
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id=UUID("00000000-0000-0000-0000-000000000902"),
+            filename="beslutsmall.docx",
+            file_type="document",
+            mimetype=(
+                "application/vnd.openxmlformats-officedocument."
+                "wordprocessingml.document"
+            ),
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="template",
+            source="heuristic",
+            confidence="medium",
+            template_placeholders=list(placeholders),
+        )
+    ]
+    state.input_fields = list(input_fields)
+    _commit_architecture(state)
+    context = create_compile_context_from_planning_state(state, ui_language="sv")
+    assert context is not None
+    return context
+
+
+def _decision_preparation_intent(*fields: dict[str, object]) -> CreateFlowIntent:
+    return parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Registreringsbeslut",
+            "plan_rationale": "Förbered beslutets innehåll och fyll mallen.",
+            "steps": [
+                {
+                    "name": "Förbered beslutsinnehåll",
+                    "instructions": (
+                        "Förbered beslutet. Handläggare är Johan Sundqvist."
+                    ),
+                    "output_fields": list(fields),
+                }
+            ],
+        }
+    )
+
+
+def _string_field(name: str, **overrides: object) -> dict[str, object]:
+    return {
+        "name": name,
+        "field_type": "string",
+        "description": f"Mallens {name}.",
+        **overrides,
+    }
+
+
+def test_liv01_constant_placeholder_asks_the_plan_for_a_producer() -> None:
+    # mc_liv01: the preparation step fills every placeholder but
+    # `handlaggare`, which the request states as a constant. Nothing says it
+    # may stay empty, so the plan gets a repair before approval instead of a
+    # run field that refuses runs or a document without it.
+    context = _decision_template_context("diarienummer", "beslut", "handlaggare")
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            _decision_preparation_intent(
+                _string_field("diarienummer"), _string_field("beslut")
+            ),
+            context=context,
+        )
+
+    error = exc_info.value
+    assert error.repair_disposition == "model_correctable"
+    assert error.failure_code == "template_placeholder_unproduced"
+    assert error.affected == ("handlaggare",)
+    assert "\n- handlaggare" in error.detail
+    assert "required string" in error.detail
+    assert "required: false" not in error.detail
+
+
+def test_byg20_decision_placeholders_ask_the_plan_for_a_producer() -> None:
+    # mc_byg20: the comparison step's `beslutet` is a list, not the template's
+    # `beslut`, and the prose writer declares no fields. Before, both
+    # placeholders became run fields and the writer was dropped; the decision
+    # document would come out empty.
+    context = _decision_template_context(
+        "diarienummer", "datum", "beslut", "motivering"
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Bostadsanpassningsbeslut",
+            "plan_rationale": "Jämför offerterna och skriv beslutet.",
+            "steps": [
+                {
+                    "name": "Jämför offerter",
+                    "instructions": "Jämför offerterna åtgärd för åtgärd.",
+                    "output_fields": [
+                        _string_field("diarienummer"),
+                        _string_field("beslutet", field_type="array"),
+                    ],
+                },
+                {
+                    "name": "Skriv beslut",
+                    "instructions": "Skriv beslutet och motiveringen.",
+                },
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(intent, context=context)
+
+    error = exc_info.value
+    assert error.repair_disposition == "model_correctable"
+    assert error.affected == ("beslut", "motivering")
+
+
+def test_byg20_repair_that_marks_the_decision_optional_is_still_refused() -> None:
+    # A plan that answers the repair by declaring the placeholders optional
+    # has still not produced the decision: the document would come out empty.
+    context = _decision_template_context("beslut", "motivering")
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            _decision_preparation_intent(
+                _string_field("beslut", required=False, nullable=True),
+                _string_field("motivering", required=False),
+            ),
+            context=context,
+        )
+
+    assert exc_info.value.failure_code == "template_placeholder_unproduced"
+    assert exc_info.value.affected == ("beslut", "motivering")
+
+
+def test_oms12_optional_step_value_is_not_rebound_to_the_run_form() -> None:
+    # mc_oms12: the preparing step declares `handlaggare` optional ("left
+    # empty"), and the person named four run fields, not this one. An
+    # optional model output is no permission for a run field or an empty
+    # document value: the plan gets the repair, and a plan that produces the
+    # value binds the template to that step.
+    context = _decision_template_context(
+        "diarienummer",
+        "beslut",
+        "handlaggare",
+        input_fields=(
+            _confirmed_runtime_field(
+                "diarienummer", "Diarienummer", purpose="shape_result", required=True
+            ),
+        ),
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            _decision_preparation_intent(
+                _string_field("beslut"),
+                _string_field("handlaggare", required=False, nullable=True),
+            ),
+            context=context,
+        )
+    assert exc_info.value.affected == ("handlaggare",)
+
+    compiled = compile_create_intent_to_spec(
+        _decision_preparation_intent(
+            _string_field("beslut"), _string_field("handlaggare")
+        ),
+        context=context,
+    )
+
+    prepare_ref = compiled.steps[-2].plan_step_ref
+    assert [(field.name, field.required) for field in compiled.form_fields or ()] == [
+        ("diarienummer", True)
+    ]
+    assert compiled.steps[-1].output_config is not None
+    assert compiled.steps[-1].output_config["bindings"]["handlaggare"] == (
+        f"{{{{ {prepare_ref}.output.structured.handlaggare }}}}"
+    )
+
+
+def test_confirmed_run_field_keeps_a_template_placeholder_and_its_requirement() -> None:
+    # The person said they type these at run time: each stays a run field
+    # the template reads, with the requirement the person gave it.
+    context = _decision_template_context(
+        "beslut",
+        "handlaggare",
+        "notering",
+        input_fields=(
+            _confirmed_runtime_field(
+                "handlaggare", "Handläggare", purpose="shape_result", required=True
+            ),
+            _confirmed_runtime_field("notering", "Notering", purpose="shape_result"),
+        ),
+    )
+
+    compiled = compile_create_intent_to_spec(
+        _decision_preparation_intent(_string_field("beslut")),
+        context=context,
+    )
+
+    assert [(field.name, field.required) for field in compiled.form_fields or ()] == [
+        ("handlaggare", True),
+        ("notering", False),
+    ]
+    template_step = compiled.steps[-1]
+    assert template_step.output_config is not None
+    bindings = template_step.output_config["bindings"]
+    assert bindings["handlaggare"] == "{{ flow_input.handlaggare }}"
+    assert bindings["notering"] == "{{ flow_input.notering }}"
+    assert "handlaggare: {{ flow_input.handlaggare }}" in _question(
+        template_step.input_bindings
+    )
+
+
+def _json_template_context(*placeholders: str) -> CreateCompileContext:
+    return CreateCompileContext(
+        runtime_input_type=InputType.JSON,
+        final_output_type=OutputType.DOCX,
+        final_output_mode=OutputMode.TEMPLATE_FILL,
+        flow_input_schema={
+            "type": "object",
+            "properties": {"arende": {"type": "string"}},
+            "required": ["arende"],
+            "additionalProperties": False,
+        },
+        selected_template_count=1,
+        selected_template_placeholders=placeholders,
+    )
+
+
+def test_json_template_run_field_joins_the_json_input_contract() -> None:
+    compiled = compile_create_intent_to_spec(
+        _decision_preparation_intent(_string_field("beslut")),
+        context=_json_template_context("beslut", "flow_input.handlaggare"),
+    )
+
+    assert [(field.name, field.required) for field in compiled.form_fields or ()] == [
+        ("handlaggare", True)
+    ]
+    assert compiled.steps[0].input_contract == {
+        "type": "object",
+        "properties": {
+            "arende": {"type": "string"},
+            "handlaggare": {"type": "string"},
+        },
+        "required": ["arende", "handlaggare"],
+        "additionalProperties": False,
+    }
+
+
+def test_json_template_run_field_overlapping_the_json_input_is_rejected() -> None:
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            _decision_preparation_intent(_string_field("beslut")),
+            context=_json_template_context("beslut", "flow_input.arende"),
+        )
+
+    assert exc_info.value.failure_code == (
+        "flow_input_schema_composite_bindings_unsupported"
+    )
 
 
 def test_compiler_admits_three_semantic_steps_before_fixed_template_fill() -> None:
@@ -4876,36 +5095,6 @@ def test_compiler_accepts_docx_template_with_runtime_form_field_overlay() -> Non
 
 
 def test_docx_template_placeholders_become_server_owned_form_fields() -> None:
-    state = PlanningState.empty()
-    state.resolved_slots["terminal_output"] = _slot(
-        "terminal_output",
-        "docx_document",
-    )
-    state.output_schema_evidence = build_schema_evidence(
-        json_schema={
-            "type": "object",
-            "properties": {
-                "kundnamn": {"type": "string"},
-                "flow_input.case_id": {"type": "string"},
-                "datum": {"type": "string"},
-                "step_a.output.summary": {"type": "string"},
-                "text": {"type": "string"},
-            },
-        },
-        source="template_placeholders",
-        source_file_ids=("00000000-0000-0000-0000-000000000001",),
-        confidence="high",
-        evidence=[
-            "file:file_id:content:template_placeholder:kundnamn",
-            "file:file_id:content:template_placeholder:flow_input.case_id",
-            "file:file_id:content:template_placeholder:datum",
-            "file:file_id:content:template_placeholder:step_a.output.summary",
-            "file:file_id:content:template_placeholder:text",
-        ],
-    )
-    derived_context = create_compile_context_from_planning_state(state)
-    assert derived_context is not None
-
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Template report",
@@ -4932,24 +5121,18 @@ def test_docx_template_placeholders_become_server_owned_form_fields() -> None:
                 EXTRACT_TEMPLATE_VARIABLES_STEP,
                 TEMPLATE_FILL_DOCX_STEP,
             ),
-            template_placeholder_field_hints=(
-                derived_context.template_placeholder_field_hints
-            ),
             selected_template_count=1,
-            selected_template_placeholders=(
-                "kundnamn",
-                "flow_input.case_id",
-            ),
+            selected_template_placeholders=("flow_input.case_id",),
         ),
     )
 
-    assert compiled.form_fields is not None
-    assert [field.name for field in compiled.form_fields] == ["kundnamn", "case_id"]
+    assert [(field.name, field.required) for field in compiled.form_fields or ()] == [
+        ("case_id", True)
+    ]
     assert len(compiled.steps) == 2
-    template_step = compiled.steps[-1]
-    template_question = _question(template_step.input_bindings)
-    assert "kundnamn: {{ flow_input.kundnamn }}" in template_question
-    assert "case_id: {{ flow_input.case_id }}" in template_question
+    assert compiled.steps[-1].output_config == {
+        "bindings": {"flow_input.case_id": "{{ flow_input.case_id }}"}
+    }
     assert validate_spec(compiled).valid
 
 

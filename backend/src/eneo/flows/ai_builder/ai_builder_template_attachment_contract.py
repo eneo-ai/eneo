@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
+from functools import partial
 from typing import TypeGuard, cast
 from uuid import UUID
 
@@ -20,6 +21,8 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     MAX_DIAGNOSTIC_NAME_LENGTH,
     MAX_DIAGNOSTIC_NAMES,
+    BoundedListing,
+    display_value,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     fold_result_field_name,
@@ -157,6 +160,8 @@ def apply_template_attachment_contract(
     existing_bindings = existing_bindings or {}
     bindings: dict[str, str] = {}
     unresolved: list[str] = []
+    # Content the person did not ask to type: a step must produce it.
+    unproduced = BoundedListing()
     for placeholder in normalized_placeholders:
         if placeholder in existing_bindings:
             existing = existing_bindings[placeholder]
@@ -178,7 +183,7 @@ def apply_template_attachment_contract(
             form_fields,
             requested_name=field_name,
         ):
-            canonical_name = _require_template_form_field(
+            canonical_name = _template_form_field(
                 form_fields,
                 requested_name=field_name,
             )
@@ -201,15 +206,18 @@ def apply_template_attachment_contract(
             bindings[placeholder] = prepared_binding
             continue
 
-        if field_name is not None:
-            canonical_name = _require_template_form_field(
+        if field_name is None:
+            unresolved.append(placeholder)
+        elif "." in placeholder:
+            # A field name has no dot, so this placeholder names the run input
+            # itself (`flow_input.x`): the template asks the person for it.
+            canonical_name = _template_form_field(
                 form_fields,
                 requested_name=field_name,
             )
             bindings[placeholder] = form_field_reference_expression(canonical_name)
-            continue
-
-        unresolved.append(placeholder)
+        else:
+            unproduced.add(partial(display_value, placeholder))
 
     if unresolved:
         raise _architecture_error(
@@ -225,6 +233,19 @@ def apply_template_attachment_contract(
                 name[:MAX_DIAGNOSTIC_NAME_LENGTH]
                 for name in unresolved[:MAX_DIAGNOSTIC_NAMES]
             ),
+        )
+
+    if unproduced.total:
+        raise _architecture_error(
+            failure_code="template_placeholder_unproduced",
+            repair_disposition="model_correctable",
+            detail=unproduced.render(
+                "These DOCX template placeholders have no producer. Add each to "
+                "the output_fields of the step that prepares the template, as a "
+                "required string field with that name:"
+            ),
+            affected=unproduced.entries,
+            unproduced_count=unproduced.total,
         )
 
     existing_output_config = terminal_step.output_config or {}
@@ -724,16 +745,24 @@ def _without_step_source_refs(
     return updated or None
 
 
-def _require_template_form_field(
+def _template_form_field(
     fields: list[FormFieldSpec],
     *,
     requested_name: str,
 ) -> str:
+    """The run field a placeholder reads, declared as required if missing.
+
+    A text field left out reads as empty, and an empty value removes its
+    placeholder from the document, so a declared text field keeps its own
+    requirement. Other types read as null when left out, which cannot
+    render, so the template requires them.
+    """
+
     requested_key = requested_name.casefold()
     for index, field in enumerate(fields):
         if field.name.casefold() != requested_key:
             continue
-        if not field.required:
+        if field.type != "text" and not field.required:
             fields[index] = field.model_copy(update={"required": True})
         return field.name
 

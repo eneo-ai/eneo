@@ -17,9 +17,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     FlowInputFieldIntent,
     parse_create_flow_intent_arguments,
 )
-from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
-    RuntimeInputFieldHint,
-)
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import SourceCaptureField
 from eneo.flows.ai_builder.planning_state import (
     ConfirmedRuntimeMetadataField,
@@ -141,13 +138,6 @@ def test_template_overlap_uses_exact_purpose_truth_table(
             selected_template_count=1,
             selected_template_placeholders=("audience",),
             runtime_input_fields=(_runtime_field("audience", purpose),),
-            template_placeholder_field_hints=(
-                RuntimeInputFieldHint(
-                    variable_name="audience",
-                    label="Audience",
-                    provenance="template_derived",
-                ),
-            ),
         ),
     )
 
@@ -158,24 +148,6 @@ def test_template_overlap_uses_exact_purpose_truth_table(
     assert compiled.steps[-1].output_config == {
         "bindings": {"audience": "{{ flow_input.audience }}"}
     }
-
-
-def test_template_only_field_without_template_target_is_typed_unsupported() -> None:
-    with pytest.raises(AIBuilderArchitectureError) as exc_info:
-        compile_create_intent_to_spec(
-            _two_step_intent(),
-            context=CreateCompileContext(
-                template_placeholder_field_hints=(
-                    RuntimeInputFieldHint(
-                        variable_name="audience",
-                        label="Audience",
-                        provenance="template_derived",
-                    ),
-                ),
-            ),
-        )
-
-    assert exc_info.value.log_context["reason"] == "form_field_no_legal_target"
 
 
 def test_whole_flow_excludes_terminal_fan_in_target() -> None:
