@@ -29,9 +29,11 @@
 
   function formatWhen(epochMs: number): string {
     try {
-      return new Date(epochMs).toLocaleString(locale === "sv" ? "sv-SE" : "en-US", {
-        dateStyle: "short",
-        timeStyle: "short"
+      return new Date(epochMs).toLocaleString(locale === "sv" ? "sv-SE" : "en-GB", {
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit"
       });
     } catch {
       return new Date(epochMs).toISOString();
@@ -43,15 +45,13 @@
   <Alert.Title>{m.recording_resume_prompt_title()}</Alert.Title>
   <Alert.Description class="text-accent-stronger/90">
     {m.recording_resume_prompt_body({
-      count: String(hint.segmentCount),
-      time: formatWhen(hint.earliestCapturedAt)
+      time: formatWhen(hint.earliestCapturedAt),
+      duration: formatDuration(hint.totalDurationMs),
+      parts:
+        hint.segmentCount === 1
+          ? m.recording_parts_one()
+          : m.recording_parts_many({ count: String(hint.segmentCount) })
     })}
-    <span class="mt-1 block text-xs opacity-80">
-      {m.recording_segments_saved_status({
-        count: String(hint.segmentCount),
-        duration: formatDuration(hint.totalDurationMs)
-      })}
-    </span>
   </Alert.Description>
   <div class="mt-3 flex flex-wrap gap-2">
     <Button size="sm" disabled={busy} onclick={() => onContinue(hint)}>

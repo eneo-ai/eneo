@@ -29,6 +29,7 @@ import {
 } from "$lib/features/audio/live/liveTranscriptTestFakes";
 import { PCM16_FLUSH, PCM16_FLUSHED } from "$lib/features/audio/live/pcm16-worklet.js";
 import { RETRY_BACKOFF_MS, ROTATION_OVERLAP_MS } from "$lib/features/audio/recordingSession";
+import { RECORDED_UPLOAD_RETRY_MS } from "$lib/features/audio/uploadRetry";
 import type { SegmentRecord, SessionRecoveryHint } from "$lib/features/audio/recordingSessionStore";
 import { toast } from "$lib/components/toast";
 import { m } from "$lib/paraglide/messages";
@@ -378,6 +379,154 @@ describe("FlowRunDialog recording rotation", () => {
     expect(persistedSegments().map(({ reason }) => reason)).toEqual(["rotation", "files"]);
     expect(media.recorders).toHaveLength(2);
     expect(screen.getByText(m.recording_files_reached({ count: "3" }))).toBeTruthy();
+  });
+
+  it("says the recording goes on while offline, and uploads a failed part by itself once the connection is back", async () => {
+    const upload = vi
+      .fn<Upload>()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockImplementation(async ({ file }) => uploadedFile("file-1", file.name));
+    await openDialogAndStartRecording(upload);
+
+    window.dispatchEvent(new Event("offline"));
+    await flush();
+    expect(screen.getByText(m.recording_offline_title())).toBeTruthy();
+    expect(screen.getByText(m.recording_offline_description())).toBeTruthy();
+
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+    expect(upload).toHaveBeenCalledOnce();
+    expect(screen.getByText(m.recording_upload_failed_preserved())).toBeTruthy();
+
+    window.dispatchEvent(new Event("online"));
+    await flush();
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(markedSegments()).toHaveLength(1);
+    expect(screen.queryByText(m.recording_offline_title())).toBeNull();
+    expect(screen.queryByText(m.recording_upload_failed_preserved())).toBeNull();
+  });
+
+  it("uploads a part that failed on the network again by itself, even with no online event", async () => {
+    const upload = vi
+      .fn<Upload>()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockImplementation(async ({ file }) => uploadedFile("file-1", file.name));
+    await openDialogAndStartRecording(upload);
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+    expect(upload).toHaveBeenCalledOnce();
+
+    vi.advanceTimersByTime(RECORDED_UPLOAD_RETRY_MS[0] - 1);
+    await flush();
+    expect(upload).toHaveBeenCalledOnce();
+    vi.advanceTimersByTime(1);
+    await flush();
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(markedSegments()).toHaveLength(1);
+  });
+
+  it("stops retrying by itself after the last wait, even when the connection comes back", async () => {
+    const upload = vi.fn<Upload>().mockRejectedValue(new TypeError("Failed to fetch"));
+    await openDialogAndStartRecording(upload);
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+
+    for (const wait of RECORDED_UPLOAD_RETRY_MS) {
+      vi.advanceTimersByTime(wait);
+      await flush();
+    }
+    expect(upload).toHaveBeenCalledTimes(1 + RECORDED_UPLOAD_RETRY_MS.length);
+
+    window.dispatchEvent(new Event("online"));
+    vi.advanceTimersByTime(10 * 60_000);
+    await flush();
+    expect(upload).toHaveBeenCalledTimes(1 + RECORDED_UPLOAD_RETRY_MS.length);
+    expect(screen.getByText(m.recording_upload_failed_preserved())).toBeTruthy();
+  });
+
+  it("keeps retrying an earlier part that failed after a later part uploaded", async () => {
+    const upload = vi
+      .fn<Upload>()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockImplementation(async ({ file }) => uploadedFile(`file-${file.name}`, file.name));
+    await openDialogAndStartRecording(upload);
+
+    await rotate();
+    await endOverlap();
+    media.recorders[0]?.finish();
+    await flush();
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[1]?.finish();
+    await flush();
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(markedSegments()).toHaveLength(1);
+
+    vi.advanceTimersByTime(RECORDED_UPLOAD_RETRY_MS[0]);
+    await flush();
+    expect(upload).toHaveBeenCalledTimes(3);
+    expect(markedSegments()).toHaveLength(2);
+  });
+
+  it("spends no attempt on a connection change while a retry is still uploading", async () => {
+    let failLater: (error: Error) => void = () => {};
+    const upload = vi
+      .fn<Upload>()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockImplementationOnce(() => new Promise<UploadedFile>((_, reject) => (failLater = reject)))
+      .mockImplementation(async ({ file }) => uploadedFile("file-1", file.name));
+    await openDialogAndStartRecording(upload);
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+
+    vi.advanceTimersByTime(RECORDED_UPLOAD_RETRY_MS[0]);
+    await flush();
+    expect(upload).toHaveBeenCalledTimes(2); // the retry is uploading
+    for (let change = 0; change < 6; change += 1) window.dispatchEvent(new Event("online"));
+    await flush();
+    expect(upload).toHaveBeenCalledTimes(2);
+
+    failLater(new TypeError("Failed to fetch"));
+    await flush();
+    vi.advanceTimersByTime(RECORDED_UPLOAD_RETRY_MS[1]);
+    await flush();
+    expect(upload).toHaveBeenCalledTimes(3);
+    expect(markedSegments()).toHaveLength(1);
+  });
+
+  it("leaves a part the server refused to the user's Retry", async () => {
+    const upload = vi.fn<Upload>().mockRejectedValue(new EneoError("Too large", "SERVER", 413, 0));
+    await openDialogAndStartRecording(upload);
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+
+    vi.advanceTimersByTime(10 * 60_000);
+    window.dispatchEvent(new Event("online"));
+    await flush();
+    expect(upload).toHaveBeenCalledOnce();
+    expect(screen.getByText(m.recording_upload_failed_preserved())).toBeTruthy();
+  });
+
+  it("keeps the screen on while recording and lets it go when the recording stops", async () => {
+    const release = vi.fn(async () => undefined);
+    const request = vi.fn(async () => ({ release }));
+    Object.defineProperty(navigator, "wakeLock", { value: { request }, configurable: true });
+    onTestFinished(() => {
+      Reflect.deleteProperty(navigator, "wakeLock");
+    });
+
+    await openDialogAndStartRecording(vi.fn(() => new Promise<UploadedFile>(() => undefined)));
+    await flush();
+    expect(request).toHaveBeenCalledWith("screen");
+
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+    expect(release).toHaveBeenCalledOnce();
   });
 
   it("gives a recording started while the last segment uploads its own rotation schedule", async () => {

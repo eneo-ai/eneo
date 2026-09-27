@@ -23,6 +23,9 @@ export type PreparedRecordedSegment = {
 export type PendingRecordedSegment = PreparedRecordedSegment & {
   file: File;
   state: "persisting" | "uploading" | "failed";
+  // A failed upload that may pass by itself (network, timeout, busy server):
+  // retried automatically. Otherwise it waits for the user's Retry.
+  retryable?: boolean;
 };
 
 export class FlowRunFileInputState {
@@ -321,8 +324,13 @@ export class FlowRunFileInputState {
     this.#setPendingSegmentState(stepId, segment, "uploading");
   }
 
-  recordedSegmentFailed(stepId: string, segment: PreparedRecordedSegment): void {
-    this.#setPendingSegmentState(stepId, segment, "failed");
+  recordedSegmentFailed(stepId: string, segment: PreparedRecordedSegment, retryable = false): void {
+    this.#setPendingSegments(
+      stepId,
+      (this.#pendingSegmentsByStepId[stepId] ?? []).map((pending) =>
+        isSegment(pending, segment) ? { ...pending, state: "failed", retryable } : pending
+      )
+    );
   }
 
   recordedSegmentUploaded(stepId: string, segment: PreparedRecordedSegment): void {

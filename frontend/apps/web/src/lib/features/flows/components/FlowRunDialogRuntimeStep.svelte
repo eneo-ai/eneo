@@ -7,6 +7,7 @@
   } from "@eneo/eneo-js";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import ChevronRight from "lucide-svelte/icons/chevron-right";
+  import IconWifiOff from "lucide-svelte/icons/wifi-off";
   import { IconUploadCloud } from "@eneo/icons/upload-cloud";
   import { IconXMark } from "@eneo/icons/x-mark";
   import { IconCheck } from "@eneo/icons/check";
@@ -36,6 +37,7 @@
   import type { FlowRunDialogLabels } from "./flowRunDialogLabels";
   import type { FlowRunLaunchInputState } from "./FlowRunLaunchInputState.svelte";
   import FlowRunResumePrompt from "./FlowRunResumePrompt.svelte";
+  import { recordingLimitsForStep } from "$lib/features/audio/recordingLimits";
   import FlowRunStorageDegradedNotice from "./FlowRunStorageDegradedNotice.svelte";
 
   let {
@@ -62,6 +64,7 @@
     showResumePrompt = false,
     resumeBusy = false,
     storageDegraded = false,
+    offline = false,
     canStartRecording = true,
     canDiscardRecording = true,
     sessionPhase = "idle",
@@ -113,6 +116,8 @@
     showResumePrompt?: boolean;
     resumeBusy?: boolean;
     storageDegraded?: boolean;
+    // The browser has no connection: recording goes on, uploads wait.
+    offline?: boolean;
     canStartRecording?: boolean;
     // False while the step's recording or an upload is still on its way.
     canDiscardRecording?: boolean;
@@ -254,6 +259,19 @@
 
     {#if storageDegraded}
       <FlowRunStorageDegradedNotice />
+    {/if}
+
+    {#if offline && supportsAudioRecording}
+      <Alert.Root
+        class="border-warning-default/30 bg-warning-dimmer/60 text-warning-stronger mb-4"
+        role="status"
+      >
+        <IconWifiOff />
+        <Alert.Title>{m.recording_offline_title()}</Alert.Title>
+        <Alert.Description class="text-warning-stronger/90">
+          {m.recording_offline_description()}
+        </Alert.Description>
+      </Alert.Root>
     {/if}
 
     <div class="flex flex-wrap items-start justify-between gap-3">
@@ -524,6 +542,7 @@
         <AudioRecorder
           bind:this={recorderRef}
           maxBytes={step.max_file_size_bytes ?? null}
+          maxRecordingMs={recordingLimitsForStep(step).maxRecordingMs}
           resetToken={recorderResetToken}
           canStart={canStartRecording}
           {onRecordingDone}

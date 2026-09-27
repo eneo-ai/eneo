@@ -37,6 +37,12 @@
     SessionRecoveryHint
   } from "$lib/features/audio/recordingSessionStore";
   import { LiveTranscriptPreview } from "$lib/features/audio/live/LiveTranscriptPreview.svelte";
+  import { ConnectionState } from "$lib/features/audio/connection.svelte";
+  import {
+    isTransientUploadFailure,
+    RECORDED_UPLOAD_RETRY_MS,
+    UploadTimeoutError
+  } from "$lib/features/audio/uploadRetry";
   import {
     buildContractSnapshotFromStep,
     detachUploadedSegmentFromLedger,
@@ -368,6 +374,67 @@
     window.addEventListener("beforeunload", beforeUnloadHandler);
   });
 
+  // A part whose upload failed on the network goes again by itself, after the
+  // waits of RECORDED_UPLOAD_RETRY_MS; the browser coming back online brings the
+  // next attempt forward. One schedule per step, reset once a part uploads.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const uploadRetriesByStepId = new Map<
+    string,
+    { attempts: number; timer: ReturnType<typeof setTimeout> | null }
+  >();
+
+  // Every automatic attempt, by the timer or the browser coming back online,
+  // counts against the same waits; after the last, the part waits for Retry.
+  function runAutomaticRetry(step: FlowRunContractStepInput, generation: number) {
+    const retry = uploadRetriesByStepId.get(step.step_id);
+    if (!retry || generation !== dialogGeneration) return;
+    // Nothing to send now (a retry is already uploading): no attempt is spent.
+    if (!hasRetryableFailure(step.step_id)) return;
+    if (retry.timer !== null) clearTimeout(retry.timer);
+    retry.timer = null;
+    if (retry.attempts >= RECORDED_UPLOAD_RETRY_MS.length) return;
+    retry.attempts += 1;
+    void retryRecordedFileUpload(step, { automatic: true });
+  }
+
+  function scheduleUploadRetry(step: FlowRunContractStepInput) {
+    const retry = uploadRetriesByStepId.get(step.step_id) ?? { attempts: 0, timer: null };
+    uploadRetriesByStepId.set(step.step_id, retry);
+    const wait = RECORDED_UPLOAD_RETRY_MS[retry.attempts];
+    if (retry.timer !== null || wait === undefined) return;
+    const generation = dialogGeneration;
+    retry.timer = setTimeout(() => {
+      retry.timer = null;
+      runAutomaticRetry(step, generation);
+    }, wait);
+  }
+
+  function hasRetryableFailure(stepId: string): boolean {
+    return fileInputState.failedRecordedSegments(stepId).some((segment) => segment.retryable);
+  }
+
+  // A part uploaded, or the user chose Retry: the step's schedule starts over.
+  function cancelUploadRetry(stepId: string) {
+    const retry = uploadRetriesByStepId.get(stepId);
+    if (retry?.timer != null) clearTimeout(retry.timer);
+    uploadRetriesByStepId.delete(stepId);
+  }
+
+  const connection = new ConnectionState(() => {
+    for (const step of stepsRequiringInput) runAutomaticRetry(step, dialogGeneration);
+  });
+
+  function clearUploadRetries() {
+    for (const stepId of [...uploadRetriesByStepId.keys()]) cancelUploadRetry(stepId);
+  }
+
+  onDestroy(() => {
+    // Callbacks still on their way belong to a dialog that is gone.
+    dialogGeneration += 1;
+    connection.dispose();
+    clearUploadRetries();
+  });
+
   onDestroy(() => {
     window.removeEventListener("beforeunload", beforeUnloadHandler);
     disposeAllRecordingSessions();
@@ -447,6 +514,7 @@
   function resetDialogState() {
     dialogGeneration += 1;
     uploadTailsByStepId.clear();
+    clearUploadRetries();
     runContractLoadedForFlowId = null;
     runContract = null;
     runContractError = null;
@@ -609,7 +677,7 @@
         policy: runContract?.runtime_upload_policy,
         abortController: controller,
         onTimeout: (event) => {
-          reject(new Error(getRuntimeUploadTimeoutMessage(event, file.name)));
+          reject(new UploadTimeoutError(getRuntimeUploadTimeoutMessage(event, file.name)));
         }
       });
       handleProgress = uploadTimeout.onProgress;
@@ -636,6 +704,8 @@
     uploadedCount: number;
     uploadedFiles: UploadedFile[];
     failed: boolean;
+    // Every failure may pass by itself (network, timeout, busy server).
+    transient?: boolean;
   };
 
   async function uploadFilesForStep(
@@ -674,6 +744,8 @@
     let uploadedCount = 0;
     const uploadedFiles: UploadedFile[] = [];
     let failed = false;
+    // Cleared by any failure that will not pass by itself (size, slots, a refusal).
+    let transient = true;
 
     try {
       await previousTail.catch(() => undefined);
@@ -691,6 +763,7 @@
 
       if (toUpload.length < files.length && step.max_files != null) {
         failed = true;
+        transient = false;
         fileInputState.recordSkippedFiles(
           step.step_id,
           m.flow_run_max_files_exceeded({
@@ -708,6 +781,7 @@
       for (const file of toUpload) {
         if (step.max_file_size_bytes != null && file.size > step.max_file_size_bytes) {
           failed = true;
+          transient = false;
           fileInputState.recordUploadFailure(
             step.step_id,
             `${file.name}: ${m.flow_run_upload_max_size({
@@ -730,13 +804,14 @@
             return staleResult;
           }
           failed = true;
+          transient &&= isTransientUploadFailure(error);
           fileInputState.recordUploadFailure(
             step.step_id,
             getFlowRuntimeErrorMessage(error, String(error))
           );
         }
       }
-      return { uploadedCount, uploadedFiles, failed };
+      return { uploadedCount, uploadedFiles, failed, transient: failed && transient };
     } finally {
       // A reset dialog dropped this upload's reservation with the rest.
       if (!isStale(operationGeneration, operationFlowId)) {
@@ -1026,10 +1101,17 @@
     }
   }
 
-  async function retryRecordedFileUpload(step: DialogRuntimeStepInput) {
+  // Retry, or an automatic retry (only the parts that may pass by itself).
+  async function retryRecordedFileUpload(
+    step: FlowRunContractStepInput,
+    { automatic = false }: { automatic?: boolean } = {}
+  ) {
     const operationGeneration = dialogGeneration;
     const operationFlowId = flow.id;
-    const failed = fileInputState.failedRecordedSegments(step.step_id);
+    const failed = fileInputState
+      .failedRecordedSegments(step.step_id)
+      .filter((segment) => !automatic || segment.retryable);
+    if (!automatic) cancelUploadRetry(step.step_id);
     // All of them leave "failed" at once, so a second click cannot upload one twice.
     for (const segment of failed) {
       fileInputState.recordedSegmentUploading(step.step_id, segment);
@@ -1061,9 +1143,13 @@
     if (isStale(operationGeneration, operationFlowId)) return;
     const uploaded = result.failed ? undefined : result.uploadedFiles[0];
     if (!uploaded) {
-      fileInputState.recordedSegmentFailed(step.step_id, segment);
+      fileInputState.recordedSegmentFailed(step.step_id, segment, result.transient);
+      if (result.transient) scheduleUploadRetry(step);
       return;
     }
+    // A part uploaded, so the connection works: the waits start over for any part still failing.
+    cancelUploadRetry(step.step_id);
+    if (hasRetryableFailure(step.step_id)) scheduleUploadRetry(step);
     await markSegmentUploaded({
       flowId: operationFlowId,
       stepId: step.step_id,
@@ -1545,6 +1631,7 @@
             showResumePrompt={fileInputState.isResumePromptForStep(currentRuntimeStep.step_id)}
             resumeBusy={fileInputState.isResumeBusyForStep(currentRuntimeStep.step_id)}
             storageDegraded={fileInputState.isStorageDegraded}
+            offline={!connection.online}
             canStartRecording={currentStepCanStartRecording}
             onOpenFilePicker={() => openFilePicker(currentRuntimeStep)}
             onRemoveFile={(fileId) => removeFile(currentRuntimeStep.step_id, fileId)}

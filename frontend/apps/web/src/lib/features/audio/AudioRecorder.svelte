@@ -14,7 +14,9 @@
   import { onDestroy, onMount } from "svelte";
 
   import dayjs from "dayjs";
-  import { monotonicNow } from "./recordingLimits";
+  import { formatRecordingLength, monotonicNow } from "./recordingLimits";
+  import { getLocale } from "$lib/paraglide/runtime";
+  import { ScreenWakeLock } from "./screenWakeLock";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import {
@@ -67,6 +69,8 @@
 
   type RecordingStartOrigin = "user" | "external";
   export let maxBytes: number | null = null;
+  // Eneo's longest recording for the step, said before recording starts.
+  export let maxRecordingMs: number | null = null;
   export let resetToken: unknown = 0;
   // False while the caller cannot take another recording; stopping stays possible.
   export let canStart = true;
@@ -142,7 +146,9 @@
   const MIC_ACTIVITY_THRESHOLD = 0.035;
   const MIC_SILENCE_HINT_MS = 6000;
 
-  const formatMegabytes = (bytes: number) => (bytes / (1024 * 1024)).toFixed(2);
+  // "384" or "12,5" in the page's language: whole or one decimal, never "384.00".
+  const megabytes = new Intl.NumberFormat(getLocale(), { maximumFractionDigits: 1 });
+  const formatMegabytes = (bytes: number) => megabytes.format(bytes / (1024 * 1024));
   let maxSizeLabel: string | null = null;
   $: maxSizeLabel =
     typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0
@@ -507,6 +513,9 @@
   // capture. Coalescing on `startPromise` makes startRecording reentrant-safe.
   let startPromise: Promise<void> | null = null;
 
+  // A phone whose screen locks can stop the capture: the screen stays on while recording.
+  const screenWakeLock = new ScreenWakeLock();
+
   async function startRecording(origin: RecordingStartOrigin = "user"): Promise<void> {
     if (isRecording || recordingState === "recording" || recordingState === "preparing") {
       return startPromise ?? Promise.resolve();
@@ -577,6 +586,7 @@
         startMonitoringLoop();
         startStallChecker();
         attachVisibilityHandler();
+        screenWakeLock.hold();
       } else {
         const errorMsg = "No media stream available";
         setRecordingErrorState(errorMsg);
@@ -814,6 +824,7 @@
     const overlapStopped = stopOverlappingRecorder();
     stopStallChecker();
     detachVisibilityHandler();
+    screenWakeLock.release();
     const endsRecording = isRecording;
     if (isRecording) {
       isRecording = false;
@@ -1114,6 +1125,7 @@
 
   function disposeRecorder() {
     isDestroyed = true;
+    screenWakeLock.release();
     clearCompletedRecording();
     // A replaced recorder's segment is complete, so it is still handed over.
     void stopOverlappingRecorder();
@@ -1289,7 +1301,10 @@
       </div>
     {:else}
       <div class="idle-recording-copy">
-        {#if estimatedLimitLabel && maxSizeLabel}
+        {#if maxRecordingMs}
+          <span>{m.recording_length_hint({ duration: formatRecordingLength(maxRecordingMs) })}</span
+          >
+        {:else if estimatedLimitLabel && maxSizeLabel}
           <span
             >{m.recording_estimated_limit({
               duration: estimatedLimitLabel,
@@ -1429,7 +1444,7 @@
   }
 
   .idle-recording-copy {
-    @apply text-muted max-w-60 px-4 py-1 text-sm leading-snug;
+    @apply text-muted min-w-0 flex-1 px-4 py-1 text-sm leading-snug;
   }
 
   .recording-estimate {
