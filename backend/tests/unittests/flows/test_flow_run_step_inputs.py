@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 
 from eneo.authentication.principal_types import PrincipalType
+from eneo.files.audio import AudioDecodeLimits
 from eneo.files.file_models import FileContentVariant, FileMetadata, FileType
 from eneo.files.file_repo import FileRepository
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
@@ -20,6 +21,7 @@ from eneo.flows.flow_run_step_inputs import (
     build_runtime_step_input_specs,
     normalize_step_inputs_payload,
     primary_runtime_input_format,
+    validate_audio_lengths,
     validate_submitted_step_inputs,
 )
 from eneo.flows.principal import FlowPrincipal
@@ -711,3 +713,112 @@ def test_primary_runtime_input_format_matches_run_contract_input_spec_for_same_s
 
     assert derived == FlowRuntimeInputFormat.AUDIO
     assert derived == specs[audio_step.step_id].runtime_input.input_format
+
+
+_RECORDING_LIMITS = AudioDecodeLimits(
+    max_duration_seconds=1_800, max_decoded_bytes=10**12
+)
+
+
+def _audio_specs(*step_ids):
+    return {
+        step_id: SimpleNamespace(
+            runtime_input=SimpleNamespace(input_format=FlowRuntimeInputFormat.AUDIO)
+        )
+        for step_id in step_ids
+    }
+
+
+async def _validate_audio(lengths, *, single_recording=True, specs=None):
+    step_id = uuid4()
+    file_ids = [uuid4() for _ in lengths]
+    repo = AsyncMock()
+    repo.audio_seconds_by_file.return_value = {
+        file_id: length
+        for file_id, length in zip(file_ids, lengths, strict=True)
+        if length is not None
+    }
+    admitted = await validate_audio_lengths(
+        specs=specs or _audio_specs(step_id),
+        normalized_step_inputs={step_id: file_ids},
+        single_recording_steps=frozenset({step_id} if single_recording else ()),
+        runtime_upload_repo=repo,
+        limits=_RECORDING_LIMITS,
+    )
+    return step_id, file_ids, repo, admitted
+
+
+@pytest.mark.asyncio
+async def test_one_recordings_parts_are_held_to_the_longest_recording_together() -> (
+    None
+):
+    with pytest.raises(BadRequestException) as error:
+        await _validate_audio((1_000.0, 800.5))
+
+    assert error.value.code == "flow_run_audio_exceeds_limit"
+    assert error.value.context["measured"] == 1_801
+    assert error.value.context["ceiling"] == 1_800
+
+
+@pytest.mark.asyncio
+async def test_audio_within_the_limit_is_admitted_under_that_limit() -> None:
+    # Decoded lengths, as transcription decodes them: up to the limit itself.
+    step_id, file_ids, repo, admitted = await _validate_audio((900.0, 900.0))
+
+    # The limit the run was admitted under, for its transcription to keep.
+    assert admitted == {step_id: 1_800}
+    repo.audio_seconds_by_file.assert_awaited_once_with(file_ids=file_ids)
+
+
+@pytest.mark.asyncio
+async def test_parts_that_decode_to_exactly_the_limit_are_admitted() -> None:
+    # 16 kHz sample counts that add up to 1800 s, whose float lengths do not.
+    samples = (9_534_807, 16_755_811, 2_509_382)
+    assert sum(samples) == 1_800 * 16_000
+
+    _step_id, _file_ids, _repo, admitted = await _validate_audio(
+        tuple(count / 16_000 for count in samples)
+    )
+
+    assert set(admitted.values()) == {1_800}
+
+
+@pytest.mark.asyncio
+async def test_each_file_is_held_to_the_limit_as_it_is_now() -> None:
+    # Uploaded under a higher limit, then the administrator lowered it.
+    with pytest.raises(BadRequestException) as error:
+        await _validate_audio((600.0, 1_900.0), single_recording=False)
+
+    assert error.value.code == "flow_run_audio_exceeds_limit"
+    assert error.value.context["measured"] == 1_900
+
+
+@pytest.mark.asyncio
+async def test_audio_uploaded_before_lengths_were_measured_is_refused() -> None:
+    with pytest.raises(BadRequestException) as error:
+        await _validate_audio((600.0, None))
+
+    assert error.value.code == "flow_run_audio_length_unknown"
+    assert len(error.value.context["file_ids"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_files_of_other_steps_are_not_measured() -> None:
+    step_id = uuid4()
+    specs = {
+        step_id: SimpleNamespace(
+            runtime_input=SimpleNamespace(input_format=FlowRuntimeInputFormat.DOCUMENT)
+        )
+    }
+    repo = AsyncMock()
+
+    admitted = await validate_audio_lengths(
+        specs=specs,
+        normalized_step_inputs={step_id: [uuid4()]},
+        single_recording_steps=frozenset(),
+        runtime_upload_repo=repo,
+        limits=_RECORDING_LIMITS,
+    )
+
+    assert admitted == {}
+    repo.audio_seconds_by_file.assert_not_awaited()

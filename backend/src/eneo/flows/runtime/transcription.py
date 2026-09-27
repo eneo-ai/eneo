@@ -11,7 +11,12 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 from uuid import UUID
 
 from eneo.completion_models.infrastructure.context_builder import count_tokens
-from eneo.files.audio import AudioDecodeLimitExceeded, AudioDecodeLimits, AudioMimeTypes
+from eneo.files.audio import (
+    AudioDecodeLimitExceeded,
+    AudioDecodeLimits,
+    AudioMimeTypes,
+    within_decode_limit,
+)
 from eneo.files.transcriber import TranscribedAudio
 from eneo.flows.domain.speaker_labels import (
     build_label_renumbering,
@@ -788,7 +793,7 @@ async def transcribe_audio_input(
     live_fallback_reason: LiveFallbackReason | None = None
     recording_parts: list[TranscribedAudio] | None = None
     recording_labels: dict[str, str] | None = None
-    recorded_seconds = 0.0
+    recorded: list[float] = []
     if (
         single_recording
         and diarize
@@ -832,11 +837,13 @@ async def transcribe_audio_input(
                         # Not joined (labels off, or an engine that labels no
                         # speakers): the parts still take the longest recording
                         # together, checked before this part is paid for.
-                        recorded_seconds += await audio_file.measure_duration()
-                        if recorded_seconds > limits.longest_audio_seconds:
+                        recorded.append(await audio_file.measure_duration())
+                        if not within_decode_limit(
+                            recorded, limits.longest_audio_seconds
+                        ):
                             raise AudioDecodeLimitExceeded(
                                 limit="duration_seconds",
-                                measured=recorded_seconds,
+                                measured=sum(recorded),
                                 ceiling=limits.longest_audio_seconds,
                             )
                     transcribed = None

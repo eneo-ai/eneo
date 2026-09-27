@@ -5,8 +5,10 @@ import pytest
 
 from eneo.flows.api.flow_models import StepRunInput
 from eneo.flows.enums import FlowRuntimeInputFormat
+from eneo.flows.flow_input_limits import FlowInputLimits
 from eneo.flows.flow_run_input_envelope import (
     build_initial_run_input_envelope,
+    read_admitted_audio_seconds,
     read_single_recording_steps,
 )
 from eneo.flows.flow_run_step_inputs import (
@@ -40,9 +42,7 @@ async def test_the_run_records_which_steps_hold_one_recording(admission):  # noq
     await _submit(admission, single_recording=True)
 
     payload = admission.repo.create.await_args.kwargs["input_payload_json"]
-    assert payload["step_inputs"] == {
-        str(admission.step.id): {"single_recording": True}
-    }
+    assert payload["step_inputs"][str(admission.step.id)]["single_recording"] is True
     assert read_single_recording_steps(payload) == {admission.step.id}
 
 
@@ -90,3 +90,58 @@ def test_the_envelope_keeps_live_transcript_and_recording_facts_together():
             "single_recording": True,
         }
     }
+
+
+async def test_a_recording_over_the_longest_recording_is_refused_before_the_run_is_accepted(
+    admission,  # noqa: F811
+):
+    # Far past any tenant's longest recording, measured as the parts were uploaded.
+    admission.service.runtime_upload_repo.audio_seconds_by_file.return_value = {
+        file.id: 90_000.0 for file in admission.files
+    }
+
+    with pytest.raises(BadRequestException) as error:
+        await _submit(admission, single_recording=True)
+
+    assert error.value.code == "flow_run_audio_exceeds_limit"
+    assert error.value.context["step_id"] == str(admission.step.id)
+    admission.repo.create.assert_not_awaited()
+
+
+async def test_the_run_keeps_the_limit_its_audio_was_admitted_under(
+    admission,  # noqa: F811
+):
+    admission.service.runtime_upload_repo.audio_seconds_by_file.return_value = {
+        file.id: 60.0 for file in admission.files
+    }
+
+    await _submit(admission, single_recording=True)
+
+    payload = admission.repo.create.await_args.kwargs["input_payload_json"]
+    admitted = read_admitted_audio_seconds(payload)
+    assert set(admitted) == {admission.step.id}
+    assert admitted[admission.step.id] >= 120
+
+
+async def test_a_limit_change_does_not_break_the_replay_of_an_accepted_run(
+    admission,  # noqa: F811
+):
+    first = await _submit(admission, single_recording=True, key="recording")
+    fingerprint = admission.repo.create.await_args.kwargs["request_fingerprint"]
+    admission.repo.get_idempotent_run.return_value = (first.run, fingerprint)
+    # Lowered below the accepted recording: the replay still returns its run.
+    admission.service.settings_service.get_flow_input_limits_resolved.return_value = (
+        FlowInputLimits(
+            file_max_size_bytes=10_000,
+            audio_max_size_bytes=10_000,
+            audio_max_duration_seconds=60,
+        )
+    )
+    admission.service.runtime_upload_repo.audio_seconds_by_file.return_value = {
+        file.id: 90.0 for file in admission.files
+    }
+
+    replay = await _submit(admission, single_recording=True, key="recording")
+
+    assert replay.created is False
+    assert replay.run is first.run

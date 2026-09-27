@@ -16872,6 +16872,10 @@ export interface components {
       | "flow_run_file_access_audit_unavailable"
       | "flow_run_step_input_file_too_large"
       | "flow_run_upload_pdf_exceeds_limit"
+      | "flow_run_audio_exceeds_limit"
+      | "flow_run_audio_unreadable"
+      | "flow_run_audio_length_unknown"
+      | "flow_run_audio_measurement_busy"
       | "flow_run_step_input_mimetype_rejected"
       | "flow_run_aggregate_max_files_exceeded"
       | "flow_run_reserved_input_payload_key"
@@ -19332,6 +19336,7 @@ export interface components {
      *         "idle_timeout_seconds": 120,
      *         "max_timeout_seconds": 600,
      *         "min_timeout_seconds": 120,
+     *         "response_timeout_seconds": 960,
      *         "seconds_per_mebibyte": 8
      *       },
      *       "security_classification": {
@@ -19412,7 +19417,7 @@ export interface components {
       form_fields?: components["schemas"]["FormFieldPublic"][];
       /** Published Flow Version */
       published_flow_version: number;
-      /** @description Client-side timeout policy for runtime file uploads. Consumers should calculate each upload's initial timeout from the actual file size: `clamp(min_timeout_seconds, max_timeout_seconds, ceil(file_size_mib * seconds_per_mebibyte))`, then keep a progressing upload alive until `idle_timeout_seconds` passes without progress. */
+      /** @description Client-side timeout policy for runtime file uploads. Consumers should calculate each upload's initial timeout from the actual file size: `clamp(min_timeout_seconds, max_timeout_seconds, ceil(file_size_mib * seconds_per_mebibyte))`, then keep a progressing upload alive until `idle_timeout_seconds` passes without progress, and wait `response_timeout_seconds` for the response once every byte is sent. */
       runtime_upload_policy?: components["schemas"]["FlowRuntimeUploadPolicyPublic"];
       /** @description The security classification of the flow's space, which tells users what information the flow may take. Null when the space has none or the organization has turned security classifications off. */
       security_classification?: components["schemas"]["FlowSecurityClassificationPublic"] | null;
@@ -23996,6 +24001,11 @@ export interface components {
        * @description Minimum wall-clock timeout clients should allow for each runtime file upload.
        */
       min_timeout_seconds: number;
+      /**
+       * Response Timeout Seconds
+       * @description Time clients should allow for the response once every byte is sent: the server measures audio and extracts PDF text before it answers.
+       */
+      response_timeout_seconds: number;
       /**
        * Seconds Per Mebibyte
        * @description Multiplier clients should apply to the actual file size when calculating a per-file upload timeout.

@@ -9,6 +9,7 @@ from fastapi import UploadFile
 
 from eneo.authentication.auth_models import is_service_api_key
 from eneo.authentication.principal_types import PrincipalType
+from eneo.files.audio import AudioDecodeLimits
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import (
     File,
@@ -195,13 +196,17 @@ class FileService:
         upload_file: UploadFile,
         *,
         max_size: int | None = None,
-        before_commit: Callable[[FileInfo], Awaitable[None]] | None = None,
+        before_commit: Callable[[FileInfo, float | None], Awaitable[None]]
+        | None = None,
         pdf_limits: PdfExtractionLimits | None = None,
+        audio_limits: AudioDecodeLimits | None = None,
     ) -> FileInfo:
         """Persist one file family and optionally join a dependent SQL write.
 
         ``before_commit`` runs after the File rows are staged but inside the same
-        SQL transaction. Raising from it rolls back the File rows as well.
+        SQL transaction, with the audio's length when ``audio_limits`` measured
+        it (None otherwise). Raising from it rolls back the File rows as well.
+        Audio clearly longer than ``audio_limits`` is refused before it is kept.
         """
         snapshot = self._require_upload_admission()
         storage_target = snapshot.new_write_storage_target
@@ -222,6 +227,7 @@ class FileService:
             upload_admission_snapshot=snapshot,
             max_size=max_size,
             pdf_limits=pdf_limits,
+            audio_limits=audio_limits,
         ) as prepared:
             async with AsyncExitStack() as capture_stack:
                 family = tuple(
@@ -267,7 +273,7 @@ class FileService:
                             list(root.references),
                         )
                         if before_commit is not None:
-                            await before_commit(file)
+                            await before_commit(file, prepared.audio_seconds)
                     return file
 
                 contents = tuple(
@@ -286,7 +292,7 @@ class FileService:
                             policy_revision=snapshot.policy_revision,
                         )
                         if before_commit is not None:
-                            await before_commit(file)
+                            await before_commit(file, prepared.audio_seconds)
                     return file
 
     async def _capture_prepared_file(

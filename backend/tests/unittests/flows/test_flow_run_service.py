@@ -189,6 +189,8 @@ def _access_policy_double() -> AsyncMock:
 def _runtime_upload_repo(*bound_file_ids: UUID) -> AsyncMock:
     repo = AsyncMock()
     repo.list_bound_file_ids_for_owner.return_value = set(bound_file_ids)
+    # Measured at upload, well within any tenant's longest recording.
+    repo.audio_seconds_by_file.return_value = dict.fromkeys(bound_file_ids, 60.0)
     return repo
 
 

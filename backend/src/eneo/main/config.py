@@ -364,6 +364,9 @@ class Settings(BaseSettings):
     # page; its default is flow_audio_max_duration_seconds). Flow-only: other
     # transcription keeps flow_audio_max_duration_seconds.
     flow_audio_max_duration_ceiling_seconds: int = 8 * 60 * 60
+    # How long an audio upload may wait for and take its measuring decode (a few
+    # run at a time); past it the upload is refused as busy, to retry.
+    flow_audio_measurement_timeout_seconds: int = Field(default=600, gt=0)
     # Live transcription preview. A recording streams audio, silence included,
     # the whole time, so the idle timeout only ends a paused or stalled client.
     # The final-text wait covers the audio the model server has not decoded yet

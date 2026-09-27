@@ -86,7 +86,34 @@ describe("runtime upload policy", () => {
     expect(abortController.signal.aborted).toBe(true);
   });
 
-  it("uses the server-response timeout after all bytes are sent", () => {
+  it("waits the server's published response time after all bytes are sent", () => {
+    const clock = createFakeClock();
+    const abortController = new AbortController();
+    const timeouts = [];
+    const controller = createFlowRuntimeUploadTimeoutController({
+      fileSizeBytes: 50 * 1024 * 1024,
+      // The server measures audio for up to 10 minutes before it answers.
+      policy: { ...policy, response_timeout_seconds: 660 },
+      abortController,
+      onTimeout: (event) => timeouts.push(event),
+      setTimeoutFn: clock.setTimeout,
+      clearTimeoutFn: clock.clearTimeout
+    });
+
+    controller.onProgress({ loaded: 10, total: 50 * 1024 * 1024, lengthComputable: true });
+    // Stalls during the upload are still found at the idle timeout.
+    expect(clock.current?.timeoutMs).toBe(120_000);
+    controller.onProgress({
+      loaded: 50 * 1024 * 1024,
+      total: 50 * 1024 * 1024,
+      lengthComputable: true
+    });
+
+    expect(clock.current?.timeoutMs).toBe(660_000);
+    expect(abortController.signal.aborted).toBe(false);
+  });
+
+  it("uses the idle timeout for the response when the server publishes none", () => {
     const clock = createFakeClock();
     const abortController = new AbortController();
     const timeouts = [];

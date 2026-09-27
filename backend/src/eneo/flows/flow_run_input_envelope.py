@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Self
+from collections.abc import Mapping
+from typing import Self, cast
 from uuid import UUID
 
 from pydantic import TypeAdapter
@@ -34,6 +35,9 @@ class StepInputFacts(TypedDict):
     live_transcript_id: NotRequired[UUID]
     # The step's files are the ordered parts of one recording.
     single_recording: NotRequired[bool]
+    # The longest recording the step's audio was admitted under: its transcription
+    # keeps it, whatever the tenant's limit is when the run executes.
+    audio_max_duration_seconds: NotRequired[int]
 
 
 _STEP_INPUT_FACTS = TypeAdapter(dict[UUID, StepInputFacts])
@@ -131,6 +135,38 @@ def read_single_recording_steps(
         for step_id, facts in _read_step_input_facts(input_payload_json).items()
         if facts.get("single_recording")
     )
+
+
+def with_admitted_audio_seconds(
+    input_payload_json: FlowPersistedJsonObject | None,
+    admitted: Mapping[UUID, int],
+) -> FlowPersistedJsonObject:
+    """The payload with the limit each audio step was admitted under. Server
+    policy, not the caller's request: it is added after the replay check and never
+    enters the idempotency fingerprint."""
+    payload = dict(input_payload_json or {})
+    if not admitted:
+        return payload
+    step_facts = dict(
+        cast(dict[str, dict[str, object]], payload.get(STEP_INPUTS_KEY) or {})
+    )
+    for step_id, seconds in admitted.items():
+        step_facts[str(step_id)] = {
+            **step_facts.get(str(step_id), {}),
+            "audio_max_duration_seconds": seconds,
+        }
+    payload[STEP_INPUTS_KEY] = step_facts
+    return payload
+
+
+def read_admitted_audio_seconds(
+    input_payload_json: FlowPersistedJsonObject | None,
+) -> dict[UUID, int]:
+    return {
+        step_id: facts["audio_max_duration_seconds"]
+        for step_id, facts in _read_step_input_facts(input_payload_json).items()
+        if "audio_max_duration_seconds" in facts
+    }
 
 
 def read_max_speakers_decision(

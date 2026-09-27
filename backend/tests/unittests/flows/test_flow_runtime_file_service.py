@@ -13,7 +13,7 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 
-from eneo.files import text
+from eneo.files import audio, text
 from eneo.files.file_protocol import FileProtocol
 from eneo.files.file_service import FileService
 from eneo.files.file_size_service import FileSizeService
@@ -25,8 +25,11 @@ from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_api_exceptions import FlowBadRequestException
-from eneo.flows.flow_input_limits import FlowInputLimits
+from eneo.flows.flow_api_exceptions import (
+    FlowBadRequestException,
+    FlowServiceUnavailableException,
+)
+from eneo.flows.flow_input_limits import FlowInputLimits, flow_audio_decode_limits
 from eneo.flows.flow_run_contract_service import FlowRunContractService
 from eneo.flows.flow_runtime_file_service import FlowRuntimeFileService
 from eneo.flows.published_definition import (
@@ -349,7 +352,7 @@ async def test_upload_runtime_file_for_step_records_flow_upload_binding(
             mimetype="application/pdf",
         )
         async with session.begin():
-            await kwargs["before_commit"](file)
+            await kwargs["before_commit"](file, None)
         return file
 
     async def create_runtime_upload(**kwargs):
@@ -447,7 +450,7 @@ async def test_upload_runtime_file_rolls_back_binding_when_required_audit_fails(
             mimetype="application/pdf",
         )
         async with session.begin():
-            await kwargs["before_commit"](file)
+            await kwargs["before_commit"](file, None)
         return file
 
     file_service.save_file.side_effect = save_file
@@ -515,7 +518,7 @@ async def test_upload_runtime_file_rolls_back_when_binding_insert_fails(
             mimetype="application/pdf",
         )
         async with session.begin():
-            await kwargs["before_commit"](file)
+            await kwargs["before_commit"](file, None)
         return file
 
     async def create_runtime_upload(**kwargs):
@@ -1057,6 +1060,170 @@ async def test_upload_accepts_declared_audio_mp3_alias(monkeypatch) -> None:
     )
 
     file_service.save_file.assert_awaited_once()
+
+
+def _audio_upload_case(monkeypatch):
+    flow_service = AsyncMock()
+    file_service = AsyncMock()
+    settings_service = AsyncMock()
+    session = _Session()
+    runtime_upload_repo = _runtime_upload_repo(session=session)
+    flow = _flow(step=_step(step_order=1, input_type="audio"))
+    flow_service.get_flow.return_value = flow
+    limits = FlowInputLimits(
+        file_max_size_bytes=11_000_000,
+        audio_max_size_bytes=25_000_000,
+        audio_max_duration_seconds=1_800,
+    )
+    settings_service.get_flow_input_limits_resolved.return_value = limits
+    monkeypatch.setattr(
+        "eneo.flows.flow_runtime_file_service._sniff_mimetype",
+        lambda _upload_file: "audio/webm",
+    )
+    service = _service(
+        user=_user(tenant_id=flow.tenant_id),
+        session=session,
+        flow_service=flow_service,
+        file_service=file_service,
+        runtime_upload_repo=runtime_upload_repo,
+        settings_service=settings_service,
+        flow_version_repo=_version_repo(flow),
+    )
+    upload = UploadFile(
+        filename="part.webm",
+        file=BytesIO(b"fake"),
+        headers={"content-type": "audio/webm"},
+    )
+    return SimpleNamespace(
+        service=service,
+        flow=flow,
+        file_service=file_service,
+        runtime_upload_repo=runtime_upload_repo,
+        session=session,
+        limits=limits,
+        upload=upload,
+    )
+
+
+@pytest.mark.asyncio
+async def test_audio_upload_keeps_its_measured_length_with_the_upload(
+    monkeypatch,
+) -> None:
+    case = _audio_upload_case(monkeypatch)
+    file = SimpleNamespace(id=uuid4(), name="part.webm", size=4, mimetype="audio/webm")
+
+    async def save_file(*args, **kwargs):
+        async with case.session.begin():
+            await kwargs["before_commit"](file, 95.5)
+        return file
+
+    case.file_service.save_file.side_effect = save_file
+
+    await case.service.upload_runtime_file_for_step(
+        flow_id=case.flow.id, step_id=case.flow.steps[0].id, upload_file=case.upload
+    )
+
+    # Measured under the tenant's longest recording, the limit the run is held to.
+    assert case.file_service.save_file.await_args.kwargs[
+        "audio_limits"
+    ] == flow_audio_decode_limits(case.limits)
+    assert case.runtime_upload_repo.create.await_args.kwargs["audio_seconds"] == 95.5
+
+
+@pytest.mark.asyncio
+async def test_audio_upload_over_the_longest_recording_is_refused_before_it_is_kept(
+    monkeypatch,
+) -> None:
+    case = _audio_upload_case(monkeypatch)
+    case.file_service.save_file.side_effect = audio.AudioDecodeLimitExceeded(
+        limit="duration_seconds", measured=1_900.2, ceiling=1_800
+    )
+
+    with pytest.raises(FlowBadRequestException) as error:
+        await case.service.upload_runtime_file_for_step(
+            flow_id=case.flow.id,
+            step_id=case.flow.steps[0].id,
+            upload_file=case.upload,
+        )
+
+    assert error.value.code is FlowApiErrorCode.RUN_AUDIO_EXCEEDS_LIMIT
+    assert error.value.context == {
+        "limit": "duration_seconds",
+        "measured": 1_901,
+        "ceiling": 1_800,
+    }
+    case.runtime_upload_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_audio_upload_that_does_not_decode_is_refused_as_unreadable(
+    monkeypatch,
+) -> None:
+    case = _audio_upload_case(monkeypatch)
+    case.file_service.save_file.side_effect = audio.AudioUnreadableError("status 1")
+
+    with pytest.raises(FlowBadRequestException) as error:
+        await case.service.upload_runtime_file_for_step(
+            flow_id=case.flow.id,
+            step_id=case.flow.steps[0].id,
+            upload_file=case.upload,
+        )
+
+    assert error.value.code is FlowApiErrorCode.RUN_AUDIO_UNREADABLE
+    case.runtime_upload_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_audio_measurement_without_capacity_is_refused_as_retryable(
+    monkeypatch,
+) -> None:
+    case = _audio_upload_case(monkeypatch)
+    case.file_service.save_file.side_effect = audio.AudioMeasurementBusy()
+
+    with pytest.raises(FlowServiceUnavailableException) as error:
+        await case.service.upload_runtime_file_for_step(
+            flow_id=case.flow.id,
+            step_id=case.flow.steps[0].id,
+            upload_file=case.upload,
+        )
+
+    assert error.value.code is FlowApiErrorCode.RUN_AUDIO_MEASUREMENT_BUSY
+    case.runtime_upload_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_document_upload_is_not_measured_as_audio(monkeypatch) -> None:
+    flow_service = AsyncMock()
+    file_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow = _flow(step=_step(step_order=1, input_type="document"))
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
+        file_max_size_bytes=11_000_000,
+        audio_max_size_bytes=25_000_000,
+    )
+    monkeypatch.setattr(
+        "eneo.flows.flow_runtime_file_service._sniff_mimetype",
+        lambda _upload_file: "application/pdf",
+    )
+    service = _service(
+        flow_service=flow_service,
+        file_service=file_service,
+        settings_service=settings_service,
+        flow_version_repo=_version_repo(flow),
+    )
+
+    await service.upload_runtime_file_for_step(
+        flow_id=flow.id,
+        step_id=flow.steps[0].id,
+        upload_file=UploadFile(
+            filename="source.pdf",
+            file=BytesIO(b"%PDF-1.4"),
+            headers={"content-type": "application/pdf"},
+        ),
+    )
+
+    assert file_service.save_file.await_args.kwargs["audio_limits"] is None
 
 
 @pytest.mark.asyncio

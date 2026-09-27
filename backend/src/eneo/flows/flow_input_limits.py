@@ -41,6 +41,8 @@ class FlowRuntimeUploadPolicy:
     seconds_per_mebibyte: int = 8
     max_timeout_seconds: int = 600
     idle_timeout_seconds: int = 120
+    # After the last byte: the server measures audio and extracts PDF text first.
+    response_timeout_seconds: int = 120
 
 
 def audio_duration_ceiling_seconds(settings: Settings | None = None) -> int:
@@ -62,12 +64,16 @@ def _default_audio_duration_seconds(settings: Settings | None = None) -> int:
 
 
 def flow_audio_decode_limits(
-    limits: FlowInputLimits, settings: Settings | None = None
+    limits: FlowInputLimits,
+    settings: Settings | None = None,
+    *,
+    admitted_seconds: int | None = None,
 ) -> AudioDecodeLimits:
-    """What a flow's audio may decode to: the tenant's longest recording and
-    the deployment's decoded-byte bound."""
+    """What a flow's audio may decode to: the tenant's longest recording (or the
+    one a run's audio was admitted under) and the deployment's decoded-byte bound."""
     return AudioDecodeLimits(
-        max_duration_seconds=limits.audio_max_duration_seconds
+        max_duration_seconds=admitted_seconds
+        or limits.audio_max_duration_seconds
         or _default_audio_duration_seconds(settings),
         max_decoded_bytes=(settings or get_settings()).flow_audio_max_decoded_bytes,
     )
@@ -323,8 +329,19 @@ def effective_flow_input_limit(*, input_type: str, limits: FlowInputLimits) -> i
     return limits.file_max_size_bytes
 
 
+# What the upload request does after its measuring or extraction: storing, binding, audit.
+_UPLOAD_RESPONSE_MARGIN_SECONDS = 60
+
+
 def effective_runtime_upload_policy() -> FlowRuntimeUploadPolicy:
-    return FlowRuntimeUploadPolicy()
+    settings = get_settings()
+    return FlowRuntimeUploadPolicy(
+        response_timeout_seconds=max(
+            settings.flow_audio_measurement_timeout_seconds,
+            settings.flow_pdf_extraction_timeout_seconds,
+        )
+        + _UPLOAD_RESPONSE_MARGIN_SECONDS
+    )
 
 
 def effective_max_files_per_run(*, input_type: str, limits: FlowInputLimits) -> int:

@@ -417,6 +417,10 @@ FLOW_PDF_EXTRACTION_TIMEOUT_SECONDS=900
 # budget together; provisional defaults pending measurement (eneo-hy7c).
 FLOW_AUDIO_MAX_DURATION_SECONDS=18000
 FLOW_AUDIO_MAX_DECODED_BYTES=2147483648
+# An audio upload is decoded to measure it before it is kept, a few at a time; past
+# this wait and decode the upload is refused as busy (503) to retry. Clients wait
+# max(this, FLOW_PDF_EXTRACTION_TIMEOUT_SECONDS) + 60 s for the upload's response.
+FLOW_AUDIO_MEASUREMENT_TIMEOUT_SECONDS=600
 # Live transcription preview. A recording keeps streaming audio (silence too),
 # so the idle timeout only ends a paused or stalled client. The final-text wait
 # covers what the model server has not decoded yet when recording stops; raise it

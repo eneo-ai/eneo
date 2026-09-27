@@ -2,14 +2,17 @@
 
 import asyncio
 import math
+import os
 import tempfile
 import threading
 import wave
 from collections.abc import (
     AsyncGenerator,
     AsyncIterator,
+    Awaitable,
     Callable,
     Generator,
+    Iterable,
 )
 from contextlib import (
     AbstractContextManager,
@@ -272,6 +275,40 @@ async def measure_duration(
     return await _decode_audio(
         filepath, limits=limits or AudioDecodeLimits.from_settings()
     )
+
+
+def within_decode_limit(lengths: Iterable[float], ceiling_seconds: int) -> bool:
+    """Whether decoded lengths together fit the ceiling, counted in whole 16 kHz
+    samples as the decoder counts them: float seconds would drift past it."""
+    samples = sum(round(seconds * _DECODE_SAMPLE_RATE) for seconds in lengths)
+    return samples <= ceiling_seconds * _DECODE_SAMPLE_RATE
+
+
+class AudioUnreadableError(ValueError):
+    """The audio decoder could not read the file."""
+
+
+class AudioMeasurementBusy(Exception):
+    """No capacity to measure the audio within its deadline: try again shortly."""
+
+
+# Decodes that measure uploads run beside transcription's: a few at a time a process.
+_MEASUREMENT_CAPACITY = asyncio.Semaphore(max(1, (os.cpu_count() or 2) // 2))
+
+
+def _measurement_deadline_seconds() -> float:
+    return get_settings().flow_audio_measurement_timeout_seconds
+
+
+async def bounded_measurement(work: Callable[[], Awaitable[_T]]) -> _T:
+    """Runs `work` once a measurement slot is free, the wait inside one deadline;
+    past it, AudioMeasurementBusy."""
+    try:
+        async with asyncio.timeout(_measurement_deadline_seconds()):
+            async with _MEASUREMENT_CAPACITY:
+                return await work()
+    except TimeoutError as exc:
+        raise AudioMeasurementBusy() from exc
 
 
 @asynccontextmanager
