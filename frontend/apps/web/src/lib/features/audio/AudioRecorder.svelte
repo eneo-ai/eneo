@@ -41,6 +41,7 @@
   import { downloadRecordedAudioFile } from "./downloadRecordedAudioFile";
   import type { RecorderJournal } from "./recordingJournal";
   import { generateSessionId, ROTATION_OVERLAP_MS } from "./recordingSession";
+  import { withRecordedDuration } from "./webmDuration";
   import type { RecorderAudioGraph } from "./live/LiveTranscriptPreview.svelte";
 
   // Every stop reports once. `blob` is null when nothing was captured, so a
@@ -136,6 +137,9 @@
   // Recorders a rotation replaced; each still finishes its own segment.
   const replacedRecorders = new WeakSet<MediaRecorder>();
   let handoversPending = 0;
+  // Settles once the latest segment recorder has handed its file over: each waits
+  // for the one before, so parts arrive in recording order whichever file is built first.
+  let handoverQueue: Promise<void> = Promise.resolve();
   // Settles once a recorder's stop has been handled.
   const recorderStops = new WeakMap<MediaRecorder, Promise<void>>();
   // The replaced recorder still capturing the rotation overlap.
@@ -642,7 +646,14 @@
     const initialMimeType = recorder.mimeType || recordingOptions.mimeType || "";
     const chunks: Blob[] = [];
     const segmentStartedAt = monotonicNow();
-    const handOver = reportTo.onRecordingDone;
+    const onRecordingDone = reportTo.onRecordingDone;
+    // Its place in the handover queue, taken once the recorder runs.
+    let earlierHandovers: Promise<void> = Promise.resolve();
+    let handedOver = () => {};
+    const handOver = async (segment: Parameters<typeof onRecordingDone>[0]) => {
+      await earlierHandovers;
+      onRecordingDone(segment);
+    };
     const partJournal = reportTo.journal;
     const fileNearlyFull = reportTo.onFileNearlyFull;
     const partId = generateSessionId();
@@ -654,16 +665,22 @@
         stopHandled = resolve;
       })
     );
-    const finishedSegment = () => {
+    // The part's file, its WebM header carrying the recorded duration.
+    const finishedSegment = async () => {
       const mimeType =
         recorder.mimeType ||
         initialMimeType ||
         chunks.find((chunk) => chunk.type)?.type ||
         "audio/webm";
+      // Measured at the stop, before the header is read.
+      const durationMs = Math.max(0, monotonicNow() - segmentStartedAt);
+      const [first, ...rest] = chunks;
       return {
-        blob: new Blob(chunks, { type: mimeType }),
+        blob: new Blob([await withRecordedDuration(first!, durationMs, mimeType), ...rest], {
+          type: mimeType
+        }),
         mimeType,
-        durationMs: Math.max(0, monotonicNow() - segmentStartedAt),
+        durationMs,
         partId
       };
     };
@@ -730,24 +747,23 @@
     });
 
     recorder.addEventListener("stop", () => {
-      try {
-        finishStop();
-      } finally {
-        stopHandled();
-      }
+      void finishStop()
+        .catch((error) => console.error("Failed to finish a recorded segment", error))
+        .finally(() => {
+          void earlierHandovers.then(handedOver);
+          stopHandled();
+        });
     });
 
-    function finishStop() {
+    async function finishStop() {
       if (isReplaced()) {
-        handoversPending -= 1;
         // Rotation replaced this recorder: hand its file over and leave the
         // stream, the meter and the live recorder alone. The segment is
         // complete, so not even an unmount drops it.
-        if (chunks.length > 0) {
-          handOver({ ...finishedSegment(), reason: "rotation" });
-        } else {
-          partJournal?.discard(partId);
-        }
+        const segment = chunks.length > 0 ? await finishedSegment() : null;
+        if (segment) await handOver({ ...segment, reason: "rotation" });
+        else partJournal?.discard(partId);
+        handoversPending -= 1;
         return;
       }
       if (discardRecordingOnStop) {
@@ -756,40 +772,41 @@
         releaseMediaCapture();
         return;
       }
-      let segment: ReturnType<typeof finishedSegment> | null = null;
-      try {
-        recordingState = "processing";
-
-        if (chunks.length === 0) {
-          const errorMsg = m.no_audio_data_captured();
-          setRecordingErrorState(errorMsg);
-          recordingStats.errors.push(errorMsg);
-          recordingState = "error";
-        } else {
-          completedRecordingAt = dayjs();
-          segment = finishedSegment();
-          recordedMimeType = segment.mimeType;
-          recordedBlob = segment.blob;
-          audioURL = URL.createObjectURL(recordedBlob);
-          recordingState = "complete";
-        }
-      } catch (error) {
-        const errorMsg =
-          "Failed to process recording: " +
-          (error instanceof Error ? error.message : String(error));
-        console.error(errorMsg, error);
-        setRecordingErrorState(errorMsg, error);
+      // Read now: another recording may start while the file is built.
+      const reason = stopReason;
+      resetStopReason();
+      recordingState = "processing";
+      releaseMediaCapture();
+      let segment: Awaited<ReturnType<typeof finishedSegment>> | null = null;
+      if (chunks.length === 0) {
+        const errorMsg = m.no_audio_data_captured();
+        setRecordingErrorState(errorMsg);
         recordingStats.errors.push(errorMsg);
         recordingState = "error";
-        segment = null;
-      } finally {
-        releaseMediaCapture();
+      } else {
+        try {
+          segment = await finishedSegment();
+          // A recording started meanwhile owns the recorder's view; an unmounted one has none.
+          if (!isRecording && !isDestroyed) {
+            completedRecordingAt = dayjs();
+            recordedMimeType = segment.mimeType;
+            recordedBlob = segment.blob;
+            audioURL = URL.createObjectURL(recordedBlob);
+            recordingState = "complete";
+          }
+        } catch (error) {
+          const errorMsg =
+            "Failed to process recording: " +
+            (error instanceof Error ? error.message : String(error));
+          console.error(errorMsg, error);
+          setRecordingErrorState(errorMsg, error);
+          recordingStats.errors.push(errorMsg);
+          recordingState = "error";
+        }
       }
       // Reported whether or not there is audio: an error or stall that
       // captured nothing still has to reach the caller's retry loop.
-      const reason = stopReason;
-      resetStopReason();
-      handOver({
+      await handOver({
         blob: segment?.blob ?? null,
         mimeType: segment?.mimeType ?? "",
         reason,
@@ -809,6 +826,8 @@
     });
 
     recorder.start(TIMESLICE_MS);
+    earlierHandovers = handoverQueue;
+    handoverQueue = new Promise<void>((resolve) => (handedOver = resolve));
     recordingStats.recorderMimeType = recorder.mimeType || initialMimeType;
     partJournal?.begin(partId, recordingStats.recorderMimeType || "audio/webm");
     return recorder;

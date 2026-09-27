@@ -31,6 +31,7 @@ import { PCM16_FLUSH, PCM16_FLUSHED } from "$lib/features/audio/live/pcm16-workl
 import { RETRY_BACKOFF_MS, ROTATION_OVERLAP_MS } from "$lib/features/audio/recordingSession";
 import { RECORDED_UPLOAD_RETRY_MS } from "$lib/features/audio/uploadRetry";
 import { fakeLocks } from "$lib/features/audio/recordingJournalTestLocks";
+import { chromeWebm, readDurationMs } from "$lib/features/audio/webmDurationTestFixtures";
 import {
   recordingSessionStore,
   type SegmentRecord,
@@ -431,6 +432,72 @@ describe("FlowRunDialog recording rotation", () => {
 
     expect(upload).not.toHaveBeenCalled();
     expect(requireFailedRecordingAlert()).toBeTruthy();
+  });
+
+  it("writes each part's recorded duration into its WebM header, also when it stops at once", async () => {
+    await openDialogAndStartRecording(vi.fn(() => new Promise<UploadedFile>(() => undefined)));
+    vi.advanceTimersByTime(4_000);
+    // The first chunk and the stop come together: the header is read as the file is built.
+    media.recorders[0]?.deliver(chromeWebm());
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+
+    const [persisted] = vi.mocked(persistRecordingSegment).mock.calls.map(([args]) => args);
+    const header = new Uint8Array(await persisted!.blob.arrayBuffer());
+    expect(readDurationMs(header)).toBe(persisted!.durationMs);
+    expect(persisted!.durationMs).toBeGreaterThanOrEqual(4_000);
+  });
+
+  it("hands parts over in recording order when the earlier part's header is slower to read", async () => {
+    await openDialogAndStartRecording(vi.fn(() => new Promise<UploadedFile>(() => undefined)));
+    await rotate();
+    let releaseEarlierHeader = () => {};
+    const read = vi.spyOn(Blob.prototype, "arrayBuffer");
+    read.mockImplementationOnce(
+      () =>
+        new Promise<ArrayBuffer>((resolve) => {
+          releaseEarlierHeader = () => resolve(new ArrayBuffer(1));
+        })
+    );
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    media.recorders[1]?.finish();
+    await flush();
+    await endOverlap();
+    // The later part's file is built; it waits for the earlier one.
+    expect(persistedSegments()).toEqual([]);
+
+    releaseEarlierHeader();
+    await flush();
+    expect(persistedSegments()).toEqual([
+      { segmentIndex: 0, reason: "rotation" },
+      { segmentIndex: 1, reason: "manual" }
+    ]);
+  });
+
+  it("hands over a part whose file is still being built at unmount, and makes no preview for it", async () => {
+    const rendered = await openDialogAndStartRecording(
+      vi.fn(() => new Promise<UploadedFile>(() => undefined))
+    );
+    let releaseHeader = () => {};
+    vi.spyOn(Blob.prototype, "arrayBuffer").mockImplementationOnce(
+      () =>
+        new Promise<ArrayBuffer>((resolve) => {
+          releaseHeader = () => resolve(new ArrayBuffer(1));
+        })
+    );
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+    const createObjectURL = vi.spyOn(URL, "createObjectURL");
+
+    rendered.unmount();
+    releaseHeader();
+    await flush();
+
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(persistedSegments()).toEqual([{ segmentIndex: 0, reason: "manual" }]);
   });
 
   it("stops at the step's last file slot and refuses another start, saying why", async () => {

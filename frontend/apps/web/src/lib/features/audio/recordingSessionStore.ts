@@ -2,6 +2,7 @@
 // store (a failed write or Blob round trip), and every read combines the two.
 
 import type { RecordingStopReason } from "./recordedAudioFile";
+import { withRecordedDuration } from "./webmDuration";
 
 const DB_NAME = "eneo-recording-sessions";
 // Version 2 adds the journal a running recording writes as it goes.
@@ -592,18 +593,19 @@ class RecordingSessionStoreImpl {
     if (kept === null || chunks === null) return false;
     // The part ends with its last chunk that plays, when the recorder handed it over.
     const savedUntil = chunks.at(-1)?.at ?? part.lastChunkAt;
+    const durationMs = Math.max(0, savedUntil - part.startedAt);
     if (chunks.length > 0) {
+      const [first, ...rest] = chunks.map((chunk) => chunk.blob);
       const { persisted } = await this.writeSegment({
         flowId: part.flowId,
         stepId: part.stepId,
         sessionId: part.sessionId,
         segmentIndex,
-        blob: new Blob(
-          chunks.map((chunk) => chunk.blob),
-          { type: part.mimeType }
-        ),
+        blob: new Blob([await withRecordedDuration(first!, durationMs, part.mimeType), ...rest], {
+          type: part.mimeType
+        }),
         mimeType: part.mimeType,
-        durationMs: Math.max(0, savedUntil - part.startedAt),
+        durationMs,
         capturedAt: savedUntil,
         uploadedFileId: null,
         reason: "interrupted",
