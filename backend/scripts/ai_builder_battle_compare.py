@@ -227,6 +227,7 @@ def _case_delta(
     *,
     baseline_repetitions: list[dict[str, Any]] | None = None,
     current_repetitions: list[dict[str, Any]] | None = None,
+    runtime_call_allowance: int | None = None,
 ) -> dict[str, Any]:
     before = str((baseline or {}).get("outcome_class") or "absent")
     after = str((current or {}).get("outcome_class") or "absent")
@@ -307,7 +308,124 @@ def _case_delta(
                     - before_repairs["repair_token_cost"]
                 )
             delta["repair_economics"] = repair_delta
+    runtime_cost = _runtime_cost_delta(
+        baseline_repetitions or [],
+        current_repetitions or [],
+        allowance=runtime_call_allowance,
+    )
+    if runtime_cost is not None:
+        delta["runtime_cost"] = runtime_cost
     return delta
+
+
+def _runtime_cost_delta(
+    before_rows: list[dict[str, Any]],
+    after_rows: list[dict[str, Any]],
+    *,
+    allowance: int | None,
+) -> dict[str, Any] | None:
+    """Each side's runtime cost per observation, for a case either side executes.
+
+    With an allowance, each current observation is held to the baseline's
+    worst observation: calls up to its most plus the allowance and no more
+    length finishes. It must deliver successfully where every baseline
+    observation did, and always every required literal they all delivered.
+    """
+
+    costs = {
+        side: [row.get("runtime_cost") for row in rows]
+        for side, rows in (("before", before_rows), ("after", after_rows))
+    }
+    if not any(isinstance(cost, dict) for side in costs.values() for cost in side):
+        return None
+    report: dict[str, Any] = dict(costs)
+    if allowance is None:
+        return report
+    failures: list[str] = []
+    if not before_rows or not after_rows:
+        failures.append("the case was observed on one side only")
+    for side, rows in (("baseline", before_rows), ("current", after_rows)):
+        failures.extend(
+            f"{side} r{row.get('repetition')} runtime evidence is missing or incomplete"
+            for row in rows
+            if cast(dict[str, Any], row.get("runtime_cost") or {}).get("complete")
+            is not True
+        )
+    if not failures:
+        before = [cast(dict[str, Any], row["runtime_cost"]) for row in before_rows]
+        most_calls = max(cast(int, cost["provider_calls"]) for cost in before)
+        most_lengths = max(cast(int, cost["length_finishes"]) for cost in before)
+        for row in after_rows:
+            cost = cast(dict[str, Any], row["runtime_cost"])
+            label = f"current r{row.get('repetition')}"
+            if cost["provider_calls"] > most_calls + allowance:
+                failures.append(
+                    f"{label} made {cost['provider_calls']} runtime calls; the "
+                    f"baseline's most is {most_calls}, allowance {allowance}"
+                )
+            if cost["length_finishes"] > most_lengths:
+                failures.append(
+                    f"{label} has {cost['length_finishes']} finish_reason=length "
+                    f"attempt(s); the baseline's most is {most_lengths}"
+                )
+    if before_rows and all(row.get("output_success") is True for row in before_rows):
+        failures.extend(
+            f"current r{row.get('repetition')} did not deliver successfully; "
+            "every baseline observation did"
+            for row in after_rows
+            if row.get("output_success") is not True
+        )
+    baseline_facts = [
+        cast(dict[str, Any], row.get("output_required_facts") or {})
+        for row in before_rows
+    ]
+    delivered = {
+        fact
+        for fact in (baseline_facts[0] if baseline_facts else {})
+        if all(facts.get(fact) is True for facts in baseline_facts)
+    }
+    for row in after_rows:
+        facts = cast(dict[str, Any], row.get("output_required_facts") or {})
+        missing = sorted(fact for fact in delivered if facts.get(fact) is not True)
+        if missing:
+            failures.append(
+                f"current r{row.get('repetition')} misses required literal(s) "
+                f"the baseline delivered: {missing}"
+            )
+    report["failures"] = failures
+    return report
+
+
+def _runtime_row_error(row: dict[str, Any]) -> str | None:
+    """Why a row cannot be gated on runtime cost, or None."""
+
+    def count(value: object) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+    if "runtime_cost" not in row:
+        return "no runtime_cost (a receipt from an older harness)"
+    raw_cost: object = row["runtime_cost"]
+    if raw_cost is not None:
+        cost = cast(dict[str, Any], raw_cost if isinstance(raw_cost, dict) else {})
+        if not isinstance(cost.get("complete"), bool):
+            return "runtime_cost must be null or an object with a boolean complete"
+        if cost["complete"] and not (
+            all(
+                count(cost.get(key))
+                for key in ("provider_calls", "length_finishes", "total_tokens")
+            )
+            and cost.get("tokens_complete") is True
+            and cost.get("provider_call_evidence") == "complete"
+            and isinstance(cost.get("finish_reasons"), dict)
+        ):
+            return (
+                "a complete runtime_cost needs counted provider_calls, "
+                "length_finishes and total_tokens, tokens_complete, complete "
+                "provider_call_evidence and finish_reasons"
+            )
+    if not isinstance(row.get("output_required_facts"), (dict, type(None))):
+        return "output_required_facts must be null or an object"
+    return None
 
 
 def _identity(summary: dict[str, Any]) -> dict[str, Any]:
@@ -470,6 +588,7 @@ def compare(
     *,
     allow_harness_change: bool = False,
     noise_margin: int | None = None,
+    runtime_call_allowance: int | None = None,
 ) -> dict[str, Any]:
     baseline_rows, baseline_summary, baseline_executed_output = _load_rows(
         baseline_path
@@ -489,6 +608,20 @@ def compare(
             f"baseline={_identity_marker(baseline_summary)!r} "
             f"current={_identity_marker(current_summary)!r}"
         )
+    if runtime_call_allowance is not None:
+        malformed = [
+            f"{row.get('case_id')} r{row.get('repetition')}: {error}"
+            for rows in (baseline_rows, current_rows)
+            for case_rows in rows.values()
+            for row in case_rows
+            if (error := _runtime_row_error(row)) is not None
+        ]
+        if runtime_call_allowance < 0 or malformed:
+            raise SystemExit(
+                "Refusing the runtime cost gate: the allowance must be >= 0 "
+                f"(got {runtime_call_allowance}) and every row well-formed; "
+                f"malformed: {malformed[:5]}"
+            )
     rescored_cases = _case_contract_changes(baseline_summary, current_summary)
     identity_differences = _reported_identity_differences(
         baseline_summary, current_summary
@@ -503,6 +636,7 @@ def compare(
                 _representative_row(current_rows.get(case_id)),
                 baseline_repetitions=baseline_rows.get(case_id) or [],
                 current_repetitions=current_rows.get(case_id) or [],
+                runtime_call_allowance=runtime_call_allowance,
             ),
             "cohorts": _cohorts(current_rows.get(case_id))
             or _cohorts(baseline_rows.get(case_id)),
@@ -589,6 +723,18 @@ def compare(
         "remaining_blockers_ranked": remaining_blockers.most_common(),
         "remaining_failed_checks_ranked": remaining_failed_checks.most_common(),
         "unstable_cases": unstable,
+        "runtime_call_allowance": runtime_call_allowance,
+        "runtime_cost_failed_cases": (
+            {
+                delta["case_id"]: cost["failures"]
+                for delta in deltas
+                if (cost := cast(dict[str, Any], delta.get("runtime_cost") or {})).get(
+                    "failures"
+                )
+            }
+            if runtime_call_allowance is not None
+            else None
+        ),
         "cases": deltas,
     }
 
@@ -843,6 +989,15 @@ def _render_markdown(report: dict[str, Any], *, only_changed: bool) -> str:
         lines.append("## Conformance regressions (the no-regression rule)")
         lines.extend(f"- {case_id}" for case_id in regressed)
         lines.append("")
+    runtime_failed = report["runtime_cost_failed_cases"]
+    if runtime_failed is not None:
+        lines.append(
+            f"## Runtime cost gate (allowance {report['runtime_call_allowance']}): "
+            + ("FAIL" if runtime_failed else "pass")
+        )
+        for case_id, reasons in cast(dict[str, list[str]], runtime_failed).items():
+            lines.extend(f"- {case_id}: {reason}" for reason in reasons)
+        lines.append("")
     by_cohort = cast(dict[str, dict[str, int]], report["direction_counts_by_cohort"])
     if by_cohort:
         lines.append("## Conformance direction by cohort")
@@ -916,6 +1071,7 @@ def _render_markdown(report: dict[str, Any], *, only_changed: bool) -> str:
             "questions",
             "authoring_tokens",
             "repair_economics",
+            "runtime_cost",
         ):
             if key in delta:
                 lines.append(f"  - {key}: {json.dumps(delta[key], ensure_ascii=False)}")
@@ -1562,6 +1718,15 @@ def main() -> None:
             "result is not a margin."
         ),
     )
+    compare_mode.add_argument(
+        "--runtime-call-allowance",
+        type=int,
+        default=None,
+        help=(
+            "Gate executed cases: at most the baseline's most runtime calls + N, "
+            "whole evidence on both sides, no new length finish or lost literal."
+        ),
+    )
 
     release_mode = modes.add_parser(
         "release-verdict", help="Judge one receipt against the release gate."
@@ -1653,6 +1818,7 @@ def main() -> None:
         args.current,
         allow_harness_change=args.allow_harness_change,
         noise_margin=args.noise_margin,
+        runtime_call_allowance=args.runtime_call_allowance,
     )
     if args.format == "json":
         json.dump(report, sys.stdout, ensure_ascii=False, indent=2)
@@ -1660,6 +1826,8 @@ def main() -> None:
     else:
         sys.stdout.write(_render_markdown(report, only_changed=args.only_changed))
         sys.stdout.write("\n")
+    if report["runtime_cost_failed_cases"]:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

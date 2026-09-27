@@ -21,7 +21,7 @@ import subprocess
 import sys
 import time
 import unicodedata
-from collections import deque
+from collections import Counter, deque
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
@@ -8018,6 +8018,18 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
         "output_executed": _created_run(bundle),
         "output_success": output_success if isinstance(output_success, bool) else None,
         "output_failed_checks": output_failed_checks,
+        # Each required literal of the case, and whether the delivered output
+        # holds it, as `_output_report` scored it; None when nothing was scored.
+        "output_required_facts": (
+            {
+                str(check.get("fact")): check.get("passed") is True
+                for check in _mapping_list(report.get("output_checks"))
+                if check.get("name") == "required_fact"
+            }
+            if "output_checks" in report
+            else None
+        ),
+        "runtime_cost": _runtime_cost(bundle),
         "identity_failed_check_count": len(failed_identity_checks),
         "identity_failed_checks": failed_identity_checks,
         "warning_count": len(warnings) if isinstance(warnings, list) else 0,
@@ -11352,25 +11364,9 @@ def _runtime_evidence_checks(
         if provider_calls is not None
         else None
     )
-    raw_provider_call_count = (
-        provider_calls.get("total_count") if provider_calls is not None else None
+    provider_call_count, provider_call_evidence_status = _provider_call_count(
+        cast(Mapping[str, object] | None, provider_calls)
     )
-    provider_call_count = (
-        raw_provider_call_count
-        if isinstance(raw_provider_call_count, int)
-        and not isinstance(raw_provider_call_count, bool)
-        and raw_provider_call_count >= 0
-        and total_count_truncated is False
-        else None
-    )
-    if provider_calls is None:
-        provider_call_evidence_status = "missing"
-    elif total_count_truncated is True:
-        provider_call_evidence_status = "truncated"
-    elif total_count_truncated is not False or provider_call_count is None:
-        provider_call_evidence_status = "invalid"
-    else:
-        provider_call_evidence_status = "complete"
 
     source_labels = list(
         dict.fromkeys(
@@ -11393,16 +11389,8 @@ def _runtime_evidence_checks(
     expected_model_calls = _int_value(expected.get("model_call_count"))
     token_usage = run.get("token_usage")
     token_usage = token_usage if isinstance(token_usage, Mapping) else None
-    total_tokens = (
-        _int_value(token_usage.get("num_tokens_total"))
-        if token_usage is not None
-        else None
-    )
-    # The run's own usage says whether every contributing call reported its
-    # counts; a total with a gap in it bounds nothing.
-    total_tokens_complete = token_usage is not None and all(
-        token_usage.get(key) == "complete"
-        for key in ("input_completeness", "output_completeness")
+    total_tokens, total_tokens_complete = _run_total_tokens(
+        cast(Mapping[str, object] | None, token_usage)
     )
     max_total_tokens = _int_value(expected.get("max_total_tokens"))
     step_cost = _runtime_step_cost(
@@ -11641,6 +11629,137 @@ def _runtime_evidence_checks(
             },
         },
     ]
+
+
+def _provider_call_count(
+    provider_calls: Mapping[str, object] | None,
+) -> tuple[int | None, str]:
+    """The run's provider-call count, and whether its evidence page proves it:
+    the count stands only on an untruncated page, else the status says why."""
+
+    if provider_calls is None:
+        return None, "missing"
+    truncated = provider_calls.get("total_count_truncated")
+    count = provider_calls.get("total_count")
+    if truncated is True:
+        return None, "truncated"
+    if (
+        truncated is not False
+        or not isinstance(count, int)
+        or isinstance(count, bool)
+        or count < 0
+    ):
+        return None, "invalid"
+    return count, "complete"
+
+
+def _run_total_tokens(
+    token_usage: Mapping[str, object] | None,
+) -> tuple[int | None, bool]:
+    """The run's token total, and whether it is a count and its own usage says
+    every contributing call reported its counts; a gap bounds nothing."""
+
+    total = token_usage.get("num_tokens_total") if token_usage is not None else None
+    if not isinstance(total, int) or isinstance(total, bool) or total < 0:
+        return None, False
+    return total, all(
+        cast(Mapping[str, object], token_usage).get(key) == "complete"
+        for key in ("input_completeness", "output_completeness")
+    )
+
+
+def _attempt_finish_reasons(
+    debug_export: object, provider_calls: object
+) -> dict[str, int] | None:
+    """Every attempt's finish reason, counted. None unless the debug export
+    provably shows every attempt (no omission, and its summary's count) and
+    every attempt that made a completion call, by the whole call page,
+    reports one."""
+
+    export = _object_mapping(debug_export)
+    summary = _object_mapping(_object_mapping(export.get("run")).get("summary"))
+    calls = _object_mapping(provider_calls)
+    if (
+        not isinstance(summary.get("omissions"), list)
+        or not isinstance(export.get("steps"), list)
+        or not isinstance(calls.get("items"), list)
+        or calls.get("has_more") is not False
+        or calls.get("total_count") != len(_mapping_list(calls.get("items")))
+    ):
+        return None
+    if any(
+        omission.get("section")
+        in ("step_attempts", "definition_snapshot", "whole_bundle")
+        for omission in _mapping_list(summary.get("omissions"))
+    ):
+        return None
+    model_attempts = {
+        (item.get("step_order"), item.get("attempt_no"))
+        for item in _mapping_list(calls.get("items"))
+        if item.get("call_kind") == "completion"
+    }
+    attempts = [
+        (step.get("step_order"), attempt)
+        for step in _mapping_list(export.get("steps"))
+        for attempt in _mapping_list(step.get("attempts"))
+    ]
+    if _int_value(summary.get("attempts_count")) != len(attempts) or any(
+        not isinstance(attempt.get("finish_reason"), str)
+        and (order, attempt.get("attempt_no")) in model_attempts
+        for order, attempt in attempts
+    ):
+        return None
+    return dict(
+        Counter(
+            reason
+            for _, attempt in attempts
+            if isinstance(reason := attempt.get("finish_reason"), str)
+        )
+    )
+
+
+def _object_mapping(value: object) -> Mapping[str, object]:
+    return cast(Mapping[str, object], value if isinstance(value, Mapping) else {})
+
+
+def _runtime_cost(bundle: Mapping[str, object]) -> JsonObject | None:
+    """One observation's run cost; None when its case declares no execution.
+    Absent or partial evidence is None with `complete` False, never a zero."""
+
+    if not any(
+        isinstance(_object_mapping(owner).get("execution"), Mapping)
+        for owner in (bundle.get("case_contract"), bundle.get("case"))
+    ):
+        return None
+    evidence = _object_mapping(bundle.get("runtime_evidence"))
+    provider_calls = evidence.get("provider_calls")
+    calls, call_evidence = _provider_call_count(
+        _object_mapping(provider_calls) if isinstance(provider_calls, Mapping) else None
+    )
+    token_usage = _object_mapping(evidence.get("run")).get("token_usage")
+    total_tokens, tokens_complete = _run_total_tokens(
+        cast(Mapping[str, object], token_usage)
+        if isinstance(token_usage, Mapping)
+        else None
+    )
+    finish_reasons = _attempt_finish_reasons(
+        evidence.get("debug_export"), provider_calls
+    )
+    return {
+        "provider_calls": calls,
+        "provider_call_evidence": call_evidence,
+        "total_tokens": total_tokens,
+        "tokens_complete": tokens_complete,
+        "finish_reasons": finish_reasons,
+        "length_finishes": (
+            finish_reasons.get("length", 0) if finish_reasons is not None else None
+        ),
+        "complete": (
+            call_evidence == "complete"
+            and tokens_complete
+            and finish_reasons is not None
+        ),
+    }
 
 
 def _runtime_step_cost(
