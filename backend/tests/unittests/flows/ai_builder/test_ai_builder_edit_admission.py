@@ -29,6 +29,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_tools import (
+    ProposalToolArgumentsError,
     build_native_strict_tool_schema,
     validate_native_strict_schema,
     validate_propose_flow_tool_arguments,
@@ -258,6 +259,30 @@ def test_the_field_tree_lowers_the_same_way_for_create_and_edit() -> None:
         if branch["properties"]["kind"]["enum"] == ["modify"]
     )["properties"]["output_fields"]["items"]
     assert create_items == edit_items
+
+
+def test_an_edit_in_a_space_without_knowledge_bases_offers_no_knowledge_refs() -> None:
+    schema = _edit_schema(1)
+    modify = _strict_modify(
+        "existing_step_1",
+        assistant_spec={"instructions": None, "knowledge_refs": []},
+    )
+    validate_propose_flow_tool_arguments(
+        arguments=_strict_arguments(modify), tool_schema=schema
+    )
+    with pytest.raises(ProposalToolArgumentsError, match="knowledge_refs"):
+        validate_propose_flow_tool_arguments(
+            arguments=_strict_arguments(
+                {
+                    **modify,
+                    "assistant_spec": {
+                        "instructions": None,
+                        "knowledge_refs": ["f27f03c7-ff50-40b7-a55f-6c75fb11f8b4"],
+                    },
+                }
+            ),
+            tool_schema=schema,
+        )
 
 
 def test_a_malformed_field_tree_is_a_validation_error_not_a_silent_drop() -> None:

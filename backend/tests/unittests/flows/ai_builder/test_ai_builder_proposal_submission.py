@@ -71,10 +71,12 @@ from eneo.flows.ai_builder.ai_builder_proposal_submission import (
     _forced_submission_response,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+    PROPOSAL_PARSE_SCHEMA_FAILURE_CODE,
     PROPOSAL_TELEMETRY_LOG_KEY,
     ProposalTurnTelemetry,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    MAX_DIAGNOSTIC_MESSAGE_LENGTH,
     CompiledProposal,
     CorrectableFailure,
     NonPlanOutcome,
@@ -1617,6 +1619,103 @@ async def test_create_admission_rehomes_field_shaped_step_before_compilation() -
         "_rehome_misplaced_create_children",
     )
     assert len(arguments["steps"]) == 2
+
+
+async def _submit_create_knowledge_refs(
+    *, knowledge_base_count: int, refs_per_step: list[list[str]]
+) -> CorrectableFailure:
+    planning_state = _committed_text_planning_state()
+    resource_catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[
+            {
+                "id": f"kb-{index}",
+                "ref": f"kb-{index}",
+                "name": f"Policy {index}",
+                "display_name": f"Policy {index}",
+                "description": "",
+            }
+            for index in range(knowledge_base_count)
+        ],
+    )
+    invocation = _make_retry_invocation(
+        resource_catalog=resource_catalog,
+        arguments={
+            "flow_name": "Riksnorm flow",
+            "plan_rationale": "Read the case against the reference material.",
+            "steps": [
+                {
+                    "name": f"Steg {number}",
+                    "instructions": "Analysera texten.",
+                    "knowledge_refs": refs,
+                }
+                for number, refs in enumerate(refs_per_step, start=1)
+            ],
+        },
+    )
+    config = _make_submission()._proposal_retry_config(
+        target_kind=TargetKind.CREATE,
+        assistant_snapshots=None,
+        request_id="req-knowledge-refs",
+        planning_state=planning_state,
+        plan_edit_context=None,
+        prior_spec_for_revision=None,
+        usage_tracker=None,
+        proposal_tool_schema=build_propose_flow_tool_schema(
+            resource_catalog=resource_catalog
+        ),
+        compile_context=create_compile_context_from_planning_state(planning_state),
+    )
+    result = await config.process_tool_invocation(invocation)
+    assert isinstance(result, CorrectableFailure), result
+    return result
+
+
+@pytest.mark.asyncio
+async def test_an_attachment_file_id_as_a_knowledge_ref_without_knowledge_bases_is_a_schema_repair() -> (
+    None
+):
+    # The planner copied the uploaded attachment's own file id. The space has
+    # no knowledge base, so the schema admits no ref and says so.
+    attachment_file_id = "f27f03c7-ff50-40b7-a55f-6c75fb11f8b4"
+
+    result = await _submit_create_knowledge_refs(
+        knowledge_base_count=0, refs_per_step=[[attachment_file_id]]
+    )
+
+    assert result.kind == "parse"
+    assert result.codes == frozenset({PROPOSAL_PARSE_SCHEMA_FAILURE_CODE})
+    assert result.feedback == (
+        "Invalid propose_flow arguments: steps.0.knowledge_refs: "
+        f"['{attachment_file_id}'] is expected to be empty (maxItems)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_unknown_knowledge_refs_beyond_the_schema_enum_are_a_bounded_repair() -> (
+    None
+):
+    # More knowledge bases than the schema enumerates: the refs reach the
+    # catalog, which names each step's bad ref and the valid refs, bounded.
+    refs_per_step = [[str(uuid4()) for _ in range(5)] for _ in range(3)]
+
+    result = await _submit_create_knowledge_refs(
+        knowledge_base_count=40, refs_per_step=refs_per_step
+    )
+
+    assert result.kind == "validation"
+    assert result.codes == frozenset({"unknown_kb_ref"})
+    first = refs_per_step[0][0]
+    assert f"Unknown knowledge base reference '{first}' at step 1 'Steg 1' " in (
+        result.feedback
+    )
+    assert refs_per_step[2][4] not in result.feedback
+    assert "\n... and 7 more.\n" in result.feedback
+    assert "Valid knowledge base refs (40):\n- Policy 0 [knowledge.policy-0]" in (
+        result.feedback
+    )
+    assert result.feedback.endswith("\n... and 32 more.")
+    assert len(result.feedback) <= 2 * MAX_DIAGNOSTIC_MESSAGE_LENGTH + 1
 
 
 @pytest.mark.asyncio

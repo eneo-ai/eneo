@@ -40,7 +40,10 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     ResolvedAIBuilderEditContext,
 )
 from eneo.flows.ai_builder.ai_builder_plan_store import build_flow_builder_proposal
-from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    FlowInputFieldIntent,
+    build_create_flow_tool_schema,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_policy import (
     build_create_contextual_quality_feedback,
 )
@@ -51,6 +54,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     TerminalFailure,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderAvailableKnowledgeBaseResource,
     AIBuilderAvailableModelResource,
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
@@ -61,6 +65,12 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
 from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
+)
+from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tools import (
+    ProposalToolArgumentsError,
+    build_native_strict_tool_schema,
+    validate_propose_flow_tool_arguments,
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
@@ -431,6 +441,96 @@ async def test_outline_processing_reports_unknown_resource_from_compiled_spec() 
     assert isinstance(result, CorrectableFailure)
     assert result.kind == "validation"
     assert "Unknown knowledge base reference 'missing-policy'" in result.feedback
+
+
+def _kb_resource(local_id: str, name: str) -> AIBuilderAvailableKnowledgeBaseResource:
+    return {
+        "id": local_id,
+        "ref": local_id,
+        "name": name,
+        "display_name": name,
+        "description": "",
+    }
+
+
+def _one_step_arguments(knowledge_refs: list[str] | None) -> dict[str, Any]:
+    return {
+        # Every property present, so the strict projection admits it too.
+        "flow_name": "Riksnorm flow",
+        "flow_description": None,
+        "plan_rationale": "Read the case against the reference material.",
+        "assumptions": [],
+        "steps": [
+            {
+                "name": "Analysera",
+                "instructions": "Analysera texten.",
+                "knowledge_refs": knowledge_refs,
+                "citations_requested": False,
+                "output_fields": None,
+            }
+        ],
+    }
+
+
+def test_a_space_without_knowledge_bases_offers_no_knowledge_refs() -> None:
+    no_kb = build_create_flow_tool_schema(
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[]
+        ),
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
+    )
+    with_kb = build_create_flow_tool_schema(
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[_kb_resource(str(uuid4()), "Policy")],
+        ),
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
+    )
+
+    for schema in (no_kb, build_native_strict_tool_schema(no_kb)):
+        for none_offered in (None, []):
+            validate_propose_flow_tool_arguments(
+                arguments=_one_step_arguments(none_offered), tool_schema=schema
+            )
+        with pytest.raises(
+            ProposalToolArgumentsError, match=r"steps\.0\.knowledge_refs"
+        ):
+            validate_propose_flow_tool_arguments(
+                arguments=_one_step_arguments(["f27f03c7-ff50-40b7-a55f-6c75fb11f8b4"]),
+                tool_schema=schema,
+            )
+    validate_propose_flow_tool_arguments(
+        arguments=_one_step_arguments(["knowledge.policy"]), tool_schema=with_kb
+    )
+    step_properties = with_kb["function"]["parameters"]["properties"]["steps"]["items"][
+        "properties"
+    ]
+    assert step_properties["knowledge_refs"]["items"]["enum"] == ["knowledge.policy"]
+
+
+@pytest.mark.asyncio
+async def test_a_valid_knowledge_ref_reaches_the_compiled_step() -> None:
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[_kb_resource(str(uuid4()), "Policy")],
+    )
+
+    result = await process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=[ConversationMessage(role="user", content="Bygg ett flöde.")],
+        arguments=_one_step_arguments(["knowledge.policy"]),
+        tool_call_id="call-valid-knowledge-ref",
+        available_model_refs=catalog.model_refs,
+        available_kb_refs=catalog.knowledge_base_refs,
+        resource_catalog=catalog,
+    )
+
+    assert isinstance(result, ProposalReady)
+    step = result.compiled.content.spec.steps[0]
+    assert step.assistant_spec.knowledge_refs == ["knowledge.policy"]
+    assert [binding.slot_ref.ref for binding in result.compiled.resource_bindings] == [
+        "knowledge.policy"
+    ]
 
 
 @pytest.mark.asyncio

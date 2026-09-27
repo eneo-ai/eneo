@@ -137,10 +137,21 @@ class AIBuilderResourceCatalog:
         *,
         limit: int = 15,
     ) -> list[str] | None:
+        # [] is a real answer: no resource of this kind exists, so the wire
+        # offers none. None means too many to enumerate.
         refs = {entry.authoring_ref for entry in self._entries_for_kind(kind)}
-        if not refs or len(refs) > limit:
+        if len(refs) > limit:
             return None
         return sorted(refs)
+
+    def alias_matches(
+        self,
+        *,
+        kind: ResourceKind,
+        value: str,
+    ) -> tuple[AIBuilderResourceCatalogEntry, ...]:
+        """The entries `value` names; building no option list."""
+        return self._alias_index_for_kind(kind).get(_normalize_alias(value), ())
 
     def resolve(
         self,
@@ -455,26 +466,7 @@ def _build_local_ref_index(
     return {entry.local_ref: entry for entry in entries}
 
 
-def format_resource_resolution_feedback(
-    issues: list[AIBuilderResourceResolutionIssue],
-) -> str:
-    lines: list[str] = []
-    for issue in issues:
-        resource_label = _resource_label(issue.kind)
-        if issue.code.startswith("ambiguous_"):
-            lines.append(
-                f"Ambiguous {resource_label} reference '{issue.provided_value}' at {issue.location}. "
-                f"Use the canonical ref. Matching options: {', '.join(issue.valid_options)}."
-            )
-        else:
-            lines.append(
-                f"Unknown {resource_label} reference '{issue.provided_value}' at {issue.location}. "
-                f"Use one of the canonical refs: {', '.join(issue.valid_options)}."
-            )
-    return "\n".join(lines)
-
-
-def _resource_label(kind: ResourceKind) -> str:
+def resource_label(kind: ResourceKind) -> str:
     if kind == "knowledge_base":
         return "knowledge base"
     return "model"

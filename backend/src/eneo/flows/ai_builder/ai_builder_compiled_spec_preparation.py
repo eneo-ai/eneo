@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from functools import partial
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
@@ -9,10 +11,19 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_edit_compiler import EditMutationScope
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    MAX_DIAGNOSTIC_NAMES,
+    BoundedListing,
+    CorrectableFailure,
+    display_value,
+)
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
+    AIBuilderResourceCatalogEntry,
+    AIBuilderResourceResolutionIssue,
+    ResourceKind,
     canonicalize_flow_spec_resources,
-    format_resource_resolution_feedback,
+    resource_label,
 )
 from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
     disambiguate_ai_builder_step_names,
@@ -84,6 +95,118 @@ def prepare_compiled_spec_for_session(
         target_kind=target_kind,
     )
     return PreparedCompiledSpecResult(spec=prepared_spec, validation=validation)
+
+
+def authored_knowledge_ref_repair(
+    catalog: AIBuilderResourceCatalog,
+    refs_by_step: Iterable[tuple[str, Sequence[str]]],
+) -> CorrectableFailure | None:
+    """The repair for authored knowledge refs the catalog cannot resolve.
+
+    Run before compile, for create and edit alike: the portable spec refuses a
+    local id (an attachment's file id, say) as an invariant, which no model
+    repair could then reach. `refs_by_step` pairs a step label with its refs.
+    """
+
+    # Identity only, and only the lines shown: an issue formats when the
+    # listing keeps it, and the valid refs are listed once from the catalog.
+    listing = BoundedListing()
+    codes: set[str] = set()
+    for step_label, refs in refs_by_step:
+        for index, ref in enumerate(refs):
+            matches = catalog.alias_matches(kind="knowledge_base", value=ref)
+            if len(matches) == 1:
+                continue
+            codes.add("ambiguous_kb_ref" if matches else "unknown_kb_ref")
+            listing.add(
+                partial(
+                    _reference_line,
+                    kind="knowledge_base",
+                    value=ref,
+                    location=f"{step_label} knowledge_refs[{index}]",
+                    matches=matches,
+                )
+            )
+    if not listing.total:
+        return None
+    valid = BoundedListing()
+    for entry in catalog.knowledge_bases:
+        valid.add(partial(_option_label, entry))
+    return CorrectableFailure(
+        feedback="\n".join(
+            (
+                listing.render(_REPAIR_HEADING),
+                valid.render(f"Valid knowledge base refs ({valid.total}):"),
+            )
+        ),
+        kind="validation",
+        codes=frozenset(codes),
+    )
+
+
+def format_resource_resolution_feedback(
+    issues: Sequence[AIBuilderResourceResolutionIssue],
+) -> str:
+    """Bounded repair text: the first issues, then each kind's valid refs once."""
+
+    listing = BoundedListing()
+    for issue in issues:
+        listing.add(
+            partial(
+                _reference_line,
+                kind=issue.kind,
+                value=issue.provided_value,
+                location=issue.location,
+                matches=(
+                    issue.valid_options if issue.code.startswith("ambiguous_") else ()
+                ),
+            )
+        )
+    parts = [listing.render(_REPAIR_HEADING)]
+    unknown_options: dict[ResourceKind, tuple[str, ...]] = {
+        issue.kind: issue.valid_options
+        for issue in issues
+        if issue.code.startswith("unknown_")
+    }
+    for kind, options in unknown_options.items():
+        valid = BoundedListing()
+        for option in options:
+            valid.add(partial(display_value, option))
+        parts.append(
+            valid.render(f"Valid {resource_label(kind)} refs ({valid.total}):")
+        )
+    return "\n".join(parts)
+
+
+_REPAIR_HEADING = "Replace or remove these resource references:"
+
+
+def _option_label(entry: AIBuilderResourceCatalogEntry) -> str:
+    return display_value(entry.option_label)
+
+
+def _reference_line(
+    *,
+    kind: ResourceKind,
+    value: str,
+    location: str,
+    matches: Sequence[str | AIBuilderResourceCatalogEntry],
+) -> str:
+    """One unresolved reference; `matches` are an ambiguous ref's candidates."""
+
+    label = resource_label(kind)
+    shown = display_value(value)
+    if not matches:
+        return f"Unknown {label} reference '{shown}' at {location}."
+    names = ", ".join(
+        display_value(match) if isinstance(match, str) else _option_label(match)
+        for match in matches[:MAX_DIAGNOSTIC_NAMES]
+    )
+    more = len(matches) - MAX_DIAGNOSTIC_NAMES
+    return (
+        f"Ambiguous {label} reference '{shown}' at {location}. "
+        f"Matching options: {names}{f' and {more} more' if more > 0 else ''}."
+    )
 
 
 def _enforce_terminal_output_alignment(
