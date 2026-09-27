@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import type {
   Eneo,
   Flow,
@@ -144,6 +144,110 @@ beforeEach(() => {
 });
 
 describe("FlowRunDialog recording upload reconciliation", () => {
+  it("opens on its page heading, as a page change does, not on the close button", async () => {
+    renderDialog(buildEneo({ upload: vi.fn() }));
+    await screen.findByText("Audio input");
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(document.querySelector("[data-wizard-heading]"))
+    );
+  });
+
+  it("rests focus on the dialog title while its first page loads, then moves it to that page's heading", async () => {
+    const eneo = buildEneo({ upload: vi.fn() });
+    const contract = await eneo.flows.runContract.get({ id: "flow-1" });
+    let finishLoading = () => {};
+    vi.mocked(eneo.flows.runContract.get).mockImplementationOnce(
+      () => new Promise((resolve) => (finishLoading = () => resolve(contract)))
+    );
+    renderDialog(eneo);
+    await screen.findByRole("dialog");
+    await waitFor(() =>
+      expect(document.activeElement).toBe(document.querySelector("[data-dialog-title]"))
+    );
+
+    finishLoading();
+    await screen.findByText("Audio input");
+    await waitFor(() =>
+      expect(document.activeElement).toBe(document.querySelector("[data-wizard-heading]"))
+    );
+  });
+
+  it("keeps focus on the title through a failed load and its retry, then moves it to the heading", async () => {
+    const eneo = buildEneo({ upload: vi.fn() });
+    const contract = await eneo.flows.runContract.get({ id: "flow-1" });
+    let finishRetry = () => {};
+    vi.mocked(eneo.flows.runContract.get)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockImplementationOnce(
+        () => new Promise((resolve) => (finishRetry = () => resolve(contract)))
+      );
+    renderDialog(eneo);
+    const title = await waitFor(() => {
+      const element = document.querySelector("[data-dialog-title]");
+      expect(document.activeElement).toBe(element);
+      return element;
+    });
+
+    // Clicked or pressed, the button has focus as it goes away.
+    const retry = await screen.findByRole("button", { name: "Försök igen" });
+    retry.focus();
+    await fireEvent.click(retry);
+    expect(document.activeElement).toBe(title);
+
+    finishRetry();
+    await screen.findByText("Audio input");
+    await waitFor(() =>
+      expect(document.activeElement).toBe(document.querySelector("[data-wizard-heading]"))
+    );
+  });
+
+  describe("with animation frames run by hand", () => {
+    const frames: FrameRequestCallback[] = [];
+    const runFrames = () => frames.splice(0).forEach((callback) => callback(0));
+    beforeEach(() => {
+      frames.length = 0;
+      vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) =>
+        frames.push(callback)
+      );
+    });
+    afterEach(() => {
+      vi.mocked(window.requestAnimationFrame).mockRestore();
+    });
+
+    it("leaves focus where the user put it before the dialog's first frame", async () => {
+      renderDialog(buildEneo({ upload: vi.fn() }));
+      const dialog = await screen.findByRole("dialog");
+      await waitFor(() => expect(frames.length).toBeGreaterThan(0));
+      const [closeButton] = within(dialog).getAllByRole("button");
+      closeButton.focus();
+      runFrames();
+      expect(document.activeElement).toBe(closeButton);
+    });
+
+    it("leaves focus where the user put it while the first page loaded", async () => {
+      const eneo = buildEneo({ upload: vi.fn() });
+      const contract = await eneo.flows.runContract.get({ id: "flow-1" });
+      let finishLoading = () => {};
+      vi.mocked(eneo.flows.runContract.get).mockImplementationOnce(
+        () => new Promise((resolve) => (finishLoading = () => resolve(contract)))
+      );
+      renderDialog(eneo);
+      const dialog = await screen.findByRole("dialog");
+      await waitFor(() => expect(frames.length).toBeGreaterThan(0));
+      runFrames();
+      expect(document.activeElement).toBe(document.querySelector("[data-dialog-title]"));
+
+      finishLoading();
+      await screen.findByText("Audio input");
+      // The heading's frame is queued; the user tabs away before it runs.
+      const [closeButton] = within(dialog).getAllByRole("button");
+      closeButton.focus();
+      runFrames();
+      expect(document.activeElement).toBe(closeButton);
+    });
+  });
+
   it("persists before upload and records the fresh upload response identity", async () => {
     const events: string[] = [];
     const pendingUploads: PendingUpload[] = [];
