@@ -11835,7 +11835,7 @@ def test_an_edited_number_must_replace_the_old_one_where_attributable(
                         "value_type": "number",
                         "old": old,
                         "new": new,
-                        "old_unique_in_review": True,
+                        "old_absent_outside_edit": True,
                     },
                 }
             ],
@@ -11845,15 +11845,104 @@ def test_an_edited_number_must_replace_the_old_one_where_attributable(
     assert harness._review_edit_delivery_check(evidence)["passed"] is passed
 
 
-def test_a_boolean_only_review_target_is_an_unmeasured_observation(
-    tmp_path: Path, monkeypatch: MonkeyPatch
+_DUPLICATED = "reviewed value holds the edited value in more than one place"
+
+
+@mark.parametrize(
+    ("structured", "target_group", "edited", "delivered", "passed"),
+    [
+        # The old value only occurs inside another leaf: not a duplicate, so it
+        # is edited; that leaf may reach delivery, so the old value there is
+        # not attributed to the reviewed one.
+        (
+            {"beslut": "Ja", "datum": "Januari 2026"},
+            ["beslut"],
+            {"beslut": "REVIEW-EDIT-cp-1", "datum": "Januari 2026"},
+            "Beslut: REVIEW-EDIT-cp-1. Datum: Januari 2026.",
+            True,
+        ),
+        (
+            {"belopp": 1, "datum": "2026-09-01"},
+            ["belopp"],
+            {"belopp": 7920, "datum": "2026-09-01"},
+            "Belopp: 7 920 kr. Datum: 2026-09-01.",
+            True,
+        ),
+        # Unique everywhere and still delivered: a stale copy.
+        (
+            {"beslut": "Avslag", "datum": "2026-09-01"},
+            ["beslut"],
+            {"beslut": "REVIEW-EDIT-cp-1", "datum": "2026-09-01"},
+            "Beslut: REVIEW-EDIT-cp-1. Tidigare beslut: Avslag.",
+            False,
+        ),
+    ],
+)
+def test_an_old_value_is_attributed_only_when_no_other_leaf_holds_it(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    structured: dict[str, object],
+    target_group: list[str],
+    edited: dict[str, object],
+    delivered: str,
+    passed: bool,
 ) -> None:
-    """A boolean has no delivered text to find, so its edit cannot be scored.
+    harness = _battle_harness()
+    api, evidence, oracle = _review_oracle(
+        harness,
+        monkeypatch,
+        tmp_path,
+        structured=structured,
+        delivered=delivered,
+        target_group=target_group,
+    )
+
+    assert api.call("PATCH", _EDITED_PATH)["payload"]["edited_value"] == edited
+    assert evidence["execution"]["failures"] == []
+    assert oracle["actual"][0]["old_absent_outside_edit"] is not passed
+    assert oracle["passed"] is passed
+
+
+@mark.parametrize(
+    ("structured", "target_group", "path", "reason"),
+    [
+        (
+            {"akut_skyddsbehov": True, "barn": "Wilma"},
+            ["akut_skyddsbehov"],
+            ["akut_skyddsbehov"],
+            "boolean reviewed value: delivery not checkable without "
+            "case-specific wording gold",
+        ),
+        # mc_int02 rep 2: the legal basis flat and per record.
+        (
+            {"lagrum": ["OSL 26:1"], "handlingar": [{"lagrum": "OSL 26:1"}]},
+            ["lagrum"],
+            ["lagrum", 0],
+            _DUPLICATED,
+        ),
+        # mc_byg20: one group, two facts that happen to be equal.
+        (
+            {"kostnad": 1000, "bidragsbelopp": 1000},
+            ["kostnad", "bidragsbelopp"],
+            ["kostnad"],
+            _DUPLICATED,
+        ),
+    ],
+)
+def test_a_review_target_the_oracle_cannot_edit_is_an_unmeasured_observation(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    structured: dict[str, object],
+    target_group: list[str],
+    path: list[object],
+    reason: str,
+) -> None:
+    """A boolean has no delivered text to find, and a value held in more than one
+    place cannot be told apart into one fact or several: the edit proves nothing.
 
     The run is cancelled at the checkpoint (no further model work) and the slot
     is unmeasured, like a final output past a read bound: neither pass nor fail,
-    out of the denominator and re-measurable. Case-specific wording gold is the
-    way to measure it.
+    out of the denominator and re-measurable.
     """
 
     harness = _battle_harness()
@@ -11862,9 +11951,7 @@ def test_a_boolean_only_review_target_is_an_unmeasured_observation(
         checkpoints=[
             _checkpoint(
                 output_type="json",
-                current_payload_json={
-                    "structured": {"akut_skyddsbehov": True, "barn": "Wilma"}
-                },
+                current_payload_json={"structured": structured},
             )
         ],
     )
@@ -11877,7 +11964,7 @@ def test_a_boolean_only_review_target_is_an_unmeasured_observation(
             "expected_review_policy": {
                 "mode": "edit",
                 "target_output_type": "json",
-                "target_field_groups": [["akut_skyddsbehov"]],
+                "target_field_groups": [target_group],
                 "target_must_be_non_terminal": True,
             }
         },
@@ -11908,14 +11995,10 @@ def test_a_boolean_only_review_target_is_an_unmeasured_observation(
     assert api.paths("PATCH") == []
     assert f"{_EDITED_PATH}approve-and-continue/" not in api.paths("POST")
     assert f"{_RUN_PATH}/cancel/" in api.paths("POST")
-    reason = (
-        "boolean reviewed value: delivery not checkable without "
-        "case-specific wording gold"
-    )
     execution = raised.value.flow_lifecycle["execution"]
     assert execution["unmeasured"] == reason
     assert execution["failures"][0]["kind"] == "review_target_unmeasured"
-    assert execution["failures"][0]["edit_oracle"]["path"] == ["akut_skyddsbehov"]
+    assert execution["failures"][0]["edit_oracle"]["path"] == path
     failure = {
         "artifact_mode": "live_execution_failure",
         "case_identity": harness._case_identity(case),

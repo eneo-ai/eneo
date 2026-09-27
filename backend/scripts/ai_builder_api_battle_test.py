@@ -5543,6 +5543,18 @@ def _leaf_kind(value: object) -> str | None:
     return "string" if isinstance(value, str) and value.strip() else None
 
 
+def _same_leaf_value(left: object, right: object) -> bool:
+    """Exact, type-aware leaf equality: the same JSON type and value, numbers as
+    decimals. Unlike `_value_occurs`, which scans delivered text, a value that
+    merely occurs inside another leaf is a different leaf value."""
+
+    if _leaf_kind(left) != _leaf_kind(right):
+        return False
+    if _leaf_kind(left) == "number":
+        return _decimal(left) == _decimal(right)
+    return left == right
+
+
 def _review_target_edit(
     current_payload: object,
     target_names: tuple[str, ...],
@@ -5554,8 +5566,10 @@ def _review_target_edit(
     The first leaf the case's target group names, preferring a string, then a
     number: a string becomes `sentinel`, a number old + 7919. The rest of the
     value is sent back unchanged, since the edit API takes the whole value and
-    validates it against the output contract. A boolean-only target is not
-    edited: its delivery is not checkable, so the observation is unmeasured.
+    validates it against the output contract. A boolean-only target, or an
+    old value the reviewed value holds in more than one place (which copies
+    are the same fact is unknowable), is not edited: the observation is
+    unmeasured.
     """
 
     structured = (
@@ -5578,15 +5592,20 @@ def _review_target_edit(
     if not named:
         return {"missing": "the reviewed value has no leaf the target group names"}
     value_type, path, old = min(named, key=lambda item: kinds.index(item[0]))
-    if value_type == "boolean":
+    unmeasured = (
+        "boolean reviewed value: delivery not checkable without "
+        "case-specific wording gold"
+        if value_type == "boolean"
+        else "reviewed value holds the edited value in more than one place"
+        if sum(_same_leaf_value(old, value) for _, value in leaves) > 1
+        else None
+    )
+    if unmeasured is not None:
         return {
             "path": list(path),
             "value_type": value_type,
             "old": old,
-            "unmeasured": (
-                "boolean reviewed value: delivery not checkable without "
-                "case-specific wording gold"
-            ),
+            "unmeasured": unmeasured,
         }
     new = sentinel if value_type == "string" else _json_number(_decimal(old) + 7919)
     edited = copy.deepcopy(structured)
@@ -5599,10 +5618,11 @@ def _review_target_edit(
         "value_type": value_type,
         "old": old,
         "new": new,
-        "old_unique_in_review": sum(
-            _value_occurs(old, str(value)) for _, value in leaves
-        )
-        == 1,
+        # The broad scan the delivery check uses: an old value inside another
+        # reviewed leaf ("Ja" in "Januari") can reach delivery legitimately.
+        "old_absent_outside_edit": not any(
+            _value_occurs(old, str(value)) for leaf, value in leaves if leaf != path
+        ),
         "edited_value": edited,
     }
 
@@ -5645,9 +5665,10 @@ def _review_edit_delivery_check(evidence: Mapping[str, object] | None) -> JsonOb
     """The review edit oracle's verdict: every edited target reached delivery.
 
     The new string or number must appear in the delivered output, and the old
-    one must not where it is attributable: unique in the reviewed value, the
-    run had no file inputs, and its sent input does not hold it. A target
-    none of whose leaves is named fails, as does no edit.
+    one must not where it is attributable: the run had no file inputs, its
+    sent input does not hold it, and no other leaf of the reviewed value holds
+    it (`old_absent_outside_edit`). Otherwise only the new value is scored. A
+    target none of whose leaves is named fails, as does no edit.
     """
 
     evidence = evidence or {}
@@ -5673,7 +5694,7 @@ def _review_edit_delivery_check(evidence: Mapping[str, object] | None) -> JsonOb
             results.append({**oracle, "passed": False})
         else:
             attributable = (
-                oracle.get("old_unique_in_review") is True
+                oracle.get("old_absent_outside_edit") is True
                 and not run_request.get("step_inputs")
                 and not _value_occurs(old, sent_input)
             )
@@ -5693,7 +5714,10 @@ def _review_edit_delivery_check(evidence: Mapping[str, object] | None) -> JsonOb
         "name": "review_edit_reaches_delivery",
         "passed": bool(results) and all(result["passed"] is True for result in results),
         "actual": results or "no reviewed value was edited",
-        "expected": "each edited review target reaches delivery; the old value does not",
+        "expected": (
+            "each edited review target reaches delivery; the old value is absent "
+            "when attributable"
+        ),
     }
 
 
