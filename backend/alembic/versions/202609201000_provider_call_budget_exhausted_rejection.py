@@ -12,7 +12,7 @@ the scan. The downgrade refuses to run while budget_exhausted receipts
 exist: rewriting them to a provider-side reason would misattribute evidence.
 
 Revision ID: 202609201000
-Revises: 202609181000
+Revises: 202609181010
 """
 
 import sqlalchemy as sa
@@ -21,7 +21,7 @@ from sqlalchemy.engine import Connection
 from alembic import op
 
 revision = "202609201000"
-down_revision = "202609181000"
+down_revision = "202609181010"
 branch_labels = None
 depends_on = None
 

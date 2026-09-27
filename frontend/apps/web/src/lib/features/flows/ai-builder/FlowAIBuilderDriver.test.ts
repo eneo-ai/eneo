@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, type Mock } from "vitest";
 
 import { m } from "$lib/paraglide/messages";
 import { getLocale, setLocale } from "$lib/paraglide/runtime";
@@ -166,8 +166,8 @@ function makeDraft(overrides: Partial<AIBuilderDraftSession> = {}): AIBuilderDra
 
 function makeDriver(
   options: {
-    fetchImpl?: ReturnType<typeof vi.fn>;
-    streamImpl?: ReturnType<typeof vi.fn>;
+    fetchImpl?: Mock;
+    streamImpl?: Mock;
   } = {}
 ) {
   const fetch = options.fetchImpl ?? vi.fn();
@@ -3829,7 +3829,7 @@ describe("FlowAIBuilderDriver", () => {
 describe("FlowAIBuilderDriver client error reporting", () => {
   const CLIENT_ERRORS_ROUTE = "/api/v1/flows/ai-builder/client-errors";
 
-  function clientErrorCalls(fetch: ReturnType<typeof vi.fn>) {
+  function clientErrorCalls(fetch: Mock) {
     return fetch.mock.calls.filter(([route]) => route === CLIENT_ERRORS_ROUTE);
   }
 
@@ -4121,7 +4121,7 @@ describe("FlowAIBuilderDriver send outcome contract", () => {
     details: {}
   });
 
-  function seeded(streamImpl: ReturnType<typeof vi.fn>) {
+  function seeded(streamImpl: Mock) {
     const made = makeDriver({
       streamImpl,
       fetchImpl: vi.fn(async () => makeSession())

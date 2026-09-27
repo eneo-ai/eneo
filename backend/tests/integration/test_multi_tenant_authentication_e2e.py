@@ -234,6 +234,7 @@ async def test_multi_tenant_oidc_login_isolated(
     )
     assert me_a.status_code == 200
     assert me_a.json()["name"] == tenant_a["slug"]
+    assert me_a.json()["id"] == tenant_a["id"]
 
     callback_b = await _complete_oidc(client, "code-tenant-b", state_b)
     assert callback_b.status_code == 200, callback_b.text
@@ -245,6 +246,8 @@ async def test_multi_tenant_oidc_login_isolated(
     )
     assert me_b.status_code == 200
     assert me_b.json()["name"] == tenant_b["slug"]
+    assert me_b.json()["id"] == tenant_b["id"]
+    assert me_b.json()["id"] != me_a.json()["id"]
 
     callback_cross = await _complete_oidc(client, "code-tenant-b-cross", state_b)
     assert callback_cross.status_code == 400  # Domain mismatch returns 400 Bad Request
@@ -298,6 +301,8 @@ async def test_multi_tenant_password_login(
     assert tenant_info_a.status_code == 200
     # The tenant endpoint returns 'name' field, which is the tenant slug
     assert tenant_info_a.json()["name"] == tenant_a["slug"]
+    # The tenant primary key is exposed so API clients can bind to the tenant
+    assert tenant_info_a.json()["id"] == tenant_a["id"]
 
     login_b = await client.post(
         "/api/v1/users/login/token/",
@@ -314,6 +319,8 @@ async def test_multi_tenant_password_login(
     assert tenant_info_b.status_code == 200
     # The tenant endpoint returns 'name' field, which is the tenant slug
     assert tenant_info_b.json()["name"] == tenant_b["slug"]
+    assert tenant_info_b.json()["id"] == tenant_b["id"]
+    assert tenant_info_b.json()["id"] != tenant_a["id"]
 
     wrong_password = await client.post(
         "/api/v1/users/login/token/",

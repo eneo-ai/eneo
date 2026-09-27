@@ -1,12 +1,7 @@
 <script lang="ts">
-  import { Table } from "@eneo/ui";
-  import { createRender } from "svelte-headless-table";
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
+  import * as Table from "$lib/components/resource-table/index.js";
   import HistoryActions from "./HistoryActions.svelte";
-  import dayjs from "dayjs";
-  import relativeTime from "dayjs/plugin/relativeTime";
-  import utc from "dayjs/plugin/utc";
-  dayjs.extend(relativeTime);
-  dayjs.extend(utc);
 
   import type { Conversation, ConversationSparse } from "@eneo/eneo-js";
   import { getChatService } from "../../ChatService.svelte";
@@ -28,7 +23,7 @@
       header: m.name(),
       value: (item) => item.name ?? "",
       cell: (item) => {
-        return createRender(Table.ButtonCell, {
+        return Table.renderComponent(Table.ButtonCell, {
           label: item.value.name ?? m.chat_history_untitled(),
           async onclick() {
             const loaded = await chat.loadConversation(item.value);
@@ -44,15 +39,15 @@
       header: m.created(),
       accessor: "created_at",
       cell: (item) => {
-        return createRender(Table.FormattedCell, {
-          value: dayjs(item.value).format("YYYY-MM-DD HH:mm"),
+        return Table.renderComponent(Table.FormattedCell, {
+          value: formatDateTime(item.value),
           monospaced: true
         });
       }
     }),
     table.columnActions({
       cell: (item) => {
-        return createRender(HistoryActions, {
+        return Table.renderComponent(HistoryActions, {
           conversation: item.value,
           onConversationDeleted
         });

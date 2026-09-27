@@ -17,7 +17,7 @@
   import { onDestroy, tick } from "svelte";
   import { IconWorkflow } from "@eneo/icons/workflow";
   import { IconChevronRight } from "@eneo/icons/chevron-right";
-  import MousePointerClick from "lucide-svelte/icons/mouse-pointer-click";
+  import MousePointerClick from "@lucide/svelte/icons/mouse-pointer-click";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import * as Empty from "$lib/components/ui/empty/index.js";

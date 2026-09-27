@@ -32,15 +32,14 @@
   import { IconCog } from "@eneo/icons/cog";
   import { IconKnowledge } from "@eneo/icons/knowledge";
   import { IconOverview } from "@eneo/icons/overview";
-  import { IconServices } from "@eneo/icons/services";
   import { IconSpeechBubble } from "@eneo/icons/speech-bubble";
   import { IconWorkflow } from "@eneo/icons/workflow";
-  import BookOpenCheck from "lucide-svelte/icons/book-open-check";
   import { page } from "$app/stores";
   import { Navigation } from "$lib/components/layout";
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
+  import { BookOpenCheck } from "@lucide/svelte";
 
   export let space: SpaceMenuContext;
 
@@ -113,16 +112,6 @@
       isActive={section === "skills"}
       icon={BookOpenCheck}
       label={m.skills()}
-    />
-  {/if}
-  {#if space.hasPermission("read", "service")}<div
-      class="border-default my-2 border-b-[0.5px]"
-    ></div>
-    <Navigation.Link
-      href={localizeHref(`/spaces/${space.routeId}/services`)}
-      isActive={section === "services"}
-      icon={IconServices}
-      label={m.services()}
     />
   {/if}
   {#if !isOrgSpace && space.hasPermission("read", "member")}

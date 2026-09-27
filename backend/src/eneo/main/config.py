@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from eneo.main.removed_env import check_removed_variables
 from eneo.object_content.configuration import DEFAULT_FILE_UPLOAD_LIMIT_BYTES
 
 # Version manifest lookup:
@@ -214,9 +215,8 @@ def _set_app_version():
         return f"DEV-{_PROCESS_STARTED_AT}"
 
 
-_SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS = frozenset(
-    {"development", "local", "dev", "test"}
-)
+_DEVELOPMENT_ENVIRONMENTS = frozenset({"development", "local", "dev"})
+_SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS = _DEVELOPMENT_ENVIRONMENTS | {"test"}
 
 
 # The share of the room after a request's required input that AI Builder
@@ -241,6 +241,11 @@ class Settings(BaseSettings):
     # Environment setting (development, staging, production)
     # Controls error detail exposure in API responses
     environment: str = "production"
+
+    @property
+    def is_development(self) -> bool:
+        """Local development or test: verbose errors and developer tools."""
+        return self.environment.strip().lower() in _DEVELOPMENT_ENVIRONMENTS
 
     # Explicit opt-in for the development-only SharePoint fixture API. Runtime
     # environment checks provide a second guard so fixture data cannot be
@@ -768,6 +773,12 @@ class Settings(BaseSettings):
                     f"Legacy variables will be removed in v3.0"
                 )
 
+        return values
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_variables(cls, values: dict[str, object]) -> dict[str, object]:
+        check_removed_variables(os.environ, values)
         return values
 
     @model_validator(mode="after")

@@ -108,10 +108,12 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  vi.useFakeTimers();
-  cleanup();
-  vi.runOnlyPendingTimers();
+  // Under Vitest 4, entering fake timers again here left the dialog's teardown
+  // unfinished and Bits UI's scroll lock on. Drain the test's own clock, then
+  // tear down on real timers.
+  if (vi.isFakeTimers()) vi.runOnlyPendingTimers();
   vi.useRealTimers();
+  cleanup();
   // Bits UI releases its body scroll lock after dialog teardown completes.
   await waitFor(() => {
     expect(document.body.style.overflow).not.toBe("hidden");

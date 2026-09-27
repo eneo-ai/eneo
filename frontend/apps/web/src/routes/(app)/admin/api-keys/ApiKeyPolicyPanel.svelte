@@ -10,15 +10,17 @@
   import { m } from "$lib/paraglide/messages";
   import type { ApiKeyPolicy } from "@eneo/eneo-js";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
-  import Calendar from "lucide-svelte/icons/calendar";
-  import Clock from "lucide-svelte/icons/clock";
-  import Gauge from "lucide-svelte/icons/gauge";
-  import Globe2 from "lucide-svelte/icons/globe-2";
-  import Layers from "lucide-svelte/icons/layers";
-  import Link from "lucide-svelte/icons/link";
-  import AlertCircle from "lucide-svelte/icons/alert-circle";
-  import Check from "lucide-svelte/icons/check";
-  import RotateCcw from "lucide-svelte/icons/rotate-ccw";
+  import {
+    Calendar,
+    Clock,
+    Gauge,
+    Earth,
+    Layers,
+    Link,
+    CircleAlert,
+    Check,
+    RotateCcw
+  } from "@lucide/svelte";
   import { fly } from "svelte/transition";
 
   const eneo = getEneo();
@@ -156,7 +158,7 @@
       id: "requireTenantAllowedOrigin",
       title: m.api_keys_admin_policy_require_tenant_origin(),
       description: m.api_keys_admin_policy_require_tenant_origin_desc(),
-      icon: Globe2,
+      icon: Earth,
       type: "toggle" as const
     },
     {
@@ -226,7 +228,7 @@
   {#if errorMessage}
     <div transition:fly={{ y: -8, duration: 150 }}>
       <Alert.Root variant="destructive">
-        <AlertCircle />
+        <CircleAlert />
         <Alert.Description>{errorMessage}</Alert.Description>
       </Alert.Root>
     </div>

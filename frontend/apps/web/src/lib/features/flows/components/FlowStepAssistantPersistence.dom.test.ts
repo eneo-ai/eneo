@@ -5,6 +5,17 @@ import { m } from "$lib/paraglide/messages";
 
 import FlowStepAssistantPersistenceHarness from "./test-harnesses/FlowStepAssistantPersistenceHarness.svelte";
 
+// bits-ui's select needs these, which jsdom does not implement.
+Element.prototype.hasPointerCapture ??= () => false;
+Element.prototype.releasePointerCapture ??= () => {};
+Element.prototype.setPointerCapture ??= () => {};
+Element.prototype.scrollIntoView ??= () => {};
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
+
 const models = [
   {
     id: "model-4o-mini",
@@ -75,8 +86,15 @@ describe("Flow step assistant persistence wiring", () => {
   it("saves updated completion model kwargs when the behaviour picker changes", async () => {
     render(FlowStepAssistantPersistenceHarness, { availableModels: models });
 
-    await fireEvent.click(screen.getByRole("combobox", { name: m.select_model_behaviour() }));
-    await fireEvent.click(screen.getByText(m.deterministic()));
+    // The behaviour picker is a bits-ui select: it opens on pointerdown and
+    // picks an option on pointerup.
+    await fireEvent.pointerDown(screen.getByRole("button", { name: m.select_model_behaviour() }), {
+      pointerType: "mouse",
+      button: 0
+    });
+    const option = await screen.findByRole("option", { name: m.deterministic() });
+    await fireEvent.pointerUp(option, { pointerType: "mouse", button: 0 });
+    await fireEvent.click(option);
 
     expect(screen.getByTestId("save-call-count").textContent).toBe("1");
     expect(screen.getByTestId("last-save").textContent).toContain('"completion_model_kwargs"');

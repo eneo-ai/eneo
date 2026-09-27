@@ -1,8 +1,10 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import { IconQuestionMark } from "@eneo/icons/question-mark";
-  import { Input, Tooltip } from "@eneo/ui";
+  import { Input } from "$lib/components/ui/input/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
+  import { Slider } from "$lib/components/ui/slider/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import type { ModelKwargs } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
   import {
@@ -185,9 +187,13 @@
       {:else}
         <p class="w-36">{getKwargLabel(kwargName)}</p>
       {/if}
-      <Tooltip text={getKwargTooltip(kwargName)}>
-        <IconQuestionMark class="text-muted hover:text-primary" />
-      </Tooltip>
+      <Tooltip.Root>
+        <Tooltip.Trigger class="cursor-default">
+          <IconQuestionMark class="text-muted hover:text-primary" />
+          <span class="sr-only">{getKwargTooltip(kwargName)}</span>
+        </Tooltip.Trigger>
+        <Tooltip.Content>{getKwargTooltip(kwargName)}</Tooltip.Content>
+      </Tooltip.Root>
     </div>
 
     {#if isSelectKwargName(kwargName)}
@@ -228,20 +234,32 @@
         </label>
 
         {#if !useDefaultNumeric[kwargName]}
-          <Input.Slider
+          <Slider
+            type="single"
             bind:value={numericValues[kwargName]}
             min={getNumericMinimum(kwargName)}
             max={getNumericMaximum(kwargName)}
             step={getNumericStep(kwargName)}
-            onInput={(value) => setNumericKwarg(kwargName, value)}
+            onValueChange={(value) => setNumericKwarg(kwargName, value)}
+            aria-label={getKwargLabel(kwargName)}
           />
-          <Input.Number
+          <Input
+            type="number"
             bind:value={numericValues[kwargName]}
             min={getNumericMinimum(kwargName)}
             max={getNumericMaximum(kwargName)}
             step={getNumericStep(kwargName)}
-            hiddenLabel={true}
-            on:input={() => setNumericKwarg(kwargName)}
+            aria-label={getKwargLabel(kwargName)}
+            class="w-24 shrink-0 text-center"
+            oninput={() => {
+              const value = numericValues[kwargName];
+              if (typeof value !== "number") return;
+              const clamped = Math.min(
+                getNumericMaximum(kwargName),
+                Math.max(getNumericMinimum(kwargName), value)
+              );
+              setNumericKwarg(kwargName, clamped);
+            }}
           />
         {/if}
       </div>

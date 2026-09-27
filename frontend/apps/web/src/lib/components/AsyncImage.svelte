@@ -1,8 +1,7 @@
 <script lang="ts">
   import placeholderImageUrl from "$lib/assets/GeneratedImagePlaceholder.svg";
   import { IconDownload } from "@eneo/icons/download";
-  import { Button } from "@eneo/ui";
-  import { sanitizeImageSrc, sanitizeLinkHref } from "@eneo/ui/components/markdown";
+  import { sanitizeImageSrc, sanitizeLinkHref } from "$lib/components/markdown/index.js";
   import { m } from "$lib/paraglide/messages";
 
   type Props = {
@@ -45,13 +44,13 @@
       alt={m.generated_file()}
     />
     {#if safeDownloadUrl}
-      <Button
+      <!-- eslint-disable svelte/no-navigation-without-resolve -- sanitized external file URL -->
+      <a
         href={safeDownloadUrl}
-        unstyled
-        variant="outlined"
         class="border-stronger bg-secondary hover:bg-tertiary absolute top-2 right-2 hidden gap-1 rounded-md border px-2 py-1 no-underline shadow group-hover:flex"
-        ><IconDownload></IconDownload>{m.download_file()}</Button
+        ><IconDownload></IconDownload>{m.download_file()}</a
       >
+      <!-- eslint-enable svelte/no-navigation-without-resolve -->
     {/if}
   {/if}
 </div>

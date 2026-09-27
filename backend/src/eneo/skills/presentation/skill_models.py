@@ -2,12 +2,13 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from eneo.main.models import NotProvided, PaginatedResponse
 from eneo.skills.domain.skill import (
     MAX_SKILL_DESCRIPTION_LENGTH,
     MAX_SKILL_DISPLAY_NAME_LENGTH,
+    MAX_SKILL_REMOVAL_BATCH_SIZE,
     MAX_SKILL_SLUG_LENGTH,
     AppPinAdvanceIncompatibleReason,
     AppPinAdvanceOutcome,
@@ -68,9 +69,29 @@ class PersonalChatPinAdvancePublic(BaseModel):
     to_revision_number: int
 
 
+def _distinct_ids(value: list[UUID] | None) -> list[UUID] | None:
+    if value is not None and len(value) != len(set(value)):
+        raise ValueError("Select each resource once")
+    return value
+
+
 class AssistantFleetAdvanceRequest(BaseModel):
     expected_published_revision_id: UUID
     cursor: str | None = None
+    assistant_ids: list[UUID] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_SKILL_REMOVAL_BATCH_SIZE,
+        description=(
+            "Restrict the update to these Assistants (one chunk, no cursor). "
+            "Assistants already on the published revision are skipped."
+        ),
+    )
+
+    @field_validator("assistant_ids")
+    @classmethod
+    def distinct_assistants(cls, value: list[UUID] | None) -> list[UUID] | None:
+        return _distinct_ids(value)
 
 
 class AssistantFleetAdvanceCountsPublic(BaseModel):
@@ -95,6 +116,20 @@ class AssistantFleetAdvancePublic(BaseModel):
 class AppFleetAdvanceRequest(BaseModel):
     expected_published_revision_id: UUID
     cursor: str | None = None
+    app_ids: list[UUID] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_SKILL_REMOVAL_BATCH_SIZE,
+        description=(
+            "Restrict the update to these Apps (one chunk, no cursor). Apps "
+            "already on the published revision are skipped."
+        ),
+    )
+
+    @field_validator("app_ids")
+    @classmethod
+    def distinct_apps(cls, value: list[UUID] | None) -> list[UUID] | None:
+        return _distinct_ids(value)
 
 
 class AppFleetAdvanceCountsPublic(BaseModel):
@@ -122,6 +157,76 @@ class SkillRevisionRestoreRequest(BaseModel):
 
 class SkillActiveUpdateRequest(BaseModel):
     is_active: bool
+
+
+class SkillRemovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    skill_ids: list[UUID] = Field(min_length=1, max_length=MAX_SKILL_REMOVAL_BATCH_SIZE)
+    detach_bindings: bool = Field(
+        default=False,
+        description=(
+            "Also delete every Assistant, App and Personal Chat binding of the "
+            "selected Skills in the same transaction. Without it, a bound Skill "
+            "refuses the whole batch."
+        ),
+    )
+
+    @field_validator("skill_ids")
+    @classmethod
+    def unique_skills(cls, value: list[UUID]) -> list[UUID]:
+        if len(value) != len(set(value)):
+            raise ValueError("Select distinct Skills")
+        return value
+
+
+class SkillBindingDetachRequest(BaseModel):
+    """Assistants and Apps to detach one Skill from; at most 100 in total."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    assistant_ids: list[UUID] = Field(default_factory=lambda: list[UUID]())
+    app_ids: list[UUID] = Field(default_factory=lambda: list[UUID]())
+
+    @field_validator("assistant_ids", "app_ids")
+    @classmethod
+    def unique_ids(cls, value: list[UUID]) -> list[UUID]:
+        if len(value) != len(set(value)):
+            raise ValueError("Select each resource once")
+        return value
+
+    @model_validator(mode="after")
+    def bounded_selection(self) -> "SkillBindingDetachRequest":
+        total = len(self.assistant_ids) + len(self.app_ids)
+        if not 1 <= total <= MAX_SKILL_REMOVAL_BATCH_SIZE:
+            raise ValueError(
+                f"Select between 1 and {MAX_SKILL_REMOVAL_BATCH_SIZE} resources"
+            )
+        return self
+
+
+class SkillDetachmentTotalsPublic(BaseModel):
+    """Distinct resources that lost a binding in one removal batch."""
+
+    assistant_count: int
+    app_count: int
+    personal_chat_count: int = Field(
+        description="Personal Chat policies that lost at least one selected Skill."
+    )
+
+
+class SkillRemovalPublic(BaseModel):
+    removed_ids: list[UUID] = Field(
+        description="Selected Skills confirmed removed, including previously removed Skills."
+    )
+    detached: SkillDetachmentTotalsPublic
+
+
+class SkillUsageCountsPublic(BaseModel):
+    assistant_count: int
+    app_count: int
+    distinct_space_count: int
+    personal_chat_pinned: bool
 
 
 class SkillRevisionPublic(BaseModel):
@@ -175,6 +280,8 @@ class OrganizationSkillSummaryPublic(SkillSparse):
     first_published_at: datetime | None
     publication_state: SkillPublicationState
     execution_blocked: bool
+    removed_at: datetime | None
+    usage: SkillUsageCountsPublic
 
 
 class OrganizationSkillPublic(OrganizationSkillSummaryPublic):
@@ -190,6 +297,13 @@ class SkillAdoptionResourcePublic(BaseModel):
     revision_id: UUID
     revision_number: int
     drift: SkillAdoptionDrift
+    owner_name: str | None = Field(
+        default=None, description="Owner of the personal space, when personal."
+    )
+    can_open: bool = Field(
+        default=True,
+        description="False for another user's personal space, which admins cannot open.",
+    )
 
 
 class SkillAdoptionPersonalChatPublic(BaseModel):
@@ -220,6 +334,12 @@ class SkillAdoptionProjectionPagePublic(BaseModel):
     items: list[SkillAdoptionResourcePublic]
     limit: int
     next_cursor: str | None = None
+    matched_count: int | None = Field(
+        default=None,
+        description=(
+            "Resources matching the filters across all pages; first page only."
+        ),
+    )
 
 
 class OrganizationSkillSummaryPagePublic(

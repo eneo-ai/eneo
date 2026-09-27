@@ -17,8 +17,7 @@
   import { getEneo } from "$lib/core/Eneo";
   import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
-  import Eye from "lucide-svelte/icons/eye";
-  import RotateCcw from "lucide-svelte/icons/rotate-ccw";
+  import { Eye, RotateCcw } from "@lucide/svelte";
 
   const { data } = $props();
   const eneo = getEneo();

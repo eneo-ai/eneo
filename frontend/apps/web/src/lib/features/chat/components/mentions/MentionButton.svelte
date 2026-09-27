@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button/index.js";
   import { getMentionInput } from "./MentionInput";
-  import AtSign from "lucide-svelte/icons/at-sign";
+  import { AtSign } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
 
   const {

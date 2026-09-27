@@ -51,7 +51,7 @@
         </span>
       {:else if authType === "user_oauth"}
         <span
-          class="text-secondary bg-dimmer border-default rounded border px-1.5 py-0.5 text-xs font-semibold"
+          class="text-secondary bg-secondary border-default rounded border px-1.5 py-0.5 text-xs font-semibold"
         >
           {m.integration_personal_badge()}
         </span>

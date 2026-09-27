@@ -3110,7 +3110,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 181 actions with their enabled status for the modal UI.
+     * @description Retrieve all 182 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -8063,6 +8063,33 @@ export interface paths {
     patch: operations["update_template_setting_api_v1_settings_templates_patch"];
     trace?: never;
   };
+  "/api/v1/settings/whats-new": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Toggle the What's new feature
+     * @description Toggle the What's new page, release announcement and menu indicator for your tenant.
+     *
+     *     **Admin Only:** Requires admin permissions.
+     *
+     *     **Behavior:**
+     *     - Updates the `whats_new_enabled` feature flag for your tenant
+     *     - When disabled: the page, the one-time release announcement and the menu indicator are hidden for every user in the tenant
+     *     - Change takes effect on the next page load
+     */
+    patch: operations["update_whats_new_setting_api_v1_settings_whats_new_patch"];
+    trace?: never;
+  };
   "/api/v1/skills/catalogue/": {
     parameters: {
       query?: never;
@@ -8127,6 +8154,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/skills/organization/remove/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Remove Organization Skills
+     * @description Remove up to 100 organisation Skills atomically, retaining history. With detach_bindings, their Assistant, App and Personal Chat bindings are deleted in the same transaction; otherwise a bound Skill refuses the whole batch.
+     */
+    post: operations["remove_organization_skills_api_v1_skills_organization_remove__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/skills/organization/{skill_id}/": {
     parameters: {
       query?: never;
@@ -8140,7 +8187,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Organization Skill
-     * @description Delete an eligible organisation Skill draft.
+     * @description Remove an organisation Skill while retaining its history. With detach_bindings, its Assistant, App and Personal Chat bindings are deleted in the same transaction.
      */
     delete: operations["delete_organization_skill_api_v1_skills_organization__skill_id___delete"];
     options?: never;
@@ -8202,6 +8249,26 @@ export interface paths {
      * @description Move one bounded chunk of Assistant bindings to the reviewed published Skill revision.
      */
     post: operations["advance_assistant_bindings_api_v1_skills_organization__skill_id__assistants_advance__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/detach/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Detach Organization Skill Bindings
+     * @description Detach an organisation Skill from up to 100 selected Assistants and Apps in one transaction. Personal Chat keeps its binding.
+     */
+    post: operations["detach_organization_skill_bindings_api_v1_skills_organization__skill_id__detach__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -10604,6 +10671,70 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/whats-new/announced/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Mark Whats New Announced
+     * @description Record that the current user has been shown the announcement for a release.
+     */
+    put: operations["mark_whats_new_announced_api_v1_whats_new_announced__put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/whats-new/seen/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Mark Whats New Seen
+     * @description Record that the current user has opened the What's new page for a release.
+     */
+    put: operations["mark_whats_new_seen_api_v1_whats_new_seen__put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/whats-new/state/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Whats New State
+     * @description Get which releases the current user has seen and been told about.
+     */
+    get: operations["get_whats_new_state_api_v1_whats_new_state__get"];
+    put?: never;
+    post?: never;
+    /**
+     * Reset Whats New State
+     * @description Development only: forget the current user's What's new markers so the announcement and dot return.
+     */
+    delete: operations["reset_whats_new_state_api_v1_whats_new_state__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/version": {
     parameters: {
       query?: never;
@@ -11278,6 +11409,8 @@ export interface components {
     };
     /** AcceptedFileType */
     AcceptedFileType: {
+      /** Extensions */
+      extensions: string[];
       /** Mimetype */
       mimetype: string;
       /** Size Limit */
@@ -11470,6 +11603,7 @@ export interface components {
       | "skill_published"
       | "skill_unpublished"
       | "skill_bindings_advanced"
+      | "skill_bindings_detached"
       | "skill_deleted"
       | "session_started"
       | "session_ended"
@@ -11834,13 +11968,6 @@ export interface components {
        * @default 24
        */
       rotation_grace_hours?: number;
-    };
-    /** ApiKeyErrorResponse */
-    ApiKeyErrorResponse: {
-      /** Code */
-      code: string;
-      /** Message */
-      message: string;
     };
     /** ApiKeyExactLookupRequest */
     ApiKeyExactLookupRequest: {
@@ -12337,6 +12464,11 @@ export interface components {
     };
     /** AppFleetAdvanceRequest */
     AppFleetAdvanceRequest: {
+      /**
+       * App Ids
+       * @description Restrict the update to these Apps (one chunk, no cursor). Apps already on the published revision are skipped.
+       */
+      app_ids?: string[] | null;
       /** Cursor */
       cursor?: string | null;
       /**
@@ -12937,6 +13069,11 @@ export interface components {
     };
     /** AssistantFleetAdvanceRequest */
     AssistantFleetAdvanceRequest: {
+      /**
+       * Assistant Ids
+       * @description Restrict the update to these Assistants (one chunk, no cursor). Assistants already on the published revision are skipped.
+       */
+      assistant_ids?: string[] | null;
       /** Cursor */
       cursor?: string | null;
       /**
@@ -13548,7 +13685,7 @@ export interface components {
      *           ]
      *         },
      *         {
-     *           "action_count": 83,
+     *           "action_count": 84,
      *           "category": "user_actions",
      *           "enabled": true,
      *           "example_actions": [
@@ -15983,7 +16120,8 @@ export interface components {
       | 9061
       | 9062
       | 9063
-      | 9064;
+      | 9064
+      | 9065;
     /** EvidenceArtifactAvailabilitySummary */
     EvidenceArtifactAvailabilitySummary: {
       /** Artifact Count */
@@ -28525,6 +28663,8 @@ export interface components {
       publication_state: components["schemas"]["SkillPublicationState"];
       /** Published Revision Number */
       published_revision_number: number | null;
+      /** Removed At */
+      removed_at: string | null;
       /** Slug */
       slug: string;
       /**
@@ -28537,6 +28677,7 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+      usage: components["schemas"]["SkillUsageCountsPublic"];
     };
     /** OrganizationSkillSummaryPagePublic */
     OrganizationSkillSummaryPagePublic: {
@@ -28594,6 +28735,8 @@ export interface components {
       publication_state: components["schemas"]["SkillPublicationState"];
       /** Published Revision Number */
       published_revision_number: number | null;
+      /** Removed At */
+      removed_at: string | null;
       /** Slug */
       slug: string;
       /**
@@ -28606,6 +28749,7 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+      usage: components["schemas"]["SkillUsageCountsPublic"];
     };
     /**
      * OriginalSignedURLRequest
@@ -32565,6 +32709,11 @@ export interface components {
         [key: string]: unknown;
       };
       /**
+       * Developer Tools Available
+       * @default false
+       */
+      developer_tools_available?: boolean;
+      /**
        * File References Enabled
        * @default false
        */
@@ -32606,6 +32755,11 @@ export interface components {
        * @default false
        */
       using_templates?: boolean;
+      /**
+       * Whats New Enabled
+       * @default true
+       */
+      whats_new_enabled?: boolean;
     };
     /** SharePointFixturePreviewResponse */
     SharePointFixturePreviewResponse: {
@@ -32935,6 +33089,11 @@ export interface components {
       items: components["schemas"]["SkillAdoptionResourcePublic"][];
       /** Limit */
       limit: number;
+      /**
+       * Matched Count
+       * @description Resources matching the filters across all pages; first page only.
+       */
+      matched_count?: number | null;
       /** Next Cursor */
       next_cursor?: string | null;
       summary: components["schemas"]["SkillAdoptionSummaryPublic"] | null;
@@ -32946,10 +33105,21 @@ export interface components {
     SkillAdoptionResourceKind: "assistant" | "app";
     /** SkillAdoptionResourcePublic */
     SkillAdoptionResourcePublic: {
+      /**
+       * Can Open
+       * @description False for another user's personal space, which admins cannot open.
+       * @default true
+       */
+      can_open?: boolean;
       drift: components["schemas"]["SkillAdoptionDrift"];
       kind: components["schemas"]["SkillAdoptionResourceKind"];
       /** Name */
       name: string;
+      /**
+       * Owner Name
+       * @description Owner of the personal space, when personal.
+       */
+      owner_name?: string | null;
       /**
        * Resource Id
        * Format: uuid
@@ -32999,6 +33169,16 @@ export interface components {
       personal_chat: components["schemas"]["SkillAdoptionPersonalChatPublic"] | null;
       /** Revision Counts */
       revision_counts: components["schemas"]["SkillAdoptionRevisionCountPublic"][];
+    };
+    /**
+     * SkillBindingDetachRequest
+     * @description Assistants and Apps to detach one Skill from; at most 100 in total.
+     */
+    SkillBindingDetachRequest: {
+      /** App Ids */
+      app_ids?: string[];
+      /** Assistant Ids */
+      assistant_ids?: string[];
     };
     /** SkillBindingReferenceInput */
     SkillBindingReferenceInput: {
@@ -33062,6 +33242,21 @@ export interface components {
       instructions: string;
       /** Slug */
       slug: string;
+    };
+    /**
+     * SkillDetachmentTotalsPublic
+     * @description Distinct resources that lost a binding in one removal batch.
+     */
+    SkillDetachmentTotalsPublic: {
+      /** App Count */
+      app_count: number;
+      /** Assistant Count */
+      assistant_count: number;
+      /**
+       * Personal Chat Count
+       * @description Personal Chat policies that lost at least one selected Skill.
+       */
+      personal_chat_count: number;
     };
     /** SkillExecutionBlockPublic */
     SkillExecutionBlockPublic: {
@@ -33189,6 +33384,26 @@ export interface components {
        * Format: uuid
        */
       expected_revision_id: string;
+    };
+    /** SkillRemovalPublic */
+    SkillRemovalPublic: {
+      detached: components["schemas"]["SkillDetachmentTotalsPublic"];
+      /**
+       * Removed Ids
+       * @description Selected Skills confirmed removed, including previously removed Skills.
+       */
+      removed_ids: string[];
+    };
+    /** SkillRemovalRequest */
+    SkillRemovalRequest: {
+      /**
+       * Detach Bindings
+       * @description Also delete every Assistant, App and Personal Chat binding of the selected Skills in the same transaction. Without it, a bound Skill refuses the whole batch.
+       * @default false
+       */
+      detach_bindings?: boolean;
+      /** Skill Ids */
+      skill_ids: string[];
     };
     /** SkillRevisionCreateRequest */
     SkillRevisionCreateRequest: {
@@ -33392,6 +33607,17 @@ export interface components {
      * @enum {string}
      */
     SkillTurnEffectiveMode: "eager" | "always_only" | "selective";
+    /** SkillUsageCountsPublic */
+    SkillUsageCountsPublic: {
+      /** App Count */
+      app_count: number;
+      /** Assistant Count */
+      assistant_count: number;
+      /** Distinct Space Count */
+      distinct_space_count: number;
+      /** Personal Chat Pinned */
+      personal_chat_pinned: boolean;
+    };
     /** SkillsPolicyInput */
     SkillsPolicyInput: {
       /** Bindings */
@@ -34744,6 +34970,11 @@ export interface components {
       display_name?: string | null;
       /** Domain */
       domain?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
       /** Name */
       name: string;
       /** Privacy Policy */
@@ -36740,6 +36971,28 @@ export interface components {
       /** Url */
       url?: string;
     };
+    /** WhatsNewStatePublic */
+    WhatsNewStatePublic: {
+      /**
+       * Announced Version
+       * @description Newest release the user has been shown the announcement for; null before the first one.
+       */
+      announced_version: string | null;
+      /**
+       * Seen Version
+       * @description Newest release the user has opened the What's new page for; null before the first visit.
+       */
+      seen_version: string | null;
+    };
+    /** WhatsNewVersionUpdate */
+    WhatsNewVersionUpdate: {
+      /**
+       * Version
+       * @description A release id as written in releases.json.
+       * @example 2.2.0
+       */
+      version: string;
+    };
     /**
      * WizardType
      * @enum {string}
@@ -37188,7 +37441,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -37197,7 +37450,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Too Many Requests */
@@ -37206,7 +37459,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -37247,7 +37500,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -37256,7 +37509,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -37265,7 +37518,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -37283,7 +37536,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -37356,7 +37609,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -37365,7 +37618,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -37374,7 +37627,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -37392,7 +37645,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -37423,7 +37676,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -37432,7 +37685,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -37450,7 +37703,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -37508,7 +37761,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -37517,7 +37770,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -37526,7 +37779,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -37535,7 +37788,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -37553,7 +37806,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -37582,7 +37835,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -37591,7 +37844,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Too Many Requests */
@@ -37600,7 +37853,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -37633,7 +37886,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -37642,7 +37895,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -37651,7 +37904,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -37669,7 +37922,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -37722,7 +37975,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -37731,7 +37984,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -37740,7 +37993,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -37758,7 +38011,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -37787,7 +38040,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -37796,7 +38049,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -37805,7 +38058,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -37823,7 +38076,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -37880,7 +38133,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -37889,7 +38142,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -37898,7 +38151,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -37907,7 +38160,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -37925,7 +38178,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -37960,7 +38213,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -37969,7 +38222,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -37978,7 +38231,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -37987,7 +38240,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -38005,7 +38258,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -38034,7 +38287,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -38043,7 +38296,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -38052,7 +38305,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -38061,7 +38314,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -38079,7 +38332,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -38132,7 +38385,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -38141,7 +38394,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -38150,7 +38403,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -38159,7 +38412,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -38177,7 +38430,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -38234,7 +38487,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -38243,7 +38496,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -38252,7 +38505,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -38261,7 +38514,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -38279,7 +38532,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -38339,7 +38592,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -38348,7 +38601,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -38357,7 +38610,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -38366,7 +38619,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -38384,7 +38637,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -38441,7 +38694,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -38450,7 +38703,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -38459,7 +38712,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -38468,7 +38721,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -38486,7 +38739,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -38520,7 +38773,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -38529,7 +38782,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -38538,7 +38791,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -38556,7 +38809,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -41000,7 +41253,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -41009,7 +41262,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -41018,7 +41271,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -41036,7 +41289,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -41483,7 +41736,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -41492,7 +41745,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Too Many Requests */
@@ -41501,7 +41754,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -44679,7 +44932,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -44688,7 +44941,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Too Many Requests */
@@ -44697,7 +44950,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Service Unavailable */
@@ -44706,7 +44959,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -44780,7 +45033,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -44789,7 +45042,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -44807,7 +45060,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -44864,7 +45117,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -44873,7 +45126,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -44882,7 +45135,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -44900,7 +45153,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -44934,7 +45187,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -44952,7 +45205,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -44981,7 +45234,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Too Many Requests */
@@ -44990,7 +45243,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -45023,7 +45276,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -45032,7 +45285,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -45041,7 +45294,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -45059,7 +45312,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -45088,7 +45341,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Too Many Requests */
@@ -45097,7 +45350,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -45129,7 +45382,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -45138,7 +45391,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -45147,7 +45400,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -45156,7 +45409,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -45174,7 +45427,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -45206,7 +45459,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -45215,7 +45468,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -45233,7 +45486,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -45262,7 +45515,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Too Many Requests */
@@ -45271,7 +45524,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -45323,7 +45576,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -45332,7 +45585,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -45341,7 +45594,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -45359,7 +45612,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -45388,7 +45641,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -45397,7 +45650,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -45406,7 +45659,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -45424,7 +45677,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -45480,7 +45733,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -45489,7 +45742,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -45498,7 +45751,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -45507,7 +45760,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -45525,7 +45778,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -45581,7 +45834,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -45590,7 +45843,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -45599,7 +45852,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -45608,7 +45861,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -45626,7 +45879,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -45655,7 +45908,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -45664,7 +45917,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -45673,7 +45926,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -45682,7 +45935,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -45700,7 +45953,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -45752,7 +46005,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -45761,7 +46014,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -45770,7 +46023,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -45779,7 +46032,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -45797,7 +46050,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -45853,7 +46106,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -45862,7 +46115,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -45871,7 +46124,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -45880,7 +46133,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -45898,7 +46151,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -45957,7 +46210,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -45966,7 +46219,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -45975,7 +46228,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -45984,7 +46237,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -46002,7 +46255,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -46058,7 +46311,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -46067,7 +46320,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -46076,7 +46329,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -46085,7 +46338,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -46103,7 +46356,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -46137,7 +46390,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -46146,7 +46399,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -46155,7 +46408,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -46173,7 +46426,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -65990,6 +66243,48 @@ export interface operations {
       };
     };
   };
+  update_whats_new_setting_api_v1_settings_whats_new_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   list_catalogue_api_v1_skills_catalogue__get: {
     parameters: {
       query?: {
@@ -66087,6 +66382,7 @@ export interface operations {
         limit?: number;
         cursor?: string | null;
         search?: string | null;
+        removed?: boolean;
       };
       header?: never;
       path?: never;
@@ -66183,6 +66479,75 @@ export interface operations {
       };
     };
   };
+  remove_organization_skills_api_v1_skills_organization_remove__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillRemovalRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRemovalPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   get_organization_skill_api_v1_skills_organization__skill_id___get: {
     parameters: {
       query?: never;
@@ -66234,7 +66599,9 @@ export interface operations {
   };
   delete_organization_skill_api_v1_skills_organization__skill_id___delete: {
     parameters: {
-      query?: never;
+      query?: {
+        detach_bindings?: boolean;
+      };
       header?: never;
       path: {
         skill_id: string;
@@ -66293,6 +66660,10 @@ export interface operations {
       query?: {
         limit?: number;
         cursor?: string | null;
+        /** @description Matches resource, space or owner name. */
+        query?: string | null;
+        kind?: components["schemas"]["SkillAdoptionResourceKind"] | null;
+        drift?: components["schemas"]["SkillAdoptionDrift"] | null;
       };
       header?: never;
       path: {
@@ -66442,6 +66813,77 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AssistantFleetAdvancePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  detach_organization_skill_bindings_api_v1_skills_organization__skill_id__detach__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillBindingDetachRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillDetachmentTotalsPublic"];
         };
       };
       /** @description Bad Request */
@@ -69383,6 +69825,15 @@ export interface operations {
           "application/json": components["schemas"]["StorageModel"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   get_spaces_api_v1_storage_spaces__get: {
@@ -69401,6 +69852,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["StorageInfoModel"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -73917,6 +74377,157 @@ export interface operations {
       };
       /** @description Validation Error */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  mark_whats_new_announced_api_v1_whats_new_announced__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WhatsNewVersionUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WhatsNewStatePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  mark_whats_new_seen_api_v1_whats_new_seen__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WhatsNewVersionUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WhatsNewStatePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_whats_new_state_api_v1_whats_new_state__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WhatsNewStatePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  reset_whats_new_state_api_v1_whats_new_state__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WhatsNewStatePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };

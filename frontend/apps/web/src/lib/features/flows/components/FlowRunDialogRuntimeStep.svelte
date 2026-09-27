@@ -6,8 +6,8 @@
     UploadedFile
   } from "@eneo/eneo-js";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
-  import ChevronRight from "lucide-svelte/icons/chevron-right";
-  import IconWifiOff from "lucide-svelte/icons/wifi-off";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import IconWifiOff from "@lucide/svelte/icons/wifi-off";
   import { IconUploadCloud } from "@eneo/icons/upload-cloud";
   import { IconXMark } from "@eneo/icons/x-mark";
   import { IconCheck } from "@eneo/icons/check";

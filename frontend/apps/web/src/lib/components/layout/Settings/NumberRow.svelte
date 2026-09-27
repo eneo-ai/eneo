@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { uid } from "uid";
+  import { useId } from "bits-ui";
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
@@ -38,8 +38,8 @@
 
   const shownError = $derived(field.error ?? externalError);
 
-  const hintId = uid(8);
-  const errorId = uid(8);
+  const hintId = useId();
+  const errorId = useId();
 
   function describedBy(descriptionId: string): string {
     const ids = [

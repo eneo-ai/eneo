@@ -16,17 +16,19 @@
     formatUsageMetric,
     formatRelativeDate
   } from "$lib/features/api-keys/apiKeyTableUtils";
-  import ChevronDown from "lucide-svelte/icons/chevron-down";
-  import Key from "lucide-svelte/icons/key";
-  import Globe from "lucide-svelte/icons/globe";
-  import Server from "lucide-svelte/icons/server";
-  import Lock from "lucide-svelte/icons/lock";
-  import Shield from "lucide-svelte/icons/shield";
-  import Clock from "lucide-svelte/icons/clock";
-  import Calendar from "lucide-svelte/icons/calendar";
-  import Activity from "lucide-svelte/icons/activity";
-  import Bell from "lucide-svelte/icons/bell";
-  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
+  import {
+    ChevronDown,
+    Key,
+    Globe,
+    Server,
+    Lock,
+    Shield,
+    Clock,
+    Calendar,
+    Activity,
+    Bell,
+    TriangleAlert
+  } from "@lucide/svelte";
   import { slide } from "svelte/transition";
   import ApiKeyActions from "./ApiKeyActions.svelte";
   import {
@@ -405,7 +407,7 @@
                           class="border-warning-default/40 bg-warning-dimmer/40 text-warning-stronger dark:bg-warning-dimmer/20 rounded-lg border p-3 text-xs"
                         >
                           <span class="inline-flex items-center gap-1.5">
-                            <AlertTriangle class="h-3.5 w-3.5" />
+                            <TriangleAlert class="h-3.5 w-3.5" />
                             {m.api_keys_admin_usage_sampled_notice()}
                           </span>
                         </div>

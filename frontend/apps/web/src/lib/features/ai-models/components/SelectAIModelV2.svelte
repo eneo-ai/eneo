@@ -1,3 +1,10 @@
+<!--
+  Model picker for the config surfaces (assistant/app/service editors, admin
+  templates and help assistants). Uses the same model selector as the personal
+  chat — provider logos, a searchable vendor-grouped command palette and the
+  model details preview — behind a bordered trigger that fits the settings
+  forms. Works for both completion and transcription models.
+-->
 <script module lang="ts">
   export type SelectableAIModel = {
     id: string;
@@ -17,9 +24,7 @@
 <script lang="ts" generics="T extends SelectableAIModel">
   import { createEventDispatcher } from "svelte";
   import type { CompletionModel } from "@eneo/eneo-js";
-  import { uid } from "uid";
-  import Ban from "lucide-svelte/icons/ban";
-  import ChevronsUpDown from "lucide-svelte/icons/chevrons-up-down";
+  import { Ban, ChevronsUpDown } from "@lucide/svelte";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import * as ModelSelector from "$lib/components/ai-elements/model-selector/index.js";
   import { sortModels } from "../sortModels";
@@ -49,7 +54,7 @@
 
   let open = $state(false);
   let previewedModelId = $state<string | null>(null);
-  const valueId = uid(8);
+  const valueId = $props.id();
 
   const sortedAvailableModels = $derived.by(() => {
     const models = [...availableModels];

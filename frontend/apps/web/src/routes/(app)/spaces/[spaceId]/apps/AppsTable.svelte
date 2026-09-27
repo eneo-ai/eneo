@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { Table } from "@eneo/ui";
-  import { createRender } from "svelte-headless-table";
+  import * as Table from "$lib/components/resource-table/index.js";
   import AppTile from "./AppTile.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import type { AppSparse } from "@eneo/eneo-js";
@@ -21,7 +20,7 @@
       header: m.name(),
       value: (item) => item.name,
       cell: (item) => {
-        return createRender(Table.PrimaryCell, {
+        return Table.renderComponent(Table.PrimaryCell, {
           label: item.value.name,
           link: `/spaces/${$currentSpace.routeId}/apps/${item.value.id}`,
           icon: IconApp
@@ -36,7 +35,7 @@
             header: m.status(),
             accessor: (item) => item,
             cell: (item) => {
-              return createRender(PublishingStatusChip, {
+              return Table.renderComponent(PublishingStatusChip, {
                 resource: item.value
               });
             }
@@ -46,7 +45,7 @@
 
     table.columnActions({
       cell: (item) => {
-        return createRender(AppActions, {
+        return Table.renderComponent(AppActions, {
           app: item.value
         });
       }
@@ -55,7 +54,7 @@
     table.columnCard({
       value: (item) => item.name,
       cell: (item) => {
-        return createRender(AppTile, {
+        return Table.renderComponent(AppTile, {
           app: item.value
         });
       }

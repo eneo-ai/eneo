@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { uid } from "uid";
+  import { useId } from "bits-ui";
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
@@ -33,9 +33,9 @@
     info?: string;
   } = $props();
 
-  const switchId = uid(8);
-  const hintId = uid(8);
-  const errorId = uid(8);
+  const switchId = useId();
+  const hintId = useId();
+  const errorId = useId();
 
   $effect(() => {
     if (field.enabled) field.applySuggestion();

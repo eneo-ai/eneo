@@ -27,6 +27,13 @@ export type SkillRuntimeModelProjections = components["schemas"]["SkillRuntimeMo
 export type SkillExecutionBlockPublic = components["schemas"]["SkillExecutionBlockPublic"];
 export type SkillExecutionBlockState = components["schemas"]["SkillExecutionBlockState"];
 export type OrganizationSkillPublic = components["schemas"]["OrganizationSkillPublic"];
+export type SkillUsageCounts = components["schemas"]["SkillUsageCountsPublic"];
+export type SkillRemovalRequest = components["schemas"]["SkillRemovalRequest"];
+export type SkillRemovalResult = components["schemas"]["SkillRemovalPublic"];
+export type SkillBindingDetachRequest = components["schemas"]["SkillBindingDetachRequest"];
+export type SkillDetachmentTotals = components["schemas"]["SkillDetachmentTotalsPublic"];
+export type SkillAdoptionResourceKind = components["schemas"]["SkillAdoptionResourceKind"];
+export type SkillAdoptionDrift = components["schemas"]["SkillAdoptionDrift"];
 export type OrganizationSkillSummaryPublic =
   components["schemas"]["OrganizationSkillSummaryPublic"];
 export type OrganizationSkillSummaryPagePublic =
@@ -63,7 +70,6 @@ export type GroupSparse = components["schemas"]["GroupPublicWithMetadata"];
 export type InfoBlob = Omit<components["schemas"]["InfoBlobPublic"], "text"> & {
   text?: string | undefined;
 };
-export type Widget = components["schemas"]["WidgetPublic"];
 export type CompletionModel = components["schemas"]["CompletionModelPublic"];
 export type EmbeddingModel = components["schemas"]["EmbeddingModelPublic"];
 export type TranscriptionModel = components["schemas"]["TranscriptionModelPublic"];
@@ -159,6 +165,7 @@ export type FlowDocumentRenderLimits = {
 };
 export type AIBuilderBudgetSettings = components["schemas"]["AIBuilderBudgetSettingsPublic"];
 export type AIBuilderBudgetSettingsUpdate = components["schemas"]["AIBuilderBudgetSettingsUpdate"];
+export type WhatsNewState = components["schemas"]["WhatsNewStatePublic"];
 export type WebsiteSparse = components["schemas"]["WebsiteSparse"];
 export type Space = components["schemas"]["SpacePublic"];
 export type SpaceSparse = components["schemas"]["SpaceSparse"];

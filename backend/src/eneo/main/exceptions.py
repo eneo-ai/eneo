@@ -92,6 +92,9 @@ class ErrorCodes(int, Enum):
     PASSWORD_POLICY_VIOLATION = 9062
     LOCAL_PASSWORD_CHANGE_UNAVAILABLE = 9063
     CURRENT_PASSWORD_INCORRECT = 9064
+    # Develop numbers this 9062; the branch keeps its own 9056-9064 (see
+    # the 2026-09-20 develop merge), so it takes the next free code here.
+    SKILL_REMOVAL_BUSY = 9065
 
 
 class NotFoundException(Exception):

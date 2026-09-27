@@ -8,10 +8,7 @@
   import { Label } from "$lib/components/ui/label/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
-  import AlertCircle from "lucide-svelte/icons/alert-circle";
-  import ChevronRight from "lucide-svelte/icons/chevron-right";
-  import Info from "lucide-svelte/icons/info";
-  import Plug from "lucide-svelte/icons/plug";
+  import { CircleAlert, ChevronRight, Info, Plug } from "@lucide/svelte";
   import { isCapabilityPurpose, type CapabilityDescriptor } from "$lib/features/mcp/capabilities";
   import { SvelteSet } from "svelte/reactivity";
   import PolicySection from "$lib/features/admin/PolicySection.svelte";
@@ -301,7 +298,7 @@
       </fieldset>
       {#if !mcpValid}
         <p class="text-destructive flex items-center gap-2 text-sm" role="alert">
-          <AlertCircle class="h-4 w-4 shrink-0" aria-hidden="true" />
+          <CircleAlert class="h-4 w-4 shrink-0" aria-hidden="true" />
           {m.governance_mcp_error_none()}
         </p>
       {/if}

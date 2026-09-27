@@ -16,6 +16,16 @@ const selectedModel = {
   provider_name: "Anthropic"
 };
 
+Element.prototype.hasPointerCapture ??= () => false;
+Element.prototype.releasePointerCapture ??= () => {};
+Element.prototype.setPointerCapture ??= () => {};
+Element.prototype.scrollIntoView ??= () => {};
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
+
 afterEach(() => {
   cleanup();
 });
@@ -27,8 +37,15 @@ describe("SelectBehaviourV2", () => {
       selectedModel
     });
 
-    await fireEvent.click(screen.getByRole("combobox", { name: m.select_model_behaviour() }));
-    await fireEvent.click(screen.getByText(m.deterministic()));
+    {
+      const t = screen.getByRole("button", { name: m.select_model_behaviour() });
+      await fireEvent.pointerDown(t, { pointerType: "mouse", button: 0 });
+    }
+    {
+      const o = await screen.findByRole("option", { name: m.deterministic() });
+      await fireEvent.pointerUp(o, { pointerType: "mouse", button: 0 });
+      await fireEvent.click(o);
+    }
 
     expect(screen.getByTestId("change-count").textContent).toBe("1");
     expect(screen.getByTestId("serialized-kwargs").textContent).toContain('"temperature":0.25');
@@ -40,8 +57,15 @@ describe("SelectBehaviourV2", () => {
       selectedModel
     });
 
-    await fireEvent.click(screen.getByRole("combobox", { name: m.select_model_behaviour() }));
-    await fireEvent.click(screen.getByText(m.custom()));
+    {
+      const t = screen.getByRole("button", { name: m.select_model_behaviour() });
+      await fireEvent.pointerDown(t, { pointerType: "mouse", button: 0 });
+    }
+    {
+      const o = await screen.findByRole("option", { name: m.custom() });
+      await fireEvent.pointerUp(o, { pointerType: "mouse", button: 0 });
+      await fireEvent.click(o);
+    }
 
     const input = screen.getByRole("spinbutton");
     await fireEvent.input(input, { target: { value: "1.37" } });

@@ -4,7 +4,7 @@ Every existing Flow version was published at creation: publish_flow was the only
 writer. Backfill that history from created_at without changing snapshot payloads.
 
 Revision ID: 202609161030
-Revises: 202609151000
+Revises: 202609161010
 """
 
 from collections.abc import Sequence
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "202609161030"
-down_revision: str | None = "202609161000"
+down_revision: str | None = "202609161010"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

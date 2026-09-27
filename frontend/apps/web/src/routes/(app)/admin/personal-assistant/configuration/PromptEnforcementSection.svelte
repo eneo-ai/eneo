@@ -11,9 +11,7 @@
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
-  import AlertCircle from "lucide-svelte/icons/alert-circle";
-  import Info from "lucide-svelte/icons/info";
-  import Sparkles from "lucide-svelte/icons/sparkles";
+  import { CircleAlert, Info, Sparkles } from "@lucide/svelte";
   import PolicySection from "$lib/features/admin/PolicySection.svelte";
 
   type PromptOption = {
@@ -95,7 +93,7 @@
       </RadioGroup.Root>
       {#if !selectedPromptId}
         <p class="text-destructive flex items-center gap-2 text-sm" role="alert">
-          <AlertCircle class="h-4 w-4 shrink-0" aria-hidden="true" />
+          <CircleAlert class="h-4 w-4 shrink-0" aria-hidden="true" />
           {m.governance_prompt_error_required()}
         </p>
       {/if}

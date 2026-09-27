@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { uid } from "uid";
+  import { useId } from "bits-ui";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
   import Row from "./Row.svelte";
@@ -21,7 +21,7 @@
     info?: string;
   } = $props();
 
-  const switchId = uid(8);
+  const switchId = useId();
 </script>
 
 <Row

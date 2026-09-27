@@ -6,7 +6,8 @@
 
 <script lang="ts">
   import { getSpaceSettingsEditor } from "$lib/features/spaces/SpaceSettingsEditor";
-  import { Input } from "@eneo/ui";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
 
@@ -25,12 +26,7 @@
   let:labelId
   let:descriptionId
 >
-  <Input.Text
-    labelClass="text-2xl"
-    bind:value={$update.name}
-    aria-labelledby={labelId}
-    aria-describedby={descriptionId}
-  ></Input.Text>
+  <Input bind:value={$update.name} aria-labelledby={labelId} aria-describedby={descriptionId} />
 </Settings.Row>
 
 <Settings.Row
@@ -41,9 +37,10 @@
   let:labelId
   let:descriptionId
 >
-  <Input.TextArea
+  <Textarea
     bind:value={$update.description}
+    rows={4}
     aria-labelledby={labelId}
     aria-describedby={descriptionId}
-  ></Input.TextArea>
+  />
 </Settings.Row>

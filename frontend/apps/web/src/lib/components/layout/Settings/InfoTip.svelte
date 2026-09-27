@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Info from "lucide-svelte/icons/info";
+  import { Info } from "@lucide/svelte";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { m } from "$lib/paraglide/messages";
 

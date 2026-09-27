@@ -54,7 +54,7 @@ class AppAssembler:
                 return []
             case InputFieldType.TEXT_UPLOAD:
                 return [
-                    AcceptedFileType(
+                    AcceptedFileType.for_mimetype(
                         mimetype=mimetype,
                         size_limit=self.upload_admission.session_file_maximum_bytes,
                     )
@@ -62,7 +62,7 @@ class AppAssembler:
                 ]
             case InputFieldType.AUDIO_UPLOAD:
                 return [
-                    AcceptedFileType(
+                    AcceptedFileType.for_mimetype(
                         mimetype=mimetype,
                         size_limit=self.upload_admission.session_audio_maximum_bytes,
                     )
@@ -70,7 +70,7 @@ class AppAssembler:
                 ]
             case InputFieldType.AUDIO_RECORDER:
                 return [
-                    AcceptedFileType(
+                    AcceptedFileType.for_mimetype(
                         mimetype=mimetype,
                         size_limit=self.upload_admission.session_audio_maximum_bytes,
                     )
@@ -78,7 +78,7 @@ class AppAssembler:
                 ]
             case InputFieldType.IMAGE_UPLOAD:
                 return [
-                    AcceptedFileType(
+                    AcceptedFileType.for_mimetype(
                         mimetype=mimetype,
                         size_limit=self.upload_admission.session_image_maximum_bytes,
                     )
@@ -159,7 +159,7 @@ class AppAssembler:
         model_kwargs = app.completion_model_kwargs
         allowed_attachments = FileRestrictions(
             accepted_file_types=[
-                AcceptedFileType(
+                AcceptedFileType.for_mimetype(
                     mimetype=mimetype,
                     size_limit=self.upload_admission.session_file_maximum_bytes,
                 )

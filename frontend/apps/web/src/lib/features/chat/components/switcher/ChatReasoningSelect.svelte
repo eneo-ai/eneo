@@ -4,7 +4,7 @@
   import { selectEffectiveChatModel } from "$lib/features/chat/selectEffectiveChatModel";
   import { getModelKwargOptionLabel } from "$lib/features/ai-models/ModelKwargCapabilities";
   import { m } from "$lib/paraglide/messages";
-  import Brain from "lucide-svelte/icons/brain";
+  import Brain from "@lucide/svelte/icons/brain";
 
   const DEFAULT_VALUE = "default";
   const VALUE_PREFIX = "reasoning:";

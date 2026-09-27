@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eneo.ai/schemas/whats-new/releases.json",
+  "title": "Eneo What's new releases",
+  "description": "User-facing release notes. Newest release first. Validated by scripts/check_whats_new.py.",
+  "type": "object",
+  "required": ["releases"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "releases": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/release" }
+    }
+  },
+  "$defs": {
+    "localized": {
+      "type": "object",
+      "required": ["en", "sv"],
+      "additionalProperties": false,
+      "properties": {
+        "en": { "type": "string", "minLength": 1 },
+        "sv": { "type": "string", "minLength": 1 }
+      }
+    },
+    "release": {
+      "type": "object",
+      "required": ["version", "entries"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "Semver without a leading v, matching the git tag (v2.2.0 -> 2.2.0).",
+          "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$"
+        },
+        "date": {
+          "type": "string",
+          "description": "Release date (YYYY-MM-DD). Leave out while the release is still a draft.",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "entries": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/entry" }
+        }
+      }
+    },
+    "entry": {
+      "type": "object",
+      "required": ["id", "type", "area", "title", "body"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable kebab-case id, unique within the release. Used for deep links.",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "type": { "enum": ["new", "improved", "fixed"] },
+        "area": {
+          "enum": [
+            "chat",
+            "assistants",
+            "knowledge",
+            "spaces",
+            "skills",
+            "account",
+            "admin",
+            "platform"
+          ]
+        },
+        "audience": {
+          "enum": ["all", "admin"],
+          "default": "all",
+          "description": "admin entries are hidden from users without the admin permission."
+        },
+        "title": { "$ref": "#/$defs/localized" },
+        "body": { "$ref": "#/$defs/localized" },
+        "showMe": {
+          "type": "object",
+          "description": "Optional 'Show me' action: navigate to href and spotlight the element with data-tour=anchor.",
+          "required": ["href", "anchor"],
+          "additionalProperties": false,
+          "properties": {
+            "href": {
+              "type": "string",
+              "description": "App-relative path without locale prefix.",
+              "pattern": "^/[^\\s]*$"
+            },
+            "anchor": {
+              "type": "string",
+              "description": "Value of a data-tour attribute in frontend/apps/web/src.",
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+            }
+          }
+        }
+      }
+    }
+  }
+}

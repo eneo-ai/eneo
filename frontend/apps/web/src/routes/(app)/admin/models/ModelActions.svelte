@@ -11,12 +11,14 @@
   import { getEneo } from "$lib/core/Eneo";
   import { invalidate } from "$app/navigation";
   import { writable } from "svelte/store";
-  import Pencil from "lucide-svelte/icons/pencil";
-  import Trash2 from "lucide-svelte/icons/trash-2";
-  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
-  import Loader2 from "lucide-svelte/icons/loader-2";
-  import ArrowRight from "lucide-svelte/icons/arrow-right";
-  import MoreHorizontal from "lucide-svelte/icons/more-horizontal";
+  import {
+    Pencil,
+    Trash2,
+    TriangleAlert,
+    LoaderCircle,
+    ArrowRight,
+    Ellipsis
+  } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { getErrorMessage } from "$lib/core/errors";
 
@@ -34,9 +36,6 @@
   type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
   type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
 
-  // svelte-headless-table's `createRender` expects a class-based component,
-  // so we keep this file on the legacy `export let` API. Shadcn primitives
-  // below work just fine inside a non-runes parent.
   export let model: AnyModel;
   export let type: ModelTypeKey;
   export let completionModels: CompletionModel[] = [];
@@ -116,7 +115,7 @@
   <DropdownMenu.Trigger>
     {#snippet child({ props })}
       <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
-        <MoreHorizontal />
+        <Ellipsis />
       </Button>
     {/snippet}
   </DropdownMenu.Trigger>
@@ -170,7 +169,7 @@
           <div class="bg-negative-default absolute inset-y-0 left-0 w-1" aria-hidden="true"></div>
           <div class="flex items-start gap-3 p-4 pl-5">
             <div class="bg-negative-default/10 flex-shrink-0 rounded-full p-1.5">
-              <AlertTriangle class="text-negative-default size-4" aria-hidden="true" />
+              <TriangleAlert class="text-negative-default size-4" aria-hidden="true" />
             </div>
             <div class="min-w-0 flex-1">
               <p class="text-negative-stronger text-sm font-medium">
@@ -210,7 +209,7 @@
       <Button variant="outline" onclick={() => (deleteOpen = false)}>{m.cancel()}</Button>
       <Button variant="destructive" onclick={handleDelete} disabled={isDeleting}>
         {#if isDeleting}
-          <Loader2 class="size-4 animate-spin" aria-hidden="true" />
+          <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
           {m.deleting()}
         {:else}
           {m.delete_model()}

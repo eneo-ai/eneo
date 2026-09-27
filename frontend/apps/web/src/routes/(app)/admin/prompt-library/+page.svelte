@@ -16,9 +16,7 @@
   import { EneoError } from "@eneo/eneo-js";
   import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
-  import Plus from "lucide-svelte/icons/plus";
-  import Trash2 from "lucide-svelte/icons/trash-2";
-  import Search from "lucide-svelte/icons/search";
+  import { Plus, Trash2, Search } from "@lucide/svelte";
 
   const { data } = $props();
 

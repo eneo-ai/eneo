@@ -1,13 +1,12 @@
 <script lang="ts">
+  import { intlLocale } from "$lib/core/formatting/dateTime";
   import type {
     SkillRevisionPublic,
     SkillRevisionRestorePublic,
     SkillRevisionSummaryPage,
     SkillRevisionSummaryPublic
   } from "@eneo/eneo-js";
-  import Eye from "lucide-svelte/icons/eye";
-  import LoaderCircle from "lucide-svelte/icons/loader-circle";
-  import RotateCcw from "lucide-svelte/icons/rotate-ccw";
+  import { Eye, LoaderCircle, RotateCcw } from "@lucide/svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
@@ -16,7 +15,6 @@
   import * as Table from "$lib/components/ui/table/index.js";
   import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
   import { tick, untrack } from "svelte";
 
   type Props = {
@@ -77,7 +75,7 @@
   }
 
   function formatCreatedAt(value: string): string {
-    return new Date(value).toLocaleString(getLocale() === "sv" ? "sv-SE" : "en-US", {
+    return new Date(value).toLocaleString(intlLocale(), {
       dateStyle: "short",
       timeStyle: "short"
     });
@@ -239,39 +237,33 @@
     {/if}
     <dl class="flex flex-col gap-3">
       <div class="flex flex-col gap-1">
-        <dt
-          class="text-muted-foreground flex items-baseline justify-between gap-3 text-xs font-medium"
-        >
+        <dt class="text-muted-foreground flex flex-wrap items-baseline gap-2 text-xs font-medium">
           {m.name()}
           {#if fieldChanged(revision, comparison, "display_name")}
-            <span class="text-accent-stronger font-normal">{m.skills_library_changed_field()}</span>
+            <Badge variant="outline" class="font-normal">{m.skills_library_changed_field()}</Badge>
           {/if}
         </dt>
         <dd class="text-sm">{revision.display_name}</dd>
       </div>
       <div class="flex flex-col gap-1">
-        <dt
-          class="text-muted-foreground flex items-baseline justify-between gap-3 text-xs font-medium"
-        >
+        <dt class="text-muted-foreground flex flex-wrap items-baseline gap-2 text-xs font-medium">
           {m.description()}
           {#if fieldChanged(revision, comparison, "description")}
-            <span class="text-accent-stronger font-normal">{m.skills_library_changed_field()}</span>
+            <Badge variant="outline" class="font-normal">{m.skills_library_changed_field()}</Badge>
           {/if}
         </dt>
         <dd class="text-sm">{revision.description}</dd>
       </div>
       <div class="flex flex-col gap-1">
-        <dt
-          class="text-muted-foreground flex items-baseline justify-between gap-3 text-xs font-medium"
-        >
+        <dt class="text-muted-foreground flex flex-wrap items-baseline gap-2 text-xs font-medium">
           <span>{m.skills_instructions_label()}</span>
           {#if fieldChanged(revision, comparison, "instructions")}
-            <span class="text-accent-stronger font-normal">{m.skills_library_changed_field()}</span>
+            <Badge variant="outline" class="font-normal">{m.skills_library_changed_field()}</Badge>
           {/if}
         </dt>
         <dd>
           <pre
-            class="border-border bg-muted/40 rounded-md border p-3 font-mono text-xs leading-5 [overflow-wrap:anywhere] whitespace-pre-wrap">{revision.instructions}</pre>
+            class="border-border bg-muted/40 rounded-md border p-3 font-mono text-xs leading-5 whitespace-pre-wrap [overflow-wrap:anywhere]">{revision.instructions}</pre>
         </dd>
       </div>
     </dl>
@@ -397,7 +389,7 @@
         <Dialog.Description>{m.skills_library_compare_revision_description()}</Dialog.Description>
       {/if}
     </Dialog.Header>
-    <div class="min-h-0 [scrollbar-gutter:stable] overflow-y-auto">
+    <div class="min-h-0 overflow-y-auto [scrollbar-gutter:stable]">
       {#if restoreError}
         <div class="flex flex-col gap-3 px-6 pt-6">
           <Alert.Root variant="destructive">
@@ -431,12 +423,12 @@
     </div>
     <Dialog.Footer class="border-border mx-0 mb-0 border-t px-6 py-4">
       {#if canRestore && viewedRevision && viewedRevision.id !== comparisonCurrentRevision.id}
-        <Button variant="outline" onclick={() => viewedRevision && requestRestore(viewedRevision)}>
+        <Button onclick={() => viewedRevision && requestRestore(viewedRevision)}>
           <RotateCcw aria-hidden="true" />
           {m.skills_library_restore_revision_from_preview()}
         </Button>
       {/if}
-      <Button onclick={() => (viewedRevision = null)}>{m.close()}</Button>
+      <Button variant="outline" onclick={() => (viewedRevision = null)}>{m.close()}</Button>
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

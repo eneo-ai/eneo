@@ -1119,7 +1119,7 @@ async def test_history_migration_preserves_current_correction_revision(
             )
         path = (
             Path(__file__).parents[3]
-            / "alembic/versions/202609151000_add_review_change_history.py"
+            / "alembic/versions/202609151040_add_review_change_history.py"
         )
         spec = importlib.util.spec_from_file_location("history_migration", path)
         assert spec is not None and spec.loader is not None

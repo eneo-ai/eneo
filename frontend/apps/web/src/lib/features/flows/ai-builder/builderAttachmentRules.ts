@@ -1,5 +1,6 @@
 import type { Limits } from "@eneo/eneo-js";
 import type { AttachmentRules } from "$lib/features/attachments/AttachmentManager";
+import { acceptedFormatsFromLimits } from "$lib/features/attachments/getAttachmentRules";
 
 const AI_BUILDER_SUPPORTED_MIMETYPES = new Set([
   "text/markdown",
@@ -21,10 +22,7 @@ export function getAIBuilderAttachmentRules(limits: Limits): AttachmentRules {
 
   return {
     maxTotalCount: limits.attachments.ai_builder_max_count,
-    acceptedFormats: formats.map(({ mimetype, size }) => ({
-      mimetype,
-      maxSize: size
-    })),
+    acceptedFormats: acceptedFormatsFromLimits(formats),
     acceptString: formats.map((format) => format.mimetype).join(",")
   };
 }

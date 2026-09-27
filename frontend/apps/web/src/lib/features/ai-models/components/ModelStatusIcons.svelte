@@ -82,13 +82,8 @@
 </script>
 
 <script lang="ts">
-  import { Tooltip } from "@eneo/ui";
-  import TriangleAlert from "lucide-svelte/icons/triangle-alert";
-  import Brain from "lucide-svelte/icons/brain";
-  import Eye from "lucide-svelte/icons/eye";
-  import Wrench from "lucide-svelte/icons/wrench";
-  import Clock from "lucide-svelte/icons/clock";
-  import AudioLines from "lucide-svelte/icons/audio-lines";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
+  import { TriangleAlert, Brain, Eye, Wrench, Clock, AudioLines } from "@lucide/svelte";
   import ModelCostBadge from "./ModelCostBadge.svelte";
 
   export let model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
@@ -109,18 +104,21 @@
 
 <div class="flex items-center gap-2" role="list" aria-label={m.model_capabilities_label()}>
   {#each icons as icon (icon.icon)}
-    <Tooltip text={icon.tooltip} asFragment let:trigger>
-      {@const tooltipTrigger = trigger[0]}
-      <span
-        {...tooltipTrigger}
-        use:tooltipTrigger.action
-        class="{icon.color} cursor-default"
-        role="listitem"
-        aria-label={icon.ariaLabel}
-      >
-        <svelte:component this={iconComponents[icon.icon]} size={16} strokeWidth={2} />
-      </span>
-    </Tooltip>
+    <Tooltip.Root>
+      <Tooltip.Trigger>
+        {#snippet child({ props })}
+          <span
+            {...props}
+            class="{icon.color} cursor-default"
+            role="listitem"
+            aria-label={icon.ariaLabel}
+          >
+            <svelte:component this={iconComponents[icon.icon]} size={16} strokeWidth={2} />
+          </span>
+        {/snippet}
+      </Tooltip.Trigger>
+      <Tooltip.Content>{icon.tooltip}</Tooltip.Content>
+    </Tooltip.Root>
   {/each}
   {#if showCost}
     <ModelCostBadge {model} dense />

@@ -1031,6 +1031,13 @@ checksum and skew-recovery checks.
 Replace all five digest suffixes in `.env`. Keep the previous `.env` with the
 matching backup.
 
+### Rename environment variables that are no longer read
+
+From 2.2, `db-init`, the backend, the worker and the web app refuse to start
+while a renamed variable is set without its replacement, and the web app
+refuses to start without `ENEO_BACKEND_URL`. Before upgrading to 2.2, follow
+[Upgrading to 2.2.0](/guides/upgrade-2-2-0#environment-variables).
+
 ### Review network changes
 
 If your current deployment predates the isolated-network template, recreating
@@ -1056,7 +1063,7 @@ Keep `backend`, `worker`, `task-execution-worker`, and
 `task-maintenance-worker` stopped through the recovery point and `db-init`.
 
 Follow the [File and Icon storage upgrade
-checklist](/guides/file-icon-storage-upgrade#before-you-upgrade). Keep the API
+checklist](/guides/file-icon-storage-upgrade#before-you-start). Keep the API
 closed until the new migration and same-release worker are ready.
 
 ### Take the stopped-writer recovery point

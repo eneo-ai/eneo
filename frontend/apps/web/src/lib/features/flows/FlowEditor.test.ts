@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { get } from "svelte/store";
-import { assert, beforeEach, describe, expect, it, vi } from "vitest";
+import { assert, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import { EneoError } from "@eneo/eneo-js";
 import type { Flow, FlowStep, Eneo } from "@eneo/eneo-js";
@@ -1222,8 +1222,8 @@ describe("FlowEditor drafting chain starter", () => {
   };
 
   const makeStarterEditor = (
-    assistantCreate: ReturnType<typeof vi.fn>,
-    assistantUpdate: ReturnType<typeof vi.fn> = vi.fn(async (_request: unknown) => undefined)
+    assistantCreate: Mock,
+    assistantUpdate: Mock = vi.fn(async (_request: unknown) => undefined)
   ) =>
     createFlowEditor({
       flow: makeFlow(null, { steps: [] }),

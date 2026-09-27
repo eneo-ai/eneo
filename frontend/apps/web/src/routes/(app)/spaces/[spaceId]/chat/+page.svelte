@@ -9,7 +9,7 @@
   import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { fade } from "svelte/transition";
   import InsightsPage from "./insights/InsightsPage.svelte";
   import { page } from "$app/state";
@@ -146,11 +146,9 @@
           <Page.Flex>
             {@render debugTrigger()}
             {#if chat.partner.type !== "default-assistant" && chat.partner.permissions?.includes("edit")}
-              <Button href={partnerEditHref()}>{m.edit()}</Button>
+              <Button variant="ghost" href={partnerEditHref()}>{m.edit()}</Button>
             {/if}
-            <Button variant="primary" on:click={startNewConversation} class="!line-clamp-1"
-              >{m.new_conversation()}
-            </Button>
+            <Button onclick={startNewConversation}>{m.new_conversation()}</Button>
           </Page.Flex>
         </Page.Header>
 
@@ -200,8 +198,9 @@
               <div class="flex flex-col items-center justify-center gap-2">
                 {#if chat.hasMoreConversations}
                   <Button
-                    variant="primary-outlined"
-                    on:click={() => chat.loadMoreConversations()}
+                    variant="outline"
+                    class="border-accent-default text-accent-default"
+                    onclick={() => chat.loadMoreConversations()}
                     aria-label={m.load_more_conversations()}
                   >
                     {m.load_more_conversations()}</Button

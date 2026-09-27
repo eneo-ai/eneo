@@ -144,7 +144,22 @@ On an organisation Skill's detail page, the adoption view shows:
   to the published version.
 
 Configured resources load 25 at a time. The count shows how many are visible,
-and **Show more resources** loads the next page.
+and **Show more resources** loads the next page. Search by resource, Space or
+owner name, and filter by type or update status, to find one resource among
+hundreds; the totals above the table always describe the whole Skill.
+
+Rows in a personal Space name their owner. A row the administrator cannot open
+(another user's personal Space, or a Space they are not a member of) is shown
+as plain text instead of a link.
+
+Tick rows (at most 100 at a time) to act on them without visiting each one:
+
+- **Detach** removes the Skill from the selected Assistants and Apps only. The
+  Skill, every unselected binding, and Personal Chat stay as they are. The
+  audit log records which resources lost the binding.
+- **Update to published version** moves the selected stale rows to the
+  published version in one chunk. Rows already on it are skipped, each
+  Assistant is validated first, and queued App runs are not affected.
 
 ### Moving Personal Chat to the published version
 
@@ -263,8 +278,8 @@ exact-version attachment.
 ### Organisation Skills
 
 Organisation Skills form the reviewed catalogue inside one Eneo installation.
-Only tenant admins author, revise, publish, unpublish, restore, and delete
-eligible organisation Skills.
+Only tenant admins author, revise, publish, unpublish, restore versions of, and
+remove organisation Skills. Removed Skills remain readable by admins.
 
 | Status            | What users receive                                                     |
 | ----------------- | ---------------------------------------------------------------------- |
@@ -272,6 +287,7 @@ eligible organisation Skills.
 | Published         | The exact approved version is available to authorised builders         |
 | Awaiting approval | The approved version remains available while a newer draft is reviewed |
 | Unpublished       | No new organisation attachment; existing exact pins remain stable      |
+| Removed           | Admin-only history; no editing, publishing, or new attachments         |
 
 A builder needs **Use Skills** and edit access to the target Assistant or App to
 preview and attach a published organisation Skill. **Manage Skills** does not
@@ -358,20 +374,60 @@ Review the adoption view and update or remove unsafe versions before unblocking.
   execution** to stop those existing pins at runtime.
 </Callout>
 
+## Remove organisation Skills
+
+Open **Skills** in the organisation Space. Each current Skill shows the number
+of Assistants and Apps with a saved binding, the number of distinct Spaces
+containing those resources, and whether Personal Chat uses it. These are
+configuration counts, not run counts. Select a count to inspect the bindings.
+
+Use **Remove** on a row or **Remove skill** in its detail page. To remove several,
+select up to 100 Skills and choose **Remove selected**. Review the named Skills
+in the confirmation before continuing. A selected Skill can be a draft,
+published, unpublished, or execution-blocked.
+
+If a selected Skill is still used by Assistants, Apps, or Personal Chat, the
+confirmation says so and offers to remove those bindings in the same step. The
+option is on by default: the Skill and every binding are removed together, in
+one transaction, and the audit event for the Skill lists each Assistant, App,
+and Personal Chat policy that lost it. Assistants and Apps continue without the
+Skill; a Personal Chat change applies to everyone in the organisation. Untick
+the option to keep today's stricter behaviour, where the whole selection stays
+unchanged while any Skill is in use and you can exclude the Skills in use
+instead.
+
+Queued or running App jobs still refuse removal, with or without the option,
+so a job never loses its Skill mid-run. A concurrent change can also refuse the
+request; review the message before retrying.
+
+Removed Skills leave the current and published catalogues. Under **Removed**,
+admins can still read their instructions and version history. Completed App-run
+provenance and audit events remain intact. Removal cannot be undone: editing,
+publishing, and restoring versions are unavailable. An existing execution block
+can still be closed with an auditable reason. A new Skill may reuse a removed
+Skill's identifier, with a separate identity and history.
+
+Choose the control that matches the intent:
+
+| Control         | Effect                                                                  |
+| --------------- | ----------------------------------------------------------------------- |
+| Unpublish       | Stops new attachments; existing exact-version bindings remain usable    |
+| Block execution | Stops runs that use the Skill; keeps bindings available for remediation |
+| Remove          | Retires a Skill from the catalogue, optionally detaching it everywhere  |
+
 ## When a change is blocked
 
 Eneo refuses a Skill change rather than silently overwriting someone else's work
 or breaking a resource that is in use. The message names the exact blocker and
 the next safe action.
 
-| Blocker                             | What happened                                                                                                                                                                 | What to do                                                                     |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Identifier already taken            | Another Skill in the same Space, or in the organisation catalogue, already uses that identifier                                                                               | Choose a different identifier                                                  |
-| Skill changed while you reviewed it | Someone saved a new version, or published a different one, between the moment the page loaded and the moment you saved; this covers restoring an older version and publishing | Reload the Skill, compare the latest version, then repeat the action           |
-| Published Skill cannot be deleted   | A Skill that has ever been published is kept for audit history and can never be deleted                                                                                       | Unpublish it to stop new attachments; existing ones keep working until removed |
-| Skill is still attached             | The Skill is attached to an Assistant, an App, or the organisation Personal Chat policy                                                                                       | Remove every attachment, then delete                                           |
-| App run in progress                 | A queued or running App run needs the Skill                                                                                                                                   | Wait for the run to finish, then delete                                        |
-| Execution block changed             | The block you reviewed was released or replaced before your unblock was applied                                                                                               | The page reloads the live block state; review it and try again                 |
+| Blocker                             | What happened                                                                                                                                                                 | What to do                                                           |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Identifier already taken            | Another Skill in the same Space, or in the organisation catalogue, already uses that identifier                                                                               | Choose a different identifier                                        |
+| Skill changed while you reviewed it | Someone saved a new version, or published a different one, between the moment the page loaded and the moment you saved; this covers restoring an older version and publishing | Reload the Skill, compare the latest version, then repeat the action |
+| Skill is still attached             | The Skill is attached to an Assistant, an App, or the organisation Personal Chat policy, and the removal was sent without the detach option                                    | Tick the detach option in the confirmation, or remove the attachments |
+| App run in progress                 | A queued or running App run needs the Skill                                                                                                                                   | Wait for the run to finish, then remove the Skill                    |
+| Execution block changed             | The block you reviewed was released or replaced before your unblock was applied                                                                                               | The page reloads the live block state; review it and try again       |
 
 The Skill editor keeps unsaved edits when a save is refused, so nothing has to
 be retyped. A separate refusal applies at save time when the selected models or
@@ -454,11 +510,12 @@ evidence. This lets administrators see the full impact, remediate resources,
 and later unblock with an auditable reason. Removing the bindings would erase
 that operational context and make recovery a manual reconfiguration task.
 
-### When can I delete a Skill?
+### When can I remove a Skill?
 
-First detach it from every Assistant, App, and Personal Chat policy. A queued or
-running App run whose history still exists also blocks deletion until it
-completes or fails. Completed and failed runs keep only the Skill and revision
-IDs, revision number, digest, and position—not the instruction body. Previously
-published organisation Skills remain as audit history and cannot be
-hard-deleted.
+Whenever no queued or running App job needs it. The confirmation offers to
+detach the Skill from every Assistant, App, and Personal Chat policy in the same
+step (on by default), so prior manual detachment is not required. Organisation
+Skills retain their instructions, immutable versions, and audit history under
+**Removed**, including Skills that were published before removal. Local Space
+Skills still use permanent deletion once their bindings and active App jobs have
+been cleared.

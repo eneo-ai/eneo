@@ -1,126 +1,57 @@
 <script lang="ts">
-  import { IconCheck } from "@eneo/icons/check";
-  import { IconChevronUpDown } from "@eneo/icons/chevron-up-down";
-  import { IconPeople } from "@eneo/icons/people";
-  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { createSelect } from "@melt-ui/svelte";
-  import SpaceChip from "$lib/features/spaces/components/SpaceChip.svelte";
   import { goto } from "$app/navigation";
-  import { fly } from "svelte/transition";
-  import { quadInOut } from "svelte/easing";
-  import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
-  import { getChatService } from "../../ChatService.svelte";
-  import type { AssistantSparse, GroupChatSparse } from "@eneo/eneo-js";
-  import { getChatQueryParams } from "../../getChatQueryParams";
+  import { IconPeople } from "@eneo/icons/people";
+  import ResourceSwitcher from "$lib/components/ResourceSwitcher.svelte";
+  import { getEneo } from "$lib/core/Eneo";
+  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import SpaceChip from "$lib/features/spaces/components/SpaceChip.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { getAppContext } from "$lib/core/AppContext";
+  import { getChatService } from "../../ChatService.svelte";
+  import { getChatQueryParams } from "../../getChatQueryParams";
 
-  const { environment } = getAppContext();
-
-  // Helper function to get icon URL from icon_id
-  function getIconUrl(partner: AssistantSparse | GroupChatSparse): string | null {
-    if (partner.icon_id) {
-      return `${environment.baseUrl}/api/v1/icons/${partner.icon_id}/`;
-    }
-    return null;
-  }
-
+  const eneo = getEneo();
   const {
     state: { currentSpace }
   } = getSpacesManager();
-
   const chat = getChatService();
-
-  const {
-    elements: { trigger, menu, option },
-    states: { selected }
-  } = createSelect<GroupChatSparse | AssistantSparse>({
-    positioning: {
-      placement: "bottom-start",
-      fitViewport: true
-    },
-    defaultSelected: { value: $state.snapshot(chat.partner) },
-    onSelectedChange: ({ next }) => {
-      if (next) {
-        const url = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: next.value })}`;
-        // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with space id and chat query params
-        goto(url);
-      }
-      return next;
-    }
-  });
 </script>
 
-<button
-  {...$trigger}
-  use:trigger
-  in:fly|global={{ x: -5, duration: parent ? 300 : 0, easing: quadInOut, opacity: 0.3 }}
-  class="group text-primary hover:border-dimmer hover:bg-hover-default flex max-w-[calc(100%_-_1rem)] items-center justify-between gap-2 overflow-hidden rounded-lg border border-transparent py-0.5 pr-1 pl-2 text-[1.4rem] leading-normal font-extrabold"
+<ResourceSwitcher
+  items={$currentSpace.applications.chat}
+  current={chat.partner}
+  heading={m.select_an_assistant()}
+  onSelect={(partner) => {
+    const url = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: partner })}`;
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with space id and chat query params
+    goto(url);
+  }}
 >
-  <span class="truncate">{chat.partner.name}</span>
-  <!-- translate-y to make it look on the same line as the chevron in the space selector -->
-  <IconChevronUpDown
-    class="text-secondary group-hover:text-primary min-w-6 translate-y-[0.05rem]"
-  />
-</button>
-
-<div
-  class="border-default bg-primary z-10 flex min-w-[24vw] flex-col overflow-y-auto rounded-lg border shadow-xl"
-  {...$menu}
-  use:menu
->
-  <div
-    class="bg-frosted-glass-secondary border-default sticky top-0 border-b px-4 py-2 pr-12 font-mono text-sm"
-  >
-    {m.select_an_assistant()}
-  </div>
-  {#each $currentSpace.applications.chat as partner (partner.id)}
-    <div
-      class="border-default hover:bg-hover-default flex min-h-16 items-center gap-4 border-b px-4 hover:cursor-pointer"
-      {...$option({ value: partner, label: partner.name, disabled: false })}
-      use:option
-    >
-      <div class="relative flex-shrink-0">
-        {#if getIconUrl(partner)}
-          <div class="h-10 w-10 overflow-hidden rounded-lg">
-            <img src={getIconUrl(partner)} alt={partner.name} class="h-full w-full object-cover" />
-          </div>
-          {#if partner.type === "group-chat"}
-            <div class="group-chat-badge">
-              <IconPeople class="!h-3 !w-3" />
-            </div>
-          {/if}
-        {:else if partner.type === "group-chat"}
+  {#snippet itemIcon(partner)}
+    <div class="relative flex-shrink-0">
+      {#if partner.icon_id}
+        <div class="h-10 w-10 overflow-hidden rounded-lg">
+          <img
+            src={eneo.icons.url({ id: partner.icon_id })}
+            alt=""
+            class="h-full w-full object-cover"
+          />
+        </div>
+        {#if partner.type === "group-chat"}
           <div
-            class="bg-hover-default text-secondary flex h-10 w-10 items-center justify-center rounded-lg"
+            class="bg-primary border-default text-secondary absolute -right-1.5 -bottom-1.5 flex h-5 w-5 items-center justify-center rounded-full border shadow-sm"
           >
-            <IconPeople class="!h-5 !w-5" />
+            <IconPeople class="!h-3 !w-3" />
           </div>
-        {:else}
-          <SpaceChip space={{ ...partner, personal: false }}></SpaceChip>
         {/if}
-      </div>
-      <span class="flex-grow truncate">{formatEmojiTitle(partner.name)}</span>
-      <div class="check {$selected?.value.id === partner.id ? 'block' : 'hidden'}">
-        <IconCheck class="text-positive-stronger !size-8"></IconCheck>
-      </div>
+      {:else if partner.type === "group-chat"}
+        <div
+          class="bg-hover-default text-secondary flex h-10 w-10 items-center justify-center rounded-lg"
+        >
+          <IconPeople class="!h-5 !w-5" />
+        </div>
+      {:else}
+        <SpaceChip space={{ ...partner, personal: false }} />
+      {/if}
     </div>
-  {/each}
-</div>
-
-<style lang="postcss">
-  @reference "@eneo/ui/styles";
-  div[data-highlighted] {
-    @apply bg-hover-default;
-  }
-
-  /* div[data-selected] { } */
-
-  div[data-disabled] {
-    @apply opacity-30 hover:bg-transparent;
-  }
-
-  .group-chat-badge {
-    @apply bg-primary border-default text-secondary absolute -right-1.5 -bottom-1.5 flex h-5 w-5 items-center justify-center rounded-full border shadow-sm;
-  }
-</style>
+  {/snippet}
+</ResourceSwitcher>

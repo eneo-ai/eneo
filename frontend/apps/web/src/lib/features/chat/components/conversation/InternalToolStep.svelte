@@ -10,8 +10,7 @@
 -->
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import ChevronRight from "lucide-svelte/icons/chevron-right";
-  import X from "lucide-svelte/icons/x";
+  import { ChevronRight, X } from "@lucide/svelte";
   import ShimmerText from "./ShimmerText.svelte";
   import ToolCallDetailsPanel from "./ToolCallDetailsPanel.svelte";
 

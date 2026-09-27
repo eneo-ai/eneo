@@ -32,7 +32,7 @@ function initGroupChatEditor(data: {
     eneo: data.eneo,
     resource: data.groupChat,
     defaults: {
-      insight_enabled: false
+      insight_enabled: false as boolean
     },
     updateResource: async (resource, changes) => {
       const updated = await data.eneo.groupChats.update({ groupChat: resource, update: changes });

@@ -1,9 +1,22 @@
+import { readFileSync } from "node:fs";
 import prettier from "eslint-config-prettier";
 import js from "@eslint/js";
 import svelte from "eslint-plugin-svelte";
 import globals from "globals";
 import ts from "typescript-eslint";
 import eneo from "@eneo/eslint-plugin";
+
+// Lucide keeps renamed icons as deprecated aliases (`Loader2` → `LoaderCircle`) and drops them in
+// later majors. Read them from the installed package so the rule below tracks the version we use.
+const lucideAliases = readFileSync(
+  new URL("./aliases/aliases.js", import.meta.resolve("@lucide/svelte")),
+  "utf8"
+);
+const deprecatedLucideIcons = [
+  ...lucideAliases.matchAll(
+    /@deprecated[^\n]*\{@link (\w+)\}[^\n]*\n\s*default as (\w+) \} from '\.\.\/icons\/([\w-]+)\.js'/g
+  )
+].map(([, current, alias, file]) => ({ current, alias, file }));
 
 export default ts.config(
   js.configs.recommended,
@@ -82,38 +95,26 @@ export default ts.config(
     }
   },
   {
+    // Vendored shadcn-svelte files stay as upstream ships them.
     files: ["src/**/*.{svelte,js,ts}"],
+    ignores: ["src/lib/components/ui/**"],
     rules: {
-      // Lucide's aggregate entry points re-export the full icon catalogue.
-      // Importing them makes Vite transform thousands of unused modules in
-      // both production graphs; direct icon modules keep builds bounded.
       "no-restricted-imports": [
         "error",
         {
           paths: [
             {
-              name: "lucide-svelte",
-              message: 'Import the icon from "lucide-svelte/icons/<icon-name>".'
-            },
-            {
-              name: "lucide-svelte/icons",
-              message: 'Import the icon from "lucide-svelte/icons/<icon-name>".'
-            },
-            {
-              name: "lucide-svelte/icons/index",
-              message: 'Import the icon from "lucide-svelte/icons/<icon-name>".'
-            },
-            {
               name: "@lucide/svelte",
-              message: 'Import the icon from "@lucide/svelte/icons/<icon-name>".'
-            },
+              importNames: deprecatedLucideIcons.map(({ alias }) => alias),
+              message:
+                "Deprecated Lucide alias: import the current icon name named in its @deprecated note."
+            }
+          ],
+          patterns: [
             {
-              name: "@lucide/svelte/icons",
-              message: 'Import the icon from "@lucide/svelte/icons/<icon-name>".'
-            },
-            {
-              name: "@lucide/svelte/icons/index",
-              message: 'Import the icon from "@lucide/svelte/icons/<icon-name>".'
+              group: deprecatedLucideIcons.map(({ file }) => `@lucide/svelte/icons/${file}`),
+              message:
+                "Deprecated Lucide alias: import the current icon file named in its @deprecated note."
             }
           ]
         }

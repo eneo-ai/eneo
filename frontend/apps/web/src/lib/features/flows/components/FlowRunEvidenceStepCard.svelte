@@ -3,7 +3,7 @@
   import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { IconCopy } from "@eneo/icons/copy";
   import { IconCheck } from "@eneo/icons/check";
-  import { Markdown } from "@eneo/ui";
+  import { Markdown } from "$lib/components/markdown/index.js";
   import { m } from "$lib/paraglide/messages";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";

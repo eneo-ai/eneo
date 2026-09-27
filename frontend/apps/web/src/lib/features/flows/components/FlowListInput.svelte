@@ -2,7 +2,7 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { m } from "$lib/paraglide/messages";
-  import IconX from "lucide-svelte/icons/x";
+  import IconX from "@lucide/svelte/icons/x";
 
   let {
     id,

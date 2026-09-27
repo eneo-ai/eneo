@@ -1,139 +1,35 @@
 <script lang="ts">
-  import { IconCopy } from "@eneo/icons/copy";
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { IconDownload } from "@eneo/icons/download";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
-  import { IconPrint } from "@eneo/icons/print";
-  import { Button, Markdown, Tooltip } from "@eneo/ui";
-  import dayjs from "dayjs";
-  import utc from "dayjs/plugin/utc";
-  import { getResultTitle } from "$lib/features/apps/getResultTitle.js";
+  import { Markdown } from "$lib/components/markdown/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import AppResultStatus from "$lib/features/apps/components/AppResultStatus.svelte";
-  import { onMount } from "svelte";
-  import { getEneoSocket } from "$lib/core/EneoSocket.js";
+  import AppResultToolbar from "$lib/features/apps/components/AppResultToolbar.svelte";
+  import { createAppRunResult } from "$lib/features/apps/createAppRunResult.svelte";
   import UploadedFileIcon from "$lib/features/attachments/components/UploadedFileIcon.svelte";
-  import type { UploadedFile } from "@eneo/eneo-js";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte.js";
   import { getEneo } from "$lib/core/Eneo.js";
   import { browser } from "$app/environment";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
   import { localizeHref } from "$lib/paraglide/runtime";
   import { fade, fly } from "svelte/transition";
   import { quadInOut } from "svelte/easing";
-  import { untrack } from "svelte";
-
-  dayjs.extend(utc);
 
   const { data } = $props();
 
-  const { subscribe } = getEneoSocket();
   const eneo = getEneo();
-
   const attachmentUrlService = getAttachmentUrlService();
 
-  let result = $state(untrack(() => data.result));
-  const resultTitle = $derived(getResultTitle(result));
-
-  async function downloadAsText(text?: string | null) {
-    if (!text) {
-      toast.warning(m.not_output_to_save());
-      return;
-    }
-    const file = new Blob([text], { type: "application/octet-stream;charset=utf-8" });
-    const suggestedName =
-      data.app.name + dayjs(result.created_at).format(" YYYY-MM-DD HH:mm") + ".txt";
-    if (window.showSaveFilePicker) {
-      const handle = await window.showSaveFilePicker({ suggestedName });
-      const writable = await handle.createWritable();
-      await writable.write(file);
-      writable.close();
-    } else {
-      const a = document.createElement("a");
-      a.download = suggestedName;
-      a.href = URL.createObjectURL(file);
-      a.click();
-      setTimeout(function () {
-        URL.revokeObjectURL(a.href);
-      }, 1500);
-    }
-  }
+  const run = createAppRunResult(() => data);
 
   let printElement = $state<HTMLDivElement>();
-  function print() {
-    if (!printElement) return;
-    const printNode = printElement.cloneNode(true);
-    document.body.appendChild(printNode);
-    document.body.classList.add("print-mode");
-    window.print();
-    document.body.classList.remove("print-mode");
-    document.body.removeChild(printNode);
-  }
-
-  function copyText(text?: string | null) {
-    if (text) {
-      navigator.clipboard.writeText(text);
-    } else {
-      toast.warning(m.no_copyable_output());
-    }
-  }
-
-  const isRunComplete = $derived(!(result.status === "in progress" || result.status === "queued"));
-
-  function isTranscribedFile(file: UploadedFile): file is UploadedFile & { transcription: string } {
-    return file.transcription !== null && file.transcription !== undefined;
-  }
-
-  let transcribedFiles = $derived.by(() => {
-    if (!result.output) return [];
-    return result.input.files.filter((file) => isTranscribedFile(file));
-  });
-
   let activeTab: "results" | "transcription" = $state("results");
-
-  onMount(() => {
-    if (isRunComplete) return;
-
-    const unsubscriber = subscribe("app_run_updates", async (update) => {
-      if (update.id === data.result.id) {
-        result = await eneo.apps.runs.get(result);
-      }
-    });
-
-    if (result.status === "queued") {
-      eneo.apps.runs.get(result).then((updatedResult) => {
-        result = updatedResult;
-      });
-    }
-
-    return unsubscriber;
-  });
 </script>
 
 <svelte:head>
   <title>Eneo.ai – {m.dashboard()} – {data.app.name}</title>
 </svelte:head>
-
-{#snippet downloadButtons(type: "output" | "transcription", text?: string)}
-  <div class="flex gap-1 pb-2">
-    <Tooltip text={m.print_save_type_pdf({ type })} placement="bottom">
-      <Button on:click={print} padding="icon" variant="outlined">
-        <IconPrint size="md" />
-      </Button>
-    </Tooltip>
-
-    <Tooltip text={m.download_type_raw_text({ type })} placement="bottom">
-      <Button on:click={() => downloadAsText(text)} padding="icon" variant="outlined">
-        <IconDownload />
-      </Button>
-    </Tooltip>
-
-    <Tooltip text={m.copy_type({ type })} placement="bottom">
-      <Button on:click={() => copyText(text)} padding="icon" variant="outlined">
-        <IconCopy />
-      </Button>
-    </Tooltip>
-  </div>
-{/snippet}
 
 <div class="outer bg-primary flex w-full flex-col">
   <div
@@ -159,26 +55,22 @@
         }}
         class="truncate px-3 py-1 text-xl font-extrabold"
       >
-        {resultTitle}
+        {run.title}
       </h1>
     </a>
-    <Button
-      variant="primary"
-      href={localizeHref(`/dashboard/app/${data.app.id}`)}
-      class="!rounded-lg !px-5 !py-1"
-    >
+    <Button href={localizeHref(`/dashboard/app/${data.app.id}`)} class="px-5">
       {m.new_run()}
     </Button>
   </div>
 
   <div class="border-default flex flex-wrap items-center gap-4 border-b px-4 py-2">
-    <AppResultStatus run={result} variant="full" />
+    <AppResultStatus run={run.result} variant="full" />
     <span class="text-secondary text-sm">
-      {dayjs(result.created_at).format("YYYY-MM-DD HH:mm")}
+      {formatDateTime(run.result.created_at)}
     </span>
   </div>
 
-  {#if transcribedFiles.length > 0}
+  {#if run.transcribedFiles.length > 0}
     <div class="border-default flex border-b px-3.5">
       <button
         class="border-b-2 px-4 py-2 text-sm font-medium transition-colors"
@@ -204,12 +96,18 @@
   {/if}
 
   <div class="flex-grow overflow-y-auto p-4">
-    {#if isRunComplete}
-      {#if transcribedFiles.length > 0 && activeTab === "transcription"}
+    {#if run.isComplete}
+      {#if run.transcribedFiles.length > 0 && activeTab === "transcription"}
         <div class="flex flex-col gap-4">
-          {#each transcribedFiles as file (file.id)}
+          {#each run.transcribedFiles as file (file.id)}
             {@const url = attachmentUrlService.getUrl(file)}
-            {@render downloadButtons("transcription", file.transcription)}
+            <AppResultToolbar
+              type="transcription"
+              text={file.transcription}
+              fileName={run.textFileName}
+              {printElement}
+              class="pb-2"
+            />
 
             <div class="border-stronger bg-secondary rounded-xl border">
               {#if url}
@@ -219,7 +117,12 @@
                       <UploadedFileIcon {file} />
                       <span class="truncate">{file.name}</span>
                     </div>
-                    <Button href={url} padding="icon">
+                    <Button
+                      href={url}
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`${m.download()} ${file.name}`}
+                    >
                       <IconDownload />
                     </Button>
                   </div>
@@ -236,20 +139,26 @@
             </div>
           {/each}
         </div>
-      {:else if result.output}
-        {@render downloadButtons("output", result.output)}
+      {:else if run.result.output}
+        <AppResultToolbar
+          type="output"
+          text={run.result.output}
+          fileName={run.textFileName}
+          {printElement}
+          class="pb-2"
+        />
         <div
-          class="prose border-default bg-primary rounded-lg border p-4 shadow"
+          class="printable-document prose border-default bg-primary rounded-lg border p-4 shadow"
           bind:this={printElement}
         >
-          <Markdown source={result.output} />
+          <Markdown source={run.result.output} />
         </div>
-      {:else if browser && result.status === "failed" && result.input.files.length > 0}
+      {:else if browser && run.result.status === "failed" && run.result.input.files.length > 0}
         <div class="flex flex-col items-center justify-center gap-4 py-8">
           <span class="text-secondary">{m.app_run_failed_files_list()}</span>
-          {#each result.input.files as file (file.id)}
+          {#each run.result.input.files as file (file.id)}
             {#await eneo.files.generateSignedUrl( { fileId: file.id, expiresIn: 3600, contentDisposition: "attachment" } ) then signedFile}
-              <Button href={signedFile.url} variant="outlined">
+              <Button href={signedFile.url} variant="outline">
                 <IconDownload />
                 {m.download()} "{file.name}"
               </Button>
@@ -268,10 +177,10 @@
       </div>
     {/if}
 
-    {#if result.input.files.length > 0}
+    {#if run.result.input.files.length > 0}
       <div class="mt-4 flex flex-col gap-2">
         <span class="text-secondary text-sm font-medium">{m.input_files()}</span>
-        {#each result.input.files as file (file.id)}
+        {#each run.result.input.files as file (file.id)}
           <div
             class="border-default bg-primary flex items-center gap-2 rounded-lg border px-4 py-3"
           >

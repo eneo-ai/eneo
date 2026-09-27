@@ -1,13 +1,15 @@
 <script lang="ts">
-  import ChevronRight from "lucide-svelte/icons/chevron-right";
-  import File from "lucide-svelte/icons/file";
-  import FileAudio from "lucide-svelte/icons/file-audio";
-  import FileImage from "lucide-svelte/icons/file-image";
-  import FileText from "lucide-svelte/icons/file-text";
-  import Folder from "lucide-svelte/icons/folder";
-  import FolderOpen from "lucide-svelte/icons/folder-open";
-  import LoaderCircle from "lucide-svelte/icons/loader-circle";
-  import RefreshCw from "lucide-svelte/icons/refresh-cw";
+  import {
+    ChevronRight,
+    File,
+    FileHeadphone,
+    FileImage,
+    FileText,
+    Folder,
+    FolderOpen,
+    LoaderCircle,
+    RefreshCw
+  } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -147,7 +149,7 @@
           {#if IMAGE_EXTENSIONS.includes(ext)}
             <FileImage class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
           {:else if AUDIO_EXTENSIONS.includes(ext)}
-            <FileAudio class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
+            <FileHeadphone class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
           {:else if TEXT_EXTENSIONS.includes(ext)}
             <FileText class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
           {:else}

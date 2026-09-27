@@ -9,7 +9,6 @@ import { createResourceEditor } from "$lib/core/editing/ResourceEditor";
 import { toast } from "$lib/components/toast";
 import { EneoError, type Flow, type FlowStep, type Eneo, type PromptSparse } from "@eneo/eneo-js";
 import { derived, get, readonly, writable } from "svelte/store";
-import { uid } from "uid";
 import { shouldSaveAssistantImmediately } from "./assistantSavePolicy";
 import { AssistantSaveManager } from "./flowAssistantSaveManager";
 import {
@@ -706,7 +705,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     const isFirst = stepCount === 0;
     const prevStep = stepCount > 0 ? currentSteps[stepCount - 1] : null;
 
-    const tempId = `_temp_${uid(12)}`;
+    const tempId = `_temp_${temporaryIdSuffix()}`;
     const stepName = seed?.name ?? `Nytt steg ${stepCount + 1}`;
     const newStep = buildBlankStep({
       tempId,
@@ -813,7 +812,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     const $update = get(editor.state.update);
     const currentSteps = [...($update.steps ?? [])];
 
-    const tempId = `_temp_${uid(12)}`;
+    const tempId = `_temp_${temporaryIdSuffix()}`;
     const prevStep = currentSteps.find((s: FlowStep) => s.step_order === afterOrder);
     const isFirstInsert = afterOrder === 0;
 
@@ -1161,3 +1160,11 @@ export {
   getUnifiedFlowSaveStatus
 };
 export type { FlowEditor, FlowMetadataJson, FlowWizardMetadata };
+
+/** Twelve random hex characters for a client-side temporary id. `getRandomValues`, unlike
+ * `randomUUID`, also works outside secure contexts. */
+function temporaryIdSuffix(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(6)), (byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("");
+}

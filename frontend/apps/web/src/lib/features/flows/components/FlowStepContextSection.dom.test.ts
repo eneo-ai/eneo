@@ -98,7 +98,7 @@ describe("FlowStepContextSection published mode", () => {
 
     expect(screen.queryAllByTestId("select-knowledge-stub")).toHaveLength(0);
     expect(screen.queryByRole("button", { name: m.remove() })).toBeNull();
-    expect(screen.queryByText(m.upload_attachment())).toBeNull();
+    expect(screen.queryByText(m.upload_dropzone_prompt())).toBeNull();
     expect(screen.queryByRole("button", { name: m.cancel() })).toBeNull();
   });
 
@@ -107,7 +107,7 @@ describe("FlowStepContextSection published mode", () => {
 
     expect(screen.queryAllByTestId("select-knowledge-stub")).toHaveLength(2);
     expect(screen.getByRole("button", { name: m.remove() })).toBeTruthy();
-    expect(screen.getByText(m.upload_attachment())).toBeTruthy();
+    expect(screen.getByText(m.upload_dropzone_prompt())).toBeTruthy();
     expect(screen.getByRole("button", { name: m.cancel() })).toBeTruthy();
   });
 });

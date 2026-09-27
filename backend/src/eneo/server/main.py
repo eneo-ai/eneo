@@ -46,6 +46,7 @@ from eneo.server import api_documentation
 from eneo.server.dependencies.lifespan import lifespan as app_lifespan
 from eneo.server.exception_handlers import (
     add_exception_handlers,
+    default_error_code_for_status,
     extract_request_id,
     validation_error_response_content,
 )
@@ -553,6 +554,14 @@ def get_application():
             request_id = extract_request_id(request)
             if request_id and "request_id" not in normalized_detail:
                 normalized_detail["request_id"] = request_id
+            # Every raiser of this shape means it as the documented error, but
+            # each built the dict by hand and most left the required numeric
+            # category out. Fill it here, where the dict becomes the body, so a
+            # direct `raise HTTPException` cannot bypass the contract.
+            if "eneo_error_code" not in normalized_detail:
+                normalized_detail["eneo_error_code"] = default_error_code_for_status(
+                    exc.status_code
+                ).value
             return JSONResponse(
                 status_code=exc.status_code, content=normalized_detail, headers=headers
             )

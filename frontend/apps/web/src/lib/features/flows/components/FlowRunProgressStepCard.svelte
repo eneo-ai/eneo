@@ -3,7 +3,7 @@
   import { IconCopy } from "@eneo/icons/copy";
   import { IconCheck } from "@eneo/icons/check";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
-  import { Markdown } from "@eneo/ui";
+  import { Markdown } from "$lib/components/markdown/index.js";
   import { slide, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { browser } from "$app/environment";

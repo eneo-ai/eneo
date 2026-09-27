@@ -11,8 +11,7 @@
 
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
-  import ArrowLeft from "lucide-svelte/icons/arrow-left";
-  import Loader2 from "lucide-svelte/icons/loader-2";
+  import { ArrowLeft, LoaderCircle } from "@lucide/svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
@@ -184,7 +183,7 @@
 
     <Button type="button" onclick={() => void submit()} disabled={!isValid || isSubmitting}>
       {#if isSubmitting}
-        <Loader2 class="animate-spin" aria-hidden="true" />
+        <LoaderCircle class="animate-spin" aria-hidden="true" />
         {m.creating()}
       {:else}
         {m.create_and_continue()}

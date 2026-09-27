@@ -29,9 +29,9 @@
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { getChipClasses } from "$lib/features/flows/flowVariableTokens";
-  import Info from "lucide-svelte/icons/info";
-  import ArrowUp from "lucide-svelte/icons/arrow-up";
-  import ArrowDown from "lucide-svelte/icons/arrow-down";
+  import Info from "@lucide/svelte/icons/info";
+  import ArrowUp from "@lucide/svelte/icons/arrow-up";
+  import ArrowDown from "@lucide/svelte/icons/arrow-down";
   let {
     isPublished,
     onStatsChanged

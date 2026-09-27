@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Markdown } from "@eneo/ui";
+  import { Markdown } from "$lib/components/markdown/index.js";
   import MessageEneoInfoBlob from "./MessageEneoInfoBlob.svelte";
   import McpImageAttachments from "./McpImageAttachments.svelte";
   import ReasoningTrace from "./ReasoningTrace.svelte";
@@ -22,10 +22,7 @@
   import { getMessageContext } from "../../MessageContext.svelte";
   import AsyncImage from "$lib/components/AsyncImage.svelte";
   import { m } from "$lib/paraglide/messages";
-  import Check from "lucide-svelte/icons/check";
-  import ChevronRight from "lucide-svelte/icons/chevron-right";
-  import Wrench from "lucide-svelte/icons/wrench";
-  import X from "lucide-svelte/icons/x";
+  import { ChevronRight, Check, X, Wrench } from "@lucide/svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
 
   const chat = getChatService();

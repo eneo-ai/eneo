@@ -5,7 +5,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import type { HTMLAttributes } from "svelte/elements";
-  import { CircleAlert, CircleCheck, Info, TriangleAlert } from "lucide-svelte";
+  import { CircleAlert, CircleCheck, Info, TriangleAlert } from "@lucide/svelte";
   import * as Alert from "$lib/components/ui/alert";
   import { cn } from "$lib/utils";
 

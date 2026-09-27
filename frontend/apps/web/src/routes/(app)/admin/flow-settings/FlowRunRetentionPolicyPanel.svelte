@@ -7,7 +7,7 @@
     FlowRunRetentionSpaceTarget,
     FlowRunRetentionSpaceTargetPage
   } from "@eneo/eneo-js";
-  import ShieldCheck from "lucide-svelte/icons/shield-check";
+  import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import { untrack } from "svelte";
 
   import { Settings } from "$lib/components/layout";

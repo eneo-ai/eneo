@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { Table } from "@eneo/ui";
-  import { createRender } from "svelte-headless-table";
+  import * as Table from "$lib/components/resource-table/index.js";
   import AssistantTile from "./AssistantTile.svelte";
   import AssistantActions from "./AssistantActions.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -23,7 +22,7 @@
       header: m.name(),
       value: (item) => item.name,
       cell: (item) => {
-        return createRender(Table.PrimaryCell, {
+        return Table.renderComponent(Table.PrimaryCell, {
           label: item.value.name,
           link: `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({
             chatPartner: item.value,
@@ -41,7 +40,7 @@
             header: m.status(),
             accessor: (item) => item,
             cell: (item) => {
-              return createRender(PublishingStatusChip, {
+              return Table.renderComponent(PublishingStatusChip, {
                 resource: item.value
               });
             }
@@ -52,25 +51,25 @@
     table.columnActions({
       cell: (item) => {
         if (item.value.type === "assistant") {
-          return createRender(AssistantActions, {
+          return Table.renderComponent(AssistantActions, {
             assistant: item.value
           });
         }
 
         if (item.value.type === "group-chat") {
-          return createRender(GroupChatActions, {
+          return Table.renderComponent(GroupChatActions, {
             groupChat: item.value
           });
         }
 
-        return createRender(Table.FormattedCell, { value: "Unknown" });
+        return Table.renderComponent(Table.FormattedCell, { value: m.unknown() });
       }
     }),
 
     table.columnCard({
       value: (item) => item.name,
       cell: (item) => {
-        return createRender(AssistantTile, {
+        return Table.renderComponent(AssistantTile, {
           item: item.value
         });
       }

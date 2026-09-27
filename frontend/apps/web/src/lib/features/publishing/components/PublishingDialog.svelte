@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { Button, Dialog } from "@eneo/ui";
+  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import type { PublishableResource, PublishableResourceEndpoints } from "../Publisher";
   import { writable } from "svelte/store";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -70,31 +72,40 @@
         : null;
 </script>
 
-<Dialog.Root {openController}>
+<Dialog.Root bind:open={$openController}>
   {#if includeTrigger}
-    <Dialog.Trigger let:trigger asFragment>
-      <Button
-        variant={resource.published ? "destructive" : "positive"}
-        is={trigger}
-        class="w-24 transition-colors duration-300"
-        disabled={isDisabled}>{strings.action}</Button
-      >
+    <Dialog.Trigger>
+      {#snippet child({ props })}
+        <Button
+          {...props}
+          variant={resource.published ? "destructive" : "default"}
+          class={[
+            "w-24 transition-colors duration-300",
+            !resource.published && "bg-positive-default hover:bg-positive-stronger"
+          ]}
+          disabled={isDisabled}>{strings.action}</Button
+        >
+      {/snippet}
     </Dialog.Trigger>
   {/if}
 
-  <Dialog.Content>
-    <Dialog.Title>{strings.action} {resource.name}</Dialog.Title>
+  <Dialog.Content class={dialogLayout.content()} closeLabel={m.close()}>
+    <Dialog.Header class={dialogLayout.header}>
+      <Dialog.Title>{strings.action} {resource.name}</Dialog.Title>
+      <Dialog.Description>{strings.description}</Dialog.Description>
+    </Dialog.Header>
 
-    <Dialog.Description>{strings.description}</Dialog.Description>
     {#if autoFollowHint}
-      <p class="text-muted mt-2 text-xs">{autoFollowHint}</p>
+      <div class={dialogLayout.body}>
+        <p class="text-muted text-xs">{autoFollowHint}</p>
+      </div>
     {/if}
 
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant={resource.published ? "destructive" : "primary"} on:click={toggleState}
+    <Dialog.Footer class={dialogLayout.footer}>
+      <Dialog.Close class={buttonVariants({ variant: "outline" })}>{m.cancel()}</Dialog.Close>
+      <Button variant={resource.published ? "destructive" : "default"} onclick={toggleState}
         >{isLoading ? m.loading() : strings.action}</Button
       >
-    </Dialog.Controls>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

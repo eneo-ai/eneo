@@ -14,7 +14,7 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import { m } from "$lib/paraglide/messages";
-  import BookOpen from "lucide-svelte/icons/book-open";
+  import { BookOpen } from "@lucide/svelte";
 
   type KnowledgeSource = {
     id: string;
@@ -62,7 +62,7 @@
 
     <div class="flex max-h-64 flex-col overflow-y-auto p-1" role="list" aria-label={m.knowledge()}>
       {#each groups as group (group.label)}
-        <p class="text-muted-foreground px-2 pt-2 pb-0.5 text-xs font-medium">{group.label}</p>
+        <p class="text-muted-foreground px-2 pb-0.5 pt-2 text-xs font-medium">{group.label}</p>
         {#each group.sources as source (source.id)}
           <div class="flex items-center gap-2.5 rounded-md px-2 py-1.5" role="listitem">
             <span

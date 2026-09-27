@@ -1,6 +1,6 @@
 <script lang="ts">
   import { SvelteSet } from "svelte/reactivity";
-  import ChevronRight from "lucide-svelte/icons/chevron-right";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import IconHeadphones from "@lucide/svelte/icons/headphones";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";

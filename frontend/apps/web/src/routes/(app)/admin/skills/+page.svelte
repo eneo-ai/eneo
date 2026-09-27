@@ -1,8 +1,6 @@
 <script lang="ts">
   import type { SkillRuntimePolicyUpdate } from "@eneo/eneo-js";
-  import ArrowRight from "lucide-svelte/icons/arrow-right";
-  import BookOpenCheck from "lucide-svelte/icons/book-open-check";
-  import SlidersHorizontal from "lucide-svelte/icons/sliders-horizontal";
+  import { ArrowRight, BookOpenCheck, SlidersHorizontal } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { getEneo } from "$lib/core/Eneo.js";
   import PolicySection from "$lib/features/admin/PolicySection.svelte";
@@ -44,7 +42,7 @@
 
 <div class="flex h-full min-w-0 flex-grow flex-col overflow-hidden">
   <div class="border-default bg-primary border-b">
-    <div class="px-6 pt-5 pb-5">
+    <div class="px-6 pt-5 pb-5" data-tour="admin-skills">
       <h1 class="text-primary text-xl font-bold">{m.admin_skills_title()}</h1>
       <p class="text-secondary mt-0.5 text-sm">
         {m.admin_skills_subtitle()}

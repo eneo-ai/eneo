@@ -1,7 +1,7 @@
 <script lang="ts">
   import { BUILDER_COLUMN, BUILDER_MEASURE } from "./builderColumns";
   import { m } from "$lib/paraglide/messages";
-  import { Markdown } from "@eneo/ui";
+  import { Markdown } from "$lib/components/markdown/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import type { AIBuilderStatus } from "./protocol";
   import FlowAIBuilderInput from "./FlowAIBuilderInput.svelte";

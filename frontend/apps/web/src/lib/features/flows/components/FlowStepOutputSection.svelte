@@ -16,7 +16,7 @@
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { IconQuestionMark } from "@eneo/icons/question-mark";
   import { Input } from "$lib/components/ui/input/index.js";
-  import CircleAlert from "lucide-svelte/icons/circle-alert";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import {
     getOutputModeCompatibilityIssue,
     type OutputModeCompatibilityIssue,

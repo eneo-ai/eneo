@@ -1,12 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { Tabs } from "bits-ui";
   import { getContentTabs } from "./ctx";
   import { m } from "$lib/paraglide/messages";
 
-  const {
-    elements: { list },
-    states: { value }
-  } = getContentTabs();
+  const { value } = getContentTabs();
 
   let port: HTMLDivElement | undefined;
 
@@ -43,12 +41,10 @@
   bind:this={port}
   class="text-primary left-[50%] my-[-0.5rem] flex min-w-0 flex-grow items-center justify-center overflow-x-auto py-2 pr-3 max-lg:order-2 max-lg:w-full max-lg:flex-none max-lg:justify-start @4xl:lg:absolute @4xl:lg:-translate-x-[50%]"
 >
-  <div
-    {...$list}
-    use:list
+  <Tabs.List
     class="bg-secondary inline-flex w-fit items-center gap-[2px] rounded-lg p-[3px] whitespace-nowrap"
     aria-label={m.main_views_available_for_current_resource()}
   >
     <slot />
-  </div>
+  </Tabs.List>
 </div>

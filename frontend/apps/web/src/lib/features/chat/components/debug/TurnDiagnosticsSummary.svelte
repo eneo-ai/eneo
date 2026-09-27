@@ -1,16 +1,16 @@
 <script lang="ts">
+  import { intlLocale } from "$lib/core/formatting/dateTime";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import AttachmentPreview from "$lib/features/attachments/components/AttachmentPreview.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
   import type { TurnDebugDetails } from "../../turnDebugProjection";
   import ChatDebugSection from "./ChatDebugSection.svelte";
   import CopyableDebugValue from "./CopyableDebugValue.svelte";
 
   let { details }: { details: TurnDebugDetails } = $props();
-  const numberFormatter = $derived(new Intl.NumberFormat(getLocale() === "sv" ? "sv-SE" : "en-US"));
+  const numberFormatter = $derived(new Intl.NumberFormat(intlLocale()));
   const sentAtFormatter = $derived(
-    new Intl.DateTimeFormat(getLocale() === "sv" ? "sv-SE" : "en-US", {
+    new Intl.DateTimeFormat(intlLocale(), {
       dateStyle: "medium",
       timeStyle: "short"
     })

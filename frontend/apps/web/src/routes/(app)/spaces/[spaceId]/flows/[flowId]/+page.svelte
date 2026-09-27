@@ -34,9 +34,9 @@
   import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
   import IconArrowRight from "@lucide/svelte/icons/arrow-right";
   import Check from "@lucide/svelte/icons/check";
-  import CheckCircle2 from "lucide-svelte/icons/check-circle-2";
-  import CircleAlert from "lucide-svelte/icons/circle-alert";
-  import ListTree from "lucide-svelte/icons/list-tree";
+  import CheckCircle2 from "@lucide/svelte/icons/circle-check";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import ListTree from "@lucide/svelte/icons/list-tree";
   import { EneoError, type FlowRun, type FlowStep, type TranscriptionModel } from "@eneo/eneo-js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";

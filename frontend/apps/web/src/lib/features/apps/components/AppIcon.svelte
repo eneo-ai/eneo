@@ -1,14 +1,13 @@
 <script lang="ts">
   import { dynamicColour } from "$lib/core/colours";
-  import { getAppContext } from "$lib/core/AppContext";
+  import { getEneo } from "$lib/core/Eneo";
 
   export let app: { id: string; name: string; icon_id?: string | null };
   export let size: "medium" | "large" = "large";
 
-  const { environment } = getAppContext();
+  const eneo = getEneo();
 
-  // Generate icon URL from icon_id
-  $: iconUrl = app.icon_id ? `${environment.baseUrl}/api/v1/icons/${app.icon_id}/` : null;
+  $: iconUrl = app.icon_id ? eneo.icons.url({ id: app.icon_id }) : null;
 </script>
 
 <div

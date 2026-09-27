@@ -11,8 +11,7 @@
 
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import Loader2 from "lucide-svelte/icons/loader-2";
-  import ListPlus from "lucide-svelte/icons/list-plus";
+  import { LoaderCircle, ListPlus } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { getEneo } from "$lib/core/Eneo";
@@ -26,7 +25,7 @@
   import { getSecurityContext } from "$lib/features/security-classifications/SecurityContext";
   import SelectSecurityClassification from "$lib/features/security-classifications/components/SelectSecurityClassification.svelte";
 
-  import HelpTooltip from "../../components/HelpTooltip.svelte";
+  import HelpTooltip from "$lib/components/HelpTooltip.svelte";
   import { speaksRealtimeDialect } from "../../modelProviderCapabilities";
   import {
     IMAGE_QUALITIES,
@@ -186,7 +185,7 @@
         onclick={lookupDefaults}
       >
         {#if isLookingUpDefaults}
-          <Loader2 class="size-3 animate-spin" aria-hidden="true" />
+          <LoaderCircle class="size-3 animate-spin" aria-hidden="true" />
         {/if}
         {m.lookup_defaults()}
       </button>

@@ -5,27 +5,29 @@
 -->
 
 <script lang="ts">
-  import type { ComponentType } from "svelte";
-  import BookOpenCheck from "lucide-svelte/icons/book-open-check";
-  import BookText from "lucide-svelte/icons/book-text";
-  import Boxes from "lucide-svelte/icons/boxes";
-  import ChartPie from "lucide-svelte/icons/chart-pie";
-  import Cloud from "lucide-svelte/icons/cloud";
-  import Cpu from "lucide-svelte/icons/cpu";
-  import Fingerprint from "lucide-svelte/icons/fingerprint";
-  import HardDrive from "lucide-svelte/icons/hard-drive";
-  import History from "lucide-svelte/icons/history";
-  import KeyRound from "lucide-svelte/icons/key-round";
-  import Landmark from "lucide-svelte/icons/landmark";
-  import LayoutTemplate from "lucide-svelte/icons/layout-template";
-  import Lightbulb from "lucide-svelte/icons/lightbulb";
-  import MessageSquareText from "lucide-svelte/icons/message-square-text";
-  import Plug from "lucide-svelte/icons/plug";
-  import ShieldCheck from "lucide-svelte/icons/shield-check";
-  import Sparkles from "lucide-svelte/icons/sparkles";
-  import UserRound from "lucide-svelte/icons/user-round";
-  import UsersRound from "lucide-svelte/icons/users-round";
-  import Workflow from "lucide-svelte/icons/workflow";
+  import type { Component } from "svelte";
+  import {
+    BookOpenCheck,
+    BookText,
+    Boxes,
+    ChartPie,
+    Cloud,
+    Cpu,
+    FingerprintPattern,
+    HardDrive,
+    History,
+    KeyRound,
+    Landmark,
+    LayoutTemplate,
+    Lightbulb,
+    MessageSquareText,
+    Plug,
+    ShieldCheck,
+    Sparkles,
+    UserRound,
+    UsersRound,
+    Workflow
+  } from "@lucide/svelte";
   import { page } from "$app/stores";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -43,10 +45,15 @@
     return normalizedRoute === normalizedUrl || normalizedRoute.startsWith(`${normalizedUrl}/`);
   }
 
-  type NavItem = { route: string; href: string; icon: ComponentType; label: string };
+  type NavItem = {
+    route: string;
+    href: string;
+    icon: Component<{ class?: string }>;
+    label: string;
+  };
   type NavGroup = { label: string; items: NavItem[] };
 
-  function navItem(route: string, icon: ComponentType, label: string): NavItem {
+  function navItem(route: string, icon: Component<{ class?: string }>, label: string): NavItem {
     return { route, href: localizeHref(route), icon, label };
   }
 
@@ -94,7 +101,7 @@
       items: [
         navItem("/admin/users", UserRound, m.users()),
         navItem("/admin/legacy/user-groups", UsersRound, m.user_groups()),
-        navItem("/admin/legacy/roles", Fingerprint, m.roles()),
+        navItem("/admin/roles", FingerprintPattern, m.roles()),
         navItem("/admin/api-keys", KeyRound, m.api_keys())
       ]
     }

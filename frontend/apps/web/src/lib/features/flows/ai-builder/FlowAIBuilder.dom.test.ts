@@ -837,8 +837,8 @@ describe("FlowAIBuilder planner controls", () => {
 
   it("says the model list is loading instead of showing nothing", async () => {
     const { fetch } = makeFetch();
-    const pending = vi.fn(async (path: string, init?: Record<string, unknown>) =>
-      path.endsWith("/models") ? new Promise(() => {}) : fetch(path as string, init as never)
+    const pending = vi.fn(async (...args: Parameters<typeof fetch>) =>
+      args[0].endsWith("/models") ? new Promise<never>(() => {}) : fetch(...args)
     );
     const { service } = renderShell({ fetch: pending, stream: makeStream().stream });
 

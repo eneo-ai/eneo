@@ -74,7 +74,7 @@ async def test_draft_execution_migration_backfills_history_and_reverses(
         spec.loader.exec_module(migration)
         # Chains from the capacity-window revision that landed just before it,
         # so the branch keeps a single head.
-        assert migration.down_revision == "202609161000"
+        assert migration.down_revision == "202609161010"
 
         def cycle(connection):
             assert sa.inspect(connection).has_table("flow_version_file_references")

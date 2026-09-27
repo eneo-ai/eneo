@@ -2,11 +2,13 @@
   import { onMount, untrack } from "svelte";
   import type { Writable } from "svelte/store";
   import type { components } from "@eneo/eneo-js";
-  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
-  import CheckCircle2 from "lucide-svelte/icons/check-circle-2";
-  import FlaskConical from "lucide-svelte/icons/flask-conical";
-  import LoaderCircle from "lucide-svelte/icons/loader-circle";
-  import RefreshCw from "lucide-svelte/icons/refresh-cw";
+  import {
+    TriangleAlert,
+    CircleCheck,
+    FlaskConical,
+    LoaderCircle,
+    RefreshCw
+  } from "@lucide/svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -399,7 +401,7 @@
             </Field.Field>
           {:else}
             <Alert.Root class="border-caution bg-caution">
-              <AlertTriangle class="text-caution!" aria-hidden="true" />
+              <TriangleAlert class="text-caution!" aria-hidden="true" />
               <Alert.Description>{m.sharepoint_change_auth_warning()}</Alert.Description>
             </Alert.Root>
           {/if}
@@ -500,7 +502,7 @@
           {#if testResult}
             {#if testResult.success}
               <Alert.Root class="border-positive-default/40 bg-positive-default/10" role="status">
-                <CheckCircle2 class="text-positive-stronger!" aria-hidden="true" />
+                <CircleCheck class="text-positive-stronger!" aria-hidden="true" />
                 <Alert.Title>{m.connection_successful()}</Alert.Title>
                 {#if testResult.details}
                   <Alert.Description>{testResult.details}</Alert.Description>
@@ -508,7 +510,7 @@
               </Alert.Root>
             {:else}
               <Alert.Root variant="destructive" role="alert">
-                <AlertTriangle aria-hidden="true" />
+                <TriangleAlert aria-hidden="true" />
                 <Alert.Title>{m.connection_failed()}</Alert.Title>
                 {#if testResult.error_message || testResult.details}
                   <Alert.Description>

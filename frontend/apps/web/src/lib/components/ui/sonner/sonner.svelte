@@ -9,8 +9,8 @@
   let { ...restProps }: SonnerProps = $props();
 </script>
 
+<!-- NOTE: upstream reads the theme from mode-watcher; eneo passes its own theme store value as `theme`. -->
 <Sonner
-  theme="system"
   class="toaster group"
   style="--normal-bg: var(--color-popover); --normal-text: var(--color-popover-foreground); --normal-border: var(--color-border);"
   {...restProps}

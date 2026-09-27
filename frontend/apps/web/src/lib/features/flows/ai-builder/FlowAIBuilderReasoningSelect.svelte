@@ -5,7 +5,7 @@
      turn runs or sending is blocked: the choice is for the next turn. */
   import * as Select from "$lib/components/ui/select/index.js";
   import { m } from "$lib/paraglide/messages";
-  import Brain from "lucide-svelte/icons/brain";
+  import Brain from "@lucide/svelte/icons/brain";
 
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
 

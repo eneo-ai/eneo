@@ -6,12 +6,7 @@
     SkillPublic
   } from "@eneo/eneo-js";
   import { useId } from "bits-ui";
-  import ArrowDown from "lucide-svelte/icons/arrow-down";
-  import ArrowUp from "lucide-svelte/icons/arrow-up";
-  import Info from "lucide-svelte/icons/info";
-  import Plus from "lucide-svelte/icons/plus";
-  import RefreshCw from "lucide-svelte/icons/refresh-cw";
-  import Trash2 from "lucide-svelte/icons/trash-2";
+  import { ArrowDown, ArrowUp, Info, Plus, RefreshCw, ShieldAlert, Trash2 } from "@lucide/svelte";
   import { onDestroy, tick, untrack } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
@@ -429,7 +424,7 @@
   {:else}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex (overflow region must be keyboard-scrollable) -->
     <div
-      class="border-border focus-visible:ring-ring max-h-[min(32rem,60dvh)] [scrollbar-gutter:stable] overflow-y-auto overscroll-contain border-y outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+      class="border-border focus-visible:ring-ring max-h-[min(32rem,60dvh)] overflow-y-auto overscroll-contain border-y outline-none focus-visible:ring-2 focus-visible:ring-offset-2 [scrollbar-gutter:stable]"
       role="region"
       aria-label={m.skills_binding_scroll_region_label({ count: String(rows.length) })}
       tabindex="0"
@@ -465,8 +460,11 @@
                   </span>
                 {/if}
                 {#if row.executionBlocked}
-                  <Badge variant="destructive">{m.skills_execution_blocked_status()}</Badge>
-                  <span class="text-destructive text-xs">
+                  <Badge variant="outline">
+                    <ShieldAlert aria-hidden="true" />
+                    {m.skills_execution_blocked_status()}
+                  </Badge>
+                  <span class="text-foreground text-xs">
                     {m.skills_execution_blocked_binding_explanation()}
                   </span>
                 {/if}
@@ -498,7 +496,7 @@
                       </span>
                     </Select.Trigger>
                     <Select.Content
-                      class="w-max max-w-[min(26rem,calc(100vw-2rem))] min-w-(--bits-select-anchor-width)"
+                      class="w-max min-w-(--bits-select-anchor-width) max-w-[min(26rem,calc(100vw-2rem))]"
                     >
                       <Select.Group>
                         <Select.Item
@@ -623,7 +621,7 @@
         <Command.Root
           label={m.skills_search_existing()}
           shouldFilter={false}
-          class="[&_[data-slot=command-input-wrapper]]:border-border [&_[data-slot=input-group]]:border-input [&_[data-slot=input-group]]:bg-background p-0 [&_[data-slot=command-input-wrapper]]:border-b [&_[data-slot=command-input-wrapper]]:p-2"
+          class="p-0 [&_[data-slot=command-input-wrapper]]:border-border [&_[data-slot=command-input-wrapper]]:border-b [&_[data-slot=command-input-wrapper]]:p-2 [&_[data-slot=input-group]]:border-input [&_[data-slot=input-group]]:bg-background"
         >
           <Command.Input
             value={skillCatalog.query}
@@ -667,7 +665,7 @@
                   >
                     <div class="min-w-0 flex-1">
                       <div class="flex items-start justify-between gap-3">
-                        <p class="line-clamp-2 leading-5 font-medium">{skill.display_name}</p>
+                        <p class="line-clamp-2 font-medium leading-5">{skill.display_name}</p>
                         <Badge variant="outline" class="shrink-0">
                           {m.skills_revision_label({
                             revision: String(getSkillCandidateRevisionNumber(skill))
@@ -731,7 +729,7 @@
         </Dialog.Header>
         <!-- svelte-ignore a11y_no_noninteractive_tabindex (named overflow region must be keyboard-scrollable) -->
         <div
-          class="max-h-[min(40rem,calc(100dvh-12rem))] min-h-0 flex-1 [scrollbar-gutter:stable] overflow-y-auto px-4 py-4 outline-none focus-visible:ring-2 focus-visible:ring-inset sm:px-6 sm:py-5"
+          class="min-h-0 max-h-[min(40rem,calc(100dvh-12rem))] flex-1 overflow-y-auto px-4 py-4 outline-none [scrollbar-gutter:stable] focus-visible:ring-2 focus-visible:ring-inset sm:px-6 sm:py-5"
           role="region"
           aria-label={m.skills_preview_scroll_region()}
           tabindex="0"
@@ -789,7 +787,7 @@
             <Dialog.Title>{m.skills_create_dialog_title()}</Dialog.Title>
             <Dialog.Description>{m.skills_create_dialog_description()}</Dialog.Description>
           </Dialog.Header>
-          <div class="min-h-0 [scrollbar-gutter:stable] overflow-y-auto px-6 py-5">
+          <div class="min-h-0 overflow-y-auto px-6 py-5 [scrollbar-gutter:stable]">
             <div class="flex flex-col gap-5">
               <Alert.Root role="note">
                 <Info aria-hidden="true" />

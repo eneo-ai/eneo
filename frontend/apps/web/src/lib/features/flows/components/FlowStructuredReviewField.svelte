@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from "svelte";
-  import ChevronRight from "lucide-svelte/icons/chevron-right";
-  import Info from "lucide-svelte/icons/info";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import Info from "@lucide/svelte/icons/info";
   import { IconTrash } from "@eneo/icons/trash";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";

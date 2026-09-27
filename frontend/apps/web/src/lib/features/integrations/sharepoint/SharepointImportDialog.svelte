@@ -3,16 +3,18 @@
   import { onMount, untrack } from "svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import type { EmbeddingModel, IntegrationKnowledgePreview } from "@eneo/eneo-js";
-  import Check from "lucide-svelte/icons/check";
-  import CheckCircle2 from "lucide-svelte/icons/check-circle-2";
-  import Cloud from "lucide-svelte/icons/cloud";
-  import FileText from "lucide-svelte/icons/file-text";
-  import FlaskConical from "lucide-svelte/icons/flask-conical";
-  import Globe2 from "lucide-svelte/icons/globe-2";
-  import LoaderCircle from "lucide-svelte/icons/loader-circle";
-  import RefreshCw from "lucide-svelte/icons/refresh-cw";
-  import Trash2 from "lucide-svelte/icons/trash-2";
-  import Users from "lucide-svelte/icons/users";
+  import {
+    Check,
+    CircleCheck,
+    Cloud,
+    FileText,
+    FlaskConical,
+    Earth,
+    LoaderCircle,
+    RefreshCw,
+    Trash2,
+    Users
+  } from "@lucide/svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -154,7 +156,7 @@
       case "my_teams":
         return Users;
       case "other_sites":
-        return Globe2;
+        return Earth;
       case "onedrive":
         return Cloud;
     }
@@ -803,7 +805,7 @@
           <span
             class="bg-positive-default/10 flex size-14 items-center justify-center rounded-full"
           >
-            <CheckCircle2 class="text-positive-stronger size-8" aria-hidden="true" />
+            <CircleCheck class="text-positive-stronger size-8" aria-hidden="true" />
           </span>
           <div>
             <h3 id="sharepoint-simulation-complete-heading" class="text-lg font-semibold">

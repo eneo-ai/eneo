@@ -1,11 +1,6 @@
 <script lang="ts">
   import type { SpaceSparse } from "@eneo/eneo-js";
-  import Check from "lucide-svelte/icons/check";
-  import ChevronDown from "lucide-svelte/icons/chevron-down";
-  import Building2 from "lucide-svelte/icons/building-2";
-  import MessageSquare from "lucide-svelte/icons/message-square";
-  import AppWindow from "lucide-svelte/icons/app-window";
-  import X from "lucide-svelte/icons/x";
+  import { Check, ChevronDown, Building2, MessageSquare, AppWindow, X } from "@lucide/svelte";
   import { tick } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import * as Popover from "$lib/components/ui/popover/index.js";

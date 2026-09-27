@@ -1,10 +1,6 @@
 <script lang="ts">
   import { getEneo } from "$lib/core/Eneo";
-  import Cloud from "lucide-svelte/icons/cloud";
-  import Globe2 from "lucide-svelte/icons/globe-2";
-  import Info from "lucide-svelte/icons/info";
-  import LoaderCircle from "lucide-svelte/icons/loader-circle";
-  import RefreshCw from "lucide-svelte/icons/refresh-cw";
+  import { Cloud, Earth, Info, LoaderCircle, RefreshCw } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import type { components } from "@eneo/eneo-js";
@@ -247,7 +243,7 @@
           {#if isOneDrive}
             <Cloud class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
           {:else}
-            <Globe2 class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
+            <Earth class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
           {/if}
           {isOneDrive ? m.import_entire_onedrive() : m.import_entire_site()}
         </label>

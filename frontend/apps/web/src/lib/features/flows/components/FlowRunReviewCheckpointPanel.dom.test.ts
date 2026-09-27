@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
   EneoError,
   type FlowRunReviewCheckpoint,
@@ -106,15 +106,15 @@ function buildEneo({
   resume = vi.fn()
 }: {
   activeCheckpoint: FlowRunReviewCheckpoint | null;
-  active?: ReturnType<typeof vi.fn>;
-  edits?: ReturnType<typeof vi.fn>;
-  edit?: ReturnType<typeof vi.fn>;
-  approve?: ReturnType<typeof vi.fn>;
-  approveAndContinue?: ReturnType<typeof vi.fn>;
-  reject?: ReturnType<typeof vi.fn>;
-  resume?: ReturnType<typeof vi.fn>;
-  steps?: ReturnType<typeof vi.fn>;
-  inputFileSignedUrl?: ReturnType<typeof vi.fn>;
+  active?: Mock;
+  edits?: Mock;
+  edit?: Mock;
+  approve?: Mock;
+  approveAndContinue?: Mock;
+  reject?: Mock;
+  resume?: Mock;
+  steps?: Mock;
+  inputFileSignedUrl?: Mock;
 }) {
   return {
     users: { me: vi.fn(async () => ({ id: "user-1" })) },

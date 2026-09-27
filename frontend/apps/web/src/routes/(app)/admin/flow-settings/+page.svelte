@@ -2,8 +2,8 @@
   import { untrack } from "svelte";
   import { formatRecordingLength } from "$lib/features/audio/recordingLimits";
   import { beforeNavigate } from "$app/navigation";
-  import ChevronDown from "lucide-svelte/icons/chevron-down";
-  import TriangleAlert from "lucide-svelte/icons/triangle-alert";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";

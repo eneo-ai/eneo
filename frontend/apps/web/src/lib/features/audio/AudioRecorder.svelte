@@ -25,7 +25,6 @@
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { onDestroy, onMount } from "svelte";
 
-  import dayjs from "dayjs";
   import { formatRecordingLength, monotonicNow } from "./recordingLimits";
   import { getLocale } from "$lib/paraglide/runtime";
   import { ScreenWakeLock } from "./screenWakeLock";
@@ -106,7 +105,18 @@
   let reportTo = { onRecordingDone, onRecordingStateChange, journal, onFileNearlyFull };
 
   let isRecording: boolean = false;
-  let startedRecordingAt = dayjs();
+  // The file name's local wall-clock stamp, as the dayjs pattern
+  // `YYYY-MM-DDTHH-mm-ss[Z]` wrote it before dayjs left the app.
+  function recordingFileTimestamp(at: number): string {
+    const date = new Date(at);
+    const pad = (value: number) => String(value).padStart(2, "0");
+    return (
+      `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+      `T${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}Z`
+    );
+  }
+
+  let startedRecordingAt = Date.now();
   let elapsedTime = "";
   let recordingError: string | null = null;
   let recordingErrorHint: string | null = null;
@@ -125,7 +135,7 @@
 
   let recordedBlob: Blob | null = null;
   let recordedMimeType = "";
-  let completedRecordingAt = dayjs();
+  let completedRecordingAt = Date.now();
   let audioURL: string | null = null;
   let previewAudioEl: HTMLAudioElement | null = null;
   let isPreviewPlaying = false;
@@ -595,7 +605,7 @@
         // eat into the stall budget.
         const startTimestamp = performance.now();
         recordingStats.lastChunkTime = startTimestamp;
-        startedRecordingAt = dayjs();
+        startedRecordingAt = Date.now();
         lastMeterUpdateAt = 0;
         lastAudibleAt = startTimestamp;
         showMicSilentHint = false;
@@ -766,7 +776,7 @@
           recordingStats.errors.push(errorMsg);
           recordingState = "error";
         } else {
-          completedRecordingAt = dayjs();
+          completedRecordingAt = Date.now();
           segment = finishedSegment();
           recordedMimeType = segment.mimeType;
           recordedBlob = segment.blob;
@@ -956,7 +966,7 @@
         lastMeterUpdateAt = now;
       }
     }
-    elapsedSeconds = dayjs().diff(startedRecordingAt, "seconds");
+    elapsedSeconds = Math.floor((Date.now() - startedRecordingAt) / 1000);
     elapsedTime = formatElapsed(elapsedSeconds);
     animationFrameId = window.requestAnimationFrame(onAnimationFrame);
   };
@@ -1138,7 +1148,7 @@
       blob: recordedBlob,
       mimeType: recordedMimeType || recordedBlob.type || "audio/webm",
       fileNameBase: m.recording_filename_template({
-        datetime: completedRecordingAt.format("YYYY-MM-DDTHH-mm-ss[Z]")
+        datetime: recordingFileTimestamp(completedRecordingAt)
       })
     });
 

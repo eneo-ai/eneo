@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { cva } from "class-variance-authority";
-  import RotateCcw from "lucide-svelte/icons/rotate-ccw";
+  import { RotateCcw } from "@lucide/svelte";
   import { IconQuestionMark } from "@eneo/icons/question-mark";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
+  import { useId } from "bits-ui";
   import { getContext } from "svelte";
-  import { uid } from "uid";
   import { m } from "$lib/paraglide/messages";
+  import { cn } from "$lib/utils.js";
   import { settingsDensityContext, type SettingsDensity } from "./density";
 
   export let title: string;
@@ -19,42 +19,19 @@
   export let hasChanges = false;
   export let revertFn: (() => void) | undefined = undefined;
 
-  const labelId = uid(8);
-  const descriptionId = uid(8);
+  const labelId = useId();
+  const descriptionId = useId();
 
-  const inputSection = cva(["flex", "w-full", "flex-col"], {
-    variants: {
-      fullWidth: { true: ["w-full"], false: [] },
-      density: {
-        default: ["pt-3"],
-        compact: ["pt-1", "xl:pt-3"]
-      }
-    },
-    compoundVariants: [
-      { fullWidth: false, density: "default", class: "lg:w-[56%]" },
-      { fullWidth: false, density: "compact", class: "xl:w-[56%]" }
-    ]
-  });
+  $: inputSectionClass = cn(
+    "flex w-full flex-col",
+    density === "compact" ? "pt-1 xl:pt-3" : "pt-3",
+    !fullWidth && (density === "compact" ? "xl:w-[56%]" : "lg:w-[56%]")
+  );
 
-  const descriptionSection = cva(["flex", "w-full", "flex-col", "justify-between", "sm:flex-row"], {
-    variants: {
-      fullWidth: { true: ["w-full"], false: [] },
-      density: { default: [], compact: [] }
-    },
-    compoundVariants: [
-      { fullWidth: false, density: "default", class: "lg:w-[40%]" },
-      { fullWidth: false, density: "compact", class: "xl:w-[40%]" }
-    ]
-  });
-
-  const changeIndicator = cva(["transition-all", "duration-300"], {
-    variants: {
-      hasChanges: {
-        true: ["mr-2", "h-2", "w-2", "rounded-full", "bg-[var(--change-indicator)]"],
-        false: ["h-0", "w-0", "bg-transparent"]
-      }
-    }
-  });
+  $: descriptionSectionClass = cn(
+    "flex w-full flex-col justify-between sm:flex-row",
+    !fullWidth && (density === "compact" ? "xl:w-[40%]" : "lg:w-[40%]")
+  );
 </script>
 
 <div
@@ -69,7 +46,7 @@
   class:xl:pl-0.5={density === "compact"}
   data-row-has-changes={hasChanges}
 >
-  <div class={descriptionSection({ fullWidth, density })}>
+  <div class={descriptionSectionClass}>
     <div
       class="flex flex-col pl-2"
       class:pr-12={density === "default"}
@@ -85,7 +62,14 @@
         class:font-medium={density === "compact"}
         id={labelId}
       >
-        <span class={changeIndicator({ hasChanges })}></span>{title}<slot name="title"></slot>
+        <span
+          class={cn(
+            "transition-all duration-300",
+            hasChanges
+              ? "mr-2 h-2 w-2 rounded-full bg-[var(--change-indicator)]"
+              : "h-0 w-0 bg-transparent"
+          )}
+        ></span>{title}<slot name="title"></slot>
         {#if help}
           <Tooltip.Provider delayDuration={150}>
             <Tooltip.Root>
@@ -101,6 +85,7 @@
         {/if}
         {#if revertFn}
           <button
+            type="button"
             class="border-default hover:bg-hover-dimmer ml-2 inline-flex -translate-y-[1px] items-center gap-1.5 self-end rounded-lg border px-2 py-0.5 text-sm font-normal transition-all hover:shadow disabled:opacity-0"
             disabled={!hasChanges}
             aria-label="{m.discard_changes()}: {title}"
@@ -130,7 +115,7 @@
     {/if}
   </div>
 
-  <div class={inputSection({ fullWidth, density })}>
+  <div class={inputSectionClass}>
     <slot
       {labelId}
       {descriptionId}

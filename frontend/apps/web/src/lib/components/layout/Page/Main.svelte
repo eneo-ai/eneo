@@ -3,9 +3,7 @@
 
   let div: HTMLDivElement | undefined;
 
-  const {
-    states: { value }
-  } = getContentTabs();
+  const { value } = getContentTabs();
 
   const scrollPositions: Record<string, number> = {};
   function loadPersistedScroll(tabKey: string) {

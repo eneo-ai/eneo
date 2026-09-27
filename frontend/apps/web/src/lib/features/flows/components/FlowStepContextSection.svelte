@@ -13,7 +13,7 @@
   import { IconTrash } from "@eneo/icons/trash";
   import { IconCancel } from "@eneo/icons/cancel";
   import SelectKnowledge from "$lib/features/knowledge/components/select/SelectKnowledge.svelte";
-  import AttachmentUploadTextButton from "$lib/features/attachments/components/AttachmentUploadTextButton.svelte";
+  import AttachmentDropzone from "$lib/features/attachments/components/AttachmentDropzone.svelte";
   import UploadedFileIcon from "$lib/features/attachments/components/UploadedFileIcon.svelte";
   import AttachmentPreview from "$lib/features/attachments/components/AttachmentPreview.svelte";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
@@ -257,7 +257,7 @@
         {/each}
         {#if !isPublished}
           <div class="mt-2">
-            <AttachmentUploadTextButton multiple></AttachmentUploadTextButton>
+            <AttachmentDropzone multiple />
           </div>
         {/if}
       </div>

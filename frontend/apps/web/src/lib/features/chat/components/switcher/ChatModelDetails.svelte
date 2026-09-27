@@ -1,12 +1,10 @@
 <script lang="ts">
+  import { intlLocale } from "$lib/core/formatting/dateTime";
   import type { CompletionModel } from "@eneo/eneo-js";
-  import Brain from "lucide-svelte/icons/brain";
-  import Eye from "lucide-svelte/icons/eye";
-  import Wrench from "lucide-svelte/icons/wrench";
+  import { Brain, Eye, Wrench } from "@lucide/svelte";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { formatCostPerMillionTokens } from "$lib/features/ai-models/formatModelStats";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
   import { getAppContext } from "$lib/core/AppContext";
   import * as ModelSelector from "$lib/components/ai-elements/model-selector/index.js";
 
@@ -32,9 +30,7 @@
     model.max_input_tokens === null || model.max_input_tokens === undefined
       ? m.context_window_unknown()
       : m.model_selector_context_value({
-          tokens: new Intl.NumberFormat(getLocale() === "sv" ? "sv-SE" : "en-US").format(
-            model.max_input_tokens
-          )
+          tokens: new Intl.NumberFormat(intlLocale()).format(model.max_input_tokens)
         })
   );
   const description = $derived(model.description?.trim() || m.model_selector_no_description());

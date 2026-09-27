@@ -1,46 +1,60 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import type { Group, InfoBlob } from "@eneo/eneo-js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { getAppContext } from "$lib/core/AppContext";
-  import { getJobManager } from "$lib/features/jobs/JobManager";
   import { getEneo } from "$lib/core/Eneo";
-  import type { AttachmentValidationError } from "$lib/features/attachments/AttachmentManager";
-  import FileSizeValidationPanel from "$lib/features/attachments/components/FileSizeValidationPanel.svelte";
-  import { type Group, type InfoBlob } from "@eneo/eneo-js";
-  import { Button, Dialog, Input } from "@eneo/ui";
-  import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
+  import { formatBytes } from "$lib/core/formatting/formatBytes";
+  import {
+    unsupportedTypeError,
+    type AttachmentValidationError
+  } from "$lib/features/attachments/AttachmentManager";
+  import FileDropzone, {
+    type FileSelection
+  } from "$lib/features/attachments/components/FileDropzone.svelte";
+  import FileSizeValidationPanel from "$lib/features/attachments/components/FileSizeValidationPanel.svelte";
+  import { acceptedFormatsFromLimits } from "$lib/features/attachments/getAttachmentRules";
+  import { getJobManager } from "$lib/features/jobs/JobManager";
+  import { m } from "$lib/paraglide/messages";
+
+  type Props = {
+    collection: Group;
+    currentBlobs: InfoBlob[];
+    disabled?: boolean;
+  };
+
+  let { collection, currentBlobs, disabled = false }: Props = $props();
 
   const {
     limits,
     user,
     state: { showHeader }
   } = getAppContext();
-  const acceptedMimeTypes = limits.info_blobs.formats.map((format) => format.mimetype);
-  const formatLimitByType = new Map(
-    limits.info_blobs.formats.map((format) => [format.mimetype, format.size])
-  );
+  const formats = acceptedFormatsFromLimits(limits.info_blobs.formats);
+  const formatLimitByType = new Map(formats.map((format) => [format.mimetype, format.maxSize]));
 
   const {
     queueUploads,
     state: { showJobManagerPanel }
   } = getJobManager();
-  export let collection: Group;
-  export let currentBlobs: InfoBlob[];
-  export let disabled = false;
-
-  let files: File[] = [];
-  let fileValidationErrors: AttachmentValidationError[] = [];
-  let quotaValidationError: AttachmentValidationError | null = null;
-  let validationErrors: AttachmentValidationError[] = [];
-  let quotaRemaining: number | null = null;
-  let tenantQuotaLimit: number | null = null;
-  let tenantQuotaUsed = 0;
-  let isUploading = false;
-
   const eneo = getEneo();
 
+  let open = $state(false);
+  let files = $state<File[]>([]);
+  let skippedFiles = $state<File[]>([]);
+  let duplicateFileNames = $state<string[]>([]);
+  let isUploading = $state(false);
+  let tenantQuotaLimit = $state<number | null>(null);
+  let tenantQuotaUsed = $state(0);
+
+  // Tenant storage usage is admin-only; for everyone else the server enforces
+  // the tenant quota when the upload job runs.
   onMount(async () => {
+    if (!user.hasPermission("admin")) return;
     try {
       const summary = await eneo.usage.storage.getSummary();
       tenantQuotaLimit = summary.limit ?? null;
@@ -50,143 +64,168 @@
     }
   });
 
-  $: {
+  const fileValidationErrors = $derived.by(() => {
     const errors: AttachmentValidationError[] = [];
     for (const file of files) {
-      if (!acceptedMimeTypes.includes(file.type)) {
-        errors.push({
-          kind: "unsupported_type",
-          fileName: file.name,
-          message: `${file.name}: File type "${file.type || "unknown"}" is not supported.`
-        });
-        continue;
-      }
       const limit = formatLimitByType.get(file.type);
-      if (limit !== undefined && file.size > limit) {
+      if (limit === undefined) {
+        errors.push(unsupportedTypeError(file));
+      } else if (file.size > limit) {
         errors.push({
           kind: "file_size",
-          message: `${file.name}: file is too large.`,
           fileName: file.name,
           fileSizeBytes: file.size,
-          maxSizeBytes: limit
+          maxSizeBytes: limit,
+          message: m.file_too_large_detail({
+            fileName: file.name,
+            currentSize: formatBytes(file.size),
+            maxSize: formatBytes(limit)
+          })
         });
       }
     }
-    fileValidationErrors = errors;
-  }
+    return errors;
+  });
 
-  $: {
-    const remainingCandidates: number[] = [];
+  const quotaRemaining = $derived.by(() => {
+    const candidates: number[] = [];
     if (user.quota_limit != null) {
-      const quotaUsed = user.quota_used ?? 0;
-      remainingCandidates.push(user.quota_limit - quotaUsed);
+      candidates.push(user.quota_limit - (user.quota_used ?? 0));
     }
     if (tenantQuotaLimit != null) {
-      remainingCandidates.push(tenantQuotaLimit - tenantQuotaUsed);
+      candidates.push(tenantQuotaLimit - tenantQuotaUsed);
     }
-    quotaRemaining = remainingCandidates.length > 0 ? Math.min(...remainingCandidates) : null;
+    return candidates.length > 0 ? Math.min(...candidates) : null;
+  });
+
+  const quotaValidationError = $derived.by((): AttachmentValidationError | null => {
+    if (quotaRemaining == null) return null;
+    const totalUploadSize = files.reduce((total, file) => total + file.size, 0);
+    return quotaRemaining <= 0 || totalUploadSize > quotaRemaining
+      ? { kind: "max_total_size", message: m.quota_limit_reached() }
+      : null;
+  });
+
+  const validationErrors = $derived([
+    ...fileValidationErrors,
+    ...(quotaValidationError ? [quotaValidationError] : [])
+  ]);
+
+  const canUpload = $derived(!isUploading && files.length > 0 && validationErrors.length === 0);
+
+  function resetSelection() {
+    files = [];
+    skippedFiles = [];
+    duplicateFileNames = [];
   }
 
-  $: {
-    if (quotaRemaining != null) {
-      const totalUploadSize = files.reduce((total, file) => total + file.size, 0);
-      quotaValidationError =
-        quotaRemaining <= 0 || totalUploadSize > quotaRemaining
-          ? {
-              kind: "max_total_size",
-              message: m.quota_limit_reached()
-            }
-          : null;
-    } else {
-      quotaValidationError = null;
-    }
+  function handleSelection({ rejected }: FileSelection) {
+    skippedFiles = [...skippedFiles, ...rejected];
   }
 
-  $: {
-    validationErrors = [
-      ...fileValidationErrors,
-      ...(quotaValidationError ? [quotaValidationError] : [])
-    ];
-  }
-
-  async function uploadBlobs() {
-    if (validationErrors.length > 0) {
+  function requestUpload() {
+    if (!canUpload) return;
+    const existingTitles = new Set(currentBlobs.map((blob) => blob.metadata.title));
+    const duplicates = files
+      .filter((file) => existingTitles.has(file.name))
+      .map((file) => file.name);
+    if (duplicates.length > 0) {
+      duplicateFileNames = duplicates;
       return;
     }
+    uploadFiles();
+  }
 
-    const duplicateFiles: string[] = [];
-    const blobTitles = currentBlobs.flatMap((blob) => blob.metadata.title);
-    files.forEach((file) => {
-      if (blobTitles.includes(file.name)) {
-        duplicateFiles.push(file.name);
-      }
-    });
-
-    if (duplicateFiles.length > 0) {
-      if (!confirm(m.duplicate_files_warning({ fileList: duplicateFiles.join("\\n- ") }))) {
-        return;
-      }
-    }
-
+  function uploadFiles() {
+    duplicateFileNames = [];
     try {
       isUploading = true;
-      queueUploads(collection.id, files);
+      queueUploads(collection.id, [...files]);
       $showHeader = true;
       $showJobManagerPanel = true;
-      $showDialog = false;
+      open = false;
+    } catch (error) {
+      toastError(error);
+    } finally {
       isUploading = false;
-      files = [];
-      return;
-    } catch (e) {
-      toastError(e);
     }
   }
-
-  let showDialog: Dialog.OpenState;
 </script>
 
 <Dialog.Root
-  bind:isOpen={showDialog}
-  on:close={() => {
-    files = [];
+  bind:open
+  onOpenChange={(isOpen) => {
+    if (!isOpen) resetSelection();
   }}
 >
-  <Dialog.Trigger asFragment let:trigger>
-    <Button {disabled} variant="primary" is={trigger}>{m.upload_files()}</Button>
+  <Dialog.Trigger>
+    {#snippet child({ props })}
+      <Button {...props} {disabled}>{m.upload_files()}</Button>
+    {/snippet}
   </Dialog.Trigger>
 
-  <Dialog.Content width="medium">
-    <Dialog.Title>{m.upload_files()}</Dialog.Title>
-    <Dialog.Description hidden></Dialog.Description>
+  <Dialog.Content class="sm:max-w-2xl" closeLabel={m.close()}>
+    <Dialog.Header>
+      <Dialog.Title>{m.upload_files()}</Dialog.Title>
+      <Dialog.Description>
+        {m.upload_files_to_collection_description({ name: collection.name })}
+      </Dialog.Description>
+    </Dialog.Header>
 
-    <Input.Files
+    <FileDropzone
       bind:files
-      {acceptedMimeTypes}
-      on:showsupportedtypes={(e) => toast.info(e.detail.message)}
-    ></Input.Files>
+      {formats}
+      disabled={isUploading}
+      onselect={handleSelection}
+      class="max-h-[60vh] overflow-y-auto"
+    />
 
-    {#if validationErrors.length > 0}
-      <FileSizeValidationPanel errors={validationErrors} />
+    {#if skippedFiles.length > 0}
+      <Alert.Root>
+        <Alert.Description>
+          {m.upload_skipped_unsupported_files({
+            fileList: skippedFiles.map((file) => file.name).join(", ")
+          })}
+        </Alert.Description>
+      </Alert.Root>
     {/if}
 
-    <Dialog.Controls let:close>
+    <FileSizeValidationPanel errors={validationErrors} />
+
+    <Dialog.Footer>
       {#if files.length > 0}
-        <Button
-          on:click={() => {
-            files = [];
-          }}
-          variant="destructive">{m.clear_list()}</Button
-        >
-        <div class="flex-grow"></div>
+        <Button variant="ghost" onclick={resetSelection} disabled={isUploading} class="sm:mr-auto">
+          {m.clear_list()}
+        </Button>
       {/if}
-      <Button is={close}>{m.cancel()}</Button>
-      <Button
-        variant="primary"
-        on:click={uploadBlobs}
-        disabled={isUploading || files.length < 1 || validationErrors.length > 0}
-      >
-        {#if isUploading}{m.uploading()}{:else}{m.upload_files()}{/if}</Button
-      >
-    </Dialog.Controls>
+      <Dialog.Close>
+        {#snippet child({ props })}
+          <Button {...props} variant="outline">{m.cancel()}</Button>
+        {/snippet}
+      </Dialog.Close>
+      <Button onclick={requestUpload} disabled={!canUpload}>
+        {isUploading ? m.uploading() : m.upload_files()}
+      </Button>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>
+
+<ConfirmDialog
+  bind:open={
+    () => duplicateFileNames.length > 0,
+    (isOpen) => {
+      if (!isOpen) duplicateFileNames = [];
+    }
+  }
+  title={m.duplicate_files_dialog_title()}
+  description={m.duplicate_files_dialog_description()}
+  confirmLabel={m.replace_files()}
+  variant="default"
+  onConfirm={uploadFiles}
+>
+  <ul class="list-disc pl-5 text-sm">
+    {#each duplicateFileNames as fileName (fileName)}
+      <li>{fileName}</li>
+    {/each}
+  </ul>
+</ConfirmDialog>

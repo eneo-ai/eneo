@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/svelte";
+import { render, screen, fireEvent, cleanup } from "@testing-library/svelte";
 import { afterEach, it, expect, vi } from "vitest";
 import type { Flow } from "@eneo/eneo-js";
 import Panel from "./FlowGraphPanel.svelte";
@@ -51,7 +51,8 @@ it("waits for a slow module rather than giving up on a timer", async () => {
   vi.useFakeTimers();
   render(Panel, { props: { flow, activeStepId: null } });
   await fireEvent.click(screen.getByRole("button", { name: /Flödesvy/ }));
-  await waitFor(() => expect(load.starts).toBe(1));
+  // vi.waitFor steps the fake clock between checks; a DOM waitFor would poll on it and hang.
+  await vi.waitFor(() => expect(load.starts).toBe(1));
 
   await vi.advanceTimersByTimeAsync(30_000);
 

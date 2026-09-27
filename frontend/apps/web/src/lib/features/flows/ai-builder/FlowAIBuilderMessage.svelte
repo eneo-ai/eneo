@@ -3,7 +3,7 @@
      from theme tokens via relative oklch() syntax, which the rule cannot see
      through */
   import { m } from "$lib/paraglide/messages";
-  import { Markdown } from "@eneo/ui";
+  import { Markdown } from "$lib/components/markdown/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import FlowAIBuilderQuestion from "./FlowAIBuilderQuestion.svelte";
   import type { RequirementsSummary } from "./protocol";

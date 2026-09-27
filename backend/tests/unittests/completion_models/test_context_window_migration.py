@@ -11,7 +11,7 @@ from alembic.operations import Operations
 def test_context_window_migration_preserves_rows_and_is_reversible() -> None:
     path = (
         Path(__file__).parents[3]
-        / "alembic/versions/202609161000_add_context_window_tokens.py"
+        / "alembic/versions/202609161010_add_context_window_tokens.py"
     )
     spec = importlib.util.spec_from_file_location("context_window_migration", path)
     assert spec and spec.loader

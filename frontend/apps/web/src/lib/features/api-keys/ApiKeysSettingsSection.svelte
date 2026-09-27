@@ -4,14 +4,16 @@
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
-  import Key from "lucide-svelte/icons/key";
-  import ChevronDown from "lucide-svelte/icons/chevron-down";
-  import AlertCircle from "lucide-svelte/icons/alert-circle";
-  import ExternalLink from "lucide-svelte/icons/external-link";
-  import RefreshCw from "lucide-svelte/icons/refresh-cw";
-  import Bell from "lucide-svelte/icons/bell";
-  import BellOff from "lucide-svelte/icons/bell-off";
-  import ShieldAlert from "lucide-svelte/icons/shield-alert";
+  import {
+    Key,
+    ChevronDown,
+    CircleAlert,
+    ExternalLink,
+    RefreshCw,
+    Bell,
+    BellOff,
+    ShieldAlert
+  } from "@lucide/svelte";
   import { slide } from "svelte/transition";
   import ApiKeyTable from "../../../routes/(app)/account/api-keys/ApiKeyTable.svelte";
   import CreateApiKeyDialog from "$lib/features/api-keys/CreateApiKeyDialog.svelte";
@@ -156,7 +158,7 @@
     <div
       class="border-negative-default/20 bg-negative-dimmer flex items-center gap-3 rounded-lg border px-5 py-4"
     >
-      <AlertCircle class="text-negative-default h-4 w-4 flex-shrink-0" />
+      <CircleAlert class="text-negative-default h-4 w-4 flex-shrink-0" />
       <p class="text-negative-default flex-1 text-sm">{errorMessage}</p>
       <Button variant="ghost" size="sm" onclick={loadKeys}>
         <RefreshCw />

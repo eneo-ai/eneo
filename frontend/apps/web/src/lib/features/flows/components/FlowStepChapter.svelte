@@ -2,7 +2,7 @@
   import { untrack, type Snippet } from "svelte";
   import { SvelteMap } from "svelte/reactivity";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
-  import ChevronDown from "lucide-svelte/icons/chevron-down";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { cn } from "$lib/utils.js";
 
   let {

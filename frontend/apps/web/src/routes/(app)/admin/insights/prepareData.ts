@@ -5,7 +5,7 @@
 */
 
 import type { AnalyticsAggregatedData } from "@eneo/eneo-js";
-import type { Chart } from "@eneo/ui";
+import type * as Chart from "$lib/components/chart/index.js";
 import {
   fromAbsolute,
   getDayOfWeek,

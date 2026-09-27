@@ -1,8 +1,8 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button/index.js";
-  import ChevronRight from "lucide-svelte/icons/chevron-right";
-  import PencilLine from "lucide-svelte/icons/pencil-line";
-  import Undo2 from "lucide-svelte/icons/undo-2";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import PencilLine from "@lucide/svelte/icons/pencil-line";
+  import Undo2 from "@lucide/svelte/icons/undo-2";
   import { untrack } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import { formatClock } from "$lib/features/flows/transcriptSegments";

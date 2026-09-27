@@ -2,10 +2,10 @@
   import type { FlowStep } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
-  import CheckCircle2 from "lucide-svelte/icons/check-circle-2";
-  import AlertCircle from "lucide-svelte/icons/alert-circle";
-  import Loader2 from "lucide-svelte/icons/loader-2";
-  import ListChecks from "lucide-svelte/icons/list-checks";
+  import CheckCircle2 from "@lucide/svelte/icons/circle-check";
+  import AlertCircle from "@lucide/svelte/icons/circle-alert";
+  import Loader2 from "@lucide/svelte/icons/loader-circle";
+  import ListChecks from "@lucide/svelte/icons/list-checks";
 
   /**
    * "Kontrollera flödet": saves the draft so the server validates it, then

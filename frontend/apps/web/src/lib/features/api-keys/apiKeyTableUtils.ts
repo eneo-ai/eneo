@@ -1,14 +1,17 @@
+import { intlLocale } from "$lib/core/formatting/dateTime";
 import type { ApiKeyState, ApiKeyV2 } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 import { getLocale } from "$lib/paraglide/runtime";
-import Building2 from "lucide-svelte/icons/building-2";
-import MessageSquare from "lucide-svelte/icons/message-square";
-import AppWindow from "lucide-svelte/icons/app-window";
-import Eye from "lucide-svelte/icons/eye";
-import Pencil from "lucide-svelte/icons/pencil";
-import Globe from "lucide-svelte/icons/globe";
-import Lock from "lucide-svelte/icons/lock";
-import ShieldCheck from "lucide-svelte/icons/shield-check";
+import {
+  Building2,
+  MessageSquare,
+  AppWindow,
+  Eye,
+  Pencil,
+  Globe,
+  Lock,
+  ShieldCheck
+} from "@lucide/svelte";
 
 type LucideIcon = typeof Building2;
 
@@ -201,16 +204,12 @@ export function getKeyTypeConfig(keyType: string): {
 // Locale-aware formatters
 // ---------------------------------------------------------------------------
 
-function resolveLocale(): string {
-  return getLocale() === "sv" ? "sv-SE" : "en-US";
-}
-
 function resolveShortLocale(): string {
   return getLocale() === "sv" ? "sv" : "en";
 }
 
 export function createDateFormatter(): Intl.DateTimeFormat {
-  return new Intl.DateTimeFormat(resolveLocale(), {
+  return new Intl.DateTimeFormat(intlLocale(), {
     dateStyle: "medium",
     timeStyle: "short"
   });
@@ -221,11 +220,11 @@ export function createRelativeFormatter(): Intl.RelativeTimeFormat {
 }
 
 export function createFullNumberFormatter(): Intl.NumberFormat {
-  return new Intl.NumberFormat(resolveLocale());
+  return new Intl.NumberFormat(intlLocale());
 }
 
 export function createCompactNumberFormatter(): Intl.NumberFormat {
-  return new Intl.NumberFormat(resolveLocale(), {
+  return new Intl.NumberFormat(intlLocale(), {
     notation: "compact",
     compactDisplay: "short",
     maximumFractionDigits: 1

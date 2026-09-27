@@ -6,7 +6,7 @@
     Eneo
   } from "@eneo/eneo-js";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
-  import ChevronRight from "lucide-svelte/icons/chevron-right";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import { onMount } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";

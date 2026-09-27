@@ -7,15 +7,15 @@
     type FlowPackageImportResult,
     type Eneo
   } from "@eneo/eneo-js";
-  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
-  import CheckCircle2 from "lucide-svelte/icons/check-circle-2";
-  import FileArchive from "lucide-svelte/icons/file-archive";
-  import FileDown from "lucide-svelte/icons/file-down";
-  import Loader2 from "lucide-svelte/icons/loader-2";
-  import PackageOpen from "lucide-svelte/icons/package-open";
-  import RefreshCw from "lucide-svelte/icons/refresh-cw";
-  import Upload from "lucide-svelte/icons/upload";
-  import UploadCloud from "lucide-svelte/icons/upload-cloud";
+  import AlertTriangle from "@lucide/svelte/icons/triangle-alert";
+  import CheckCircle2 from "@lucide/svelte/icons/circle-check";
+  import FileArchive from "@lucide/svelte/icons/file-archive";
+  import FileDown from "@lucide/svelte/icons/file-down";
+  import Loader2 from "@lucide/svelte/icons/loader-circle";
+  import PackageOpen from "@lucide/svelte/icons/package-open";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import Upload from "@lucide/svelte/icons/upload";
+  import UploadCloud from "@lucide/svelte/icons/cloud-upload";
   import { toast } from "$lib/components/toast";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";

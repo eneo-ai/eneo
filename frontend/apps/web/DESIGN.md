@@ -212,6 +212,12 @@ everywhere.
 
 A warm neutral ground carries one civic blue and three quiet semantic hues.
 
+The canonical tokens are in `../../packages/ui/src/styles/` and mapped in
+`src/app.css`. Use semantic foreground, muted foreground, background, border,
+accent, and destructive tokens so controls follow the user's theme. Filled
+controls use `bg-accent-default` and `text-on-fill`; `bg-primary` has a legacy
+namespace conflict described in `src/app.css`.
+
 ### Primary
 
 - **Civic Blue** (`civic-blue`): the only brand accent. Primary button fill,
@@ -310,6 +316,12 @@ The phase rail is a container query: three pips with labels above 40rem, a
 single "steg n av 3" line below. On narrow widths the question card's action
 row becomes a bar pinned to the bottom and touch targets grow to 44px.
 
+Administration pages use the shared `Page` shell. Skills pages use a centred
+content area, closely grouped search and actions, and responsive tables. At
+narrow widths, move secondary information below the resource name while keeping
+important status and actions available. English and Swedish share the same
+layout.
+
 ## Elevation & Depth
 
 Flat by default. Depth is tonal: paper cards on the linen ground, bounded by
@@ -340,6 +352,10 @@ ring in civic blue rather than a thicker border. No coloured left borders; the
 only left rule is the 2px neutral quote rule on "Du bad om".
 
 ## Components
+
+Reuse `Button`, `Checkbox`, `Table`, `Badge`, `Alert`, `AlertDialog`, `Field`, and
+`InputGroup` from `src/lib/components/ui/`. Keep visible labels, keyboard focus,
+pending states, recoverable errors, and clear confirmation of destructive actions.
 
 ### Buttons
 

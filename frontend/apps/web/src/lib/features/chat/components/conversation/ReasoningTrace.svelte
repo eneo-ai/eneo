@@ -12,10 +12,7 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import { slide } from "svelte/transition";
-  import Wrench from "lucide-svelte/icons/wrench";
-  import Brain from "lucide-svelte/icons/brain";
-  import ChevronDown from "lucide-svelte/icons/chevron-down";
-  import Loader2 from "lucide-svelte/icons/loader-2";
+  import { Wrench, Brain, ChevronDown, LoaderCircle } from "@lucide/svelte";
   import ReasoningToolStep from "./ReasoningToolStep.svelte";
 
   type Step = {
@@ -73,7 +70,7 @@
     onclick={() => (manualOpen = !open)}
   >
     {#if working}
-      <Loader2 class="text-accent-default h-4 w-4 shrink-0 animate-spin" />
+      <LoaderCircle class="text-accent-default h-4 w-4 shrink-0 animate-spin" />
       <span class="font-medium">{hasReasoning ? m.thinking() : m.chat_reasoning_working()}</span>
     {:else if hasReasoning}
       <Brain class="h-4 w-4 shrink-0" />

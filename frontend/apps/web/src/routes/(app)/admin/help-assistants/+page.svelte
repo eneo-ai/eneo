@@ -6,12 +6,14 @@
 
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
-  import { Input } from "@eneo/ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import { m } from "$lib/paraglide/messages";
   import HelpAssistantRow from "./HelpAssistantRow.svelte";
   import AddHelpAssistant from "./AddHelpAssistant.svelte";
 
   let { data } = $props();
+  const uid = $props.id();
 
   // Client-side filter, mirroring the Models admin page's "Filtrera …" box.
   let filter = $state("");
@@ -58,14 +60,15 @@
         {:else}
           <!-- Capped width (matches the MCP / Security filter bars), not full row. -->
           <div class="flex items-center gap-4">
-            <Input.Text
-              bind:value={filter}
-              label={m.ui_filter()}
-              class="max-w-md flex-grow"
-              placeholder={m.admin_help_assistants_filter_placeholder()}
-              hiddenLabel={true}
-              inputClass="!px-4"
-            ></Input.Text>
+            <Field.Field class="max-w-md flex-grow">
+              <Field.Label for={`${uid}-filter`} class="sr-only">{m.ui_filter()}</Field.Label>
+              <Input
+                id={`${uid}-filter`}
+                bind:value={filter}
+                placeholder={m.admin_help_assistants_filter_placeholder()}
+                class="px-4"
+              />
+            </Field.Field>
           </div>
 
           {#if filteredRoles.length === 0}

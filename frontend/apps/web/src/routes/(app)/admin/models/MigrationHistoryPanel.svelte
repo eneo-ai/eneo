@@ -10,10 +10,7 @@
 
 <script lang="ts">
   import { onMount } from "svelte";
-  import Loader2 from "lucide-svelte/icons/loader-2";
-  import ChevronDown from "lucide-svelte/icons/chevron-down";
-  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
-  import Search from "lucide-svelte/icons/search";
+  import { LoaderCircle, ChevronDown, TriangleAlert, Search } from "@lucide/svelte";
 
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
@@ -205,7 +202,7 @@
 <div class="flex flex-col gap-4 p-4">
   {#if loading}
     <div class="text-muted flex items-center justify-center py-12">
-      <Loader2 class="mr-2 size-5 animate-spin" aria-hidden="true" />
+      <LoaderCircle class="mr-2 size-5 animate-spin" aria-hidden="true" />
       <span>{m.loading()}</span>
     </div>
   {:else if error}
@@ -358,7 +355,7 @@
                     {#if record.warnings && record.warnings.length > 0}
                       <div class="border-border mt-3 border-t pt-3">
                         <div class="text-muted mb-1.5 flex items-center gap-1.5 text-sm">
-                          <AlertTriangle class="size-3.5" aria-hidden="true" />
+                          <TriangleAlert class="size-3.5" aria-hidden="true" />
                           <span>{m.migration_history_warnings()}</span>
                         </div>
                         <ul class="text-warning-stronger space-y-1 pl-5 text-sm">

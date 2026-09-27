@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("$lib/paraglide/messages", () => ({
   m: new Proxy({}, { get: (_target, key) => () => String(key) })
 }));
-vi.mock("lucide-svelte", () => ({ Globe: "Globe", Image: "Image" }));
+vi.mock("@lucide/svelte", () => ({ Globe: "Globe", Image: "Image" }));
 
 import {
   CAPABILITIES,

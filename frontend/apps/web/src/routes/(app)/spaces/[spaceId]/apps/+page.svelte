@@ -3,10 +3,10 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { onMount } from "svelte";
   import AppsTable from "./AppsTable.svelte";
-  import TemplateCreateApp from "$lib/features/templates/components/apps/TemplateCreateApp.svelte";
+  import TemplateCreateDialog from "$lib/features/templates/components/TemplateCreateDialog.svelte";
   import { createAppTemplateAdapter } from "$lib/features/templates/TemplateAdapter";
   import { initTemplateController } from "$lib/features/templates/TemplateController";
-  import TemplateCreateAppHint from "$lib/features/templates/components/apps/TemplateCreateAppHint.svelte";
+  import TemplateCreateHint from "$lib/features/templates/components/TemplateCreateHint.svelte";
   import { m } from "$lib/paraglide/messages";
   export let data;
 
@@ -36,12 +36,12 @@
   <Page.Header>
     <Page.Title title={m.apps()}></Page.Title>
     {#if $currentSpace.hasPermission("create", "app")}
-      <TemplateCreateApp settings={data.settings}></TemplateCreateApp>
+      <TemplateCreateDialog kind="app" settings={data.settings} />
     {/if}
   </Page.Header>
   <Page.Main>
     {#if $currentSpace.applications.apps.length < 1 && data.settings.using_templates && $currentSpace.hasPermission("create", "app")}
-      <TemplateCreateAppHint></TemplateCreateAppHint>
+      <TemplateCreateHint kind="app" />
     {:else}
       <AppsTable apps={$currentSpace.applications.apps}></AppsTable>
     {/if}

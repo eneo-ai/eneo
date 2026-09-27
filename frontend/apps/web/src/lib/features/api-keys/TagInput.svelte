@@ -1,9 +1,5 @@
 <script lang="ts">
-  import X from "lucide-svelte/icons/x";
-  import Plus from "lucide-svelte/icons/plus";
-  import Globe from "lucide-svelte/icons/globe";
-  import Server from "lucide-svelte/icons/server";
-  import AlertCircle from "lucide-svelte/icons/alert-circle";
+  import { X, Plus, Globe, Server, CircleAlert } from "@lucide/svelte";
   import { fly, scale } from "svelte/transition";
   import { flip } from "svelte/animate";
   import { m } from "$lib/paraglide/messages";
@@ -243,7 +239,7 @@
       class="text-negative-stronger flex items-center gap-1.5 text-xs"
       transition:fly={{ y: -4, duration: 150 }}
     >
-      <AlertCircle class="h-3.5 w-3.5 flex-shrink-0" />
+      <CircleAlert class="h-3.5 w-3.5 flex-shrink-0" />
       <span>{validationError}</span>
     </p>
   {/if}

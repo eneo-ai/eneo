@@ -27,17 +27,8 @@ declare module "@eneo/icons/assistant" {
 declare module "@eneo/icons/assistants" {
   export { Icon as IconAssistants } from "@eneo/icons/*";
 }
-declare module "@eneo/icons/at-symbol" {
-  export { Icon as IconAtSymbol } from "@eneo/icons/*";
-}
 declare module "@eneo/icons/attachment" {
   export { Icon as IconAttachment } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/building-2" {
-  export { Icon as IconBuilding2 } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/bulb" {
-  export { Icon as IconBulb } from "@eneo/icons/*";
 }
 declare module "@eneo/icons/calendar" {
   export { Icon as IconCalendar } from "@eneo/icons/*";
@@ -56,12 +47,6 @@ declare module "@eneo/icons/chevron-right" {
 }
 declare module "@eneo/icons/chevron-up-down" {
   export { Icon as IconChevronUpDown } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/circle" {
-  export { Icon as IconCircle } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/code" {
-  export { Icon as IconCode } from "@eneo/icons/*";
 }
 declare module "@eneo/icons/cog" {
   export { Icon as IconCog } from "@eneo/icons/*";
@@ -90,9 +75,6 @@ declare module "@eneo/icons/ellipsis" {
 declare module "@eneo/icons/eneo" {
   export { Icon as IconEneo } from "@eneo/icons/*";
 }
-declare module "@eneo/icons/enter" {
-  export { Icon as IconEnter } from "@eneo/icons/*";
-}
 declare module "@eneo/icons/feedback" {
   export { Icon as IconFeedback } from "@eneo/icons/*";
 }
@@ -108,9 +90,6 @@ declare module "@eneo/icons/file-text" {
 declare module "@eneo/icons/file" {
   export { Icon as IconFile } from "@eneo/icons/*";
 }
-declare module "@eneo/icons/filter" {
-  export { Icon as IconFilter } from "@eneo/icons/*";
-}
 declare module "@eneo/icons/folder" {
   export { Icon as IconFolder } from "@eneo/icons/*";
 }
@@ -123,26 +102,17 @@ declare module "@eneo/icons/history" {
 declare module "@eneo/icons/info" {
   export { Icon as IconInfo } from "@eneo/icons/*";
 }
-declare module "@eneo/icons/integrations" {
-  export { Icon as IconIntegrations } from "@eneo/icons/*";
-}
 declare module "@eneo/icons/key" {
   export { Icon as IconKey } from "@eneo/icons/*";
 }
 declare module "@eneo/icons/knowledge" {
   export { Icon as IconKnowledge } from "@eneo/icons/*";
 }
-declare module "@eneo/icons/library" {
-  export { Icon as IconLibrary } from "@eneo/icons/*";
-}
 declare module "@eneo/icons/link-external" {
   export { Icon as IconLinkExternal } from "@eneo/icons/*";
 }
 declare module "@eneo/icons/link" {
   export { Icon as IconLink } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/list-arrows" {
-  export { Icon as IconListArrows } from "@eneo/icons/*";
 }
 declare module "@eneo/icons/list" {
   export { Icon as IconList } from "@eneo/icons/*";
@@ -210,12 +180,6 @@ declare module "@eneo/icons/service" {
 declare module "@eneo/icons/services" {
   export { Icon as IconServices } from "@eneo/icons/*";
 }
-declare module "@eneo/icons/session" {
-  export { Icon as IconSession } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/share" {
-  export { Icon as IconShare } from "@eneo/icons/*";
-}
 declare module "@eneo/icons/sort-asc-desc" {
   export { Icon as IconSortAscDesc } from "@eneo/icons/*";
 }
@@ -240,17 +204,8 @@ declare module "@eneo/icons/squares" {
 declare module "@eneo/icons/star" {
   export { Icon as IconStar } from "@eneo/icons/*";
 }
-declare module "@eneo/icons/stop-circle" {
-  export { Icon as IconStopCircle } from "@eneo/icons/*";
-}
 declare module "@eneo/icons/stop" {
   export { Icon as IconStop } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/storage" {
-  export { Icon as IconStorage } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/thumb" {
-  export { Icon as IconThumb } from "@eneo/icons/*";
 }
 declare module "@eneo/icons/trash" {
   export { Icon as IconTrash } from "@eneo/icons/*";
@@ -260,9 +215,6 @@ declare module "@eneo/icons/upload-cloud" {
 }
 declare module "@eneo/icons/upload" {
   export { Icon as IconUpload } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/usage" {
-  export { Icon as IconUsage } from "@eneo/icons/*";
 }
 declare module "@eneo/icons/web" {
   export { Icon as IconWeb } from "@eneo/icons/*";

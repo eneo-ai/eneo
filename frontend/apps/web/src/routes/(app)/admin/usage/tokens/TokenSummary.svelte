@@ -17,7 +17,7 @@
   import UserTokenSummary from "../users/UserTokenSummary.svelte";
   import { CalendarDate, type DateValue } from "@internationalized/date";
   import { getEneo } from "$lib/core/Eneo";
-  import { Input } from "@eneo/ui";
+  import DateRangePicker from "$lib/components/DateRangePicker.svelte";
   import { m } from "$lib/paraglide/messages";
   import { untrack } from "svelte";
   import { buildCostRateMap } from "$lib/features/ai-models/costRates";
@@ -72,7 +72,7 @@
   <Settings.Group title={m.details()}>
     <Settings.Row title={m.usage_by_model()} description={m.see_token_usage_by_model()} fullWidth>
       <div slot="toolbar">
-        <Input.DateRange bind:value={dateRange} onValueCommit={handleDateChange}></Input.DateRange>
+        <DateRangePicker bind:value={dateRange} onValueCommit={handleDateChange}></DateRangePicker>
       </div>
       <TokenOverviewTable tokenStats={detailedStats} {costRates}></TokenOverviewTable>
     </Settings.Row>
