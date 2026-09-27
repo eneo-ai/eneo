@@ -79,6 +79,8 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     RESULT_OBLIGATION_VALUES,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
+    BASIC_RUNTIME_METADATA,
+    DETAILED_RUNTIME_METADATA,
     NO_EXTRA_RUNTIME_METADATA,
     infer_runtime_metadata_slot,
 )
@@ -88,6 +90,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedCheckpointUpdate,
+    ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
     ClassifiedNamedResultDelta,
@@ -807,7 +810,9 @@ def merge_llm_resolved_slots(
 
     `settled_by_acceptance` names slots this classification may not touch
     because the user already accepted them and it cites nothing they have said
-    since; `attested_slots_without_newer_evidence` resolves it.
+    since, and `FORM_INTAKE_SIGNAL_ID` when its form-intake verdict is such a
+    re-reading of the accepted run form; `attested_slots_without_newer_evidence`
+    resolves it.
     """
     if not prompt_hash.strip():
         raise ValueError("prompt_hash must be non-empty")
@@ -903,6 +908,13 @@ def merge_llm_resolved_slots(
         )
         state.slot_uncertainties.pop(slot_name, None)
 
+    if FORM_INTAKE_SIGNAL_ID not in settled_by_acceptance:
+        _read_form_intake_as_run_form(
+            state,
+            form_intake=classification_result.form_intake,
+            prompt_hash=prompt_hash,
+            model_blocked_slots=model_blocked_slots,
+        )
     _merge_model_named_result_evidence(
         state,
         classified_evidence=classification_result.named_result_evidence,
@@ -1383,6 +1395,71 @@ def _form_intake_signal_values(
     if form_intake.sectioned_form_intake:
         values.append(SECTIONED_FORM_INTAKE_SIGNAL)
     return tuple(values)
+
+
+def _form_intake_asks_for_fields(form_intake: ClassifiedFormIntake | None) -> bool:
+    return (
+        form_intake is not None
+        and _model_form_intake_is_persistable(form_intake)
+        and FORM_INTAKE_NEEDS_FIELDS_SIGNAL in _form_intake_signal_values(form_intake)
+    )
+
+
+def _read_form_intake_as_run_form(
+    state: PlanningState,
+    *,
+    form_intake: ClassifiedFormIntake | None,
+    prompt_hash: str,
+    model_blocked_slots: frozenset[str],
+) -> None:
+    """A form-intake verdict asking for fields is a reading of the run-form slot.
+
+    When it is firm enough to drive the field question it resolves the slot by
+    the precedence any model reading has. A weaker one never replaces a reading
+    of "no extra fields" — it could only demote it to a guess that asks
+    nothing — so the conflict is put to the user as the slot's own question.
+    It never answers a slot the user is unsure of.
+    """
+
+    if (
+        not _form_intake_asks_for_fields(form_intake)
+        or "runtime_metadata_fields" in model_blocked_slots
+        or "runtime_metadata_fields" in state.slot_uncertainties
+    ):
+        return
+    assert form_intake is not None
+    slot = state.resolved_slots.get("runtime_metadata_fields")
+    reading = ResolvedSlot(
+        name="runtime_metadata_fields",
+        value=(
+            DETAILED_RUNTIME_METADATA
+            if slot is not None and slot.value == DETAILED_RUNTIME_METADATA
+            else BASIC_RUNTIME_METADATA
+        ),
+        source="model",
+        evidence=[
+            f"model:{FORM_INTAKE_SIGNAL_ID}:{prompt_hash}",
+            *[item.planning_reference() for item in form_intake.evidence],
+        ],
+        confidence=form_intake.confidence,
+        evidence_level=form_intake.evidence_level,
+    )
+    if reading.is_commit_grade:
+        if _model_slot_can_replace(
+            existing_slot=slot,
+            model_confidence=form_intake.confidence,
+        ):
+            state.resolved_slots["runtime_metadata_fields"] = reading
+    elif (
+        slot is not None
+        and slot.value == NO_EXTRA_RUNTIME_METADATA
+        and slot.source in {"model", "requirements_summary"}
+    ):
+        del state.resolved_slots["runtime_metadata_fields"]
+        state.slot_uncertainties["runtime_metadata_fields"] = SlotUncertainty(
+            slot="runtime_metadata_fields",
+            kind="conflicting_readings",
+        )
 
 
 def _merged_model_file_roles(
@@ -2381,6 +2458,8 @@ def attested_slots_without_newer_evidence(
     later. A citation is newer when the message it quotes comes after the
     confirmation. A quoted message that compaction has since dropped cannot be
     placed, so it counts as already-answered and the accepted value stands.
+    Each reading is judged on its own citations: a form-intake verdict asking
+    for fields re-reads the accepted run-form slot, and is named by its own id.
     """
 
     attested = resolve_attested_disclosure(conversation)
@@ -2392,13 +2471,23 @@ def attested_slots_without_newer_evidence(
     message_order = {
         message.message_id: index for index, message in enumerate(conversation)
     }
-    return frozenset(
-        slot_name
+    readings = {
+        slot_name: outcome.evidence
         for slot_name, outcome in classification_result.slot_outcomes.items()
         if slot_name in accepted
         and isinstance(outcome, ResolvedSlotClassificationOutcome)
-        and not _cites_evidence_after(
-            outcome,
+    }
+    form_intake = classification_result.form_intake
+    if "runtime_metadata_fields" in accepted and _form_intake_asks_for_fields(
+        form_intake
+    ):
+        assert form_intake is not None
+        readings[FORM_INTAKE_SIGNAL_ID] = form_intake.evidence
+    return frozenset(
+        reading
+        for reading, evidence in readings.items()
+        if not _cites_evidence_after(
+            evidence,
             attested=attested,
             cited_message_ids_by_source=cited_message_ids_by_source,
             message_order=message_order,
@@ -2407,13 +2496,13 @@ def attested_slots_without_newer_evidence(
 
 
 def _cites_evidence_after(
-    outcome: ResolvedSlotClassificationOutcome,
+    evidence: Sequence[ClassifiedEvidence],
     *,
     attested: AttestedDisclosure,
     cited_message_ids_by_source: Mapping[str, str | None],
     message_order: Mapping[str, int],
 ) -> bool:
-    for item in outcome.evidence:
+    for item in evidence:
         message_id = cited_message_ids_by_source.get(item.source_id)
         if message_id is None:
             continue

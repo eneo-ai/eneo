@@ -100,7 +100,9 @@ SlotSource = Literal[
 
 SlotConfidence = Literal["high", "medium", "low"]
 SlotEvidenceLevel = Literal["explicit", "inferred"]
-SlotUncertaintyKind = Literal["explicitly_uncertain"]
+# explicitly_uncertain: the user said so. conflicting_readings: a fresh reading
+# too weak to overrule the standing answer contradicts it, so the user decides.
+SlotUncertaintyKind = Literal["explicitly_uncertain", "conflicting_readings"]
 RuntimeMetadataFieldPurpose = Literal[
     "interpret_input",
     "shape_result",

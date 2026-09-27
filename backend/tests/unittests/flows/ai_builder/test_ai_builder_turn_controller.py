@@ -45,6 +45,14 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     resolve_structured_schema_direction,
     schema_direction_option_values,
 )
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    AbsentSlotClassificationOutcome,
+    ClassifiedEvidence,
+    ClassifiedFormIntake,
+    ExplicitlyUncertainSlotClassificationOutcome,
+    ResolvedSlotClassificationOutcome,
+    SlotClassificationOutcome,
+)
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
 )
@@ -79,9 +87,13 @@ from eneo.flows.ai_builder.planning_state import (
     SlotSource,
     StepTriple,
 )
+from eneo.flows.ai_builder.planning_state_builder import merge_llm_resolved_slots
 from eneo.flows.ai_builder.question_catalog import (
     RUNTIME_METADATA_FIELD_PURPOSES,
     render_summary_label,
+)
+from tests.unittests.flows.ai_builder.slot_classification_test_support import (
+    slot_classification_result,
 )
 
 
@@ -321,6 +333,185 @@ def test_saved_form_fields_are_a_known_baseline_and_are_not_asked_for_again(
     decision = _decision(state=state, ui_language="en", is_edit_mode=True)
 
     assert isinstance(decision, ConfirmRequirements)
+
+
+_FORM_REQUEST = ClassifiedEvidence(
+    source_id="user_message:test",
+    quote="Formuläret ska ha exakt de här fälten (fältnamn och typ):",
+)
+_OMITTED = "omitted"
+_UNCERTAIN = "explicitly_uncertain"
+
+
+def _state_classified_with(
+    *,
+    runtime_metadata: tuple[str, SlotConfidence, SlotEvidenceLevel] | str,
+    form_intake: bool | None,
+    existing: ResolvedSlot | None = None,
+    blocked: bool = False,
+    weak_form_intake: bool = False,
+) -> PlanningState:
+    """The measured shape: one classification reads a requested run form and,
+    in the same breath, a run-form slot value of its own (or none at all)."""
+
+    state = _state(
+        primary_runtime_input="text_and_documents",
+        terminal_output="structured_text",
+        comparison_scope="no_direct_compare",
+        document_material_scope="single_document_case",
+    )
+    if existing is not None:
+        state.resolved_slots["runtime_metadata_fields"] = existing
+    if runtime_metadata == _OMITTED:
+        outcomes: dict[str, SlotClassificationOutcome] = {
+            "runtime_metadata_fields": AbsentSlotClassificationOutcome()
+        }
+    elif runtime_metadata == _UNCERTAIN:
+        outcomes = {
+            "runtime_metadata_fields": ExplicitlyUncertainSlotClassificationOutcome(
+                quote=_FORM_REQUEST
+            )
+        }
+    else:
+        assert isinstance(runtime_metadata, tuple)
+        value, confidence, evidence_level = runtime_metadata
+        outcomes = {
+            "runtime_metadata_fields": ResolvedSlotClassificationOutcome(
+                value=value,
+                confidence=confidence,
+                reason="all run data is given in the specified form",
+                evidence=(_FORM_REQUEST,),
+                evidence_level=evidence_level,
+            )
+        }
+    merge_llm_resolved_slots(
+        state,
+        slot_classification_result(
+            slot_outcomes=outcomes,
+            form_intake=(
+                ClassifiedFormIntake(
+                    needs_form_fields=form_intake,
+                    sectioned_form_intake=False,
+                    confidence="medium" if weak_form_intake else "high",
+                    reason="whether the user fills in a run form",
+                    evidence=(_FORM_REQUEST,),
+                    evidence_level="inferred" if weak_form_intake else "explicit",
+                )
+                if form_intake is not None
+                else None
+            ),
+        ),
+        prompt_hash="f" * 64,
+        freeform_text="",
+        model_blocked_slots=(
+            frozenset({"runtime_metadata_fields"}) if blocked else frozenset()
+        ),
+    )
+    state.architecture_commit = _finalized_commit_for_state(state)
+    return state
+
+
+@pytest.mark.parametrize(
+    ("runtime_metadata", "existing"),
+    [
+        (("no_extra_metadata", "medium", "inferred"), None),
+        (("no_extra_metadata", "high", "explicit"), None),
+        (("basic_runtime_metadata", "medium", "inferred"), None),
+        (_OMITTED, None),
+        (
+            _OMITTED,
+            _slot("runtime_metadata_fields", "no_extra_metadata", source="heuristic"),
+        ),
+        (
+            _OMITTED,
+            _slot(
+                "runtime_metadata_fields",
+                "no_extra_metadata",
+                source="policy_default",
+            ),
+        ),
+    ],
+    ids=["mc_liv01", "mc_utb01", "mc_utb07", "omitted", "heuristic", "policy_default"],
+)
+def test_a_requested_run_form_is_collected_whatever_the_run_form_slot_reads(
+    runtime_metadata: tuple[str, SlotConfidence, SlotEvidenceLevel] | str,
+    existing: ResolvedSlot | None,
+) -> None:
+    # Measured: the classifier read needs_form_fields (high, citing the field
+    # list) and, for the same sentence, "no extra fields" or a weak "a few
+    # fields". The confirmation followed with no field question, and each
+    # flow was saved without the form it could not run without. A slot the
+    # classifier left out, or only a guess stands for, is lost the same way.
+    state = _state_classified_with(
+        runtime_metadata=runtime_metadata, form_intake=True, existing=existing
+    )
+
+    decision = _decision(state=state, ui_language="sv")
+
+    assert isinstance(decision, AskCanonicalQuestion)
+    assert decision.slot_name == "runtime_metadata_field_details"
+
+
+@pytest.mark.parametrize("form_intake", [None, False], ids=["absent", "no_form"])
+def test_no_requested_run_form_asks_for_no_fields(form_intake: bool | None) -> None:
+    # A confident verdict that no form is needed is a verdict too; only one
+    # that asks for fields re-reads the run-form slot.
+    state = _state_classified_with(
+        runtime_metadata=("no_extra_metadata", "high", "explicit"),
+        form_intake=form_intake,
+    )
+
+    assert isinstance(_decision(state=state, ui_language="sv"), ConfirmRequirements)
+
+
+def test_the_users_own_no_form_answer_outranks_a_form_intake_reading() -> None:
+    state = _state_classified_with(
+        runtime_metadata=("no_extra_metadata", "high", "explicit"),
+        form_intake=True,
+        existing=_slot("runtime_metadata_fields", "no_extra_metadata"),
+    )
+
+    assert isinstance(_decision(state=state, ui_language="sv"), ConfirmRequirements)
+
+
+def test_a_weaker_form_intake_does_not_demote_a_committed_run_form() -> None:
+    state = _state_classified_with(
+        runtime_metadata=("detailed_runtime_metadata", "high", "explicit"),
+        form_intake=True,
+        weak_form_intake=True,
+    )
+
+    slot = state.resolved_slots["runtime_metadata_fields"]
+    assert (slot.value, slot.confidence) == ("detailed_runtime_metadata", "high")
+
+
+def test_a_weak_form_intake_against_no_fields_puts_the_run_form_to_the_user() -> None:
+    state = _state_classified_with(
+        runtime_metadata=("no_extra_metadata", "high", "explicit"),
+        form_intake=True,
+        weak_form_intake=True,
+    )
+
+    assert "runtime_metadata_fields" not in state.resolved_slots
+    assert state.slot_uncertainties["runtime_metadata_fields"].kind == (
+        "conflicting_readings"
+    )
+
+
+@pytest.mark.parametrize(
+    ("runtime_metadata", "blocked"),
+    [(_UNCERTAIN, False), (_OMITTED, True)],
+    ids=["explicitly_uncertain", "blocked"],
+)
+def test_a_form_intake_does_not_answer_a_run_form_the_user_is_unsure_of(
+    runtime_metadata: str,
+    blocked: bool,
+) -> None:
+    state = _state_classified_with(
+        runtime_metadata=runtime_metadata, form_intake=True, blocked=blocked
+    )
+
+    assert "runtime_metadata_fields" not in state.resolved_slots
 
 
 def test_every_purpose_a_field_can_be_stored_with_can_also_be_chosen() -> None:

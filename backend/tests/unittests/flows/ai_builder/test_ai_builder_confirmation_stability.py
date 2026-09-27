@@ -27,6 +27,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_with_slot_classification,
     slot_classification_metadata_from_attempt,
 )
+from eneo.flows.ai_builder.ai_builder_discovery import analyze_discovery
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsDisclosureContent,
@@ -44,6 +45,7 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedEvidence,
+    ClassifiedFormIntake,
     ClassifiedSlot,
     SlotClassificationAttempt,
     SlotClassificationConfidence,
@@ -52,6 +54,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
+    AskCanonicalQuestion,
     ConfirmRequirements,
     GenerateProposal,
     resolve_turn_control,
@@ -1058,15 +1061,20 @@ def test_values_that_join_alike_are_still_different_disclosures() -> None:
     assert first.requirements_version != second.requirements_version
 
 
-def _classifier_metadata(*slots: ClassifiedSlot) -> dict[str, object]:
+def _classifier_metadata(
+    *slots: ClassifiedSlot,
+    form_intake: ClassifiedFormIntake | None = None,
+) -> dict[str, object]:
     quotes_by_source: dict[str, list[str]] = {}
-    for slot in slots:
-        for item in slot.evidence:
-            quotes_by_source.setdefault(item.source_id, []).append(item.quote)
+    for item in (
+        *(item for slot in slots for item in slot.evidence),
+        *(form_intake.evidence if form_intake is not None else ()),
+    ):
+        quotes_by_source.setdefault(item.source_id, []).append(item.quote)
     metadata = slot_classification_metadata_from_attempt(
         SlotClassificationAttempt(
             outcome="resolved",
-            result=slot_classification_result(slots=slots),
+            result=slot_classification_result(slots=slots, form_intake=form_intake),
         ),
         prompt_hash="c" * 64,
         classification_input=SlotClassificationInput(
@@ -1233,6 +1241,7 @@ def test_the_rebuild_pins_the_same_architecture_the_acknowledgment_committed() -
 def _accepted_audio_conversation(
     *,
     confirmation_metadata: dict[str, object] | None = None,
+    also_classified: tuple[ClassifiedSlot, ...] = (),
 ) -> tuple[
     list[ConversationMessage],
     RequirementsSummaryPayload,
@@ -1267,6 +1276,7 @@ def _accepted_audio_conversation(
                     "high",
                     "beslut och åtgärder",
                 ),
+                *also_classified,
             ),
         ),
     ]
@@ -1381,6 +1391,208 @@ def test_what_the_user_says_after_accepting_still_changes_the_output() -> None:
     assert (
         build_requirements_disclosure(rebuilt, ui_language="sv").requirements_version
         != disclosed.requirements_version
+    )
+
+
+def _accepted_no_fields_conversation(
+    *slots: ClassifiedSlot,
+    form_intake: ClassifiedFormIntake | None = None,
+    then: tuple[ConversationMessage, ...] = (),
+) -> tuple[list[ConversationMessage], RequirementsSummaryPayload]:
+    """ "No extra fields" accepted, then one more classified user message."""
+
+    conversation, disclosed = _accepted_audio_conversation(
+        also_classified=(
+            _classified(
+                "runtime_metadata_fields",
+                "no_extra_metadata",
+                "medium",
+                "Ladda upp mötesljud",
+            ),
+        )
+    )
+    assert build_planning_state_from_conversation(conversation).resolved_slots[
+        "runtime_metadata_fields"
+    ].source == ("requirements_summary")
+    conversation.append(
+        ConversationMessage(
+            message_id="user-2",
+            role="user",
+            content="Den som kör flödet ska fylla i ärendenummer och mötesdatum.",
+            metadata=_classifier_metadata(*slots, form_intake=form_intake),
+        )
+    )
+    return [*conversation, *then], disclosed
+
+
+def _accepted_no_fields_then(
+    *slots: ClassifiedSlot,
+    form_intake: ClassifiedFormIntake | None = None,
+) -> PlanningState:
+    conversation, _ = _accepted_no_fields_conversation(*slots, form_intake=form_intake)
+    return build_planning_state_from_conversation(conversation)
+
+
+def _decide_after_discovery(
+    conversation: list[ConversationMessage],
+    disclosed: RequirementsSummaryPayload,
+) -> object:
+    """The next turn as the live runtime takes it, the accepted version in hand."""
+
+    state = build_planning_state_from_conversation(conversation)
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    state.architecture_commit = finalize_architecture_commit(
+        draft,
+        now=lambda: datetime(2026, 9, 27, tzinfo=timezone.utc),
+    )
+    return resolve_turn_control(
+        session_state=state,
+        selected_discovery_question_ids=analyze_discovery(
+            conversation, planning_state=state
+        ).selected_question_ids,
+        requirements_disclosure=build_requirements_disclosure(state, ui_language="sv"),
+        confirmed_requirements_version=disclosed.requirements_version,
+        ui_language="sv",
+    ).decision
+
+
+def _form_verdict(cited_message_id: str, *, weak: bool = False) -> ClassifiedFormIntake:
+    return ClassifiedFormIntake(
+        needs_form_fields=True,
+        sectioned_form_intake=False,
+        confidence="medium" if weak else "high",
+        reason="The runner fills in values of their own.",
+        evidence=(
+            ClassifiedEvidence(
+                source_id=f"user_message:{cited_message_id}",
+                quote=(
+                    "ska fylla i ärendenummer och mötesdatum"
+                    if cited_message_id == "user-2"
+                    else "Ladda upp mötesljud"
+                ),
+            ),
+        ),
+        evidence_level="inferred" if weak else "explicit",
+    )
+
+
+_STALE_NO_FIELDS = _classified(
+    "runtime_metadata_fields", "no_extra_metadata", "high", "Ladda upp mötesljud"
+)
+
+
+@pytest.mark.parametrize(
+    ("form_intake", "expected"),
+    [
+        (_form_verdict("user-2"), ("basic_runtime_metadata", "model", True)),
+        (
+            _form_verdict("user-1"),
+            ("no_extra_metadata", "requirements_summary", True),
+        ),
+    ],
+    ids=["new_form_request", "reread_prompt"],
+)
+def test_each_reading_of_the_run_form_is_judged_fresh_on_its_own(
+    form_intake: ClassifiedFormIntake,
+    expected: tuple[str, SlotSource, bool],
+) -> None:
+    """A later classification re-reads the accepted "no extra fields" from the
+    first prompt; that reading stays settled whatever the form verdict cites.
+
+    A verdict quoting what the user said after accepting is the user changing
+    their mind, and it answers the slot when it is firm enough to drive the
+    field question. A verdict quoting the accepted prompt is a re-reading like
+    any other.
+    """
+
+    slot = _accepted_no_fields_then(
+        _STALE_NO_FIELDS, form_intake=form_intake
+    ).resolved_slots["runtime_metadata_fields"]
+
+    assert (slot.value, slot.source, slot.is_commit_grade) == expected
+
+
+def test_a_re_read_form_request_asks_nothing_after_acceptance() -> None:
+    decision = _decide_after_discovery(
+        *_accepted_no_fields_conversation(
+            _STALE_NO_FIELDS, form_intake=_form_verdict("user-1")
+        )
+    )
+
+    # The stored form-intake signal still changes the disclosure, so the card
+    # is shown again; no question about the run form is asked.
+    assert isinstance(decision, ConfirmRequirements)
+
+
+def test_a_weak_new_form_request_puts_the_accepted_run_form_to_the_user() -> None:
+    """Too weak to overrule the accepted "no extra fields", too new to drop.
+
+    The accepted answer is not replaced by a guess that asks nothing; the
+    existing question about extra run fields puts the conflict to the user.
+    """
+
+    conversation, disclosed = _accepted_no_fields_conversation(
+        _STALE_NO_FIELDS, form_intake=_form_verdict("user-2", weak=True)
+    )
+
+    decision = _decide_after_discovery(conversation, disclosed)
+
+    assert isinstance(decision, AskCanonicalQuestion)
+    assert decision.slot_name == "runtime_metadata_fields"
+    accepted = resolve_requirements_state(conversation).attested_summary
+    assert accepted is not None
+    assert {
+        item.requirement_id: item.selected_value
+        for item in accepted.resolved_requirements
+    }["runtime_metadata_fields"] == "no_extra_metadata"
+
+
+def test_answering_the_run_form_question_settles_the_weak_request() -> None:
+    decision = _decide_after_discovery(
+        *_accepted_no_fields_conversation(
+            _STALE_NO_FIELDS,
+            form_intake=_form_verdict("user-2", weak=True),
+            then=(
+                ConversationMessage(
+                    message_id="answer-run-form",
+                    role="user",
+                    content="Inga extra fält",
+                    metadata={
+                        "question_answer": {
+                            "question_id": "runtime_metadata_fields",
+                            "selected_option_id": "no_extra_metadata",
+                        }
+                    },
+                ),
+            ),
+        )
+    )
+
+    assert isinstance(decision, ConfirmRequirements)
+
+
+def test_an_old_form_citation_does_not_settle_a_new_uncertainty() -> None:
+    unsure = ClassifiedSlot(
+        slot_name="runtime_metadata_fields",
+        value="unknown",
+        confidence="high",
+        reason="The user is unsure.",
+        evidence=(
+            ClassifiedEvidence(source_id="user_message:user-2", quote="vet inte"),
+        ),
+        classification_kind="explicitly_uncertain",
+    )
+
+    with_old_form = _accepted_no_fields_then(
+        unsure, form_intake=_form_verdict("user-1")
+    )
+    without_form = _accepted_no_fields_then(unsure)
+
+    assert "runtime_metadata_fields" in without_form.slot_uncertainties
+    assert (with_old_form.resolved_slots, with_old_form.slot_uncertainties) == (
+        without_form.resolved_slots,
+        without_form.slot_uncertainties,
     )
 
 
