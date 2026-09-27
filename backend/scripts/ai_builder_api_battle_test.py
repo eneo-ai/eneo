@@ -31,7 +31,7 @@ from dataclasses import fields as dataclass_fields
 from decimal import Decimal
 from http.client import HTTPException
 from pathlib import Path
-from threading import Lock
+from threading import BoundedSemaphore, Lock
 from typing import Any, Literal, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -230,6 +230,9 @@ class ApiConfig:
     # Monotonic end of the current observation, or None outside one. Every
     # request and every blocking stream read is bounded by it.
     deadline: float | None = None
+    # The suite's Flow-run slots, shared by its observations: a run holds one
+    # from creation until it is terminal or cancelled. None is unlimited.
+    run_slots: BoundedSemaphore | None = None
 
 
 _READ_CHUNK_BYTES = 64 * 1024
@@ -246,6 +249,31 @@ def _request_timeout(config: ApiConfig) -> float:
     if remaining <= 0:
         raise ObservationDeadlineExceeded("observation deadline reached")
     return min(config.timeout_seconds, remaining)
+
+
+def _acquire_run_slot(
+    config: ApiConfig, *, timeout_seconds: float
+) -> BoundedSemaphore | None:
+    """Take one of the suite's run slots, waiting until the observation
+    deadline, or for the run's own timeout outside one.
+
+    Returns the semaphore to release, or None when runs are not limited.
+    """
+
+    slots = getattr(config, "run_slots", None)
+    if slots is None:
+        return None
+    deadline = getattr(config, "deadline", None)
+    wait_seconds = (
+        timeout_seconds if deadline is None else max(0.0, deadline - time.monotonic())
+    )
+    if not slots.acquire(timeout=wait_seconds):
+        raise ObservationDeadlineExceeded("no Flow run slot freed in time")
+    if deadline is not None and time.monotonic() >= deadline:
+        # No run was started on it, so the slot is free again, not retired.
+        slots.release()
+        raise ObservationDeadlineExceeded("observation deadline reached")
+    return slots
 
 
 def _without_deadline(config: ApiConfig) -> ApiConfig:
@@ -2784,6 +2812,48 @@ def _max_concurrency(args: argparse.Namespace) -> int:
     return value
 
 
+def _suite_run_slots(
+    *,
+    config: ApiConfig,
+    cases: Sequence[BattleCase],
+    capacity_preflight: Mapping[str, object] | None,
+) -> int | None:
+    """How many Flow runs the suite keeps in flight: the tenant's run capacity.
+
+    The preflight's reading is reused; a suite without one reads the capacity
+    endpoint itself, and an outage raises in its own class. Like the sealed
+    preflight, every suite needs an idle tenant. A suite that executes no Flow
+    needs no slots (None). Only run execution is limited; planning and
+    Builder turns keep the full concurrency.
+    """
+
+    if not any(case.apply_plan and case.executes for case in cases):
+        return None
+    runtime = (capacity_preflight or {}).get("runtime_capacity")
+    if not isinstance(runtime, Mapping):
+        runtime = _request_json(config=config, method="GET", path=RUN_CAPACITY_PATH)
+    reading = cast(Mapping[str, object], runtime)
+    limit, active = reading.get("max_concurrent_runs"), reading.get("active_runs")
+    if (
+        not isinstance(limit, int)
+        or isinstance(limit, bool)
+        or limit < 1
+        or not isinstance(active, int)
+        or isinstance(active, bool)
+        or active < 0
+    ):
+        refusal = "runtime_capacity_unknown"
+    elif active:
+        # Pre-existing tenant work would take slots the suite counts on.
+        refusal = "measurement_tenant_not_idle"
+    else:
+        return limit
+    raise CapacityPreflightRefused(
+        {"verdict": "fail", "refusals": [refusal], "runtime_capacity": dict(reading)},
+        base_url=getattr(config, "base_url", None),
+    )
+
+
 def _acquire_observations_with_case_isolation(
     *,
     observations: list[tuple[int, int, BattleCase]],
@@ -2918,6 +2988,9 @@ def _case_deletes_a_flow(case: BattleCase) -> bool:
     return case.apply_plan or case.edit is not None
 
 
+RUN_CAPACITY_PATH = "/flows/runs/capacity/"
+
+
 def _capacity_preflight(
     *,
     config: ApiConfig,
@@ -2941,7 +3014,7 @@ def _capacity_preflight(
         timeout_seconds=timeout_seconds,
     )
     runtime_capacity, runtime_failure = (
-        _read_capacity_snapshot(config=config, path="/flows/runs/capacity/")
+        _read_capacity_snapshot(config=config, path=RUN_CAPACITY_PATH)
         if slots_required
         else (None, None)
     )
@@ -3198,6 +3271,11 @@ def _run_suite(
             base_url=config.base_url,
             space_id=args.space_id,
         )
+    run_slots = _suite_run_slots(
+        config=config, cases=cases, capacity_preflight=capacity_preflight
+    )
+    if run_slots is not None:
+        config = replace(config, run_slots=BoundedSemaphore(run_slots))
     _require_clean_measurement_space(
         config=config,
         space_id=args.space_id,
@@ -3205,6 +3283,7 @@ def _run_suite(
     provisioned_fixtures = _provision_fixtures(config=config, cases=cases)
     expected_observations = _expected_observations(cases, args.repetitions)
     run_context = _suite_run_context(args)
+    run_context["run_slots"] = run_slots
     evaluator_identity = _suite_evaluator_identity(
         release_identity=release_identity,
         run_context=run_context,
@@ -3649,6 +3728,12 @@ def _run_replacement_batch(
             base_url=config.base_url,
             space_id=args.space_id,
         )
+
+    replacement_slots = _suite_run_slots(
+        config=config, cases=requested_cases, capacity_preflight=capacity_preflight
+    )
+    if replacement_slots is not None:
+        config = replace(config, run_slots=BoundedSemaphore(replacement_slots))
 
     _require_clean_measurement_space(
         config=config,
@@ -5208,34 +5293,51 @@ def _execute_and_collect_runtime_evidence(
             }
         }
     record["run_request"] = run_request
+    run_slot = _acquire_run_slot(config, timeout_seconds=timeout_seconds)
+    # The slot is freed only when the tenant provably no longer counts the run.
+    run_ended = False
     try:
-        created_run = _request_json(
-            config=config,
-            method="POST",
-            path=f"/flows/{flow_id}/runs/",
-            payload=run_request,
-        )
-    except HTTPError as error:
-        # The server owns run-request validation; keep its answer.
-        record["run_request_refused"] = _http_error_detail(error, config)
-        raise
-    run_id = _required_string(created_run, "id")
-    record["run_id"] = run_id
-    try:
-        run = _drive_run(
-            config=config,
-            flow_id=flow_id,
-            run_id=run_id,
-            checkpoints=execution.checkpoints,
-            timeout_seconds=timeout_seconds,
-            record=record,
-            review_target_names=review_target_names,
-        )
-    except Exception:
-        # Deleting the Flow does not stop a run it has, so an error must not
-        # leave the run paused or running; the error itself still propagates.
-        _cancel_run(config=config, flow_id=flow_id, run_id=run_id, record=record)
-        raise
+        try:
+            created_run = _request_json(
+                config=config,
+                method="POST",
+                path=f"/flows/{flow_id}/runs/",
+                payload=run_request,
+            )
+        except HTTPError as error:
+            # A 4xx created no run; behind a 5xx one may exist.
+            run_ended = error.code < 500
+            # The server owns run-request validation; keep its answer.
+            record["run_request_refused"] = _http_error_detail(error, config)
+            raise
+        run_id = _required_string(created_run, "id")
+        record["run_id"] = run_id
+        try:
+            run = _drive_run(
+                config=config,
+                flow_id=flow_id,
+                run_id=run_id,
+                checkpoints=execution.checkpoints,
+                timeout_seconds=timeout_seconds,
+                record=record,
+                review_target_names=review_target_names,
+            )
+        except Exception:
+            # Deleting the Flow does not stop a run it has, so an error must
+            # not leave the run paused or running; the error still propagates.
+            cancelled = _cancel_run(
+                config=config, flow_id=flow_id, run_id=run_id, record=record
+            )
+            run_ended = _run_is_terminal(cancelled)
+            raise
+        run_ended = _run_is_terminal(run)
+    finally:
+        if run_slot is not None and run_ended:
+            run_slot.release()
+        elif run_slot is not None:
+            # The run may still hold tenant capacity: retire its slot for the
+            # rest of the suite rather than overrun the limit.
+            record["run_slot_retired"] = True
     evidence = _request_json(
         config=config,
         method="GET",
@@ -5369,6 +5471,12 @@ def _drive_run(
         )
     record.update(outcome=outcome, run_status=_optional_string(run, "status"))
     return run
+
+
+def _run_is_terminal(run: Mapping[str, object] | None) -> bool:
+    return run is not None and _optional_string(run, "status") in (
+        TERMINAL_FLOW_RUN_STATUSES
+    )
 
 
 def _cancel_run(

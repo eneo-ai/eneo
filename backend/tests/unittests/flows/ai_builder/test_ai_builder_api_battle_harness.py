@@ -3441,6 +3441,8 @@ def test_acquisition_contract_is_non_configurable_and_reported(
     # The acquisition contract is non-configurable, so the manifest declares
     # no thresholds: there is nothing an operator could have set.
     assert "thresholds" not in manifest
+    # No case executes a Flow, so the suite holds no run slots.
+    assert manifest["run_context"]["run_slots"] is None
     summary = json.loads((suite_dir / "suite-summary.json").read_text())
     assert all(check["passed"] for check in summary["sentinel_acquisition_checks"])
     assert summary["sentinel_verdict"] == "pass"
