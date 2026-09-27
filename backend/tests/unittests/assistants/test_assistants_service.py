@@ -28,6 +28,7 @@ from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
 from eneo.main.exceptions import (
     BadRequestException,
     ModelNotAvailableException,
+    NotFoundException,
     UnauthorizedException,
 )
 from eneo.main.models import NOT_PROVIDED, ModelId
@@ -230,6 +231,38 @@ async def test_delete_space_assistant_not_member(setup: Setup):
 
 async def test_delete_space_assistant_member(setup: Setup):
     await setup.service.delete_assistant(TEST_UUID)
+
+    # Only the target goes: a whole-space write would rewrite or delete the
+    # other assistants from this request's snapshot.
+    setup.service.space_repo.delete_assistant.assert_awaited_once_with(
+        TEST_UUID, TEST_UUID
+    )
+    setup.service.space_repo.update.assert_not_awaited()
+
+
+async def test_delete_that_matched_no_row_is_not_found(setup: Setup):
+    setup.service.space_repo.delete_assistant.return_value = False
+
+    with pytest.raises(NotFoundException):
+        await setup.service.delete_assistant(TEST_UUID)
+
+
+async def test_publish_writes_only_the_published_flag(setup: Setup):
+    space = setup.service.space_repo.get_space_by_assistant.return_value
+    assistant = space.get_assistant.return_value
+    setup.service.actor_manager.get_space_actor_from_space.return_value = MagicMock()
+
+    returned, _ = await setup.service.publish_assistant(TEST_UUID, False)
+
+    # Reloaded after the permission check, so the result is what is stored now.
+    assert setup.service.space_repo.get_space_by_assistant.await_count == 2
+    setup.service.repo.set_published.assert_awaited_once_with(
+        assistant_id=TEST_UUID, space_id=TEST_UUID, published=False
+    )
+    setup.service.repo.update.assert_not_awaited()
+    setup.service.space_repo.update.assert_not_awaited()
+    assistant.update.assert_called_once_with(published=False)
+    assert returned is assistant
 
 
 async def test_delete_flow_managed_assistants_has_every_deletion_effect(
@@ -1206,7 +1239,7 @@ async def test_create_from_template_prefers_template_model_when_available(
     )
     setup.service.file_service.get_file_infos.return_value = []
     setup.service.factory.create_assistant.return_value = created_assistant
-    setup.service.space_repo.update.return_value = refreshed_space
+    setup.service.space_repo.add_assistant.return_value = refreshed_space
 
     await setup.service._create_from_template(
         space=space,
@@ -1247,7 +1280,7 @@ async def test_create_from_template_keeps_fallback_when_template_has_no_model(
     )
     setup.service.file_service.get_file_infos.return_value = []
     setup.service.factory.create_assistant.return_value = created_assistant
-    setup.service.space_repo.update.return_value = refreshed_space
+    setup.service.space_repo.add_assistant.return_value = refreshed_space
 
     await setup.service._create_from_template(
         space=MagicMock(id=uuid4()),

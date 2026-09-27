@@ -106,6 +106,9 @@ class Space:
         # so they don't auto-create a duplicate default. See SpaceInitService.
         self.default_assistant_load_failed = default_assistant_load_failed
         self.assistants = assistants or []
+        # Assistants this request removed on purpose. A whole-space write
+        # deletes only these, never one it merely did not load.
+        self.removed_assistant_ids: set[UUID] = set()
         self.group_chats = group_chats or []
         self.apps = apps or []
         self.services = services or []
@@ -568,6 +571,7 @@ class Space:
             ]
 
         self.assistants.remove(assistant)
+        self.removed_assistant_ids.add(assistant.id)
 
     def add_collection_owner_move(self, collection: "Collection"):
         """Byter ägare på en collection till detta space (uppdaterar FK i DB).

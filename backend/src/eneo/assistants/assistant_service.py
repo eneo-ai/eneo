@@ -661,7 +661,7 @@ class AssistantService:
 
             assistant.enabled_capabilities = sorted(set(enabled_capabilities or []))
             space.add_assistant(assistant)
-            refreshed_space = await self.space_repo.update(space)
+            refreshed_space = await self.space_repo.add_assistant(space, assistant)
             try:
                 assistant = refreshed_space.get_assistant(assistant.id)
             except NotFoundException:
@@ -755,7 +755,7 @@ class AssistantService:
         await self._validate_attachments_fit(assistant, space=space)
 
         space.add_assistant(assistant)
-        refreshed_space = await self.space_repo.update(space)
+        refreshed_space = await self.space_repo.add_assistant(space, assistant)
         assistant = refreshed_space.get_assistant(assistant.id)
 
         return assistant
@@ -2181,7 +2181,9 @@ class AssistantService:
             )
 
         space.remove_assistant(assistant)
-        await self.space_repo.update(space)
+        if not await self.space_repo.delete_assistant(space.id, assistant_id):
+            # Deleted or moved to another space since this request loaded it.
+            raise NotFoundException("Assistant not found")
 
         if icon_id:
             await self.icon_repo.delete_unused(icon_id, tenant_id=self.user.tenant_id)
@@ -3490,12 +3492,20 @@ class AssistantService:
 
         _reject_direct_flow_managed_assistant_mutation(assistant, action="publish")
 
+        # Validate and return what is stored now, not the copy loaded for the
+        # permission check: an edit may have been committed in between.
+        authorized_space_id = space.id
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
         if publish:
             await self._validate_attachments_fit(assistant, space=space)
 
+        await self.repo.set_published(
+            assistant_id=assistant_id,
+            space_id=authorized_space_id,
+            published=publish,
+        )
         assistant.update(published=publish)
-
-        await self.space_repo.update(space)
 
         # TODO: Review how we get the permissions to the presentation layer
         permissions: list[ResourcePermission] = actor.get_assistant_permissions(

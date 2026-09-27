@@ -1034,6 +1034,22 @@ class AssistantRepository:
             )
         return inputs
 
+    async def set_published(
+        self, *, assistant_id: UUID, space_id: UUID, published: bool
+    ) -> None:
+        """Write the published flag alone, so a concurrent edit to any other
+        field of the assistant survives. The space guard refuses an assistant
+        moved out of the space the caller was authorized in."""
+        updated = await self.session.scalar(
+            sa.update(Assistants)
+            .where(Assistants.id == assistant_id)
+            .where(Assistants.space_id == space_id)
+            .values(published=published)
+            .returning(Assistants.id)
+        )
+        if updated is None:
+            raise NotFoundException("Assistant not found")
+
     async def update(
         self,
         assistant: Assistant,
