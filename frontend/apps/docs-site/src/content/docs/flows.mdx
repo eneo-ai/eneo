@@ -159,6 +159,24 @@ For audio-first workflows such as meeting transcript summaries or employee revie
 
 The Flow runtime does **not** require browser-side streaming transcription for this pattern.
 
+### Recording in the run dialog
+
+When a user records audio in the run dialog:
+
+- The recorder shows how long the recording can still run. The limit comes from
+  the flow's longest recording and the audio input's file slots. A long
+  recording is split into parts, one file each, and a part starts before a file
+  reaches its size limit.
+- **Pause** (Swedish: Pausa) pauses the recording and **Resume** (Fortsätt)
+  continues it. Paused time is not recorded and does not count toward the
+  recording's length or its parts.
+- If live text is on, pausing turns it into a preview, and the recording is
+  transcribed after it ends. A long pause can end the live text; the recording
+  continues.
+- Each part is kept on the device while it records. If the page closes or
+  reloads during a recording, the dialog offers to continue it the next time it
+  opens, with the audio up to shortly before the page closed.
+
 ### How form fields map to runtime payloads
 
 If a published flow exposes form fields, the client sends those values inside `input_payload_json` using the published field names as keys. The backend validates the values against the published field types and required flags.

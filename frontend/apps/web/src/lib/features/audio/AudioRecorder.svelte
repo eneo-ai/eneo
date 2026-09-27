@@ -20,6 +20,7 @@
   import { IconMicrophone } from "@eneo/icons/microphone";
   import { IconStop } from "@eneo/icons/stop";
   import { IconDownload } from "@eneo/icons/download";
+  import { IconPause } from "@eneo/icons/pause";
   import { IconPlay } from "@eneo/icons/play";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
@@ -94,6 +95,8 @@
   // The segment's file nears its size limit: the caller starts a new part, or
   // stops at its last file slot. At the limit itself the recording stops.
   export let onFileNearlyFull: () => void = () => {};
+  // The user paused (true) or went on (false): the caller's session and live text follow.
+  export let onPauseChange: (paused: boolean) => void = () => {};
   export let resetToken: unknown = 0;
   // False while the caller cannot take another recording; stopping stays possible.
   export let canStart = true;
@@ -104,10 +107,23 @@
 
   // A recording reports to the callbacks it started with: its last segment
   // arrives after the stop, when the caller may have moved on.
-  let reportTo = { onRecordingDone, onRecordingStateChange, journal, onFileNearlyFull };
+  let reportTo = {
+    onRecordingDone,
+    onRecordingStateChange,
+    journal,
+    onFileNearlyFull,
+    onPauseChange
+  };
 
   let isRecording: boolean = false;
-  let startedRecordingAt = dayjs();
+  // The recorded clock: time since the recording started, the user's pauses excluded.
+  let isPaused = false;
+  let clockStartedAt = 0;
+  let pausedAt: number | null = null;
+  let pausedTotalMs = 0;
+  // Pause events the user's own pauses still owe: not an interruption of capture.
+  let userPauseEvents = 0;
+  const recordedNow = () => (pausedAt ?? monotonicNow()) - clockStartedAt - pausedTotalMs;
   let elapsedTime = "";
   let recordingError: string | null = null;
   let recordingErrorHint: string | null = null;
@@ -554,7 +570,13 @@
   }
 
   async function doStartRecording(origin: RecordingStartOrigin): Promise<void> {
-    reportTo = { onRecordingDone, onRecordingStateChange, journal, onFileNearlyFull };
+    reportTo = {
+      onRecordingDone,
+      onRecordingStateChange,
+      journal,
+      onFileNearlyFull,
+      onPauseChange
+    };
     try {
       recordedBlob = null;
       recordedMimeType = "";
@@ -593,13 +615,18 @@
       }
 
       if (stream) {
+        // The recorded clock starts before the first part reads it.
+        clockStartedAt = monotonicNow();
+        pausedAt = null;
+        pausedTotalMs = 0;
+        isPaused = false;
+        userPauseEvents = 0;
         mediaRecorder = startSegmentRecorder(stream);
         // Initialise the watchdog AFTER recorder.start() so getUserMedia
         // latency (especially on the very first permission grant) does not
         // eat into the stall budget.
         const startTimestamp = performance.now();
         recordingStats.lastChunkTime = startTimestamp;
-        startedRecordingAt = dayjs();
         lastMeterUpdateAt = 0;
         lastAudibleAt = startTimestamp;
         showMicSilentHint = false;
@@ -645,7 +672,7 @@
     const recorder = new MediaRecorder(stream, recordingOptions);
     const initialMimeType = recorder.mimeType || recordingOptions.mimeType || "";
     const chunks: Blob[] = [];
-    const segmentStartedAt = monotonicNow();
+    const segmentStartedAt = recordedNow();
     const onRecordingDone = reportTo.onRecordingDone;
     // Its place in the handover queue, taken once the recorder runs.
     let earlierHandovers: Promise<void> = Promise.resolve();
@@ -673,7 +700,7 @@
         chunks.find((chunk) => chunk.type)?.type ||
         "audio/webm";
       // Measured at the stop, before the header is read.
-      const durationMs = Math.max(0, monotonicNow() - segmentStartedAt);
+      const durationMs = Math.max(0, recordedNow() - segmentStartedAt);
       const [first, ...rest] = chunks;
       return {
         blob: new Blob([await withRecordedDuration(first!, durationMs, mimeType), ...rest], {
@@ -816,8 +843,13 @@
     }
 
     recorder.addEventListener("pause", () => {
-      console.warn("MediaRecorder was paused unexpectedly");
       recordingStats.errors.push("Recorder paused at " + new Date().toISOString());
+      // The event of the user's own pause comes after the pause, maybe after a resume too.
+      if (userPauseEvents > 0) {
+        userPauseEvents -= 1;
+        return;
+      }
+      console.warn("MediaRecorder was paused unexpectedly");
       onCaptureInterrupted();
     });
 
@@ -919,6 +951,31 @@
     return handedOver;
   }
 
+  // The user's pause: the recorder and its clock stand still, and so do the caller's
+  // session (parts, time left) and live text, which it tells.
+  function togglePause() {
+    const recorder = mediaRecorder;
+    if (!isRecording || !recorder) return;
+    if (recorder.state === "recording") {
+      // A part being handed over records nothing of the pause either.
+      void stopOverlappingRecorder();
+      isPaused = true;
+      pausedAt = monotonicNow();
+      userPauseEvents += 1;
+      recorder.pause();
+      reportTo.onPauseChange(true);
+    } else if (recorder.state === "paused" && isPaused && pausedAt !== null) {
+      pausedTotalMs += monotonicNow() - pausedAt;
+      pausedAt = null;
+      isPaused = false;
+      recorder.resume();
+      // The watchdog measures from now: no chunk came while paused.
+      recordingStats.lastChunkTime = performance.now();
+      requestDataPendingAt = null;
+      reportTo.onPauseChange(false);
+    }
+  }
+
   function toggleRecording() {
     if (!isRecording) {
       if (!canStart) return;
@@ -968,14 +1025,14 @@
       if (nextVolumeLevel > MIC_ACTIVITY_THRESHOLD) {
         lastAudibleAt = now;
       }
-      showMicSilentHint = isRecording && now - lastAudibleAt > MIC_SILENCE_HINT_MS;
+      showMicSilentHint = isRecording && !isPaused && now - lastAudibleAt > MIC_SILENCE_HINT_MS;
       if (now - lastMeterUpdateAt >= METER_UPDATE_MS) {
         const attack = nextVolumeLevel > volumeLevel ? 0.55 : 0.16;
         volumeLevel = volumeLevel + (nextVolumeLevel - volumeLevel) * attack;
         lastMeterUpdateAt = now;
       }
     }
-    elapsedSeconds = dayjs().diff(startedRecordingAt, "seconds");
+    elapsedSeconds = Math.floor(recordedNow() / 1000);
     elapsedTime = formatElapsed(elapsedSeconds);
     animationFrameId = window.requestAnimationFrame(onAnimationFrame);
   };
@@ -1261,9 +1318,24 @@
     {#if isRecording}
       <div class="recording-stats">
         <div class="recording-status-row">
-          <span class="recording-status-dot" aria-hidden="true"></span>
-          <span class="recording-status-label">{m.recording_in_progress()}</span>
+          {#if isPaused}
+            <IconPause class="text-secondary size-3.5" aria-hidden="true" />
+          {:else}
+            <span class="recording-status-dot" aria-hidden="true"></span>
+          {/if}
+          <span class="recording-status-label" data-paused={isPaused} role="status">
+            {isPaused ? m.recording_paused() : m.recording_in_progress()}
+          </span>
           <div class="time-display">{elapsedTime}</div>
+          <Button variant="outline" size="sm" onclick={togglePause}>
+            {#if isPaused}
+              <IconPlay data-icon="inline-start" />
+              {m.recording_resume()}
+            {:else}
+              <IconPause data-icon="inline-start" />
+              {m.recording_pause()}
+            {/if}
+          </Button>
         </div>
         <div class="mic-activity-row">
           <span class="mic-activity-label">{m.recording_mic_activity()}</span>
@@ -1480,6 +1552,10 @@
 
   .recording-status-label {
     @apply text-negative-stronger text-xs font-medium tracking-[0.08em] uppercase;
+  }
+
+  .recording-status-label[data-paused="true"] {
+    @apply text-secondary;
   }
 
   .recording-status-dot {

@@ -1,5 +1,11 @@
 import { EneoError, type Eneo, type FlowLiveTranscriptionSession } from "@eneo/eneo-js";
-import { PCM16_FLUSH, PCM16_FLUSHED, PCM16_PROCESSOR } from "./pcm16-worklet.js";
+import {
+  PCM16_FLUSH,
+  PCM16_FLUSHED,
+  PCM16_PAUSE,
+  PCM16_PROCESSOR,
+  PCM16_RESUME
+} from "./pcm16-worklet.js";
 // A file of its own: Vite would inline a file this small as a data: URL, and
 // the app's `script-src 'self'` refuses worklet modules from data: URLs.
 import workletUrl from "./pcm16-worklet.js?url&no-inline";
@@ -79,9 +85,15 @@ export class LiveTranscriptPreview {
   // whether this session heard the recording whole: from its first sample,
   // with nothing lost on the way. Once lost, never whole again.
   #produced = 0;
+  #paused = $state(false);
   #whole = false;
   #transcriptId: string | null = null;
   #finishingTimer: ReturnType<typeof setTimeout> | undefined;
+
+  // The recording is paused: nothing is heard until it goes on.
+  get paused(): boolean {
+    return this.#paused;
+  }
 
   get status(): LiveTranscriptStatus {
     return this.#status;
@@ -130,6 +142,16 @@ export class LiveTranscriptPreview {
     return this.#finishing && this.#isRecordingFile(fileIds);
   }
 
+  // The user paused the recording: what the microphone hears meanwhile is not
+  // recorded, so it is not sent. The worklet's frames do not end where the pause
+  // does, so the text no longer matches the recording exactly: it stays a preview.
+  pause(paused: boolean): void {
+    this.#paused = paused;
+    // The worklet drops the frame it was filling, so none of it follows the pause.
+    this.#node?.port.postMessage(paused ? PCM16_PAUSE : PCM16_RESUME);
+    if (paused) this.lose();
+  }
+
   // Some of the recording never reaches this session's transcript (it rotated
   // into a second file, or the run no longer takes one): the text stays a
   // preview, for good, and nothing waits for it.
@@ -172,6 +194,7 @@ export class LiveTranscriptPreview {
     this.#onListening = onListening;
     this.#recordingId = generateSessionId();
     this.#produced = 0;
+    this.#paused = false;
     this.#whole = true;
     this.#transcriptId = null;
     this.#fileId = null;
@@ -301,6 +324,8 @@ export class LiveTranscriptPreview {
   }
 
   #takeFrame(frame: ArrayBuffer) {
+    // The recording holds none of it: nor does its text.
+    if (this.#paused) return;
     this.#produced += frame.byteLength / 2;
     const socket = this.#socket;
     if (socket?.readyState === WebSocket.OPEN) {

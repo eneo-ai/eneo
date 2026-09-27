@@ -86,6 +86,7 @@
     recordingTimeLeftMs = () => Infinity,
     recordingRoom = { ms: null, continues: false },
     onFileNearlyFull = () => {},
+    onPauseChange = () => {},
     onRecordingStateChange,
     onRecorderRef,
     onSessionRetry,
@@ -159,6 +160,7 @@
     // What a recording started now may still hold, and whether it continues one.
     recordingRoom?: { ms: number | null; continues: boolean };
     onFileNearlyFull?: () => void;
+    onPauseChange?: (paused: boolean) => void;
     onRecordingStateChange?: (isRecording: boolean, meta?: { origin: "user" | "external" }) => void;
     // Lets the dialog grab an imperative handle on the recorder so the
     // session controller can call startExternal/stopExternal during retries.
@@ -574,6 +576,7 @@
           continuesRecording={recordingRoom.continues}
           timeLeftMs={recordingTimeLeftMs}
           {onFileNearlyFull}
+          {onPauseChange}
           resetToken={recorderResetToken}
           canStart={canStartRecording}
           {onRecordingDone}
@@ -584,7 +587,11 @@
         />
 
         {#if liveTextOn && livePreview.stepId === step.step_id}
-          <LiveTranscriptPanel status={livePreview.status} pieces={livePreview.pieces} />
+          <LiveTranscriptPanel
+            status={livePreview.status}
+            pieces={livePreview.pieces}
+            paused={livePreview.paused}
+          />
         {/if}
 
         {#if sessionPhase === "reconnecting"}

@@ -280,6 +280,56 @@ describe("RecordingSession lifecycle", () => {
     session.dispose();
   });
 
+  it("stands still while the user pauses: no new part, and the same time left", () => {
+    vi.useFakeTimers({ toFake: [...FAKED_CLOCK] });
+    const MINUTE = 60_000;
+    const stopSegment = vi.fn();
+    const session = new RecordingSession(
+      makeDeps({
+        stopSegment,
+        recordingLimits: () => ({
+          partMs: 30 * MINUTE,
+          maxRecordingMs: 60 * MINUTE,
+          recordedMs: 0,
+          parts: 0,
+          filesLeft: Infinity
+        })
+      }),
+      {}
+    );
+
+    session.beginRecordingExternal();
+    vi.advanceTimersByTime(10 * MINUTE);
+    session.pause();
+    vi.advanceTimersByTime(60 * MINUTE);
+    expect(stopSegment).not.toHaveBeenCalled();
+    expect(session.timeLeftMs()).toBe(49 * MINUTE);
+
+    session.resume();
+    // The part has 20 of its 30 minutes left.
+    vi.advanceTimersByTime(20 * MINUTE - 1);
+    expect(stopSegment).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(stopSegment.mock.calls).toEqual([["rotation"]]);
+    expect(session.timeLeftMs()).toBe(29 * MINUTE - 1_000);
+    session.dispose();
+  });
+
+  it("ends a part that neared its size limit during the pause as soon as the recording goes on", () => {
+    vi.useFakeTimers({ toFake: [...FAKED_CLOCK] });
+    const stopSegment = vi.fn();
+    const session = new RecordingSession(makeDeps({ stopSegment }), {});
+
+    session.beginRecordingExternal();
+    session.pause();
+    session.rotateEarly();
+    expect(stopSegment).not.toHaveBeenCalled();
+
+    session.resume();
+    expect(stopSegment.mock.calls).toEqual([["rotation"]]);
+    session.dispose();
+  });
+
   it("ends the part as an error when the next part keeps failing to start", () => {
     vi.useFakeTimers({ toFake: [...FAKED_CLOCK] });
     const stopSegment = vi.fn();

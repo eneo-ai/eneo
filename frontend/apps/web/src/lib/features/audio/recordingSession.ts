@@ -242,6 +242,9 @@ export class RecordingSession {
   // Read as recording begins; the session then counts the parts it rotates.
   private _limits: ReturnType<RecordingSessionDeps["recordingLimits"]> | null = null;
   private _segmentStartedAt = 0;
+  // While the user has paused: the part's clock stands still from this moment.
+  private _pausedAt: number | null = null;
+  private _rotateOnResume = false;
   private _rotationAttempts = 0;
 
   constructor(
@@ -313,6 +316,8 @@ export class RecordingSession {
   // A new segment begins: the recording so far is read again from the
   // dialog, which has every finished segment by now.
   private startCounting(): void {
+    this._pausedAt = null;
+    this._rotateOnResume = false;
     this._limits = this.deps.recordingLimits();
     this.armRotationTimer();
   }
@@ -324,8 +329,33 @@ export class RecordingSession {
     return recordingTimeLeftMs(
       limits.maxRecordingMs,
       limits.parts + 1,
-      limits.recordedMs + (this._now() - this._segmentStartedAt)
+      limits.recordedMs + this.inPartMs()
     );
+  }
+
+  // Recorded time of the running part, paused time excluded.
+  private inPartMs(): number {
+    return (this._pausedAt ?? this._now()) - this._segmentStartedAt;
+  }
+
+  // The user paused the recording: its part's clock, and the time left, stand still.
+  pause(): void {
+    if (this._state !== "recording" || this._pausedAt !== null) return;
+    this._pausedAt = this._now();
+    this.cancelRotationTimer();
+  }
+
+  resume(): void {
+    if (this._pausedAt === null) return;
+    this._segmentStartedAt += this._now() - this._pausedAt;
+    this._pausedAt = null;
+    if (this._state !== "recording") return;
+    if (this._rotateOnResume) {
+      this._rotateOnResume = false;
+      this.rotateEarly();
+    } else {
+      this.armRotationTimer({ newPart: false });
+    }
   }
 
   // How long the running recording has before it stops by itself: at Eneo's
@@ -336,7 +366,7 @@ export class RecordingSession {
     if (this._state !== "recording" || !limits) return Infinity;
     // Read now: a file chosen meanwhile takes a slot too.
     const { filesLeft } = this.deps.recordingLimits();
-    const inPart = this._now() - this._segmentStartedAt;
+    const inPart = this.inPartMs();
     const filesHold =
       limits.partMs && Number.isFinite(filesLeft) ? filesLeft * limits.partMs - inPart : Infinity;
     return Math.max(0, Math.min(this.lengthLeftMs(), filesHold));
@@ -345,21 +375,23 @@ export class RecordingSession {
   // The recorder rotates on the live stream and starts the next segment at
   // once, so the session keeps recording and only re-arms. The timer also
   // ends the recording before Eneo's longest recording.
-  private armRotationTimer(): void {
+  // A resumed part keeps its clock and is timed for what it has left.
+  private armRotationTimer({ newPart = true }: { newPart?: boolean } = {}): void {
     this.cancelRotationTimer();
-    this._segmentStartedAt = this._now();
-    const partMs = this._limits?.partMs ?? Infinity;
+    if (newPart) this._segmentStartedAt = this._now();
+    const inPart = this.inPartMs();
+    const partLeftMs = (this._limits?.partMs ?? Infinity) - inPart;
     const leftMs = this.lengthLeftMs();
     // Decided now, not when the timer fires: a timer never fires early, and
     // the recording's end must not depend on reading the clock twice.
-    const endsRecording = leftMs <= partMs;
-    const due = Math.min(partMs, leftMs);
+    const endsRecording = leftMs <= partLeftMs;
+    const due = Math.min(partLeftMs, leftMs);
     if (!Number.isFinite(due)) return;
     this._rotationTimer = setTimeout(
       () => {
         this._rotationTimer = null;
         // It lasted at least its delay: a timer never fires early.
-        this.endPart(endsRecording, due);
+        this.endPart(endsRecording, inPart + due);
       },
       Math.max(0, Math.ceil(due))
     );
@@ -369,6 +401,11 @@ export class RecordingSession {
   // up: the part ends now, as it would at its time.
   rotateEarly(): void {
     if (this._state !== "recording" || !this._limits) return;
+    // A chunk handed over after the pause: the part ends as soon as the recording goes on.
+    if (this._pausedAt !== null) {
+      this._rotateOnResume = true;
+      return;
+    }
     this.cancelRotationTimer();
     this.endPart(false, 0);
   }
@@ -414,8 +451,7 @@ export class RecordingSession {
     // handed over (its slot and upload place it counts from the rotation on).
     this._limits = {
       ...this._limits,
-      recordedMs:
-        this._limits.recordedMs + Math.max(this._now() - this._segmentStartedAt, lastedAtLeastMs),
+      recordedMs: this._limits.recordedMs + Math.max(this.inPartMs(), lastedAtLeastMs),
       parts: this._limits.parts + 1
     };
     this.armRotationTimer();

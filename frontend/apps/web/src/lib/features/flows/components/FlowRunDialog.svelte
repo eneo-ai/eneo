@@ -1087,6 +1087,16 @@
     return () => recordingSessionsByStepId[stepId]?.rotateEarly();
   }
 
+  // The user paused or went on: the step's parts, time left and live text stand still with it.
+  function pauseChangeHandler(stepId: string) {
+    return (paused: boolean) => {
+      const session = recordingSessionsByStepId[stepId];
+      if (paused) session?.pause();
+      else session?.resume();
+      livePreviewFor(stepId).pause(paused);
+    };
+  }
+
   function recordingStateHandler(stepId: string) {
     return (active: boolean, meta?: { origin: "user" | "external" }) =>
       setStepRecordingState(stepId, active, meta);
@@ -1736,6 +1746,7 @@
             recordingTimeLeftMs={() =>
               recordingSessionsByStepId[currentRuntimeStep.step_id]?.timeLeftMs() ?? Infinity}
             onFileNearlyFull={fileNearlyFullHandler(currentRuntimeStep.step_id)}
+            onPauseChange={pauseChangeHandler(currentRuntimeStep.step_id)}
             onRecordingStateChange={recordingStateHandler(currentRuntimeStep.step_id)}
             onRecorderRef={handleRecorderRefChange}
             onSessionRetry={() => retryRecordingSession(currentRuntimeStep.step_id)}

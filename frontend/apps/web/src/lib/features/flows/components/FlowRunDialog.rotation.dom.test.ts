@@ -500,6 +500,70 @@ describe("FlowRunDialog recording rotation", () => {
     expect(persistedSegments()).toEqual([{ segmentIndex: 0, reason: "manual" }]);
   });
 
+  it("pauses the recording: its clock, parts and time left stand still until Fortsätt", async () => {
+    await openDialogAndStartRecording(vi.fn(() => new Promise<UploadedFile>(() => undefined)));
+    vi.advanceTimersByTime(5 * 60_000);
+    await flush();
+
+    await fireEvent.click(screen.getByRole("button", { name: m.recording_pause() }));
+    expect(media.recorders[0]?.state).toBe("paused");
+    expect(screen.getByText(m.recording_paused())).toBeTruthy();
+    const timeLeft = screen.getByText(m.recording_time_left({ duration: "3 h 15 min" }));
+    // Longer than a part: no new part starts, and nothing counts down.
+    vi.advanceTimersByTime(30 * 60_000);
+    await flush();
+    expect(media.recorders).toHaveLength(1);
+    expect(timeLeft.textContent).toBe(m.recording_time_left({ duration: "3 h 15 min" }));
+
+    await fireEvent.click(screen.getByRole("button", { name: m.recording_resume() }));
+    expect(media.recorders[0]?.state).toBe("recording");
+    // The part has 15 of its 20 minutes left.
+    vi.advanceTimersByTime(15 * 60_000 - 1);
+    await flush();
+    expect(media.recorders).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    await flush();
+    expect(media.recorders).toHaveLength(2);
+
+    // The finished part lasted its 20 recorded minutes, the 30 paused ones not counted.
+    await endOverlap();
+    media.recorders[0]?.finish();
+    await flush();
+    const [part] = vi.mocked(persistRecordingSegment).mock.calls.map(([args]) => args);
+    expect(Math.round(part!.durationMs / 60_000)).toBe(20);
+  });
+
+  it("starts a new part for a chunk that neared the limit during the pause as soon as it goes on", async () => {
+    await openDialogAndStartRecording(
+      vi.fn(() => new Promise<UploadedFile>(() => undefined)),
+      {
+        steps: [{ ...audioStep, max_file_size_bytes: 10_000_000 }]
+      }
+    );
+    await fireEvent.click(screen.getByRole("button", { name: m.recording_pause() }));
+    // The recorder's last chunk from before the pause nears the file's limit.
+    media.recorders[0]?.deliver(4_000_000);
+    await flush();
+    expect(media.recorders).toHaveLength(1);
+
+    // No other chunk is needed: the part that neared its limit ends at once.
+    await fireEvent.click(screen.getByRole("button", { name: m.recording_resume() }));
+    await flush();
+    expect(media.recorders).toHaveLength(2);
+  });
+
+  it("does not take the user's own pause for an interruption when it goes on at once", async () => {
+    const warn = vi.spyOn(console, "warn");
+    await openDialogAndStartRecording(vi.fn(() => new Promise<UploadedFile>(() => undefined)));
+    await fireEvent.click(screen.getByRole("button", { name: m.recording_pause() }));
+    await fireEvent.click(screen.getByRole("button", { name: m.recording_resume() }));
+    // The pause's own event comes only now, after the resume.
+    expect(warn).not.toHaveBeenCalledWith("MediaRecorder was paused unexpectedly");
+    await flush();
+
+    expect(warn).not.toHaveBeenCalledWith("MediaRecorder was paused unexpectedly");
+  });
+
   it("stops at the step's last file slot and refuses another start, saying why", async () => {
     const upload = vi.fn(() => new Promise<UploadedFile>(() => undefined));
     await openDialogAndStartRecording(upload, { steps: [{ ...audioStep, max_files: 2 }] });
@@ -1799,6 +1863,17 @@ function installFakeMedia() {
     }
 
     requestData() {}
+
+    // As in a browser: the state changes at once, its event comes in a later task.
+    pause() {
+      this.state = "paused";
+      setTimeout(() => this.dispatchEvent(new Event("pause")), 0);
+    }
+
+    resume() {
+      this.state = "recording";
+      this.dispatchEvent(new Event("resume"));
+    }
 
     // A chunk the recorder hands over while it records: that many bytes, or these.
     deliver(bytes: number | Uint8Array<ArrayBuffer>) {

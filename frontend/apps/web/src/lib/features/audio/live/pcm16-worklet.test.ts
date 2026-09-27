@@ -5,6 +5,8 @@ import {
   createPcm16Processor,
   FRAME_SAMPLES,
   PCM16_FLUSH,
+  PCM16_PAUSE,
+  PCM16_RESUME,
   PCM16_FLUSHED
 } from "./pcm16-worklet.js";
 
@@ -80,4 +82,25 @@ describe("createPcm16Processor", () => {
       expect(posted.slice(-2)).toEqual([PCM16_FLUSHED, PCM16_FLUSHED]);
     }
   );
+
+  it("hears nothing while paused, not even the frame it was filling, and starts afresh after", () => {
+    const posted: unknown[] = [];
+    const port: Parameters<typeof createPcm16Processor>[1] = {
+      postMessage: (message) => posted.push(message),
+      onmessage: null
+    };
+    const process = createPcm16Processor(16_000, port);
+
+    // 50 ms before the pause: half a frame, still in progress.
+    renderQuanta(16_000, 0.05, 0.5, (block) => process([[block]]));
+    port.onmessage?.({ data: PCM16_PAUSE });
+    renderQuanta(16_000, 0.2, 0.5, (block) => process([[block]]));
+    port.onmessage?.({ data: PCM16_RESUME });
+    renderQuanta(16_000, 0.03, 0.5, (block) => process([[block]]));
+    port.onmessage?.({ data: PCM16_FLUSH });
+
+    const frames = posted.filter((message) => message instanceof ArrayBuffer);
+    const samples = frames.reduce((count, frame) => count + frame.byteLength / 2, 0);
+    expect(samples).toBe(480);
+  });
 });
