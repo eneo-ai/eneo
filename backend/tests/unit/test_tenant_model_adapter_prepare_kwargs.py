@@ -10,6 +10,9 @@ from eneo.main.exceptions import ProviderRejectedRequestException
 
 TRANSPORT = "openai"
 MODEL = "model-a"
+# These tests pin output-cap arithmetic at toy limits below the default
+# useful-output reserve; that gate is covered in test_tenant_model_adapter_non_stream.
+CAP_ARITHMETIC_RESERVE = 1
 
 
 @pytest.fixture(autouse=True)
@@ -96,6 +99,7 @@ async def test_dispatch_bounds_the_outgoing_cap(
         await getattr(adapter, method)(
             context=SimpleNamespace(),
             model_kwargs=caller_kwargs,
+            useful_output_reserve_tokens=CAP_ARITHMETIC_RESERVE,
             **(
                 {"provider_call_observer": observer} if method == "get_response" else {}
             ),
@@ -150,6 +154,7 @@ async def test_dispatch_refuses_before_transport_and_observation(
         await getattr(adapter, method)(
             context=SimpleNamespace(),
             model_kwargs={"max_tokens": 1},
+            useful_output_reserve_tokens=CAP_ARITHMETIC_RESERVE,
             **(
                 {"provider_call_observer": observer} if method == "get_response" else {}
             ),
@@ -212,6 +217,7 @@ async def test_vllm_dispatch_preserves_schema_and_counts_it_in_input_budget():
         await adapter.get_response(
             context=SimpleNamespace(),
             model_kwargs={"response_format": response_format},
+            useful_output_reserve_tokens=CAP_ARITHMETIC_RESERVE,
         )
 
     assert reserve.call_args.kwargs["response_format"] == response_format
@@ -508,6 +514,7 @@ async def test_response_schema_reserve_covers_reference_expansion(
                     context=SimpleNamespace(),
                     model_kwargs={"response_format": response_format},
                     provider_call_observer=observer,
+                    useful_output_reserve_tokens=CAP_ARITHMETIC_RESERVE,
                 )
             transport.assert_not_awaited()
             observer.started.assert_not_awaited()
@@ -517,6 +524,7 @@ async def test_response_schema_reserve_covers_reference_expansion(
                     context=SimpleNamespace(),
                     model_kwargs={"response_format": response_format},
                     provider_call_observer=observer,
+                    useful_output_reserve_tokens=CAP_ARITHMETIC_RESERVE,
                 )
             ).text == "ok"
             transport.assert_awaited_once()
