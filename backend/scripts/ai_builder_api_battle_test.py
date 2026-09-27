@@ -1071,6 +1071,9 @@ def main() -> int:
         api_key=api_key,
         timeout_seconds=args.timeout_seconds,
     )
+    # Named in the failure bundle once known, so a run sharing its output
+    # directory with other single-case runs can be attributed.
+    case: BattleCase | None = None
     try:
         cases = _cases_from_args(args)
         if getattr(args, "seed_calibration", False):
@@ -1114,19 +1117,20 @@ def main() -> int:
         print(f"capacity refusal receipt: {refusal_path}", file=sys.stderr)
         return 2
     except (HTTPError, URLError, TimeoutError, ValueError) as error:
-        started_at = time.strftime("%Y%m%dT%H%M%S")
-        bundle_path = (
-            output_dir / f"ai-builder-api-battle-test-{started_at}-failure.json"
-        )
         failure: JsonObject = {
-            "created_at": started_at,
+            "created_at": time.strftime("%Y%m%dT%H%M%S"),
             "app_version": LOCAL_APP_VERSION,
             "base_url": config.base_url,
             "space_id": args.space_id,
+            **({"case_identity": _case_identity(case)} if case else {}),
             **_failure_error_fields(error),
         }
         failure["artifact_mode"] = "live_execution_failure"
-        _write_json_exclusive(bundle_path, failure)
+        bundle_path = _write_bundle(
+            output_dir,
+            failure,
+            suffix=f"{case.case_id}-failure" if case else "failure",
+        )
         print(f"battle test failed: {error}", file=sys.stderr)
         print(f"failure bundle: {bundle_path}", file=sys.stderr)
         return 1

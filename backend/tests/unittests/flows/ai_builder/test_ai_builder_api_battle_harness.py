@@ -9606,6 +9606,47 @@ def test_a_refused_replacement_batch_leaves_a_receipt_not_a_traceback(
     assert "test-key" not in receipt.read_text()
 
 
+def test_a_single_case_failure_bundle_names_its_case(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # A failure bundle that does not name its case cannot be attributed when
+    # many single-case runs share one output directory. Any case id is allowed,
+    # so the file name is sanitized the way every other bundle name is.
+    harness = _battle_harness()
+    case = harness.BattleCase(case_id="division/refused run", prompt="Build a Flow.")
+    monkeypatch.setattr(harness, "_cases_from_args", lambda _args: [case])
+    monkeypatch.setattr(harness, "_cases_path_from_args", lambda _args: None)
+    monkeypatch.setattr(harness, "_provision_fixtures", lambda **_: {})
+
+    def refuse(**_kwargs: object) -> object:
+        raise ValueError("case division/refused run sets form field(s) the Flow lacks")
+
+    monkeypatch.setattr(harness, "_run_case", refuse)
+    monkeypatch.setattr(
+        harness,
+        "_parse_args",
+        lambda: SimpleNamespace(
+            reanalyze_bundle=None,
+            api_key="test-key",
+            output_dir=str(tmp_path),
+            replacement_suite_dir=None,
+            base_url="http://localhost:8123/api/v1",
+            timeout_seconds=1,
+            space_id="space-1",
+            seed_calibration=False,
+            run_suite=False,
+            sealed_targeted_suite=False,
+            session_id=None,
+        ),
+    )
+
+    assert harness.main() == 1
+    bundle_path = next(tmp_path.glob("*-division-refused-run-failure.json"))
+    written = json.loads(bundle_path.read_text())
+    assert written["case_identity"] == harness._case_identity(case)
+
+
 def test_capacity_preflight_holds_the_exact_finite_budget_boundary() -> None:
     # The snapshot is taken after the capacity reads were already counted, so
     # the budget that must remain is the demand minus those reads. One request
