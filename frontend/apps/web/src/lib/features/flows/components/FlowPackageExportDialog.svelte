@@ -15,10 +15,12 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import {
+    FLOW_PACKAGE_ID_MAX_LENGTH,
     defaultFlowPackageId,
     downloadFlowPackageFile,
     getFlowPackageMcpOmissionCount,
-    mapFlowPackageExportError
+    mapFlowPackageExportError,
+    normalizeFlowPackageId
   } from "$lib/features/flows/flowPackageTransfer";
   import { m } from "$lib/paraglide/messages";
 
@@ -53,11 +55,7 @@
   );
   const formLocked = $derived(exporting || pendingExport !== null);
   const canSubmit = $derived(
-    trimmedId.length > 0 &&
-      trimmedVersion.length > 0 &&
-      trimmedName.length > 0 &&
-      !exporting &&
-      pendingExport === null
+    trimmedVersion.length > 0 && trimmedName.length > 0 && !exporting && pendingExport === null
   );
 
   function handleOpenChange(next: boolean) {
@@ -80,6 +78,12 @@
   function onPackageIdInput(event: Event) {
     packageIdManuallyEdited = true;
     packageId = (event.currentTarget as HTMLInputElement).value;
+  }
+
+  // Show the ID that will be exported instead of failing on its form.
+  function normalizePackageId(): string {
+    packageId = normalizeFlowPackageId(packageId) || defaultFlowPackageId(packageName);
+    return packageId;
   }
 
   function onNameInput(event: Event) {
@@ -107,7 +111,7 @@
       await beforeExport?.();
       const response = await eneo.flows.packages.export({
         id: flow.id,
-        packageId: trimmedId,
+        packageId: normalizePackageId(),
         packageVersion: trimmedVersion,
         name: trimmedName,
         description: packageDescription.trim()
@@ -182,6 +186,8 @@
                 id="flow-package-export-id"
                 value={packageId}
                 oninput={onPackageIdInput}
+                onblur={normalizePackageId}
+                maxlength={FLOW_PACKAGE_ID_MAX_LENGTH}
                 disabled={formLocked}
                 autocomplete="off"
                 spellcheck={false}
@@ -196,6 +202,7 @@
               <Input
                 id="flow-package-export-version"
                 bind:value={packageVersion}
+                maxlength={64}
                 disabled={formLocked}
                 autocomplete="off"
                 spellcheck={false}

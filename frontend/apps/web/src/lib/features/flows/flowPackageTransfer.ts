@@ -291,7 +291,44 @@ export function defaultFlowPackageId(flowName: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return `local.${slug || "flow-package"}`;
+  return fitFlowPackageId(`local.${slug || "flow-package"}`);
+}
+
+// The package ID length limit of backend/src/eneo/resource_packages/manifest.py.
+export const FLOW_PACKAGE_ID_MAX_LENGTH = 128;
+
+/** Cuts an overlong ID and keeps a hash of the whole ID, so cut IDs stay distinct. */
+function fitFlowPackageId(id: string): string {
+  if (id.length <= FLOW_PACKAGE_ID_MAX_LENGTH) return id;
+  const hash = fnv1a(id).toString(36);
+  const head = id.slice(0, FLOW_PACKAGE_ID_MAX_LENGTH - hash.length - 1).replace(/[.-]+$/, "");
+  return `${head}-${hash}`;
+}
+
+function fnv1a(text: string): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193) >>> 0;
+  }
+  return hash;
+}
+
+/**
+ * Rewrites a typed package ID into the lowercase dot or hyphen form export
+ * accepts, so "RonnyVariant" exports as "ronnyvariant" instead of failing.
+ * Returns "" when nothing usable is left.
+ */
+export function normalizeFlowPackageId(value: string): string {
+  const id = value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9.]+/g, "-")
+    .replace(/-*\.[.-]*/g, ".")
+    .replace(/^[.-]+|[.-]+$/g, "");
+  if (!id) return "";
+  // A leading digit or a too-short ID becomes a segment of the local namespace.
+  return fitFlowPackageId(/^[a-z]/.test(id) && id.length >= 3 ? id : `local.${id}`);
 }
 
 export function mapFlowPackageImportError(error: unknown): string | null {
