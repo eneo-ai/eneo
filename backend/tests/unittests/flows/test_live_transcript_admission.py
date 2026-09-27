@@ -189,9 +189,8 @@ async def test_live_transcript_binds_and_same_file_retry_is_accepted(admission):
     await _submit(case)
     assert case.row.bound_file_id == case.files[0].id
     assert case.repo.create.await_count == 2
-    assert case.repo.create.await_args.kwargs["input_payload_json"]["step_inputs"] == {
-        str(case.step.id): {"live_transcript_id": str(case.row.id)},
-    }
+    step_facts = case.repo.create.await_args.kwargs["input_payload_json"]["step_inputs"]
+    assert step_facts[str(case.step.id)]["live_transcript_id"] == str(case.row.id)
 
 
 async def test_an_expired_transcript_already_bound_to_this_file_is_accepted(admission):

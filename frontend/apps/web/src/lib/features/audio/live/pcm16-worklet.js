@@ -8,6 +8,13 @@ export const PCM16_PROCESSOR = "pcm16-frames";
 // it, however short, and then PCM16_FLUSHED.
 export const PCM16_FLUSH = "flush";
 export const PCM16_FLUSHED = "flushed";
+// The recording paused: the processor drops the frame in progress and hears
+// nothing until PCM16_RESUME, so no paused audio reaches a later frame. It answers
+// each PCM16_RESUME with PCM16_RESUMED: every frame it posted before that answer
+// was heard before the resume.
+export const PCM16_PAUSE = "pause";
+export const PCM16_RESUME = "resume";
+export const PCM16_RESUMED = "resumed";
 const TARGET_RATE = 16_000;
 export const FRAME_SAMPLES = 1_600;
 
@@ -19,7 +26,7 @@ export const FRAME_SAMPLES = 1_600;
  * 16000 steps and an output sample inputRate steps: exact for any pair of rates.
  * @param {number} inputRate
  * @param {(frame: ArrayBuffer) => void} onFrame
- * @returns {{ write: (samples: Float32Array) => void, flush: () => void }}
+ * @returns {{ write: (samples: Float32Array) => void, flush: () => void, discard: () => void }}
  */
 export function createPcm16FrameWriter(inputRate, onFrame) {
   let frame = new DataView(new ArrayBuffer(FRAME_SAMPLES * 2));
@@ -35,6 +42,13 @@ export function createPcm16FrameWriter(inputRate, onFrame) {
   };
 
   return {
+    // A pause: the frame in progress, and the sample being averaged, go.
+    discard() {
+      frame = new DataView(new ArrayBuffer(FRAME_SAMPLES * 2));
+      offset = 0;
+      filled = 0;
+      sum = 0;
+    },
     write(samples) {
       for (const sample of samples) {
         let remaining = TARGET_RATE;
@@ -72,10 +86,18 @@ export function createPcm16FrameWriter(inputRate, onFrame) {
 export function createPcm16Processor(inputRate, port) {
   const writer = createPcm16FrameWriter(inputRate, (frame) => port.postMessage(frame, [frame]));
   let hadInput = false;
+  let paused = false;
   port.onmessage = (event) => {
-    if (event.data !== PCM16_FLUSH) return;
-    writer.flush();
-    port.postMessage(PCM16_FLUSHED);
+    if (event.data === PCM16_PAUSE) {
+      paused = true;
+      writer.discard();
+    } else if (event.data === PCM16_RESUME) {
+      paused = false;
+      port.postMessage(PCM16_RESUMED);
+    } else if (event.data === PCM16_FLUSH) {
+      writer.flush();
+      port.postMessage(PCM16_FLUSHED);
+    }
   };
   return (inputs) => {
     const channel = inputs[0]?.[0];
@@ -83,7 +105,7 @@ export function createPcm16Processor(inputRate, port) {
     // let it go instead of idling until the recording ends.
     if (!channel) return !hadInput;
     hadInput = true;
-    writer.write(channel);
+    if (!paused) writer.write(channel);
     return true;
   };
 }

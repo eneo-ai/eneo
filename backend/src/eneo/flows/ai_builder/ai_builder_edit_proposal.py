@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -12,6 +12,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     log_architecture_error,
 )
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
+    authored_knowledge_ref_repair,
     prepare_compiled_spec_for_session,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
@@ -75,6 +76,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalAnswer,
     ProposalReady,
     TerminalFailure,
+    display_value,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
@@ -146,6 +148,23 @@ def _unchanged_edit_proposal(current_steps: Sequence[FlowStep]) -> OrderedEditPr
     )
 
 
+def _authored_knowledge_refs(
+    proposal: OrderedEditProposal,
+) -> Iterator[tuple[str, list[str]]]:
+    for entry in proposal.steps:
+        if isinstance(entry, ModifyExistingStep):
+            if entry.assistant_spec is not None:
+                yield (
+                    f"step {display_value(entry.existing_step_ref)}",
+                    entry.assistant_spec.knowledge_refs,
+                )
+        else:
+            yield (
+                f"new step '{display_value(entry.step.name)}'",
+                entry.step.knowledge_refs,
+            )
+
+
 PROPOSE_FLOW_EDIT_FORCED_TOOL_PROMPT = (
     "Return one valid propose_flow tool call that keeps the flow coherent. "
     "Do not answer with prose."
@@ -199,6 +218,12 @@ async def process_edit_arguments(
             kind="parse",
             codes=frozenset({PROPOSAL_PARSE_MODEL_FAILURE_CODE}),
         )
+    if resource_catalog is not None and (
+        repair := authored_knowledge_ref_repair(
+            resource_catalog, _authored_knowledge_refs(authored_proposal)
+        )
+    ):
+        return repair
     current_step_refs = [
         existing_step_ref_for_order(step.step_order)
         for step in sorted(flow.steps, key=lambda step: step.step_order)

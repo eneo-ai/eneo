@@ -6,14 +6,18 @@
 
   let {
     status,
-    pieces
+    pieces,
+    paused = false
   }: {
     status: LiveTranscriptStatus;
     pieces: readonly LiveTranscriptPiece[];
+    // The recording is paused: the preview listens again when it goes on.
+    paused?: boolean;
   } = $props();
 
   const headingId = $props.id();
   const active = $derived(status === "connecting" || status === "listening");
+  const listening = $derived(status === "listening" && !paused);
   const hasText = $derived(pieces.length > 0);
   // After the recording, an empty panel would only say that nobody spoke.
   const ended = $derived(status === "interrupted" || status === "unavailable");
@@ -44,20 +48,22 @@
         role="status"
         class={[
           "inline-flex items-center gap-1.5 text-xs font-medium",
-          status === "listening" ? "text-positive-stronger" : "text-secondary"
+          listening ? "text-positive-stronger" : "text-secondary"
         ]}
       >
         {#if active}
           <span
             class={[
               "size-1.5 shrink-0 rounded-full",
-              status === "listening" ? "bg-positive-default" : "bg-current"
+              listening ? "bg-positive-default" : "bg-current"
             ]}
             aria-hidden="true"
           ></span>
-          {status === "listening"
+          {listening
             ? m.live_transcription_listening()
-            : m.live_transcription_connecting()}
+            : status === "listening"
+              ? m.recording_paused()
+              : m.live_transcription_connecting()}
         {/if}
       </span>
     </div>

@@ -305,6 +305,20 @@ def test_openapi_ai_builder_status_event_exposes_status_enum(
     }
 
 
+def test_openapi_named_content_field_publishes_an_optional_nullable_shape(
+    openapi_spec: dict,
+) -> None:
+    # Optional because a disclosure stored before shapes were reported has
+    # none; nullable because a name can be declared without a shape.
+    field = openapi_spec["components"]["schemas"]["NamedContentFieldPayload"]
+
+    assert "declared_shape" not in field.get("required", [])
+    assert field["properties"]["declared_shape"]["anyOf"] == [
+        {"enum": ["array", "object"], "type": "string"},
+        {"type": "null"},
+    ]
+
+
 def test_openapi_ai_builder_stream_response_does_not_advertise_json(
     openapi_spec: dict,
 ) -> None:

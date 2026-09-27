@@ -136,7 +136,10 @@ async function generateTypes() {
     parser: "typescript"
   });
 
-  await writeFile(paths.typeFilePath, types, "utf-8");
+  // Written only when it changes: every tool that loads this plugin (a type check, a
+  // test run) would otherwise touch it, and each touch reloads every open dev page.
+  const current = await readFile(paths.typeFilePath, "utf-8").catch(() => null);
+  if (current !== types) await writeFile(paths.typeFilePath, types, "utf-8");
 }
 
 /** @param {string} iconTemplateContents */

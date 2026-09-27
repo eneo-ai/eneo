@@ -38,7 +38,10 @@ from eneo.flows.ai_builder.ai_builder_edit_proposal import process_edit_argument
 from eneo.flows.ai_builder.ai_builder_edit_tool_schema import (
     build_edit_flow_tool_schema,
 )
-from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+)
 from eneo.flows.ai_builder.ai_builder_flow_review import (
     ReviewEditScope,
     validate_review_edit_effect,
@@ -3231,6 +3234,62 @@ async def test_added_edit_step_uses_server_requested_primary_runtime_input() -> 
     assert steps[1].input_type == InputType.TEXT
 
 
+@pytest.mark.asyncio
+async def test_an_edit_with_an_unknown_knowledge_ref_is_a_model_repair() -> None:
+    # More knowledge bases than the schema enumerates, so the ref arrives
+    # unconstrained; it must come back as a repair, never reach the spec.
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[
+            {
+                "id": f"kb-{index}",
+                "ref": f"kb-{index}",
+                "name": f"Policy {index}",
+                "display_name": f"Policy {index}",
+                "description": "",
+            }
+            for index in range(20)
+        ],
+    )
+    unknown = "f27f03c7-ff50-40b7-a55f-6c75fb11f8b4"
+
+    result = await _process(
+        flow=_flow(_flow_step(step_order=1, user_description="Läs ärendet")),
+        resource_catalog=catalog,
+        arguments={
+            "plan_rationale": "Ground the reading in policy.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "assistant_spec": {"knowledge_refs": [unknown]},
+                },
+                {
+                    "kind": "add",
+                    "step": {
+                        "name": "Bedöm",
+                        "instructions": "Bedöm ärendet.",
+                        "knowledge_refs": ["knowledge.policy-3", "okänd"],
+                    },
+                },
+            ],
+        },
+    )
+
+    assert isinstance(result, CorrectableFailure), result
+    assert result.kind == "validation"
+    assert result.codes == frozenset({"unknown_kb_ref"})
+    assert (
+        f"Unknown knowledge base reference '{unknown}' at step existing_step_1 "
+        "knowledge_refs[0]." in result.feedback
+    )
+    assert (
+        "Unknown knowledge base reference 'okänd' at new step 'Bedöm' "
+        "knowledge_refs[1]." in result.feedback
+    )
+    assert "Valid knowledge base refs (20):" in result.feedback
+
+
 async def _process(
     *,
     flow: SimpleNamespace,
@@ -3389,8 +3448,9 @@ def test_saved_step_revision_sequence_is_checked_before_fragment_expansion():
         }
     )
     with pytest.raises(
-        BadRequestException, match="revision must preserve the saved step sequence"
-    ):
+        AIBuilderBadRequestException,
+        match="revision must preserve the saved step sequence",
+    ) as exc_info:
         compile_edit_proposal(
             proposal,
             current_steps=flow.steps,
@@ -3399,6 +3459,7 @@ def test_saved_step_revision_sequence_is_checked_before_fragment_expansion():
             resource_catalog=catalog,
             revision_spec=stale_sequence,
         )
+    assert exc_info.value.code is AIBuilderErrorCode.BAD_REQUEST
 
 
 async def test_saved_step_repair_replays_fragment_and_names_target():

@@ -445,6 +445,7 @@ def test_flow_run_contract_public_rejects_unknown_response_fields() -> None:
                 "seconds_per_mebibyte": 8,
                 "max_timeout_seconds": 600,
                 "idle_timeout_seconds": 120,
+                "response_timeout_seconds": 960,
             },
         ),
         (

@@ -3,7 +3,7 @@
 import type { FlowRunContractStepInput, Eneo, UploadedFile } from "@eneo/eneo-js";
 
 import type { RecordingStopReason } from "./recordedAudioFile";
-import { journalLockName, type JournalDegradation } from "./recordingJournal";
+import { journalLockName } from "./recordingJournal";
 import {
   buildSegmentFilenameBase,
   generateSessionId,
@@ -26,8 +26,6 @@ export type RecordingSessionState = {
   resumeHintsByStepId: Record<string, SessionRecoveryHint[]>;
   resumePromptStepId: string | null;
   resumeBusyStepId: string | null;
-  // Part of a recording is only in this tab, and why; "failed" outweighs "unavailable".
-  storageNotice: JournalDegradation | null;
 };
 
 export function emptyRecordingSessionState(): RecordingSessionState {
@@ -37,8 +35,7 @@ export function emptyRecordingSessionState(): RecordingSessionState {
     recordedMsByStepId: {},
     resumeHintsByStepId: {},
     resumePromptStepId: null,
-    resumeBusyStepId: null,
-    storageNotice: null
+    resumeBusyStepId: null
   };
 }
 

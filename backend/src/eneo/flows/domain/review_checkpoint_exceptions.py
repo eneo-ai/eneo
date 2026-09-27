@@ -89,14 +89,14 @@ class FlowReviewCheckpointRunNotRunningError(FlowReviewCheckpointRuntimeInvarian
     status: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False, slots=True)
 class FlowReviewOpenBlockedByActiveCheckpointError(
     FlowReviewCheckpointRuntimeInvariantError
 ):
     active_checkpoint_id: UUID
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False, slots=True)
 class FlowReviewCheckpointStepResultIncompleteError(
     FlowReviewCheckpointRuntimeInvariantError
 ):
@@ -104,7 +104,7 @@ class FlowReviewCheckpointStepResultIncompleteError(
     attempt_no: int
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False, slots=True)
 class FlowReviewMultipleActiveCheckpointsError(
     FlowReviewCheckpointRuntimeInvariantError
 ):

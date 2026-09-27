@@ -92,6 +92,7 @@ FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
         "seconds_per_mebibyte": 8,
         "max_timeout_seconds": 600,
         "idle_timeout_seconds": 120,
+        "response_timeout_seconds": 960,
     },
     "steps_requiring_review": [
         {
@@ -139,7 +140,8 @@ FLOW_RUNTIME_UPLOAD_POLICY_DESCRIPTION = (
     "calculate each upload's initial timeout from the actual file size: "
     "`clamp(min_timeout_seconds, max_timeout_seconds, "
     "ceil(file_size_mib * seconds_per_mebibyte))`, then keep a progressing "
-    "upload alive until `idle_timeout_seconds` passes without progress."
+    "upload alive until `idle_timeout_seconds` passes without progress, and wait "
+    "`response_timeout_seconds` for the response once every byte is sent."
 )
 
 
@@ -165,6 +167,13 @@ class FlowRuntimeUploadPolicyPublic(BaseModel):
         gt=0,
         description="Timeout clients should allow after the latest upload progress event.",
     )
+    response_timeout_seconds: int = Field(
+        gt=0,
+        description=(
+            "Time clients should allow for the response once every byte is sent: the "
+            "server measures audio and extracts PDF text before it answers."
+        ),
+    )
 
     @classmethod
     def from_domain(
@@ -175,6 +184,7 @@ class FlowRuntimeUploadPolicyPublic(BaseModel):
             seconds_per_mebibyte=policy.seconds_per_mebibyte,
             max_timeout_seconds=policy.max_timeout_seconds,
             idle_timeout_seconds=policy.idle_timeout_seconds,
+            response_timeout_seconds=policy.response_timeout_seconds,
         )
 
 

@@ -34,6 +34,18 @@ export function resolveFlowRuntimeUploadIdleTimeoutMs(policy) {
 }
 
 /**
+ * How long to wait for the response once every byte is sent: the server measures
+ * audio and extracts PDF text before it answers. Older servers publish none.
+ * @param {import("../types/resources").FlowRuntimeUploadPolicy | null | undefined} policy
+ */
+export function resolveFlowRuntimeUploadResponseTimeoutMs(policy) {
+  const responseSeconds = positiveFinite(policy?.response_timeout_seconds);
+  return responseSeconds == null
+    ? resolveFlowRuntimeUploadIdleTimeoutMs(policy)
+    : responseSeconds * 1000;
+}
+
+/**
  * @param {{
  *   fileSizeBytes: number,
  *   policy: import("../types/resources").FlowRuntimeUploadPolicy | null | undefined,
@@ -53,6 +65,7 @@ export function createFlowRuntimeUploadTimeoutController({
 }) {
   const initialTimeoutMs = resolveFlowRuntimeUploadInitialTimeoutMs(fileSizeBytes, policy);
   const idleTimeoutMs = resolveFlowRuntimeUploadIdleTimeoutMs(policy);
+  const responseTimeoutMs = resolveFlowRuntimeUploadResponseTimeoutMs(policy);
   let timeoutId = null;
   let lastUploadedBytes = 0;
   let active = true;
@@ -90,7 +103,8 @@ export function createFlowRuntimeUploadTimeoutController({
       lastUploadedBytes = event.loaded;
       const uploadComplete =
         event.lengthComputable && event.total > 0 && event.loaded >= event.total;
-      scheduleTimeout(idleTimeoutMs, uploadComplete ? "server_not_responding" : "stalled");
+      if (uploadComplete) scheduleTimeout(responseTimeoutMs, "server_not_responding");
+      else scheduleTimeout(idleTimeoutMs, "stalled");
     },
     clear() {
       active = false;

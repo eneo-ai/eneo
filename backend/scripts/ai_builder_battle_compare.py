@@ -35,6 +35,7 @@ import statistics
 import subprocess
 import sys
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -117,10 +118,38 @@ def _load_rows(
     receipt = load_summary_receipt(path)
     rows: dict[str, list[dict[str, Any]]] = {}
     for observation in receipt.observations:
+        _require_decision_score_shape(
+            observation.row, where=f"{path}: {observation.case_id}"
+        )
         rows.setdefault(observation.case_id, []).append(dict(observation.row))
     for case_rows in rows.values():
         case_rows.sort(key=lambda item: item.get("repetition") or 0)
     return rows, dict(receipt.summary), executed_output_report(receipt.observations)
+
+
+_DECISION_COUNTS = ("necessary_questions", "missed_decisions", "unnecessary_questions")
+
+
+def _require_decision_score_shape(row: Mapping[str, Any], *, where: str) -> None:
+    """A decision score is absent, or exactly three non-negative counts."""
+
+    required = row.get("decision_score_required", False)
+    score = row.get("decision_score")
+    if not isinstance(required, bool) or not (
+        score is None
+        or (
+            isinstance(score, dict)
+            and set(cast(dict[str, Any], score)) == set(_DECISION_COUNTS)
+            and all(
+                type(value) is int and value >= 0
+                for value in cast(dict[str, Any], score).values()
+            )
+        )
+    ):
+        raise ReceiptError(
+            f"{where}: decision_score must be null or {list(_DECISION_COUNTS)} as "
+            "non-negative integers, and decision_score_required a boolean."
+        )
 
 
 def _failure_codes(row: dict[str, Any]) -> tuple[str, ...]:
@@ -322,7 +351,79 @@ def _case_delta(
     )
     if runtime_cost is not None:
         delta["runtime_cost"] = runtime_cost
+    decisions = _decision_floor(baseline_repetitions or [], current_repetitions or [])
+    if decisions is not None:
+        delta["decisions"] = decisions
     return delta
+
+
+def _decision_floor(
+    before_rows: list[dict[str, Any]], after_rows: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Questions judged by the decisions they served, per case.
+
+    This replaces "no more questions than the parent": a candidate may ask
+    more when the extra question is a necessary decision the parent missed.
+    Each current observation is held to the baseline's worst one on missed
+    decisions and on unnecessary questions. A case scored on one side only,
+    or on some repetitions only, is `incomparable`, which fails: a missing
+    score must never read as a floor that held.
+    """
+
+    scores = {
+        side: [row.get("decision_score") for row in rows]
+        for side, rows in (("before", before_rows), ("after", after_rows))
+    }
+    # The obligation comes from the sealed case contract (the row says whether
+    # the case declares necessary_decisions), so scores absent on both sides
+    # still fail rather than read as an unscored case.
+    if not any(
+        row.get("decision_score_required") is True or row.get("decision_score")
+        for row in (*before_rows, *after_rows)
+    ):
+        return None
+
+    def incomparable(reason: str) -> dict[str, Any]:
+        return {
+            **scores,
+            "state": "incomparable",
+            "failures": [
+                f"{reason}; acquire or reanalyse a scored baseline with the same "
+                "case contract"
+            ],
+        }
+
+    contracts = {
+        side: {row.get("case_contract_sha256") for row in rows}
+        for side, rows in (("before", before_rows), ("after", after_rows))
+    }
+    if len(contracts["before"]) != 1 or contracts["before"] != contracts["after"]:
+        return incomparable("the case contract differs between the receipts")
+    coverage = {
+        side: sum(isinstance(score, dict) for score in side_scores)
+        for side, side_scores in scores.items()
+    }
+    if any(coverage[side] != len(side_scores) for side, side_scores in scores.items()):
+        return incomparable(
+            "decision scores are incomplete (baseline "
+            f"{coverage['before']}/{len(scores['before'])}, current "
+            f"{coverage['after']}/{len(scores['after'])} scored)"
+        )
+    report: dict[str, Any] = {**scores, "state": "compared", "failures": []}
+    before = [cast(dict[str, int], score) for score in scores["before"]]
+    for key, what in (
+        ("missed_decisions", "missed {} necessary decision(s)"),
+        ("unnecessary_questions", "asked {} unnecessary question(s)"),
+    ):
+        most = max(score[key] for score in before)
+        for row in after_rows:
+            score = cast(dict[str, int], row["decision_score"])
+            if score[key] > most:
+                report["failures"].append(
+                    f"current r{row.get('repetition')} {what.format(score[key])}; "
+                    f"the baseline's most is {most}"
+                )
+    return report
 
 
 @dataclass(frozen=True)
@@ -865,6 +966,13 @@ def compare(
             if runtime_call_allowance is not None
             else None
         ),
+        "decision_floor_failed_cases": {
+            delta["case_id"]: decisions["failures"]
+            for delta in deltas
+            if (decisions := cast(dict[str, Any], delta.get("decisions") or {})).get(
+                "failures"
+            )
+        },
         "cases": deltas,
     }
 
@@ -1130,6 +1238,16 @@ def _render_markdown(report: dict[str, Any], *, only_changed: bool) -> str:
             + ("FAIL" if runtime_failed else "pass")
         )
         for case_id, reasons in cast(dict[str, list[str]], runtime_failed).items():
+            lines.extend(f"- {case_id}: {reason}" for reason in reasons)
+        lines.append("")
+    decision_failed = cast(
+        dict[str, list[str]], report.get("decision_floor_failed_cases") or {}
+    )
+    if decision_failed:
+        lines.append(
+            "## Decision floor (missed decisions, unnecessary questions): FAIL"
+        )
+        for case_id, reasons in decision_failed.items():
             lines.extend(f"- {case_id}: {reason}" for reason in reasons)
         lines.append("")
     by_cohort = cast(dict[str, dict[str, int]], report["direction_counts_by_cohort"])
@@ -1974,23 +2092,27 @@ def main() -> None:
             sys.stdout.write("\n")
         raise SystemExit(_release_exit_code(report))
 
-    report = compare(
-        args.baseline,
-        args.current,
-        allow_harness_change=args.allow_harness_change,
-        noise_margin=args.noise_margin,
-        runtime_call_allowance=args.runtime_call_allowance,
-        runtime_token_tolerance=args.runtime_token_tolerance,
-        new_case_max_runtime_calls=args.new_case_max_runtime_calls,
-        new_case_max_runtime_tokens=args.new_case_max_runtime_tokens,
-    )
+    try:
+        report = compare(
+            args.baseline,
+            args.current,
+            allow_harness_change=args.allow_harness_change,
+            noise_margin=args.noise_margin,
+            runtime_call_allowance=args.runtime_call_allowance,
+            runtime_token_tolerance=args.runtime_token_tolerance,
+            new_case_max_runtime_calls=args.new_case_max_runtime_calls,
+            new_case_max_runtime_tokens=args.new_case_max_runtime_tokens,
+        )
+    except ReceiptError as error:
+        print(f"Refusing to compare these receipts: {error}", file=sys.stderr)
+        raise SystemExit(_INVALID_RECEIPT_EXIT) from error
     if args.format == "json":
         json.dump(report, sys.stdout, ensure_ascii=False, indent=2)
         sys.stdout.write("\n")
     else:
         sys.stdout.write(_render_markdown(report, only_changed=args.only_changed))
         sys.stdout.write("\n")
-    if report["runtime_cost_failed_cases"]:
+    if report["runtime_cost_failed_cases"] or report.get("decision_floor_failed_cases"):
         raise SystemExit(1)
 
 

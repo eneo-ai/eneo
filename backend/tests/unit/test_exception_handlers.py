@@ -251,7 +251,9 @@ MODEL = "model-a"
 @pytest.mark.parametrize(
     "input_limit,output_limit,status,code",
     [
-        (10, 64, 413, "context_window_exceeded"),
+        # Output capacity covers the default useful reserve, so the input
+        # overflow is the only refusal.
+        (10, 1000, 413, "context_window_exceeded"),
         (None, 64, 400, "unknown_model_capacity"),
         (5000, None, 400, "unknown_model_capacity"),
     ],

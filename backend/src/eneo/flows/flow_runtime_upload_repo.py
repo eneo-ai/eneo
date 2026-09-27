@@ -21,6 +21,7 @@ class FlowRuntimeUploadRepository:
         tenant_id: UUID,
         uploaded_for_step_id: UUID,
         principal: FlowPrincipal,
+        audio_seconds: float | None = None,
     ) -> None:
         await self.session.execute(
             sa.insert(FlowRuntimeUploadedFiles).values(
@@ -31,8 +32,22 @@ class FlowRuntimeUploadRepository:
                 owner_type=principal.principal_type.value,
                 owner_user_id=principal.principal_user_id,
                 owner_service_id=principal.principal_service_id,
+                audio_seconds=audio_seconds,
             )
         )
+
+    async def audio_seconds_by_file(self, *, file_ids: list[UUID]) -> dict[UUID, float]:
+        """The audio lengths measured at upload; a file without one is left out."""
+        if not file_ids:
+            return {}
+        rows = await self.session.execute(
+            sa.select(
+                FlowRuntimeUploadedFiles.file_id, FlowRuntimeUploadedFiles.audio_seconds
+            )
+            .where(FlowRuntimeUploadedFiles.file_id.in_(file_ids))
+            .where(FlowRuntimeUploadedFiles.audio_seconds.is_not(None))
+        )
+        return {file_id: float(seconds) for file_id, seconds in rows}
 
     async def exists_for_owner(
         self,

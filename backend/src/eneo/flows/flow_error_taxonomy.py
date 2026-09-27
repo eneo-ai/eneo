@@ -299,6 +299,36 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Split the PDF or ask an administrator to review the PDF ceilings.",
         user_action="Split the PDF or ask an administrator to review the PDF ceilings.",
     ),
+    FlowApiErrorCode.RUN_AUDIO_EXCEEDS_LIMIT: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="An audio upload or one recording's parts run past the tenant's longest recording.",
+        consumer_action=(
+            "Keep the recording and split it, or ask an administrator to raise the limit."
+        ),
+        user_action="Split the recording, or ask an administrator to raise the limit.",
+    ),
+    FlowApiErrorCode.RUN_AUDIO_UNREADABLE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The audio decoder cannot read an uploaded audio file.",
+        consumer_action="Export the audio again in a supported format and upload it.",
+        user_action="Save the recording again in a common audio format and upload it.",
+    ),
+    FlowApiErrorCode.RUN_AUDIO_MEASUREMENT_BUSY: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="Eneo could not measure an uploaded audio file within its deadline.",
+        consumer_action="Retry the upload after a short wait.",
+        user_action="Try the upload again in a moment.",
+    ),
+    FlowApiErrorCode.RUN_AUDIO_LENGTH_UNKNOWN: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="An audio file was uploaded before Eneo measured audio at upload.",
+        consumer_action="Upload the audio file again and use the new file id.",
+        user_action="Upload the audio file again.",
+    ),
     FlowApiErrorCode.RUN_STEP_INPUT_MIMETYPE_REJECTED: _entry(
         category="Run input",
         surfaced_through="API error response",

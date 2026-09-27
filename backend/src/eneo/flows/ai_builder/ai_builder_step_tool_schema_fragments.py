@@ -53,6 +53,16 @@ def build_knowledge_refs_property_schema(
     *,
     kb_refs: list[str] | None,
 ) -> dict[str, Any]:
+    if kb_refs == []:
+        # No knowledge base exists, so no ref is admissible. The field stays
+        # (null and [] remain valid) but can carry no value.
+        return {
+            "knowledge_refs": {
+                "type": ["array", "null"],
+                "items": {"type": "string"},
+                "maxItems": 0,
+            }
+        }
     knowledge_refs_schema: dict[str, Any] = {
         "type": ["array", "null"],
         "items": {"type": "string"},

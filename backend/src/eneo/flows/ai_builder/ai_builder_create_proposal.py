@@ -7,6 +7,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     architecture_failure_outcome,
 )
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
+    authored_knowledge_ref_repair,
     prepare_compiled_spec_for_session,
 )
 from eneo.flows.ai_builder.ai_builder_create_compile_context import CreateCompileContext
@@ -45,6 +46,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CorrectableFailure,
     PreparationOutcome,
     ProposalReady,
+    display_value,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
@@ -85,6 +87,16 @@ async def process_create_intent_arguments(
             arguments,
             obligation_projection=obligation_projection,
         )
+        if resource_catalog is not None and (
+            repair := authored_knowledge_ref_repair(
+                resource_catalog,
+                (
+                    (f"step {number} '{display_value(step.name)}'", step.knowledge_refs)
+                    for number, step in enumerate(intent.steps, start=1)
+                ),
+            )
+        ):
+            return repair
         field_diagnostics: list[LintWarning] = []
         spec = compile_create_intent_to_spec(
             intent,

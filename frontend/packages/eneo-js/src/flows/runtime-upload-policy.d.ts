@@ -9,6 +9,10 @@ export function resolveFlowRuntimeUploadIdleTimeoutMs(
   policy: FlowRuntimeUploadPolicy | null | undefined
 ): number;
 
+export function resolveFlowRuntimeUploadResponseTimeoutMs(
+  policy: FlowRuntimeUploadPolicy | null | undefined
+): number;
+
 export type FlowRuntimeUploadTimeoutReason = "not_started" | "stalled" | "server_not_responding";
 
 export type FlowRuntimeUploadTimeoutEvent = {

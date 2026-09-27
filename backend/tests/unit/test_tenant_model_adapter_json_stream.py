@@ -58,6 +58,11 @@ def _usage_event():
     ).encode()
 
 
+# Bound on request preparation before the provider stream starts; generous so
+# only a real stall fails it, even on a loaded parallel run.
+_STREAM_START_SECONDS = 30
+
+
 class _Body(httpx.AsyncByteStream):
     def __init__(self, chunks, delay=0, cleanup_delay=0):
         self.chunks = chunks
@@ -302,9 +307,35 @@ async def test_http_stream_failures_keep_their_cause_and_never_complete(
         with pytest.raises(asyncio.CancelledError):
             await task
     elif cause == "deadline":
-        with pytest.raises(TimeoutError):
-            async with asyncio.timeout(0.03):
-                await request()
+        # The tested deadline expires once the stream is under way: a fixed
+        # short timeout could expire during request preparation under load,
+        # before any request was sent. A separate setup bound keeps a stalled
+        # preparation from hanging the test, and fails outside pytest.raises.
+        deadlines: list[asyncio.Timeout] = []
+
+        async def request_under_deadline():
+            async with asyncio.timeout(None) as deadline:
+                deadlines.append(deadline)
+                return await request()
+
+        task = asyncio.create_task(request_under_deadline())
+        try:
+            try:
+                async with asyncio.timeout(_STREAM_START_SECONDS):
+                    while body.onset is None and not task.done():
+                        await asyncio.sleep(0.001)
+            except TimeoutError:
+                pytest.fail("the provider stream did not start within the setup bound")
+            assert body.onset is not None, "the request ended before its stream began"
+            [deadline] = deadlines
+            deadline.reschedule(asyncio.get_running_loop().time())
+            with pytest.raises(TimeoutError):
+                await task
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        assert body.consumed < len(body.chunks)
     else:
         monkeypatch.setattr(stream_collector, "STREAM_EVENT_LIMIT", 2)
         if cause == "retained_bytes":

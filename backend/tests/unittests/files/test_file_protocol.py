@@ -2,6 +2,8 @@
 
 import asyncio
 import os
+import shutil
+import subprocess
 import time
 from dataclasses import replace
 from io import BytesIO
@@ -12,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import UploadFile
 
+from eneo.files import audio
 from eneo.files import file_protocol as file_protocol_module
 from eneo.files.file_models import FileContentVariant
 from eneo.files.file_protocol import FileProtocol
@@ -24,7 +27,11 @@ from eneo.main.config import get_settings
 from eneo.main.exceptions import FileTooLargeException
 from eneo.object_content.content import StorageKind
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
-from tests.unittests.files.test_pdf_extraction_limits import _hanging_child, _write_pdf
+from tests.unittests.files.test_pdf_extraction_limits import (
+    _hanging_child,
+    _write_pdf,
+    record_spawned_pids,
+)
 
 # ── Fake settings ────────────────────────────────────────────────────────
 
@@ -156,6 +163,7 @@ async def test_pdf_wait_keeps_request_loop_responsive(protocol, tmp_path, monkey
         headers={"content-type": "application/pdf"},
     )
     protocol.file_size_service.get_file_size.return_value = len(payload)
+    spawned_pids = record_spawned_pids(monkeypatch)
     ticks = 0
     finished = asyncio.Event()
 
@@ -182,8 +190,11 @@ async def test_pdf_wait_keeps_request_loop_responsive(protocol, tmp_path, monkey
     assert 2 <= time.monotonic() - started < 3.5
     assert ticks >= 20
     assert not (tmp_path / "uploaded").exists()
+    # The pid comes from the parent: under load the parser may not reach a
+    # page before the 2 s deadline, so it never writes one itself.
+    [pid] = spawned_pids
     with pytest.raises(ProcessLookupError):
-        os.kill(int((tmp_path / "uploaded.pid").read_text()), 0)
+        os.kill(pid, 0)
 
 
 @pytest.mark.asyncio
@@ -201,13 +212,15 @@ async def test_cancelled_pdf_upload_kills_child_and_cleans_up(
         headers={"content-type": "application/pdf"},
     )
     protocol.file_size_service.get_file_size.return_value = len(payload)
+    spawned_pids = record_spawned_pids(monkeypatch)
+    # Cancel once the parser is started, well before its deadline: a spawned
+    # parser needs seconds to start under load and may never reach a page.
     task = asyncio.create_task(
-        _prepare(protocol, upload, pdf_limits=PdfExtractionLimits(10, 1024, 2))
+        _prepare(protocol, upload, pdf_limits=PdfExtractionLimits(10, 1024, 60))
     )
-    pid_path = tmp_path / "uploaded.pid"
     try:
-        async with asyncio.timeout(3):
-            while not pid_path.exists():
+        async with asyncio.timeout(30):
+            while not spawned_pids:
                 await asyncio.sleep(0.01)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -218,8 +231,9 @@ async def test_cancelled_pdf_upload_kills_child_and_cleans_up(
             await asyncio.gather(task, return_exceptions=True)
 
     assert not (tmp_path / "uploaded").exists()
+    [pid] = spawned_pids
     with pytest.raises(ProcessLookupError):
-        os.kill(int(pid_path.read_text()), 0)
+        os.kill(pid, 0)
 
 
 @pytest.mark.asyncio
@@ -317,6 +331,149 @@ async def test_prepare_audio_preserves_exact_original(protocol, tmp_path):
         content = prepared.contents[0]
         assert content.variant is FileContentVariant.ORIGINAL
         assert await _content_bytes(content) == original
+
+
+async def _prepare_measured_audio(protocol, tmp_path, monkeypatch, *, decoded):
+    upload = UploadFile(
+        file=BytesIO(b"audio"),
+        filename="meeting.webm",
+        headers={"content-type": "audio/webm"},
+    )
+    protocol.file_size_service.get_file_size.return_value = 5
+    path = tmp_path / "meeting.webm"
+
+    async def save_original(_file):
+        path.write_bytes(b"audio")
+        return str(path)
+
+    protocol.file_size_service.save_file_to_disk = save_original
+    decodes: list[audio.AudioDecodeLimits] = []
+
+    async def measure_duration(filepath, *, limits):
+        decodes.append(limits)
+        if isinstance(decoded, BaseException):
+            raise decoded
+        if callable(decoded):
+            return await decoded()
+        return decoded
+
+    monkeypatch.setattr(audio, "measure_duration", measure_duration)
+    limits = audio.AudioDecodeLimits(max_duration_seconds=300, max_decoded_bytes=10**12)
+    async with protocol.prepare_upload(
+        upload, upload_admission_snapshot=_UPLOAD_ADMISSION, audio_limits=limits
+    ) as prepared:
+        return prepared.audio_seconds, decodes
+
+
+@pytest.mark.asyncio
+async def test_audio_upload_keeps_its_decoded_length(protocol, tmp_path, monkeypatch):
+    # Up to the limit itself: the length the run's transcription decodes.
+    seconds, decodes = await _prepare_measured_audio(
+        protocol, tmp_path, monkeypatch, decoded=300.0
+    )
+
+    assert seconds == 300.0
+    assert [limits.max_duration_seconds for limits in decodes] == [300]
+
+
+@pytest.mark.asyncio
+async def test_audio_upload_past_the_limit_is_refused_before_it_is_kept(
+    protocol, tmp_path, monkeypatch
+):
+    over = audio.AudioDecodeLimitExceeded(
+        limit="duration_seconds", measured=300.02, ceiling=300
+    )
+
+    with pytest.raises(audio.AudioDecodeLimitExceeded):
+        await _prepare_measured_audio(protocol, tmp_path, monkeypatch, decoded=over)
+
+
+@pytest.mark.asyncio
+async def test_audio_upload_that_does_not_decode_is_refused_as_unreadable(
+    protocol, tmp_path, monkeypatch
+):
+    with pytest.raises(audio.AudioUnreadableError):
+        await _prepare_measured_audio(
+            protocol,
+            tmp_path,
+            monkeypatch,
+            decoded=ValueError("Audio decoder exited with status 1"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_audio_measurement_past_its_deadline_is_refused_as_busy(
+    protocol, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        audio, "_measurement_deadline_seconds", lambda: 0.01, raising=False
+    )
+
+    async def stall():
+        await asyncio.sleep(10)
+
+    with pytest.raises(audio.AudioMeasurementBusy):
+        await _prepare_measured_audio(protocol, tmp_path, monkeypatch, decoded=stall)
+
+
+@pytest.mark.asyncio
+async def test_audio_measurements_wait_for_capacity_within_the_deadline(monkeypatch):
+    running = 0
+    peak = 0
+
+    async def work():
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        await asyncio.sleep(0.01)
+        running -= 1
+        return 1.0
+
+    monkeypatch.setattr(audio, "_MEASUREMENT_CAPACITY", asyncio.Semaphore(2))
+    results = await asyncio.gather(*(audio.bounded_measurement(work) for _ in range(5)))
+
+    assert results == [1.0] * 5
+    assert peak == 2
+
+
+@pytest.mark.asyncio
+async def test_audio_whose_timestamps_run_short_is_held_to_its_decoded_length(
+    protocol, tmp_path
+):
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("FFmpeg is not installed")
+    # 4 s of Opus whose container timestamps say 2 s.
+    source, squashed = tmp_path / "source.webm", tmp_path / "squashed.webm"
+    for args in (
+        ["-f", "lavfi", "-t", "4", "-i", "sine=frequency=300", "-c:a", "libopus"],
+        ["-i", str(source), "-c", "copy", "-bsf:a", "setts=ts=TS/2"],
+    ):
+        target = source if "-f" in args else squashed
+        subprocess.run(
+            ["ffmpeg", "-nostdin", "-loglevel", "error", *args, str(target)], check=True
+        )
+    payload = squashed.read_bytes()
+    upload = UploadFile(
+        file=BytesIO(payload),
+        filename="squashed.webm",
+        headers={"content-type": "audio/webm"},
+    )
+    protocol.file_size_service.get_file_size.return_value = len(payload)
+
+    async def save_original(_file):
+        return str(squashed)
+
+    protocol.file_size_service.save_file_to_disk = save_original
+
+    with pytest.raises(audio.AudioDecodeLimitExceeded):
+        async with protocol.prepare_upload(
+            upload,
+            upload_admission_snapshot=_UPLOAD_ADMISSION,
+            audio_limits=audio.AudioDecodeLimits(
+                max_duration_seconds=3, max_decoded_bytes=10**12
+            ),
+        ):
+            pytest.fail("audio decoding past the limit is not prepared")
 
 
 # ── Tests: text files use TEXT_MAX ───────────────────────────────────────

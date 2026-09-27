@@ -14,13 +14,23 @@ from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.database.database import AsyncSession
+from eneo.files.audio import (
+    AudioDecodeLimitExceeded,
+    AudioDecodeLimits,
+    AudioMeasurementBusy,
+    AudioUnreadableError,
+)
 from eneo.files.file_models import FileInfo
 from eneo.files.file_service import FileService
 from eneo.files.mime_support import canonicalize_mime, canonicalize_sniffed_mime
 from eneo.files.text import PdfExtractionLimitExceeded, PdfExtractionLimits
 from eneo.flows.enums import FlowRuntimeInputFormat
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_api_exceptions import (
+    FlowBadRequestException,
+    FlowServiceUnavailableException,
+)
+from eneo.flows.flow_input_limits import FlowInputLimits, flow_audio_decode_limits
 from eneo.flows.flow_run_step_inputs import (
     RuntimeStepInputSpec,
 )
@@ -135,19 +145,28 @@ class FlowFileInputPolicy:
     accepted_mimetypes: list[str]
     max_file_size_bytes: int
     max_files_per_run: int | None
+    # What an audio input may run to: measured at upload, before it is kept.
+    audio_limits: AudioDecodeLimits | None = None
 
 
 def _policy_from_runtime_spec(
     *,
     flow_id: UUID,
     spec: RuntimeStepInputSpec,
+    limits: FlowInputLimits,
 ) -> FlowFileInputPolicy:
+    input_type = spec.runtime_input.input_format
     return FlowFileInputPolicy(
         flow_id=flow_id,
-        input_type=spec.runtime_input.input_format,
+        input_type=input_type,
         accepted_mimetypes=spec.accepted_mimetypes,
         max_file_size_bytes=spec.max_file_size_bytes,
         max_files_per_run=spec.max_files,
+        audio_limits=(
+            flow_audio_decode_limits(limits)
+            if input_type is FlowRuntimeInputFormat.AUDIO
+            else None
+        ),
     )
 
 
@@ -232,7 +251,9 @@ class FlowRuntimeFileService:
                 )
 
             policy = _policy_from_runtime_spec(
-                flow_id=runtime_inputs.published.flow_id, spec=spec
+                flow_id=runtime_inputs.published.flow_id,
+                spec=spec,
+                limits=runtime_inputs.limits,
             )
         return await self._upload_with_policy(
             flow_id=runtime_inputs.published.flow_id,
@@ -286,13 +307,14 @@ class FlowRuntimeFileService:
             policy=policy,
         )
 
-        async def bind_and_audit(file: FileInfo) -> None:
+        async def bind_and_audit(file: FileInfo, audio_seconds: float | None) -> None:
             await self.runtime_upload_repo.create(
                 file_id=file.id,
                 flow_id=flow_id,
                 tenant_id=self.user.tenant_id,
                 uploaded_for_step_id=step_id,
                 principal=self._principal(),
+                audio_seconds=audio_seconds,
             )
             await self.audit_service.log(
                 tenant_id=self.user.tenant_id,
@@ -329,7 +351,25 @@ class FlowRuntimeFileService:
                     max_extracted_bytes=settings.flow_pdf_max_extracted_bytes,
                     timeout_seconds=settings.flow_pdf_extraction_timeout_seconds,
                 ),
+                audio_limits=policy.audio_limits,
             )
+        except AudioMeasurementBusy as exc:
+            raise FlowServiceUnavailableException(
+                "The audio could not be measured in time; try again shortly.",
+                code=FlowApiErrorCode.RUN_AUDIO_MEASUREMENT_BUSY,
+            ) from exc
+        except AudioUnreadableError as exc:
+            raise FlowBadRequestException(
+                "The audio could not be read.",
+                code=FlowApiErrorCode.RUN_AUDIO_UNREADABLE,
+            ) from exc
+        except AudioDecodeLimitExceeded as exc:
+            # One code with the recording checked when the run is created.
+            raise FlowBadRequestException(
+                "The audio is longer than this Eneo allows for a recording.",
+                code=FlowApiErrorCode.RUN_AUDIO_EXCEEDS_LIMIT,
+                context=exc.context,
+            ) from exc
         except PdfExtractionLimitExceeded as exc:
             # Saturation is not a defect of the file: the guidance is to wait,
             # never to split a PDF that no parser has read.

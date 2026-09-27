@@ -3,8 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import unicodedata
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from functools import partial
 from typing import Any, Sequence, cast
 from uuid import UUID
 
@@ -56,6 +58,7 @@ from eneo.flows.flow_api_exceptions import (
 )
 from eneo.flows.flow_input_limits import (
     FlowInputLimits,
+    flow_audio_decode_limits,
     resolve_flow_input_limits_from_source,
 )
 from eneo.flows.flow_run_contract_service import (
@@ -74,6 +77,7 @@ from eneo.flows.flow_run_input_envelope import (
     read_semantic_flow_input_payload,
     read_single_recording_steps,
     read_speaker_labels_choice,
+    with_admitted_audio_seconds,
 )
 from eneo.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
 from eneo.flows.flow_run_payload_validation import (
@@ -86,6 +90,7 @@ from eneo.flows.flow_run_step_inputs import (
     build_runtime_step_input_specs,
     normalize_step_inputs_payload,
     runtime_file_not_bound_to_flow_error,
+    validate_audio_lengths,
     validate_live_transcript_inputs,
     validate_single_recording_inputs,
     validate_submitted_step_inputs,
@@ -245,6 +250,9 @@ class _PreparedRunCreation:
     preseed_steps: list[PreseedStep]
     step_input_files: list[FlowRunStepInputFileProjection]
     request_fingerprint: str
+    # The limit each audio step is admitted under, checked only for a new run
+    # (after the replay check): the tenant's limit may change between replays.
+    admit_audio: Callable[[], Awaitable[dict[UUID, int]]] | None = None
 
 
 def _normalize_step_input_files_for_fingerprint(
@@ -492,6 +500,14 @@ class FlowRunService:
                 flow_id=flow_id, input_payload_json=payload
             )
             prepared = replace(prepared, input_payload_json=payload)
+        if prepared.admit_audio is not None:
+            payload = with_admitted_audio_seconds(
+                prepared.input_payload_json, await prepared.admit_audio()
+            )
+            ensure_inline_payload_size_allowed(
+                flow_id=flow_id, input_payload_json=payload
+            )
+            prepared = replace(prepared, input_payload_json=payload)
         live_transcript_ids = read_live_transcript_ids(prepared.input_payload_json)
         if live_transcript_ids:
             file_ids_by_step = {
@@ -604,6 +620,7 @@ class FlowRunService:
         step_input_file_projections: list[FlowRunStepInputFileProjection] = []
         live_transcript_ids: dict[UUID, UUID] = {}
         single_recording_steps: frozenset[UUID] = frozenset()
+        admit_audio: Callable[[], Awaitable[dict[UUID, int]]] | None = None
         if step_inputs is not None or definition.has_required_runtime_input():
             runtime_steps = definition.runtime_steps()
             limits = await self._resolve_flow_input_limits()
@@ -633,6 +650,14 @@ class FlowRunService:
                 runtime_upload_repo=self.runtime_upload_repo,
                 principal=principal,
                 tenant_id=self.user.tenant_id,
+            )
+            admit_audio = partial(
+                validate_audio_lengths,
+                specs=runtime_specs,
+                normalized_step_inputs=normalized_step_inputs,
+                single_recording_steps=single_recording_steps,
+                runtime_upload_repo=self.runtime_upload_repo,
+                limits=flow_audio_decode_limits(limits),
             )
             step_order_by_id = {
                 runtime_step.step_id: runtime_step.step_order
@@ -676,6 +701,7 @@ class FlowRunService:
             preseed_steps=preseed_steps,
             step_input_files=step_input_file_projections,
             request_fingerprint=request_fingerprint,
+            admit_audio=admit_audio,
         )
 
     async def _find_idempotent_run_or_enforce_creation_limits(

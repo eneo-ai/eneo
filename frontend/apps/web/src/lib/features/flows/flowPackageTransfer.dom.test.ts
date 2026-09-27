@@ -10,6 +10,7 @@ import {
   buildSelectedFlowPackageResourceBindings,
   createInitialFlowPackageImportSelections,
   defaultFlowPackageId,
+  normalizeFlowPackageId,
   downloadFlowPackageFile,
   encodeFlowPackageFileToBase64,
   getFlowPackageMcpOmissionCount,
@@ -362,6 +363,45 @@ describe("flowPackageTransfer", () => {
   it("creates safe default package identifiers", () => {
     expect(defaultFlowPackageId("Mötesrapport från ljud")).toBe("local.motesrapport-fran-ljud");
     expect(defaultFlowPackageId("")).toBe("local.flow-package");
+  });
+
+  it("keeps default IDs of long flow names valid and distinct", () => {
+    const first = defaultFlowPackageId(`${"x".repeat(200)} a`);
+    const second = defaultFlowPackageId(`${"x".repeat(200)} b`);
+
+    expect(first).not.toBe(second);
+    for (const id of [first, second]) {
+      expect(id.length).toBeLessThanOrEqual(128);
+      expect(id).toMatch(/^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/);
+    }
+  });
+
+  it("rewrites a typed package ID into the form export accepts", () => {
+    const backendRule = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
+    const cases: [string, string][] = [
+      ["RonnyVariant", "ronnyvariant"],
+      [" Se.Kommun.Rapport Flöde ", "se.kommun.rapport-flode"],
+      ["se..kommun.-_rapport", "se.kommun.rapport"],
+      ["2024 plan", "local.2024-plan"],
+      ["ab", "local.ab"],
+      ["-.-", ""]
+    ];
+    for (const [typed, exported] of cases) {
+      expect(normalizeFlowPackageId(typed)).toBe(exported);
+    }
+    const typedA = normalizeFlowPackageId(`9${"x".repeat(121)}a`);
+    const typedB = normalizeFlowPackageId(`9${"x".repeat(121)}b`);
+    expect(typedA).not.toBe(typedB);
+    const long = normalizeFlowPackageId(`9${"a-".repeat(100)}`);
+    for (const id of [
+      ...cases.map(([, exported]) => exported).filter(Boolean),
+      long,
+      typedA,
+      typedB
+    ]) {
+      expect(id.length).toBeLessThanOrEqual(128);
+      expect(id).toMatch(backendRule);
+    }
   });
 });
 

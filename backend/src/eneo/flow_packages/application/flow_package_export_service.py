@@ -73,6 +73,10 @@ from eneo.flows.flow_resource_bindings import (
     local_resource_kinds_for_slot_kind,
 )
 from eneo.flows.flow_validators_template import has_template_fill_resource_reference
+from eneo.flows.flow_variable_definitions import (
+    RESERVED_RUNTIME_VARIABLES,
+    runtime_variables_for_step,
+)
 from eneo.flows.http_transport import contains_secret_sentinel, is_authored_config
 from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
@@ -662,11 +666,12 @@ def _validate_step_template_references(
         if step_order < current_step_order
     }
     allowed_step_refs = set(prior_step_refs)
-    for template in _step_spec_template_strings(step_spec):
+    for template, runtime_variables in _step_spec_template_strings(step_spec):
         references = analyze_template(
             template,
             step_refs=prior_step_refs,
             form_field_names=form_field_names,
+            runtime_variables=runtime_variables,
         )
         for reference in references:
             if reference.path_error_code is not None:
@@ -701,13 +706,24 @@ def _raise_invalid_variable_reference(expression: str, step_order: int) -> None:
     )
 
 
-def _step_spec_template_strings(step_spec: StepSpec) -> Iterator[str]:
-    yield step_spec.assistant_spec.instructions
-    yield from _string_leaves(step_spec.input_bindings)
-    yield from _string_leaves(step_spec.input_contract)
-    yield from _string_leaves(step_spec.output_contract)
-    yield from _string_leaves(step_spec.input_config)
-    yield from _string_leaves(step_spec.output_config)
+def _step_spec_template_strings(
+    step_spec: StepSpec,
+) -> Iterator[tuple[str, frozenset[str]]]:
+    # Section variables such as section_index are prompt variables, as in the
+    # Builder's reference validation; step payloads keep the reserved set.
+    yield (
+        step_spec.assistant_spec.instructions,
+        runtime_variables_for_step(step_spec.input_config),
+    )
+    for payload in (
+        step_spec.input_bindings,
+        step_spec.input_contract,
+        step_spec.output_contract,
+        step_spec.input_config,
+        step_spec.output_config,
+    ):
+        for template in _string_leaves(payload):
+            yield template, RESERVED_RUNTIME_VARIABLES
 
 
 def _string_leaves(value: object, *, depth: int = 0) -> Iterator[str]:

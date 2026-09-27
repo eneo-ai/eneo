@@ -8,8 +8,10 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
     TypeAdapter,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -25,6 +27,7 @@ from eneo.flows.ai_builder.ai_builder_telemetry_models import (
 from eneo.flows.ai_builder.planning_state import (
     AttachmentCoverage,
     FileRole,
+    NamedResultDeclaredShape,
     NamedResultOrigin,
 )
 from eneo.flows.flow_ai_builder_budget_settings import (
@@ -336,6 +339,12 @@ class NamedContentFieldPayload(BaseModel):
     # including childless ones.
     can_contain_fields: bool
     origin: NamedResultOrigin = "described"
+    # The shape the user wrote next to the name, or None when they declared
+    # none. Telemetry beside the card, outside the confirmed identity like the
+    # rest of this projection. A disclosure stored before shapes were reported
+    # has no value here, which is not the same fact as "no declared shape":
+    # the serializer below keeps the two apart.
+    declared_shape: NamedResultDeclaredShape | None = None
 
     @model_validator(mode="after")
     def require_unplaced_without_segments(self) -> "NamedContentFieldPayload":
@@ -344,6 +353,20 @@ class NamedContentFieldPayload(BaseModel):
         if self.unplaced and self.segments:
             raise ValueError("an unplaced named content field cannot carry segments")
         return self
+
+    @model_serializer(mode="wrap")
+    def _report_declared_shape_when_known(
+        self, handler: SerializerFunctionWrapHandler
+    ):  # No return annotation: the published schema stays this model's own.
+        # The stream and the stored disclosure both drop None values, which
+        # would turn "declared no shape" into "never reported". Emit the key
+        # exactly when a value was set, null included, and never otherwise.
+        data = handler(self)
+        if "declared_shape" in self.model_fields_set:
+            data["declared_shape"] = self.declared_shape
+        else:
+            data.pop("declared_shape", None)
+        return data
 
 
 def _weak_role_file_ids_are_empty(value: list[UUID]) -> bool:

@@ -11,6 +11,7 @@ two of those steps.
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
@@ -32,6 +33,10 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    REQUIREMENTS_SUMMARY_METADATA_KEY,
+    requirements_summary_to_metadata,
+)
 from eneo.flows.ai_builder.ai_builder_create_compile_context import (
     create_compile_context_from_planning_state,
 )
@@ -41,6 +46,11 @@ from eneo.flows.ai_builder.ai_builder_create_compiler import (
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
 from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
+from eneo.flows.ai_builder.ai_builder_event_models import (
+    AIBuilderRequirementsSummaryEvent,
+    RequirementsSummaryPayload,
+)
+from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     StructuredFieldDraft,
 )
@@ -1454,6 +1464,50 @@ def test_named_content_is_listed_without_repeating_it_in_the_summary() -> None:
     )
     for field in disclosure.named_content_fields:
         assert field.label not in disclosure.summary
+
+
+def test_named_content_fields_report_the_declared_shape_on_every_wire() -> None:
+    # `can_contain_fields` is true for both arrays and objects; only the
+    # declared shape tells them apart. A name declared without a shape carries
+    # an explicit null on the stream and in storage, so a reader can tell it
+    # from a disclosure that never reported shapes at all.
+    state = _state((("bids", "array"), ("payload", "object"), ("status", None)))
+
+    disclosure = build_requirements_disclosure(state, ui_language="sv")
+
+    assert [
+        (field.name, field.declared_shape) for field in disclosure.named_content_fields
+    ] == [("bids", "array"), ("payload", "object"), ("status", None)]
+    streamed = json.loads(
+        encode_ai_builder_stream_event(
+            AIBuilderRequirementsSummaryEvent(data=disclosure)
+        )["data"]
+    )
+    persisted = requirements_summary_to_metadata(disclosure)[
+        REQUIREMENTS_SUMMARY_METADATA_KEY
+    ]
+    assert isinstance(persisted, dict)
+    for wire in (streamed, persisted):
+        assert [field["declared_shape"] for field in wire["named_content_fields"]] == [
+            "array",
+            "object",
+            None,
+        ]
+
+    # A disclosure stored before shapes were reported keeps saying nothing,
+    # rather than claiming every name was declared without a shape.
+    legacy = {
+        **persisted,
+        "named_content_fields": [
+            {key: value for key, value in field.items() if key != "declared_shape"}
+            for field in persisted["named_content_fields"]
+        ],
+    }
+    reread = RequirementsSummaryPayload.model_validate(legacy)
+    assert all(
+        "declared_shape" not in field
+        for field in reread.model_dump(mode="json")["named_content_fields"]
+    )
 
 
 def test_naming_no_content_leaves_the_item_list_empty() -> None:

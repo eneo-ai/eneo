@@ -1,10 +1,10 @@
 """Unit tests for the cross-provider /v1/models normalization helpers."""
 
+from eneo.model_providers.domain.endpoints import normalize_endpoint_base
 from eneo.model_providers.domain.model_provider_service import (
     _auth_headers_for,
     _coerce_to_epoch,
     _extract_mode_hint,
-    _normalize_endpoint_base,
     _normalize_live_model,
 )
 
@@ -90,28 +90,27 @@ def test_endpoint_normalization_handles_v1_suffix() -> None:
     """Users may paste either ``https://api.example.com`` or ``…/v1`` and we
     must avoid producing ``/v1/v1/models`` either way."""
     assert (
-        _normalize_endpoint_base("https://api.example.com") == "https://api.example.com"
+        normalize_endpoint_base("https://api.example.com") == "https://api.example.com"
     )
     assert (
-        _normalize_endpoint_base("https://api.example.com/")
+        normalize_endpoint_base("https://api.example.com/") == "https://api.example.com"
+    )
+    assert (
+        normalize_endpoint_base("https://api.example.com/v1")
         == "https://api.example.com"
     )
     assert (
-        _normalize_endpoint_base("https://api.example.com/v1")
-        == "https://api.example.com"
-    )
-    assert (
-        _normalize_endpoint_base("https://api.example.com/v1/")
+        normalize_endpoint_base("https://api.example.com/v1/")
         == "https://api.example.com"
     )
     # ``v1beta`` should NOT be stripped — only the exact ``/v1`` segment.
     assert (
-        _normalize_endpoint_base("https://api.example.com/v1beta")
+        normalize_endpoint_base("https://api.example.com/v1beta")
         == "https://api.example.com/v1beta"
     )
     # Path before /v1 is preserved.
     assert (
-        _normalize_endpoint_base("https://gateway.example.com/proxy/v1")
+        normalize_endpoint_base("https://gateway.example.com/proxy/v1")
         == "https://gateway.example.com/proxy"
     )
 

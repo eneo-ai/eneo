@@ -144,6 +144,9 @@ declare module "@eneo/icons/notification" {
 declare module "@eneo/icons/overview" {
   export { Icon as IconOverview } from "@eneo/icons/*";
 }
+declare module "@eneo/icons/pause" {
+  export { Icon as IconPause } from "@eneo/icons/*";
+}
 declare module "@eneo/icons/people" {
   export { Icon as IconPeople } from "@eneo/icons/*";
 }

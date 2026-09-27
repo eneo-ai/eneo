@@ -69,8 +69,10 @@ class _PreparedFileProtocol(FileProtocol):
         upload_admission_snapshot: UploadAdmissionSnapshot | None = None,
         max_size: int | None = None,
         limit_name: str | None = None,
+        pdf_limits: object = None,
+        audio_limits: object = None,
     ) -> AsyncGenerator[PreparedFileUpload]:
-        del upload_file, max_size, limit_name
+        del upload_file, max_size, limit_name, pdf_limits, audio_limits
         self.seen_snapshot = upload_admission_snapshot
         yield self._prepared
 

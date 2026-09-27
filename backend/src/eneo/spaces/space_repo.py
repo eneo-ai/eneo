@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from collections.abc import Set as AbstractSet
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional, Protocol
@@ -638,7 +639,12 @@ class SpaceRepository:
         # Refresh to reflect changes
         await self.session.refresh(space_in_db)
 
-    async def _set_assistants(self, space_in_db: Spaces, assistants: list["Assistant"]):
+    async def _set_assistants(
+        self,
+        space_in_db: Spaces,
+        assistants: list["Assistant"],
+        removed_ids: AbstractSet[UUID],
+    ):
         new_assistants = [assistant for assistant in assistants if assistant.is_new]
         existing_assistants = [
             assistant for assistant in assistants if not assistant.is_new
@@ -652,16 +658,46 @@ class SpaceRepository:
             assistant.space_id = space_in_db.id  # type: ignore[attr-defined]
             await self.assistant_repo.update(assistant)
 
-        # Delete all assistants that are not in the list
-        # Don't delete the default assistant
-        stmt = (
+        # Delete only the assistants this request removed. One missing from the
+        # list may just have been created after the space was loaded.
+        if removed_ids:
+            await self._delete_assistants(space_in_db.id, removed_ids)
+
+    async def _delete_assistants(
+        self, space_id: UUID, ids: AbstractSet[UUID]
+    ) -> set[UUID]:
+        # Never the default assistant, nor one a flow manages.
+        deleted = await self.session.scalars(
             sa.delete(Assistants)
-            .where(Assistants.space_id == space_in_db.id)
-            .where(Assistants.id.notin_([assistant.id for assistant in assistants]))
-            .where(Assistants.is_default == False)  # noqa
+            .where(Assistants.space_id == space_id)
+            .where(Assistants.id.in_(ids))
+            .where(Assistants.is_default.is_(False))
             .where(Assistants.origin != "flow_managed")
+            .returning(Assistants.id)
         )
-        await self.session.execute(stmt)
+        return set(deleted.all())
+
+    async def add_assistant(self, space: Space, assistant: "Assistant") -> Space:
+        """Insert one new assistant, leaving the rest of the space untouched."""
+        assert space.id is not None
+        model = assistant.completion_model
+        if model is not None and space.is_completion_model_in_space(model.id):
+            # Space.add_assistant may have enabled the model in the space.
+            await self.session.execute(
+                pg_insert(SpacesCompletionModels)
+                .values(space_id=space.id, completion_model_id=model.id)
+                .on_conflict_do_nothing()
+            )
+        assistant.space_id = space.id  # type: ignore[attr-defined]
+        await self.assistant_repo.add(assistant)
+        return await self.one(id=space.id)
+
+    async def delete_assistant(self, space_id: UUID, assistant_id: UUID) -> bool:
+        """Delete one assistant, leaving the rest of the space untouched.
+
+        False when no row matched: the assistant is gone, moved to another
+        space, or is one this delete never removes."""
+        return bool(await self._delete_assistants(space_id, {assistant_id}))
 
     async def _set_default_assistant(
         self, space_in_db: Spaces, assistant: Optional["Assistant"]
@@ -1884,6 +1920,7 @@ class SpaceRepository:
             entry_in_db,
             space.assistants
             + ([space.default_assistant] if space.default_assistant else []),
+            space.removed_assistant_ids,
         )
         await self._set_group_chats(entry_in_db, space.group_chats)
 

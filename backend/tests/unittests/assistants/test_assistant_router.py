@@ -370,7 +370,7 @@ class TestAskAssistant:
 
 
 class TestUpdateAssistant:
-    async def test_preserves_completion_model_when_deprecated_field_absent(
+    async def test_preserves_completion_model_when_field_absent(
         self,
         mock_container,
     ):
@@ -393,7 +393,7 @@ class TestUpdateAssistant:
         assert update.completion_model_id is NOT_PROVIDED
         assert not update.is_set("completion_model_id")
 
-    async def test_preserves_completion_model_when_deprecated_field_is_null(
+    async def test_preserves_completion_model_when_field_is_null(
         self,
         mock_container,
     ):
@@ -416,13 +416,21 @@ class TestUpdateAssistant:
         assert update.completion_model_id is NOT_PROVIDED
         assert not update.is_set("completion_model_id")
 
-    async def test_preserves_completion_model_when_deprecated_field_is_non_null(
+    @pytest.mark.parametrize("old_model", ["gpt", None])
+    async def test_changes_and_audits_the_chosen_completion_model(
         self,
         mock_container,
+        old_model,
     ):
         assistant_id = uuid.uuid4()
+        chosen_model_id = uuid.uuid4()
         old_assistant = _router_assistant(assistant_id)
+        if old_model is None:
+            old_assistant.completion_model = None
         updated_assistant = _router_assistant(assistant_id)
+        updated_assistant.completion_model = MagicMock(
+            id=chosen_model_id, nickname="gemma"
+        )
         service = mock_container.assistant_service.return_value
         service.get_assistant.return_value = (old_assistant, [])
         service.update_assistant.return_value = (updated_assistant, [])
@@ -431,16 +439,17 @@ class TestUpdateAssistant:
         await update_assistant(
             id=assistant_id,
             assistant=AssistantUpdatePublic(
-                name="Renamed",
-                completion_model=ModelId(id=uuid.uuid4()),
+                completion_model=ModelId(id=chosen_model_id),
             ),
             request=_request(),
             container=mock_container,
         )
 
         update = service.update_assistant.await_args.kwargs["update"]
-        assert update.completion_model_id is NOT_PROVIDED
-        assert not update.is_set("completion_model_id")
+        assert update.completion_model_id == chosen_model_id
+        audit_log = mock_container.audit_service.return_value.log_async
+        metadata = audit_log.await_args.kwargs["metadata"]
+        assert metadata["changes"]["model"] == {"old": old_model, "new": "gemma"}
 
 
 class TestAssistantResponseStructure:

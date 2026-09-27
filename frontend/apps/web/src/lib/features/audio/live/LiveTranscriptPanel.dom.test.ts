@@ -23,6 +23,14 @@ describe("LiveTranscriptPanel", () => {
     expect(screen.getByText(m.live_transcription_listening())).toBeTruthy();
   });
 
+  it("says the recording is paused instead of listening, and keeps the text", () => {
+    render(LiveTranscriptPanel, { status: "listening", pieces: spoken, paused: true });
+
+    expect(screen.getByRole("status").textContent?.trim()).toBe(m.recording_paused());
+    expect(screen.queryByText(m.live_transcription_listening())).toBeNull();
+    expect(screen.getByRole("log").textContent).toBe("Hej och välkomna.");
+  });
+
   it("says it is connecting and where the text will appear", () => {
     render(LiveTranscriptPanel, { status: "connecting", pieces: [] });
 

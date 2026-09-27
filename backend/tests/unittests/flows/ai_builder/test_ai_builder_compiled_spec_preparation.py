@@ -9,6 +9,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
+    authored_knowledge_ref_repair,
     prepare_compiled_spec_for_session,
 )
 from eneo.flows.ai_builder.ai_builder_create_compile_context import CreateCompileContext
@@ -21,7 +22,11 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     parse_create_flow_intent_arguments,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    MAX_DIAGNOSTIC_NAMES,
+)
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderResourceCatalogEntry,
     build_ai_builder_resource_catalog,
 )
 from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
@@ -519,3 +524,46 @@ def test_an_existing_step_keeps_its_model() -> None:
 
     assert result.spec is not None
     assert result.spec.steps[0].assistant_spec.model_ref == luna_ref
+
+
+def test_a_knowledge_ref_repair_builds_only_the_option_labels_it_shows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[
+            {
+                "id": f"kb-{index}",
+                "ref": f"kb-{index}",
+                "name": f"Policy {index}",
+                "display_name": f"Policy {index}",
+                "description": "",
+            }
+            for index in range(40)
+        ],
+    )
+    built: list[str] = []
+    label = AIBuilderResourceCatalogEntry.option_label
+
+    def counted(entry: AIBuilderResourceCatalogEntry) -> str:
+        built.append(entry.authoring_ref)
+        return cast(str, label.fget(entry))  # pyright: ignore[reportOptionalCall]
+
+    monkeypatch.setattr(
+        AIBuilderResourceCatalogEntry, "option_label", property(counted)
+    )
+
+    repair = authored_knowledge_ref_repair(
+        catalog,
+        [
+            (f"step {step}", [f"missing-{step}-{ref}" for ref in range(5)])
+            for step in (1, 2, 3)
+        ],
+    )
+
+    assert repair is not None
+    # 15 bad refs against 40 knowledge bases: only the shown valid refs.
+    assert len(built) == MAX_DIAGNOSTIC_NAMES
+    assert "\n... and 7 more.\n" in repair.feedback
+    assert repair.feedback.endswith("\n... and 32 more.")
+    assert repair.codes == frozenset({"unknown_kb_ref"})

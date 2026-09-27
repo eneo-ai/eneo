@@ -60,6 +60,7 @@ from eneo.flows.flow_input_limits import (
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     TRANSCRIPT_FORMAT_UNSUPPORTED_MESSAGE,
+    read_admitted_audio_seconds,
     read_semantic_flow_input_payload,
 )
 from eneo.flows.flow_run_provenance import (
@@ -305,7 +306,12 @@ async def resolve_step_input(
                 max_inline_text_bytes=deps.max_inline_text_bytes,
                 source_preparation=deps.transcript_source_preparation,
                 decode_limits=(
-                    flow_audio_decode_limits(deps.input_limits)
+                    flow_audio_decode_limits(
+                        deps.input_limits,
+                        admitted_seconds=read_admitted_audio_seconds(
+                            run.input_payload_json
+                        ).get(step.step_id),
+                    )
                     if deps.input_limits is not None
                     else None
                 ),

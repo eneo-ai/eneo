@@ -695,10 +695,8 @@ def test_prepared_create_schema_has_a_native_strict_transport_projection() -> No
                         ],
                     }
                 ],
-                "knowledge_refs": [
-                    " knowledge.policy ",
-                    "knowledge.policy",
-                ],
+                # The space has no knowledge base, so none is admissible.
+                "knowledge_refs": [],
                 "citations_requested": False,
             }
         ],
@@ -708,7 +706,15 @@ def test_prepared_create_schema_has_a_native_strict_transport_projection() -> No
         arguments=raw_create_payload,
         tool_schema=tool_schema,
     )
-    parsed = parse_create_flow_intent_arguments(raw_create_payload)
+    step = raw_create_payload["steps"][0]
+    parsed = parse_create_flow_intent_arguments(
+        {
+            **raw_create_payload,
+            "steps": [
+                {**step, "knowledge_refs": [" knowledge.policy ", "knowledge.policy"]}
+            ],
+        }
+    )
     assert parsed.steps[0].knowledge_refs == ["knowledge.policy"]
 
 
@@ -716,7 +722,15 @@ def test_prepared_edit_schema_is_not_native_strict() -> None:
     tool_schema = build_propose_flow_tool_schema(
         resource_catalog=build_ai_builder_resource_catalog(
             available_models=[],
-            available_kbs=[],
+            available_kbs=[
+                {
+                    "id": "kb-1",
+                    "ref": "kb-1",
+                    "name": "Policy",
+                    "display_name": "Policy",
+                    "description": "",
+                }
+            ],
         ),
         current_steps=[],
     )

@@ -109,7 +109,6 @@ from eneo.flows.step_lineage import (
     existing_step_order_from_ref,
     existing_step_ref_for_order,
 )
-from eneo.main.exceptions import BadRequestException
 
 _RUNTIME_STEP_ALIAS_PATTERN = re.compile(r"\{\{\s*step_(\d+)(\.[^{}]+?)\s*\}\}")
 _RUNTIME_STEP_REF_PATTERN = re.compile(r"^step_(\d+)$")
@@ -267,7 +266,10 @@ def compile_edit_proposal(
     if revision_spec is not None and [
         step.existing_step_ref for step in revision_spec.steps
     ] != [step.existing_step_ref for step in base_spec.steps]:
-        raise BadRequestException("The revision must preserve the saved step sequence.")
+        raise AIBuilderBadRequestException(
+            "The revision must preserve the saved step sequence.",
+            code=AIBuilderErrorCode.BAD_REQUEST,
+        )
     mutation_scope: EditMutationScope | None = None
     if revision_spec is not None:
         proposal, mutation_scope = _expand_saved_step_proposal(
@@ -461,7 +463,10 @@ def _expand_saved_step_proposal(
     modifications: list[ModifyExistingStep] = []
     for step in proposal.steps:
         if not isinstance(step, ModifyExistingStep):
-            raise BadRequestException("A selected-step edit must not add steps.")
+            raise AIBuilderBadRequestException(
+                "A selected-step edit must not add steps.",
+                code=AIBuilderErrorCode.BAD_REQUEST,
+            )
         modifications.append(step)
     current_refs = [
         step.existing_step_ref

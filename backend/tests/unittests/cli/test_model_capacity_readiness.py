@@ -6,6 +6,7 @@ import pytest
 from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.spaces.space_factory import SpaceFactory
 from eneo.tenants.tenant import TenantInDB
+from tests.flow_snapshot_fixtures import assistant_snapshot
 
 NOW = datetime(2026, 9, 16, tzinfo=timezone.utc)
 
@@ -135,8 +136,7 @@ def version(owner, flow_id, assistant_ids, number=1, modes=None):
         description="private content",
         metadata_json=None,
         steps=[
-            dict(
-                step_id=str(uuid4()),
+            {
                 **FlowStep(
                     id=uuid4(),
                     assistant_id=aid,
@@ -146,7 +146,10 @@ def version(owner, flow_id, assistant_ids, number=1, modes=None):
                     output_type="text",
                     output_mode=modes[i] if modes else "pass_through",
                 ).model_dump(mode="json"),
-            )
+                "step_id": str(uuid4()),
+                # Published definitions carry the v2 execution snapshot.
+                "assistant_snapshot": assistant_snapshot(aid),
+            }
             for i, aid in enumerate(assistant_ids)
         ],
     )
@@ -345,6 +348,11 @@ async def test_database_failure_closes_and_does_not_expose_credentials(
     import sys
     from types import ModuleType, SimpleNamespace
 
+    # Load the report's repository before the stub config replaces the real
+    # one: importing it evaluates settings, and a first import under the stub
+    # fails before the database is touched, so the test would depend on
+    # whether an earlier test in this worker had imported it.
+    import eneo.cli.model_capacity_readiness_repo  # noqa: F401
     from eneo.cli.model_capacity_readiness import _run_database
 
     class Manager:

@@ -12,7 +12,9 @@ from eneo.flows.flow_run_input_envelope import (
     FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS,
     FlowRunInputEnvelopePatch,
     build_initial_run_input_envelope,
+    read_admitted_audio_seconds,
     read_semantic_flow_input_payload,
+    with_admitted_audio_seconds,
 )
 from eneo.flows.flow_run_payload_validation import reject_reserved_input_payload_keys
 from eneo.flows.runtime.step_input_resolution import resolve_input_source_text
@@ -100,3 +102,20 @@ def test_reserved_input_payload_keys_are_rejected_and_stripped(
     )
 
     assert resolved == '{"case_id": "A-123"}'
+
+
+def test_the_run_keeps_the_limit_each_audio_step_was_admitted_under() -> None:
+    step_id = uuid4()
+
+    payload = with_admitted_audio_seconds(
+        build_initial_run_input_envelope(
+            normalized_inline_payload=None, flow_version=1
+        ),
+        {step_id: 18_000},
+    )
+
+    assert payload["step_inputs"] == {
+        str(step_id): {"audio_max_duration_seconds": 18_000}
+    }
+    assert read_admitted_audio_seconds(payload) == {step_id: 18_000}
+    assert read_admitted_audio_seconds(None) == {}

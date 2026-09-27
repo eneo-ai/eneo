@@ -1300,7 +1300,7 @@ A recorder that starts a new file during a long meeting, for example every 20 mi
 }
 ```
 
-Send the flag only when the run contract's `transcription.single_recording` is `true`, which it is for every flow that transcribes audio. List the parts in recording order; a break between two parts, such as a paused meeting, is fine. Set `single_recording` only when every file of the step comes from the same recording; separately recorded or uploaded files stay separate. The setting takes effect when the run labels speakers with the external speaker service and the step has more than one file; otherwise each part is transcribed on its own, as without it. Either way the parts together must fit within the step's `max_recording_seconds`, and a longer recording fails its transcription step with `typed_io_audio_exceeds_limit`. Each part keeps its own place in the transcript, so playback, corrections and regeneration work per file as before. Only audio steps accept it; other steps receive `400 flow_run_single_recording_requires_audio_step`. It is part of the request's idempotency fingerprint, and a retry keeps it. A step result reports it as `runtime_input_single_recording`, so a new run started with the same files can send it again.
+Send the flag only when the run contract's `transcription.single_recording` is `true`, which it is for every flow that transcribes audio. List the parts in recording order; a break between two parts, such as a paused meeting, is fine. Set `single_recording` only when every file of the step comes from the same recording; separately recorded or uploaded files stay separate. The setting takes effect when the run labels speakers with the external speaker service and the step has more than one file; otherwise each part is transcribed on its own, as without it. Either way the parts together must fit within the step's `max_recording_seconds`: creating the run refuses a longer recording with `400 flow_run_audio_exceeds_limit` before the run is accepted, so keep the recording on the device until the run is created. Each part keeps its own place in the transcript, so playback, corrections and regeneration work per file as before. Only audio steps accept it; other steps receive `400 flow_run_single_recording_requires_audio_step`. It is part of the request's idempotency fingerprint, and a retry keeps it. A step result reports it as `runtime_input_single_recording`, so a new run started with the same files can send it again.
 
 A recorder reads the recording's length from the audio step in `steps_requiring_input`:
 
@@ -1308,6 +1308,8 @@ A recorder reads the recording's length from the audio step in `steps_requiring_
 - `recording_part_seconds`: the part length at which the step's `max_files` slots hold a recording of `max_recording_seconds`. Start a new part at this length, or earlier when a part nears `max_duration_seconds` (one file) or `max_file_size_bytes`.
 
 Contracts from older Eneo versions lack both fields. There, treat `max_duration_seconds` as the limit for the parts of one recording together.
+
+Eneo measures every audio upload by decoding it, as the run's transcription will, and refuses it before keeping it: `400 flow_run_audio_exceeds_limit` when it is longer than the step's limit, `400 flow_run_audio_unreadable` when the audio cannot be read, and `503 flow_run_audio_measurement_busy` when it cannot measure the file in time (upload it again shortly). Creating a run holds every audio file, and the parts of one recording together, to the limit as it is then, and the run keeps the limit it was accepted under for its transcription. A file uploaded before Eneo measured audio at upload is refused with `400 flow_run_audio_length_unknown`; upload it again.
 
 ### Show live text while recording
 
@@ -1905,6 +1907,7 @@ Structured output uses the same 8 MiB ceiling, measured as serialized JSON inclu
 | `TASK_EXECUTION_TIMEOUT_SECONDS` | 28,800 s (8 hours) | One worker invocation, shared by all steps; review pauses and requeues start a new invocation |
 | `FLOW_AUDIO_MAX_DURATION_SECONDS` | 18,000 s (5 hours) | Duration of each decoded audio input |
 | `FLOW_AUDIO_MAX_DECODED_BYTES` | 2,147,483,648 (2 GiB) | Decoded audio size, independently of compressed upload size |
+| `FLOW_AUDIO_MEASUREMENT_TIMEOUT_SECONDS` | 600 s | Waiting for and decoding one audio upload to measure it; past it the upload gets `503 flow_run_audio_measurement_busy`. The run contract's `runtime_upload_policy.response_timeout_seconds` is the longer of this and `FLOW_PDF_EXTRACTION_TIMEOUT_SECONDS`, plus 60 s |
 | `FLOW_MAPPED_STEP_MAX_PROVIDER_CALLS_DEFAULT` | 1000 | Provider calls per mapped step, including the native-JSON fallback reserve |
 | `FLOW_PDF_MAX_PAGES` | 2000 | Pages in each PDF extracted for a Flow |
 | `FLOW_PDF_MAX_EXTRACTED_BYTES` | 134,217,728 (128 MiB) | Extracted UTF-8 text, including page markers |

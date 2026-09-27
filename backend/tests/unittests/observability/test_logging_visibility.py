@@ -17,7 +17,6 @@ import pytest
 from eneo.flows.ai_builder import (
     ai_builder_conversation_compaction,
     ai_builder_create_compiler,
-    ai_builder_new_step_compiler,
     ai_builder_schema_evidence,
     ai_builder_source_reader_contracts,
 )
@@ -47,7 +46,6 @@ def test_import_leaves_pre_registered_loggers_at_their_own_level(name: str):
     [
         ai_builder_conversation_compaction,
         ai_builder_create_compiler,
-        ai_builder_new_step_compiler,
         ai_builder_schema_evidence,
         ai_builder_source_reader_contracts,
         assembly_create,

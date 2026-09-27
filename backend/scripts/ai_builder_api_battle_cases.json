@@ -2890,6 +2890,7 @@
       "prompt": "Jag vill bygga ett flöde där jag laddar upp flera dokument och får en tydlig PDF-rapport tillbaka.",
       "expected": {
         "allow_question_instead_of_plan": true,
+        "necessary_decisions": ["report_disposition"],
         "expected_question_event_count": 1,
         "max_question_event_count": 1,
         "expected_question_event_ids": [
@@ -5437,6 +5438,14 @@
         "min_json_steps": 1,
         "max_all_previous_steps": 0,
         "forbid_primary_material_form_fields": true,
+        "expected_named_results": [
+          {"name": "service_reference", "parent": [], "declared_shape": null},
+          {"name": "submission_reference", "parent": [], "declared_shape": null},
+          {"name": "applicant_channels", "parent": [], "declared_shape": null},
+          {"name": "attachment_references", "parent": [], "declared_shape": "array"},
+          {"name": "submitted_fields", "parent": [], "declared_shape": "object"},
+          {"name": "routing_issues", "parent": [], "declared_shape": "array"}
+        ],
         "expected_input_contract_schema": {
           "type": "object"
         },
@@ -5987,6 +5996,15 @@
         "min_json_steps": 1,
         "max_all_previous_steps": 0,
         "forbid_primary_material_form_fields": true,
+        "expected_named_results": [
+          {"name": "validation_status", "parent": [], "declared_shape": null},
+          {"name": "violations", "parent": [], "declared_shape": "array"},
+          {"name": "normalized_payload", "parent": [], "declared_shape": "object"},
+          {"name": "rule_reference", "parent": ["violations"], "declared_shape": null},
+          {"name": "field_path", "parent": ["violations"], "declared_shape": null},
+          {"name": "observed_value", "parent": ["violations"], "declared_shape": null},
+          {"name": "message", "parent": ["violations"], "declared_shape": null}
+        ],
         "expected_output_contract_schema": {
           "type": "object",
           "properties": {
@@ -11611,6 +11629,54 @@
       "domain": "municipal_permit",
       "cohorts": ["edit_reference"],
       "edit": {"seed_flow_fixture": "edit_chain_10.json", "target_step_order": 3}
+    },
+    {
+      "id": "scripted_correction_removes_a_named_result",
+      "complexity": "hard",
+      "domain": "municipality_integrations",
+      "prompt": "Flödet tar emot JSON från en kommunal integration och kontrollerar det mot reglerna som skickas med i samma körning. Returnera JSON med validation_status, violations[], normalized_payload{} och debug_trace. Varje violation ska ha rule_reference, field_path, observed_value och message.",
+      "script": {"kind": "correction", "message": "Ändring: debug_trace ska inte finnas med i resultatet. Allt annat gäller som tidigare."},
+      "expected": {
+        "terminal_output_type": "json",
+        "expected_named_results": [
+          {"name": "validation_status", "parent": [], "declared_shape": null},
+          {"name": "violations", "parent": [], "declared_shape": "array"},
+          {"name": "normalized_payload", "parent": [], "declared_shape": "object"},
+          {"name": "rule_reference", "parent": ["violations"], "declared_shape": null},
+          {"name": "field_path", "parent": ["violations"], "declared_shape": null},
+          {"name": "observed_value", "parent": ["violations"], "declared_shape": null},
+          {"name": "message", "parent": ["violations"], "declared_shape": null}
+        ],
+        "expected_removals": ["debug_trace"]
+      },
+      "cohorts": ["scripted", "json"]
+    },
+    {
+      "id": "scripted_decline_keeps_the_named_result",
+      "complexity": "hard",
+      "domain": "municipality_procurement",
+      "prompt": "Vid körning laddas flera anbud upp. Skapa JSON med bids[] och requirements[]. Jag är osäker på om requirements behövs.",
+      "script": {"kind": "decline"},
+      "expected": {
+        "terminal_output_type": "json",
+        "expected_named_results": [
+          {"name": "bids", "parent": [], "declared_shape": "array"},
+          {"name": "requirements", "parent": [], "declared_shape": "array"}
+        ]
+      },
+      "cohorts": ["scripted", "protocol"]
+    },
+    {
+      "id": "scripted_stale_replay_is_refused",
+      "complexity": "easy",
+      "domain": "municipality_reports",
+      "prompt": "Jag vill ha ett flöde som gör en PDF-rapport av de dokument jag laddar upp varje månad.",
+      "script": {"kind": "stale_replay"},
+      "expected": {
+        "allow_question_instead_of_plan": true,
+        "necessary_decisions": ["report_disposition"]
+      },
+      "cohorts": ["scripted", "protocol"]
     }
   ]
 }

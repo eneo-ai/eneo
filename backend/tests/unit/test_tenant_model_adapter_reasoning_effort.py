@@ -108,6 +108,9 @@ def reasoning_route(monkeypatch):
         return await getattr(adapter, method)(
             context=SimpleNamespace(),
             model_kwargs=model_kwargs,
+            # The cap arithmetic here uses toy limits below the default
+            # useful-output reserve; that gate is covered elsewhere.
+            useful_output_reserve_tokens=1,
             api_base="https://provider.example/v1",
             num_retries=0,
             max_retries=0,

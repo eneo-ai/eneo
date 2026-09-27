@@ -9,6 +9,7 @@ from typing import Callable
 
 from fastapi import UploadFile
 
+from eneo.files import audio
 from eneo.files.audio import AudioMimeTypes
 from eneo.files.file_models import FileContentVariant, FileType
 from eneo.files.file_size_service import FileSizeService
@@ -62,6 +63,8 @@ class PreparedFileUpload:
     display_media_type: str
     contents: tuple[PendingFileContent, ...]
     derivatives: tuple["PreparedFileUpload", ...] = ()
+    # Audio measured at upload: its decoded length, or None.
+    audio_seconds: float | None = None
 
 
 async def _path_chunks(filepath: Path) -> AsyncGenerator[bytes]:
@@ -74,6 +77,20 @@ async def _bytes_chunks(payload: bytes) -> AsyncGenerator[bytes]:
     view = memoryview(payload)
     for start in range(0, len(view), _FILE_STREAM_CHUNK_BYTES):
         yield bytes(view[start : start + _FILE_STREAM_CHUNK_BYTES])
+
+
+async def _measure_audio_length(
+    filepath: Path, limits: audio.AudioDecodeLimits
+) -> float:
+    """The audio's decoded length, as the run's transcription decodes it. The
+    decode stops at the limits and refuses what passes them before the file is
+    kept; a file the decoder cannot read is refused too."""
+    try:
+        return await audio.bounded_measurement(
+            lambda: audio.measure_duration(str(filepath), limits=limits)
+        )
+    except ValueError as exc:
+        raise audio.AudioUnreadableError(str(exc)) from exc
 
 
 class FileProtocol:
@@ -146,6 +163,7 @@ class FileProtocol:
         max_size: int | None = None,
         limit_name: str | None = None,
         pdf_limits: PdfExtractionLimits | None = None,
+        audio_limits: audio.AudioDecodeLimits | None = None,
     ) -> AsyncGenerator[PreparedFileUpload]:
         """Classify one upload into exact and derived content variants.
 
@@ -228,6 +246,11 @@ class FileProtocol:
                     file_type=file_type,
                     display_media_type=media_type,
                     contents=(original,),
+                    audio_seconds=(
+                        await _measure_audio_length(filepath, audio_limits)
+                        if audio_limits is not None
+                        else None
+                    ),
                 )
                 return
 

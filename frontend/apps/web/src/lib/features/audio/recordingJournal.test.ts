@@ -72,7 +72,7 @@ describe("RecordingJournal", () => {
     for (let chunk = 0; chunk <= JOURNAL_MAX_PENDING_CHUNKS; chunk += 1) {
       journal.append("p1", new Blob([String(chunk)]));
     }
-    expect(degraded).toHaveBeenCalledExactlyOnceWith("failed");
+    expect(degraded).toHaveBeenCalledExactlyOnceWith("failed", "p1", "step-1");
     release();
     await journal.commit("p1");
     // The chunks queued before it fell behind are written; none after.
@@ -210,7 +210,7 @@ describe("RecordingJournal", () => {
     journal.append("p1", new Blob(["a"]));
     await journal.commit("p1");
 
-    expect(degraded).toHaveBeenCalledExactlyOnceWith("failed");
+    expect(degraded).toHaveBeenCalledExactlyOnceWith("failed", "p1", "step-1");
     expect(store.beginJournalPart).not.toHaveBeenCalled();
     expect(store.written).toEqual([]);
   });
@@ -225,6 +225,9 @@ describe("RecordingJournal", () => {
     });
 
     expect(store.beginJournalPart).not.toHaveBeenCalled();
-    expect(degraded.mock.calls).toEqual([["unavailable"], ["unavailable"]]);
+    expect(degraded.mock.calls).toEqual([
+      ["unavailable", "p1", "step-1"],
+      ["unavailable", "p2", "step-1"]
+    ]);
   });
 });

@@ -316,6 +316,23 @@ def test_effective_runtime_upload_policy_exposes_client_timeout_formula() -> Non
     assert policy.idle_timeout_seconds == 120
 
 
+def test_upload_policy_gives_the_server_time_to_measure_before_it_answers(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "eneo.flows.flow_input_limits.get_settings",
+        lambda: SimpleNamespace(
+            flow_audio_measurement_timeout_seconds=600,
+            flow_pdf_extraction_timeout_seconds=900,
+        ),
+    )
+
+    policy = effective_runtime_upload_policy()
+
+    # The longer of what the upload request may do before answering, and a minute more.
+    assert policy.response_timeout_seconds == 960
+
+
 @pytest.mark.parametrize(
     "locale,ceiling_word,unlimited_word",
     [
@@ -429,3 +446,22 @@ def test_flow_decode_limits_take_the_tenant_duration_and_the_deployment_bytes(
         FlowInputLimits(file_max_size_bytes=1, audio_max_size_bytes=1)
     )
     assert unset.max_duration_seconds == 18_000
+
+
+def test_a_runs_audio_decodes_under_the_limit_it_was_admitted_under(
+    monkeypatch,
+) -> None:
+    from eneo.flows.flow_input_limits import FlowInputLimits, flow_audio_decode_limits
+
+    monkeypatch.setattr(
+        "eneo.flows.flow_input_limits.get_settings", lambda: _durations(18_000, 28_800)
+    )
+    # The administrator lowered the limit after the run was accepted.
+    lowered = FlowInputLimits(
+        file_max_size_bytes=1, audio_max_size_bytes=1, audio_max_duration_seconds=3_600
+    )
+
+    decode = flow_audio_decode_limits(lowered, admitted_seconds=21_600)
+
+    assert decode.max_duration_seconds == 21_600
+    assert decode.max_decoded_bytes == 2 * 1024**3

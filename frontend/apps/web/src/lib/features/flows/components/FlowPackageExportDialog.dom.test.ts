@@ -21,23 +21,32 @@ afterEach(() => {
 });
 
 describe("FlowPackageExportDialog", () => {
-  it("does not duplicate backend package-id validation in the submit gate", async () => {
+  it("exports a typed package ID in the form export accepts instead of failing", async () => {
+    const exportPackage = vi.fn(async () => exportedPackageWithMcpOmissions());
     render(FlowPackageExportDialog, {
       flow: flow(),
-      eneo: eneo()
+      eneo: eneo(exportPackage)
     });
 
     await fireEvent.click(screen.getByRole("button", { name: m.flow_package_export_button() }));
-    await fireEvent.input(screen.getByLabelText(m.flow_package_package_id()), {
-      target: { value: "Invalid Package" }
-    });
+    const idInput = screen.getByLabelText(m.flow_package_package_id()) as HTMLInputElement;
+    await fireEvent.input(idInput, { target: { value: "Invalid Package" } });
 
+    await fireEvent.blur(idInput);
+    expect(idInput.value).toBe("invalid-package");
+
+    await fireEvent.input(idInput, { target: { value: "RonnyVariant" } });
     const exportButtons = screen.getAllByRole("button", {
       name: m.flow_package_export_button()
     });
     const submitButton = exportButtons[exportButtons.length - 1];
-
     expect((submitButton as HTMLButtonElement).disabled).toBe(false);
+    await fireEvent.click(submitButton);
+
+    expect(exportPackage).toHaveBeenCalledWith(
+      expect.objectContaining({ packageId: "ronnyvariant" })
+    );
+    expect(idInput.value).toBe("ronnyvariant");
   });
 
   it("requires acknowledgement before saving a package with omitted MCP attachments", async () => {

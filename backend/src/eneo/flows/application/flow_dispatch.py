@@ -139,7 +139,9 @@ async def dispatch_flow_run_recoverably_after_commit(
                 now=now,
             )
         if claimed is None:
-            current = await run_repo.get(run_id=run_id, tenant_id=tenant_id)
+            # Another dispatcher (the request's own or the sweep) claimed it.
+            async with session.begin():
+                current = await run_repo.get(run_id=run_id, tenant_id=tenant_id)
             return FlowRunDispatchNotClaimed(run=current)
 
         try:

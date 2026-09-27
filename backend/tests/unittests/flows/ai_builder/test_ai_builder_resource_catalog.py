@@ -4,6 +4,9 @@ from uuid import UUID
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
+    format_resource_resolution_feedback,
+)
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     RESOURCE_DESCRIPTION_MAX_CHARS,
     AIBuilderAvailableKnowledgeBaseResource,
@@ -15,7 +18,6 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     canonicalize_assistant_spec_resources,
     canonicalize_flow_spec_resources,
     collect_flow_spec_resource_bindings,
-    format_resource_resolution_feedback,
     render_resource_reference_block,
 )
 from eneo.flows.assistant_authoring_snapshot import (

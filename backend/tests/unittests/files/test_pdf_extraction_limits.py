@@ -21,7 +21,16 @@ from eneo.files.text import (
 )
 from eneo.main.config import get_settings
 
-_LIMITS = PdfExtractionLimits(max_pages=10, max_extracted_bytes=1024, timeout_seconds=2)
+# A spawned parser re-imports eneo before it reads a page: about 1.6 s on an
+# idle machine and several seconds under a parallel test run. The deadline
+# counts that start-up, so a test that is not about the deadline gets room for
+# it, and a deadline test takes the child's pid from the parent, never from a
+# page the child may not reach in time.
+_LIMITS = PdfExtractionLimits(
+    max_pages=10, max_extracted_bytes=1024, timeout_seconds=60
+)
+_DEADLINE_LIMITS = replace(_LIMITS, timeout_seconds=2)
+_STARTUP_WAIT_SECONDS = 30
 
 
 def _write_pdf(path, page_count):
@@ -103,7 +112,7 @@ def pdf_capacity(monkeypatch):
 
 
 async def _wait_for_parser(path):
-    async with asyncio.timeout(2):
+    async with asyncio.timeout(_STARTUP_WAIT_SECONDS):
         while not path.with_suffix(".pid").exists():
             await asyncio.sleep(0.01)
     return int(path.with_suffix(".pid").read_text())
@@ -113,7 +122,7 @@ async def _wait_for_parser(path):
 async def test_pdf_capacity_serializes_child_processes(tmp_path, pdf_capacity):
     first = _write_pdf(tmp_path / "first.pdf", 1)
     second = _write_pdf(tmp_path / "second.pdf", 1)
-    limits = replace(_LIMITS, timeout_seconds=5)
+    limits = _LIMITS
     context = multiprocessing.get_context("spawn")
     tasks = []
     with patch.object(context, "Process", wraps=context.Process) as spawn:
@@ -228,7 +237,7 @@ async def test_pdf_cancellation_reaps_before_releasing_capacity(tmp_path, pdf_ca
 
 @pytest.mark.asyncio
 async def test_pdf_capacity_wait_consumes_extraction_deadline(
-    tmp_path, pdf_capacity, monkeypatch
+    tmp_path, pdf_capacity, monkeypatch, spawned_pids
 ):
     monkeypatch.setattr(
         TextExtractor, "_extract_pdf_in_child", staticmethod(_hanging_child)
@@ -244,11 +253,11 @@ async def test_pdf_capacity_wait_consumes_extraction_deadline(
     started = time.monotonic()
     try:
         with pytest.raises(PdfExtractionLimitExceeded) as caught:
-            await TextExtractor.extract_from_pdf_async(path, limits=_LIMITS)
+            await TextExtractor.extract_from_pdf_async(path, limits=_DEADLINE_LIMITS)
         assert caught.value.limit == "seconds"
         assert 2 <= caught.value.measured <= time.monotonic() - started < 2.75
         assert caught.value.reason is None
-        pid = int(path.with_suffix(".pid").read_text())
+        [pid] = spawned_pids
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
         assert not pdf_capacity.locked()
@@ -256,10 +265,39 @@ async def test_pdf_capacity_wait_consumes_extraction_deadline(
         await release
 
 
+class _PidRecordingProcess(multiprocessing.get_context("spawn").Process):
+    """A spawn process that reports its pid the moment it is started."""
+
+    started_pids: list[int] = []
+    pid_path: Path | None = None
+
+    def start(self):
+        super().start()
+        assert self.pid is not None
+        type(self).started_pids.append(self.pid)
+        if type(self).pid_path is not None:
+            type(self).pid_path.write_text(str(self.pid))
+
+
+def record_spawned_pids(monkeypatch) -> list[int]:
+    """Collect the pid of every spawned parser as the parent starts it."""
+    monkeypatch.setattr(_PidRecordingProcess, "started_pids", [])
+    monkeypatch.setattr(
+        multiprocessing.get_context("spawn"), "Process", _PidRecordingProcess
+    )
+    return _PidRecordingProcess.started_pids
+
+
+@pytest.fixture
+def spawned_pids(monkeypatch):
+    return record_spawned_pids(monkeypatch)
+
+
 def _hanging_page(page):
     Path(page.pdf.stream.name).with_suffix(".pid").write_text(str(os.getpid()))
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    time.sleep(30)
+    # Longer than any wait below, so only a deadline ends it.
+    time.sleep(120)
     return "late"
 
 
@@ -274,35 +312,43 @@ def _crashed_child(*args):
 
 
 def _hung_supervisor(path):
+    _PidRecordingProcess.pid_path = path.with_suffix(".child")
     with (
         patch.object(TextExtractor, "_extract_pdf_in_child", _hanging_child),
+        patch.object(
+            multiprocessing.get_context("spawn"), "Process", _PidRecordingProcess
+        ),
         patch(
             "eneo.files.text.TemporaryDirectory",
             partial(TemporaryDirectory, dir=path.parent),
         ),
     ):
-        asyncio.run(TextExtractor.extract_from_pdf_async(path, limits=_LIMITS))
+        asyncio.run(TextExtractor.extract_from_pdf_async(path, limits=_DEADLINE_LIMITS))
 
 
 def test_pdf_child_deadline_survives_killed_supervisor(tmp_path):
     path = _write_pdf(tmp_path / "orphan.pdf", 1)
-    pid_path = path.with_suffix(".pid")
+    pid_path = path.with_suffix(".child")
     supervisor = multiprocessing.get_context("spawn").Process(
         target=_hung_supervisor, args=(path,)
     )
     child_pid = None
     try:
         supervisor.start()
-        deadline = time.monotonic() + 2
-        while not pid_path.exists() and time.monotonic() < deadline:
+        deadline = time.monotonic() + _STARTUP_WAIT_SECONDS
+        while child_pid is None and time.monotonic() < deadline:
+            with suppress(FileNotFoundError, ValueError):
+                child_pid = int(pid_path.read_text())
             time.sleep(0.01)
-        assert pid_path.exists(), "parser did not start"
-        child_pid = int(pid_path.read_text())
+        assert child_pid is not None, "supervisor did not start the parser"
         supervisor.kill()
         supervisor.join(1)
         assert not supervisor.is_alive()
 
-        deadline = time.monotonic() + 2.5
+        # The parser hangs for 120 s; only its own deadline (2 s after the
+        # supervisor began, or at once if its start-up ran past that) ends it
+        # sooner. The bound leaves room for a slow start-up under load.
+        deadline = time.monotonic() + _STARTUP_WAIT_SECONDS
         while time.monotonic() < deadline:
             try:
                 os.kill(child_pid, 0)
@@ -368,7 +414,9 @@ async def test_pdf_at_page_and_byte_limits_is_accepted(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_hanging_pdf_parser_is_killed_and_reaped(tmp_path, monkeypatch):
+async def test_hanging_pdf_parser_is_killed_and_reaped(
+    tmp_path, monkeypatch, spawned_pids
+):
     monkeypatch.setattr(
         TextExtractor, "_extract_pdf_in_child", staticmethod(_hanging_child)
     )
@@ -376,13 +424,13 @@ async def test_hanging_pdf_parser_is_killed_and_reaped(tmp_path, monkeypatch):
     started = time.monotonic()
 
     with pytest.raises(PdfExtractionLimitExceeded) as caught:
-        await TextExtractor.extract_from_pdf_async(path, limits=_LIMITS)
+        await TextExtractor.extract_from_pdf_async(path, limits=_DEADLINE_LIMITS)
 
     elapsed = time.monotonic() - started
     assert caught.value.limit == "seconds"
     assert caught.value.ceiling == 2
     assert 2 <= caught.value.measured <= elapsed < 3.5
-    pid = int(path.with_suffix(".pid").read_text())
+    [pid] = spawned_pids
     assert all(child.pid != pid for child in multiprocessing.active_children())
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)

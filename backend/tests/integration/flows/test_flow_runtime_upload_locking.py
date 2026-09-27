@@ -380,6 +380,43 @@ async def test_runtime_upload_binding_lock_blocks_concurrent_delete(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_runtime_upload_keeps_the_audio_length_measured_at_upload(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+) -> None:
+    upload = await _create_runtime_upload(
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        admin_user=admin_user,
+    )
+
+    async with sessionmanager.session() as session, session.begin():
+        repo = FlowRuntimeUploadRepository(session=session)
+        # Measured before lengths were kept: unknown, so absent.
+        assert await repo.audio_seconds_by_file(file_ids=[upload.file_id]) == {}
+        await session.execute(
+            sa.delete(FlowRuntimeUploadedFiles).where(
+                FlowRuntimeUploadedFiles.file_id == upload.file_id
+            )
+        )
+        await repo.create(
+            file_id=upload.file_id,
+            flow_id=upload.flow_id,
+            tenant_id=upload.tenant_id,
+            uploaded_for_step_id=uuid4(),
+            principal=upload.principal,
+            audio_seconds=1_799.5,
+        )
+        assert await repo.audio_seconds_by_file(file_ids=[upload.file_id, uuid4()]) == {
+            upload.file_id: 1_799.5
+        }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_runtime_upload_bind_first_keeps_source_during_run_purge(
     db_container,
     completion_model_factory,

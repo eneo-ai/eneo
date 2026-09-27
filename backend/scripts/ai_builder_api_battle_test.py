@@ -436,6 +436,27 @@ class CaseSource:
     url: str
 
 
+# A selection of protocol cases only: nothing ran, and that is not a pass.
+NOT_SUPPORTED_ON_PARENT_EXIT = 3
+# Scripted user acts. A correction is ordinary text any build accepts. Decline
+# and stale replay exercise the displayed-instance protocol (design §2), which
+# the parent does not implement: those cases are reported
+# `not_supported_on_parent` and never run until the product carries the
+# protocol, so a parent can never score them as passes.
+CaseScriptKind = Literal["correction", "decline", "stale_replay"]
+_PARENT_UNSUPPORTED_SCRIPT_KINDS: frozenset[str] = frozenset(
+    {"decline", "stale_replay"}
+)
+
+
+@dataclass(frozen=True, slots=True)
+class CaseScript:
+    """One scripted user act; a correction answers the first card with `message`."""
+
+    kind: CaseScriptKind
+    message: str | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class BattleCase:
     case_id: str
@@ -455,6 +476,7 @@ class BattleCase:
     edit: EditCase | None = None
     execution: CaseExecution | None = None
     source: CaseSource | None = None
+    script: CaseScript | None = None
 
     @property
     def executes(self) -> bool:
@@ -465,6 +487,17 @@ class BattleCase:
         """The fixtures the run uploads; runtime lineage is proven against these."""
 
         return self.execution.inputs.files if self.execution is not None else ()
+
+
+def _parent_unsupported_case_ids(cases: Sequence[BattleCase]) -> list[str]:
+    """The protocol cases a run reports `not_supported_on_parent` and never runs."""
+
+    return [
+        case.case_id
+        for case in cases
+        if case.script is not None
+        and case.script.kind in _PARENT_UNSUPPORTED_SCRIPT_KINDS
+    ]
 
 
 def _edit_contract(edit: EditCase) -> JsonObject:
@@ -503,6 +536,13 @@ def _source_contract(source: CaseSource) -> JsonObject:
     return {"catalogue_id": source.catalogue_id, "url": source.url}
 
 
+def _script_contract(script: CaseScript) -> JsonObject:
+    return {
+        "kind": script.kind,
+        **({"message": script.message} if script.message is not None else {}),
+    }
+
+
 def _case_record(case: BattleCase, *, file_ids: Sequence[str]) -> JsonObject:
     """The case as a bundle records it; `_observed_case_contract_payload` projects it back onto the contract."""
     record: JsonObject = {
@@ -526,6 +566,8 @@ def _case_record(case: BattleCase, *, file_ids: Sequence[str]) -> JsonObject:
     }
     if case.source is not None:
         record["source"] = _source_contract(case.source)
+    if case.script is not None:
+        record["script"] = _script_contract(case.script)
     if case.execution is not None:
         record["execution"] = _execution_contract(case.execution)
     return record
@@ -563,6 +605,9 @@ def _case_contract_payload(case: BattleCase) -> JsonObject:
     }
     if case.source is not None:
         payload["source"] = _source_contract(case.source)
+    # Only a scripted case carries the key, so every other contract hash holds.
+    if case.script is not None:
+        payload["script"] = _script_contract(case.script)
     if case.edit is not None:
         payload["edit"] = _edit_contract(case.edit)
     if case.execution is not None:
@@ -616,6 +661,9 @@ def _observed_case_contract_payload(case: Mapping[str, object]) -> JsonObject:
     raw_source = case.get("source")
     if isinstance(raw_source, Mapping):
         payload["source"] = dict(cast(Mapping[str, Any], raw_source))
+    raw_script = case.get("script")
+    if isinstance(raw_script, Mapping):
+        payload["script"] = dict(cast(Mapping[str, Any], raw_script))
     raw_edit = case.get("edit")
     if isinstance(raw_edit, Mapping):
         edit = cast(Mapping[str, Any], raw_edit)
@@ -1131,6 +1179,27 @@ def main() -> int:
     case: BattleCase | None = None
     try:
         cases = _cases_from_args(args)
+        not_supported_on_parent = _parent_unsupported_case_ids(cases)
+        for case_id in not_supported_on_parent:
+            print(f"{case_id}: not_supported_on_parent (a protocol case; not run)")
+        cases = [
+            selected
+            for selected in cases
+            if selected.case_id not in not_supported_on_parent
+        ]
+        if not cases:
+            refusal_path = _write_not_supported_refusal(
+                output_dir=output_dir,
+                base_url=config.base_url,
+                space_id=args.space_id,
+                case_ids=not_supported_on_parent,
+            )
+            print(
+                "every selected case is not_supported_on_parent; nothing ran. "
+                f"receipt: {refusal_path}",
+                file=sys.stderr,
+            )
+            return NOT_SUPPORTED_ON_PARENT_EXIT
         if getattr(args, "seed_calibration", False):
             return _run_seed_calibration(
                 cases=cases, config=config, args=args, output_dir=output_dir
@@ -1146,6 +1215,7 @@ def main() -> int:
                     if args.run_suite or args.sealed_targeted_suite
                     else None
                 ),
+                not_supported_on_parent=not_supported_on_parent,
             )
         case = cases[0]
         cases_path = _cases_path_from_args(args)
@@ -1610,6 +1680,7 @@ _CASE_KEYS = frozenset(
         "cohorts",
         "edit",
         "source",
+        "script",
     }
 )
 _EXPECTATION_KEYS = frozenset(
@@ -1622,6 +1693,7 @@ _EXPECTATION_KEYS = frozenset(
         "expected_input_field_contracts",
         "expected_key_decisions",
         "expected_leaf_output_field_groups",
+        "expected_named_results",
         "expected_output_contract_schema",
         "expected_output_modes",
         "expected_persisted_named_results",
@@ -1629,6 +1701,7 @@ _EXPECTATION_KEYS = frozenset(
         "expected_primary_input_type",
         "expected_question_event_count",
         "expected_question_event_ids",
+        "expected_removals",
         "preferred_question_event_ids",
         "allowed_question_event_ids",
         "expected_first_pass_authoring",
@@ -1640,6 +1713,7 @@ _EXPECTATION_KEYS = frozenset(
         "forbid_primary_material_form_fields",
         "forbidden_form_field_groups",
         "forbidden_assumption_topics",
+        "forbidden_named_results",
         "forbidden_question_event_ids",
         "max_all_previous_steps",
         "max_post_json_text_cleanup_steps",
@@ -1651,6 +1725,7 @@ _EXPECTATION_KEYS = frozenset(
         "min_question_event_count",
         "min_source_ref_steps",
         "min_steps",
+        "necessary_decisions",
         "terminal_document_output_mode",
         "terminal_output_type",
         "terminal_output_types",
@@ -1769,6 +1844,30 @@ def _case_source(raw: object, *, path: Path, case_id: str) -> CaseSource | None:
     if not _is_https_url(url):
         raise ValueError(f"{path} case {case_id} source url must be an https URL.")
     return CaseSource(catalogue_id=catalogue_id, url=url)
+
+
+def _case_script(raw: object, *, path: Path, case_id: str) -> CaseScript | None:
+    if raw is None:
+        return None
+    owner = f"{path} case {case_id}.script"
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"{owner} must be an object.")
+    raw = cast(Mapping[str, object], raw)
+    kind = raw.get("kind")
+    if kind == "correction":
+        message = raw.get("message")
+        if set(raw) != {"kind", "message"} or not (
+            isinstance(message, str) and message.strip()
+        ):
+            raise ValueError(f"{owner} correction needs exactly kind and a message.")
+        return CaseScript(kind="correction", message=message)
+    if kind in _PARENT_UNSUPPORTED_SCRIPT_KINDS and set(raw) == {"kind"}:
+        return CaseScript(kind=cast(CaseScriptKind, kind))
+    raise ValueError(
+        f"{owner} must be a correction with a message, or a bare "
+        + " or ".join(sorted(_PARENT_UNSUPPORTED_SCRIPT_KINDS))
+        + "."
+    )
 
 
 def _read_cases_file(path: Path) -> list[BattleCase]:
@@ -1933,7 +2032,19 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             edit=edit,
             execution=execution,
             source=_case_source(raw_case.get("source"), path=path, case_id=case_id),
+            script=_case_script(
+                cast(Mapping[str, object], raw_case).get("script"),
+                path=path,
+                case_id=case_id,
+            ),
         )
+        if "expected_removals" in (case.expected or {}) and (
+            case.script is None or case.script.kind != "correction"
+        ):
+            raise ValueError(
+                f"{path} case {case_id}.expected_removals needs a correction script "
+                "to remove them."
+            )
         if case.edit is not None and case.file_ids:
             raise ValueError(
                 f"{path} case {case_id} is an edit case and takes fixtures, "
@@ -2420,6 +2531,7 @@ def _validate_release_expectations(
                 f"{path} case {case_id}.expected_key_decisions has duplicate "
                 "topics (case-insensitive); a topic names one decision."
             )
+    _validate_named_result_gold(path, case_id, expected)
     first_pass = expected.get("expected_first_pass_authoring")
     if first_pass is not None:
         _validate_first_pass_authoring_expectation(path, case_id, first_pass)
@@ -2477,6 +2589,68 @@ def _validate_release_expectations(
                 f"expected_runtime_evidence.{key}",
                 runtime_evidence.get(key),
             )
+
+
+def _validate_named_result_gold(
+    path: Path,
+    case_id: str,
+    expected: Mapping[str, object],
+) -> None:
+    """The frozen gold the card is scored against before its confirmation.
+
+    Every expected result states all three facts, the shape included: null is
+    the gold for a name declared without a shape, never "unknown".
+    """
+
+    owner = f"{path} case {case_id}"
+    for key in ("forbidden_named_results", "expected_removals", "necessary_decisions"):
+        values = expected.get(key)
+        if values is None:
+            continue
+        items = cast(list[object], values) if isinstance(values, list) else None
+        strings = _clean_strings(items)
+        if (
+            items is None
+            or len(strings) != len(items)
+            or len(set(strings)) != len(strings)
+        ):
+            raise ValueError(
+                f"{owner}.{key} must be a list of unique, non-empty strings."
+            )
+    gold = expected.get("expected_named_results")
+    if gold is None:
+        return
+    if not isinstance(gold, list) or not gold:
+        raise ValueError(f"{owner}.expected_named_results must be a non-empty list.")
+    entries = cast(list[object], gold)
+    locations: set[tuple[str, str]] = set()
+    for index, entry in enumerate(entries):
+        where = f"{owner}.expected_named_results[{index}]"
+        if not isinstance(entry, Mapping):
+            raise ValueError(f"{where} must be an object.")
+        entry = cast(Mapping[str, object], entry)
+        if set(entry) != {"name", "parent", "declared_shape"}:
+            raise ValueError(f"{where} needs exactly name, parent and declared_shape.")
+        name, parent = entry["name"], entry["parent"]
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"{where}.name must be a non-empty string.")
+        segments = cast(list[object], parent) if isinstance(parent, list) else None
+        if parent != _UNPLACED_PARENT and (
+            segments is None or len(_clean_strings(segments)) != len(segments)
+        ):
+            raise ValueError(
+                f"{where}.parent must be a list of segments ([] is the root) "
+                f"or {_UNPLACED_PARENT!r}."
+            )
+        shape = entry["declared_shape"]
+        if not (
+            shape is None or (isinstance(shape, str) and shape in _DECLARED_SHAPES)
+        ):
+            raise ValueError(f"{where}.declared_shape must be array, object or null.")
+        location = (name.casefold(), json.dumps(_folded_parent(entry["parent"])))
+        if location in locations:
+            raise ValueError(f"{where} repeats a name at the same parent.")
+        locations.add(location)
 
 
 def _validate_first_pass_authoring_expectation(
@@ -2915,6 +3089,34 @@ def _suite_run_context(args: argparse.Namespace) -> JsonObject:
     }
 
 
+def _write_not_supported_refusal(
+    *,
+    output_dir: Path,
+    base_url: str,
+    space_id: str | None,
+    case_ids: Sequence[str],
+) -> Path:
+    """Leave durable evidence that a selection held only protocol cases.
+
+    Nothing was acquired, so there is no suite receipt to carry the list; a
+    run that silently did nothing must not read as one that passed.
+    """
+    started_at = time.strftime("%Y%m%dT%H%M%S")
+    path = output_dir / f"not-supported-on-parent-{started_at}.json"
+    _write_json_exclusive(
+        path,
+        {
+            "artifact_mode": "not_supported_on_parent_refusal",
+            "created_at": started_at,
+            "app_version": LOCAL_APP_VERSION,
+            "base_url": base_url,
+            "space_id": space_id,
+            "not_supported_on_parent": list(case_ids),
+        },
+    )
+    return path
+
+
 def _write_capacity_refusal(
     *,
     output_dir: Path,
@@ -3218,6 +3420,7 @@ def _run_suite(
     args: argparse.Namespace,
     output_dir: Path,
     acquisition_contract: AcquisitionContract | None = None,
+    not_supported_on_parent: Sequence[str] = (),
 ) -> int:
     if args.repetitions < 1:
         raise ValueError("--repetitions must be >= 1.")
@@ -3526,6 +3729,8 @@ def _run_suite(
         "run_context": run_context,
         "results": results,
         "observation_summary": _suite_observation_summary(results),
+        "decision_scores": _suite_decision_scores(results),
+        "not_supported_on_parent": list(not_supported_on_parent),
         "outcome_class_summary": _suite_outcome_summary(results),
         "reliability": _suite_reliability_summary(results),
     }
@@ -4688,19 +4893,59 @@ def _run_case_session(
     )
     interactions.append(first)
 
-    confirmed_requirement_versions: set[str] = set()
+    answered_requirement_versions: set[str] = set()
+    pending_correction = (
+        case.script.message
+        if case.script is not None and case.script.kind == "correction"
+        else None
+    )
     while (
         interactions[-1].get("plan_id") is None
         and len(interactions) < MAX_INTERACTIONS_PER_CASE
     ):
         current = interactions[-1]
         if (
+            pending_correction is not None
+            and (corrected_card := _latest_requirements_summary(current)) is not None
+        ):
+            # The scripted correction answers the first card as ordinary
+            # text; only a later card is judged and confirmed.
+            answered_requirement_versions.add(
+                str(corrected_card.get("requirements_version") or "")
+            )
+            interactions.append(
+                _send_and_fetch(
+                    config=config,
+                    session_id=session_id,
+                    message=pending_correction,
+                    model_id=args.model_id,
+                    file_ids=(),
+                    ui_language=args.ui_language,
+                    question_answer=None,
+                    edit_context=edit_context,
+                )
+            )
+            pending_correction = None
+            continue
+        if (
             args.auto_confirm_requirements
             and (requirements_summary := _latest_requirements_summary(current))
             is not None
         ):
             version = str(requirements_summary.get("requirements_version") or "")
-            if version and version not in confirmed_requirement_versions:
+            if version and version not in answered_requirement_versions:
+                card_fields = requirements_summary.get("named_content_fields")
+                named_result_check = _pre_confirmation_check(
+                    case.expected or {}, card_fields
+                )
+                if named_result_check is not None and (
+                    not _shape_telemetry_complete(case.expected or {}, card_fields)
+                    or named_result_check["passed"] is not True
+                ):
+                    # A card that contradicts the frozen gold, or cannot be
+                    # scored against it, is never confirmed; the quality and
+                    # evidence reports record why.
+                    break
                 declared_decisions = (case.expected or {}).get("expected_key_decisions")
                 if isinstance(declared_decisions, list) and declared_decisions:
                     failed_decision_checks = [
@@ -4717,7 +4962,7 @@ def _run_case_session(
                         # Do not confirm a disclosure that violates the case
                         # contract; the quality report records why.
                         break
-                confirmed_requirement_versions.add(version)
+                answered_requirement_versions.add(version)
                 interactions.append(
                     _send_and_fetch(
                         config=config,
@@ -7689,6 +7934,24 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
     provenance_shape_complete = all(
         check.get("passed") is True for check in _live_provenance_checks(provenance)
     )
+    raw_expected = cast(Mapping[str, object], case_contract).get("expected")
+    sealed_expected: Mapping[str, Any] = (
+        cast(Mapping[str, Any], raw_expected)
+        if isinstance(raw_expected, Mapping)
+        else {}
+    )
+    raw_script = cast(Mapping[str, object], case_contract).get("script")
+    correction = (
+        cast(Mapping[str, object], raw_script).get("message")
+        if isinstance(raw_script, Mapping)
+        else None
+    )
+    card_required = raw_script is not None or any(
+        key in sealed_expected for key in _NAMED_RESULT_GOLD_KEYS
+    )
+    pre_correction_fields, scored_card_fields = _scored_card_fields(
+        interactions, correction=correction if isinstance(correction, str) else None
+    )
     checks: list[JsonObject] = [
         {
             "name": "observation_case_contract_consistent",
@@ -7764,6 +8027,47 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
             "passed": provenance_shape_complete,
             "actual": _live_provenance_checks(provenance),
             "expected": "all required live provenance fields are complete",
+        },
+        {
+            # A case with card gold or a script is scored on a card: with none
+            # (after the correction, for a corrected case) there is nothing to
+            # score. Missing shape telemetry is not a legitimate null either.
+            "name": "observation_named_result_card",
+            "passed": (
+                scored_card_fields is not None
+                and _shape_telemetry_complete(sealed_expected, scored_card_fields)
+            )
+            if card_required
+            else True,
+            "actual": (
+                _card_named_results(scored_card_fields)
+                if scored_card_fields is not None
+                else None
+            ),
+            "expected": (
+                "a card after the scripted correction"
+                if correction is not None
+                else "a card"
+            )
+            + " whose named results all report declared_shape",
+        },
+        {
+            # A removal is exercised only when the name was on the card the
+            # correction answered; otherwise its absence proves nothing.
+            "name": "observation_removal_exercised",
+            "passed": all(
+                any(
+                    str(item["name"]).casefold() == name.casefold()
+                    for item in _card_named_results(pre_correction_fields)
+                )
+                for name in _string_list(sealed_expected.get("expected_removals"))
+            ),
+            "actual": _card_named_results(pre_correction_fields),
+            "expected": {
+                "on_the_corrected_card": _string_list(
+                    sealed_expected.get("expected_removals")
+                )
+            },
         },
     ]
     failed_checks = [check for check in checks if check.get("passed") is not True]
@@ -7995,6 +8299,52 @@ def _observation_failure_class(bundle: JsonObject) -> FailureClass | None:
     )
 
 
+def _observation_decision_score(report: Mapping[str, Any]) -> JsonObject | None:
+    """The counts one observation contributes to its run's question scoring."""
+
+    score = report.get("decision_score")
+    if not isinstance(score, Mapping):
+        return None
+    score = cast(Mapping[str, object], score)
+    return {
+        key: len(_string_list(score.get(key)))
+        for key in ("necessary_questions", "missed_decisions", "unnecessary_questions")
+    }
+
+
+def _declares_necessary_decisions(bundle: Mapping[str, object]) -> bool:
+    """Whether the sealed case contract obliges the observation to be scored."""
+
+    contract = bundle.get("case_contract")
+    expected = (
+        cast(Mapping[str, object], contract).get("expected")
+        if isinstance(contract, Mapping)
+        else None
+    )
+    return isinstance(expected, Mapping) and "necessary_decisions" in expected
+
+
+def _suite_decision_scores(results: Sequence[Mapping[str, Any]]) -> JsonObject:
+    """Question scoring for one run, which measures one model."""
+
+    scores = [
+        cast(Mapping[str, Any], score)
+        for result in results
+        if isinstance(score := result.get("decision_score"), Mapping)
+    ]
+    return {
+        "scored_observations": len(scores),
+        **{
+            key: sum(_int_value(score.get(key)) or 0 for score in scores)
+            for key in (
+                "necessary_questions",
+                "missed_decisions",
+                "unnecessary_questions",
+            )
+        },
+    }
+
+
 def _observation_projection(bundle: JsonObject) -> JsonObject:
     report = bundle.get("quality_report")
     checks = report.get("checks") if isinstance(report, Mapping) else []
@@ -8118,6 +8468,8 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
         else None,
         "failed_expectation_check_count": len(failed_checks),
         "failed_checks": failed_checks,
+        "decision_score": _observation_decision_score(report),
+        "decision_score_required": _declares_necessary_decisions(bundle),
         "edit": (
             {key: value for key, value in report["edit"].items() if key != "checks"}
             if isinstance(report.get("edit"), Mapping)
@@ -9342,6 +9694,7 @@ def _interaction_event_summary(interactions: object) -> JsonObject:
     question_like_text_events: list[str] = []
     assumptions: list[str] = []
     latest_key_decisions: list[JsonObject] = []
+    latest_named_content_fields: list[JsonObject] | None = None
     server_ask_question_text_only_count = 0
     self_correction_quality_failure_count = 0
 
@@ -9405,6 +9758,12 @@ def _interaction_event_summary(interactions: object) -> JsonObject:
             latest_key_decisions = _normalized_key_decisions(
                 summary_payload.get("key_decisions")
             )
+        if summary_payload is not None:
+            # The Builder omits an empty list, so a card always has one here.
+            latest_named_content_fields = [
+                dict(field)
+                for field in _mapping_list(summary_payload.get("named_content_fields"))
+            ]
 
     return {
         "event_counts": event_counts,
@@ -9419,6 +9778,7 @@ def _interaction_event_summary(interactions: object) -> JsonObject:
         "server_ask_question_text_only_count": server_ask_question_text_only_count,
         "assumptions": assumptions,
         "latest_key_decisions": latest_key_decisions,
+        "latest_named_content_fields": latest_named_content_fields,
         "error_codes": error_codes,
         "self_correction_quality_failure_count": (
             self_correction_quality_failure_count
@@ -10265,6 +10625,207 @@ def _key_decision_checks(
     return checks
 
 
+_UNPLACED_PARENT = "unplaced"
+_DECLARED_SHAPES: frozenset[str | None] = frozenset({"array", "object", None})
+PRE_CONFIRMATION_CHECK = "pre_confirmation_semantic_mismatch"
+_NAMED_RESULT_GOLD_KEYS = (
+    "expected_named_results",
+    "forbidden_named_results",
+    "expected_removals",
+)
+
+
+def _folded_parent(parent: object) -> str | list[str]:
+    if parent == _UNPLACED_PARENT:
+        return _UNPLACED_PARENT
+    return [segment.casefold() for segment in _string_list(parent)]
+
+
+def _card_named_results(fields: object) -> list[JsonObject]:
+    """A card's `named_content_fields` as name, parent path and declared shape."""
+
+    return [
+        {
+            "name": str(field.get("name") or ""),
+            "parent": (
+                _UNPLACED_PARENT
+                if field.get("unplaced") is True
+                else _string_list(field.get("segments"))
+            ),
+            "declared_shape": field.get("declared_shape"),
+        }
+        for field in _mapping_list(fields)
+    ]
+
+
+def _scored_card_fields(
+    interactions: object, *, correction: str | None
+) -> tuple[list[JsonObject] | None, list[JsonObject] | None]:
+    """The `named_content_fields` of the card before the correction, and of the
+    card the gold is scored on; either is None when there was no such card.
+
+    The scored card is the last card shown; for a corrected case, the last
+    card whose version was first shown after the correction was sent. A card
+    read back from before the correction does not count, and neither does one
+    when the correction was never sent.
+    """
+
+    items = _mapping_list(interactions)
+    start = 0
+    if correction is not None:
+        start = next(
+            (
+                index
+                for index, item in enumerate(items)
+                if index > 0
+                and item.get("message") == correction
+                and item.get("question_answer") is None
+            ),
+            len(items),
+        )
+    earlier = [
+        card
+        for item in items[:start]
+        if (card := _latest_requirements_summary(item)) is not None
+    ]
+    versions = {str(card.get("requirements_version")) for card in earlier}
+    later = [
+        card
+        for item in items[start:]
+        if (card := _latest_requirements_summary(item)) is not None
+        and str(card.get("requirements_version")) not in versions
+    ]
+
+    def fields(cards: list[JsonObject]) -> list[JsonObject] | None:
+        return (
+            [
+                dict(field)
+                for field in _mapping_list(cards[-1].get("named_content_fields"))
+            ]
+            if cards
+            else None
+        )
+
+    return (fields(earlier) if correction is not None else None), fields(later)
+
+
+def _shape_telemetry_complete(expected: Mapping[str, Any], fields: object) -> bool:
+    """Whether a card reports every shape the case's gold compares.
+
+    A field without `declared_shape` comes from a build that reports no
+    shapes. It says nothing about the shape, so reading it as null would score
+    an array and an object alike; such a card cannot be scored at all.
+    """
+
+    return "expected_named_results" not in expected or all(
+        "declared_shape" in field for field in _mapping_list(fields)
+    )
+
+
+def _pre_confirmation_check(
+    expected: Mapping[str, Any], fields: object
+) -> JsonObject | None:
+    """The card's named results against the case's frozen gold.
+
+    Each expected result must appear at its parent with its declared shape
+    (null included); forbidden names and names the conversation removed must
+    be absent. None when the case declares no named-result gold. Extra names
+    are not failures: the gold guards only what it names.
+    """
+
+    if not any(key in expected for key in _NAMED_RESULT_GOLD_KEYS):
+        return None
+    observed = _card_named_results(fields)
+
+    def named(name: str) -> list[JsonObject]:
+        return [
+            item for item in observed if str(item["name"]).casefold() == name.casefold()
+        ]
+
+    mismatches: list[JsonObject] = []
+    for entry in _mapping_list(expected.get("expected_named_results")):
+        name, parent = str(entry["name"]), entry["parent"]
+        same_name = named(name)
+        placed = [
+            item
+            for item in same_name
+            if _folded_parent(item["parent"]) == _folded_parent(parent)
+        ]
+        if not same_name:
+            mismatches.append(
+                {"kind": "missing", "name": name, "expected": parent, "actual": []}
+            )
+        elif not placed:
+            mismatches.append(
+                {
+                    "kind": "wrong_parent",
+                    "name": name,
+                    "expected": parent,
+                    "actual": [item["parent"] for item in same_name],
+                }
+            )
+        elif all(item["declared_shape"] != entry["declared_shape"] for item in placed):
+            mismatches.append(
+                {
+                    "kind": "wrong_shape",
+                    "name": name,
+                    "expected": entry["declared_shape"],
+                    "actual": [item["declared_shape"] for item in placed],
+                }
+            )
+    for key, kind in (
+        ("forbidden_named_results", "forbidden_present"),
+        ("expected_removals", "removal_not_applied"),
+    ):
+        for name in _string_list(expected.get(key)):
+            if present := named(name):
+                mismatches.append(
+                    {
+                        "kind": kind,
+                        "name": name,
+                        "expected": "absent",
+                        "actual": [item["parent"] for item in present],
+                    }
+                )
+    return {
+        "name": PRE_CONFIRMATION_CHECK,
+        "passed": not mismatches,
+        "actual": {"mismatches": mismatches, "named_results": observed},
+        "expected": {
+            key: expected[key] for key in _NAMED_RESULT_GOLD_KEYS if key in expected
+        },
+    }
+
+
+def _decision_score(
+    necessary_decisions: list[str], question_event_ids: list[str]
+) -> JsonObject:
+    """Questions scored against the case's frozen necessary decisions.
+
+    The first ask of a necessary decision is necessary; any other question,
+    including a second ask of the same decision, is unnecessary; a necessary
+    decision never asked is missed.
+    """
+
+    asked: set[str] = set()
+    necessary: list[str] = []
+    unnecessary: list[str] = []
+    for question_id in question_event_ids:
+        if question_id in necessary_decisions and question_id not in asked:
+            necessary.append(question_id)
+        else:
+            unnecessary.append(question_id)
+        asked.add(question_id)
+    return {
+        "necessary_decisions": list(necessary_decisions),
+        "necessary_questions": necessary,
+        "missed_decisions": [
+            decision for decision in necessary_decisions if decision not in asked
+        ],
+        "unnecessary_questions": unnecessary,
+    }
+
+
 def _quality_report(
     *,
     plan: JsonObject | None,
@@ -10562,6 +11123,25 @@ def _quality_report(
                 disclosed=event_summary.get("latest_key_decisions"),
             )
         )
+    # The last card shown is the one the confirm guard judged. A card without
+    # shape telemetry is not scored here: `_observation_evidence_report` owns
+    # that observation's invalidity.
+    card_fields = event_summary.get("latest_named_content_fields")
+    if (
+        card_fields is not None
+        and _shape_telemetry_complete(expected, card_fields)
+        and (named_result_check := _pre_confirmation_check(expected, card_fields))
+    ):
+        checks.append(named_result_check)
+    decision_report: JsonObject = (
+        {
+            "decision_score": _decision_score(
+                _string_list(expected["necessary_decisions"]), question_event_ids
+            )
+        }
+        if "necessary_decisions" in expected
+        else {}
+    )
     forbidden_assumption_topics = _string_list(
         expected.get("forbidden_assumption_topics")
     )
@@ -10699,7 +11279,12 @@ def _quality_report(
             expected_invariants,
         )
     if plan is None:
-        return {"checks": checks, "warnings": warnings, **output_report}
+        return {
+            "checks": checks,
+            "warnings": warnings,
+            **decision_report,
+            **output_report,
+        }
 
     if expected_primary_input_type := _optional_string(
         expected,
@@ -11043,6 +11628,7 @@ def _quality_report(
         "checks": checks,
         "warnings": warnings,
         "metrics": _source_context_metrics(summary),
+        **decision_report,
         **output_report,
     }
 

@@ -8,6 +8,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { recoverInterruptedParts } from "./flowRunRecordingSession";
 import { journalLockName } from "./recordingJournal";
 import { fakeLocks } from "./recordingJournalTestLocks";
+import { chromeWebm, readDurationMs } from "./webmDurationTestFixtures";
 import {
   recordingSessionStore,
   SESSION_RECOVERY_TTL_MS,
@@ -162,6 +163,32 @@ describe("recording journal", () => {
     expect(await recordingSessionStore.listJournalParts("flow-1", "step-1")).toEqual([]);
   });
 
+  it("gives a rebuilt WebM part the duration it was recorded for", async () => {
+    const key = await begin(part);
+    await recordingSessionStore.appendJournalChunk(key, 0, new Blob([chromeWebm()]), 3_000);
+    await recordingSessionStore.appendJournalChunk(key, 1, new Blob(["audio"]), 5_500);
+
+    await recoverInterruptedParts("flow-1", "step-1", fakeLocks(), now);
+
+    const [record] = await recordingSessionStore.readSession("flow-1", "step-1", "sess-A");
+    // Started at 1 000, its last chunk handed over at 5 500.
+    expect(readDurationMs(new Uint8Array(await record!.blob.arrayBuffer()))).toBe(4_500);
+  });
+
+  it("rebuilds a part as recorded when its header cannot be read in time", async () => {
+    const key = await begin(part);
+    await recordingSessionStore.appendJournalChunk(key, 0, new Blob([chromeWebm()]), 3_000);
+    // The chunk reads back its first byte; the read of its header never ends.
+    vi.spyOn(Blob.prototype, "arrayBuffer")
+      .mockImplementationOnce(async () => new ArrayBuffer(1))
+      .mockImplementationOnce(() => new Promise<ArrayBuffer>(() => undefined));
+
+    expect(await recoverInterruptedParts("flow-1", "step-1", fakeLocks(), now)).toBe(true);
+
+    const [record] = await recordingSessionStore.readSession("flow-1", "step-1", "sess-A");
+    expect(readDurationMs(new Uint8Array(await record!.blob.arrayBuffer()))).toBeNull();
+  });
+
   it("rebuilds interrupted parts in the order they were recorded", async () => {
     await journal({ ...part, partId: "later", startedAt: 3_000 }, ["2"]);
     await journal({ ...part, partId: "earlier", startedAt: 2_000 }, ["1"]);
@@ -267,10 +294,12 @@ describe("recording journal", () => {
     await journal();
     const read = vi.spyOn(Blob.prototype, "arrayBuffer");
     const plays = async () => new ArrayBuffer(1);
-    // Reads in order: the stored copy, the journal's two chunks, the rebuilt copy.
-    // The stored copy and then the rebuilt one fail to read back: the journal stays.
+    // Reads in order: the stored copy, the journal's two chunks, the first chunk's
+    // header for its duration, the rebuilt copy. The stored copy and then the rebuilt
+    // one fail to read back: the journal stays.
     read
       .mockRejectedValueOnce(new Error("gone"))
+      .mockImplementationOnce(plays)
       .mockImplementationOnce(plays)
       .mockImplementationOnce(plays)
       .mockRejectedValueOnce(new Error("gone"));

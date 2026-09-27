@@ -48,6 +48,7 @@ def _flow_repo() -> AsyncMock:
 def _runtime_upload_repo() -> AsyncMock:
     repo = AsyncMock()
     repo.list_bound_file_ids_for_owner.return_value = set()
+    repo.audio_seconds_by_file.return_value = {}
     return repo
 
 

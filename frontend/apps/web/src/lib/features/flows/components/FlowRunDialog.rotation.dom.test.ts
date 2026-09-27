@@ -31,6 +31,7 @@ import { PCM16_FLUSH, PCM16_FLUSHED } from "$lib/features/audio/live/pcm16-workl
 import { RETRY_BACKOFF_MS, ROTATION_OVERLAP_MS } from "$lib/features/audio/recordingSession";
 import { RECORDED_UPLOAD_RETRY_MS } from "$lib/features/audio/uploadRetry";
 import { fakeLocks } from "$lib/features/audio/recordingJournalTestLocks";
+import { chromeWebm, readDurationMs } from "$lib/features/audio/webmDurationTestFixtures";
 import {
   recordingSessionStore,
   type SegmentRecord,
@@ -435,6 +436,145 @@ describe("FlowRunDialog recording rotation", () => {
     expect(requireFailedRecordingAlert()).toBeTruthy();
   });
 
+  it("writes each part's recorded duration into its WebM header, also when it stops at once", async () => {
+    await openDialogAndStartRecording(vi.fn(() => new Promise<UploadedFile>(() => undefined)));
+    vi.advanceTimersByTime(4_000);
+    // The first chunk and the stop come together: the header is read as the file is built.
+    media.recorders[0]?.deliver(chromeWebm());
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+
+    const [persisted] = vi.mocked(persistRecordingSegment).mock.calls.map(([args]) => args);
+    const header = new Uint8Array(await persisted!.blob.arrayBuffer());
+    expect(readDurationMs(header)).toBe(persisted!.durationMs);
+    expect(persisted!.durationMs).toBeGreaterThanOrEqual(4_000);
+  });
+
+  it("hands parts over in recording order when the earlier part's header is slower to read", async () => {
+    await openDialogAndStartRecording(vi.fn(() => new Promise<UploadedFile>(() => undefined)));
+    await rotate();
+    let releaseEarlierHeader = () => {};
+    const read = vi.spyOn(Blob.prototype, "arrayBuffer");
+    read.mockImplementationOnce(
+      () =>
+        new Promise<ArrayBuffer>((resolve) => {
+          releaseEarlierHeader = () => resolve(new ArrayBuffer(1));
+        })
+    );
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    media.recorders[1]?.finish();
+    await flush();
+    await endOverlap();
+    // The later part's file is built; it waits for the earlier one.
+    expect(persistedSegments()).toEqual([]);
+
+    releaseEarlierHeader();
+    await flush();
+    expect(persistedSegments()).toEqual([
+      { segmentIndex: 0, reason: "rotation" },
+      { segmentIndex: 1, reason: "manual" }
+    ]);
+  });
+
+  it("hands over a part whose file is still being built at unmount, and makes no preview for it", async () => {
+    const rendered = await openDialogAndStartRecording(
+      vi.fn(() => new Promise<UploadedFile>(() => undefined))
+    );
+    let releaseHeader = () => {};
+    vi.spyOn(Blob.prototype, "arrayBuffer").mockImplementationOnce(
+      () =>
+        new Promise<ArrayBuffer>((resolve) => {
+          releaseHeader = () => resolve(new ArrayBuffer(1));
+        })
+    );
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+    const createObjectURL = vi.spyOn(URL, "createObjectURL");
+
+    rendered.unmount();
+    releaseHeader();
+    await flush();
+
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(persistedSegments()).toEqual([{ segmentIndex: 0, reason: "manual" }]);
+  });
+
+  it("pauses the recording: its clock, parts and time left stand still until Fortsätt", async () => {
+    await openDialogAndStartRecording(vi.fn(() => new Promise<UploadedFile>(() => undefined)));
+    vi.advanceTimersByTime(5 * 60_000);
+    await flush();
+
+    await fireEvent.click(screen.getByRole("button", { name: m.recording_pause() }));
+    expect(media.recorders[0]?.state).toBe("paused");
+    expect(screen.getByText(m.recording_paused())).toBeTruthy();
+    const timeLeft = screen.getByText(m.recording_time_left({ duration: "3 h 15 min" }));
+    // Longer than a part: no new part starts, and nothing counts down.
+    vi.advanceTimersByTime(30 * 60_000);
+    await flush();
+    expect(media.recorders).toHaveLength(1);
+    expect(timeLeft.textContent).toBe(m.recording_time_left({ duration: "3 h 15 min" }));
+
+    await fireEvent.click(screen.getByRole("button", { name: m.recording_resume() }));
+    expect(media.recorders[0]?.state).toBe("recording");
+    // The part has 15 of its 20 minutes left.
+    vi.advanceTimersByTime(15 * 60_000 - 1);
+    await flush();
+    expect(media.recorders).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    await flush();
+    expect(media.recorders).toHaveLength(2);
+
+    // The finished part lasted its 20 recorded minutes, the 30 paused ones not counted.
+    await endOverlap();
+    media.recorders[0]?.finish();
+    await flush();
+    const [part] = vi.mocked(persistRecordingSegment).mock.calls.map(([args]) => args);
+    expect(Math.round(part!.durationMs / 60_000)).toBe(20);
+  });
+
+  it("starts a new part for a chunk that neared the limit during the pause as soon as it goes on", async () => {
+    await openDialogAndStartRecording(
+      vi.fn(() => new Promise<UploadedFile>(() => undefined)),
+      {
+        steps: [{ ...audioStep, max_file_size_bytes: 10_000_000 }]
+      }
+    );
+    await fireEvent.click(screen.getByRole("button", { name: m.recording_pause() }));
+    // The recorder's last chunk from before the pause nears the file's limit.
+    media.recorders[0]?.deliver(4_000_000);
+    await flush();
+    expect(media.recorders).toHaveLength(1);
+
+    // No other chunk is needed: the part that neared its limit ends at once.
+    await fireEvent.click(screen.getByRole("button", { name: m.recording_resume() }));
+    await flush();
+    expect(media.recorders).toHaveLength(2);
+  });
+
+  it("does not take the user's own pause for an interruption when it goes on at once", async () => {
+    const warn = vi.spyOn(console, "warn");
+    await openDialogAndStartRecording(vi.fn(() => new Promise<UploadedFile>(() => undefined)));
+    await fireEvent.click(screen.getByRole("button", { name: m.recording_pause() }));
+    await fireEvent.click(screen.getByRole("button", { name: m.recording_resume() }));
+    // The pause's own event comes only now, after the resume.
+    expect(warn).not.toHaveBeenCalledWith("MediaRecorder was paused unexpectedly");
+    await flush();
+
+    expect(warn).not.toHaveBeenCalledWith("MediaRecorder was paused unexpectedly");
+  });
+
+  it("shows a new recording's file growing below a megabyte", async () => {
+    await openDialogAndStartRecording(vi.fn(() => new Promise<UploadedFile>(() => undefined)));
+    media.recorders[0]?.deliver(42_000);
+    await flush();
+
+    // 100 MB per file in this step; 42 000 bytes are 0,04 MB.
+    expect(screen.getByText(m.mb({ value: "0,04 / 95,4" }))).toBeTruthy();
+  });
+
   it("stops at the step's last file slot and refuses another start, saying why", async () => {
     const upload = vi.fn(() => new Promise<UploadedFile>(() => undefined));
     await openDialogAndStartRecording(upload, { steps: [{ ...audioStep, max_files: 2 }] });
@@ -814,6 +954,58 @@ describe("FlowRunDialog recording rotation", () => {
     );
   });
 
+  it("refuses save for later when the recording is kept only in this tab, and says what to do instead", async () => {
+    vi.mocked(persistRecordingSegment).mockResolvedValue({ degraded: true });
+    const upload = vi.fn(async () => {
+      throw new Error("Network down");
+    });
+    await openDialogAndStartRecording(upload);
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+
+    await expectSaveForLaterRefused(
+      "Inspelningen finns bara i den här fliken och kan inte sparas till senare. Spara den som fil eller försök ladda upp igen."
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("closes the dialog when a stored recording is saved for later", async () => {
+    const upload = vi.fn(async () => {
+      throw new Error("Network down");
+    });
+    await openDialogAndStartRecording(upload);
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+
+    await fireEvent.click(queryInFailedRecordingAlert(m.recording_save_for_later())!);
+    vi.advanceTimersByTime(1_000);
+    await flush();
+    expect(toast.success).toHaveBeenCalledWith(m.recording_save_for_later_toast());
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("warns while the journal is behind, and lets the stored recording be saved for later", async () => {
+    // The journal fell behind: the part is only in this tab until it is stored.
+    const journal = spyOnJournal();
+    journal.begin.mockRejectedValue(new DOMException("quota", "QuotaExceededError"));
+    const upload = vi.fn(async () => {
+      throw new Error("Network down");
+    });
+    await openDialogAndStartRecording(upload);
+    await flush();
+    expect(screen.getByText(m.recording_session_storage_degraded())).toBeTruthy();
+
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+    // Stored now: no warning, and it can be saved for later.
+    expect(screen.queryByText(m.recording_session_storage_degraded())).toBeNull();
+    const save = queryInFailedRecordingAlert(m.recording_save_for_later()) as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+  });
+
   it("offers save for later once every segment is handed over and persisted, and discard once none is in flight", async () => {
     const pendingUploads: PendingUpload[] = [];
     const upload = vi.fn(({ file }: { file: File }) => pendingUpload(pendingUploads, file));
@@ -828,7 +1020,7 @@ describe("FlowRunDialog recording rotation", () => {
 
     // Capture continues: Retry is offered, the actions that end the recording are not.
     expect(queryInFailedRecordingAlert("Försök igen")).toBeTruthy();
-    expect(queryInFailedRecordingAlert(m.recording_save_for_later())).toBeNull();
+    await expectSaveForLaterRefused();
     await expectDiscardRefused();
 
     let finishPersisting = () => {};
@@ -841,15 +1033,17 @@ describe("FlowRunDialog recording rotation", () => {
     await fireEvent.click(screen.getByLabelText(m.stop_recording()));
     await flush();
     // Stopped, but the browser has not handed over the last segment yet.
-    expect(queryInFailedRecordingAlert(m.recording_save_for_later())).toBeNull();
+    await expectSaveForLaterRefused();
     await expectDiscardRefused();
     media.recorders[1]?.finish();
     await flush();
-    expect(queryInFailedRecordingAlert(m.recording_save_for_later())).toBeNull();
+    await expectSaveForLaterRefused();
 
     finishPersisting();
     await flush();
-    expect(queryInFailedRecordingAlert(m.recording_save_for_later())).toBeTruthy();
+    const save = queryInFailedRecordingAlert(m.recording_save_for_later()) as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+    expect(save.getAttribute("aria-describedby")).toBeNull();
     // The last segment still uploads.
     await expectDiscardRefused();
 
@@ -1689,6 +1883,20 @@ function discardButton() {
 }
 
 // Discard shows why it is disabled, and a click on it changes nothing.
+const SAVE_BUSY_REASON =
+  "Du kan spara och fortsätta senare när inspelningen har stoppats och sparats på enheten.";
+
+// Shown, disabled, with its reason: the same idiom as a refused discard.
+async function expectSaveForLaterRefused(reason = SAVE_BUSY_REASON) {
+  const save = queryInFailedRecordingAlert(m.recording_save_for_later()) as HTMLButtonElement;
+  expect(save.disabled).toBe(true);
+  const reasonId = save.getAttribute("aria-describedby") ?? "";
+  expect(document.getElementById(reasonId)?.textContent?.trim()).toBe(reason);
+  await fireEvent.click(save);
+  await flush();
+  expect(failedRecordingAlert()).toBeTruthy();
+}
+
 async function expectDiscardRefused() {
   const discard = discardButton();
   expect(discard.disabled).toBe(true);
@@ -1734,6 +1942,17 @@ function installFakeMedia() {
     }
 
     requestData() {}
+
+    // As in a browser: the state changes at once, its event comes in a later task.
+    pause() {
+      this.state = "paused";
+      setTimeout(() => this.dispatchEvent(new Event("pause")), 0);
+    }
+
+    resume() {
+      this.state = "recording";
+      this.dispatchEvent(new Event("resume"));
+    }
 
     // A chunk the recorder hands over while it records: that many bytes, or these.
     deliver(bytes: number | Uint8Array<ArrayBuffer>) {

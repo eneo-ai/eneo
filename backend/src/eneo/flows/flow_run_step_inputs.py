@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol, TypedDict
 from uuid import UUID
 
+from eneo.files.audio import AudioDecodeLimits, within_decode_limit
 from eneo.files.file_models import FileInfo, FileMetadata, FileOwner
 from eneo.files.file_repo import FileContentReferenceRecord
 from eneo.flows.domain.flow import FlowRuntimeInputConfig
@@ -49,6 +51,10 @@ class _FileRepositoryProtocol(Protocol):
 
 
 class _RuntimeUploadRepositoryProtocol(Protocol):
+    async def audio_seconds_by_file(
+        self, *, file_ids: list[UUID]
+    ) -> dict[UUID, float]: ...
+
     async def list_bound_file_ids_for_owner(
         self,
         *,
@@ -201,6 +207,59 @@ def validate_live_transcript_inputs(
             )
         live_ids[step_id] = submitted.live_transcript_id
     return live_ids
+
+
+async def validate_audio_lengths(
+    *,
+    specs: Mapping[UUID, RuntimeStepInputSpec],
+    normalized_step_inputs: Mapping[UUID, Sequence[UUID]],
+    single_recording_steps: frozenset[UUID],
+    runtime_upload_repo: _RuntimeUploadRepositoryProtocol,
+    limits: AudioDecodeLimits,
+) -> dict[UUID, int]:
+    """Holds each audio step's files to the longest recording as it is now, by the
+    decoded lengths measured as they were uploaded: every file, and one recording's
+    parts together, as transcription decodes them. Refused before the run is accepted, so no client
+    drops a recording the run cannot transcribe. Returns the limit each audio step
+    was admitted under, for its transcription to keep."""
+    ceiling = limits.longest_audio_seconds
+    admitted: dict[UUID, int] = {}
+    for step_id, requested in normalized_step_inputs.items():
+        spec = specs.get(step_id)
+        file_ids = list(requested)
+        if (
+            not file_ids
+            or spec is None
+            or spec.runtime_input.input_format is not FlowRuntimeInputFormat.AUDIO
+        ):
+            continue
+        lengths = await runtime_upload_repo.audio_seconds_by_file(file_ids=file_ids)
+        unmeasured = [str(file_id) for file_id in file_ids if file_id not in lengths]
+        if unmeasured:
+            raise FlowBadRequestException(
+                "Audio uploaded before Eneo measured audio length must be uploaded again.",
+                code=FlowApiErrorCode.RUN_AUDIO_LENGTH_UNKNOWN,
+                context={"step_id": str(step_id), "file_ids": unmeasured},
+            )
+        together = step_id in single_recording_steps
+        groups = (
+            [list(lengths.values())] if together else [[x] for x in lengths.values()]
+        )
+        for group in groups:
+            if not within_decode_limit(group, ceiling):
+                raise FlowBadRequestException(
+                    "The audio is longer than this Eneo allows for a recording.",
+                    code=FlowApiErrorCode.RUN_AUDIO_EXCEEDS_LIMIT,
+                    # The shape the upload's refusal and the decode's carry.
+                    context={
+                        "limit": "duration_seconds",
+                        "measured": math.ceil(sum(group)),
+                        "ceiling": ceiling,
+                        "step_id": str(step_id),
+                    },
+                )
+        admitted[step_id] = ceiling
+    return admitted
 
 
 def validate_single_recording_inputs(

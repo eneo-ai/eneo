@@ -408,7 +408,19 @@ class TestBuildToolSchema:
                 )
 
     def test_create_admission_rehomes_unambiguous_step_tail_properties(self) -> None:
-        schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+        catalog = build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[
+                {
+                    "id": "kb-1",
+                    "ref": "kb-1",
+                    "name": "Policy",
+                    "display_name": "Policy",
+                    "description": "",
+                }
+            ],
+        )
+        schema = build_propose_flow_tool_schema(resource_catalog=catalog)
         arguments = {
             "flow_name": "Grounded assessment",
             "plan_rationale": "Assess the submitted material.",
