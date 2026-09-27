@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import NoReturn
+from typing import Literal, NoReturn
+from uuid import UUID
 
 from eneo.flows.ai_builder.ai_builder_canonicalization import (
     canonical_question_id,
@@ -17,9 +18,11 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     delegated_question_answer_from_input,
     metadata_for_user_message,
     named_content_fields_edit_from_input,
+    new_request_from_input,
     question_answer_has_real_payload,
     question_answer_question_id,
     question_answer_values,
+    question_reply_from_input,
     question_response_to_metadata,
     reopen_question_from_input,
     requirements_confirmation_from_question_answer,
@@ -31,11 +34,14 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
+from eneo.flows.ai_builder.ai_builder_event_models import StructuredQuestionPayload
 from eneo.flows.ai_builder.ai_builder_field_identity import fold_result_field_name
 from eneo.flows.ai_builder.ai_builder_question_state import (
+    latest_shown_question,
     pending_user_requirement_question,
     pending_user_requirement_question_id,
 )
+from eneo.flows.ai_builder.ai_builder_requirements_disclosure import resolve_locale
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     resolve_requirements_state,
 )
@@ -45,6 +51,7 @@ from eneo.flows.ai_builder.planning_state import (
 )
 from eneo.flows.ai_builder.question_catalog import (
     QUESTION_CATALOG,
+    Locale,
     legal_slot_values,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
@@ -66,7 +73,20 @@ def prepare_user_question_metadata(
     message: str,
     question_answer: AIBuilderQuestionAnswerInput | None,
     ui_language: str | None = None,
+    retried_turn_message_id: str | None = None,
+    sends_files: bool = False,
 ) -> PreparedUserQuestionMetadata:
+    """Read what the user answered, refusing answers to a replaced showing.
+
+    `retried_turn_message_id` names the user message of the turn this request
+    retries under the same client turn id, when that turn never committed. The
+    message is already in the conversation, but it is this request's own and
+    has not answered anything yet.
+
+    `sends_files` says the turn attaches files. Files close an open question
+    just as words do, so a file-only turn says what it is exactly as text
+    must.
+    """
     if ui_language is None and question_answer is not None:
         ui_language = ui_language_from_question_answer(question_answer)
 
@@ -77,10 +97,48 @@ def prepare_user_question_metadata(
     delegation = delegated_question_answer_from_input(question_answer)
     reopen = reopen_question_from_input(question_answer)
     field_edit = named_content_fields_edit_from_input(question_answer)
+    reply = question_reply_from_input(question_answer)
+    new_request = new_request_from_input(question_answer)
     metadata: FlowPersistedJsonObject | None = None
-    if requirements_confirmation is not None:
+    if new_request is not None:
+        # Declared, not inferred: the turn sets the open question aside. A
+        # question shown before tokens has no reader that could tell the
+        # declaration from an answer, so it is only accepted where it can be
+        # kept: with no question open, or one that carries a token.
+        if not (message.strip() or sends_files):
+            _raise_invalid_question_payload("empty_new_request")
+        if pending_user_requirement_question_id(conversation) is not None:
+            pending = pending_user_requirement_question(conversation)
+            if pending is None or pending.instance_token is None:
+                _raise_invalid_question_payload("new_request_under_untokened_question")
+    elif reply is not None:
+        if not (message.strip() or sends_files):
+            _raise_invalid_question_payload("empty_question_reply")
+        if not is_supported_structured_question_id(reply.question_id):
+            _raise_invalid_question_payload("unsupported_question_id")
+        _require_open_question(
+            conversation=[
+                message
+                for message in conversation
+                if message.message_id != retried_turn_message_id
+            ],
+            question_id=reply.question_id,
+            instance_token=reply.instance_token,
+        )
+        metadata = question_response_to_metadata(reply.question_id)
+    elif requirements_confirmation is not None:
+        _require_displayed_summary(
+            conversation=conversation,
+            ui_language=ui_language,
+            instance_token=requirements_confirmation.instance_token,
+        )
         metadata = metadata_for_user_message(question_answer=requirements_confirmation)
     elif reopen is not None:
+        _require_displayed_summary(
+            conversation=conversation,
+            ui_language=ui_language,
+            instance_token=reopen.instance_token,
+        )
         metadata = metadata_for_user_message(
             question_answer=_validated_reopen_question(
                 conversation=conversation,
@@ -88,6 +146,11 @@ def prepare_user_question_metadata(
             )
         )
     elif field_edit is not None:
+        _require_displayed_summary(
+            conversation=conversation,
+            ui_language=ui_language,
+            instance_token=field_edit.instance_token,
+        )
         metadata = metadata_for_user_message(
             question_answer=_validated_named_content_fields_edit(
                 conversation=conversation,
@@ -95,6 +158,12 @@ def prepare_user_question_metadata(
             )
         )
     elif delegation is not None:
+        _require_displayed_question(
+            conversation=conversation,
+            ui_language=ui_language,
+            question_id=delegation.question_id,
+            instance_token=delegation.instance_token,
+        )
         metadata = metadata_for_user_message(
             question_answer=_validated_structured_question_answer(
                 conversation=conversation,
@@ -105,19 +174,40 @@ def prepare_user_question_metadata(
             )
         )
     elif question_answer is not None:
+        answer = _client_answer(question_answer)
+        _require_displayed_question(
+            conversation=conversation,
+            ui_language=ui_language,
+            question_id=answer.question_id,
+            instance_token=answer.instance_token,
+        )
         metadata = metadata_for_user_message(
             question_answer=_validated_structured_question_answer(
                 conversation=conversation,
-                answer=_client_answer(question_answer),
+                answer=answer,
             )
         )
 
-    answers_builder = question_answer is not None
-    if metadata is None and not is_requirements_confirmation and message.strip():
+    answers_builder = question_answer is not None and new_request is None
+    if question_answer is None and (message.strip() or sends_files):
+        # Text that says nothing about itself is only read as a reply to a
+        # question shown before tokens existed. Once the open question
+        # carries a token, text says what it is - a `question_reply` naming
+        # that showing, or a `new_request` - and text that says neither comes
+        # from a page built before, which is told to reload rather than have
+        # its intent guessed.
         pending_question_id = pending_user_requirement_question_id(conversation)
         if pending_question_id is not None:
-            metadata = question_response_to_metadata(pending_question_id)
-            answers_builder = True
+            pending = pending_user_requirement_question(conversation)
+            _require_named_showing(
+                stored_token=pending.instance_token if pending is not None else None,
+                instance_token=None,
+                decision="question",
+                ui_language=ui_language,
+            )
+            if message.strip():
+                metadata = question_response_to_metadata(pending_question_id)
+                answers_builder = True
 
     if ui_language is not None:
         metadata = {
@@ -129,6 +219,134 @@ def prepare_user_question_metadata(
         metadata=metadata,
         is_requirements_confirmation=is_requirements_confirmation,
         answers_builder=answers_builder,
+    )
+
+
+def _require_displayed_question(
+    *,
+    conversation: list[ConversationMessage],
+    ui_language: str | None,
+    question_id: str | None,
+    instance_token: UUID | None,
+) -> None:
+    """Refuse an answer that names a showing its question no longer has.
+
+    An answer to the open question names the showing the pending-question
+    owner reads back. An answer to another question re-answers one asked
+    earlier, which the user reopens from the card or from their earlier
+    answers, and names that question's latest showing; the same question shown
+    again since replaces the earlier showing. The token compared is always the
+    one stored with the showing, never one derived again.
+
+    A showing from before tokens existed carries none; an answer to it that
+    names none either is left to the rules that applied before, and an answer
+    naming a token there answers some other showing.
+    """
+
+    open_question = pending_user_requirement_question(conversation)
+    shown: StructuredQuestionPayload | None = None
+    if open_question is not None and (
+        question_id is None
+        or canonical_question_id(question_id)
+        == canonical_question_id(open_question.question_id)
+    ):
+        shown = open_question
+    elif question_id is not None:
+        shown = latest_shown_question(conversation, question_id=question_id)
+    _require_named_showing(
+        stored_token=shown.instance_token if shown is not None else None,
+        instance_token=instance_token,
+        decision="question",
+        ui_language=ui_language,
+    )
+
+
+def _require_open_question(
+    *,
+    conversation: list[ConversationMessage],
+    question_id: str,
+    instance_token: UUID,
+) -> None:
+    """Refuse typed words that name a showing other than the open question's.
+
+    Unlike a structured answer, typed words never re-answer an earlier
+    question: they were typed under the question that was open, so they reply
+    to it only while it is still the one on offer, same question and same
+    showing.
+    """
+
+    shown = pending_user_requirement_question(conversation)
+    if (
+        shown is None
+        or shown.instance_token != instance_token
+        or canonical_question_id(shown.question_id)
+        != canonical_question_id(question_id)
+    ):
+        _raise_stale_decision("question")
+
+
+def _require_displayed_summary(
+    *,
+    conversation: list[ConversationMessage],
+    ui_language: str | None,
+    instance_token: UUID | None,
+) -> None:
+    """Refuse a card act that names a showing other than the latest card.
+
+    The latest card is the one the requirements owner reads back, with the
+    token stored on it. A card shown before tokens existed carries none, and an
+    act naming none either keeps the version checks that applied before.
+    """
+
+    shown = resolve_requirements_state(conversation).latest_summary
+    _require_named_showing(
+        stored_token=shown.instance_token if shown is not None else None,
+        instance_token=instance_token,
+        decision="requirements_summary",
+        ui_language=ui_language,
+    )
+
+
+_ShowingKind = Literal["question", "requirements_summary"]
+
+# Said by the server because a page built before answers named their showing
+# cannot know the reason: it shows this message as it is, so the message has
+# to carry the one fix that works.
+_CLIENT_OUTDATED_MESSAGES: dict[Locale, str] = {
+    "sv": "Sidan är inaktuell. Ladda om sidan och svara igen.",
+    "en": "This page is out of date. Reload the page and answer again.",
+}
+
+
+def _require_named_showing(
+    *,
+    stored_token: UUID | None,
+    instance_token: UUID | None,
+    decision: _ShowingKind,
+    ui_language: str | None,
+) -> None:
+    if stored_token is None and instance_token is None:
+        return
+    if instance_token is None:
+        # The showing carries a token and the answer names none: a page from
+        # before tokens existed, which will never send one. Refusing it as
+        # stale would only show the same question again for it to fail on.
+        raise AIBuilderBadRequestException(
+            _CLIENT_OUTDATED_MESSAGES[resolve_locale(ui_language)],
+            code=AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD,
+            context={"reason": "client_outdated", "decision": decision},
+        )
+    if instance_token != stored_token:
+        _raise_stale_decision(decision)
+
+
+def _raise_stale_decision(decision: _ShowingKind) -> NoReturn:
+    # Nothing is applied. The client reads the session back and shows the
+    # stored question or card again, the one this answer should have named.
+    raise AIBuilderBadRequestException(
+        "The question or summary was answered after it was replaced.",
+        code=AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD,
+        context={"reason": "stale_decision", "decision": decision},
     )
 
 

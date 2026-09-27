@@ -200,6 +200,17 @@ function specialCase(error: AIBuilderError): { heading: string; cause: string } 
       cause: m.ai_builder_question_delegation_stale()
     };
   }
+  // An answer to a question or card that has since been replaced. Nothing was
+  // applied; the session is read back and the one on offer shown again.
+  if (reason === "stale_decision") {
+    return {
+      heading: m.ai_builder_decision_stale_title(),
+      cause:
+        error.details.decision === "requirements_summary"
+          ? m.ai_builder_requirements_summary_stale()
+          : m.ai_builder_question_delegation_stale()
+    };
+  }
   if (reason === "requirements_version_stale") {
     return {
       heading: m.ai_builder_question_delegate(),

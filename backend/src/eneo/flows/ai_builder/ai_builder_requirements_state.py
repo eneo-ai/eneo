@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Final, Iterable
 
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     RequirementsConfirmationMetadata,
@@ -118,19 +118,40 @@ def content_free_confirmation(
     return requirements_confirmation_from_metadata(message.metadata)
 
 
+# The fields the v23 requirements version hashes, frozen by name rather than
+# read off the model: a field added to the model later must not silently enter
+# the hash of every card already shown and confirmed. The golden-hash tests pin
+# this set and the representation of the nested payloads beneath it.
+V23_DISCLOSURE_IDENTITY_FIELDS: Final[frozenset[str]] = frozenset(
+    {
+        "summary",
+        "key_decisions",
+        "input_description",
+        "output_description",
+        "assumptions",
+        "assumption_rows",
+        "manual_setup_notes",
+        "resolved_requirements",
+        "attachment_rows",
+        "run_preview",
+    }
+)
+
+
 def build_requirements_version(content: RequirementsDisclosureContent) -> str:
     """Hash the disclosure record the user is shown, unclipped.
 
     Identity is taken from the typed record, not from the prose: display
     clips long evidence values so a summary stays readable, and two different
     values that clip to the same 80 characters must still be two different
-    disclosures.
+    disclosures. Everything outside the frozen v23 field set, the displayed
+    instance token included, is display and never moves the version.
     """
 
     serialized = json.dumps(
         content.model_dump(
             mode="json",
-            include=set(RequirementsDisclosureContent.model_fields),
+            include=set(V23_DISCLOSURE_IDENTITY_FIELDS),
         ),
         sort_keys=True,
         separators=(",", ":"),

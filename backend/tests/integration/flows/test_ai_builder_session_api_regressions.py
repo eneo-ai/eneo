@@ -669,6 +669,28 @@ def _request_question_answer(
     return payload
 
 
+def _shown_instance(
+    events: list[dict[str, object]],
+    event_name: str,
+    *,
+    question_id: str | None = None,
+) -> dict[str, object]:
+    """The token of the question or card these events showed, echoed the way
+    the client echoes it with an answer."""
+
+    shown = next(
+        event
+        for event in events
+        if event["event"] == event_name
+        and (
+            question_id is None
+            or cast(dict[str, object], event["data"]).get("question_id") == question_id
+        )
+    )
+    token = cast(dict[str, object], shown["data"]).get("instance_token")
+    return {"instance_token": token} if token is not None else {}
+
+
 async def _upload_reference_file(
     *,
     client,
@@ -7733,6 +7755,7 @@ async def _progress_builder_session_to_plan(
                 "requirements_version": requirements_event["data"][
                     "requirements_version"
                 ],
+                **_shown_instance(events, "requirements_summary"),
                 "ui_language": "sv",
             }
             continue
@@ -7764,6 +7787,7 @@ async def _progress_builder_session_to_plan(
             "question_id": question_id,
             "selected_option_ids": [selected_option_id],
             "selected_values": [selected_option_id],
+            **_shown_instance(events, "question"),
             "ui_language": "sv",
         }
 
@@ -7913,6 +7937,9 @@ async def test_ai_builder_api_does_not_repeat_report_disposition_after_structure
                 "question_id": "terminal_output",
                 "selected_option_ids": ["pdf_document"],
                 "selected_values": ["pdf_document"],
+                **_shown_instance(
+                    first_events, "question", question_id="terminal_output"
+                ),
                 "ui_language": "sv",
             },
         )
@@ -7932,6 +7959,9 @@ async def test_ai_builder_api_does_not_repeat_report_disposition_after_structure
                 "question_id": "report_disposition",
                 "selected_option_ids": ["per_source_sections"],
                 "selected_values": ["per_source_sections"],
+                **_shown_instance(
+                    second_events, "question", question_id="report_disposition"
+                ),
                 "ui_language": "sv",
             },
         )
@@ -8074,11 +8104,24 @@ async def test_ai_builder_api_repeated_output_question_after_freeform_label_reco
                 session_id=session_id,
                 message="Skapa en ljudfil transkriberare samt sammanfattare",
             )
+            shown = cast(
+                dict[str, Any],
+                next(event for event in first_events if event["event"] == "question")[
+                    "data"
+                ],
+            )
+            # Typed words under an open question name the showing they reply
+            # to, the way the web client sends them.
             second_events = await _send_builder_message(
                 client=client,
                 bearer_token=bearer_token,
                 session_id=session_id,
                 message="PDF-dokument",
+                question_answer={
+                    "kind": "question_reply",
+                    "question_id": shown["question_id"],
+                    "instance_token": shown["instance_token"],
+                },
             )
 
     assert any(event["event"] == "question" for event in first_events), (
@@ -9803,6 +9846,9 @@ async def test_ai_builder_api_audio_report_confirms_core_output_before_runtime_m
                     "question_id": "terminal_output",
                     "selected_option_ids": ["structured_text"],
                     "selected_values": ["structured_text"],
+                    **_shown_instance(
+                        first_events, "question", question_id="terminal_output"
+                    ),
                     "ui_language": "sv",
                 },
             )
@@ -10766,6 +10812,7 @@ async def test_ai_builder_api_named_content_fields_can_be_edited_on_the_card(
                 "kind": "named_content_fields_edit",
                 "requirements_version": "b" * 64,
                 "field_names": [parent_id],
+                **_shown_instance(disclosed_events, "requirements_summary"),
             },
         )
 
@@ -10779,6 +10826,7 @@ async def test_ai_builder_api_named_content_fields_can_be_edited_on_the_card(
                 "requirements_version": disclosed_data["requirements_version"],
                 "field_names": [parent_id, "Beslutsdatum"],
                 "added_field_placements": {"Beslutsdatum": parent_id},
+                **_shown_instance(disclosed_events, "requirements_summary"),
             },
         )
 
@@ -11180,3 +11228,123 @@ async def test_capacity_availability_tracks_admin_edits_and_preserves_turn_repla
         assert refused_again[0]["data"]["code"] == error_code
         assert await session_row() == committed
         provider_call.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_ai_builder_api_answer_to_a_replaced_question_is_refused_and_the_shown_one_stays(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder API stale answer",
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
+    )
+    headers = {"Authorization": f"Bearer {bearer_token}"}
+
+    with (
+        _classifier_reading_nothing(),
+        patch(
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
+        ),
+    ):
+        session_id = await _create_ai_builder_session(
+            client=client,
+            bearer_token=bearer_token,
+            space_id=space_id,
+        )
+        first_events = await _send_builder_message(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            message="Skapa ett flöde som sammanfattar dokument till en PDF-rapport.",
+        )
+        question_event = next(
+            (event for event in first_events if event["event"] == "question"), None
+        )
+        assert question_event is not None, _builder_event_outline(first_events)
+        question = cast(dict[str, Any], question_event["data"])
+        shown_token = question["instance_token"]
+        assert shown_token is not None
+        option = question["options"][0]
+
+        def answer(token: object) -> dict[str, object]:
+            return {
+                "kind": "structured_question_answer",
+                "question_id": question["question_id"],
+                "selected_option_ids": [option["id"]],
+                "selected_values": [option["value"]],
+                "ui_language": "sv",
+                **({"instance_token": token} if token is not None else {}),
+            }
+
+        before = await client.get(
+            f"/api/v1/flows/ai-builder/sessions/{session_id}", headers=headers
+        )
+        stale_events = await _send_builder_message(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            message=str(option["label"]),
+            question_answer=answer(str(uuid4())),
+        )
+        # A page from before tokens echoes none.
+        blind_events = await _send_builder_message(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            message=str(option["label"]),
+            question_answer=answer(None),
+        )
+        after = await client.get(
+            f"/api/v1/flows/ai-builder/sessions/{session_id}", headers=headers
+        )
+        answered_events = await _send_builder_message(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            message=str(option["label"]),
+            question_answer=answer(shown_token),
+        )
+
+    stale_error, blind_error = (
+        cast(
+            dict[str, Any],
+            next(event for event in refused if event["event"] == "error")["data"],
+        )
+        for refused in (stale_events, blind_events)
+    )
+    assert stale_error["code"] == "invalid_question_payload"
+    assert stale_error["details"] == {
+        "reason": "stale_decision",
+        "decision": "question",
+    }
+    # A page that names no showing cannot fix that by showing the question
+    # again; the message it displays as it is tells it to reload.
+    assert blind_error["code"] == "invalid_question_payload"
+    assert blind_error["details"] == {
+        "reason": "client_outdated",
+        "decision": "question",
+    }
+    assert "Ladda om sidan" in blind_error["message"]
+    # Nothing was applied: the conversation is unchanged and the question the
+    # client reads back to show again is the stored showing, token and all.
+    assert after.status_code == 200, after.text
+    assert after.json()["conversation"] == before.json()["conversation"]
+    shown_again = [
+        message["question"]
+        for message in after.json()["conversation"]
+        if message.get("question") is not None
+    ][-1]
+    assert shown_again["instance_token"] == shown_token
+    assert not any(event["event"] == "error" for event in answered_events), (
+        _builder_event_outline(answered_events)
+    )

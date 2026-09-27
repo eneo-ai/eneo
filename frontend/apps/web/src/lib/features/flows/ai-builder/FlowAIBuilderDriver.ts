@@ -4,8 +4,15 @@ import { getLocale } from "$lib/paraglide/runtime";
 import type { EneoFetchFunction, EneoStreamFunction } from "@eneo/eneo-js";
 import type {
   PersistedStructuredQuestionAnswerMetadata,
+  RequirementsSummaryShowing,
   StructuredQuestion,
   StructuredQuestionAnswerMetadata
+} from "./structuredQuestionAnswer";
+import {
+  newRequest,
+  questionReply,
+  resendsAsNewTurn,
+  shownInstance
 } from "./structuredQuestionAnswer";
 import {
   buildUnpublishedApplyFailureError,
@@ -942,6 +949,15 @@ export class FlowAIBuilderDriver {
       return "not_started";
     }
 
+    // Words sent while a question is open say what they are: a reply to that
+    // showing, or - for a review turn, which is about the flow and never an
+    // answer - a request of its own. The server does not guess.
+    questionAnswer ??= this.#intentUnderOpenQuestion(
+      message,
+      Boolean(fileIds?.length),
+      reviewContext != null
+    );
+
     const userMsg: ChatMessage = {
       role: "user",
       content: message,
@@ -1007,6 +1023,7 @@ export class FlowAIBuilderDriver {
     const retained = this.#state.session?.latest_turn?.retry_request;
     if (
       !retained ||
+      !resendsAsNewTurn(retained) ||
       this.#state.pendingOperation !== null ||
       this.isStreaming ||
       !this.canStartNewTurn ||
@@ -1669,7 +1686,8 @@ export class FlowAIBuilderDriver {
       {
         kind: "requirements_confirmation",
         requirements_confirmed: true,
-        requirements_version: latestSummary.requirements_version
+        requirements_version: latestSummary.requirements_version,
+        ...shownInstance(latestSummary.instance_token)
       },
       undefined,
       editContext
@@ -1703,13 +1721,14 @@ export class FlowAIBuilderDriver {
    * there is nothing for the user to say that the set does not already say.
    */
   async editNamedContentFields(
-    requirementsVersion: string,
+    summary: RequirementsSummaryShowing,
     fieldNames: string[],
     addedFieldPlacements: Record<string, string> = {}
   ): Promise<AIBuilderSendOutcome> {
     return await this.sendMessage("", {
       kind: "named_content_fields_edit",
-      requirements_version: requirementsVersion,
+      requirements_version: summary.requirements_version,
+      ...shownInstance(summary.instance_token),
       field_names: fieldNames,
       ...(Object.keys(addedFieldPlacements).length > 0
         ? { added_field_placements: addedFieldPlacements }
@@ -1783,6 +1802,21 @@ export class FlowAIBuilderDriver {
    * comes after the newest asking answers it; an older one belongs to the
    * asking before, and treating it as current hides the new question entirely.
    */
+  #intentUnderOpenQuestion(
+    message: string,
+    sendsFiles: boolean,
+    isNewRequest: boolean
+  ): StructuredQuestionAnswerMetadata | undefined {
+    // Files close an open question just as words do, so they say what they
+    // are the same way.
+    if (!message.trim() && !sendsFiles) return undefined;
+    const question = this.#state.messages[this.#state.messages.length - 1]?.question;
+    if (!question?.instance_token || this.isQuestionAnswered(question.question_id)) {
+      return undefined;
+    }
+    return isNewRequest ? newRequest() : (questionReply(question) ?? undefined);
+  }
+
   isQuestionAnswered(questionId: string): boolean {
     for (let index = this.#state.messages.length - 1; index >= 0; index -= 1) {
       const message = this.#state.messages[index];

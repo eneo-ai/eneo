@@ -41,6 +41,7 @@
   import { isDiscoveryStatus } from "./protocol";
   import {
     delegatedQuestionAnswer,
+    type StructuredQuestion,
     type StructuredQuestionAnswerPayload
   } from "./structuredQuestionAnswer";
 
@@ -551,11 +552,11 @@
     void service.sendMessage(payload.text, payload.questionAnswer, undefined, activeEditContext);
   }
 
-  function handleDelegateQuestion(questionId: string) {
+  function handleDelegateQuestion(question: StructuredQuestion) {
     editingQuestionId = null;
     void service.sendMessage(
       "",
-      delegatedQuestionAnswer(questionId, getLocale()),
+      delegatedQuestionAnswer(question, getLocale()),
       undefined,
       activeEditContext
     );
@@ -603,12 +604,11 @@
   /** An assumption has no answer to edit: the server is asked to reopen its
    *  question, pinned to the disclosure the user is looking at. */
   function handleReopenAssumption(questionId: string) {
-    const version = latestSummary?.requirements_version;
-    if (!version) return;
+    if (!latestSummary?.requirements_version) return;
     editingQuestionId = null;
     void service.sendMessage(
       "",
-      reopenQuestionRequest(questionId, version),
+      reopenQuestionRequest(questionId, latestSummary),
       undefined,
       activeEditContext
     );
@@ -1110,11 +1110,7 @@
           onchange={handleRequirementsChange}
           oneditcontentfields={(fieldNames, addedFieldPlacements) => {
             if (!latestSummary) return;
-            void service.editNamedContentFields(
-              latestSummary.requirements_version,
-              fieldNames,
-              addedFieldPlacements
-            );
+            void service.editNamedContentFields(latestSummary, fieldNames, addedFieldPlacements);
           }}
           oneditanswer={handleEditAnswer}
           onreopenassumption={handleReopenAssumption}

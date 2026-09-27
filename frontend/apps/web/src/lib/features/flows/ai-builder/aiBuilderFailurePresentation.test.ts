@@ -527,6 +527,47 @@ describe("describeFailure", () => {
     expect(shown.primary?.kind).not.toBe("attach_template");
   });
 
+  it("names an answer to a replaced question or card in the user's terms", () => {
+    const stale = (decision: string) =>
+      present({
+        error: error({
+          code: "invalid_question_payload",
+          category: "bad_request",
+          details: { reason: "stale_decision", decision }
+        }),
+        latestTurn: null,
+        capabilities: committed,
+        context: chat
+      });
+
+    expect(stale("question").heading).toBe(m.ai_builder_decision_stale_title());
+    expect(stale("question").consequence).toBe(m.ai_builder_question_delegation_stale());
+    expect(stale("requirements_summary").consequence).toBe(
+      m.ai_builder_requirements_summary_stale()
+    );
+  });
+
+  it("shows an outdated page the server's own words to reload it, with no retry", () => {
+    // A page from before answers named their showing knows no such reason; it
+    // lands here, on the server's message, and this path must not offer to
+    // send the same answer again.
+    const outdated = present({
+      error: error({
+        code: "invalid_question_payload",
+        category: "bad_request",
+        message: "Sidan är inaktuell. Ladda om sidan och svara igen.",
+        details: { reason: "client_outdated", decision: "question" }
+      }),
+      latestTurn: null,
+      capabilities: committed,
+      context: chat
+    });
+
+    expect(outdated.consequence).toBe("Sidan är inaktuell. Ladda om sidan och svara igen.");
+    expect(outdated.primary?.kind).toBe("dismiss");
+    expect(outdated.secondary).toBeNull();
+  });
+
   it("keeps the question refusals and the standing start-over offer in the user's terms", () => {
     const refusal = present({
       error: error({

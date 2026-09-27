@@ -179,6 +179,18 @@ ClassifierRetentionClass: TypeAlias = Literal[
 ClassifierRetentionIdentity: TypeAlias = tuple[ClassifierRetentionClass, str]
 
 _MAX_RESULT_OBLIGATIONS = len(RESULT_OBLIGATION_VALUES)
+# Every explicit answer names the showing of the question or card it answers.
+# The token is a request field only and is left out of every persisted answer:
+# the persisted answer shapes forbid unknown keys, so a stored token would make
+# an older build drop the whole answer when it reads the conversation back.
+_INSTANCE_TOKEN_DESCRIPTION = (
+    "The instance_token of the question or requirements summary this answer "
+    "was given to, sent back exactly as received. An answer naming a showing "
+    "that is no longer the one on offer is refused with reason "
+    "stale_decision, and one naming none when the showing carries a token "
+    "with reason client_outdated. Omit it only for a question or summary "
+    "that carries no token. Never stored with the answer."
+)
 _MAX_QUESTION_ANSWER_SELECTIONS = 20
 _MAX_UI_LANGUAGE_LENGTH = 16
 
@@ -1155,6 +1167,9 @@ class StructuredQuestionAnswerRequest(BaseModel):
 
     kind: Literal["structured_question_answer"] = "structured_question_answer"
     question_id: QuestionAnswerId | None = None
+    instance_token: UUID | None = Field(
+        default=None, description=_INSTANCE_TOKEN_DESCRIPTION
+    )
     selected_option_ids: list[QuestionAnswerId] | None = Field(
         default=None,
         max_length=_MAX_QUESTION_ANSWER_SELECTIONS,
@@ -1261,6 +1276,9 @@ class RequirementsConfirmationMetadata(BaseModel):
     # A confirmation names the exact disclosure it attests to. Without the
     # version there is no way to tell which summary the user actually saw.
     requirements_version: str = Field(pattern=r"^[0-9a-f]{64}$")
+    instance_token: UUID | None = Field(
+        default=None, description=_INSTANCE_TOKEN_DESCRIPTION
+    )
     ui_language: str | None = Field(
         default=None,
         max_length=_MAX_UI_LANGUAGE_LENGTH,
@@ -1278,6 +1296,63 @@ class DelegatedQuestionAnswerRequest(BaseModel):
 
     kind: Literal["delegated_question_answer"] = "delegated_question_answer"
     question_id: QuestionAnswerId
+    instance_token: UUID | None = Field(
+        default=None, description=_INSTANCE_TOKEN_DESCRIPTION
+    )
+    ui_language: str | None = Field(
+        default=None,
+        max_length=_MAX_UI_LANGUAGE_LENGTH,
+    )
+
+    @field_validator("question_id", mode="before")
+    @classmethod
+    def normalize_question_id(cls, question_id: object) -> object:
+        if not isinstance(question_id, str):
+            return question_id
+        return canonical_question_id(question_id)
+
+
+class NewRequestDeclaration(BaseModel):
+    """The user's words, sent past an open question as a request of their own.
+
+    While a question with an instance token is open, text or files have to
+    say what they are: a `question_reply` to that showing, or this. A turn
+    that says neither is refused rather than guessed at. Accepted only with
+    no question open or with one that carries a token: a question shown
+    before tokens has no record that could keep the declaration apart from
+    an answer.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["new_request"] = "new_request"
+    ui_language: str | None = Field(
+        default=None,
+        max_length=_MAX_UI_LANGUAGE_LENGTH,
+    )
+
+
+class QuestionReplyRequest(BaseModel):
+    """The user's own words, typed while a question was open, as a reply to it.
+
+    Text is only read as a reply to a question when it names the showing it
+    was typed under. Text that names none is a request of its own: once
+    questions carry tokens, which question a sentence answers is never
+    guessed from what happens to be open when it arrives.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["question_reply"] = "question_reply"
+    question_id: QuestionAnswerId
+    instance_token: UUID = Field(
+        description=(
+            "The instance_token of the open question this text was typed "
+            "under. A reply naming a showing that is no longer the one on "
+            "offer is refused with reason stale_decision. Text for a question "
+            "that carries no token is sent without a question_answer."
+        )
+    )
     ui_language: str | None = Field(
         default=None,
         max_length=_MAX_UI_LANGUAGE_LENGTH,
@@ -1297,6 +1372,9 @@ class ReopenQuestionRequest(BaseModel):
     kind: Literal["reopen_question"] = "reopen_question"
     question_id: QuestionAnswerId
     requirements_version: str = Field(pattern=r"^[0-9a-f]{64}$")
+    instance_token: UUID | None = Field(
+        default=None, description=_INSTANCE_TOKEN_DESCRIPTION
+    )
 
     @field_validator("question_id", mode="before")
     @classmethod
@@ -1343,6 +1421,9 @@ class NamedContentFieldsEditRequest(BaseModel):
     kind: Literal["named_content_fields_edit"] = "named_content_fields_edit"
     schema_version: Literal[1] = 1
     requirements_version: str = Field(pattern=r"^[0-9a-f]{64}$")
+    instance_token: UUID | None = Field(
+        default=None, description=_INSTANCE_TOKEN_DESCRIPTION
+    )
     field_names: list[
         Annotated[str, Field(max_length=NAMED_RESULT_LOCATION_ID_MAX_LENGTH)]
     ] = Field(max_length=NAMED_RESULT_EVIDENCE_MAX_ITEMS)
@@ -1405,6 +1486,8 @@ class _PersistedNamedContentFieldsEditVersion(BaseModel):
 AIBuilderQuestionAnswerRequest: TypeAlias = Annotated[
     StructuredQuestionAnswerRequest
     | DelegatedQuestionAnswerRequest
+    | QuestionReplyRequest
+    | NewRequestDeclaration
     | RequirementsConfirmationMetadata
     | ReopenQuestionRequest
     | NamedContentFieldsEditRequest,
@@ -1414,6 +1497,8 @@ AIBuilderQuestionAnswerRequest: TypeAlias = Annotated[
 AIBuilderQuestionAnswerInput: TypeAlias = (
     StructuredQuestionAnswerRequest
     | DelegatedQuestionAnswerRequest
+    | QuestionReplyRequest
+    | NewRequestDeclaration
     | RequirementsConfirmationMetadata
     | ReopenQuestionRequest
     | NamedContentFieldsEditRequest
@@ -1505,7 +1590,7 @@ def named_content_fields_edit_to_metadata(
     return {
         NAMED_CONTENT_FIELDS_EDIT_METADATA_KEY: edit.model_dump(
             mode="json",
-            exclude={"kind", "ui_language"},
+            exclude={"kind", "ui_language", "instance_token"},
         )
     }
 
@@ -1520,6 +1605,34 @@ def delegated_question_answer_from_input(
         return None
     try:
         return DelegatedQuestionAnswerRequest.model_validate(data)
+    except ValidationError:
+        return None
+
+
+def new_request_from_input(
+    value: AIBuilderQuestionAnswerInput | None,
+) -> NewRequestDeclaration | None:
+    if value is None:
+        return None
+    data = _model_or_mapping_data(value)
+    if data.get("kind") != "new_request":
+        return None
+    try:
+        return NewRequestDeclaration.model_validate(data)
+    except ValidationError:
+        return None
+
+
+def question_reply_from_input(
+    value: AIBuilderQuestionAnswerInput | None,
+) -> QuestionReplyRequest | None:
+    if value is None:
+        return None
+    data = _model_or_mapping_data(value)
+    if data.get("kind") != "question_reply":
+        return None
+    try:
+        return QuestionReplyRequest.model_validate(data)
     except ValidationError:
         return None
 
@@ -1756,7 +1869,7 @@ def question_answer_to_metadata(
     payload = answer.model_dump(
         mode="json",
         exclude_none=True,
-        exclude={"kind", "ui_language"},
+        exclude={"kind", "ui_language", "instance_token"},
     )
     return {QUESTION_ANSWER_METADATA_KEY: payload}
 
@@ -1770,7 +1883,7 @@ def requirements_confirmation_to_metadata(
     return confirmation.model_dump(
         mode="json",
         exclude_none=True,
-        exclude={"kind", "ui_language"},
+        exclude={"kind", "ui_language", "instance_token"},
     )
 
 

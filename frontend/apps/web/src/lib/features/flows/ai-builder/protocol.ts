@@ -562,7 +562,10 @@ const questionEventDataSchema = z.object({
       open_topics: stringArraySchema.optional()
     })
     .nullable()
-    .optional()
+    .optional(),
+  // This showing of the question. The answer sends it back, and the server
+  // refuses an answer naming a showing that is no longer on offer.
+  instance_token: z.uuid().nullable().optional()
 }) satisfies z.ZodType<AIBuilderQuestionEventData>;
 
 const requirementsSummaryEventDataSchema = z.object({
@@ -681,7 +684,10 @@ const requirementsSummaryEventDataSchema = z.object({
     .nullable()
     .optional(),
   // Attachments whose role is a weak reading; display provenance, not identity.
-  weak_role_file_ids: stringArraySchema.optional()
+  weak_role_file_ids: stringArraySchema.optional(),
+  // This showing of the card, outside the version. Confirming, editing and
+  // reopening send it back, and one naming another showing is refused.
+  instance_token: z.uuid().nullable().optional()
 }) satisfies z.ZodType<RequirementsSummary>;
 
 const planEventDataSchema = z.strictObject({

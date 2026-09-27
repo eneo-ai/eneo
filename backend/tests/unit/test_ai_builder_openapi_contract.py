@@ -319,6 +319,40 @@ def test_openapi_named_content_field_publishes_an_optional_nullable_shape(
     ]
 
 
+def test_openapi_every_explicit_answer_names_the_showing_it_answers(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec["components"]["schemas"]
+    uuid = {"type": "string", "format": "uuid"}
+
+    # Optional: a question or card shown before tokens has none.
+    for shown in ("StructuredQuestionPayload", "RequirementsSummaryPayload"):
+        assert uuid in schemas[shown]["properties"]["instance_token"]["anyOf"]
+        assert "instance_token" not in schemas[shown].get("required", [])
+    # Optional on the wire, and the refusals it leads to are named.
+    for answer in (
+        "StructuredQuestionAnswerRequest",
+        "DelegatedQuestionAnswerRequest",
+        "RequirementsConfirmationMetadata",
+        "ReopenQuestionRequest",
+        "NamedContentFieldsEditRequest",
+    ):
+        token = schemas[answer]["properties"]["instance_token"]
+        assert uuid in token["anyOf"]
+        assert "stale_decision" in token["description"]
+        assert "client_outdated" in token["description"]
+        assert "instance_token" not in schemas[answer].get("required", [])
+    # Typed words reply to a question only by naming its showing.
+    union = schemas["SendMessageRequest"]["properties"]["question_answer"]["anyOf"][0]
+    assert union["discriminator"]["mapping"]["question_reply"] == (
+        "#/components/schemas/QuestionReplyRequest"
+    )
+    assert set(schemas["QuestionReplyRequest"]["required"]) == {
+        "question_id",
+        "instance_token",
+    }
+
+
 def test_openapi_ai_builder_stream_response_does_not_advertise_json(
     openapi_spec: dict,
 ) -> None:

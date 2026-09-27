@@ -1870,7 +1870,15 @@ async def _dispatched_ask_turn(
         )
     )
     assert result.action_kind == "ask_question"
-    return [event.model_dump(mode="json") for event in result.events]
+    # Every showing mints its own instance token, so two dispatches of the
+    # same question differ only there; what was asked is everything else.
+    return [
+        event.model_dump(
+            mode="json",
+            exclude={"data": {"instance_token"}} if event.event == "question" else None,
+        )
+        for event in result.events
+    ]
 
 
 @pytest.mark.asyncio
@@ -6462,3 +6470,140 @@ def test_proposal_forwards_capacity():
     assert factory.call_args.kwargs["capacity"] is capacity
     assert prepared.request_budget.capacity is capacity
     assert prepared.request_budget.available_input_tokens == 27_872
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("same_turn", "state", "sets_aside_its_message"),
+    [
+        (True, BuilderTurnState.FAILED_BEFORE_PROVIDER, True),
+        (True, BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN, True),
+        # A new turn, or the next turn after a committed one, has no message
+        # of its own recorded yet: nothing is set aside.
+        (False, BuilderTurnState.FAILED_BEFORE_PROVIDER, False),
+    ],
+)
+async def test_only_a_retry_of_an_uncommitted_turn_sets_its_own_message_aside(
+    monkeypatch: pytest.MonkeyPatch,
+    same_turn: bool,
+    state: BuilderTurnState,
+    sets_aside_its_message: bool,
+) -> None:
+    planner = _make_planner()
+    failed_message_id = uuid4()
+    session = BuilderSession(
+        id=uuid4(),
+        tenant_id=cast(UUID, planner.user.tenant_id),
+        space_id=uuid4(),
+        target_kind=TargetKind.CREATE,
+        latest_turn=BuilderTurnLifecycle(
+            client_turn_id=_TEST_CLIENT_TURN_ID,
+            request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+            request=_test_request_snapshot("PDF"),
+            state=state,
+            user_message_id=failed_message_id,
+        ),
+    )
+    preflight = SessionTurnPreflight(
+        session=session,
+        baseline=SessionTurnPreparationBaseline(
+            session_status=SessionStatus.CHATTING,
+            latest_plan_id=None,
+            planning_state_version=0,
+            latest_turn_id=_TEST_CLIENT_TURN_ID,
+            latest_turn_state=state,
+            attachment_file_ids=(),
+        ),
+    )
+    captured: dict[str, object] = {}
+
+    class _Stop(Exception):
+        pass
+
+    def capture(**kwargs: object) -> None:
+        captured.update(kwargs)
+        raise _Stop
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.resolve_plan_edit_context",
+        AsyncMock(return_value=(None, None)),
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.prepare_user_question_metadata",
+        capture,
+    )
+
+    with pytest.raises(_Stop):
+        async for _event in planner.send_message(
+            session_id=session.id,
+            client_turn_id=_TEST_CLIENT_TURN_ID if same_turn else uuid4(),
+            request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+            request_snapshot=_test_request_snapshot("PDF"),
+            message="PDF",
+            completion_model_route=_route(),
+            turn_preflight=preflight,
+            capacity=ModelCapacity(100_000, 4_096),
+        ):
+            pass
+
+    assert captured["retried_turn_message_id"] == (
+        str(failed_message_id) if sets_aside_its_message else None
+    )
+    assert captured["sends_files"] is False
+
+
+@pytest.mark.asyncio
+async def test_admission_is_told_when_a_turn_attaches_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    session = BuilderSession(
+        id=uuid4(),
+        tenant_id=cast(UUID, planner.user.tenant_id),
+        space_id=uuid4(),
+        target_kind=TargetKind.CREATE,
+    )
+    preflight = SessionTurnPreflight(
+        session=session,
+        baseline=SessionTurnPreparationBaseline(
+            session_status=SessionStatus.CHATTING,
+            latest_plan_id=None,
+            planning_state_version=0,
+            latest_turn_id=None,
+            latest_turn_state=None,
+            attachment_file_ids=(),
+        ),
+    )
+    captured: dict[str, object] = {}
+
+    class _Stop(Exception):
+        pass
+
+    def capture(**kwargs: object) -> None:
+        captured.update(kwargs)
+        raise _Stop
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.resolve_plan_edit_context",
+        AsyncMock(return_value=(None, None)),
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.prepare_user_question_metadata",
+        capture,
+    )
+
+    with pytest.raises(_Stop):
+        async for _event in planner.send_message(
+            session_id=session.id,
+            client_turn_id=_TEST_CLIENT_TURN_ID,
+            request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+            request_snapshot=_test_request_snapshot(""),
+            message="",
+            file_ids=[uuid4()],
+            completion_model_route=_route(),
+            turn_preflight=preflight,
+            capacity=ModelCapacity(100_000, 4_096),
+        ):
+            pass
+
+    assert captured["sends_files"] is True

@@ -19,6 +19,7 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     attachment_file_roles,
     render_ai_builder_attachment_evidence,
 )
+from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationMetadata,
     SlotClassificationNamedResultEvidenceMetadata,
@@ -50,6 +51,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTele
 from eneo.flows.ai_builder.ai_builder_question_state import (
     assistant_question_id,
     last_answered_question,
+    shows_instance_token,
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     DeclaredSchemaCandidate,
@@ -271,16 +273,25 @@ def build_slot_classification_input(
     )
     transcript_sources: list[SlotClassificationSource] = []
     pending_question_id: str | None = None
+    pending_question_bound = False
     for message in conversation:
         question_id = assistant_question_id(message)
         if question_id is not None:
             pending_question_id = question_id
+            pending_question_bound = shows_instance_token(message)
             continue
         if message.role != "user":
             continue
         answer = question_answer_from_metadata(message.metadata)
         response = question_response_from_metadata(message.metadata)
         response_question_id = response.question_id if response is not None else None
+        # An explicit answer is about the question it names, which is not the
+        # open one when the user re-answers an earlier question.
+        answered_question_id = (
+            canonical_question_id(answer.question_id)
+            if answer is not None and answer.question_id is not None
+            else None
+        )
         if isinstance(message.content, str) and message.content.strip():
             if answer is None or not is_structured_answer_echo(message.content, answer):
                 transcript_sources.append(
@@ -289,7 +300,15 @@ def build_slot_classification_input(
                         kind="user_message",
                         text=message.content.strip(),
                         message_id=message.message_id,
-                        question_id=response_question_id or pending_question_id,
+                        # Unbound text under a question with an instance
+                        # token is a request of its own, not its answer.
+                        question_id=response_question_id
+                        or answered_question_id
+                        or (
+                            pending_question_id
+                            if answer is not None or not pending_question_bound
+                            else None
+                        ),
                     )
                 )
         if answer is None or answer.question_id is None:

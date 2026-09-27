@@ -207,6 +207,24 @@ describe("AI Builder stream protocol", () => {
     ]);
   });
 
+  it("keeps the shown question's and card's instance token for the answer to echo", () => {
+    const token = "6f1c2a54-6f0e-4d8e-9d55-0e5f8f3b7a10";
+    for (const name of ["question", "requirements_summary"] as const) {
+      const rawEvent = validEvents.find((event) => event.event === name);
+      if (!rawEvent) throw new Error(`${name} fixture is missing.`);
+      const data = JSON.parse((rawEvent as { data: string }).data) as Record<string, unknown>;
+
+      const parsed = parseAIBuilderStreamEvent({
+        ...rawEvent,
+        data: JSON.stringify({ ...data, instance_token: token })
+      });
+
+      expect(parsed.event).toBe(name);
+      if (parsed.event !== "question" && parsed.event !== "requirements_summary") return;
+      expect(parsed.data.instance_token).toBe(token);
+    }
+  });
+
   it("preserves reopenable assumption rows on the requirements summary", () => {
     const rawEvent = validEvents.find((event) => event.event === "requirements_summary");
     if (!rawEvent) throw new Error("Requirements summary fixture is missing.");

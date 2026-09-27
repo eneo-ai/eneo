@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal, assert_never
+from uuid import uuid4
 
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
@@ -507,13 +508,18 @@ async def _dispatch_requirements_confirmation(
     decision: ConfirmRequirements,
 ) -> ServerDecisionDispatchResult:
     # The decision already carries the complete, versioned disclosure. Nothing
-    # here may rewrite it: persisting or emitting a different object than the
-    # one that was hashed is how confirmation grew a second truth.
-    requirements_payload = decision.payload
+    # here may rewrite its content: persisting or emitting a different object
+    # than the one that was hashed is how confirmation grew a second truth.
+    # The one thing stamped here is this showing's instance token, which sits
+    # outside the hashed content, and the persisted and emitted card carry the
+    # same one.
+    requirements_payload = decision.payload.model_copy(
+        update={"instance_token": uuid4()}
+    )
     request.conversation.append(
         ConversationMessage(
             role="assistant",
-            content=decision.payload.summary,
+            content=requirements_payload.summary,
             metadata=build_assistant_message_metadata(
                 request.conversation,
                 planner_telemetry=_server_turn_telemetry(

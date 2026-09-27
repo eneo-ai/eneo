@@ -47,29 +47,81 @@ export type StructuredQuestionAnswerMetadata =
   | components["schemas"]["NamedContentFieldsEditRequest"]
   // Reopening an assumption is a command: the server answers it with the
   // canonical question instead of recording an answer.
-  | components["schemas"]["ReopenQuestionRequest"];
+  | components["schemas"]["ReopenQuestionRequest"]
+  // Words typed while a question is open, naming the showing they reply to,
+  // or declared a request of their own that sets the question aside.
+  | components["schemas"]["QuestionReplyRequest"]
+  | components["schemas"]["NewRequestDeclaration"];
+
+export type RequirementsSummaryShowing = Pick<
+  components["schemas"]["RequirementsSummaryPayload"],
+  "requirements_version" | "instance_token"
+>;
+
+/** The showing an answer was given to, echoed back so the server can refuse
+ *  an answer to a question or card that has since been replaced. A question
+ *  or card shown before tokens existed has none to echo. */
+export function shownInstance(instanceToken: string | null | undefined): {
+  instance_token?: string;
+} {
+  return instanceToken ? { instance_token: instanceToken } : {};
+}
+
+/** Words or files the user sent while this question was open, as a reply to
+ *  this showing of it. Once a question carries a token, the server refuses a
+ *  turn that names neither the showing it replies to nor `new_request`; a
+ *  question without a token needs no binding. */
+export function questionReply(
+  question: StructuredQuestion
+): components["schemas"]["QuestionReplyRequest"] | null {
+  if (!question.instance_token) return null;
+  return {
+    kind: "question_reply",
+    question_id: question.question_id,
+    instance_token: question.instance_token
+  };
+}
+
+/** Words sent past an open question as a request of their own. While a
+ *  question with a token is open, the server refuses text that says neither
+ *  this nor which showing it replies to. */
+export function newRequest(): components["schemas"]["NewRequestDeclaration"] {
+  return { kind: "new_request" };
+}
+
+/** Whether a retained request can go again as a new turn. A reply names the
+ *  question that was open when it was sent; once that turn committed, its
+ *  own recorded words closed that question, so the same reply again would
+ *  only be refused. */
+export function resendsAsNewTurn(
+  request: { question_answer?: StructuredQuestionAnswerMetadata | null } | null | undefined
+): boolean {
+  return request != null && request.question_answer?.kind !== "question_reply";
+}
 
 /** The user reopening an assumption Eneo made for them; the server answers
  *  with the canonical question, the assumed value recommended. */
 export function reopenQuestionRequest(
   questionId: string,
-  requirementsVersion: string
+  summary: RequirementsSummaryShowing
 ): components["schemas"]["ReopenQuestionRequest"] {
   return {
     kind: "reopen_question",
     question_id: questionId,
-    requirements_version: requirementsVersion
+    requirements_version: summary.requirements_version,
+    ...shownInstance(summary.instance_token)
   };
 }
 
 /** The user handing this question back to Eneo, naming no option. */
 export function delegatedQuestionAnswer(
-  questionId: string,
+  question: StructuredQuestion,
   uiLanguage: string
 ): components["schemas"]["DelegatedQuestionAnswerRequest"] {
   return {
     kind: "delegated_question_answer",
-    question_id: questionId,
+    question_id: question.question_id,
+    ...shownInstance(question.instance_token),
     ui_language: uiLanguage
   };
 }
@@ -116,6 +168,7 @@ export function buildStructuredQuestionSelection(
     questionAnswer: {
       kind: "structured_question_answer",
       question_id: question.question_id,
+      ...shownInstance(question.instance_token),
       selected_option_ids: selectedOptions
         .map((option) => option.id)
         .filter((id): id is string => Boolean(id)),
@@ -135,6 +188,7 @@ export function buildStructuredQuestionCustomAnswer(
     questionAnswer: {
       kind: "structured_question_answer",
       question_id: question.question_id,
+      ...shownInstance(question.instance_token),
       custom_value: customValue
     }
   };
@@ -161,6 +215,7 @@ export function buildStructuredQuestionInputFieldsAnswer(
     questionAnswer: {
       kind: "structured_question_answer",
       question_id: question.question_id,
+      ...shownInstance(question.instance_token),
       input_fields: inputFields
     }
   };
