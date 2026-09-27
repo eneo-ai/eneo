@@ -1,0 +1,35 @@
+{
+  "file": "int12_anteckning_tjansteskrivelse.txt",
+  "format": "txt",
+  "source": {
+    "catalogue_id": "INT-12",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/547"
+  },
+  "description": "Utredarens anteckning inför tjänsteskrivelsen: diarienummer, handläggare, sammanträde och förvaltningens linje, som förordar pilotalternativet i kostnadsberäkningen utan att ange belopp eller skolor.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Barn- och utbildningsförvaltningen",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-09-09",
+  "diarienummer": "BUN 2025/01142",
+  "title": "Anteckning inför tjänsteskrivelse",
+  "blocks": [
+    {
+      "list": [
+        "Handläggare: Lina Forsberg, utredare",
+        "Nämndens sammanträde: 2026-10-21",
+        "Ärende: Yttrande över motion om kostnadsfria mensskydd i skolan"
+      ]
+    },
+    {
+      "heading": "Förvaltningens linje"
+    },
+    {
+      "paragraph": "Avstämd med skolchef grundskola och gymnasiechef 2026-09-08. Vi delar motionens syfte men förordar alternativ 3 i ekonomienhetens kostnadsberäkning, en pilot, i stället för motionens förslag om samtliga skolor. Piloten utvärderas innan nämnden tar ställning till en utbyggnad."
+    },
+    {
+      "paragraph": "Kostnaden ryms inte i nämndens ram för 2026 och får prövas i budgetprocessen för 2027. Motionens andra att-sats, om finansiering inom befintlig ram, avstyrks."
+    }
+  ]
+}

@@ -1,0 +1,304 @@
+{
+  "file": "mb_utb08_berakning_september_2026.xlsx",
+  "format": "xlsx",
+  "source": {
+    "catalogue_id": "UTB-08",
+    "url": "https://sjalvservice.malmo.se/oversikt/overview/1375"
+  },
+  "description": "Grundskoleförvaltningens beräkningsfil för september 2026: en fristående grundskolas inrapporterade elevförändringar, handläggarens beräkning av justeringen, händelse- och kommunkoder och grundbeloppen 2026.",
+  "sheets": [
+    {
+      "name": "Inrapporterat september",
+      "columns": [
+        "Skolenhet",
+        "Personnummer",
+        "Efternamn",
+        "Förnamn",
+        "Årskurs",
+        "Händelsekod",
+        "Händelsedatum",
+        "Folkbokföringskommun",
+        "Kommentar skola"
+      ],
+      "rows": [
+        [
+          "Lärkparksskolan",
+          "20160101-2394",
+          "Berg",
+          "Adam",
+          4,
+          "N",
+          "2026-09-01",
+          "1280",
+          "Ny elev, kommer från Kastanjeskolan"
+        ],
+        [
+          "Lärkparksskolan",
+          "20120101-2380",
+          "Andersson",
+          "Wilma",
+          8,
+          "U",
+          "2026-09-18",
+          "1280",
+          "Sista skoldag 18/9, börjar i annan skola"
+        ],
+        [
+          "Lärkparksskolan",
+          "20180102-2383",
+          "Holm",
+          "Stella",
+          2,
+          "F",
+          "2026-09-10",
+          "1281",
+          "Familjen har flyttat till Lund, går kvar hos oss"
+        ],
+        [
+          "Lärkparksskolan",
+          "20140101-2396",
+          "Ibrahim",
+          "Yusuf",
+          6,
+          "Ö",
+          "2026-09-22",
+          "1280",
+          "Ny adress: Lönngatan 14 B"
+        ],
+        [
+          "Lärkparksskolan",
+          "20190101-2391",
+          "Olsson",
+          "Hugo",
+          1,
+          "N",
+          "2026-09-21",
+          "1280",
+          "Ny elev"
+        ],
+        [
+          "Lärkparksskolan",
+          "20170102-2384",
+          "Nordin",
+          "Lova",
+          3,
+          "N",
+          "2026-09-07",
+          "1263",
+          "Ny elev"
+        ]
+      ]
+    },
+    {
+      "name": "Beräkning september",
+      "columns": [
+        "Rad",
+        "Elev",
+        "Händelsekod",
+        "Händelsedatum",
+        "Årskursgrupp",
+        "Grundbelopp per månad (kr)",
+        "Månader som påverkas",
+        "Justering (kr)",
+        "Anteckning"
+      ],
+      "rows": [
+        [
+          1,
+          "Adam Berg",
+          "N",
+          "2026-09-01",
+          "Åk 4–6",
+          8790,
+          "september och oktober",
+          17580,
+          "Inskriven 1/9, före mätdagen 15/9: ersätts för september (efterreglering) och oktober."
+        ],
+        [
+          2,
+          "Wilma Andersson",
+          "U",
+          "2026-09-18",
+          "Åk 7–9",
+          9655,
+          "oktober",
+          -9655,
+          "Inskriven på mätdagen 15/9, så september står kvar. Ingen ersättning från oktober."
+        ],
+        [
+          3,
+          "Stella Holm",
+          "F",
+          "2026-09-10",
+          "Åk 1–3",
+          8245,
+          "september och oktober",
+          -16490,
+          "Folkbokförd i Lund från 10/9, alltså inte Malmöelev på mätdagen. Återkrav för september och ingen ersättning för oktober."
+        ],
+        [
+          4,
+          "Yusuf Ibrahim",
+          "Ö",
+          "2026-09-22",
+          "Åk 4–6",
+          8790,
+          "–",
+          0,
+          "Ny adress påverkar inte ersättningen."
+        ],
+        [
+          5,
+          "Hugo Olsson",
+          "N",
+          "2026-09-21",
+          "Åk 1–3",
+          8245,
+          "oktober",
+          8245,
+          "Började efter mätdagen 15/9: ersätts från oktober."
+        ],
+        [
+          6,
+          "Lova Nordin",
+          "N",
+          "2026-09-07",
+          "Åk 1–3",
+          8245,
+          "–",
+          0,
+          "Folkbokförd i Svedala (1263): Svedala kommun betalar, ingen ersättning från Malmö stad. Skolan hänvisad dit."
+        ],
+        [
+          "Summa",
+          "–",
+          "–",
+          "–",
+          "–",
+          "–",
+          "–",
+          -320,
+          "Total justering i oktoberutbetalningen"
+        ]
+      ]
+    },
+    {
+      "name": "Koder",
+      "columns": [
+        "Typ",
+        "Kod",
+        "Betydelse",
+        "Påverkan på ersättningen"
+      ],
+      "rows": [
+        [
+          "Händelse",
+          "N",
+          "Ny elev (inskrivning)",
+          "Ersätts från och med den månad eleven är inskriven på mätdagen den 15:e. Inskriven den 15:e eller tidigare i rapportmånaden ger efterreglering för rapportmånaden plus nästa månad (2 månader), inskriven den 16:e eller senare ger bara nästa månad (1 månad)."
+        ],
+        [
+          "Händelse",
+          "U",
+          "Utskriven (datumet är sista dagen som inskriven)",
+          "Ersätts till och med den månad eleven är inskriven på mätdagen. Sista dag före den 15:e i rapportmånaden ger återkrav för rapportmånaden plus nästa månad (2 månader), sista dag den 15:e eller senare ger bara nästa månad (1 månad)."
+        ],
+        [
+          "Händelse",
+          "F",
+          "Folkbokförd i annan kommun (datumet är första dagen i nya kommunen)",
+          "Samma som U räknat från folkbokföringsdatumet: den 15:e eller tidigare ger 2 månader, den 16:e eller senare 1 månad. Den nya hemkommunen betalar därefter."
+        ],
+        [
+          "Händelse",
+          "Ö",
+          "Övrig ändring (namn, adress, vårdnadshavare)",
+          "Ingen påverkan på ersättningen."
+        ],
+        [
+          "Mätdag",
+          "15",
+          "Den 15:e i varje månad",
+          "Eleven ersätts för en månad om hen är inskriven och folkbokförd i Malmö den 15:e."
+        ],
+        [
+          "Kommun",
+          "1280",
+          "Malmö",
+          "Malmö stad betalar grundbelopp."
+        ],
+        [
+          "Kommun",
+          "1281",
+          "Lund",
+          "Ingen ersättning från Malmö stad, hemkommunen betalar."
+        ],
+        [
+          "Kommun",
+          "1230",
+          "Staffanstorp",
+          "Ingen ersättning från Malmö stad, hemkommunen betalar."
+        ],
+        [
+          "Kommun",
+          "1231",
+          "Burlöv",
+          "Ingen ersättning från Malmö stad, hemkommunen betalar."
+        ],
+        [
+          "Kommun",
+          "1233",
+          "Vellinge",
+          "Ingen ersättning från Malmö stad, hemkommunen betalar."
+        ],
+        [
+          "Kommun",
+          "1261",
+          "Kävlinge",
+          "Ingen ersättning från Malmö stad, hemkommunen betalar."
+        ],
+        [
+          "Kommun",
+          "1263",
+          "Svedala",
+          "Ingen ersättning från Malmö stad, hemkommunen betalar."
+        ]
+      ]
+    },
+    {
+      "name": "Grundbelopp 2026",
+      "columns": [
+        "Årskursgrupp",
+        "Grundbelopp per elev och år (kr)",
+        "Per månad (kr)",
+        "Beslut"
+      ],
+      "rows": [
+        [
+          "F-klass",
+          73380,
+          6115,
+          "Grundskolenämnden 2025-12-16, dnr GRN-2025-09117"
+        ],
+        [
+          "Åk 1–3",
+          98940,
+          8245,
+          "Grundskolenämnden 2025-12-16, dnr GRN-2025-09117"
+        ],
+        [
+          "Åk 4–6",
+          105480,
+          8790,
+          "Grundskolenämnden 2025-12-16, dnr GRN-2025-09117"
+        ],
+        [
+          "Åk 7–9",
+          115860,
+          9655,
+          "Grundskolenämnden 2025-12-16, dnr GRN-2025-09117"
+        ]
+      ]
+    }
+  ]
+}

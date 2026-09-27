@@ -1,0 +1,76 @@
+{
+  "file": "oms16_stiftelse_barnavardsfond.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "OMS-16",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/490"
+  },
+  "description": "Stiftelseförordnande för en fond till barnfamiljer med barn under 18 år i kommunen.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Kommunstyrelsekontoret, Stiftelseförvaltningen",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2025-11-20",
+  "diarienummer": "KS-2025-00979",
+  "title": "Stiftelseförordnande: Stiftelsen Sundsvalls barnavårdsfond",
+  "blocks": [
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Värde"
+        ],
+        "rows": [
+          [
+            "Stiftelse",
+            "Stiftelsen Sundsvalls barnavårdsfond"
+          ],
+          [
+            "Organisationsnummer",
+            "802010-2267"
+          ],
+          [
+            "Förvaltare",
+            "Sundsvalls kommun genom kommunstyrelsen"
+          ],
+          [
+            "Ursprung",
+            "Sammanslagning 1998 av fem äldre barnavårdsfonder i Sundsvall"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Ändamål enligt förordnandet"
+    },
+    {
+      "paragraph": "Stiftelsens ändamål är att lämna bidrag till barnfamiljer i Sundsvalls kommun med begränsade ekonomiska resurser, för barnens fritid, kläder och sommarvistelse."
+    },
+    {
+      "heading": "Villkor för utdelning"
+    },
+    {
+      "list": [
+        "Sökanden är vårdnadshavare till barn under 18 år som bor i hushållet.",
+        "Hushållet är folkbokfört i Sundsvalls kommun.",
+        "Hushållet har begränsade ekonomiska resurser."
+      ]
+    },
+    {
+      "heading": "Utdelning"
+    },
+    {
+      "paragraph": "Högsta utdelning är 2 000 kr per barn och år."
+    },
+    {
+      "heading": "Ansökan"
+    },
+    {
+      "paragraph": "Ansökningsperiod: 1 mars – 30 april."
+    },
+    {
+      "paragraph": "Stiftelsen förvaltas enligt stiftelselagen (1994:1220) och förordnandet. Beslut om utdelning fattas av kommunstyrelsens stiftelseutskott. Den som har fått avslag kan ansöka på nytt nästa ansökningsperiod."
+    }
+  ]
+}

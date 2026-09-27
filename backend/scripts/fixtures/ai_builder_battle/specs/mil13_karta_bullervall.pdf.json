@@ -1,0 +1,38 @@
+{
+  "file": "mil13_karta_bullervall.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "MIL-13", "url": "https://sjalvservice.malmo.se/oversikt/overview/748"},
+  "description": "Sökandens kartbilaga till anmälan om återvinning av massor: översikt och bullervallens läge med ritningsförklaring (där gränsen för ett vattenskyddsområde syns), samt ursprungsplatsens provtagningsplan med delområden och mängder.",
+  "letterhead": {"organisation": "Åhus Mark & Schakt AB", "unit": "Projekt 2611 Bullervall Vä – kartbilaga", "address": "Industrivägen 17, 296 35 Åhus · 044-24 71 09"},
+  "date": "2026-08-28",
+  "title": "Kartbilaga till anmälan om återvinning av massor, Kristianstad Vä 12:4",
+  "blocks": [
+    {"heading": "Karta 1 – Översikt 1:10 000"},
+    {"paragraph": "Kartan visar Vä 12:4 söder om väg 19, bostäderna längs Skepparslövsvägen som vallen ska skydda och transportvägen från Hammar 8:12."},
+    {"heading": "Karta 2 – Bullervallens läge 1:2 000"},
+    {"list": [
+      "Röd yta: planerad bullervall, 180 m lång och 3 m hög, längs fastighetens norra gräns mot väg 19.",
+      "Grön linje: fastighetsgräns Vä 12:4.",
+      "Blå linje: dike, 260 m söder om vallen.",
+      "Svart punkt B1: närmaste brunn (grävd, hushållsvatten), 180 m sydost om vallen.",
+      "Streckad blå linje: gräns för Skepparslövs vattenskyddsområde, sekundär skyddszon. Vallens västra 60 m ligger inom skyddszonen.",
+      "Kartunderlag: Lantmäteriet, vattenskyddsområden från länsstyrelsens karttjänst hämtade 2026-08-20."
+    ]},
+    {"page_break": true},
+    {"heading": "Karta 3 – Ursprungsplats och provtagningsplan, Kristianstad Hammar 8:12"},
+    {"paragraph": "Gårdsplanen vid den tidigare bilverkstaden delades in i sex delområden. Ett samlingsprov om tio delprov togs i varje delområde 2026-08-24 på 0–0,5 m djup."},
+    {"table": {
+      "columns": ["Delområde", "Provpunkt", "Beskrivning", "Uppskattad mängd"],
+      "rows": [
+        ["A", "PP-01", "Grusad yta vid infarten", "450 ton"],
+        ["B", "PP-02", "Parkering framför verkstaden", "420 ton"],
+        ["C", "PP-03", "Gräsyta mot gatan", "380 ton"],
+        ["D", "PP-04", "Vid tidigare spolplatta och oljeavskiljare", "350 ton"],
+        ["E", "PP-05", "Under befintlig asfalt", "420 ton"],
+        ["F", "PP-06", "Släntkant mot baksidan", "380 ton"]
+      ]
+    }},
+    {"paragraph": "Summa 2 400 ton. Massorna från varje delområde lastas ut för sig."},
+    {"signature": {"name": "Johan Persson", "role": "Projektledare, Åhus Mark & Schakt AB"}}
+  ]
+}

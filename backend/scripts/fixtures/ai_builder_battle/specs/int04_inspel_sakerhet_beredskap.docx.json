@@ -1,0 +1,58 @@
+{
+  "file": "int04_inspel_sakerhet_beredskap.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-04",
+    "url": "https://www.regeringen.se/contentassets/ee59c69b63014c19a08b0e8ca47334b2/svara-pa-remiss-pm2021_1-rev-2026.pdf"
+  },
+  "description": "Kommunstyrelsekontorets säkerhetsavdelnings underlag till remissvar: tillstyrker förslagen och tidpunkterna och hänvisar till en myndighet som inte längre finns.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Kommunstyrelsekontoret, säkerhets- och beredskapsavdelningen",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-09-28",
+  "diarienummer": "KS-2026-00544",
+  "title": "Underlag till remissvar – SOU 2026:41 Kommunal beredskap i en ny tid",
+  "blocks": [
+    {
+      "paragraph": "Säkerhets- och beredskapsavdelningen har ombetts att lämna underlag till kommunens remissvar. Underlaget avser de delar som rör kommunens krisledning och samlade beredskap."
+    },
+    {
+      "heading": "Kapitel 7 Ledning"
+    },
+    {
+      "paragraph": "Vi tillstyrker förslaget om en reservledningsplats som ska kunna användas i sju dygn. Sundsvalls reservledningsplats i räddningstjänstens lokaler på Norra kajen uppfyller redan kravet på reservkraft men saknar lager för vatten och livsmedel, vilket kan åtgärdas inom befintlig budget."
+    },
+    {
+      "heading": "Kapitel 8 Reservkraft"
+    },
+    {
+      "paragraph": "Vi tillstyrker kravet på 72 timmars reservkraft i vård- och omsorgsboenden och LSS-bostäder. Elavbrottet i januari 2025 visade att vi inte kan förlita oss på mobila reservkraftverk. Tidpunkten 31 december 2028 är ambitiös men bör hållas; läget motiverar det."
+    },
+    {
+      "heading": "Kapitel 9 Nödvatten"
+    },
+    {
+      "paragraph": "Vi tillstyrker kravet på 10 liter per person och dygn inom 24 timmar och tidpunkten 30 juni 2029. Kommunens nödvattenplan från 2021 behöver revideras oavsett förslaget, och arbetet bör följa MSB:s vägledning för nödvattenplanering."
+    },
+    {
+      "heading": "Kapitel 10 Livsmedel"
+    },
+    {
+      "paragraph": "Vi tillstyrker kravet på sju dygns livsmedelsberedskap. Det är en rimlig nivå med tanke på hur länge en allvarlig störning kan pågå vintertid i vår region."
+    },
+    {
+      "heading": "Kapitel 12 Finansiering"
+    },
+    {
+      "paragraph": "Vi har inga synpunkter på ersättningsmodellen men vill betona att kraven måste finansieras fullt ut av staten."
+    },
+    {
+      "signature": {
+        "name": "Anders Molin",
+        "role": "Säkerhetschef"
+      }
+    }
+  ]
+}

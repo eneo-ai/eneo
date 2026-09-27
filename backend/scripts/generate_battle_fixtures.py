@@ -25,7 +25,7 @@ bytes match the pinned hash.
 ``--check`` changes nothing in the repository. It prints one line per problem and exits 1 when the committed bytes,
 the manifest and the specs disagree: a manifest the harness would refuse, a pinned file that is missing or has other
 bytes, a pinned file with neither a spec nor a legacy generator, an entry of the fixture directory the manifest does
-not pin (other than ``UNPINNED_FIXTURE_ENTRIES``), a spec that is invalid or whose file is not pinned, a committed
+not pin (other than ``UNPINNED_FIXTURE_ENTRIES`` and the seed flows), a spec that is invalid or whose file is not pinned, a committed
 file whose text, read through the product's own extractor, either lacks a piece of its spec's content or reads
 differently from the spec rendered now, or a DOCX template whose content controls (every field the product's
 template inspector returns, in order, with each control's XML) differ from the spec rendered now, or that the
@@ -116,20 +116,10 @@ MATTER_FIXTURE_NAMES = (
     "06_tidigare_beslut.pdf",
 )
 
-# What a fixture directory may hold without a manifest entry: the manifest, the seed flows and edit chains (the
-# harness hashes those itself), the prompts and the specs.
-UNPINNED_FIXTURE_ENTRIES = frozenset(
-    {
-        "manifest.json",
-        "edit_chain_10.json",
-        "edit_chain_30.json",
-        "edit_seed_a.json",
-        "edit_seed_g.json",
-        "edit_seed_s_speaker.json",
-        "prompts",
-        "specs",
-    }
-)
+# What a fixture directory may hold without a manifest entry: the manifest, the prompts and the specs, and the seed
+# flows and edit chains, which the harness hashes itself and names with these prefixes.
+UNPINNED_FIXTURE_ENTRIES = frozenset({"manifest.json", "prompts", "specs"})
+SEED_FIXTURE_PREFIXES = ("edit_seed_", "edit_chain_")
 
 GENERATED_FIXTURE_NAMES = (
     *MATTER_FIXTURE_NAMES,
@@ -796,6 +786,7 @@ def check(
         f"{path.name}: in the fixture directory but not pinned in {manifest_path.name}"
         for path in sorted(fixture_dir.iterdir())
         if path.name not in {*pinned, *specified, *UNPINNED_FIXTURE_ENTRIES}
+        and not (path.suffix == ".json" and path.name.startswith(SEED_FIXTURE_PREFIXES))
     ]
     for spec in specs:
         path = fixture_dir / spec.file

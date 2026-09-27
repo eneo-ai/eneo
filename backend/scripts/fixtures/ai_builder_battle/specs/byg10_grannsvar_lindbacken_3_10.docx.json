@@ -1,0 +1,17 @@
+{
+  "file": "byg10_grannsvar_lindbacken_3_10.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "BYG-10", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/715"},
+  "description": "Word-brev med invändning som grundas på skymd sjöutsikt och värdeminskning, samt en anklagelse om en tidigare olovlig altan hos sökanden.",
+  "letterhead": {"organisation": "Kerstin Lövgren", "unit": "Rönnbärsvägen 10, 857 40 Sundsvall", "address": "kerstin.lovgren@example.com"},
+  "date": "2026-09-20",
+  "title": "Invändning mot bygglov, ärende BYGG-2026-000644",
+  "blocks": [
+    {"paragraph": "Till: Sundsvalls kommun, Stadsbyggnadskontoret, Bygglovavdelningen, 851 85 Sundsvall"},
+    {"paragraph": "Jag äger Sundsvall Lindbacken 3:10 på andra sidan Rönnbärsvägen och har fått er underrättelse om garaget på Lindbacken 3:9."},
+    {"paragraph": "Jag motsätter mig bygglovet. Från mitt vardagsrum har jag i dag fri utsikt mellan husen ner mot Sidsjön. Ett garage med över fem meters nockhöjd kommer att ta bort den utsikten helt. Vi köpte huset 1998 just för utsikten, och en mäklare som jag har pratat med bedömer att fastigheten skulle förlora i värde med kanske 200 000 kronor om utsikten försvinner."},
+    {"paragraph": "Jag vill också upplysa om att ägarna till Lindbacken 3:9 byggde en stor altan med glastak för ett par år sedan. Jag har aldrig sett något bygglov för den. Innan de får bygga mer borde kommunen kontrollera att det som redan står där är lagligt."},
+    {"paragraph": "Jag begär att ansökan avslås."},
+    {"signature": {"name": "Kerstin Lövgren", "role": "Lindbacken 3:10"}}
+  ]
+}

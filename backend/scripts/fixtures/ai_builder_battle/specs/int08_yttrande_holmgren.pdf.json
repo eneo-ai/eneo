@@ -1,0 +1,52 @@
+{
+  "file": "int08_yttrande_holmgren.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "INT-08",
+    "url": "https://e-tjanster.kristianstad.se/oversikt/overview/58"
+  },
+  "description": "Ett inskannat brev från två delägare till en fastighet inom planområdet som motsätter sig att en del av tomten blir gata och begär ersättning.",
+  "letterhead": {
+    "organisation": "Ann-Sofie och Tomas Holmgren",
+    "unit": "Ägare till Sundsvall Björkängen 1:14",
+    "address": "Tallmovägen 3, 856 52 Sundsvall"
+  },
+  "date": "2026-06-10",
+  "title": "Synpunkter på detaljplan för Björkängen etapp 2",
+  "blocks": [
+    {
+      "paragraph": "Till stadsbyggnadsnämnden, Sundsvalls kommun. Ärende SBN-2025-00412."
+    },
+    {
+      "paragraph": "Vi äger fastigheten Sundsvall Björkängen 1:14 tillsammans och har bott här sedan 2009. Enligt plankartan ska en remsa längs vår norra tomtgräns, cirka 310 kvadratmeter, bli gata när Björkallén förlängs. Där står i dag vårt garage, en uteplats och sex äppelträd som planterades av Tomas föräldrar."
+    },
+    {
+      "paragraph": "Vi motsätter oss att vår mark tas i anspråk. Gatan kan i stället dras några meter längre norrut över kommunens åkermark, där det inte finns några byggnader. Vi har inte fått någon förklaring till varför just vår tomt måste användas."
+    },
+    {
+      "paragraph": "Om kommunen ändå går vidare vill vi"
+    },
+    {
+      "list": [
+        "att gatan flyttas så att garaget kan stå kvar,",
+        "att kommunen betalar full ersättning för marken, garaget och träden och för att vi får trafik nära huset,",
+        "att vi får ett möte med kommunen innan planen går ut på granskning."
+      ]
+    },
+    {
+      "paragraph": "Vi ber att få besked om hur kommunen tänker göra."
+    },
+    {
+      "signature": {
+        "name": "Ann-Sofie Holmgren",
+        "role": "Delägare"
+      }
+    },
+    {
+      "signature": {
+        "name": "Tomas Holmgren",
+        "role": "Delägare"
+      }
+    }
+  ]
+}

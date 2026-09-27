@@ -1,0 +1,113 @@
+{
+  "beskrivning": "Exempel på hur en inkommen registrering i e-tjänsten Registrering av medelstor förbränningsanläggning blev en registerpost i miljönämndens register enligt 21–23 §§ förordningen (2018:471) om medelstora förbränningsanläggningar.",
+  "etjanst_faltenheter": {
+    "tillford_effekt": "kilowatt (kW), heltal",
+    "verkningsgrad": "procent",
+    "medellast": "procent av full last",
+    "koordinat_x/koordinat_y": "SWEREF 99 TM",
+    "branslen.andel": "procent, ska summera till 100"
+  },
+  "etjanst_kodlistor": {
+    "typ": {
+      "T12": "dieselmotor",
+      "T17": "tvåbränslemotor",
+      "T23": "annan motor",
+      "T31": "gasturbin",
+      "T40": "annan medelstor förbränningsanläggning"
+    },
+    "branslen.kod": {
+      "B11": "fast biomassa",
+      "B14": "övriga fasta bränslen",
+      "O23": "dieselbrännolja",
+      "O27": "flytande biobränslen",
+      "O29": "andra flytande bränslen än dieselbrännolja eller flytande biobränslen",
+      "G31": "naturgas",
+      "G35": "andra gasformiga bränslen än naturgas"
+    }
+  },
+  "etjanst_export": {
+    "arende_id": "MK-REG-2026-0031",
+    "inkom": "2026-04-14T10:02",
+    "verksamhetsutovare": {
+      "namn": "Njurunda Värmeverk AB",
+      "organisationsnummer": "556871-3399",
+      "sate": "Sundsvall",
+      "kontaktperson": {
+        "namn": "Göran Sandström",
+        "telefon": "070-318 52 60",
+        "epost": "goran.sandstrom@njurundavarme.example"
+      },
+      "postadress": "Box 104, 862 21 Kvissleby"
+    },
+    "anlaggning": {
+      "benamning": "Hetvattenpanna P2",
+      "besoksadress": "Industrivägen 6, 862 32 Kvissleby",
+      "fastighet": "Sundsvall Kvissleby 3:118",
+      "koordinat_x": 6905412,
+      "koordinat_y": 618734,
+      "typ": "T40",
+      "tillford_effekt": 6500,
+      "verkningsgrad": 88,
+      "rening": "Multicyklon och elfilter",
+      "drifttimmar_per_ar": 4200,
+      "medellast": 62,
+      "driftstart": "2026-10-01",
+      "nace": "35.30"
+    },
+    "branslen": [
+      {
+        "kod": "B11",
+        "andel": 95
+      },
+      {
+        "kod": "O23",
+        "andel": 5
+      }
+    ],
+    "bilagor": [
+      "Tekniskt datablad P2.pdf"
+    ]
+  },
+  "registerpost": {
+    "arende_id": "MK-REG-2026-0031",
+    "registreringsnummer": "MFA-2281-0031",
+    "registrerad": "2026-04-28",
+    "verksamhetsutovare": "Njurunda Värmeverk AB",
+    "organisationsnummer": "556871-3399",
+    "sate": "Sundsvall",
+    "kontakt": "Göran Sandström, 070-318 52 60",
+    "adress": "Industrivägen 6, 862 32 Kvissleby",
+    "fastighetsbeteckning": "Sundsvall Kvissleby 3:118",
+    "sweref99tm": {
+      "x": 6905412,
+      "y": 618734
+    },
+    "driftstart": "2026-10-01",
+    "kategori": "ny förbränningsanläggning",
+    "anlaggningstyp": "annan medelstor förbränningsanläggning",
+    "anlaggningseffekt_mw": 6.5,
+    "verkningsgrad_procent": 88,
+    "reningsutrustning": "Multicyklon och elfilter",
+    "drifttimmar_per_ar": 4200,
+    "genomsnittlig_last_procent": 62,
+    "branslen": [
+      {
+        "bransle": "fast biomassa",
+        "andel_procent": 95
+      },
+      {
+        "bransle": "dieselbrännolja",
+        "andel_procent": 5
+      }
+    ],
+    "nace": "35.30",
+    "handlaggarens_anmarkning": null
+  },
+  "handlaggarens_noteringar": [
+    "Registerposten publiceras på sundsvall.se (23 § förordningen 2018:471). Personnummer, födelsedatum och bostadsadresser får inte publiceras. Är verksamhetsutövaren en enskild firma är organisationsnumret personnumret: skriv då Enskild firma i stället för numret, och ange aldrig kontaktpersonens hemadress.",
+    "Anläggningseffekten anges i megawatt i registret (18 § 5): e-tjänstens kW delas med 1 000.",
+    "Registret omfattar anläggningar med 1 MW eller högre men högst 50 MW (4 §). Ligger effekten utanför ska ärendet inte registreras utan gå till handläggare.",
+    "Typ och bränslen skrivs med förordningens beteckningar (18 § 4 och 9), inte med e-tjänstens koder.",
+    "Kategori: 2018-anläggning om den togs i drift senast 2018-12-19, annars ny förbränningsanläggning (5 §)."
+  ]
+}

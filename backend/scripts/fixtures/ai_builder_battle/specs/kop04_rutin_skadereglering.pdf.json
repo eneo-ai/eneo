@@ -1,0 +1,71 @@
+{
+  "file": "kop04_rutin_skadereglering.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "KOP-04", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/388"},
+  "description": "Stadsbyggnadskontorets interna rutin för handläggning av skadeståndsanspråk på gator och parker: vållandebedömning mot driftjournalens åtgärdstider, ersättningsgilla poster, åldersavdrag för däck, kvittokrav och beskedets innehåll.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Stadsbyggnadskontoret – Gatuavdelningen", "address": "851 85 Sundsvall"},
+  "date": "2025-11-20",
+  "diarienummer": "SBN-2025-02217",
+  "title": "Rutin för handläggning av skadeståndsanspråk – gator och parker",
+  "blocks": [
+    {"paragraph": "Fastställd av avdelningschef gatuavdelningen 2025-11-20. Gäller från 2026-01-01 och ersätter rutinen från 2021. Rutinen gäller anspråk från privatpersoner och företag för skador som uppstått på gator, gång- och cykelvägar, torg och parker där kommunen är väghållare eller fastighetsägare."},
+    {"heading": "1. Rättslig utgångspunkt"},
+    {"paragraph": "Kommunen ansvarar för en skada enligt skadeståndslagen (1972:207) 2 kap. 1 § endast om skadan har orsakats genom fel eller försummelse från kommunens sida. Kommunen har inget strikt ansvar för gatornas skick. Drift och underhåll av gator är faktisk verksamhet och inte myndighetsutövning."},
+    {"paragraph": "Skaderegleringen är civilrättslig. Beskedet är inte ett förvaltningsbeslut och kan inte överklagas. Den som inte delar kommunens bedömning kan begära att kommunen omprövar den med nytt underlag, eller väcka talan mot kommunen i allmän domstol (Sundsvalls tingsrätt)."},
+    {"paragraph": "Anspråk som avser personskada eller överstiger 50 000 kr lämnas till kommunens försäkringsbolag för reglering. Övriga anspråk regleras av gatuavdelningens skadehandläggare."},
+    {"heading": "2. Bedömning av vållande"},
+    {"paragraph": "Hämta alltid utdrag ur driftsystemets journal för platsen. Kontrollera 1) när kommunen fick kännedom om felet (felanmälan eller egen rondering; kännedom räknas från den tidpunkt felanmälan registrerades), 2) vilken prioritet felet fick vid besiktningen och 3) om varningsmärkning och åtgärd skedde inom åtgärdstiden nedan. Kontrollera att journalens rader avser samma plats och arbetsorder som anspråket; flera fel kan finnas på samma gata."},
+    {
+      "table": {
+        "columns": ["Prioritet vid besiktning", "Varningsmärkning senast", "Åtgärd senast", "Exempel"],
+        "rows": [
+          ["Prio 1", "4 timmar efter besiktning", "2 arbetsdagar efter besiktning", "Hål eller sättning i körbana djupare än 5 cm, lösa brunnslock, nedfallna träd över väg"],
+          ["Prio 2", "Ingen särskild tid", "10 arbetsdagar efter besiktning", "Hål i gång- och cykelbana, lös marksten, trasiga brunnsgaller"],
+          ["Prio 3", "Ingen särskild tid", "Vid nästa planerade underhåll", "Sprickor utan nivåskillnad, kosmetiska fel"]
+        ]
+      }
+    },
+    {"paragraph": "Har skadan inträffat efter att åtgärdstiden gått ut, eller har varningsmärkning saknats efter tidsgränsen, anses kommunen ha brustit i sitt underhåll och ersättning lämnas enligt avsnitt 3. Har skadan inträffat innan kommunen fått kännedom eller innan åtgärdstiden gått ut lämnas normalt ingen ersättning. Den skadelidandes egen vårdslöshet (till exempel för hög hastighet) kan jämkas enligt skadeståndslagen 6 kap. 1 §; ange i så fall skälen."},
+    {"page_break": true},
+    {"heading": "3. Ersättningsgilla kostnader"},
+    {
+      "table": {
+        "columns": ["Kostnadspost (ersättning)", "Ersätts", "Villkor"],
+        "rows": [
+          ["Reparation eller ersättning av skadad egendom", "Ja", "Enligt kvitto eller faktura"],
+          ["Däck", "Ja, med åldersavdrag", "Se tabellen för åldersavdrag"],
+          ["Fälg", "Ja, utan avdrag", "Enligt kvitto eller faktura"],
+          ["Montering, balansering och hjulinställning till följd av skadan", "Ja", "Enligt kvitto eller faktura"],
+          ["Bärgning", "Ja", "Enligt kvitto"],
+          ["Hyrbil", "Ja", "Endast för reparationstiden och endast mot kvitto"],
+          ["Kostnader som inte är en följd av skadan, t.ex. däckhotell, service, byte av oskadade däck", "Nej", "Ska räknas bort även om de står på samma faktura"],
+          ["Eget arbete, förlorad arbetstid, självrisk i egen försäkring", "Nej", "–"]
+        ]
+      }
+    },
+    {
+      "table": {
+        "columns": ["Däckets ålder vid skadetillfället", "Åldersavdrag"],
+        "rows": [
+          ["Under 1 år", "0 %"],
+          ["1 år till under 2 år", "20 %"],
+          ["2 år till under 3 år", "40 %"],
+          ["3 år eller äldre", "60 %"]
+        ]
+      }
+    },
+    {"paragraph": "Däckets ålder räknas från inköpsmånaden enligt kvitto eller sökandens uppgift till skadedagen. Åldersavdraget beräknas på däckets pris inklusive moms och avrundas till hela kronor. Privatpersoner ersätts med belopp inklusive moms, företag med belopp exklusive moms."},
+    {"paragraph": "En kostnad som inte styrks med kvitto eller faktura ersätts inte i beskedet. Begär komplettering i beskedet och ange att kommunen prövar posten om kvittot kommer in inom 30 dagar."},
+    {"heading": "4. Beskedet"},
+    {"list": [
+      "Skriv i klarspråk, i du-form, till den skadelidande.",
+      "Ange diarienummer, skadedag och skadeplats.",
+      "Redovisa bedömningen av kommunens ansvar med hänvisning till journalens uppgifter: när kommunen fick kännedom, prioritet och vad som gjordes och när.",
+      "Specificera varje post: begärt belopp, godkänt belopp och avdrag med skäl. Ange det totala ersättningsbeloppet.",
+      "Ange vilka poster som inte ersätts och varför, och vad som behövs för komplettering.",
+      "Upplys om hur man gör om man inte delar bedömningen (avsnitt 1).",
+      "Datum skrivs ÅÅÅÅ-MM-DD och belopp i hela kronor med mellanslag som tusentalsavgränsare, t.ex. 12 500 kr."
+    ]},
+    {"signature": {"name": "Per Edlund", "role": "Avdelningschef, gatuavdelningen"}}
+  ]
+}

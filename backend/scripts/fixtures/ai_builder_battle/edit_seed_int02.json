@@ -1,0 +1,155 @@
+{
+  "name": "Begäran om allmän handling – sekretessprövning och beslut",
+  "description": "Registraturens och juristens stöd när någon begär ut allmänna handlingar: läser begäran och de efterfrågade handlingarna, prövar sekretess uppgift för uppgift enligt OSL, tar fram ett maskeringsförslag och skriver beslutet om delvis avslag med överklagandehänvisning.",
+  "metadata_json": {
+    "form_schema": {
+      "fields": [
+        {"name": "begaran", "type": "text", "label": "Begäran (inklistrad från e-post eller e-tjänst)", "required": true, "order": 1},
+        {"name": "arendenummer", "type": "text", "label": "Ärendenummer för begäran", "required": true, "order": 2},
+        {"name": "beslutande_namnd", "type": "text", "label": "Myndighet (nämnd) som beslutar", "required": true, "order": 3},
+        {"name": "handlaggare", "type": "text", "label": "Beslutsfattare enligt delegationsordningen", "required": true, "order": 4}
+      ]
+    }
+  },
+  "steps": [
+    {
+      "name": "Läs begäran och handlingarna",
+      "instructions": "Du får en begäran om att ta del av allmänna handlingar och de handlingar som begäran gäller. Ta ut vem som begär, när begäran kom in och exakt vad som begärs. Gå sedan igenom varje handling: dess typ och datum, diarienummer, avsändare eller upprättare, och varje uppgift som kan behöva sekretessprövas, till exempel uppgifter om enskildas hälsa, personliga förhållanden, identitet, kontaktuppgifter och personnummer, med sidan eller avsnittet där uppgiften står. Återge uppgiften så att den går att hitta i handlingen, men skriv inte av mer än det som behövs.",
+      "input_source": "flow_input",
+      "input_type": "document",
+      "input_config": {
+        "runtime_input": {
+          "enabled": true,
+          "required": true,
+          "max_files": 30,
+          "input_format": "document",
+          "label": "Efterfrågade handlingar",
+          "description": "Ladda upp de handlingar som begäran gäller."
+        }
+      },
+      "input_bindings": {"question": "Begäran:\n{{ flow_input.begaran }}\n\nHandlingar:\n{{ step_input.text }}"},
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["sokande", "begaran_inkom", "begard_omfattning", "handlingar"],
+        "properties": {
+          "sokande": {"type": "string"},
+          "begaran_inkom": {"type": ["string", "null"]},
+          "begard_omfattning": {"type": "string"},
+          "handlingar": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["handling", "datum", "diarienummer", "uppgifter"],
+              "properties": {
+                "handling": {"type": "string"},
+                "datum": {"type": ["string", "null"]},
+                "diarienummer": {"type": ["string", "null"]},
+                "uppgifter": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["uppgift", "kategori", "var_i_handlingen"],
+                    "properties": {"uppgift": {"type": "string"}, "kategori": {"type": "string"}, "var_i_handlingen": {"type": "string"}}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Sekretessprövning per uppgift",
+      "instructions": "Pröva varje uppgift för sig enligt offentlighets- och sekretesslagen (2009:400). Ange för varje uppgift om den lämnas ut eller omfattas av sekretess, vilket lagrum som är tillämpligt (kapitel och paragraf), vilket skaderekvisit bestämmelsen har (rakt eller omvänt) och en kort motivering. Tillämpliga bestämmelser i förskole- och skolärenden är främst 23 kap. 1 § (förskola, omvänt skaderekvisit), 23 kap. 2 § (elevhälsa och särskilt elevstöd), 21 kap. 1 § (uppgift om hälsa eller sexualliv som kan antas leda till betydande men), 21 kap. 3 § (skyddade personuppgifter) och 39 kap. 3 § (personaladministrativ verksamhet). Uppgifter om myndighetens egna beslut, åtgärder och kostnader lämnas ut. Pröva inte om sökanden får handlingen utan att ange skäl för begäran: den har rätt att vara anonym.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "handlingar", "label": "Handlingar och uppgifter"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["provningar"],
+        "properties": {
+          "provningar": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["handling", "uppgift", "bedomning", "lagrum", "skaderekvisit", "motivering"],
+              "properties": {
+                "handling": {"type": "string"},
+                "uppgift": {"type": "string"},
+                "bedomning": {"type": "string", "enum": ["Lämnas ut", "Sekretess"]},
+                "lagrum": {"type": ["string", "null"]},
+                "skaderekvisit": {"type": ["string", "null"], "enum": ["rakt", "omvänt", null]},
+                "motivering": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Ta fram maskeringsförslag",
+      "instructions": "Gör ett maskeringsförslag per handling utifrån sekretessprövningen: vilka uppgifter som ska maskeras, var i handlingen de står och med vilket lagrum. Handlingar utan uppgifter som omfattas av sekretess lämnas ut i sin helhet. Beskriv den maskerade uppgiften med dess kategori, till exempel barnets namn eller uppgift om hälsa, och skriv inte ut själva uppgiften.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "handlingar", "label": "Handlingar"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "provningar", "label": "Sekretessprövning"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["handlingar"],
+        "properties": {
+          "handlingar": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["handling", "lamnas_ut", "maskeringar"],
+              "properties": {
+                "handling": {"type": "string"},
+                "lamnas_ut": {"type": "string", "enum": ["I sin helhet", "Med maskeringar", "Inte alls"]},
+                "maskeringar": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["kategori", "var_i_handlingen", "lagrum"],
+                    "properties": {"kategori": {"type": "string"}, "var_i_handlingen": {"type": "string"}, "lagrum": {"type": "string"}}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Skriv beslut om delvis avslag",
+      "instructions": "Skriv myndighetens beslut om utlämnande av allmänna handlingar till sökanden. Rubriker: Beslut, Ärendet, Skäl för beslutet, Hur man överklagar. Under Beslut: vilka handlingar som lämnas ut i sin helhet, vilka som lämnas ut med maskeringar och att begäran i övrigt avslås. Under Ärendet: vad som begärts och när. Under Skäl: för varje handling med maskeringar vilka slags uppgifter som maskerats och med stöd av vilket lagrum i offentlighets- och sekretesslagen (2009:400), med motivering. Beskriv uppgifterna bara med deras kategori; skriv aldrig ut namn, personnummer, kontaktuppgifter eller hälsouppgifter som maskerats. Under Hur man överklagar: beslutet kan överklagas hos kammarrätten enligt 6 kap. 7 § offentlighets- och sekretesslagen; överklagandet skickas till myndigheten och ska ha kommit in inom tre veckor från den dag sökanden fick del av beslutet (44 § förvaltningslagen). Avsluta med beslutsfattarens namn.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Ärendenummer: {{ flow_input.arendenummer }}\nMyndighet: {{ flow_input.beslutande_namnd }}\nBeslutsfattare: {{ flow_input.handlaggare }}",
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "sokande", "label": "Sökande"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "begaran_inkom", "label": "Begäran kom in"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "begard_omfattning", "label": "Vad som begärts"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "provningar", "label": "Sekretessprövning"},
+          {"step_ref": "step_3", "output": "structured", "field_path": "handlingar", "label": "Maskeringsförslag"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "text"
+    }
+  ]
+}

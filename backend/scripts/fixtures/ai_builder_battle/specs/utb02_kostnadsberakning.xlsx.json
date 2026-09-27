@@ -1,0 +1,27 @@
+{
+  "file": "utb02_kostnadsberakning.xlsx",
+  "format": "xlsx",
+  "source": {"catalogue_id": "UTB-02", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/210"},
+  "description": "Huvudmannens kostnadsberäkning per stödinsats och termin till ansökan om tilläggsbelopp, med lönebas; blandar stöd till eleven med kostnader för hela klassen och en tredje termin.",
+  "sheets": [
+    {
+      "name": "Kostnadsberäkning",
+      "columns": ["Rad", "Insats", "Termin", "Omfattning", "Timmar per vecka", "Kostnad (kr)", "Kommentar"],
+      "rows": [
+        [1, "Elevassistent", "HT 2026", "50 %", 20, 81300, "Individuellt stöd i verkstad och elsal"],
+        [2, "Elevassistent", "VT 2027", "50 %", 20, 90400, "Individuellt stöd i verkstad och elsal"],
+        [3, "Elevassistent", "HT 2027", "50 %", 20, 81300, "Individuellt stöd i verkstad och elsal"],
+        [4, "Specialpedagogisk handledning av arbetslaget", "HT 2026", "10 %", 4, 27200, "Handledning av lärarna i klass EE26A"],
+        [5, "Licens för inläsningstjänst", "Läsåret 2026/27", "Skollicens", 0, 4200, "Licensen används av alla elever på programmet"]
+      ]
+    },
+    {
+      "name": "Lönebas",
+      "columns": ["Befattning", "Månadslön heltid (kr)", "Personalomkostnadspålägg", "Månadskostnad vid 50 % (kr)"],
+      "rows": [
+        ["Elevassistent", 27500, "31,42 %", 18070],
+        ["Specialpedagog", 46000, "31,42 %", 30227]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "file": "int08_yttrande_lantmateriet.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "INT-08",
+    "url": "https://e-tjanster.kristianstad.se/oversikt/overview/58"
+  },
+  "description": "Lantmäteriets samrådsyttrande över en detaljplan: synpunkter på plankarta, fastighetsrättsliga konsekvenser, gemensamhetsanläggning och servitut.",
+  "letterhead": {
+    "organisation": "Lantmäteriet",
+    "unit": "Fastighetsbildning, Sundsvall",
+    "address": "Box 850, 851 24 Sundsvall"
+  },
+  "date": "2026-06-09",
+  "diarienummer": "LM-2026-04418",
+  "title": "Yttrande över samråd – detaljplan för Björkängen etapp 2, Sundsvalls kommun",
+  "blocks": [
+    {
+      "paragraph": "Er beteckning: SBN-2025-00412. Lantmäteriet har tagit del av samrådshandlingarna daterade 2026-05-12 och lämnar följande synpunkter enligt 5 kap. 11 § plan- och bygglagen (2010:900)."
+    },
+    {
+      "heading": "Plankartan"
+    },
+    {
+      "list": [
+        "Plangränsen i norr sammanfaller inte med fastighetsgränsen för Sundsvall Björkängen 1:14. Plangränsen bör följa fastighetsgränsen eller så bör planbeskrivningen förklara varför en remsa av fastigheten lämnas utanför planen.",
+        "Grundkartan är daterad 2024-11-04. Lantmäteriet rekommenderar att den aktualiseras före granskningen, eftersom fastighetsregleringen Björkängen 1:1–1:14 (akt 2281-25/31) har genomförts efter det datumet.",
+        "Bestämmelsen om u-område saknar angiven bredd. Ange bredden i plankartan så att ledningsrätt kan bildas utan tolkningsproblem."
+      ]
+    },
+    {
+      "heading": "Fastighetsrättsliga frågor"
+    },
+    {
+      "paragraph": "Planförslaget innebär att cirka 310 kvadratmeter av Sundsvall Björkängen 1:14 blir allmän plats gata med kommunalt huvudmannaskap. Kommunen har enligt 6 kap. 13 § plan- och bygglagen rätt och i vissa fall skyldighet att lösa marken. Planbeskrivningen bör redovisa hur marken ska överföras, genom fastighetsreglering eller inlösen, och vem som ansöker om lantmäteriförrättning."
+    },
+    {
+      "paragraph": "Gemensamhetsanläggningen Sundsvall Björkängen ga:2 (enskild väg) påverkas när Björkallén blir allmän gata. Anläggningen behöver omprövas enligt anläggningslagen (1973:1149) så att den norra delen av vägen utgår. Konsekvenserna för de delägande fastigheterna Björkängen 2:1–2:9, bland annat att deras andelstal ändras, bör redovisas i planbeskrivningen."
+    },
+    {
+      "paragraph": "Avtalsservitutet 2281IM-87/4410.1 för väg till förmån för Björkängen 1:18 blir obehövligt när Björkallén förlängs. Servitutet kan upphävas i samband med fastighetsbildningen; ange detta i planbeskrivningens avsnitt om fastighetsrättsliga konsekvenser."
+    },
+    {
+      "heading": "Övrigt"
+    },
+    {
+      "paragraph": "Lantmäteriet har inga synpunkter på planens lämplighet i övrigt."
+    },
+    {
+      "paragraph": "Detta yttrande har beslutats av förrättningslantmätare Anders Nordlund."
+    },
+    {
+      "signature": {
+        "name": "Anders Nordlund",
+        "role": "Förrättningslantmätare"
+      }
+    }
+  ]
+}

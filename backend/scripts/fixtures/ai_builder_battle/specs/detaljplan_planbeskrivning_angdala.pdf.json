@@ -1,0 +1,75 @@
+{
+  "file": "detaljplan_planbeskrivning_angdala.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "TRA-07", "url": "https://e-tjanster.kristianstad.se/oversikt/overview/58"},
+  "description": "Planbeskrivning, granskningshandling, för detaljplan för Ängdala 4:12 m.fl. i Åhus (standardförfarande): syfte, förutsättningar, planförslagets trafik, dagvatten, natur, skuggning och buller, ändringar efter samrådet och granskningstiden.",
+  "letterhead": {"organisation": "Kristianstads kommun", "unit": "Byggnadsnämnden – Planavdelningen", "address": "291 80 Kristianstad · kommun@kristianstad.se"},
+  "date": "2026-08-17",
+  "diarienummer": "BN 2025-000812",
+  "title": "Detaljplan för Ängdala 4:12 m.fl. i Åhus – Planbeskrivning, granskningshandling",
+  "blocks": [
+    {
+      "table": {
+        "columns": ["Planhandling", "Status"],
+        "rows": [
+          ["Plankarta med bestämmelser", "Granskningshandling 2026-08-17"],
+          ["Planbeskrivning (denna handling)", "Granskningshandling 2026-08-17"],
+          ["Samrådsredogörelse", "2026-06-22"],
+          ["Fastighetsförteckning", "Upprättad 2026-06-12"],
+          ["Dagvatten- och skyfallsutredning, Hydrokonsult Syd", "2025-12-04"],
+          ["Sol- och skuggstudie", "2026-05-18"],
+          ["Trafikbullerutredning", "2025-11-20"]
+        ]
+      }
+    },
+    {"heading": "Planens syfte"},
+    {"paragraph": "Syftet med detaljplanen är att möjliggöra cirka 48 bostäder i flerbostadshus och radhus på den tidigare handelsträdgården Ängdala i norra Åhus, med gemensam parkering, en ny lokalgata och en park med de befintliga ekarna. Planen prövas med standardförfarande enligt plan- och bygglagen (2010:900) 5 kap."},
+    {"heading": "Planprocessen och granskningstiden"},
+    {
+      "table": {
+        "columns": ["Skede i planprocessen", "Tid"],
+        "rows": [
+          ["Planuppdrag", "Byggnadsnämnden 2025-03-19"],
+          ["Samråd", "2026-03-02 – 2026-03-23"],
+          ["Granskning", "2026-08-24 – 2026-09-14"],
+          ["Antagande (preliminärt)", "Byggnadsnämnden december 2026"]
+        ]
+      }
+    },
+    {"paragraph": "Planförslaget finns tillgängligt för granskning enligt 5 kap. 18 § plan- och bygglagen från 2026-08-24 till och med 2026-09-14. Synpunkter ska ha kommit in till byggnadsnämnden skriftligen senast 2026-09-14, via e-tjänsten Lämna synpunkter på en detaljplan, med e-post eller brev. Den som inte senast under granskningstiden har lämnat skriftliga synpunkter som inte har blivit tillgodosedda kan förlora rätten att överklaga beslutet att anta detaljplanen (13 kap. 11 § plan- och bygglagen). Efter granskningen sammanställs synpunkterna i ett granskningsutlåtande (5 kap. 23 §)."},
+    {"heading": "Planområdet och fastigheter"},
+    {"paragraph": "Planområdet omfattar cirka 3,1 hektar mellan Strandängsvägen i väster, Ängdalabäcken i norr och väg 118 i öster. Marken ägs av kommunen (Ängdala 4:12) och av AB Åhushem (Ängdala 4:30). Samfälligheten Ängdala s:3 (dike och grönremsa) förvaltas av Ängdala samfällighetsförening. Villafastigheterna väster om Strandängsvägen ligger utanför planområdet men är sakägare. Fastighetsförteckningen redovisar alla sakägare."},
+    {"page_break": true},
+    {"heading": "Planförslaget"},
+    {"heading": "Bebyggelse och höjder"},
+    {"paragraph": "Tre flerbostadshus i högst fyra våningar (nockhöjd högst +18,5 m, cirka 13,5 m över mark) placeras längs väg 118. Mot Strandängsvägen tillåts radhus i högst två våningar (nockhöjd högst 8,5 m). Efter samrådet har flerbostadshusen sänkts från fem till fyra våningar."},
+    {"heading": "Trafik och parkering"},
+    {"paragraph": "Området nås via en ny lokalgata från Strandängsvägen. Trafikalstringen beräknas till cirka 180 fordonsrörelser per dygn. En gång- och cykelväg byggs längs lokalgatan och ansluter till cykelvägen längs väg 118. Parkeringstalet är 0,9 platser per lägenhet, i en gemensam parkering i planområdets norra del. Ingen ny utfart mot väg 118 tillåts."},
+    {"heading": "Dagvatten och skyfall"},
+    {"paragraph": "Dagvatten fördröjs i en fördröjningsdamm på cirka 45 kubikmeter i parken innan det leds till Ängdalabäcken. Vid skyfall leds vatten ytligt längs lokalgatan till parken. Diket inom Ängdala s:3 behålls och får inte belastas mer än i dag. Efter samrådet har dammens volym ökats från 30 till 45 kubikmeter."},
+    {"heading": "Natur och ekar"},
+    {"paragraph": "Ekallén med nio grova ekar skyddas med bestämmelsen n1 och får inte fällas. Två ekar i planområdets södra del måste fällas för lokalgatan; de ersätts med fyra nya ekar i parken. En naturvärdesinventering har gjorts och ekarna är klassade som särskilt skyddsvärda träd."},
+    {"heading": "Solljus och skuggning"},
+    {"paragraph": "Sol- och skuggstudien visar att flerbostadshusen inte skuggar villatomterna väster om Strandängsvägen vid sommarsolståndet. Vid vår- och höstdagjämning skuggas trädgårdarna till Strandängsvägen 5–11 efter kl. 17. Radhusen ger ingen skuggning av betydelse."},
+    {"heading": "Buller"},
+    {"paragraph": "Den ekvivalenta ljudnivån från väg 118 beräknas till högst 58 dBA vid flerbostadshusens fasader mot vägen, vilket är under riktvärdet 60 dBA vid bostadsbyggnads fasad. Varje lägenhet får tillgång till en uteplats med högst 50 dBA ekvivalent ljudnivå."},
+    {"heading": "Byggtiden"},
+    {"paragraph": "Utbyggnaden beräknas pågå 2027–2029 i två etapper. Byggtrafik ska gå via väg 118 och en tillfällig byggväg, inte via Strandängsvägen."},
+    {"heading": "Planbestämmelser i sammandrag"},
+    {
+      "table": {
+        "columns": ["Planbestämmelse", "Innebörd"],
+        "rows": [
+          ["B", "Bostäder"],
+          ["PARK", "Park, allmän plats"],
+          ["GATA", "Lokalgata, allmän plats"],
+          ["n1", "Träd får inte fällas; marklov krävs"],
+          ["Nockhöjd +18,5", "Högsta nockhöjd för flerbostadshus"],
+          ["Nockhöjd 8,5 m", "Högsta nockhöjd för radhus"],
+          ["Utfartsförbud", "Utfart mot väg 118 får inte anordnas"]
+        ]
+      }
+    },
+    {"signature": {"name": "Linnea Bengtsson", "role": "Planarkitekt, planavdelningen"}}
+  ]
+}

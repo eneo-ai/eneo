@@ -1,0 +1,1751 @@
+{
+  "name": "Livsmedelskontroll – kontrollrapport efter inspektion",
+  "description": "Livsmedelsinspektörens stöd efter en kontroll på plats: sorterar anteckningarna per kontrollområde, bedömer varje område för sig, sammanställer avvikelserna och om extra kontroll behövs och skriver kontrollrapporten som Word-dokument.",
+  "metadata_json": {
+    "form_schema": {
+      "fields": [
+        {
+          "name": "anlaggning",
+          "type": "text",
+          "label": "Anläggning (skyltnamn och adress)",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "diarienummer",
+          "type": "text",
+          "label": "Diarienummer",
+          "required": true,
+          "order": 2
+        },
+        {
+          "name": "kontrolldatum",
+          "type": "date",
+          "label": "Kontrolldatum",
+          "required": true,
+          "order": 3
+        },
+        {
+          "name": "kontrolltyp",
+          "type": "text",
+          "label": "Typ av kontroll (planerad, uppföljande, händelsestyrd)",
+          "required": true,
+          "order": 4
+        },
+        {
+          "name": "inspektor",
+          "type": "text",
+          "label": "Livsmedelsinspektör",
+          "required": true,
+          "order": 5
+        },
+        {
+          "name": "anteckningar",
+          "type": "text",
+          "label": "Inspektörens anteckningar från kontrollen",
+          "required": true,
+          "order": 6
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "name": "Strukturera inspektörens anteckningar",
+      "instructions": "Du får livsmedelsinspektörens anteckningar från en planerad kontroll av en livsmedelsanläggning. Sortera varje iakttagelse till det kontrollområde den gäller och återge den sakligt med de mätvärden, platser och livsmedel som anges, utan att bedöma den. Ett område som anteckningarna inte tar upp får värdet null. Hitta inte på iakttagelser.\n\nKontrollområden: registrering (Registrering och verksamhetens omfattning); utbildning (Utbildning och kunskap); personlig_hygien (Personlig hygien och arbetskläder); halsotillstand (Hälsotillstånd hos personalen); lokaler (Lokalernas utformning och underhåll); utrustning (Utrustning); rengoring (Rengöring och desinfektion); skadedjur (Skadedjur); vatten (Vatten); avfall (Avfallshantering); personalutrymmen (Personalutrymmen och handtvätt); mottagningskontroll (Mottagningskontroll); forvaringstemperaturer (Förvaringstemperaturer i kyl och frys); upptining (Upptining); tillagning (Tillagning och upphettning); nedkylning (Nedkylning); varmhallning (Varmhållning och återuppvärmning); separering (Separering och korskontaminering); allergener (Allergener och specialkost); markning (Märkning och presentation); information (Information till konsument); sparbarhet (Spårbarhet); aterkallande (Återkallande); material (Material i kontakt med livsmedel); haccp (HACCP-baserade förfaranden och egenkontroll); tidigare_avvikelser (Uppföljning av tidigare avvikelser).",
+      "input_source": "flow_input",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Anläggning: {{ flow_input.anlaggning }}\nKontrolldatum: {{ flow_input.kontrolldatum }}\n\nAnteckningar:\n{{ flow_input.anteckningar }}"
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "registrering",
+          "utbildning",
+          "personlig_hygien",
+          "halsotillstand",
+          "lokaler",
+          "utrustning",
+          "rengoring",
+          "skadedjur",
+          "vatten",
+          "avfall",
+          "personalutrymmen",
+          "mottagningskontroll",
+          "forvaringstemperaturer",
+          "upptining",
+          "tillagning",
+          "nedkylning",
+          "varmhallning",
+          "separering",
+          "allergener",
+          "markning",
+          "information",
+          "sparbarhet",
+          "aterkallande",
+          "material",
+          "haccp",
+          "tidigare_avvikelser"
+        ],
+        "properties": {
+          "registrering": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "utbildning": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "personlig_hygien": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "halsotillstand": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lokaler": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "utrustning": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rengoring": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "skadedjur": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "vatten": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "avfall": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "personalutrymmen": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mottagningskontroll": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "forvaringstemperaturer": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "upptining": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tillagning": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "nedkylning": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "varmhallning": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "separering": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "allergener": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "markning": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "information": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sparbarhet": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "aterkallande": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "material": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "haccp": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tidigare_avvikelser": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm registrering och verksamhetens omfattning",
+      "instructions": "Bedöm kontrollområdet Registrering och verksamhetens omfattning utifrån inspektörens iakttagelser. Kontrollera att anläggningen är registrerad för den verksamhet som bedrivs (artikel 6.2 i förordning (EG) nr 852/2004) och att verksamheten inte har utökats med aktiviteter som inte anmälts, till exempel catering, utkörning eller egen import.\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "registrering",
+            "label": "Iakttagelser: Registrering och verksamhetens omfattning"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm utbildning och kunskap",
+      "instructions": "Bedöm kontrollområdet Utbildning och kunskap utifrån inspektörens iakttagelser. Bedöm om personalen har tillräcklig kunskap i livsmedelshygien för sina arbetsuppgifter och om den som ansvarar för egenkontrollen har utbildning i HACCP-principerna (bilaga II kapitel XII i förordning (EG) nr 852/2004). Nyanställda och extrapersonal ska ha fått introduktion innan de hanterar oförpackade livsmedel.\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "utbildning",
+            "label": "Iakttagelser: Utbildning och kunskap"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm personlig hygien och arbetskläder",
+      "instructions": "Bedöm kontrollområdet Personlig hygien och arbetskläder utifrån inspektörens iakttagelser. Bedöm handtvätt, arbetskläder, smycken och hårskydd hos den personal som hanterar oförpackade livsmedel (bilaga II kapitel VIII i förordning (EG) nr 852/2004).\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "personlig_hygien",
+            "label": "Iakttagelser: Personlig hygien och arbetskläder"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm hälsotillstånd hos personalen",
+      "instructions": "Bedöm kontrollområdet Hälsotillstånd hos personalen utifrån inspektörens iakttagelser. Bedöm om verksamheten har rutiner för att personal med mag- och tarmsjukdom, infekterade sår eller andra smittsamma tillstånd inte hanterar livsmedel, och att personalen känner till rutinen (bilaga II kapitel VIII punkt 2).\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "halsotillstand",
+            "label": "Iakttagelser: Hälsotillstånd hos personalen"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm lokalernas utformning och underhåll",
+      "instructions": "Bedöm kontrollområdet Lokalernas utformning och underhåll utifrån inspektörens iakttagelser. Bedöm lokalernas utformning och underhåll: golv, väggar, tak, dörrar och fönster ska vara hela och lätta att rengöra, och flödet ska hålla isär rena och orena moment (bilaga II kapitel I och II).\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "lokaler",
+            "label": "Iakttagelser: Lokalernas utformning och underhåll"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm utrustning",
+      "instructions": "Bedöm kontrollområdet Utrustning utifrån inspektörens iakttagelser. Bedöm om utrustning som kommer i kontakt med livsmedel är hel, rengörbar och i gott skick, och om kyl-, frys- och varmhållningsutrustning har termometrar som fungerar (bilaga II kapitel V).\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "utrustning",
+            "label": "Iakttagelser: Utrustning"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm rengöring och desinfektion",
+      "instructions": "Bedöm kontrollområdet Rengöring och desinfektion utifrån inspektörens iakttagelser. Bedöm rengöringen av lokaler och utrustning och om det finns ett rengöringsschema som följs. Bedöm särskilt ytor som är svåra att komma åt och utrustning som används för både råa och färdiga livsmedel.\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "rengoring",
+            "label": "Iakttagelser: Rengöring och desinfektion"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm skadedjur",
+      "instructions": "Bedöm kontrollområdet Skadedjur utifrån inspektörens iakttagelser. Bedöm om det finns tecken på skadedjur och om verksamheten har förebyggande åtgärder och kontroll av skadedjur, till exempel avtal med saneringsföretag eller egna kontroller (bilaga II kapitel IX punkt 4).\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "skadedjur",
+            "label": "Iakttagelser: Skadedjur"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm vatten",
+      "instructions": "Bedöm kontrollområdet Vatten utifrån inspektörens iakttagelser. Bedöm om det vatten som används i verksamheten är dricksvatten. Vatten från kommunal anslutning behöver ingen egen provtagning, men enskild brunn kräver analys enligt Livsmedelsverkets dricksvattenföreskrifter (bilaga II kapitel VII).\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "vatten",
+            "label": "Iakttagelser: Vatten"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm avfallshantering",
+      "instructions": "Bedöm kontrollområdet Avfallshantering utifrån inspektörens iakttagelser. Bedöm hur livsmedelsavfall och annat avfall hanteras: behållare med lock, tömning så ofta att lukt och skadedjur undviks, och att avfall inte står i rum där oförpackade livsmedel hanteras längre än nödvändigt (bilaga II kapitel VI).\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "avfall",
+            "label": "Iakttagelser: Avfallshantering"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm personalutrymmen och handtvätt",
+      "instructions": "Bedöm kontrollområdet Personalutrymmen och handtvätt utifrån inspektörens iakttagelser. Bedöm om det finns handtvättställ med tvål och engångshanddukar vid arbetsplatserna och vid toaletterna, och omklädningsrum där personalens ytterkläder förvaras skilt från arbetskläder (bilaga II kapitel I punkt 4 och 9).\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "personalutrymmen",
+            "label": "Iakttagelser: Personalutrymmen och handtvätt"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm mottagningskontroll",
+      "instructions": "Bedöm kontrollområdet Mottagningskontroll utifrån inspektörens iakttagelser. Bedöm om verksamheten kontrollerar leveranser vid mottagandet: temperatur på kylvaror och frysvaror, skadade förpackningar och bäst före- och sista förbrukningsdag, och om avvikelser dokumenteras.\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "mottagningskontroll",
+            "label": "Iakttagelser: Mottagningskontroll"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm förvaringstemperaturer i kyl och frys",
+      "instructions": "Bedöm kontrollområdet Förvaringstemperaturer i kyl och frys utifrån inspektörens iakttagelser. Bedöm förvaringstemperaturerna. Kylvaror ska förvaras vid högst +8 °C om inte tillverkaren anger en lägre temperatur, färsk fisk vid 0 till +2 °C och frysvaror vid högst -18 °C. Bedöm också om temperaturen kontrolleras och dokumenteras regelbundet.\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "forvaringstemperaturer",
+            "label": "Iakttagelser: Förvaringstemperaturer i kyl och frys"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm upptining",
+      "instructions": "Bedöm kontrollområdet Upptining utifrån inspektörens iakttagelser. Bedöm hur frysta livsmedel tinas: i kylskåp, under rinnande kallt vatten eller i samband med tillagning, inte i rumstemperatur på bänken. Tinade livsmedel får inte frysas om.\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "upptining",
+            "label": "Iakttagelser: Upptining"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm tillagning och upphettning",
+      "instructions": "Bedöm kontrollområdet Tillagning och upphettning utifrån inspektörens iakttagelser. Bedöm tillagningen: kyckling, färs och andra livsmedel med hög risk ska värmas till minst +72 °C i kärnan, och verksamheten ska kontrollera kärntemperaturen på de rätter där det behövs.\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "tillagning",
+            "label": "Iakttagelser: Tillagning och upphettning"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm nedkylning",
+      "instructions": "Bedöm kontrollområdet Nedkylning utifrån inspektörens iakttagelser. Bedöm nedkylningen av tillagade livsmedel som ska förvaras kylda. Nedkylningen ska gå från +60 °C till +8 °C inom 6 timmar, till exempel genom att maten fördelas i grunda kantiner eller kyls i nedkylningsskåp. Bedöm Avvikelse bara om inspektören har konstaterat att nedkylningen gått för långsamt eller att en nedkyld rätt höll för hög temperatur.\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "nedkylning",
+            "label": "Iakttagelser: Nedkylning"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm varmhållning och återuppvärmning",
+      "instructions": "Bedöm kontrollområdet Varmhållning och återuppvärmning utifrån inspektörens iakttagelser. Bedöm varmhållningen: varmhållen mat ska hålla minst +60 °C, och mat som återuppvärms ska snabbt nå minst +72 °C. Varmhållen mat som hållit under +60 °C i mer än två timmar ska kasseras.\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "varmhallning",
+            "label": "Iakttagelser: Varmhållning och återuppvärmning"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm separering och korskontaminering",
+      "instructions": "Bedöm kontrollområdet Separering och korskontaminering utifrån inspektörens iakttagelser. Bedöm om råa och färdiga livsmedel hålls isär vid förvaring och hantering, om det finns separata skärbrädor och redskap för rått kött och kyckling, och om grönsaker som äts råa sköljs på en plats där de inte kan förorenas (bilaga II kapitel IX punkt 3).\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "separering",
+            "label": "Iakttagelser: Separering och korskontaminering"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm allergener och specialkost",
+      "instructions": "Bedöm kontrollområdet Allergener och specialkost utifrån inspektörens iakttagelser. Bedöm hur verksamheten hanterar allergener och specialkost: att receptens innehåll av de ämnen som anges i bilaga II till förordning (EU) nr 1169/2011 är känt, att specialkost tillagas och serveras så att den inte förorenas och att personalen kan svara på frågor om innehållet.\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "allergener",
+            "label": "Iakttagelser: Allergener och specialkost"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm märkning och presentation",
+      "instructions": "Bedöm kontrollområdet Märkning och presentation utifrån inspektörens iakttagelser. Bedöm märkningen av livsmedel som verksamheten själv förpackar och säljer, till exempel ingrediensförteckning, allergener i fetstil, nettokvantitet och bäst före-dag (förordning (EU) nr 1169/2011), och om presentationen av maten kan vilseleda.\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "markning",
+            "label": "Iakttagelser: Märkning och presentation"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm information till konsument",
+      "instructions": "Bedöm kontrollområdet Information till konsument utifrån inspektörens iakttagelser. Bedöm informationen om oförpackade livsmedel: att gäster får skriftlig eller muntlig information om allergener och att det finns en skylt eller menytext som talar om var informationen finns (artikel 44 i förordning (EU) nr 1169/2011 och LIVSFS 2014:4).\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "information",
+            "label": "Iakttagelser: Information till konsument"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm spårbarhet",
+      "instructions": "Bedöm kontrollområdet Spårbarhet utifrån inspektörens iakttagelser. Bedöm om verksamheten kan visa vilka leverantörer livsmedlen kommer från, till exempel genom sparade följesedlar och fakturor (artikel 18 i förordning (EG) nr 178/2002).\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "sparbarhet",
+            "label": "Iakttagelser: Spårbarhet"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm återkallande",
+      "instructions": "Bedöm kontrollområdet Återkallande utifrån inspektörens iakttagelser. Bedöm om verksamheten har en rutin för att ta bort och spärra livsmedel som leverantören eller myndighet återkallar, och om personalen vet vem som ansvarar (artikel 19 i förordning (EG) nr 178/2002).\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "aterkallande",
+            "label": "Iakttagelser: Återkallande"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm material i kontakt med livsmedel",
+      "instructions": "Bedöm kontrollområdet Material i kontakt med livsmedel utifrån inspektörens iakttagelser. Bedöm om förpackningar, behållare och redskap som kommer i kontakt med livsmedel är avsedda för det, till exempel märkta med glas- och gaffelsymbolen, och att de används för rätt sorts livsmedel och temperatur (förordning (EG) nr 1935/2004).\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "material",
+            "label": "Iakttagelser: Material i kontakt med livsmedel"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm HACCP-baserade förfaranden och egenkontroll",
+      "instructions": "Bedöm kontrollområdet HACCP-baserade förfaranden och egenkontroll utifrån inspektörens iakttagelser. Bedöm om verksamheten har ett dokumenterat egenkontrollprogram som bygger på HACCP-principerna, med identifierade faror, kritiska styrpunkter och gränsvärden, och om kontrollerna faktiskt görs och dokumenteras (artikel 5 i förordning (EG) nr 852/2004).\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "haccp",
+            "label": "Iakttagelser: HACCP-baserade förfaranden och egenkontroll"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Bedöm uppföljning av tidigare avvikelser",
+      "instructions": "Bedöm kontrollområdet Uppföljning av tidigare avvikelser utifrån inspektörens iakttagelser. Bedöm om de avvikelser som konstaterades vid förra kontrollen är åtgärdade. Ange varje tidigare avvikelse som inte är åtgärdad.\n\nSätt bedömningen till Utan anmärkning, Avvikelse eller Ej kontrollerat (när det inte finns några iakttagelser om området). Återge iakttagelserna sakligt med mätvärden och livsmedel. Vid Avvikelse: formulera kravet på vad verksamheten ska åtgärda, annars null. Bedöm bara det som iakttagits; hitta inte på brister.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_1",
+            "output": "structured",
+            "field_path": "tidigare_avvikelser",
+            "label": "Iakttagelser: Uppföljning av tidigare avvikelser"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "omrade",
+          "bedomning",
+          "iakttagelser",
+          "krav"
+        ],
+        "properties": {
+          "omrade": {
+            "type": "string"
+          },
+          "bedomning": {
+            "type": "string",
+            "enum": [
+              "Utan anmärkning",
+              "Avvikelse",
+              "Ej kontrollerat"
+            ]
+          },
+          "iakttagelser": {
+            "type": "string"
+          },
+          "krav": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Sammanställ avvikelser",
+      "instructions": "Sammanställ kontrollens resultat. Lista varje kontrollområde med bedömningen Avvikelse, med iakttagelserna och kravet, i den ordning områdena kommer. Lista därefter områdena som var utan anmärkning och de som inte kontrollerades. Avgör om en extra offentlig kontroll behövs: det gäller när minst en avvikelse avser nedkylning, varmhållning, tillagning, allergener eller förvaringstemperaturer, eller när en tidigare avvikelse inte är åtgärdad.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {
+            "step_ref": "step_2",
+            "output": "structured",
+            "label": "Registrering och verksamhetens omfattning"
+          },
+          {
+            "step_ref": "step_3",
+            "output": "structured",
+            "label": "Utbildning och kunskap"
+          },
+          {
+            "step_ref": "step_4",
+            "output": "structured",
+            "label": "Personlig hygien och arbetskläder"
+          },
+          {
+            "step_ref": "step_5",
+            "output": "structured",
+            "label": "Hälsotillstånd hos personalen"
+          },
+          {
+            "step_ref": "step_6",
+            "output": "structured",
+            "label": "Lokalernas utformning och underhåll"
+          },
+          {
+            "step_ref": "step_7",
+            "output": "structured",
+            "label": "Utrustning"
+          },
+          {
+            "step_ref": "step_8",
+            "output": "structured",
+            "label": "Rengöring och desinfektion"
+          },
+          {
+            "step_ref": "step_9",
+            "output": "structured",
+            "label": "Skadedjur"
+          },
+          {
+            "step_ref": "step_10",
+            "output": "structured",
+            "label": "Vatten"
+          },
+          {
+            "step_ref": "step_11",
+            "output": "structured",
+            "label": "Avfallshantering"
+          },
+          {
+            "step_ref": "step_12",
+            "output": "structured",
+            "label": "Personalutrymmen och handtvätt"
+          },
+          {
+            "step_ref": "step_13",
+            "output": "structured",
+            "label": "Mottagningskontroll"
+          },
+          {
+            "step_ref": "step_14",
+            "output": "structured",
+            "label": "Förvaringstemperaturer i kyl och frys"
+          },
+          {
+            "step_ref": "step_15",
+            "output": "structured",
+            "label": "Upptining"
+          },
+          {
+            "step_ref": "step_16",
+            "output": "structured",
+            "label": "Tillagning och upphettning"
+          },
+          {
+            "step_ref": "step_17",
+            "output": "structured",
+            "label": "Nedkylning"
+          },
+          {
+            "step_ref": "step_18",
+            "output": "structured",
+            "label": "Varmhållning och återuppvärmning"
+          },
+          {
+            "step_ref": "step_19",
+            "output": "structured",
+            "label": "Separering och korskontaminering"
+          },
+          {
+            "step_ref": "step_20",
+            "output": "structured",
+            "label": "Allergener och specialkost"
+          },
+          {
+            "step_ref": "step_21",
+            "output": "structured",
+            "label": "Märkning och presentation"
+          },
+          {
+            "step_ref": "step_22",
+            "output": "structured",
+            "label": "Information till konsument"
+          },
+          {
+            "step_ref": "step_23",
+            "output": "structured",
+            "label": "Spårbarhet"
+          },
+          {
+            "step_ref": "step_24",
+            "output": "structured",
+            "label": "Återkallande"
+          },
+          {
+            "step_ref": "step_25",
+            "output": "structured",
+            "label": "Material i kontakt med livsmedel"
+          },
+          {
+            "step_ref": "step_26",
+            "output": "structured",
+            "label": "HACCP-baserade förfaranden och egenkontroll"
+          },
+          {
+            "step_ref": "step_27",
+            "output": "structured",
+            "label": "Uppföljning av tidigare avvikelser"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "avvikelser",
+          "utan_anmarkning",
+          "ej_kontrollerat",
+          "extra_kontroll_behovs",
+          "skal_extra_kontroll"
+        ],
+        "properties": {
+          "avvikelser": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "omrade",
+                "iakttagelser",
+                "krav"
+              ],
+              "properties": {
+                "omrade": {
+                  "type": "string"
+                },
+                "iakttagelser": {
+                  "type": "string"
+                },
+                "krav": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "utan_anmarkning": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ej_kontrollerat": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "extra_kontroll_behovs": {
+            "type": "boolean"
+          },
+          "skal_extra_kontroll": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Skriv kontrollrapport",
+      "instructions": "Skriv kontrollrapporten från miljönämndens livsmedelskontroll. Överst: anläggning, diarienummer, kontrolldatum, typ av kontroll och inspektör. Rubriker: Sammanfattning, Avvikelser, Kontrollerat utan anmärkning, Ej kontrollerat, Fortsatt handläggning. Under Avvikelser redovisas varje område med iakttagelser och krav. Under Fortsatt handläggning: om extra offentlig kontroll behövs, att den debiteras med timavgift enligt miljönämndens taxa, och att verksamheten kan lämna synpunkter på rapporten inom tio dagar. Rapporten är inget beslut och kan inte överklagas; skriv det. Avsluta med inspektörens namn.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Anläggning: {{ flow_input.anlaggning }}\nDiarienummer: {{ flow_input.diarienummer }}\nKontrolldatum: {{ flow_input.kontrolldatum }}\nTyp av kontroll: {{ flow_input.kontrolltyp }}\nInspektör: {{ flow_input.inspektor }}",
+        "source_refs": [
+          {
+            "step_ref": "step_28",
+            "output": "structured",
+            "label": "Resultat av kontrollen"
+          }
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "text"
+    },
+    {
+      "name": "Skapa Word-dokument",
+      "instructions": "Återge kontrollrapporten oförändrad som Word-dokument.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "output_mode": "render_verbatim",
+      "output_type": "docx"
+    }
+  ]
+}

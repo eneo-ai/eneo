@@ -1,0 +1,160 @@
+{
+  "file": "oms07_sjuklista_augusti_2026.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "OMS-07",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/80"
+  },
+  "description": "Assistansanordnarens sjuklista och egna beräkningsunderlag dag 1–14 för den ordinarie assistentens sjukperiod: vem som täckte varje pass, sjukorsak som inte borde ha lämnats, och ett ansökt belopp som tar med ett pass utan vikarie.",
+  "letterhead": {
+    "organisation": "Assistanskompaniet Norrland AB",
+    "unit": "Sjuklista och beräkningsunderlag dag 1–14",
+    "address": "Box 823, 851 23 Sundsvall · Org.nr 559287-4410"
+  },
+  "date": "2026-09-07",
+  "title": "Sjuklista – ordinarie personlig assistent",
+  "blocks": [
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Värde"
+        ],
+        "rows": [
+          [
+            "Assistansberättigad",
+            "Oskar Lindgren, 19940902-2390"
+          ],
+          [
+            "Beslut om assistansersättning",
+            "Försäkringskassan, ärendenummer 118-2025-044913"
+          ],
+          [
+            "Ordinarie assistent",
+            "Elin Forsberg, 19910403-2389, anställd sedan 2021-03-01"
+          ],
+          [
+            "Sjukperiod",
+            "2026-08-10 – 2026-08-16"
+          ],
+          [
+            "Sjukanmälan",
+            "2026-08-10 kl. 05:40 per telefon till arbetsledaren"
+          ],
+          [
+            "Orsak enligt sjukanmälan",
+            "Magsjuka, calicivirus i familjen"
+          ],
+          [
+            "Läkarintyg",
+            "Behövs inte, sjukperioden är kortare än åtta dagar"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Schemalagda pass under sjukperioden"
+    },
+    {
+      "table": {
+        "columns": [
+          "Datum",
+          "Pass",
+          "Timmar",
+          "Varav OB",
+          "Passet utfört av"
+        ],
+        "rows": [
+          [
+            "2026-08-10",
+            "07:00–15:00",
+            "8,0",
+            "0,0",
+            "Jonas Berg, vikarie"
+          ],
+          [
+            "2026-08-11",
+            "07:00–15:00",
+            "8,0",
+            "0,0",
+            "Jonas Berg, vikarie"
+          ],
+          [
+            "2026-08-12",
+            "15:00–22:00",
+            "7,0",
+            "7,0",
+            "Maja Ström, ordinarie assistent (fyllnadstid)"
+          ],
+          [
+            "2026-08-14",
+            "07:00–15:00",
+            "8,0",
+            "0,0",
+            "Jonas Berg, vikarie"
+          ],
+          [
+            "2026-08-15",
+            "09:00–17:00",
+            "8,0",
+            "8,0",
+            "Jonas Berg, vikarie"
+          ],
+          [
+            "Summa",
+            "",
+            "39,0",
+            "15,0",
+            ""
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Anordnarens beräkning av ansökt belopp"
+    },
+    {
+      "table": {
+        "columns": [
+          "Post",
+          "Belopp"
+        ],
+        "rows": [
+          [
+            "Sjuklön 80 %, 39,0 tim à 146,00",
+            "5 694,00"
+          ],
+          [
+            "Sjuk-OB 80 %, 15,0 tim à 44,00",
+            "660,00"
+          ],
+          [
+            "Karensavdrag",
+            "-1 121,28"
+          ],
+          [
+            "Semesterersättning 12 %",
+            "627,93"
+          ],
+          [
+            "Arbetsgivaravgifter 31,42 %",
+            "1 841,42"
+          ],
+          [
+            "Ansökt belopp",
+            "7 702,07"
+          ]
+        ]
+      }
+    },
+    {
+      "paragraph": "Vi ansöker om ersättning för merkostnader för sjuklön under ordinarie assistents sjukfrånvaro enligt 9 § 2 LSS. Ersättningen betalas till bankgiro 5310-4471."
+    },
+    {
+      "signature": {
+        "name": "Karolina Wennberg",
+        "role": "Verksamhetschef, Assistanskompaniet Norrland AB"
+      }
+    }
+  ]
+}

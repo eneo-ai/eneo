@@ -1,0 +1,584 @@
+{
+  "file": "utb05_turplan_v38.csv",
+  "format": "csv",
+  "source": {
+    "catalogue_id": "UTB-05",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/773"
+  },
+  "description": "Planerad tidtabell per tur och hållplats för upphandlad skolskjuts vecka 38, export ur kommunens planeringssystem för skolskjuts.",
+  "sheets": [
+    {
+      "name": "Turplan v38",
+      "columns": [
+        "tur",
+        "datum",
+        "hallplats",
+        "planerad_tid",
+        "ordning",
+        "trafikforetag"
+      ],
+      "rows": [
+        [
+          "L-17",
+          "2026-09-14",
+          "Sörbyns vändplan",
+          "07:05",
+          1,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-17",
+          "2026-09-14",
+          "Norrbyn",
+          "07:18",
+          2,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-17",
+          "2026-09-14",
+          "Viskans skola",
+          "07:40",
+          3,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-42",
+          "2026-09-14",
+          "Tallstigen",
+          "07:15",
+          1,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-42",
+          "2026-09-14",
+          "Björkvägen",
+          "07:27",
+          2,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-42",
+          "2026-09-14",
+          "Kvarnbacken",
+          "07:34",
+          3,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-42",
+          "2026-09-14",
+          "Viskans skola",
+          "07:50",
+          4,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-08",
+          "2026-09-14",
+          "Österåsen",
+          "07:20",
+          1,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-08",
+          "2026-09-14",
+          "Lillvik",
+          "07:31",
+          2,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-08",
+          "2026-09-14",
+          "Viskans skola",
+          "07:47",
+          3,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-43",
+          "2026-09-14",
+          "Viskans skola",
+          "15:10",
+          1,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-43",
+          "2026-09-14",
+          "Kvarnbacken",
+          "15:24",
+          2,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-43",
+          "2026-09-14",
+          "Björkvägen",
+          "15:31",
+          3,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-43",
+          "2026-09-14",
+          "Tallstigen",
+          "15:43",
+          4,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-17",
+          "2026-09-15",
+          "Sörbyns vändplan",
+          "07:05",
+          1,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-17",
+          "2026-09-15",
+          "Norrbyn",
+          "07:18",
+          2,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-17",
+          "2026-09-15",
+          "Viskans skola",
+          "07:40",
+          3,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-42",
+          "2026-09-15",
+          "Tallstigen",
+          "07:15",
+          1,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-42",
+          "2026-09-15",
+          "Björkvägen",
+          "07:27",
+          2,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-42",
+          "2026-09-15",
+          "Kvarnbacken",
+          "07:34",
+          3,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-42",
+          "2026-09-15",
+          "Viskans skola",
+          "07:50",
+          4,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-08",
+          "2026-09-15",
+          "Österåsen",
+          "07:20",
+          1,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-08",
+          "2026-09-15",
+          "Lillvik",
+          "07:31",
+          2,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-08",
+          "2026-09-15",
+          "Viskans skola",
+          "07:47",
+          3,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-43",
+          "2026-09-15",
+          "Viskans skola",
+          "15:10",
+          1,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-43",
+          "2026-09-15",
+          "Kvarnbacken",
+          "15:24",
+          2,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-43",
+          "2026-09-15",
+          "Björkvägen",
+          "15:31",
+          3,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-43",
+          "2026-09-15",
+          "Tallstigen",
+          "15:43",
+          4,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-17",
+          "2026-09-16",
+          "Sörbyns vändplan",
+          "07:05",
+          1,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-17",
+          "2026-09-16",
+          "Norrbyn",
+          "07:18",
+          2,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-17",
+          "2026-09-16",
+          "Viskans skola",
+          "07:40",
+          3,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-42",
+          "2026-09-16",
+          "Tallstigen",
+          "07:15",
+          1,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-42",
+          "2026-09-16",
+          "Björkvägen",
+          "07:27",
+          2,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-42",
+          "2026-09-16",
+          "Kvarnbacken",
+          "07:34",
+          3,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-42",
+          "2026-09-16",
+          "Viskans skola",
+          "07:50",
+          4,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-08",
+          "2026-09-16",
+          "Österåsen",
+          "07:20",
+          1,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-08",
+          "2026-09-16",
+          "Lillvik",
+          "07:31",
+          2,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-08",
+          "2026-09-16",
+          "Viskans skola",
+          "07:47",
+          3,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-43",
+          "2026-09-16",
+          "Viskans skola",
+          "15:10",
+          1,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-43",
+          "2026-09-16",
+          "Kvarnbacken",
+          "15:24",
+          2,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-43",
+          "2026-09-16",
+          "Björkvägen",
+          "15:31",
+          3,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-43",
+          "2026-09-16",
+          "Tallstigen",
+          "15:43",
+          4,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-17",
+          "2026-09-17",
+          "Sörbyns vändplan",
+          "07:05",
+          1,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-17",
+          "2026-09-17",
+          "Norrbyn",
+          "07:18",
+          2,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-17",
+          "2026-09-17",
+          "Viskans skola",
+          "07:40",
+          3,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-42",
+          "2026-09-17",
+          "Tallstigen",
+          "07:15",
+          1,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-42",
+          "2026-09-17",
+          "Björkvägen",
+          "07:27",
+          2,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-42",
+          "2026-09-17",
+          "Kvarnbacken",
+          "07:34",
+          3,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-42",
+          "2026-09-17",
+          "Viskans skola",
+          "07:50",
+          4,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-08",
+          "2026-09-17",
+          "Österåsen",
+          "07:20",
+          1,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-08",
+          "2026-09-17",
+          "Lillvik",
+          "07:31",
+          2,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-08",
+          "2026-09-17",
+          "Viskans skola",
+          "07:47",
+          3,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-43",
+          "2026-09-17",
+          "Viskans skola",
+          "15:10",
+          1,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-43",
+          "2026-09-17",
+          "Kvarnbacken",
+          "15:24",
+          2,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-43",
+          "2026-09-17",
+          "Björkvägen",
+          "15:31",
+          3,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-43",
+          "2026-09-17",
+          "Tallstigen",
+          "15:43",
+          4,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-17",
+          "2026-09-18",
+          "Sörbyns vändplan",
+          "07:05",
+          1,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-17",
+          "2026-09-18",
+          "Norrbyn",
+          "07:18",
+          2,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-17",
+          "2026-09-18",
+          "Viskans skola",
+          "07:40",
+          3,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-42",
+          "2026-09-18",
+          "Tallstigen",
+          "07:15",
+          1,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-42",
+          "2026-09-18",
+          "Björkvägen",
+          "07:27",
+          2,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-42",
+          "2026-09-18",
+          "Kvarnbacken",
+          "07:34",
+          3,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-42",
+          "2026-09-18",
+          "Viskans skola",
+          "07:50",
+          4,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-08",
+          "2026-09-18",
+          "Österåsen",
+          "07:20",
+          1,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-08",
+          "2026-09-18",
+          "Lillvik",
+          "07:31",
+          2,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-08",
+          "2026-09-18",
+          "Viskans skola",
+          "07:47",
+          3,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-43",
+          "2026-09-18",
+          "Viskans skola",
+          "15:10",
+          1,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-43",
+          "2026-09-18",
+          "Kvarnbacken",
+          "15:24",
+          2,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-43",
+          "2026-09-18",
+          "Björkvägen",
+          "15:31",
+          3,
+          "Norrskjuts AB"
+        ],
+        [
+          "L-43",
+          "2026-09-18",
+          "Tallstigen",
+          "15:43",
+          4,
+          "Norrskjuts AB"
+        ]
+      ]
+    }
+  ]
+}

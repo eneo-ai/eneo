@@ -1,0 +1,170 @@
+{
+  "file": "mb_kop02_felanmalningar_augusti_2026_kommenterad.csv",
+  "format": "csv",
+  "source": {
+    "catalogue_id": "KOP-02",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/77"
+  },
+  "description": "Driftledarens export ur felanmälningssystemet för augusti 2026 (gata, gång- och cykelväg, skyltar, park, belysning), med en egen kommentarkolumn om hur varje ärende räknades i vitesunderlaget till driftentreprenören.",
+  "sheets": [
+    {
+      "name": "Felanmälningar",
+      "columns": [
+        "Ärende",
+        "Inkom",
+        "Kategori",
+        "Prio",
+        "Adress",
+        "Beskrivning",
+        "Anmälare",
+        "Telefon",
+        "Status",
+        "Åtgärdad",
+        "Utförare",
+        "Kommentar driftledare (Lena Sjödin)"
+      ],
+      "rows": [
+        [
+          "FA-2026-09411",
+          "2026-08-03 06:48",
+          "GATA",
+          "1",
+          "Esplanaden 12",
+          "Stort hål i körbanan vid övergångsstället",
+          "Birgitta Holm",
+          "070-331 20 45",
+          "30",
+          "2026-08-03 09:55",
+          "Norrväg Drift AB",
+          "Prio 1 = akut. Driftavtalet: åtgärdat eller avspärrat inom 4 timmar från Inkom. 3 h 07 min, inget vite."
+        ],
+        [
+          "FA-2026-09418",
+          "2026-08-04 13:20",
+          "SKYLT",
+          "1",
+          "Norra vägen/Bergsgatan",
+          "Stoppskylt nedkörd",
+          "–",
+          "–",
+          "40",
+          "2026-08-04 18:02",
+          "Norrväg Drift AB",
+          "Status 40 = avspärrat/provisoriskt åtgärdat. Klockan stannar vid avspärrningen. 4 h 42 min, över 4 h: vite 2 500 kr (avtalet 8.3)."
+        ],
+        [
+          "FA-2026-09426",
+          "2026-08-06 09:05",
+          "GC",
+          "2",
+          "Gång- och cykelvägen Sidsjövägen",
+          "Trasig kantsten, snubbelrisk",
+          "Mats Edlund",
+          "073-812 55 01",
+          "30",
+          "2026-08-07 15:30",
+          "Norrväg Drift AB",
+          "Prio 2: inom 48 timmar. 30 h 25 min, inget vite."
+        ],
+        [
+          "FA-2026-09433",
+          "2026-08-07 22:14",
+          "BEL",
+          "1",
+          "Skolhusallén 4",
+          "Gatubelysningen släckt på hela sträckan",
+          "Karin Nordqvist",
+          "060-12 44 90",
+          "30",
+          "2026-08-08 10:40",
+          "Ljuspunkten Norr AB",
+          "BEL = gatubelysning. Sköts av belysningsentreprenören Ljuspunkten Norr AB, inte driftentreprenören. Tas aldrig med i vitesunderlaget, oavsett tid."
+        ],
+        [
+          "FA-2026-09437",
+          "2026-08-10 07:30",
+          "GATA",
+          "2",
+          "Storgatan 28",
+          "Sättning i asfalten",
+          "–",
+          "–",
+          "30",
+          "2026-08-13 11:15",
+          "Norrväg Drift AB",
+          "Prio 2: 75 h 45 min, över 48 h: vite 800 kr (avtalet 8.3)."
+        ],
+        [
+          "FA-2026-09441",
+          "2026-08-10 07:52",
+          "GATA",
+          "2",
+          "Storgatan 28",
+          "Grop i vägen",
+          "Lars Öberg",
+          "070-225 18 63",
+          "90",
+          "–",
+          "Norrväg Drift AB",
+          "Status 90 = dubblett, stängd och hänvisad till FA-2026-09437. Räknas inte."
+        ],
+        [
+          "FA-2026-09450",
+          "2026-08-12 16:05",
+          "PARK",
+          "1",
+          "Norrmalmsparken",
+          "Träd har fallit över gångvägen",
+          "Eva Lindahl",
+          "076-104 33 29",
+          "30",
+          "2026-08-12 22:10",
+          "Parkenheten (egen regi)",
+          "Parkenheten sköter parker i egen regi. Inte driftentreprenören, räknas inte i vitesunderlaget."
+        ],
+        [
+          "FA-2026-09458",
+          "2026-08-18 10:40",
+          "KLOTT",
+          "3",
+          "Stenstans parkeringshus",
+          "Klotter på trapphuset",
+          "–",
+          "–",
+          "30",
+          "2026-08-26 14:00",
+          "Norrväg Drift AB",
+          "Prio 3 = planerat underhåll. Ingen tidsgräns i avtalet och inget vite."
+        ],
+        [
+          "FA-2026-09463",
+          "2026-08-21 05:12",
+          "GATA",
+          "1",
+          "Kyrkogatan/Rådhusgatan",
+          "Brunnslock saknas i körbanan",
+          "Tomas Viklund",
+          "070-601 72 18",
+          "40",
+          "2026-08-21 08:45",
+          "Norrväg Drift AB",
+          "3 h 33 min till avspärrning, inget vite."
+        ],
+        [
+          "FA-2026-09470",
+          "2026-08-25 14:30",
+          "GC",
+          "2",
+          "Selångersån, gångbron vid Kulturmagasinet",
+          "Lös planka på gångbron",
+          "–",
+          "–",
+          "30",
+          "2026-08-28 09:10",
+          "Norrväg Drift AB",
+          "Prio 2: 66 h 40 min, över 48 h: vite 800 kr."
+        ]
+      ]
+    }
+  ]
+}

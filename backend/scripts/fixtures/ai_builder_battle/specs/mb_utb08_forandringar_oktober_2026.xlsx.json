@@ -1,0 +1,115 @@
+{
+  "file": "mb_utb08_forandringar_oktober_2026.xlsx",
+  "format": "xlsx",
+  "source": {
+    "catalogue_id": "UTB-08",
+    "url": "https://sjalvservice.malmo.se/oversikt/overview/1375"
+  },
+  "description": "En fristående grundskolas ifyllda rapportmall för oktober 2026 (förändringar sedan föregående rapport), inskickad via e-tjänsten Fristående grundskolor - rapportera in elever.",
+  "sheets": [
+    {
+      "name": "Förändringar",
+      "columns": [
+        "Skolenhet",
+        "Personnummer",
+        "Efternamn",
+        "Förnamn",
+        "Årskurs",
+        "Händelsekod",
+        "Händelsedatum",
+        "Folkbokföringskommun",
+        "Kommentar skola"
+      ],
+      "rows": [
+        [
+          "Lärkparksskolan",
+          "20130101-2397",
+          "Lindgren",
+          "Noah",
+          7,
+          "N",
+          "2026-10-05",
+          "1280",
+          "Ny elev"
+        ],
+        [
+          "Lärkparksskolan",
+          "20170106-2380",
+          "Persson",
+          "Ella",
+          3,
+          "N",
+          "2026-10-19",
+          "1280",
+          "Ny elev efter höstlovet"
+        ],
+        [
+          "Lärkparksskolan",
+          "20150101-2395",
+          "Hansson",
+          "Vincent",
+          5,
+          "U",
+          "2026-10-09",
+          "1280",
+          "Sista dag 9/10, byter till kommunal skola"
+        ],
+        [
+          "Lärkparksskolan",
+          "20110101-2381",
+          "Nilsson",
+          "Alma",
+          9,
+          "U",
+          "2026-10-30",
+          "1280",
+          "Flyttar till Göteborg, sista dag 30/10"
+        ],
+        [
+          "Lärkparksskolan",
+          "20160105-2390",
+          "Karlsson",
+          "Liam",
+          4,
+          "F",
+          "2026-10-16",
+          "1231",
+          "Familjen flyttade till Arlöv 16/10, går kvar hos oss"
+        ],
+        [
+          "Lärkparksskolan",
+          "20180106-2389",
+          "Mansour",
+          "Selma",
+          2,
+          "Ö",
+          "2026-10-12",
+          "1280",
+          "Nytt efternamn, tidigare Ali"
+        ],
+        [
+          "Lärkparksskolan",
+          "20150105-2391",
+          "Rahimi",
+          "Elias",
+          5,
+          "N",
+          "2026-10-12",
+          "1233",
+          "Ny elev"
+        ],
+        [
+          "Lärkparksskolan",
+          "20200102-2389",
+          "Svensson",
+          "Maja",
+          "F-klass",
+          "N",
+          "2026-10-01",
+          "1280",
+          "Ny elev i förskoleklass"
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "file": "me_int02_besiktningsprotokoll_lekplats.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "INT-02",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/93"
+  },
+  "description": "Extern huvudbesiktning av en förskolegård enligt SS-EN 1176 och 1177: utrustning, anmärkningar med riskklass och åtgärdstid; innehåller inga personuppgifter utöver besiktningsmannen.",
+  "letterhead": {
+    "organisation": "Nordisk Lekplatsbesiktning AB",
+    "unit": "Besiktningsavdelningen",
+    "address": "Kvarngatan 9, 831 32 Östersund"
+  },
+  "date": "2026-05-12",
+  "title": "Årlig huvudbesiktning – förskolan Solgläntan, Kvissleby",
+  "blocks": [
+    {
+      "paragraph": "Beställare: Sundsvalls kommun, Lokalförsörjningen. Besiktningen är utförd enligt SS-EN 1176-1:2017 och SS-EN 1177:2018. Riskklass A: åtgärdas omgående; B: åtgärdas inom tre månader; C: åtgärdas vid nästa underhåll."
+    },
+    {
+      "table": {
+        "columns": [
+          "Nr",
+          "Utrustning",
+          "Anmärkning",
+          "Riskklass"
+        ],
+        "rows": [
+          [
+            "1",
+            "Klätterställning med nät",
+            "Bärlina i nätets övre del nött vid infästningen. Byts.",
+            "B"
+          ],
+          [
+            "2",
+            "Gungställning, två gungor",
+            "Inga anmärkningar.",
+            "–"
+          ],
+          [
+            "3",
+            "Rutschkana",
+            "Fallskyddsytan av gummiduk har en lös skarv vid landningsytan.",
+            "C"
+          ],
+          [
+            "4",
+            "Sandlåda",
+            "Inga anmärkningar.",
+            "–"
+          ],
+          [
+            "5",
+            "Lekstuga",
+            "Spik sticker ut i dörrkarmen.",
+            "B"
+          ]
+        ]
+      }
+    },
+    {
+      "paragraph": "Utrustning med riskklass B får användas i avvaktan på åtgärd om den del som anmärkningen gäller hålls avstängd."
+    },
+    {
+      "signature": {
+        "name": "Tove Andersson",
+        "role": "Certifierad lekplatsbesiktningsman"
+      }
+    }
+  ]
+}

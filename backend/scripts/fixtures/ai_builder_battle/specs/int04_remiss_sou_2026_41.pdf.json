@@ -1,0 +1,1739 @@
+{
+  "file": "int04_remiss_sou_2026_41.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "INT-04",
+    "url": "https://www.regeringen.se/contentassets/ee59c69b63014c19a08b0e8ca47334b2/svara-pa-remiss-pm2021_1-rev-2026.pdf"
+  },
+  "description": "Regeringskansliets remissmissiv med ett statligt betänkande (SOU) om kommunal beredskap: författningsförslag, bakgrund, enkätresultat, förslag per kapitel med avsnittsnummer, finansieringsmodell och en bilagetabell med beräknad ersättning per kommun.",
+  "letterhead": {
+    "organisation": "Regeringskansliet",
+    "unit": "Försvarsdepartementet",
+    "address": "103 33 Stockholm"
+  },
+  "date": "2026-08-14",
+  "diarienummer": "Fö2026/00871",
+  "title": "Remiss",
+  "blocks": [
+    {
+      "heading": "Remiss av betänkandet Kommunal beredskap i en ny tid – ansvar, förmåga och finansiering (SOU 2026:41)"
+    },
+    {
+      "paragraph": "Remissinstanser: Boverket, Energimyndigheten, Livsmedelsverket, Myndigheten för civilt försvar, Socialstyrelsen, Statskontoret, Länsstyrelsen i Västernorrlands län, Länsstyrelsen i Norrbottens län, Länsstyrelsen i Skåne län, Sveriges Kommuner och Regioner, Svenskt Vatten, Göteborgs kommun, Kiruna kommun, Malmö kommun, Stockholms kommun, Sundsvalls kommun, Umeå kommun, Ånge kommun, Region Västernorrland, Region Stockholm."
+    },
+    {
+      "paragraph": "Remissvaren ska ha kommit in till Försvarsdepartementet senast den 13 november 2026. Svaren bör lämnas per e-post till fo.remissvar@regeringskansliet.se och med kopia till fo.registrator@regeringskansliet.se. Ange diarienummer Fö2026/00871 och remissinstansens namn i ämnesraden i e-postmeddelandet och i yttrandet."
+    },
+    {
+      "paragraph": "Svaret bör lämnas i två versioner: den ena i ett format som är tillgängligt enligt lagen (2018:1937) om tillgänglighet till digital offentlig service och den andra i ett redigerbart format, till exempel Word. Remissvaren kommer att publiceras på regeringens webbplats."
+    },
+    {
+      "paragraph": "Remissinstanserna ombeds särskilt att yttra sig över förslagen i kapitel 8 om reservkraft, kapitel 9 om nödvatten, kapitel 10 om livsmedelsberedskap i den kommunala omsorgen och kapitel 12 om finansiering. Om remissinstansen inte har några synpunkter räcker det att svaret ger besked om det."
+    },
+    {
+      "paragraph": "För en remissinstans som är en myndighet under regeringen innebär remissen en skyldighet att svara. Kommuner och andra som inte är myndigheter under regeringen är inte skyldiga att svara men välkomnas att göra det. I promemorian Svara på remiss – hur och varför (SB PM 2021:1, reviderad 2026) finns råd om hur remissyttranden utformas; hänvisa gärna till avsnittsnumren i betänkandet."
+    },
+    {
+      "signature": {
+        "name": "Karin Wallström",
+        "role": "Departementsråd, enheten för krisberedskap och civilt försvar"
+      }
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "Statens offentliga utredningar – SOU 2026:41"
+    },
+    {
+      "paragraph": "Kommunal beredskap i en ny tid – ansvar, förmåga och finansiering. Betänkande av Utredningen om kommunernas uppgifter i civilt försvar (Fö 2025:03). Stockholm 2026."
+    },
+    {
+      "heading": "Till statsrådet och chefen för Försvarsdepartementet"
+    },
+    {
+      "paragraph": "Regeringen beslutade den 20 februari 2025 att tillkalla en särskild utredare med uppdrag att se över kommunernas uppgifter och förmåga inför och vid fredstida kriser och höjd beredskap, och hur dessa uppgifter ska finansieras (dir. 2025:17). Som särskild utredare förordnades från och med den 1 mars 2025 landshövding Birgitta Lönn. Utredningen har antagit namnet Utredningen om kommunernas uppgifter i civilt försvar."
+    },
+    {
+      "paragraph": "Härmed överlämnas betänkandet Kommunal beredskap i en ny tid – ansvar, förmåga och finansiering (SOU 2026:41). Uppdraget är därmed slutfört."
+    },
+    {
+      "paragraph": "Stockholm i juni 2026. Birgitta Lönn. Sekreterare: Oskar Lindmark och Sara Qvist."
+    },
+    {
+      "heading": "Innehåll"
+    },
+    {
+      "list": [
+        "Sammanfattning",
+        "Summary",
+        "1 Författningsförslag",
+        "2 Utredningens uppdrag och arbete",
+        "3 Bakgrund",
+        "4 Gällande rätt",
+        "5 Kommunernas beredskap i dag",
+        "6 Utgångspunkter för utredningens förslag",
+        "7 Ledning och samverkan",
+        "8 Robust elförsörjning och reservkraft",
+        "9 Dricksvatten och nödvatten",
+        "10 Livsmedelsberedskap i den kommunala omsorgen",
+        "11 Utrymning och skydd av befolkningen",
+        "12 Finansiering",
+        "13 Ikraftträdande och övergångsbestämmelser",
+        "14 Konsekvenser",
+        "15 Författningskommentar",
+        "Bilaga 1 Kommittédirektiv 2025:17",
+        "Bilaga 2 Beräknad ersättning per kommun i de sex nordligaste länen",
+        "Bilaga 3 Enkätfrågor i urval",
+        "Bilaga 4 Beräkningsunderlag för kostnaderna",
+        "Bilaga 5 Expertgruppen"
+      ]
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "Sammanfattning"
+    },
+    {
+      "paragraph": "Sverige bygger åter upp ett totalförsvar. Kommunerna ansvarar för en stor del av de verksamheter som befolkningen är beroende av i vardagen och som måste fungera också vid svåra påfrestningar och krig: vård och omsorg, skola och förskola, dricksvatten och avlopp, räddningstjänst, fysisk planering och lokal information. Utredningen konstaterar att kommunernas förmåga skiljer sig mycket åt och att de krav som ställs i lag i dag är allmänt hållna. Många kommuner har bra planer men saknar reservkraft, nödvatten och lager i de verksamheter som ska fungera när samhället i övrigt störs."
+    },
+    {
+      "paragraph": "Utredningen föreslår att lagen (2006:544) om kommuners och regioners åtgärder inför och vid extraordinära händelser i fredstid och höjd beredskap kompletteras med tydligare krav på vad kommunerna ska kunna upprätthålla. Kraven gäller fyra områden: ledning, elförsörjning i prioriterade verksamheter, nödvatten och livsmedelsberedskap i den kommunala omsorgen."
+    },
+    {
+      "paragraph": "Kommunen ska ha en reservledningsplats som kan användas i minst sju dygn utan extern försörjning (kapitel 7). Vård- och omsorgsboenden, bostäder med särskild service enligt LSS, kommunens ledningsplatser och vattenverk som försörjer fler än 500 personer ska ha reservkraft som klarar drift i minst 72 timmar utan påfyllnad (kapitel 8). Kravet ska vara uppfyllt senast den 31 december 2028."
+    },
+    {
+      "paragraph": "Kommunen ska kunna leverera nödvatten om minst 10 liter per person och dygn inom 24 timmar efter ett avbrott, och prioritera vård- och omsorgsboenden, förskolor och skolor som används som trygghetspunkter (kapitel 9). Kravet ska vara uppfyllt senast den 30 juni 2029."
+    },
+    {
+      "paragraph": "Kommunens vård- och omsorgsboenden och den kommunala hemtjänstens livsmedelsförsörjning ska kunna upprätthållas i minst sju dygn vid avbrott i leveranserna, genom lager, avtal eller en kombination (kapitel 10)."
+    },
+    {
+      "paragraph": "Staten ska ersätta kommunerna för de nya uppgifterna enligt den kommunala finansieringsprincipen. Utredningen föreslår en ersättningsmodell med ett grundbelopp per kommun och ett belopp per invånare, och ett tillägg för kommuner med färre än 8 000 invånare (kapitel 12). Den årliga kostnaden för staten beräknas till cirka 1,1 miljarder kronor när förslagen är fullt genomförda. Därtill föreslås ett tidsbegränsat investeringsstöd om sammanlagt 2,4 miljarder kronor för reservkraft och nödvattenutrustning under 2027–2029."
+    },
+    {
+      "paragraph": "Lagändringarna föreslås träda i kraft den 1 januari 2028."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "Summary"
+    },
+    {
+      "paragraph": "Sweden is rebuilding its total defence. The municipalities are responsible for many of the services that the population depends on every day and that must continue during severe disruptions and in war: care for older people and persons with disabilities, schools and pre-schools, drinking water and sewerage, rescue services, spatial planning and local information to the public. The Inquiry finds that municipal capability varies widely and that the requirements laid down in law are general. Many municipalities have good plans but lack back-up power, emergency water and stocks in the services that must keep running when the rest of society is disrupted."
+    },
+    {
+      "paragraph": "The Inquiry proposes that the Act (2006:544) on municipal and regional measures prior to and during extraordinary events in peacetime and during periods of heightened alert be supplemented with clear requirements in four areas: management, electricity supply in priority services, emergency drinking water and food supply in municipal care. Each municipality shall have an alternative command post that can operate for at least seven days without external supply. Residential care homes, group homes for persons with disabilities, command posts and waterworks serving more than 500 persons shall have back-up power for at least 72 hours by 31 December 2028. Municipalities shall be able to deliver at least 10 litres of emergency water per person and day within 24 hours of an interruption by 30 June 2029, and shall be able to maintain the food supply in municipal care for at least seven days."
+    },
+    {
+      "paragraph": "The State shall compensate the municipalities under the municipal financing principle. The Inquiry proposes a targeted grant for 2028–2031 consisting of a basic amount per municipality, an amount per inhabitant and a supplement for sparsely populated municipalities, and a time-limited investment grant of SEK 2.4 billion in 2027–2029. The amendments are proposed to enter into force on 1 January 2028."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "1 Författningsförslag"
+    },
+    {
+      "heading": "1.1 Förslag till lag om ändring i lagen (2006:544) om kommuners och regioners åtgärder inför och vid extraordinära händelser i fredstid och höjd beredskap"
+    },
+    {
+      "paragraph": "Härigenom föreskrivs i fråga om lagen (2006:544) om kommuners och regioners åtgärder inför och vid extraordinära händelser i fredstid och höjd beredskap att det ska införas fem nya paragrafer, 2 a–2 e §§, och närmast före 2 a § en ny rubrik av följande lydelse."
+    },
+    {
+      "heading": "Krav på förmåga i vissa verksamheter"
+    },
+    {
+      "paragraph": "2 a § Kommunen ska ha en ledningsplats och en reservledningsplats för krisledningsnämnden och den som leder kommunens verksamhet vid en extraordinär händelse eller under höjd beredskap. Reservledningsplatsen ska kunna användas i minst sju dygn utan extern försörjning av el, vatten och livsmedel."
+    },
+    {
+      "paragraph": "2 b § Kommunen ska se till att följande verksamheter har reservkraft som kan upprätthålla driften i minst 72 timmar utan påfyllnad av drivmedel: 1. vård- och omsorgsboenden och bostäder med särskild service enligt lagen (1993:387) om stöd och service till vissa funktionshindrade, 2. kommunens ledningsplats och reservledningsplats, och 3. vattenverk och tryckstegringsstationer som försörjer fler än 500 personer."
+    },
+    {
+      "paragraph": "2 c § Kommunen ska planera för och kunna leverera nödvatten om minst 10 liter per person och dygn till befolkningen inom 24 timmar från det att den ordinarie dricksvattenförsörjningen har upphört. Vid leveransen ska kommunen prioritera vård- och omsorgsboenden, bostäder enligt 2 b § 1 och de förskolor och skolor som kommunen har utsett till trygghetspunkter."
+    },
+    {
+      "paragraph": "2 d § Kommunen ska se till att livsmedelsförsörjningen i vård- och omsorgsboenden, i bostäder med särskild service och till personer som har beviljats matdistribution inom hemtjänsten kan upprätthållas i minst sju dygn vid avbrott i ordinarie leveranser."
+    },
+    {
+      "paragraph": "2 e § Regeringen eller den myndighet som regeringen bestämmer får meddela föreskrifter om kraven i 2 a–2 d §§ och om undantag från dem."
+    },
+    {
+      "paragraph": "Denna lag träder i kraft den 1 januari 2028. Kraven i 2 b § ska vara uppfyllda senast den 31 december 2028 och kraven i 2 c § senast den 30 juni 2029."
+    },
+    {
+      "heading": "1.2 Förslag till förordning om ändring i förordningen (2006:637) om kommuners och regioners åtgärder inför och vid extraordinära händelser i fredstid och höjd beredskap"
+    },
+    {
+      "paragraph": "Härigenom föreskrivs att det i förordningen ska införas en ny paragraf, 3 a §, av följande lydelse. 3 a § Myndigheten för civilt försvar får meddela föreskrifter om verkställigheten av 2 a, 2 b och 2 d §§ lagen (2006:544). Livsmedelsverket får, efter samråd med Myndigheten för civilt försvar, meddela föreskrifter om verkställigheten av 2 c § samma lag. Denna förordning träder i kraft den 1 januari 2028."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "2 Utredningens uppdrag och arbete"
+    },
+    {
+      "heading": "2.1 Uppdraget"
+    },
+    {
+      "paragraph": "Enligt direktiven ska utredningen analysera vilka uppgifter kommunerna har inför och vid fredstida kriser och höjd beredskap, bedöma om kraven i lag är tillräckligt tydliga, föreslå de författningsändringar som behövs och analysera hur kommunerna ska ersättas för nya eller utökade uppgifter. Utredningen ska särskilt beakta skillnaderna mellan stora och små kommuner och förhållandena i glesbygd."
+    },
+    {
+      "heading": "2.2 Arbetet"
+    },
+    {
+      "paragraph": "Utredningen har haft en expertgrupp med företrädare för Myndigheten för civilt försvar, Livsmedelsverket, Socialstyrelsen, Energimyndigheten, Sveriges Kommuner och Regioner, Svenskt Vatten och fyra kommuner. Utredningen har genomfört en enkät till samtliga 290 kommuner, som 247 kommuner besvarade (85 procent), och besökt 14 kommuner. Utredningen har också samrått med Utredningen om regionernas beredskap (Fö 2025:04)."
+    },
+    {
+      "heading": "2.3 Utredningens besök"
+    },
+    {
+      "paragraph": "Utredningen har besökt följande kommuner: Kiruna (september 2025), Luleå (september 2025), Ånge (oktober 2025), Sundsvall (oktober 2025), Östersund (oktober 2025), Falun (november 2025), Karlstad (november 2025), Norrtälje (december 2025), Gotland (januari 2026), Växjö (januari 2026), Malmö (februari 2026), Tranemo (februari 2026), Göteborg (mars 2026) och Stockholm (mars 2026). Vid besöken har utredningen träffat kommunledning, beredskapssamordnare, förvaltningschefer för vård och omsorg, VA-huvudmän och räddningstjänst."
+    },
+    {
+      "paragraph": "I Sundsvall visades bland annat kommunens reservledningsplats, ett vård- och omsorgsboende med förberedd anslutning för mobilt reservkraftverk och den kommunala VA-huvudmannens nödvattenutrustning. Utredningen noterade att flera kommuner i regionen har samordnat sin planering genom ett gemensamt beredskapsråd."
+    },
+    {
+      "heading": "2.4 Betänkandets disposition"
+    },
+    {
+      "paragraph": "Kapitel 3 och 4 beskriver bakgrunden och gällande rätt. Kapitel 5 redovisar utredningens kartläggning av kommunernas förmåga. I kapitel 6 redovisas utgångspunkterna för förslagen, som lämnas i kapitel 7–12. Kapitel 13 behandlar ikraftträdande och kapitel 14 konsekvenserna. I kapitel 15 finns författningskommentaren."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "3 Bakgrund"
+    },
+    {
+      "heading": "3.1 Från civilförsvar till totalförsvar"
+    },
+    {
+      "paragraph": "Under det kalla kriget hade kommunerna omfattande uppgifter i civilförsvaret, bland annat skyddsrum, befolkningsskydd, utrymning och nödvatten. När totalförsvaret avvecklades efter 1990-talet flyttades fokus till fredstida kriser. Lagen (2006:544) om kommuners och regioners åtgärder inför och vid extraordinära händelser i fredstid och höjd beredskap, LEH, trädde i kraft den 1 januari 2007 och bygger på principen att kommunen ska ha en grundläggande förmåga att hantera kriser, utan detaljerade krav."
+    },
+    {
+      "paragraph": "Sedan regeringen 2015 gav myndigheterna i uppdrag att återuppta planeringen för civilt försvar har kraven på kommunerna ökat, men främst genom överenskommelser mellan staten och Sveriges Kommuner och Regioner. Den senaste överenskommelsen om kommunernas krisberedskap och civila försvar gäller 2024–2026."
+    },
+    {
+      "heading": "3.2 Ny myndighetsstruktur"
+    },
+    {
+      "paragraph": "Den 1 januari 2026 ersattes Myndigheten för samhällsskydd och beredskap (MSB) av Myndigheten för civilt försvar (MCF). MCF samordnar det civila försvaret, stöder kommunerna i deras planering och fördelar statens ersättning till kommunerna enligt överenskommelsen. Föreskrifter och vägledningar som MSB har meddelat gäller tills vidare och har tagits över av MCF. I betänkandet används MCF även när det gäller uppgifter som tidigare utfördes av MSB."
+    },
+    {
+      "heading": "3.2.1 Det säkerhetspolitiska läget"
+    },
+    {
+      "paragraph": "Regeringen har i flera propositioner konstaterat att ett väpnat angrepp mot Sverige inte kan uteslutas och att planeringen ska utgå från att Sverige kan behöva uthålla en säkerhetspolitisk kris och krig under minst tre månader. Sedan Sverige blev medlem i Nato 2024 omfattar planeringen också värdlandsstöd, vilket ställer krav på kommunernas förmåga att upprätthålla infrastruktur och service även när allierade styrkor passerar eller är stationerade i kommunen."
+    },
+    {
+      "paragraph": "Hybrida hot, cyberangrepp och sabotage mot kritisk infrastruktur har blivit vanligare i hela Europa. Kommunernas verksamheter är beroende av digitala system och av leveranser från privata aktörer, vilket gör dem sårbara även för störningar som inte riktas mot kommunen själv. Utredningen har därför lagt vikt vid förmågan att upprätthålla verksamhet utan el, vatten och leveranser utifrån under en begränsad tid."
+    },
+    {
+      "heading": "3.3 Erfarenheter av störningar"
+    },
+    {
+      "paragraph": "Stormen Gudrun 2005, skogsbränderna 2014 och 2018, covid-19-pandemin och elavbrotten i norra Sverige under vintern 2024/25 har visat att det är i kommunernas verksamheter som konsekvenserna för enskilda blir tydliga. Under elavbrottet i januari 2025 var 38 000 hushåll i fem län utan el i mer än 24 timmar. I flera kommuner saknade vård- och omsorgsboenden reservkraft och boende fick flyttas."
+    },
+    {
+      "heading": "3.4 Internationella erfarenheter"
+    },
+    {
+      "paragraph": "Utredningen har studerat hur Finland, Norge och Estland reglerar kommunernas beredskap. I Finland har kommunerna sedan länge en skyldighet att genom beredskapsplanering och förberedelser säkerställa att uppgifterna kan skötas så störningsfritt som möjligt även under undantagsförhållanden, och Försörjningsberedskapscentralen stöder bland annat vattenförsörjningen. I Norge ska kommunerna enligt sivilbeskyttelsesloven ha en helhetlig risiko- og sårbarhetsanalyse och en beredskapsplan, och Direktoratet for samfunnssikkerhet og beredskap följer upp dem genom tillsyn. Estland har infört konkreta krav på att vissa samhällsviktiga tjänster ska kunna upprätthållas under viss tid vid elavbrott."
+    },
+    {
+      "paragraph": "Gemensamt för länderna är att kraven blivit mer konkreta efter 2022 och att staten har tagit ett tydligare finansiellt ansvar för investeringar i reservkraft och vattenförsörjning. Utredningen har hämtat inspiration från framför allt den estniska modellen med mätbara krav på tid."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "4 Gällande rätt"
+    },
+    {
+      "heading": "4.1 Lagen om extraordinära händelser"
+    },
+    {
+      "paragraph": "Enligt 2 kap. 1 § LEH ska kommuner analysera vilka extraordinära händelser i fredstid som kan inträffa i kommunen och hur de kan påverka den egna verksamheten. Resultatet ska värderas och sammanställas i en risk- och sårbarhetsanalys. Kommunen ska också, med beaktande av risk- och sårbarhetsanalysen, för varje ny mandatperiod fastställa en plan för hur den ska hantera extraordinära händelser. Enligt 3 kap. 1 § ska kommunen vidta de förberedelser som behövs för verksamheten under höjd beredskap."
+    },
+    {
+      "paragraph": "Lagen innehåller inga krav på reservkraft, nödvatten eller lager. Sådana krav kan i dag bara följa av annan lagstiftning, till exempel Livsmedelsverkets föreskrifter om dricksvatten, eller av kommunens egna beslut."
+    },
+    {
+      "heading": "4.2 Den kommunala finansieringsprincipen"
+    },
+    {
+      "paragraph": "Den kommunala finansieringsprincipen innebär att staten inte ska ålägga kommuner nya uppgifter utan att de får möjlighet att finansiera dem på annat sätt än genom höjda skatter. Principen är inte lagfäst men har godkänts av riksdagen och tillämpas sedan 1993. Enligt 14 kap. 3 § regeringsformen ska en inskränkning i den kommunala självstyrelsen inte gå utöver vad som är nödvändigt med hänsyn till ändamålen."
+    },
+    {
+      "heading": "4.3 Annan lagstiftning"
+    },
+    {
+      "paragraph": "Enligt lagen (2006:412) om allmänna vattentjänster ansvarar kommunen för att ordna vattentjänster. Livsmedelsverket stöder kommunerna i nödvattenplaneringen, bland annat genom den nationella nödvattensamordningen och den nationella vattenkatastrofgruppen VAKA. Socialtjänstlagen (2025:400) och lagen (1993:387) om stöd och service till vissa funktionshindrade reglerar kommunens ansvar för vård och omsorg men innehåller inga uttryckliga krav på beredskap."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "4.4 Överenskommelsen om kommunernas krisberedskap och civila försvar"
+    },
+    {
+      "paragraph": "Sedan 2019 regleras en stor del av statens styrning av kommunernas beredskap i överenskommelser mellan staten, genom MSB och sedan 2026 MCF, och Sveriges Kommuner och Regioner. Den nuvarande överenskommelsen gäller 2024–2026 och anger vilka uppgifter kommunerna ska utföra för den ersättning som betalas ut enligt 5 kap. 1 § LEH. Uppgifterna är bland annat risk- och sårbarhetsanalys, planering för höjd beredskap, utbildning och övning, geografiskt områdesansvar och krigsorganisation."
+    },
+    {
+      "paragraph": "Överenskommelsen är inte bindande för den enskilda kommunen på samma sätt som lag. Uppföljningen visar att kommunerna i stor utsträckning genomför de uppgifter som anges, men att överenskommelsen inte innehåller mätbara krav på förmåga, till exempel hur länge en viss verksamhet ska kunna upprätthållas. Utredningen föreslår därför att vissa krav lyfts in i lag, medan överenskommelsen även fortsättningsvis bör användas för uppgifter som inte lämpar sig för reglering."
+    },
+    {
+      "heading": "4.5 Tillsyn"
+    },
+    {
+      "paragraph": "Länsstyrelsen utövar enligt 7 kap. 1 § LEH tillsyn över att kommunerna fullgör sina uppgifter enligt lagen. Tillsynen har hittills främst avsett risk- och sårbarhetsanalyser och planer. Med de nya kraven blir tillsynen mer konkret: länsstyrelsen kan kontrollera att reservkraft, nödvattenutrustning och lager finns och fungerar. Utredningen bedömer att länsstyrelserna behöver förstärkas för detta, se avsnitt 14.1."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "5 Kommunernas beredskap i dag"
+    },
+    {
+      "heading": "5.1 Enkätens resultat"
+    },
+    {
+      "paragraph": "Utredningens enkät visar att nästan alla kommuner har en krisledningsplan och en risk- och sårbarhetsanalys, men att förmågan att upprätthålla verksamhet vid längre avbrott är begränsad. Tabell 5.1 sammanfattar svaren."
+    },
+    {
+      "table": {
+        "columns": [
+          "Fråga",
+          "Andel kommuner som svarat ja"
+        ],
+        "rows": [
+          [
+            "Har kommunen en reservledningsplats?",
+            "71 %"
+          ],
+          [
+            "Har reservledningsplatsen reservkraft för minst 72 timmar?",
+            "38 %"
+          ],
+          [
+            "Har samtliga vård- och omsorgsboenden fast reservkraft?",
+            "22 %"
+          ],
+          [
+            "Har samtliga vård- och omsorgsboenden anslutning för mobil reservkraft?",
+            "54 %"
+          ],
+          [
+            "Har kommunen en nödvattenplan som är högst fyra år gammal?",
+            "63 %"
+          ],
+          [
+            "Kan kommunen leverera nödvatten till hela befolkningen inom 24 timmar?",
+            "17 %"
+          ],
+          [
+            "Har kommunen livsmedelslager för minst tre dygn i vård- och omsorgsboenden?",
+            "41 %"
+          ],
+          [
+            "Har kommunen livsmedelslager för minst sju dygn i vård- och omsorgsboenden?",
+            "9 %"
+          ],
+          [
+            "Har kommunen utsett trygghetspunkter?",
+            "58 %"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Tabell 5.2 Enkätsvar per län"
+    },
+    {
+      "paragraph": "Tabellen visar antal kommuner i länet, antal som besvarat enkäten och andelen av de svarande kommunerna som har en reservledningsplats, fast reservkraft i samtliga vård- och omsorgsboenden respektive livsmedelslager för minst sju dygn."
+    },
+    {
+      "table": {
+        "columns": [
+          "Län",
+          "Kommuner",
+          "Svarande",
+          "Reservledningsplats",
+          "Fast reservkraft i alla boenden",
+          "Lager sju dygn"
+        ],
+        "rows": [
+          [
+            "Stockholms län",
+            "26",
+            "22",
+            "81 %",
+            "31 %",
+            "12 %"
+          ],
+          [
+            "Uppsala län",
+            "8",
+            "7",
+            "86 %",
+            "29 %",
+            "14 %"
+          ],
+          [
+            "Södermanlands län",
+            "9",
+            "8",
+            "75 %",
+            "25 %",
+            "13 %"
+          ],
+          [
+            "Östergötlands län",
+            "13",
+            "11",
+            "73 %",
+            "18 %",
+            "9 %"
+          ],
+          [
+            "Jönköpings län",
+            "13",
+            "12",
+            "83 %",
+            "33 %",
+            "8 %"
+          ],
+          [
+            "Kronobergs län",
+            "8",
+            "7",
+            "71 %",
+            "14 %",
+            "0 %"
+          ],
+          [
+            "Kalmar län",
+            "12",
+            "10",
+            "70 %",
+            "20 %",
+            "10 %"
+          ],
+          [
+            "Gotlands län",
+            "1",
+            "1",
+            "100 %",
+            "100 %",
+            "0 %"
+          ],
+          [
+            "Blekinge län",
+            "5",
+            "5",
+            "80 %",
+            "20 %",
+            "20 %"
+          ],
+          [
+            "Skåne län",
+            "33",
+            "28",
+            "79 %",
+            "21 %",
+            "11 %"
+          ],
+          [
+            "Hallands län",
+            "6",
+            "6",
+            "83 %",
+            "33 %",
+            "17 %"
+          ],
+          [
+            "Västra Götalands län",
+            "49",
+            "41",
+            "76 %",
+            "17 %",
+            "7 %"
+          ],
+          [
+            "Värmlands län",
+            "16",
+            "13",
+            "62 %",
+            "15 %",
+            "8 %"
+          ],
+          [
+            "Örebro län",
+            "12",
+            "10",
+            "70 %",
+            "20 %",
+            "10 %"
+          ],
+          [
+            "Västmanlands län",
+            "10",
+            "9",
+            "67 %",
+            "11 %",
+            "11 %"
+          ],
+          [
+            "Dalarnas län",
+            "15",
+            "13",
+            "62 %",
+            "8 %",
+            "8 %"
+          ],
+          [
+            "Gävleborgs län",
+            "10",
+            "9",
+            "56 %",
+            "11 %",
+            "0 %"
+          ],
+          [
+            "Västernorrlands län",
+            "7",
+            "7",
+            "71 %",
+            "14 %",
+            "14 %"
+          ],
+          [
+            "Jämtlands län",
+            "8",
+            "7",
+            "57 %",
+            "0 %",
+            "14 %"
+          ],
+          [
+            "Västerbottens län",
+            "15",
+            "13",
+            "54 %",
+            "8 %",
+            "0 %"
+          ],
+          [
+            "Norrbottens län",
+            "14",
+            "12",
+            "58 %",
+            "8 %",
+            "8 %"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "5.2 Skillnader mellan kommuner"
+    },
+    {
+      "paragraph": "Större kommuner har i högre grad reservkraft och nödvattenplaner, men också fler verksamheter att försörja. Mindre kommuner har färre boenden men saknar ofta personal med kompetens inom beredskap. I glesbygd är avstånden långa och leveranser av drivmedel och nödvatten tar längre tid. Kommunerna i de sex nordligaste länen uppger i högre grad än andra att kostnaden är det främsta hindret."
+    },
+    {
+      "heading": "5.3 Kostnader i dag"
+    },
+    {
+      "paragraph": "Kommunerna fick 2025 sammanlagt 850 miljoner kronor i ersättning från staten enligt överenskommelsen om krisberedskap och civilt försvar. Enkätsvaren visar att kommunerna själva finansierade ungefär lika mycket. Investeringar i reservkraft har i de flesta fall gjorts inom kommunernas ordinarie investeringsbudgetar."
+    },
+    {
+      "heading": "5.4 Kommunernas egna bedömningar"
+    },
+    {
+      "paragraph": "I enkätens fritextsvar framhåller många kommuner att de saknar både ekonomiska resurser och personal för att bygga upp förmågan i den takt som säkerhetsläget kräver. Flera kommuner efterfrågar tydligare krav från staten, eftersom beredskapsinvesteringar annars konkurrerar med den löpande verksamheten i budgetarbetet. Några kommuner, främst större, anser att tydliga krav riskerar att låsa fast lösningar som inte passar lokala förhållanden."
+    },
+    {
+      "paragraph": "Kommunala VA-huvudmän pekar på att nödvattenförsörjning i stor skala kräver fordon, tankar och personal som i dag inte finns, och att upphandling och utbildning tar tid. Förvaltningar inom vård och omsorg pekar på bristen på lagerutrymmen i äldre boenden och på att specialkost är svår att lagerhålla."
+    },
+    {
+      "heading": "5.5 Exempel från kommunerna"
+    },
+    {
+      "paragraph": "Kommun A (kommungrupp B3, cirka 95 000 invånare) har elva vård- och omsorgsboenden, varav tre med fast reservkraft. Under elavbrottet i januari 2025 fick ett boende med 42 boende evakueras till ett annat boende eftersom det mobila reservkraftverket behövdes på ett vattenverk. Kommunen har sedan dess förberett anslutning i samtliga boenden men har inte fått budget för fler mobila verk."
+    },
+    {
+      "paragraph": "Kommun B (kommungrupp C8, cirka 6 000 invånare) har två vård- och omsorgsboenden och ett gemensamt tillagningskök. Kommunen har en nödvattenplan från 2019 men ingen egen utrustning; vid behov ska vatten köras ut av en entreprenör. Beredskapssamordnaren arbetar 20 procent med beredskapsfrågor och resten som säkerhetssamordnare."
+    },
+    {
+      "paragraph": "Kommun C (kommungrupp A2, cirka 45 000 invånare) har byggt upp ett lager för sju dygn i samtliga boenden genom avtal med grossisten om ett buffertlager som omsätts löpande. Kostnaden är cirka 0,6 miljoner kronor per år. Kommunen framhåller att lösningen bygger på att grossistens lager ligger inom kommunen."
+    },
+    {
+      "paragraph": "Kommun D (kommungrupp B3) har ett kommunalt VA-bolag som ansvarar för nödvattenplaneringen. Bolaget kan i dag försörja cirka 15 000 personer med nödvatten inom ett dygn. För att nå hela befolkningen behövs enligt bolaget ytterligare tankar, två fordon och utbildad personal, med en upphandlingstid om cirka ett och ett halvt år."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "6 Utgångspunkter för utredningens förslag"
+    },
+    {
+      "paragraph": "Utredningen utgår från att kraven ska vara tydliga, mätbara och möjliga att följa upp, men lämna kommunerna frihet att välja hur de uppfyller dem. Kraven ska riktas mot de verksamheter där ett avbrott snabbast får allvarliga följder för liv och hälsa. Nya krav ska finansieras av staten enligt finansieringsprincipen. Utredningen har också beaktat att kraven inte får inskränka den kommunala självstyrelsen mer än nödvändigt."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "7 Ledning och samverkan"
+    },
+    {
+      "heading": "7.1 Nuvarande ordning"
+    },
+    {
+      "paragraph": "Varje kommun ska enligt 2 kap. 2 § LEH ha en krisledningsnämnd. Hur ledningen organiseras i övrigt bestämmer kommunen. Utredningens besök visar att ledningsplatserna ofta ligger i kommunhuset utan reservkraft och att reservledningsplatsen i många fall är ett sammanträdesrum i en annan kommunal byggnad."
+    },
+    {
+      "heading": "7.2 Behovet av en robust ledningsplats"
+    },
+    {
+      "paragraph": "Under höjd beredskap och vid långvariga störningar måste kommunens ledning kunna arbeta dygnet runt under lång tid. Utredningen bedömer att en reservledningsplats som kan användas i sju dygn utan extern försörjning är en rimlig miniminivå, och att den ska ha reservkraft, möjlighet att lagra vatten och livsmedel och säkra sambandsmedel."
+    },
+    {
+      "heading": "7.2.1 Reservledningsplatsens utformning"
+    },
+    {
+      "paragraph": "Utredningen har inte funnit skäl att föreslå krav på skyddad utformning av reservledningsplatsen, till exempel i ett skyddsrum eller ett bergrum. Kommunerna bör i stället välja en plats som inte är beroende av samma infrastruktur som den ordinarie ledningsplatsen, som går att nå även om vägar är avstängda och som kan hållas säker mot obehöriga. Flera kommuner använder räddningstjänstens lokaler, vilket ger fördelar genom tillgång till samband och reservkraft."
+    },
+    {
+      "paragraph": "Personalen på reservledningsplatsen behöver kunna arbeta i skift. Utredningen bedömer att kommunen bör planera för att minst tre skift ska kunna bemanna krisledningens stab under sju dygn och att vila, mat och sanitet ska kunna ordnas på plats."
+    },
+    {
+      "heading": "7.3 Utredningens förslag om ledningsplatser"
+    },
+    {
+      "paragraph": "Utredningen föreslår att kommunen ska ha en ledningsplats och en reservledningsplats och att reservledningsplatsen ska kunna användas i minst sju dygn utan extern försörjning. Kommuner får samverka om en gemensam reservledningsplats om avståndet medger det."
+    },
+    {
+      "heading": "7.4 Samverkan med regionen och länsstyrelsen"
+    },
+    {
+      "paragraph": "Utredningen bedömer att samverkan mellan kommun, region och länsstyrelse fungerar i huvudsak väl och lämnar inga förslag om ändrad ansvarsfördelning. Länsstyrelsen bör i sin tillsyn enligt 7 kap. 1 § LEH följa upp de nya kraven."
+    },
+    {
+      "heading": "7.5 Krisledningsnämnden och delegering"
+    },
+    {
+      "paragraph": "Krisledningsnämnden får enligt 2 kap. 3 § LEH fatta beslut om att överta beslutanderätten från andra nämnder i den omfattning som är nödvändig med hänsyn till den extraordinära händelsens omfattning och art. Utredningen har inte funnit skäl att ändra i denna ordning men understryker vikten av att kommunerna övar krisledningsnämndens arbete, inklusive hur nämnden ska sammanträda om kommunhuset inte kan användas."
+    },
+    {
+      "heading": "7.6 Sambandsmedel"
+    },
+    {
+      "paragraph": "Rakel och andra robusta sambandsmedel ska finnas både på ledningsplatsen och på reservledningsplatsen. Utredningen bedömer att det redan följer av överenskommelsen och lämnar inget förslag i denna del."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "8 Robust elförsörjning och reservkraft"
+    },
+    {
+      "heading": "8.1 Elförsörjningens sårbarhet"
+    },
+    {
+      "paragraph": "Nästan all kommunal verksamhet är beroende av el. Vid ett elavbrott slutar värme, ventilation, hissar, larm, kyl och frys och IT-system att fungera. I vård- och omsorgsboenden bor personer som inte kan klara sig själva och som inte kan flyttas utan risk. Vattenverk och tryckstegringsstationer behöver el för att kunna leverera vatten till högre belägna områden."
+    },
+    {
+      "heading": "8.2 Reservkraft i dag"
+    },
+    {
+      "paragraph": "Enligt enkäten har 22 procent av kommunerna fast reservkraft i samtliga vård- och omsorgsboenden och 54 procent har förberett anslutning för mobila reservkraftverk. Mobila reservkraftverk är ofta för få för att räcka till alla boenden samtidigt och ska dessutom köras dit vid en störning som ofta också påverkar framkomligheten."
+    },
+    {
+      "heading": "8.3 Krav på reservkraft i prioriterade verksamheter"
+    },
+    {
+      "paragraph": "Utredningen föreslår att vård- och omsorgsboenden, bostäder med särskild service enligt LSS, kommunens ledningsplatser och vattenverk och tryckstegringsstationer som försörjer fler än 500 personer ska ha reservkraft som klarar drift i minst 72 timmar utan påfyllnad. Kravet kan uppfyllas med fast reservkraft eller med förberedd anslutning och ett avtal eller en egen organisation som garanterar att ett mobilt reservkraftverk är på plats inom sex timmar."
+    },
+    {
+      "paragraph": "Utredningen föreslår att kravet ska vara uppfyllt senast den 31 december 2028. Utredningen är medveten om att tiden är kort, men bedömer att säkerhetsläget motiverar det. Kommuner som inte hinner kan enligt 2 e § ges undantag i föreskrifter under en övergångsperiod."
+    },
+    {
+      "heading": "Alternativ som utredningen har övervägt"
+    },
+    {
+      "paragraph": "Utredningen har övervägt ett krav på 24 timmars reservkraft, i linje med vad många kommuner redan planerar för. Erfarenheterna från elavbrottet 2025 visar dock att avbrott i glesbygd kan pågå i flera dygn och att tillgången till drivmedel och personal för påfyllnad är begränsad. Utredningen har också övervägt ett krav på fast reservkraft i samtliga boenden, men bedömer att förberedd anslutning i kombination med garanterad tillgång till mobila verk ger en likvärdig förmåga till lägre kostnad för mindre boenden."
+    },
+    {
+      "paragraph": "Utredningen har vidare övervägt att låta kravet omfatta även förskolor och skolor. Eftersom de kan stängas vid en längre störning, medan boende i vård- och omsorgsboenden inte kan flyttas utan risk, föreslår utredningen inte något sådant krav. De förskolor och skolor som kommunen utser till trygghetspunkter bör dock ha reservkraft; utredningen återkommer till trygghetspunkterna i avsnitt 9.2."
+    },
+    {
+      "heading": "8.4 Kostnader för reservkraft"
+    },
+    {
+      "paragraph": "Utredningen beräknar kostnaden för fast reservkraft till 1,5–2,5 miljoner kronor per vård- och omsorgsboende, beroende på storlek och om elsystemet behöver byggas om. Förberedd anslutning för mobilt reservkraftverk kostar 0,2–0,4 miljoner kronor per byggnad. Den samlade investeringen för landets kommuner beräknas till 3,1 miljarder kronor och den årliga kostnaden för drift, provkörning och underhåll till 180 miljoner kronor."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "8.5 Förhållandet till elberedskapslagen och prioritering vid elbrist"
+    },
+    {
+      "paragraph": "Enligt elberedskapslagen (1997:288) ansvarar elnätsföretagen för att vidta beredskapsåtgärder, och vid elbrist kan elanvändare kopplas bort enligt planeringen i Styrel. Kommunernas prioriterade verksamheter prioriteras i Styrel men har ingen garanti för el vid en störning i nätet. Kravet på reservkraft i 2 b § kompletterar därför elnätsföretagens ansvar och ersätter det inte."
+    },
+    {
+      "paragraph": "Reservkraftverk ska provköras regelbundet och kunna tankas under drift. Utredningen bedömer att MCF bör meddela föreskrifter om provkörning, dokumentation och drivmedelslager, och att dessa bör utformas i samråd med Energimyndigheten."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "9 Dricksvatten och nödvatten"
+    },
+    {
+      "heading": "9.1 Nödvattenplanering i dag"
+    },
+    {
+      "paragraph": "Kommunen ansvarar som huvudman för de allmänna vattentjänsterna och därmed för att planera för nödvatten. Livsmedelsverket rekommenderar att nödvattenplanen revideras minst vart fjärde år. Enligt enkäten har 63 procent av kommunerna en aktuell nödvattenplan, men endast 17 procent bedömer att de kan leverera nödvatten till hela befolkningen inom 24 timmar."
+    },
+    {
+      "heading": "9.2 Krav på nödvattenförsörjning"
+    },
+    {
+      "paragraph": "Utredningen föreslår att kommunen ska kunna leverera nödvatten om minst 10 liter per person och dygn inom 24 timmar efter ett avbrott i den ordinarie dricksvattenförsörjningen. Vård- och omsorgsboenden, bostäder med särskild service och förskolor och skolor som utsetts till trygghetspunkter ska prioriteras. Kravet omfattar planering, utrustning för distribution, tankar och personal som kan hantera distributionen."
+    },
+    {
+      "heading": "9.3 Samverkan om nödvatten"
+    },
+    {
+      "paragraph": "Kommuner bör kunna samverka om utrustning och personal. Livsmedelsverkets nationella nödvattensamordning och VAKA kan förstärka men inte ersätta kommunens egen förmåga. Kommunala VA-bolag kan fullgöra kommunens uppgift enligt avtal med kommunen."
+    },
+    {
+      "heading": "9.4 Tidpunkt för kravet"
+    },
+    {
+      "paragraph": "Utredningen föreslår att kravet i 2 c § ska vara uppfyllt senast den 30 juni 2029. Utredningen har övervägt en längre övergångstid, men bedömer att behovet är akut och att utrustning för nödvatten kan anskaffas relativt snabbt."
+    },
+    {
+      "heading": "9.4.1 Synpunkter från expertgruppen"
+    },
+    {
+      "paragraph": "Företrädarna för Svenskt Vatten och för de kommunala VA-huvudmännen i expertgruppen har framhållit att tidpunkten den 30 juni 2029 är svår att nå för större kommuner, där kravet innebär att hundratusentals personer ska kunna försörjas med nödvatten inom ett dygn. De har föreslagit att tidpunkten ska vara den 31 december 2031 för kommuner med fler än 50 000 invånare. Utredningen har inte följt förslaget men understryker att undantag kan medges i föreskrifter enligt 2 e §."
+    },
+    {
+      "heading": "9.5 Kostnader för nödvatten"
+    },
+    {
+      "paragraph": "Den samlade investeringen i nödvattenutrustning beräknas till 1,4 miljarder kronor. Den årliga kostnaden för övningar, underhåll och lagerhållning beräknas till 120 miljoner kronor."
+    },
+    {
+      "heading": "9.6 Nödvatten i glesbygd"
+    },
+    {
+      "paragraph": "I glesbygd är många hushåll anslutna till enskilda brunnar och omfattas inte av den allmänna vattenförsörjningen. Kravet i 2 c § gäller hela befolkningen, men utredningen bedömer att kommunen i glesbygd kan uppfylla kravet genom att hänvisa till utdelningsplatser inom rimligt avstånd och genom att prioritera boenden och trygghetspunkter. Livsmedelsverket bör i sin vägledning ange vad som är ett rimligt avstånd."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "10 Livsmedelsberedskap i den kommunala omsorgen"
+    },
+    {
+      "heading": "10.1 Livsmedelsförsörjningen i omsorgen"
+    },
+    {
+      "paragraph": "Vård- och omsorgsboenden och hemtjänstens matdistribution är beroende av dagliga eller veckovisa leveranser från grossister och tillagningskök. Lagren är små, ofta bara ett par dygn. Vid en längre störning i transporter, betalsystem eller elförsörjning kan de boende snabbt stå utan mat."
+    },
+    {
+      "heading": "10.2 Tidigare överväganden"
+    },
+    {
+      "paragraph": "Livsmedelsverket har rekommenderat att verksamheter med sårbara grupper ska kunna klara sig i minst en vecka. Flera kommuner har i överenskommelsen 2024–2026 börjat bygga upp lager, men utredningens enkät visar att endast 9 procent har lager för minst sju dygn."
+    },
+    {
+      "heading": "10.3 Krav på sju dygns livsmedelsberedskap"
+    },
+    {
+      "paragraph": "Utredningen föreslår att livsmedelsförsörjningen i vård- och omsorgsboenden, bostäder med särskild service och till personer med beviljad matdistribution ska kunna upprätthållas i minst sju dygn vid avbrott i ordinarie leveranser. Kravet kan uppfyllas genom egna lager, avtal med leverantörer om prioriterade leveranser eller en kombination. Specialkost och konsistensanpassad kost ska ingå."
+    },
+    {
+      "heading": "10.4 Kostnader"
+    },
+    {
+      "paragraph": "Kostnaden för lagerutrymmen och omsättning av lager beräknas till 90 miljoner kronor per år för landets kommuner."
+    },
+    {
+      "heading": "10.5 Specialkost, konsistensanpassad kost och läkemedelsnära nutrition"
+    },
+    {
+      "paragraph": "En stor andel av de boende i vård- och omsorgsboenden behöver specialkost eller konsistensanpassad kost, och en del behöver kosttillägg eller sondnäring. Sådana produkter har ofta kortare hållbarhet och tar mer plats. Utredningen bedömer att kravet på sju dygn ändå bör omfatta dessa produkter, eftersom det är de boende med störst behov som drabbas först, men att kravet kan uppfyllas genom avtal om prioriterade leveranser i stället för egna lager."
+    },
+    {
+      "heading": "10.6 Utredningens bedömning av alternativa nivåer"
+    },
+    {
+      "paragraph": "Utredningen har övervägt ett krav på tre dygns livsmedelsberedskap, vilket motsvarar vad en del kommuner redan har. Tre dygn räcker enligt utredningens bedömning inte vid en störning i transporter eller betalsystem som kan pågå i en vecka eller längre. Utredningen har också övervägt fjorton dygn, men bedömer att det skulle kräva lagerutrymmen som de flesta boenden inte har."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "11 Utrymning och skydd av befolkningen"
+    },
+    {
+      "paragraph": "Utredningen bedömer att kommunernas uppgifter vid utrymning och inkvartering under höjd beredskap bör utredas vidare i samband med den pågående översynen av befolkningsskyddet och lämnar därför inga förslag i denna del. Skyddsrum är även fortsättningsvis ett statligt ansvar som MCF förvaltar."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "12 Finansiering"
+    },
+    {
+      "heading": "12.1 Utgångspunkter"
+    },
+    {
+      "paragraph": "De krav som utredningen föreslår är nya obligatoriska uppgifter för kommunerna. Enligt den kommunala finansieringsprincipen ska staten därför ersätta kommunerna. Utredningen har övervägt tre modeller: ersättning efter faktisk kostnad, ett riktat statsbidrag enligt en schablon och en höjning av det generella statsbidraget."
+    },
+    {
+      "heading": "12.2 Ersättning efter faktisk kostnad"
+    },
+    {
+      "paragraph": "Ersättning efter faktisk kostnad ger bäst träffsäkerhet men kräver en omfattande administration och kan ge kommunerna svaga incitament att hålla nere kostnaderna. Utredningen avfärdar därför denna modell."
+    },
+    {
+      "heading": "12.3 Höjt generellt statsbidrag"
+    },
+    {
+      "paragraph": "En höjning av det generella statsbidraget är enkel att administrera men gör det svårt att följa upp att medlen används för beredskap. Utredningen avfärdar även denna modell för den löpande ersättningen men förordar att ersättningen efter 2031 förs över till det generella statsbidraget."
+    },
+    {
+      "heading": "12.4 Ersättningsmodell"
+    },
+    {
+      "paragraph": "Utredningen föreslår att kommunerna under 2028–2031 får ett riktat statsbidrag som fördelas av Myndigheten för civilt försvar enligt en schablon. Bidraget består av ett grundbelopp om 1 200 000 kronor per kommun och år och ett belopp om 38 kronor per invånare och år. Kommuner med färre än 8 000 invånare får ett glesbygdstillägg om 400 000 kronor per år. Beräkningen görs på befolkningen den 1 november året före bidragsåret."
+    },
+    {
+      "paragraph": "Modellen ger en samlad ersättning om cirka 740 miljoner kronor per år. Tillsammans med den nuvarande ersättningen enligt överenskommelsen blir statens årliga ersättning till kommunerna för krisberedskap och civilt försvar cirka 1,6 miljarder kronor. Beräknad ersättning för kommunerna i de sex nordligaste länen framgår av bilaga 2."
+    },
+    {
+      "paragraph": "Därutöver föreslår utredningen ett tidsbegränsat investeringsstöd om sammanlagt 2,4 miljarder kronor under 2027–2029 för reservkraft och nödvattenutrustning. Stödet fördelas efter ansökan och täcker högst 50 procent av investeringen."
+    },
+    {
+      "heading": "Tabell 12.1 Beräknade kostnader och ersättning per kommungrupp"
+    },
+    {
+      "paragraph": "Tabellen visar genomsnittlig beräknad årlig kostnad för de nya kraven och genomsnittlig ersättning enligt modellen i avsnitt 12.4, per kommungrupp enligt Sveriges Kommuner och Regioners indelning. Beloppen avser miljoner kronor per kommun och år."
+    },
+    {
+      "table": {
+        "columns": [
+          "Kommungrupp",
+          "Antal kommuner",
+          "Genomsnittlig invånare",
+          "Beräknad årlig kostnad",
+          "Beräknad ersättning",
+          "Täckningsgrad"
+        ],
+        "rows": [
+          [
+            "A1 Storstäder",
+            "3",
+            "567 000",
+            "31,8",
+            "22,7",
+            "71 %"
+          ],
+          [
+            "A2 Pendlingskommun nära storstad",
+            "43",
+            "36 000",
+            "3,2",
+            "2,6",
+            "81 %"
+          ],
+          [
+            "B3 Större stad",
+            "22",
+            "93 000",
+            "7,4",
+            "4,7",
+            "64 %"
+          ],
+          [
+            "B4 Pendlingskommun nära större stad",
+            "51",
+            "18 000",
+            "2,1",
+            "1,9",
+            "90 %"
+          ],
+          [
+            "B5 Lågpendlingskommun nära större stad",
+            "33",
+            "15 000",
+            "2,0",
+            "1,8",
+            "90 %"
+          ],
+          [
+            "C6 Mindre stad/tätort",
+            "28",
+            "22 000",
+            "2,6",
+            "2,0",
+            "77 %"
+          ],
+          [
+            "C7 Pendlingskommun nära mindre stad/tätort",
+            "50",
+            "9 000",
+            "1,7",
+            "1,5",
+            "88 %"
+          ],
+          [
+            "C8 Landsbygdskommun",
+            "37",
+            "7 000",
+            "1,9",
+            "1,7",
+            "89 %"
+          ],
+          [
+            "C9 Landsbygdskommun med besöksnäring",
+            "23",
+            "8 000",
+            "2,2",
+            "1,8",
+            "82 %"
+          ]
+        ]
+      }
+    },
+    {
+      "paragraph": "Täckningsgraden är lägst i storstäderna och i kommungruppen större städer. Det beror främst på att dessa kommuner har många vård- och omsorgsboenden och en stor befolkning att försörja med nödvatten, medan grundbeloppet väger lätt. Utredningen bedömer att de större kommunerna har bättre förutsättningar att bära en del av kostnaden inom befintliga ramar."
+    },
+    {
+      "heading": "12.5 Utredningens bedömning av träffsäkerheten"
+    },
+    {
+      "paragraph": "Utredningen är medveten om att schablonen inte täcker kostnaderna fullt ut i kommuner med många vård- och omsorgsboenden eller med många små vattenverk. Utredningen bedömer ändå att en enkel och förutsebar modell är att föredra och att träffsäkerheten bör följas upp av Statskontoret 2030."
+    },
+    {
+      "heading": "12.6 Uppföljning"
+    },
+    {
+      "paragraph": "Myndigheten för civilt försvar bör årligen följa upp hur bidraget har använts och i vilken mån kraven har uppfyllts, inom ramen för den uppföljning som redan görs av överenskommelsen. Statskontoret bör 2030 utvärdera modellens träffsäkerhet och föreslå eventuella justeringar inför den period då ersättningen förs över till det generella statsbidraget."
+    },
+    {
+      "heading": "12.7 Övergång till generellt statsbidrag"
+    },
+    {
+      "paragraph": "Från och med 2032 bör ersättningen för de nya uppgifterna föras över till det generella statsbidraget till kommunerna. Beloppet bör då beräknas utifrån utvärderingen 2030. Investeringsstödet är tidsbegränsat och upphör efter 2029."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "13 Ikraftträdande och övergångsbestämmelser"
+    },
+    {
+      "paragraph": "Lagändringarna föreslås träda i kraft den 1 januari 2028. Kravet på reservkraft ska vara uppfyllt senast den 31 december 2028 och kravet på nödvatten senast den 30 juni 2029. Kraven på ledningsplatser och livsmedelsberedskap gäller från ikraftträdandet."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "14 Konsekvenser"
+    },
+    {
+      "heading": "14.1 Konsekvenser för staten"
+    },
+    {
+      "paragraph": "Förslagen medför en årlig kostnad för staten om cirka 740 miljoner kronor från 2028 och ett investeringsstöd om 2,4 miljarder kronor 2027–2029. MCF och Livsmedelsverket behöver förstärkas med sammanlagt 25 miljoner kronor per år för föreskrifter, vägledning och uppföljning."
+    },
+    {
+      "heading": "14.2 Konsekvenser för kommunerna"
+    },
+    {
+      "paragraph": "Kommunernas investeringar beräknas till cirka 4,5 miljarder kronor, varav hälften kan täckas av investeringsstödet. De årliga kostnaderna beräknas till cirka 390 miljoner kronor för drift, lager och övningar och cirka 350 miljoner kronor för personal. Utredningen bedömer att förslagen är förenliga med 14 kap. 3 § regeringsformen, eftersom kraven är begränsade till verksamheter där ett avbrott får allvarliga följder och kommunerna själva väljer hur kraven uppfylls."
+    },
+    {
+      "heading": "14.2.1 Förhållandet till den kommunala självstyrelsen"
+    },
+    {
+      "paragraph": "Förslagen innebär en inskränkning i den kommunala självstyrelsen eftersom kommunerna åläggs nya obligatoriska uppgifter med bestämda nivåer. Enligt 14 kap. 3 § regeringsformen ska en sådan inskränkning inte gå utöver vad som är nödvändigt med hänsyn till de ändamål som har föranlett den. Ändamålet är att skydda liv och hälsa för de mest utsatta vid långvariga störningar och under höjd beredskap. Utredningen har begränsat kraven till ett fåtal verksamheter och lämnar åt kommunerna att välja hur kraven ska uppfyllas. Utredningen bedömer därför att förslagen är proportionerliga."
+    },
+    {
+      "heading": "14.2.2 Konsekvenser för kommuner av olika storlek"
+    },
+    {
+      "paragraph": "Små kommuner får genom glesbygdstillägget en relativt sett högre ersättning. Större städer får en lägre täckningsgrad, se tabell 12.1. Utredningen bedömer att skillnaderna är godtagbara under den tidsbegränsade perioden men bör följas upp."
+    },
+    {
+      "heading": "14.3 Konsekvenser för enskilda och för jämställdheten"
+    },
+    {
+      "paragraph": "Förslagen stärker skyddet för äldre och personer med funktionsnedsättning, som är de som drabbas först vid långvariga störningar. En majoritet av de boende i vård- och omsorgsboenden och av personalen är kvinnor."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "14.4 Konsekvenser för företag"
+    },
+    {
+      "paragraph": "Förslagen ökar efterfrågan på reservkraftverk, tankar och tjänster för installation och underhåll. Utredningen bedömer att marknaden kan möta efterfrågan under perioden, men att leveranstiderna kan bli längre under 2027–2028. Förslagen påverkar även företag som bedriver vård- och omsorgsboenden på entreprenad åt kommunerna, eftersom kommunen genom avtal behöver säkerställa att kraven uppfylls även där."
+    },
+    {
+      "heading": "14.5 Förenlighet med EU-rätten"
+    },
+    {
+      "paragraph": "Förslagen bedöms vara förenliga med EU-rätten. Upphandling av reservkraft och nödvattenutrustning sker enligt lagen (2016:1145) om offentlig upphandling. Investeringsstödet utgör inte statligt stöd i EU-rättslig mening eftersom det lämnas till kommuner för icke-ekonomisk verksamhet."
+    },
+    {
+      "heading": "14.6 Övriga konsekvenser"
+    },
+    {
+      "paragraph": "Förslagen bedöms inte ha några konsekvenser för brottsligheten och det brottsförebyggande arbetet, för sysselsättningen eller för möjligheterna att nå de integrationspolitiska målen. Förslagen bedöms stärka möjligheterna att nå de miljöpolitiska målen i den mån reservkraften utformas med förnybara bränslen; utredningen har dock inte ställt något sådant krav. Förslagen bedöms inte påverka den personliga integriteten."
+    },
+    {
+      "heading": "14.7 Konsekvenser för regionerna"
+    },
+    {
+      "paragraph": "Regionerna berörs indirekt genom att den kommunala hemsjukvården och den regionala hälso- och sjukvården samverkar vid störningar. Utredningen om regionernas beredskap (Fö 2025:04) lämnar förslag om krav på regionerna i ett eget betänkande."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "15 Författningskommentar"
+    },
+    {
+      "heading": "15.1 Förslaget till lag om ändring i lagen (2006:544)"
+    },
+    {
+      "paragraph": "2 a § Paragrafen är ny och innehåller krav på ledningsplats och reservledningsplats. Övervägandena finns i avsnitt 7.3. Med extern försörjning avses el, vatten och livsmedel som levereras utifrån. Kravet innebär att reservledningsplatsen ska ha reservkraft, lager av vatten och livsmedel och möjlighet att vila för den personal som behövs för att leda verksamheten dygnet runt under sju dygn. Kommuner får samverka om en gemensam reservledningsplats."
+    },
+    {
+      "paragraph": "2 b § Paragrafen är ny och innehåller krav på reservkraft i vissa verksamheter. Övervägandena finns i avsnitt 8.3. Kravet kan uppfyllas med fast reservkraft eller med förberedd anslutning i kombination med ett avtal eller en egen organisation som garanterar att ett mobilt reservkraftverk är på plats och i drift inom sex timmar. Med 72 timmar utan påfyllnad avses att drivmedel för 72 timmars drift ska finnas på plats. Punkten 3 omfattar även tryckstegringsstationer som behövs för att leverera vatten till mer än 500 personer."
+    },
+    {
+      "paragraph": "2 c § Paragrafen är ny och innehåller krav på nödvattenförsörjning. Övervägandena finns i avsnitt 9.2 och 9.4. Kravet avser kommunens förmåga att dela ut vatten, inte att varje hushåll ska få vatten levererat till dörren. Trygghetspunkter är platser dit allmänheten kan vända sig för information och hjälp vid en kris."
+    },
+    {
+      "paragraph": "2 d § Paragrafen är ny och innehåller krav på livsmedelsberedskap i den kommunala omsorgen. Övervägandena finns i avsnitt 10.3. Kravet omfattar även specialkost och konsistensanpassad kost. Kravet kan uppfyllas genom lager, avtal om prioriterade leveranser eller en kombination."
+    },
+    {
+      "paragraph": "2 e § Paragrafen är ny och ger regeringen eller den myndighet som regeringen bestämmer rätt att meddela föreskrifter om kraven och om undantag. Undantag kan till exempel avse kommuner som på grund av leveranstider inte hinner uppfylla kraven i tid."
+    },
+    {
+      "heading": "15.2 Ikraftträdande- och övergångsbestämmelser"
+    },
+    {
+      "paragraph": "Lagen träder i kraft den 1 januari 2028. Övervägandena finns i kapitel 13. Kraven i 2 b och 2 c §§ ska vara uppfyllda vid de tidpunkter som anges i övergångsbestämmelsen."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "Bilaga 1 Kommittédirektiv 2025:17"
+    },
+    {
+      "paragraph": "Kommunernas uppgifter i civilt försvar. Beslut vid regeringssammanträde den 20 februari 2025. Sammanfattning: En särskild utredare ska se över kommunernas uppgifter inför och vid fredstida kriser och höjd beredskap och föreslå tydligare krav på kommunernas förmåga. Utredaren ska bland annat analysera kommunernas förmåga att upprätthålla verksamhet vid avbrott i el-, vatten- och livsmedelsförsörjning, föreslå mätbara krav på förmåga i de mest samhällsviktiga kommunala verksamheterna, analysera och föreslå hur kommunerna ska ersättas och lämna nödvändiga författningsförslag. Uppdraget ska redovisas senast den 30 juni 2026."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "Bilaga 2 Beräknad ersättning per kommun i de sex nordligaste länen"
+    },
+    {
+      "paragraph": "Tabell 12.2 visar beräknat riktat statsbidrag per år enligt ersättningsmodellen i avsnitt 12.4, med befolkningen avrundad till närmaste hundratal. Investeringsstödet ingår inte."
+    },
+    {
+      "table": {
+        "columns": [
+          "Kommun",
+          "Län",
+          "Invånare",
+          "Grundbelopp inkl. glesbygdstillägg, kr",
+          "Belopp per invånare, kr",
+          "Summa per år, kr"
+        ],
+        "rows": [
+          [
+            "Härnösand",
+            "Västernorrlands",
+            "24 900",
+            "1 200 000",
+            "946 200",
+            "2 146 200"
+          ],
+          [
+            "Kramfors",
+            "Västernorrlands",
+            "17 800",
+            "1 200 000",
+            "676 400",
+            "1 876 400"
+          ],
+          [
+            "Sollefteå",
+            "Västernorrlands",
+            "19 300",
+            "1 200 000",
+            "733 400",
+            "1 933 400"
+          ],
+          [
+            "Sundsvall",
+            "Västernorrlands",
+            "99 600",
+            "1 200 000",
+            "3 784 800",
+            "4 984 800"
+          ],
+          [
+            "Timrå",
+            "Västernorrlands",
+            "18 100",
+            "1 200 000",
+            "687 800",
+            "1 887 800"
+          ],
+          [
+            "Ånge",
+            "Västernorrlands",
+            "9 200",
+            "1 200 000",
+            "349 600",
+            "1 549 600"
+          ],
+          [
+            "Örnsköldsvik",
+            "Västernorrlands",
+            "56 100",
+            "1 200 000",
+            "2 131 800",
+            "3 331 800"
+          ],
+          [
+            "Berg",
+            "Jämtlands",
+            "6 900",
+            "1 600 000",
+            "262 200",
+            "1 862 200"
+          ],
+          [
+            "Bräcke",
+            "Jämtlands",
+            "6 200",
+            "1 600 000",
+            "235 600",
+            "1 835 600"
+          ],
+          [
+            "Härjedalen",
+            "Jämtlands",
+            "9 900",
+            "1 200 000",
+            "376 200",
+            "1 576 200"
+          ],
+          [
+            "Krokom",
+            "Jämtlands",
+            "15 700",
+            "1 200 000",
+            "596 600",
+            "1 796 600"
+          ],
+          [
+            "Ragunda",
+            "Jämtlands",
+            "5 200",
+            "1 600 000",
+            "197 600",
+            "1 797 600"
+          ],
+          [
+            "Strömsund",
+            "Jämtlands",
+            "11 400",
+            "1 200 000",
+            "433 200",
+            "1 633 200"
+          ],
+          [
+            "Åre",
+            "Jämtlands",
+            "12 100",
+            "1 200 000",
+            "459 800",
+            "1 659 800"
+          ],
+          [
+            "Östersund",
+            "Jämtlands",
+            "65 000",
+            "1 200 000",
+            "2 470 000",
+            "3 670 000"
+          ],
+          [
+            "Bollnäs",
+            "Gävleborgs",
+            "26 400",
+            "1 200 000",
+            "1 003 200",
+            "2 203 200"
+          ],
+          [
+            "Gävle",
+            "Gävleborgs",
+            "104 100",
+            "1 200 000",
+            "3 955 800",
+            "5 155 800"
+          ],
+          [
+            "Hofors",
+            "Gävleborgs",
+            "9 400",
+            "1 200 000",
+            "357 200",
+            "1 557 200"
+          ],
+          [
+            "Hudiksvall",
+            "Gävleborgs",
+            "37 500",
+            "1 200 000",
+            "1 425 000",
+            "2 625 000"
+          ],
+          [
+            "Ljusdal",
+            "Gävleborgs",
+            "19 000",
+            "1 200 000",
+            "722 000",
+            "1 922 000"
+          ],
+          [
+            "Nordanstig",
+            "Gävleborgs",
+            "9 400",
+            "1 200 000",
+            "357 200",
+            "1 557 200"
+          ],
+          [
+            "Ockelbo",
+            "Gävleborgs",
+            "5 800",
+            "1 600 000",
+            "220 400",
+            "1 820 400"
+          ],
+          [
+            "Ovanåker",
+            "Gävleborgs",
+            "11 500",
+            "1 200 000",
+            "437 000",
+            "1 637 000"
+          ],
+          [
+            "Sandviken",
+            "Gävleborgs",
+            "40 200",
+            "1 200 000",
+            "1 527 600",
+            "2 727 600"
+          ],
+          [
+            "Söderhamn",
+            "Gävleborgs",
+            "25 300",
+            "1 200 000",
+            "961 400",
+            "2 161 400"
+          ],
+          [
+            "Bjurholm",
+            "Västerbottens",
+            "2 400",
+            "1 600 000",
+            "91 200",
+            "1 691 200"
+          ],
+          [
+            "Dorotea",
+            "Västerbottens",
+            "2 500",
+            "1 600 000",
+            "95 000",
+            "1 695 000"
+          ],
+          [
+            "Lycksele",
+            "Västerbottens",
+            "12 200",
+            "1 200 000",
+            "463 600",
+            "1 663 600"
+          ],
+          [
+            "Malå",
+            "Västerbottens",
+            "3 000",
+            "1 600 000",
+            "114 000",
+            "1 714 000"
+          ],
+          [
+            "Nordmaling",
+            "Västerbottens",
+            "7 100",
+            "1 600 000",
+            "269 800",
+            "1 869 800"
+          ],
+          [
+            "Norsjö",
+            "Västerbottens",
+            "4 000",
+            "1 600 000",
+            "152 000",
+            "1 752 000"
+          ],
+          [
+            "Robertsfors",
+            "Västerbottens",
+            "6 700",
+            "1 600 000",
+            "254 600",
+            "1 854 600"
+          ],
+          [
+            "Skellefteå",
+            "Västerbottens",
+            "79 600",
+            "1 200 000",
+            "3 024 800",
+            "4 224 800"
+          ],
+          [
+            "Sorsele",
+            "Västerbottens",
+            "2 400",
+            "1 600 000",
+            "91 200",
+            "1 691 200"
+          ],
+          [
+            "Storuman",
+            "Västerbottens",
+            "5 800",
+            "1 600 000",
+            "220 400",
+            "1 820 400"
+          ],
+          [
+            "Umeå",
+            "Västerbottens",
+            "133 500",
+            "1 200 000",
+            "5 073 000",
+            "6 273 000"
+          ],
+          [
+            "Vilhelmina",
+            "Västerbottens",
+            "6 600",
+            "1 600 000",
+            "250 800",
+            "1 850 800"
+          ],
+          [
+            "Vindeln",
+            "Västerbottens",
+            "5 400",
+            "1 600 000",
+            "205 200",
+            "1 805 200"
+          ],
+          [
+            "Vännäs",
+            "Västerbottens",
+            "8 800",
+            "1 200 000",
+            "334 400",
+            "1 534 400"
+          ],
+          [
+            "Åsele",
+            "Västerbottens",
+            "2 700",
+            "1 600 000",
+            "102 600",
+            "1 702 600"
+          ],
+          [
+            "Avesta",
+            "Dalarnas",
+            "23 300",
+            "1 200 000",
+            "885 400",
+            "2 085 400"
+          ],
+          [
+            "Borlänge",
+            "Dalarnas",
+            "52 300",
+            "1 200 000",
+            "1 987 400",
+            "3 187 400"
+          ],
+          [
+            "Falun",
+            "Dalarnas",
+            "59 800",
+            "1 200 000",
+            "2 272 400",
+            "3 472 400"
+          ],
+          [
+            "Gagnef",
+            "Dalarnas",
+            "10 300",
+            "1 200 000",
+            "391 400",
+            "1 591 400"
+          ],
+          [
+            "Hedemora",
+            "Dalarnas",
+            "15 300",
+            "1 200 000",
+            "581 400",
+            "1 781 400"
+          ],
+          [
+            "Leksand",
+            "Dalarnas",
+            "15 900",
+            "1 200 000",
+            "604 200",
+            "1 804 200"
+          ],
+          [
+            "Ludvika",
+            "Dalarnas",
+            "25 800",
+            "1 200 000",
+            "980 400",
+            "2 180 400"
+          ],
+          [
+            "Malung-Sälen",
+            "Dalarnas",
+            "10 100",
+            "1 200 000",
+            "383 800",
+            "1 583 800"
+          ],
+          [
+            "Mora",
+            "Dalarnas",
+            "20 400",
+            "1 200 000",
+            "775 200",
+            "1 975 200"
+          ],
+          [
+            "Orsa",
+            "Dalarnas",
+            "6 800",
+            "1 600 000",
+            "258 400",
+            "1 858 400"
+          ],
+          [
+            "Rättvik",
+            "Dalarnas",
+            "10 900",
+            "1 200 000",
+            "414 200",
+            "1 614 200"
+          ],
+          [
+            "Smedjebacken",
+            "Dalarnas",
+            "10 700",
+            "1 200 000",
+            "406 600",
+            "1 606 600"
+          ],
+          [
+            "Säter",
+            "Dalarnas",
+            "11 100",
+            "1 200 000",
+            "421 800",
+            "1 621 800"
+          ],
+          [
+            "Vansbro",
+            "Dalarnas",
+            "6 700",
+            "1 600 000",
+            "254 600",
+            "1 854 600"
+          ],
+          [
+            "Älvdalen",
+            "Dalarnas",
+            "7 000",
+            "1 600 000",
+            "266 000",
+            "1 866 000"
+          ],
+          [
+            "Arjeplog",
+            "Norrbottens",
+            "2 700",
+            "1 600 000",
+            "102 600",
+            "1 702 600"
+          ],
+          [
+            "Arvidsjaur",
+            "Norrbottens",
+            "6 000",
+            "1 600 000",
+            "228 000",
+            "1 828 000"
+          ],
+          [
+            "Boden",
+            "Norrbottens",
+            "28 600",
+            "1 200 000",
+            "1 086 800",
+            "2 286 800"
+          ],
+          [
+            "Gällivare",
+            "Norrbottens",
+            "17 200",
+            "1 200 000",
+            "653 600",
+            "1 853 600"
+          ],
+          [
+            "Haparanda",
+            "Norrbottens",
+            "9 500",
+            "1 200 000",
+            "361 000",
+            "1 561 000"
+          ],
+          [
+            "Jokkmokk",
+            "Norrbottens",
+            "4 900",
+            "1 600 000",
+            "186 200",
+            "1 786 200"
+          ],
+          [
+            "Kalix",
+            "Norrbottens",
+            "15 600",
+            "1 200 000",
+            "592 800",
+            "1 792 800"
+          ],
+          [
+            "Kiruna",
+            "Norrbottens",
+            "22 400",
+            "1 200 000",
+            "851 200",
+            "2 051 200"
+          ],
+          [
+            "Luleå",
+            "Norrbottens",
+            "80 100",
+            "1 200 000",
+            "3 043 800",
+            "4 243 800"
+          ],
+          [
+            "Pajala",
+            "Norrbottens",
+            "5 900",
+            "1 600 000",
+            "224 200",
+            "1 824 200"
+          ],
+          [
+            "Piteå",
+            "Norrbottens",
+            "43 100",
+            "1 200 000",
+            "1 637 800",
+            "2 837 800"
+          ],
+          [
+            "Älvsbyn",
+            "Norrbottens",
+            "8 000",
+            "1 200 000",
+            "304 000",
+            "1 504 000"
+          ],
+          [
+            "Överkalix",
+            "Norrbottens",
+            "3 200",
+            "1 600 000",
+            "121 600",
+            "1 721 600"
+          ],
+          [
+            "Övertorneå",
+            "Norrbottens",
+            "4 300",
+            "1 600 000",
+            "163 400",
+            "1 763 400"
+          ]
+        ]
+      }
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "Bilaga 3 Enkätfrågor i urval"
+    },
+    {
+      "list": [
+        "1. Har kommunen en ledningsplats och en reservledningsplats för krisledningen? Om ja, ange var och hur länge de kan användas utan extern försörjning.",
+        "2. Hur många vård- och omsorgsboenden och bostäder med särskild service har kommunen? Hur många av dem har fast reservkraft respektive förberedd anslutning för mobil reservkraft?",
+        "3. Hur många mobila reservkraftverk förfogar kommunen över, och hur lång tid tar det att få ett verk i drift på ett boende?",
+        "4. När fastställdes kommunens nödvattenplan senast? Hur många personer kan kommunen försörja med nödvatten inom 24 timmar?",
+        "5. Hur många dygn kan livsmedelsförsörjningen i vård- och omsorgsboendena upprätthållas vid avbrott i leveranserna?",
+        "6. Har kommunen utsett trygghetspunkter? Om ja, hur många och har de reservkraft?",
+        "7. Hur stor andel av en heltid arbetar kommunens beredskapssamordnare med krisberedskap och civilt försvar?",
+        "8. Vilka är de största hindren för att stärka kommunens förmåga? (Flera svar möjliga: ekonomi, personal, kompetens, lokaler, leveranstider, annat.)",
+        "9. Hur mycket har kommunen själv finansierat utöver statens ersättning 2025?",
+        "10. Övriga synpunkter på statens styrning av kommunernas beredskap."
+      ]
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "Bilaga 4 Beräkningsunderlag för kostnaderna"
+    },
+    {
+      "table": {
+        "columns": [
+          "Post",
+          "Antal i landet",
+          "Kostnad per enhet",
+          "Investering totalt",
+          "Årlig kostnad totalt"
+        ],
+        "rows": [
+          [
+            "Fast reservkraft, vård- och omsorgsboende",
+            "1 150 boenden utan fast reservkraft, varav 600 bedöms få fast",
+            "1,5–2,5 mnkr",
+            "1,2 mdkr",
+            "60 mnkr"
+          ],
+          [
+            "Förberedd anslutning, boenden och LSS-bostäder",
+            "2 900 byggnader",
+            "0,2–0,4 mnkr",
+            "0,9 mdkr",
+            "30 mnkr"
+          ],
+          [
+            "Mobila reservkraftverk",
+            "480 verk",
+            "1,0–2,0 mnkr",
+            "0,7 mdkr",
+            "40 mnkr"
+          ],
+          [
+            "Reservkraft vattenverk och tryckstegring",
+            "1 100 anläggningar",
+            "0,1–0,6 mnkr",
+            "0,3 mdkr",
+            "50 mnkr"
+          ],
+          [
+            "Nödvattenutrustning (tankar, fordon, distribution)",
+            "290 kommuner",
+            "enligt befolkning",
+            "1,4 mdkr",
+            "120 mnkr"
+          ],
+          [
+            "Livsmedelslager sju dygn",
+            "2 300 boenden och kök",
+            "–",
+            "–",
+            "90 mnkr"
+          ],
+          [
+            "Personal för planering, övning och uppföljning",
+            "290 kommuner",
+            "0,5–4 årsarbetskrafter",
+            "–",
+            "350 mnkr"
+          ]
+        ]
+      }
+    },
+    {
+      "paragraph": "Källa: Utredningens enkät, uppgifter från Energimyndigheten, Svenskt Vatten och leverantörer, och utredningens egna beräkningar. Beloppen är avrundade."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "Bilaga 5 Expertgruppen"
+    },
+    {
+      "list": [
+        "Kanslirådet Lars Ekdahl, Försvarsdepartementet",
+        "Avdelningschefen Maria Wiklund, Myndigheten för civilt försvar",
+        "Enhetschefen Per Hansson, Livsmedelsverket",
+        "Utredaren Anna Björk, Socialstyrelsen",
+        "Analytikern Johan Lindberg, Energimyndigheten",
+        "Handläggaren Sofia Ek, Sveriges Kommuner och Regioner",
+        "VA-chefen Mats Nordin, Svenskt Vatten",
+        "Beredskapssamordnaren Karin Jonsson, Ånge kommun",
+        "Säkerhetschefen Anders Molin, Sundsvalls kommun",
+        "Beredskapschefen Leila Haddad, Malmö stad",
+        "Räddningschefen Tomas Lindqvist, Kiruna kommun"
+      ]
+    }
+  ]
+}

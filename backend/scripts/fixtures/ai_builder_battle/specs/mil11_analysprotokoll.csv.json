@@ -1,0 +1,27 @@
+{
+  "file": "mil11_analysprotokoll.csv",
+  "format": "csv",
+  "source": {"catalogue_id": "MIL-11", "url": "https://sjalvservice.malmo.se/oversikt/overview/661"},
+  "description": "Laboratoriets analysprotokoll som CSV-export: PCB-halter i fog- och golvmassor per prov, med laboratoriets provnummer, kundens prov-ID, material, datum och metod.",
+  "sheets": [
+    {
+      "name": "Analysprotokoll",
+      "columns": ["Labbnummer", "Kundens prov-ID", "Material", "Provtagningsdatum", "Analysdatum", "Parameter", "Resultat", "Enhet", "Metod"],
+      "rows": [
+        ["OR-25-40211", "F-01", "Fogmassa", "2025-10-06", "2025-10-14", "PCB totalt", "1900", "mg/kg", "GC-MS, EN 15308 mod."],
+        ["OR-25-40212", "F-02", "Fogmassa", "2025-10-06", "2025-10-14", "PCB totalt", "820", "mg/kg", "GC-MS, EN 15308 mod."],
+        ["OR-25-40213", "F-03", "Fogmassa", "2025-10-06", "2025-10-14", "PCB totalt", "2400", "mg/kg", "GC-MS, EN 15308 mod."],
+        ["OR-25-40214", "F-04", "Fogmassa", "2025-10-06", "2025-10-14", "PCB totalt", "12", "mg/kg", "GC-MS, EN 15308 mod."],
+        ["OR-25-40215", "F-05", "Fogmassa", "2025-10-06", "2025-10-14", "PCB totalt", "610", "mg/kg", "GC-MS, EN 15308 mod."],
+        ["OR-25-40216", "F-06", "Fogmassa", "2025-10-06", "2025-10-14", "PCB totalt", "<5", "mg/kg", "GC-MS, EN 15308 mod."],
+        ["OR-25-40217", "F-07", "Fogmassa", "2025-10-06", "2025-10-14", "PCB totalt", "380", "mg/kg", "GC-MS, EN 15308 mod."],
+        ["OR-25-40218", "F-08", "Fogmassa", "2025-10-06", "2025-10-14", "PCB totalt", "95", "mg/kg", "GC-MS, EN 15308 mod."],
+        ["OR-25-40219", "G-01", "Golvmassa", "2025-10-06", "2025-10-15", "PCB totalt", "<5", "mg/kg", "GC-MS, EN 15308 mod."],
+        ["OR-25-40220", "G-02", "Golvmassa", "2025-10-06", "2025-10-15", "PCB totalt", "72", "mg/kg", "GC-MS, EN 15308 mod."],
+        ["OR-25-40221", "G-03", "Golvmassa", "2025-10-06", "2025-10-15", "PCB totalt", "8", "mg/kg", "GC-MS, EN 15308 mod."],
+        ["OR-26-22904", "KP-1", "Betong, kontaktyta", "2026-07-08", "2026-07-15", "PCB totalt", "6,8", "mg/kg", "GC-MS, EN 15308 mod."],
+        ["OR-26-22905", "KP-2", "Betong, kontaktyta", "2026-07-08", "2026-07-15", "PCB totalt", "4,2", "mg/kg", "GC-MS, EN 15308 mod."]
+      ]
+    }
+  ]
+}

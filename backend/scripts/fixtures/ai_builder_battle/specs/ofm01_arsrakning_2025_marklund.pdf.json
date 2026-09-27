@@ -1,0 +1,277 @@
+{
+  "file": "ofm01_arsrakning_2025_marklund.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "OFM-01",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/242"
+  },
+  "description": "Ställföreträdarens årsräkning för 2025 som utskrift ur överförmyndarens e-tjänst: huvudman, tillgångar 1 januari, inkomster, utgifter, tillgångar 31 december och kontrollfrågor, där uttaget från det spärrade kontot förnekas.",
+  "letterhead": {
+    "organisation": "Överförmyndarnämnden Mitt",
+    "unit": "E-tjänst Redogörelse och årsräkning, inskickad handling",
+    "address": "Box 830, 851 23 Sundsvall"
+  },
+  "date": "2026-02-24",
+  "diarienummer": "ÖFN-2019-0412",
+  "title": "Årsräkning för perioden 2025-01-01 till 2025-12-31",
+  "blocks": [
+    {
+      "heading": "Huvudman"
+    },
+    {
+      "table": {
+        "columns": [
+          "Uppgift om huvudman",
+          "Värde"
+        ],
+        "rows": [
+          [
+            "Namn",
+            "Gunnel Marklund"
+          ],
+          [
+            "Personnummer",
+            "19380104-9267"
+          ],
+          [
+            "Adress",
+            "Solgårdens vård- och omsorgsboende, Solgårdsvägen 6, 856 52 Sundsvall"
+          ],
+          [
+            "Boendeform",
+            "Särskilt boende sedan 2023"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Ställföreträdare"
+    },
+    {
+      "table": {
+        "columns": [
+          "Uppgift om ställföreträdare",
+          "Värde"
+        ],
+        "rows": [
+          [
+            "Namn",
+            "Lennart Byström"
+          ],
+          [
+            "Uppdrag",
+            "God man: bevaka rätt, förvalta egendom och sörja för person"
+          ],
+          [
+            "Förordnad",
+            "2019-05-14"
+          ],
+          [
+            "Telefon",
+            "070-552 18 93"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Tillgångar 1 januari 2025"
+    },
+    {
+      "table": {
+        "columns": [
+          "Tillgång 1 januari",
+          "Konto",
+          "Belopp (kr)"
+        ],
+        "rows": [
+          [
+            "Privatkonto, Mittbanken",
+            "9563 214 558 107-3",
+            "8 412,35"
+          ],
+          [
+            "Sparkonto med överförmyndarspärr, Mittbanken",
+            "9563 214 558 226-1",
+            "96 540,00"
+          ],
+          [
+            "Summa tillgångar 1 januari",
+            "",
+            "104 952,35"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Inkomster 2025 (belopp efter skatt)"
+    },
+    {
+      "table": {
+        "columns": [
+          "Inkomst",
+          "Utbetalare",
+          "Belopp efter skatt (kr)"
+        ],
+        "rows": [
+          [
+            "Allmän pension",
+            "Pensionsmyndigheten",
+            "157 416,00"
+          ],
+          [
+            "Bostadstillägg",
+            "Pensionsmyndigheten",
+            "41 520,00"
+          ],
+          [
+            "Tjänstepension",
+            "KPA Pension",
+            "22 104,00"
+          ],
+          [
+            "Ränta efter skatt",
+            "Mittbanken",
+            "1 213,00"
+          ],
+          [
+            "Summa inkomster",
+            "",
+            "222 253,00"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Utgifter 2025"
+    },
+    {
+      "table": {
+        "columns": [
+          "Utgift",
+          "Mottagare",
+          "Utgift (kr)"
+        ],
+        "rows": [
+          [
+            "Hyra, omsorgsavgift och kost",
+            "Sundsvalls kommun, Solgården",
+            "158 052,00"
+          ],
+          [
+            "Hemförsäkring",
+            "Norrförsäkringar",
+            "1 656,00"
+          ],
+          [
+            "Fickpengar till boendets handkassa",
+            "Solgården",
+            "12 000,00"
+          ],
+          [
+            "Arvode god man 2024 inklusive skatteavdrag",
+            "Lennart Byström och Skatteverket",
+            "12 831,00"
+          ],
+          [
+            "Fotvård",
+            "Fotvårdsmottagningen Nacksta",
+            "1 800,00"
+          ],
+          [
+            "Frisör",
+            "Salong Solgården",
+            "1 520,00"
+          ],
+          [
+            "Tandvård",
+            "Folktandvården Sundsvall",
+            "16 200,00"
+          ],
+          [
+            "Kläder",
+            "Klädbutiken Stenstan",
+            "1 290,00"
+          ],
+          [
+            "Summa utgifter",
+            "",
+            "205 349,00"
+          ]
+        ]
+      }
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "Tillgångar 31 december 2025"
+    },
+    {
+      "table": {
+        "columns": [
+          "Tillgång 31 december",
+          "Kontonummer",
+          "Saldo (kr)"
+        ],
+        "rows": [
+          [
+            "Privatkonto, Mittbanken",
+            "9563 214 558 107-3",
+            "35 733,35"
+          ],
+          [
+            "Sparkonto med överförmyndarspärr, Mittbanken",
+            "9563 214 558 226-1",
+            "83 253,00"
+          ],
+          [
+            "Summa tillgångar 31 december",
+            "",
+            "118 986,35"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Skulder"
+    },
+    {
+      "paragraph": "Huvudmannen har inga skulder."
+    },
+    {
+      "heading": "Kontrollfrågor"
+    },
+    {
+      "table": {
+        "columns": [
+          "Fråga",
+          "Svar"
+        ],
+        "rows": [
+          [
+            "Har uttag gjorts från spärrat konto under perioden?",
+            "Nej"
+          ],
+          [
+            "Har huvudmannen kontanter i handkassa på boendet?",
+            "Ja, boendets kassabok redovisas separat"
+          ],
+          [
+            "Har ställföreträdaren tagit ut kontanter åt huvudmannen?",
+            "Nej, fickpengar förs över till boendets handkassa"
+          ],
+          [
+            "Begär ställföreträdaren arvode för 2025?",
+            "Ja"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Underskrift"
+    },
+    {
+      "paragraph": "Jag intygar på heder och samvete att uppgifterna i årsräkningen är riktiga. Signerad med BankID 2026-02-24 av Lennart Byström."
+    }
+  ]
+}

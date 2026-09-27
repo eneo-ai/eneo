@@ -1,0 +1,29 @@
+{
+  "file": "utb11_avsiktsforklaring_lokal.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "UTB-11", "url": "https://sjalvservice.malmo.se/oversikt/overview/479"},
+  "description": "Fastighetsägarens avsiktsförklaring om uthyrning av en kontorslokal för förskoleverksamhet, bilaga till ansökan om godkännande; bygglov för ändrad användning är inte sökt.",
+  "letterhead": {"organisation": "Kastanjen Fastigheter AB", "unit": "Uthyrning", "address": "Södra Förstadsgatan 40, 211 43 Malmö"},
+  "date": "2026-08-25",
+  "title": "Avsiktsförklaring om uthyrning av lokal för förskola",
+  "blocks": [
+    {"paragraph": "Kastanjen Fastigheter AB avser att hyra ut lokalen på Kastanjegatan 14, Malmö, fastigheten Malmö Kastanjen 3, till Ekorrens Förskolor AB för förskoleverksamhet, under förutsättning att bolaget godkänns som huvudman och att nödvändiga myndighetsbeslut för lokalen finns."},
+    {"heading": "Lokalen"},
+    {
+      "table": {
+        "columns": ["Lokal", "Beskrivning"],
+        "rows": [
+          ["Lokalens yta", "310 m² BTA, varav 205 m² för barnens vistelse"],
+          ["Utemiljö", "Inhägnad gård om cirka 900 m²"],
+          ["Nuvarande användning", "Kontor"],
+          ["Bygglov för ändrad användning till förskola", "Inte sökt. Fastighetsägaren avser att söka bygglov under hösten 2026."],
+          ["Planerat tillträde", "2027-01-01"],
+          ["Hyra", "52 000 kronor per månad exklusive moms"],
+          ["Hyrestid", "Fem år från tillträdet"]
+        ]
+      }
+    },
+    {"paragraph": "Avsiktsförklaringen är inte ett bindande hyresavtal. Hyresavtal tecknas när bygglov har beviljats och huvudmannen har godkänts."},
+    {"signature": {"name": "Jonas Wester", "role": "Uthyrningsansvarig, Kastanjen Fastigheter AB"}}
+  ]
+}

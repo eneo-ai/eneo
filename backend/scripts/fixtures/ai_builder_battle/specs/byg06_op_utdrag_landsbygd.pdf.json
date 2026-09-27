@@ -1,0 +1,22 @@
+{
+  "file": "byg06_op_utdrag_landsbygd.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-06", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/428"},
+  "description": "Utdrag ur översiktsplanens del om landsbygden: riktlinjer för ny bebyggelse, kommunens hållning till brukningsvärd jordbruksmark och en tabell med områdesvisa rekommendationer där platsens område finns på andra sidan.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Översiktsplan Sundsvall 2045 – antagen av kommunfullmäktige 2024-11-25", "address": "Utdrag: kapitel 5 Landsbygden"},
+  "date": "2024-11-25",
+  "title": "5 Landsbygden",
+  "blocks": [
+    {"heading": "5.1 Utgångspunkter"},
+    {"paragraph": "Ungefär en femtedel av kommunens invånare bor på landsbygden. Kommunen vill att landsbygden ska kunna växa, men så att ny bebyggelse stärker befintliga byar och vägar, inte sprids ut över jordbruksmark, stränder och sammanhängande natur. Översiktsplanen är inte bindande, men den är kommunens viktigaste underlag när lämpligheten prövas i förhandsbesked och bygglov utanför detaljplan."},
+    {"heading": "5.2 Riktlinjer för ny bebyggelse på landsbygden"},
+    {"list": ["L1. Ny bebyggelse lokaliseras i första hand i anslutning till befintlig bebyggelse och befintliga vägar.", "L2. Nya tomter ska kunna anslutas till en befintlig utfart eller ett befintligt enskilt vägnät. Nya utfarter mot statliga vägar med hastighet 70 km/tim eller mer ska undvikas.", "L3. Vatten och avlopp ska kunna lösas på den egna tomten utan risk för grannars vattenförsörjning.", "L4. Brukningsvärd jordbruksmark ska inte tas i anspråk för bostäder, se 5.3.", "L5. Strandskyddade områden prövas enligt 7 kap. miljöbalken; landsbygdsutveckling i strandnära läge (LIS) medges bara inom de LIS-områden som redovisas i tematiskt tillägg."]},
+    {"heading": "5.3 Jordbruksmark"},
+    {"paragraph": "Brukningsvärd jordbruksmark är av nationell betydelse. Enligt 3 kap. 4 § miljöbalken får den tas i anspråk för bebyggelse endast om det behövs för att tillgodose väsentliga samhällsintressen och behovet inte kan tillgodoses på ett tillfredsställande sätt genom att annan mark tas i anspråk. Kommunens hållning är att enstaka bostadshus normalt inte är ett väsentligt samhällsintresse. Åkermark som för tillfället inte brukas räknas som brukningsvärd om den kan brukas igen utan stora åtgärder."},
+    {"page_break": true},
+    {"heading": "5.4 Rekommendationer per område"},
+    {"table": {"columns": ["Nr", "Område", "Karaktär", "Rekommendation för ny bebyggelse"], "rows": [["11", "Stöde och Nedansjö", "Serviceort med skola och handel, sjönära lägen", "Förtätning inom och i anslutning till orten. LIS-område vid Stödesjön."], ["12", "Matfors och Vattjom", "Serviceort längs Ljungan och väg E14", "Ny bebyggelse inom gångavstånd till kollektivtrafik. Höga natur- och kulturvärden längs Ljungan."], ["13", "Indalsälvens dalgång", "Odlingslandskap och byar längs älven", "Kompletterande bebyggelse i befintliga byar. Odlingsmarken i dalgången ska hållas obebyggd."], ["14", "Lövsta och Vike", "Jordbruksbygd med höga natur- och jordbruksvärden, ån Lövstaån", "Kompletterande bebyggelse kan prövas i lägen som inte tar brukningsvärd jordbruksmark i anspråk och som ansluter till befintlig utfart. Ingen ny bebyggelse inom 100 meter från Lövstaån."], ["15", "Njurundakusten", "Kust med fritidshusområden under omvandling", "Omvandling prövas med detaljplan. Vatten och avlopp måste lösas gemensamt."], ["16", "Alnö norra", "Ö med odlingslandskap och kust", "Ny bebyggelse samlas kring befintliga byar. Kustzonen ska hållas tillgänglig."]]}},
+    {"heading": "5.5 Så används rekommendationerna"},
+    {"paragraph": "Rekommendationerna ska vägas samman med yttranden från remissinstanserna och med de allmänna intressena i 2 kap. plan- och bygglagen. Där en rekommendation och ett förhandsbesked skulle gå isär ska tjänsteskrivelsen redovisa varför."}
+  ]
+}

@@ -1,0 +1,141 @@
+{
+  "file": "int08_pm_stallningstaganden.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-08",
+    "url": "https://e-tjanster.kristianstad.se/oversikt/overview/58"
+  },
+  "description": "Stadsbyggnadskontorets minnesanteckningar från planeringsgruppens genomgång av samrådsyttrandena: kommunens ställningstagande och planändring per sakfråga inför granskning.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Stadsbyggnadskontoret, planavdelningen",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-06-24",
+  "diarienummer": "SBN-2025-00412",
+  "title": "PM – Ställningstaganden efter samråd, detaljplan för Björkängen etapp 2",
+  "blocks": [
+    {
+      "paragraph": "Minnesanteckningar från planeringsgruppens möte 2026-06-23. Närvarande: Sofia Åkerlund (planarkitekt), Mattias Grön (trafikplanerare), Elin Fors (VA-ingenjör, Nordvatten Sundsvall AB), Olof Brandt (exploateringsingenjör), Lina Forsberg (miljökontoret). Samrådshandlingarna är daterade 2026-05-12 och samrådstiden var 2026-05-18 – 2026-06-12."
+    },
+    {
+      "heading": "Ställningstaganden per sakfråga"
+    },
+    {
+      "table": {
+        "columns": [
+          "Nr",
+          "Sakfråga",
+          "Har tagits upp av",
+          "Kommunens ställningstagande",
+          "Ändring till granskning"
+        ],
+        "rows": [
+          [
+            "1",
+            "Byggnadshöjd och insyn i kvarteret närmast Björkängen 1:18",
+            "Brf Björkängen 1",
+            "Fyra våningar behålls eftersom de behövs för att nå cirka 65 bostäder. Huset närmast föreningen flyttas 6 meter söderut så att avståndet blir cirka 24 meter. Kravet på högst två våningar tillgodoses inte.",
+            "Byggrätten flyttas; solstudie redovisas."
+          ],
+          [
+            "2",
+            "Trafik och trottoar på Björkallén",
+            "Brf Björkängen 1, P-O Nyström",
+            "En trafikutredning tas fram. Trottoar byggs längs hela Björkallén när gatan förlängs.",
+            "Trafikutredning bifogas; gatusektion med trottoar."
+          ],
+          [
+            "3",
+            "Förlängning av Björkallén eller egen infart från Tallmovägen",
+            "P-O Nyström",
+            "Björkallén förlängs enligt samrådsförslaget. En infart från Tallmovägen är inte möjlig på grund av Björkbäckens dalgång och slänten mot bäcken. Kravet tillgodoses inte.",
+            "Ingen."
+          ],
+          [
+            "4",
+            "Parkering för boende och besökare",
+            "Brf Björkängen 1",
+            "Mobilitetshubben får 0,7 platser per lägenhet och 12 besöksplatser. Parkeringsutredningen redovisas i planbeskrivningen.",
+            "Parkeringsutredning; bestämmelse om besöksparkering."
+          ],
+          [
+            "5",
+            "Dagvatten och skyfall",
+            "Brf Björkängen 1, P-O Nyström, Länsstyrelsen, miljökontoret",
+            "En skyfallsutredning tas fram. Marken höjdsätts så att vattnet leds ytligt mot dagvattenparken och inte mot Björkallén. Föroreningsberäkning för Björkbäcken görs.",
+            "Skyfallsutredning; bestämmelser om höjdsättning och lägsta golvnivå."
+          ],
+          [
+            "6",
+            "Information till boende längs Björkallén",
+            "P-O Nyström",
+            "Samtliga sakägare enligt fastighetsförteckningen fick samrådsbrev 2026-05-15. Inför granskningen skickas brev även till övriga boende längs Björkallén.",
+            "Utökad sändlista."
+          ],
+          [
+            "7",
+            "Intrång på Björkängen 1:14 för gata",
+            "A-S och T Holmgren, Lantmäteriet",
+            "Gatan kan inte flyttas norrut eftersom ledningsrätten 2281-09/112 och förskolans tomt ligger där. Marken löses genom fastighetsreglering med ersättning enligt expropriationslagens regler. Kraven på ändrad gatudragning tillgodoses inte. Möte med fastighetsägarna bokas.",
+            "Plangränsen justeras mot fastighetsgränsen."
+          ],
+          [
+            "8",
+            "Dagvattenytans placering och gångväg",
+            "Norrbacka Fastigheter AB",
+            "Dagvattenytan flyttas 15 meter från gränsen mot Björkängen 2:7 och får flacka slänter. En allmän gångväg genom parken till Björkallén läggs in. Synpunkterna tillgodoses.",
+            "Plankarta ändras."
+          ],
+          [
+            "9",
+            "Elkabel, u-område och nätstation",
+            "Kustnät Elnät AB",
+            "U-område om 4 meter och ett E-område för nätstation vid mobilitetshubben läggs in. Flyttkostnader regleras i exploateringsavtalet. Synpunkterna tillgodoses.",
+            "Plankarta ändras."
+          ],
+          [
+            "10",
+            "Buller mot Björkallén och på förskolegården",
+            "Länsstyrelsen, miljökontoret",
+            "Planbestämmelse om ljuddämpad sida. Bullerutredningen kompletteras för förskolegården.",
+            "Bestämmelse och kompletterad utredning."
+          ],
+          [
+            "11",
+            "Förorenad mark",
+            "Miljökontoret",
+            "Översiktlig markundersökning är beställd och redovisas före granskning.",
+            "Markundersökning."
+          ],
+          [
+            "12",
+            "Geoteknik och stabilitet mot Björkbäcken",
+            "Länsstyrelsen",
+            "Stabilitetsutredning tas fram.",
+            "Utredning; eventuell bestämmelse om markarbeten."
+          ],
+          [
+            "13",
+            "Grundkarta, plangräns och gemensamhetsanläggning ga:2",
+            "Lantmäteriet",
+            "Grundkartan aktualiseras. Planbeskrivningen kompletteras med omprövning av ga:2 och upphävande av servitutet.",
+            "Planbeskrivning kompletteras."
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Fortsatt arbete"
+    },
+    {
+      "paragraph": "Planarkitekten skriver samrådsredogörelsen utifrån ställningstagandena ovan. Granskning planeras till oktober 2026."
+    },
+    {
+      "signature": {
+        "name": "Sofia Åkerlund",
+        "role": "Planarkitekt"
+      }
+    }
+  ]
+}

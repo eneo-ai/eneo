@@ -1,0 +1,20 @@
+{
+  "file": "byg01_situationsplan.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/443"},
+  "description": "Situationsplan A-01 (skala 1:400) för tillbyggnaden, återgiven som ritningens måttuppgifter: fastighetsarea, befintliga byggnader med byggnadsarea och måttsatta avstånd till fastighetsgränserna.",
+  "letterhead": {"organisation": "Norrljus Arkitektur & Bygg AB", "unit": "Bygglovshandlingar", "address": "Storgatan 31, 852 30 Sundsvall · 060-61 22 40"},
+  "date": "2026-08-02",
+  "title": "A-01 Situationsplan – tillbyggnad av enbostadshus, Sundsvall Tallåsen 4:17",
+  "blocks": [
+    {"paragraph": "Skala 1:400 (A3). Underlag: nybyggnadskarta från Sundsvalls kommun, daterad 2026-06-18. Höjdsystem RH 2000, koordinatsystem SWEREF 99 17 15. Ny byggnadsdel redovisas med kraftig linje, befintliga byggnader med tunn linje och prickad mark med raster."},
+    {"heading": "Fastighet"},
+    {"table": {"columns": ["Uppgift", "Värde"], "rows": [["Fastighetsbeteckning", "Sundsvall Tallåsen 4:17"], ["Fastighetsarea", "812 m²"], ["Gällande plan", "Byggnadsplan 2281K-P84/12 med tillägg 2281K-P98/7"], ["Angränsande fastigheter", "Tallåsen 4:16 (öster), Tallåsen 4:21 (norr), Tallåsen 4:18 (väster), Tallåsvägen (söder)"]]}},
+    {"heading": "Byggnader på fastigheten"},
+    {"table": {"columns": ["Byggnad", "Status", "Byggnadsarea", "Anmärkning"], "rows": [["Bostadshus", "Befintlig", "118,0 m²", "En våning, sadeltak"], ["Garage med förråd", "Befintlig", "24,0 m²", "Fristående komplementbyggnad i fastighetens nordvästra hörn"], ["Tillbyggnad", "Ny", "32,5 m²", "Mot östra fastighetsgränsen, i liv med husets norra fasad"]]}},
+    {"heading": "Måttsatta avstånd"},
+    {"table": {"columns": ["Från", "Till", "Avstånd"], "rows": [["Tillbyggnadens östra fasad", "Fastighetsgräns mot Tallåsen 4:16 (öster)", "3,2 m"], ["Tillbyggnadens norra fasad", "Fastighetsgräns mot Tallåsen 4:21 (norr)", "4,6 m"], ["Tillbyggnadens södra fasad", "Fastighetsgräns mot Tallåsvägen (söder)", "9,0 m"], ["Bostadshusets södra fasad", "Fastighetsgräns mot Tallåsvägen (söder)", "7,5 m"], ["Garagets västra fasad", "Fastighetsgräns mot Tallåsen 4:18 (väster)", "1,0 m"]]}},
+    {"paragraph": "Prickad mark, 6,0 m från gatugränsen mot Tallåsvägen, redovisas med raster på ritningen. Befintlig infart och två parkeringsplatser behålls. Dagvatten från tillbyggnadens tak leds till befintlig stenkista på den egna fastigheten."},
+    {"signature": {"name": "Karin Sjölund", "role": "Ritare, Norrljus Arkitektur & Bygg AB"}}
+  ]
+}

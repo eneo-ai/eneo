@@ -1,0 +1,58 @@
+{
+  "etjanst": {
+    "namn": "Kommunal mark – använda, köpa eller sälja mark",
+    "arendetyp": "Använda kommunal mark tillfälligt",
+    "inskickad": "2026-08-24T19:42:11+02:00"
+  },
+  "arende": {
+    "arendenummer": "MEX-2026-0412",
+    "status": "Inkommen",
+    "handlaggande_enhet": "Mark- och exploateringsavdelningen"
+  },
+  "sokande": {
+    "typ": "Förening",
+    "namn": "Föreningen Kajfesten Sundsvall",
+    "organisationsnummer": "802512-4478",
+    "postadress": "Box 406, 851 06 Sundsvall",
+    "fakturaadress": "Föreningen Kajfesten Sundsvall, Box 406, 851 06 Sundsvall",
+    "kontaktperson": {
+      "namn": "Hanna Engström",
+      "roll": "Ordförande",
+      "telefon": "070-418 22 63",
+      "epost": "hanna.engstrom@kajfesten.example.se"
+    }
+  },
+  "plats": {
+    "beskrivning": "Grusplanen vid Norra kajen, mellan gästhamnen och Kajkanten",
+    "fastighetsbeteckning": "Sundsvall Kajen 3:4",
+    "karta_bifogad": true
+  },
+  "anvandning": {
+    "andamal": "Höstmarknad med lokala hantverkare och matförsäljning, 24 försäljningsbord och en mindre scen",
+    "publik_per_dag": 1500,
+    "uppbyggnad": "2026-10-02",
+    "arrangemang": {
+      "fran": "2026-10-03",
+      "till": "2026-10-04",
+      "tider": "10.00–17.00 båda dagarna"
+    },
+    "nedmontering": "2026-10-04, klart senast 21.00",
+    "sokt_yta_kvm": 132,
+    "ytans_fordelning": "Se situationsplan och etableringsbeskrivning",
+    "el": "Två uttag 16 A, beställs hos Sundsvall Elnät",
+    "vatten": "Nej",
+    "fordon_pa_ytan": "Ja, försäljarnas bilar står på ytan under marknaden, se situationsplan",
+    "tillfalliga_konstruktioner": "Scen 6 × 4 m, höjd 0,6 m; 8 partytält 3 × 3 m"
+  },
+  "ovriga_tillstand": {
+    "polistillstand_sokt": false,
+    "kommentar": "Marken är inte offentlig plats enligt kommunens karta."
+  },
+  "bilagor": [
+    {
+      "namn": "Situationsplan och etableringsbeskrivning Kajfesten 2026.pdf",
+      "typ": "Situationsplan"
+    }
+  ],
+  "forsakran": "Jag intygar att uppgifterna är riktiga."
+}

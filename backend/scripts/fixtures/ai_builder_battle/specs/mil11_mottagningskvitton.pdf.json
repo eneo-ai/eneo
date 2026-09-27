@@ -1,0 +1,42 @@
+{
+  "file": "mil11_mottagningskvitton.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "MIL-11", "url": "https://sjalvservice.malmo.se/oversikt/overview/661"},
+  "description": "Mottagarens två kvitton på mottaget farligt avfall från PCB-saneringen, ett per sida, med kvittonummer, datum, avfallskod, vägd vikt och rapportering till avfallsregistret.",
+  "letterhead": {"organisation": "Sydvästra Miljöterminalen AB", "unit": "Mottagning av farligt avfall", "address": "Terminalvägen 4, 235 91 Vellinge · 040-42 19 80"},
+  "date": "2026-07-10",
+  "title": "Mottagningskvitton – farligt avfall, Sydsanering i Skåne AB",
+  "blocks": [
+    {"heading": "Kvitto MK-26-11873"},
+    {"table": {
+      "columns": ["Uppgift", "Kvitto MK-26-11873"],
+      "rows": [
+        ["Mottagningsdatum", "2026-06-26"],
+        ["Avlämnare", "Sydsanering i Skåne AB"],
+        ["Ursprung", "Malmö Rönnen 14, hus B"],
+        ["Transportör", "Skåne Miljötransporter AB"],
+        ["Avfall", "Bygg- och rivningsavfall som innehåller PCB (fogmassa)"],
+        ["Avfallskod", "17 09 02*"],
+        ["Vägd vikt", "112 kg"],
+        ["Rapporterat till Naturvårdsverkets avfallsregister", "Ja, 2026-06-26"]
+      ]
+    }},
+    {"page_break": true},
+    {"heading": "Kvitto MK-26-11902"},
+    {"table": {
+      "columns": ["Uppgift", "Kvitto MK-26-11902"],
+      "rows": [
+        ["Mottagningsdatum", "2026-07-10"],
+        ["Avlämnare", "Sydsanering i Skåne AB"],
+        ["Ursprung", "Malmö Rönnen 14, hus B"],
+        ["Transportör", "Skåne Miljötransporter AB"],
+        ["Avfall", "Bygg- och rivningsavfall som innehåller PCB (fogmassa)"],
+        ["Avfallskod", "17 09 02*"],
+        ["Vägd vikt", "74 kg"],
+        ["Rapporterat till Naturvårdsverkets avfallsregister", "Ja, 2026-07-10"]
+      ]
+    }},
+    {"paragraph": "Avfallet mellanlagras för vidare transport till destruktion."},
+    {"signature": {"name": "Sofia Lindh", "role": "Mottagningsansvarig, Sydvästra Miljöterminalen AB"}}
+  ]
+}

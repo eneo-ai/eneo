@@ -1,0 +1,40 @@
+{
+  "file": "me_int01_anmalan_till_huvudman.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "INT-01", "url": "https://sundsvall.se/kommun/kommun-och-politik/diarium-arkiv-och-sekretess/diarium"},
+  "description": "Skolans blankett för anmälan till huvudmannen om kränkande behandling (skollagen 6 kap. 10 §), bilaga till e-posten; innehåller elevernas namn, personnummer och uppgifter från elevhälsan och skolans egen referens.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Norrbrinkens skola, barn- och utbildningsförvaltningen", "address": "Brinkvägen 20, 856 50 Sundsvall"},
+  "date": "2026-09-22",
+  "diarienummer": "NBR-KB-2026-014",
+  "title": "Anmälan till huvudman om kränkande behandling (6 kap. 10 § skollagen)",
+  "blocks": [
+    {
+      "table": {
+        "columns": ["Uppgift", "Värde"],
+        "rows": [
+          ["Skolenhet", "Norrbrinkens skola, årskurs F–6"],
+          ["Rektor", "Per Almqvist"],
+          ["Anmälan gjord av", "Sara Nyberg, mentor 5B"],
+          ["Datum för händelsen", "2026-09-17"],
+          ["Datum då rektor fick kännedom", "2026-09-18"],
+          ["Elev som upplever sig kränkt", "Alva Lindqvist, 5B, 20150615-2386"],
+          ["Elev som uppges ha kränkt", "Theo Berg, 5B"]
+        ]
+      }
+    },
+    {"heading": "Beskrivning av händelsen"},
+    {"paragraph": "Under lunchrasten 2026-09-17 blev Alva utfryst från en lek och kallad nedsättande ord av en grupp elever. En av eleverna, Theo Berg, filmade Alva med sin mobiltelefon och delade filmen i en gruppchatt för klassen. Alva har diagnosen ADHD och har extra anpassningar i undervisningen. Hon har inte velat komma till skolan sedan händelsen och har varit hemma 2026-09-18–2026-09-22."},
+    {"heading": "Åtgärder som vidtagits"},
+    {
+      "list": [
+        "Samtal med de inblandade eleverna 2026-09-18.",
+        "Vårdnadshavare till samtliga inblandade elever kontaktade samma dag.",
+        "Filmen har tagits bort ur gruppchatten.",
+        "Skolkurator har samtal med Alva två gånger per vecka."
+      ]
+    },
+    {"heading": "Rektors bedömning"},
+    {"paragraph": "Rektor bedömer att kränkande behandling har förekommit. Skolan utreder omständigheterna och vidtar åtgärder enligt 6 kap. 10 § skollagen (2010:800). Anmälan till huvudmannen görs samma vecka som rektor fick kännedom."},
+    {"signature": {"name": "Per Almqvist", "role": "Rektor, Norrbrinkens skola"}}
+  ]
+}

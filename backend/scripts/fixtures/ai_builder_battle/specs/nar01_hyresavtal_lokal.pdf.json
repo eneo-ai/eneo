@@ -1,0 +1,39 @@
+{
+  "file": "nar01_hyresavtal_lokal.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "NAR-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/145"},
+  "description": "Hyreskontrakt för lokal (restaurang) bifogat ansökan om serveringstillstånd som bevis på dispositionsrätt; hyresgästen är ett annat bolag än sökanden.",
+  "letterhead": {"organisation": "Fastighets AB Kajhuset", "unit": "Förvaltning", "address": "Esplanaden 9, 852 30 Sundsvall"},
+  "date": "2026-07-01",
+  "title": "Hyreskontrakt för lokal",
+  "blocks": [
+    {"paragraph": "Kontraktsnummer: KH-0412-01"},
+    {"heading": "1. Parter"},
+    {
+      "table": {
+        "columns": ["Part", "Namn", "Organisationsnummer", "Adress"],
+        "rows": [
+          ["Hyresvärd", "Fastighets AB Kajhuset", "556812-4471", "Esplanaden 9, 852 30 Sundsvall"],
+          ["Hyresgäst", "Norra Kajen Restaurang HB", "969781-3322", "Norra Kajen 12, 852 29 Sundsvall"]
+        ]
+      }
+    },
+    {"heading": "2. Fastighet och lokal"},
+    {"paragraph": "Fastighet: Sundsvall Norrmalm 3:41. Lokalen ligger i bottenvåningen, entré från Norra Kajen 12, och omfattar 186 kvadratmeter enligt ritning som bilaga 1 till detta kontrakt: matsal, bar, kök med diskrum, personalutrymme, två toaletter och förråd."},
+    {"heading": "3. Ändamål"},
+    {"paragraph": "Lokalen får endast användas som restaurang med servering av mat och dryck. Hyresgästen svarar för att de tillstånd som behövs för verksamheten, bland annat serveringstillstånd och registrering av livsmedelsanläggning, finns innan verksamheten startar."},
+    {"heading": "4. Hyrestid och uppsägning"},
+    {"paragraph": "Hyrestiden löper från 2026-10-01 till 2029-09-30. Kontraktet ska sägas upp senast nio månader före hyrestidens utgång. Sägs det inte upp förlängs det med tre år i taget."},
+    {"heading": "5. Hyra och säkerhet"},
+    {"paragraph": "Årshyran är 462 000 kronor exklusive moms, att betala med 38 500 kronor per månad i förskott. Som säkerhet ställer hyresgästen en deposition om 115 500 kronor, motsvarande tre månadshyror, före tillträdet."},
+    {"heading": "6. Uteplats"},
+    {"paragraph": "Hyresgästen får använda uteplatsen på gården mot kajen, cirka 40 kvadratmeter, för uteservering under perioden 1 maj–30 september. Uteplatsens gränser redovisas inte i bilaga 1."},
+    {"heading": "7. Överlåtelse och upplåtelse i andra hand"},
+    {"paragraph": "Hyresgästen får inte överlåta kontraktet eller upplåta lokalen i andra hand utan hyresvärdens skriftliga medgivande."},
+    {"page_break": true},
+    {"heading": "8. Underskrifter"},
+    {"paragraph": "Detta kontrakt har upprättats i två likalydande exemplar, av vilka parterna tagit var sitt."},
+    {"signature": {"name": "Karin Åström", "role": "För Fastighets AB Kajhuset, förvaltningschef"}},
+    {"signature": {"name": "Johan Ekholm", "role": "För Norra Kajen Restaurang HB, bolagsman"}}
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "file": "oms16_stiftelse_wikstrom.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "OMS-16",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/490"
+  },
+  "description": "Stiftelseförordnande (testamente 1952) för en fond till behövande äldre kvinnor, änkor eller ogifta, folkbokförda i kommunen; utdelning till personliga behov, högsta belopp per år.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Kommunstyrelsekontoret, Stiftelseförvaltningen",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2025-11-20",
+  "diarienummer": "KS-2025-00977",
+  "title": "Stiftelseförordnande: Stiftelsen Hilda och Gustaf Wikströms donationsfond",
+  "blocks": [
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Värde"
+        ],
+        "rows": [
+          [
+            "Stiftelse",
+            "Stiftelsen Hilda och Gustaf Wikströms donationsfond"
+          ],
+          [
+            "Organisationsnummer",
+            "802004-1187"
+          ],
+          [
+            "Förvaltare",
+            "Sundsvalls kommun genom kommunstyrelsen"
+          ],
+          [
+            "Ursprung",
+            "Testamente av handlanden Gustaf Wikström och hans hustru Hilda, daterat 1952-04-03, bekräftat 1958"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Ändamål enligt förordnandet"
+    },
+    {
+      "paragraph": "Avkastningen ska användas till understöd åt behövande ålderstigna kvinnor, änkor eller ogifta, som är mantalsskrivna inom Sundsvalls stad. Förordnandet tolkas sedan kommunsammanläggningen 1974 så att det omfattar kvinnor som är folkbokförda i Sundsvalls kommun."
+    },
+    {
+      "heading": "Villkor för utdelning"
+    },
+    {
+      "list": [
+        "Sökanden är kvinna och har fyllt 65 år.",
+        "Sökanden är änka eller ogift; den som är gift eller sambo omfattas inte.",
+        "Sökanden är folkbokförd i Sundsvalls kommun.",
+        "Sökanden har begränsade ekonomiska resurser. Stiftelseutskottet bedömer behovet utifrån inkomster och boendekostnad."
+      ]
+    },
+    {
+      "heading": "Utdelning"
+    },
+    {
+      "paragraph": "Bidrag lämnas till personliga behov som glasögon, tandvård, kläder, möbler eller hemutrustning. Högsta utdelning per person och år är 5 000 kr."
+    },
+    {
+      "heading": "Ansökan"
+    },
+    {
+      "paragraph": "Stiftelsen är öppen för ansökan hela året. Utdelning beslutas fyra gånger per år."
+    },
+    {
+      "paragraph": "Stiftelsen förvaltas enligt stiftelselagen (1994:1220) och förordnandet. Beslut om utdelning fattas av kommunstyrelsens stiftelseutskott. Den som har fått avslag kan ansöka på nytt nästa ansökningsperiod."
+    }
+  ]
+}

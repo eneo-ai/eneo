@@ -1,0 +1,25 @@
+{
+  "file": "nar05_klassningsplan.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "NAR-05", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/468"},
+  "description": "Klassningsplan K-01 för explosionsfarlig miljö i sprutbox och blandningsrum, bilaga till ansökan om tillstånd för brandfarlig vara.",
+  "letterhead": {"organisation": "Brandkonsult Mitt AB", "unit": "Uppdrag 26-114", "address": "Bankgatan 15, 852 31 Sundsvall"},
+  "date": "2026-08-20",
+  "title": "Klassningsplan för explosionsfarlig miljö – sprutbox och blandningsrum",
+  "blocks": [
+    {"paragraph": "Dokumentnummer K-01. Klassningen är gjord enligt SS-EN IEC 60079-10-1 för Tunadals Industrilack AB, Sundsvall Tunadal 7:22. Klassningsplanen ska finnas tillgänglig i verksamheten och uppdateras vid ändrad hantering."},
+    {
+      "table": {
+        "columns": ["Utrymme", "Utsläppskälla", "Zon", "Utbredning", "Ventilation"],
+        "rows": [
+          ["Sprutbox", "Sprutpistol och lackdimma vid sprutning", "Zon 1", "Hela sprutboxens inre volym", "Mekanisk frånluft 8 000 m³/h, förreglad med sprututrustningen"],
+          ["Sprutbox", "Öppning mot verkstaden", "Zon 2", "1 meter utanför öppningen", "Som ovan"],
+          ["Blandningsrum", "Omtappning och blandning av lack och förtunning", "Zon 2", "Hela rummet upp till 1 meter över golv", "Mekanisk frånluft vid golv"],
+          ["Brandcell B2", "Slutna förpackningar", "Ingen zon", "–", "Naturlig ventilation"]
+        ]
+      }
+    },
+    {"paragraph": "Förutsättning: omtappning sker endast i blandningsrummet och med jordade kärl."},
+    {"signature": {"name": "Linnea Sjölander", "role": "Brandingenjör, Brandkonsult Mitt AB"}}
+  ]
+}

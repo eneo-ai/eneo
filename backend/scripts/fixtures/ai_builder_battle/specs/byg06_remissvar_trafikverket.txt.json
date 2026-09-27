@@ -1,0 +1,21 @@
+{
+  "file": "byg06_remissvar_trafikverket.txt",
+  "format": "txt",
+  "source": {"catalogue_id": "BYG-06", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/428"},
+  "description": "Trafikverkets yttrande som textfil: avstyrker ny utfart mot väg 634, kräver anslutning via befintlig utfart och ett byggnadsfritt avstånd på 30 meter.",
+  "letterhead": {"organisation": "Trafikverket", "unit": "Region Mitt, Samhälle, planering och trafik", "address": "Box 186, 871 24 Härnösand"},
+  "date": "2026-06-05",
+  "diarienummer": "TRV 2026/61473",
+  "title": "Yttrande över ansökan om förhandsbesked, Lövsta 3:28, Sundsvalls kommun",
+  "blocks": [
+    {"paragraph": "Till: Stadsbyggnadsnämnden, Sundsvalls kommun. Er beteckning: BYGG-2026-000512."},
+    {"paragraph": "Trafikverket är väghållare för väg 634, som har hastighetsgränsen 80 km/tim och cirka 1 400 fordon per årsmedeldygn."},
+    {"heading": "Utfart"},
+    {"paragraph": "Trafikverket avstyrker en ny utfart mot väg 634. Varje ny anslutning ökar risken för olyckor på vägen. Den nya tomten ska i stället anslutas via den befintliga utfarten för Lövsta 3:28, och rätten att använda den behöver säkras med servitut eller gemensamhetsanläggning."},
+    {"heading": "Byggnadsfritt avstånd"},
+    {"paragraph": "Längs väg 634 gäller ett byggnadsfritt avstånd på 30 meter från vägområdet enligt länsstyrelsens beslut med stöd av 47 § väglagen (1971:948). Byggnader och andra anläggningar som kan påverka trafiksäkerheten, till exempel garage, upplag och parkering, får inte placeras inom det avståndet."},
+    {"heading": "Sammanfattning"},
+    {"paragraph": "Trafikverket har inget att invända mot förhandsbeskedet under förutsättning att tomten ansluts via befintlig utfart och att alla byggnader placeras utanför det byggnadsfria avståndet på 30 meter."},
+    {"signature": {"name": "Magnus Fors", "role": "Samhällsplanerare, Trafikverket"}}
+  ]
+}

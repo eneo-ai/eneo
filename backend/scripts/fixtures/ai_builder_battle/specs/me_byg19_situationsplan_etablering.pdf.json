@@ -1,0 +1,37 @@
+{
+  "file": "me_byg19_situationsplan_etablering.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-19", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/688"},
+  "description": "Sökandens bilaga till en ansökan om tillfällig markupplåtelse: situationsplan i tabellform med delytor och mått, passage längs kajkanten, tidsplan för uppbyggnad och nedmontering, el och avfall.",
+  "letterhead": {"organisation": "Föreningen Kajfesten Sundsvall", "unit": "Arrangörsgruppen", "address": "Box 406, 851 06 Sundsvall"},
+  "date": "2026-08-24",
+  "title": "Situationsplan och etableringsbeskrivning – Kajfesten höstmarknad 2026",
+  "blocks": [
+    {"paragraph": "Bilaga till ansökan om att använda kommunal mark tillfälligt. Plats: grusplanen vid Norra kajen, fastighet Sundsvall Kajen 3:4. Situationsplanen visar hur ytan delas in. Måtten är uppmätta på plats den 17 augusti 2026."},
+    {"heading": "Delytor"},
+    {"table": {
+      "columns": ["Delyta", "Användning", "Mått", "Yta"],
+      "rows": [
+        ["A", "24 försäljningsbord i två rader med gång emellan, 8 partytält 3 × 3 m", "12 × 6 m", "72 kvm"],
+        ["B", "Scen 6 × 4 m med publikyta framför", "6 × 4 m", "24 kvm"],
+        ["C", "Uppställning av försäljarnas bilar och släp under marknaden (6 platser)", "12 × 3 m", "36 kvm"],
+        ["Summa", "", "", "132 kvm"]
+      ]
+    }},
+    {"paragraph": "Längs kajkanten lämnas en fri passage på 3,5 meter mellan kajkanten och delyta A. Delyta C ligger närmast Kajkanten och nås från Norra kajgatan."},
+    {"heading": "Tidsplan"},
+    {"list": [
+      "Fredag 2 oktober 2026, 14.00–20.00: uppbyggnad av tält, bord och scen.",
+      "Lördag 3 och söndag 4 oktober 2026, 10.00–17.00: marknad. Försäljarna lastar av mellan 08.00 och 09.30 och ställer sedan bilarna på delyta C.",
+      "Söndag 4 oktober 2026, 17.00–21.00: nedmontering och städning."
+    ]},
+    {"heading": "El, avfall och säkerhet"},
+    {"list": [
+      "El: två uttag 16 A från Sundsvall Elnäts elskåp vid gästhamnen. Föreningen beställer anslutningen själv.",
+      "Avfall: fyra sopkärl och två kärl för matavfall hyrs från MittSverige Vatten & Avfall och töms söndag kväll.",
+      "Brandsläckare finns vid scenen och vid varje tält med matförsäljning.",
+      "Ansvarig på plats under hela arrangemanget: Hanna Engström, 070-418 22 63."
+    ]},
+    {"signature": {"name": "Hanna Engström", "role": "Ordförande, Föreningen Kajfesten Sundsvall"}}
+  ]
+}

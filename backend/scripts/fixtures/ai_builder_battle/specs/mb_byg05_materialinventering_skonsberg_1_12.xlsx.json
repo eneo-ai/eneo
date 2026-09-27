@@ -1,0 +1,157 @@
+{
+  "file": "mb_byg05_materialinventering_skonsberg_1_12.xlsx",
+  "format": "xlsx",
+  "source": {
+    "catalogue_id": "BYG-05",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/716"
+  },
+  "description": "Sökandens ifyllda materialinventering för rivning av en förrådsbyggnad på fastigheten Skönsberg 1:12, bilaga till rivningsanmälan.",
+  "sheets": [
+    {
+      "name": "Uppgifter",
+      "columns": [
+        "Uppgift",
+        "Värde"
+      ],
+      "rows": [
+        [
+          "Diarienummer",
+          "SBN 2026-01187"
+        ],
+        [
+          "Fastighet",
+          "Sundsvall Skönsberg 1:12"
+        ],
+        [
+          "Byggnad",
+          "Förråds- och verkstadsbyggnad från 1971, cirka 310 kvadratmeter"
+        ],
+        [
+          "Byggherre",
+          "Skönsbergs Fastigheter AB"
+        ],
+        [
+          "Kontrollansvarig",
+          "Martin Edholm, certifierad KA, behörighet N"
+        ],
+        [
+          "Datum",
+          "2026-09-21"
+        ]
+      ]
+    },
+    {
+      "name": "Materialinventering",
+      "columns": [
+        "Nr",
+        "Byggdel/material",
+        "Avfallskod",
+        "Mängd",
+        "Enhet",
+        "Hantering/mottagare",
+        "Kommentar"
+      ],
+      "rows": [
+        [
+          1,
+          "Grund och bjälklag, betong",
+          "170101",
+          42,
+          "ton",
+          "Krossning, Blåberget avfallsanläggning",
+          "–"
+        ],
+        [
+          2,
+          "Fasadskivor, eternit (asbestcement)",
+          "170605",
+          1.2,
+          "ton",
+          "Farligt avfall, Blåberget",
+          "Inventering: se bilaga"
+        ],
+        [
+          3,
+          "Fogmassa kring fönster (PCB-halt 1 800 mg/kg)",
+          "170902",
+          35,
+          "kg",
+          "Farligt avfall, Blåberget",
+          "PCB-inventering 2026-08-19"
+        ],
+        [
+          4,
+          "Lysrör och armaturer",
+          "200121",
+          18,
+          "kg",
+          "El-kretsen",
+          "–"
+        ],
+        [
+          5,
+          "Blybatterier i nödbelysning",
+          "160601",
+          12,
+          "kg",
+          "Farligt avfall, Blåberget",
+          "–"
+        ],
+        [
+          6,
+          "Asfalt på gården (tjärhaltig, PAH-16 650 mg/kg enligt analys)",
+          "170301",
+          0.9,
+          "ton",
+          "Farligt avfall, Blåberget",
+          "–"
+        ],
+        [
+          7,
+          "Mineralull, vindsbjälklag",
+          "170604",
+          2.1,
+          "ton",
+          "Blåberget",
+          "–"
+        ],
+        [
+          8,
+          "Järn och stål",
+          "170405",
+          3.5,
+          "ton",
+          "Metallåtervinning",
+          "–"
+        ],
+        [
+          9,
+          "Trä, takstolar och panel",
+          "170201",
+          8,
+          "ton",
+          "Energiåtervinning",
+          "–"
+        ],
+        [
+          10,
+          "Gipsskivor",
+          "170802",
+          2.6,
+          "ton",
+          "Gipsåtervinning",
+          "–"
+        ],
+        [
+          11,
+          "Blandat rivningsavfall",
+          "170904",
+          4,
+          "ton",
+          "Sortering, Blåberget",
+          "–"
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "file": "nar05_situationsplan.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "NAR-05", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/468"},
+  "description": "Situationsplan över fastigheten med förvaringsplatser för brandfarlig vara och uppmätta avstånd, bilaga till ansökan om tillstånd; avståndet från gasolskåpet till fasaden är kortare än riskutredningen anger.",
+  "letterhead": {"organisation": "Tunadals Industrilack AB", "unit": "Bilaga 1 till ansökan om tillstånd", "address": "Tunadalsvägen 31, 856 41 Sundsvall"},
+  "date": "2026-08-24",
+  "title": "Situationsplan – Sundsvall Tunadal 7:22",
+  "blocks": [
+    {"paragraph": "Ritningsnummer S-01. Skala 1:400. Fastigheten omfattar verkstadsbyggnad (tegel, fönster i fasad mot norr), kontorsbyggnad i trä och parkering. Grannfastigheten Tunadal 7:23 ligger öster om fastighetsgränsen."},
+    {"heading": "Förvaringsplatser"},
+    {
+      "table": {
+        "columns": ["Beteckning på planen", "Förvaringsplats", "Placering"],
+        "rows": [
+          ["F1", "Gasolskåp, 12 flaskor P26", "Utomhus mot verkstadens norra fasad"],
+          ["F2", "Gasolcentral, 2 flaskor P190", "I verkstadens östra fasad, egen brandcell EI 60 med dörr utåt"],
+          ["F3", "Brandcell B2, förråd för brandfarlig vätska", "Inne i verkstaden, egen brandcell EI 60"],
+          ["F4", "Blandningsrum och sprutbox", "Inne i verkstaden"]
+        ]
+      }
+    },
+    {"heading": "Uppmätta avstånd"},
+    {
+      "table": {
+        "columns": ["Från", "Till", "Avstånd"],
+        "rows": [
+          ["F1 gasolskåp", "Fönster i verkstadens norra fasad", "3 meter"],
+          ["F1 gasolskåp", "Kontorsbyggnad i trä", "15 meter"],
+          ["F1 gasolskåp", "Fastighetsgräns mot Tunadal 7:23", "11 meter"],
+          ["F2 gasolcentral", "Fastighetsgräns mot Tunadal 7:23", "6 meter"],
+          ["F3 brandcell B2", "Utrymningsväg från verkstaden", "9 meter"]
+        ]
+      }
+    },
+    {"signature": {"name": "Anders Holm", "role": "Produktionschef, Tunadals Industrilack AB"}}
+  ]
+}

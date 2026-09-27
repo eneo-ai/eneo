@@ -1,0 +1,249 @@
+{
+  "file": "mb_nar08_kvalificering_augusti_2026.xlsx",
+  "format": "xlsx",
+  "source": {
+    "catalogue_id": "NAR-08",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/307"
+  },
+  "description": "HR-avdelningens arbetsfil för augusti 2026: anställningshistoriken ur personalsystemet för dem som anmält anspråk på företrädesrätt via e-tjänsten, handläggarens bedömning och personalsystemets koder med HR:s räkneregler.",
+  "sheets": [
+    {
+      "name": "Export augusti",
+      "columns": [
+        "Anst.nr",
+        "Namn",
+        "Personnr",
+        "Fr.o.m.",
+        "T.o.m.",
+        "Anst.form",
+        "Befattning",
+        "Förvaltning",
+        "Syss.grad %",
+        "Avg.orsak"
+      ],
+      "rows": [
+        [
+          "103877",
+          "Linnea Holm",
+          "19960101-2389",
+          "2023-03-01",
+          "2023-12-31",
+          "11",
+          "Undersköterska",
+          "Vård- och omsorgsförvaltningen",
+          100,
+          "32"
+        ],
+        [
+          "103877",
+          "Linnea Holm",
+          "19960101-2389",
+          "2025-10-01",
+          "2026-05-31",
+          "11",
+          "Undersköterska",
+          "Vård- och omsorgsförvaltningen",
+          100,
+          "32"
+        ],
+        [
+          "104012",
+          "Oskar Berg",
+          "19920101-2391",
+          "2025-01-01",
+          "2025-06-30",
+          "12",
+          "Elevassistent",
+          "Barn- och utbildningsförvaltningen",
+          100,
+          "35"
+        ],
+        [
+          "104012",
+          "Oskar Berg",
+          "19920101-2391",
+          "2025-09-01",
+          "2026-05-31",
+          "11",
+          "Elevassistent",
+          "Barn- och utbildningsförvaltningen",
+          75,
+          "32"
+        ],
+        [
+          "104150",
+          "Hanna Ek",
+          "19990101-6809",
+          "2024-02-01",
+          "2024-07-31",
+          "11",
+          "Fritidsledare",
+          "Kultur- och fritidsförvaltningen",
+          100,
+          "35"
+        ],
+        [
+          "104150",
+          "Hanna Ek",
+          "19990101-6809",
+          "2026-02-01",
+          "2026-06-30",
+          "11",
+          "Fritidsledare",
+          "Kultur- och fritidsförvaltningen",
+          100,
+          "41"
+        ]
+      ]
+    },
+    {
+      "name": "Bedömning augusti",
+      "columns": [
+        "Anst.nr",
+        "Namn",
+        "Senaste anställning t.o.m.",
+        "Referensperiod",
+        "Månader SÄVA i perioden",
+        "Månader totalt i perioden",
+        "Företrädesrätt",
+        "Gäller t.o.m.",
+        "Kommentar"
+      ],
+      "rows": [
+        [
+          "103877",
+          "Linnea Holm",
+          "2026-05-31",
+          "2023-06-01 – 2026-05-31",
+          15,
+          15,
+          "Ja, alla anställningar",
+          "2027-02-28",
+          "Mer än tolv månader totalt (15). Har också mer än nio månader SÄVA men tolvmånadersregeln ger den vidare rätten. Perioden 2023-03 till 2023-05 ligger före referensperioden och räknas inte."
+        ],
+        [
+          "104012",
+          "Oskar Berg",
+          "2026-05-31",
+          "2023-06-01 – 2026-05-31",
+          9,
+          15,
+          "Ja, alla anställningar",
+          "2027-02-28",
+          "Exakt nio månader SÄVA räcker inte (mer än nio krävs), men vikariatet plus SÄVA blir 15 månader totalt."
+        ],
+        [
+          "104150",
+          "Hanna Ek",
+          "2026-06-30",
+          "2023-07-01 – 2026-06-30",
+          11,
+          11,
+          "Nej",
+          "–",
+          "Senaste anställningen avslutades med egen uppsägning (kod 41). Ingen företrädesrätt oavsett anställningstid."
+        ]
+      ]
+    },
+    {
+      "name": "Koder och regler",
+      "columns": [
+        "Typ",
+        "Kod",
+        "Betydelse"
+      ],
+      "rows": [
+        [
+          "Anst.form",
+          "01",
+          "Tillsvidareanställning"
+        ],
+        [
+          "Anst.form",
+          "02",
+          "Provanställning"
+        ],
+        [
+          "Anst.form",
+          "11",
+          "Särskild visstidsanställning (SÄVA), 5 § 1 LAS"
+        ],
+        [
+          "Anst.form",
+          "12",
+          "Vikariat, 5 § 2 LAS"
+        ],
+        [
+          "Anst.form",
+          "13",
+          "Säsongsanställning, 5 § 3 LAS"
+        ],
+        [
+          "Avg.orsak",
+          "31",
+          "Uppsägning på grund av arbetsbrist"
+        ],
+        [
+          "Avg.orsak",
+          "32",
+          "Visstid slut, ingen fortsatt anställning på grund av arbetsbrist"
+        ],
+        [
+          "Avg.orsak",
+          "35",
+          "Visstid slut enligt avtal"
+        ],
+        [
+          "Avg.orsak",
+          "41",
+          "Egen uppsägning"
+        ],
+        [
+          "Avg.orsak",
+          "42",
+          "Uppsägning av personliga skäl"
+        ],
+        [
+          "Avg.orsak",
+          "43",
+          "Avsked"
+        ],
+        [
+          "Regel",
+          "Grund",
+          "Företrädesrätt kräver att den senaste anställningen upphörde med avg.orsak 31 eller 32 (arbetsbrist), 25 § LAS (lag 2022:835). Bara den senaste anställningens avg.orsak avgör detta; tidigare perioder räknas in i anställningstiden oavsett kod."
+        ],
+        [
+          "Regel",
+          "Referensperiod",
+          "De senaste tre åren räknat bakåt från den dag den senaste anställningen upphörde. Perioder eller delar av perioder före referensperioden räknas inte."
+        ],
+        [
+          "Regel",
+          "Räkning",
+          "Hela kalendermånader. Personalsystemet lägger alltid perioderna från den 1:a till månadens sista dag."
+        ],
+        [
+          "Regel",
+          "Tolv månader",
+          "Mer än tolv månader i alla anställningsformer tillsammans ger företrädesrätt till alla anställningar i verksamheten (25 § första stycket 1 LAS)."
+        ],
+        [
+          "Regel",
+          "Nio månader",
+          "Den som inte når tolv månader men har mer än nio månader i SÄVA (kod 11) har företrädesrätt bara till ny särskild visstidsanställning (25 § första stycket 2 LAS)."
+        ],
+        [
+          "Regel",
+          "Gäller t.o.m.",
+          "Nio månader från den dag anställningen upphörde; HR skriver sista dagen i den nionde månaden (anställning t.o.m. 2026-05-31 ger 2027-02-28)."
+        ],
+        [
+          "Regel",
+          "Verksamhet",
+          "Företrädesrätten gäller i den förvaltning där personen senast var anställd."
+        ]
+      ]
+    }
+  ]
+}

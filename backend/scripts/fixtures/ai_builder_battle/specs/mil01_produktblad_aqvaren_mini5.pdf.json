@@ -1,0 +1,43 @@
+{
+  "file": "mil01_produktblad_aqvaren_mini5.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "MIL-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/581"},
+  "description": "Tillverkarens produktblad och funktionsbeskrivning för ett minireningsverk: dimensionering, provade reningsresultat, CE-märkning, drift, service och slamtömning, med en hänvisning till upphävda allmänna råd.",
+  "letterhead": {"organisation": "AqvaRen Sverige AB", "unit": "Produktblad och funktionsbeskrivning", "address": "Industrigatan 9, 824 43 Hudiksvall · www.aqvaren.exempel.se"},
+  "date": "2021-03-01",
+  "title": "AqvaRen Mini 5 – minireningsverk för ett hushåll",
+  "blocks": [
+    {"paragraph": "AqvaRen Mini 5 är ett minireningsverk med satsvis biologisk rening (SBR) och kemisk fällning av fosfor för ett hushåll upp till 5 personekvivalenter (pe). Verket har inbyggd slamavskiljning och doseringspump för fällningskemikalie."},
+    {"heading": "Tekniska data"},
+    {"table": {
+      "columns": ["Egenskap", "Värde"],
+      "rows": [
+        ["Dimensionering", "1–5 pe, högst 0,75 m³ spillvatten per dygn"],
+        ["Tankvolym", "4,2 m³ (varav slamlager 1,6 m³)"],
+        ["Mått (d x h)", "1,9 x 2,3 m"],
+        ["Elanslutning", "230 V, larm vid fel via ljus och ljud samt sms"],
+        ["Fällningskemikalie", "Polyaluminiumklorid, dunk 25 l, räcker cirka 6 månader"],
+        ["CE-märkning", "Ja, provad enligt SS-EN 12566-3"]
+      ]
+    }},
+    {"heading": "Reningsresultat vid typprovning enligt SS-EN 12566-3"},
+    {"table": {
+      "columns": ["Parameter", "Reduktion", "Utgående halt, medel"],
+      "rows": [
+        ["Organiskt material (BOD7)", "96 %", "11 mg/l"],
+        ["Totalfosfor (Tot-P)", "92 %", "0,6 mg/l"],
+        ["Totalkväve (Tot-N)", "55 %", "31 mg/l"]
+      ]
+    }},
+    {"paragraph": "AqvaRen Mini 5 uppfyller kraven för hög skyddsnivå för miljöskydd och hälsoskydd enligt Naturvårdsverkets allmänna råd NFS 2006:7 om små avloppsanordningar för hushållsspillvatten, i kombination med efterpolering."},
+    {"heading": "Drift och underhåll"},
+    {"list": [
+      "Service minst två gånger per år av servicetekniker certifierad av AqvaRen. Serviceavtal tecknas med återförsäljaren.",
+      "Fällningskemikalie fylls på av ägaren; larm vid låg nivå.",
+      "Slamtömning minst en gång per år, fullständig tömning inklusive kemslam.",
+      "Utgående vatten kan provtas i provtagningsbrunn efter verket.",
+      "Ägaren för en driftjournal över larm, påfyllning och service."
+    ]},
+    {"paragraph": "Garanti 5 år på tank och 2 år på elektronik och pumpar under förutsättning att serviceavtal finns."}
+  ]
+}

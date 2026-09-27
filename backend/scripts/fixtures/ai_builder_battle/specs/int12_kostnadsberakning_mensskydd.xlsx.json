@@ -1,0 +1,205 @@
+{
+  "file": "int12_kostnadsberakning_mensskydd.xlsx",
+  "format": "xlsx",
+  "source": {
+    "catalogue_id": "INT-12",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/547"
+  },
+  "description": "Ekonomienhetens kostnadsberäkning för mensskydd i skolan: underlag per skola, tre alternativ med engångs- och årskostnad (piloten med sina tre skolor bara här) och kalkylens förutsättningar.",
+  "sheets": [
+    {
+      "name": "Underlag per skola",
+      "columns": [
+        "Skola",
+        "Rektorsområde",
+        "Skolform",
+        "Elever åk 4–9 resp. gymnasiet",
+        "Dispensrar",
+        "Engångskostnad (kr)",
+        "Förbrukning per år (kr)"
+      ],
+      "rows": [
+        [
+          "Björkhöjdens skola",
+          "Nord",
+          "Grundskola F–9",
+          310,
+          6,
+          10800,
+          30380
+        ],
+        [
+          "Granbergsskolan",
+          "Nord",
+          "Grundskola 4–9",
+          265,
+          5,
+          9000,
+          25970
+        ],
+        [
+          "Lillhedens skola",
+          "Syd",
+          "Grundskola F–6",
+          142,
+          3,
+          5400,
+          13916
+        ],
+        [
+          "Västerbackens skola",
+          "Syd",
+          "Grundskola 7–9",
+          388,
+          7,
+          12600,
+          38024
+        ],
+        [
+          "Åkerbergsskolan",
+          "Väst",
+          "Grundskola F–9",
+          296,
+          6,
+          10800,
+          29008
+        ],
+        [
+          "Norrgårdens skola",
+          "Väst",
+          "Grundskola 4–9",
+          244,
+          5,
+          9000,
+          23912
+        ],
+        [
+          "Stenhamra skola",
+          "Öst",
+          "Grundskola 7–9",
+          402,
+          8,
+          14400,
+          39396
+        ],
+        [
+          "Tallbackens skola",
+          "Öst",
+          "Grundskola F–6",
+          118,
+          3,
+          5400,
+          11564
+        ],
+        [
+          "Kyrkbackens skola",
+          "Centrum",
+          "Grundskola 7–9",
+          356,
+          7,
+          12600,
+          34888
+        ],
+        [
+          "Västra Parkens gymnasium",
+          "Gymnasiet",
+          "Gymnasieskola",
+          715,
+          12,
+          21600,
+          70070
+        ],
+        [
+          "Hamngatans gymnasium",
+          "Gymnasiet",
+          "Gymnasieskola",
+          1040,
+          16,
+          28800,
+          101920
+        ],
+        [
+          "Summa samtliga skolor",
+          "Alla",
+          "Grund- och gymnasieskola",
+          4276,
+          78,
+          140400,
+          419048
+        ]
+      ]
+    },
+    {
+      "name": "Alternativ",
+      "columns": [
+        "Alternativ",
+        "Beskrivning",
+        "Omfattning",
+        "Engångskostnad (kr)",
+        "Årlig kostnad (kr)",
+        "Kommentar"
+      ],
+      "rows": [
+        [
+          "Alternativ 1",
+          "Dispensrar med kostnadsfria mensskydd på samtliga elevtoaletter i årskurs 4–9 och gymnasiet",
+          "Samtliga 11 skolor",
+          140400,
+          419048,
+          "Motsvarar motionens förslag. Ryms inte inom befintlig ram."
+        ],
+        [
+          "Alternativ 2",
+          "Utökat akutförråd: mensskydd hos elevhälsan, mentorer och i skolbiblioteken",
+          "Samtliga skolor, ingen installation",
+          0,
+          96000,
+          "Kräver ingen investering men löser inte att elever inte vill fråga."
+        ],
+        [
+          "Alternativ 3",
+          "Pilot med dispensrar under läsåret 2026/27, därefter utvärdering",
+          "Björkhöjdens skola, Granbergsskolan och Västra Parkens gymnasium",
+          41400,
+          126420,
+          "Utvärdering redovisas för nämnden i juni 2027."
+        ]
+      ]
+    },
+    {
+      "name": "Förutsättningar",
+      "columns": [
+        "Parameter",
+        "Värde",
+        "Källa"
+      ],
+      "rows": [
+        [
+          "Andel elever som menstruerar (antagande)",
+          "50 %",
+          "Centrala elevhälsan"
+        ],
+        [
+          "Utnyttjandegrad (antagande)",
+          "70 %",
+          "Erfarenheter från andra kommuner"
+        ],
+        [
+          "Förbrukning per elev i målgruppen och läsår (kr)",
+          98,
+          "Avtal hygienartiklar, Inköpscentralen, 280 kr per menstruerande användare"
+        ],
+        [
+          "Dispenser inklusive montering (kr)",
+          1800,
+          "Offert från fastighetsavdelningen 2026-08-20"
+        ],
+        [
+          "Kalkylen upprättad",
+          "2026-09-02",
+          "BUF ekonomienhet, Sofia Engström"
+        ]
+      ]
+    }
+  ]
+}

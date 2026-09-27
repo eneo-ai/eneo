@@ -1,0 +1,98 @@
+{
+  "file": "oms09_rutin_klagomal_synpunkter.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "OMS-09",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/647"
+  },
+  "description": "Vård- och omsorgsförvaltningens rutin för klagomål och synpunkter: lagrum, kategorier, när ett klagomål ska bedömas som lex Sarah eller gå till MAS, svarstid i arbetsdagar, vem som svarar per verksamhet och hur svaret skrivs.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Vård- och omsorgsförvaltningen, Kvalitet och utveckling",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-02-16",
+  "diarienummer": "VON-2026-00188",
+  "title": "Rutin för hantering av klagomål och synpunkter inom vård och omsorg",
+  "blocks": [
+    {
+      "heading": "Syfte"
+    },
+    {
+      "paragraph": "Klagomål och synpunkter är en del av det systematiska kvalitetsarbetet. Rutinen gäller allt som kommer in via e-tjänsten Klagomål och synpunkter – vård och omsorg, per telefon, brev eller vid besök."
+    },
+    {
+      "heading": "Lagrum"
+    },
+    {
+      "list": [
+        "Socialstyrelsens föreskrifter och allmänna råd om ledningssystem för systematiskt kvalitetsarbete (SOSFS 2011:9, ändrad genom HSLF-FS 2025:21) 5 kap. 3 och 6 §§ – ta emot och utreda klagomål.",
+        "Socialtjänstlagen (2025:400) 27 kap. 2–6 §§ – rapportering, dokumentation, utredning och anmälan av missförhållanden (lex Sarah).",
+        "Patientsäkerhetslagen (2010:659) 3 kap. 5 § – vårdskador och händelser i hälso- och sjukvården (lex Maria), som bedöms av medicinskt ansvarig sjuksköterska (MAS).",
+        "Offentlighets- och sekretesslagen (2009:400) 26 kap. 1 § – sekretess inom socialtjänsten."
+      ]
+    },
+    {
+      "heading": "1. Registrera och klassa"
+    },
+    {
+      "paragraph": "Klagomålet registreras samma dag som det kommer in. Varje punkt i klagomålet klassas i en av kategorierna omvårdnad och tillsyn, bemötande, läkemedel och hälso- och sjukvård, kost och måltider, tvätt och städning, information och delaktighet eller övrigt."
+    },
+    {
+      "paragraph": "En punkt som kan innebära ett missförhållande eller en påtaglig risk för ett missförhållande i socialtjänstens omsorg, till exempel utebliven tillsyn eller trygghetslarm som inte fungerar, rapporteras samma dag enligt lex Sarah till enhetschefen. En punkt som gäller läkemedel eller annan hälso- och sjukvård lämnas samma dag till MAS."
+    },
+    {
+      "heading": "2. Svarstid"
+    },
+    {
+      "paragraph": "Den som har lämnat klagomålet och vill ha återkoppling ska få ett första skriftligt svar senast tio arbetsdagar efter den dag klagomålet kom in. Dagen då klagomålet kom in räknas inte. Svaret anger vårt ärendenummer och det datum då personen senast får ett besked om vad utredningen har kommit fram till, som är trettio dagar efter att klagomålet kom in."
+    },
+    {
+      "heading": "3. Vem som svarar"
+    },
+    {
+      "table": {
+        "columns": [
+          "Verksamhet",
+          "Svarar",
+          "Telefon"
+        ],
+        "rows": [
+          [
+            "Tallbackens vård- och omsorgsboende",
+            "Lena Dahl, enhetschef",
+            "060-19 24 50"
+          ],
+          [
+            "Björkhagens vård- och omsorgsboende",
+            "Per Wallin, enhetschef",
+            "060-19 24 71"
+          ],
+          [
+            "Hemtjänst Norr",
+            "Sara Lindqvist, enhetschef",
+            "060-19 25 02"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "4. Så skrivs svaret"
+    },
+    {
+      "list": [
+        "Tacka för klagomålet och bekräfta vad det gäller.",
+        "Berätta vad som händer nu, utan att föregripa utredningen.",
+        "Nämn aldrig enskilda medarbetare vid namn; klagomålet riktas mot verksamheten.",
+        "Lämna uppgifter om den enskildes vård bara om hen har samtyckt till att anhöriga får information.",
+        "Svaret undertecknas av den enhetschef som ansvarar för verksamheten."
+      ]
+    },
+    {
+      "signature": {
+        "name": "Annika Holmberg",
+        "role": "Kvalitetsstrateg, Vård- och omsorgsförvaltningen"
+      }
+    }
+  ]
+}

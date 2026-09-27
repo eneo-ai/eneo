@@ -1,0 +1,65 @@
+{
+  "file": "mil06_anmalan_miljofarlig_verksamhet.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "MIL-06", "url": "https://sjalvservice.malmo.se/oversikt/overview/529"},
+  "description": "Ifylld blankett Anmälan om miljöfarlig verksamhet (C) till Malmö stads miljöförvaltning med ankomststämpel: administrativa uppgifter, verksamhetskod, produktion, vatten och avlopp, kemikalier, farligt avfall med avfallskoder, utsläpp och driftstörningar.",
+  "letterhead": {"organisation": "Malmö stad", "unit": "Miljöförvaltningen – Anmälan om miljöfarlig verksamhet enligt 9 kap. 6 § miljöbalken", "address": "Miljöförvaltningen, 205 80 Malmö"},
+  "date": "2026-09-10",
+  "diarienummer": "MF-2026-04417",
+  "title": "Anmälan om miljöfarlig verksamhet – ny verksamhet",
+  "blocks": [
+    {"paragraph": "Inkom till miljöförvaltningen 2026-09-14. Anmälan avser: ny verksamhet på platsen (flytt från Lindängen)."},
+    {"heading": "1. Administrativa uppgifter"},
+    {"table": {
+      "columns": ["Uppgift", "Ifyllt"],
+      "rows": [
+        ["Verksamhetsutövare", "Lindängens Släpvagnsservice AB"],
+        ["Organisationsnummer", "559418-2256"],
+        ["Besöksadress", "Grusgropsgatan 14, 212 41 Malmö"],
+        ["Fastighetsbeteckning", "Malmö Grusgropen 7"],
+        ["Fastighetsägare", "Fastighets AB Grusgropen, Box 3301, 200 22 Malmö"],
+        ["Kontaktperson", "Anders Kvist, VD, 040-630 48 17, anders.kvist@lindangens-slap.exempel.se"],
+        ["Fakturaadress", "Som ovan"],
+        ["Planerad start på platsen", "2026-11-02"]
+      ]
+    }},
+    {"heading": "2. Verksamhetskod och omfattning"},
+    {"table": {
+      "columns": ["Verksamhet", "Verksamhetskod enligt miljöprövningsförordningen (2013:251)", "Prövningsnivå", "Omfattning"],
+      "rows": [
+        ["Blästring av släpvagnsramar och detaljer", "28.95", "C", "720 m² blästrad yta per kalenderår"],
+        ["Vattenbaserad avfettning i spolbås", "28.95", "C", "16 m³ avloppsvatten per kalenderår"],
+        ["Lackering i sprutbox", "–", "U", "Cirka 1 800 liter färg och lack per år"],
+        ["Service och reparation av släpvagnar", "–", "U", "Cirka 900 släpvagnar per år"]
+      ]
+    }},
+    {"paragraph": "Drifttider: måndag–fredag 06.30–17.00. Antal anställda: 9."},
+    {"heading": "3. Lokaler"},
+    {"paragraph": "Verkstadsbyggnad om 1 250 m² med hall 1 (verkstad), hall 2 (tvätt- och avfettningshall), blästerkabin, sprutbox, färgförråd och förråd för farligt avfall. Se verksamhetsbeskrivningen för ritning och detaljer."},
+    {"heading": "4. Vatten och avlopp"},
+    {"paragraph": "Processavloppsvatten från avfettningen leds via oljeavskiljare klass 1 med provtagningsbrunn till spillvattennätet. Inga golvbrunnar är anslutna till dagvattennätet. Oljeavskiljaren töms och kontrolleras av entreprenör en gång per år."},
+    {"paragraph": "Vattenförbrukning: cirka 350 m³ per år (kommunalt vatten)."},
+    {"heading": "5. Kemiska produkter"},
+    {"paragraph": "Se bifogad kemikalieförteckning (Excel). Säkerhetsdatablad finns i pärm i verkstadskontoret."},
+    {"heading": "6. Avfall"},
+    {"table": {
+      "columns": ["Avfallsslag", "Avfallskod", "Mängd per år", "Förvaring", "Transportör"],
+      "rows": [
+        ["Blästeravfall med farliga ämnen", "12 01 16*", "3 ton", "Container på gården", "Skåne Miljötransporter AB"],
+        ["Slam från oljeavskiljare", "13 05 02*", "1,5 m³", "Töms direkt ur avskiljaren", "Skåne Miljötransporter AB"],
+        ["Färg- och lackavfall", "08 01 11*", "400 kg", "Förråd för farligt avfall", "Skåne Miljötransporter AB"],
+        ["Spillolja", "13 02 05*", "800 liter", "Tank i verkstaden", "Oljeservice Syd AB"],
+        ["Absorbenter och trasor med olja", "15 02 02*", "150 kg", "Förråd för farligt avfall", "Skåne Miljötransporter AB"],
+        ["Metallskrot", "17 04 05", "12 ton", "Container på gården", "Skrot & Metall i Malmö AB"]
+      ]
+    }},
+    {"paragraph": "Avfallskoder anges enligt bilaga 4 till avfallsförordningen (2011:927)."},
+    {"heading": "7. Utsläpp till luft och buller"},
+    {"paragraph": "Blästring sker i sluten blästerkabin med stoftfilter. Lackering sker i sprutbox med filter och utsug över tak. Kompressor för blästern står i eget rum. Närmaste bostad ligger cirka 300 meter från verksamheten."},
+    {"heading": "8. Driftstörningar och olyckor"},
+    {"paragraph": "Absorbent och spillskydd finns i hall 1 och hall 2. Personalen har fått instruktion om hur spill ska tas om hand."},
+    {"heading": "9. Underskrift"},
+    {"paragraph": "Jag försäkrar att uppgifterna är riktiga. Bilagor: kemikalieförteckning, verksamhetsbeskrivning med ritning."},
+    {"signature": {"name": "Anders Kvist", "role": "VD och firmatecknare, Lindängens Släpvagnsservice AB"}}
+  ]
+}

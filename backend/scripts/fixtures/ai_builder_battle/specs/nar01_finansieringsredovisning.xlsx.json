@@ -1,0 +1,39 @@
+{
+  "file": "nar01_finansieringsredovisning.xlsx",
+  "format": "xlsx",
+  "source": {"catalogue_id": "NAR-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/145"},
+  "description": "Sökandens finansieringsredovisning med kostnader, finansieringskällor och kapitalets ursprung per källa, bilaga till ansökan om serveringstillstånd för prövning av ekonomisk lämplighet.",
+  "sheets": [
+    {
+      "name": "Kostnader",
+      "columns": ["Post", "Belopp (kr)", "Underlag"],
+      "rows": [
+        ["Köp av inventarier och köksutrustning", 420000, "Offert Storköksgruppen 2026-08-02"],
+        ["Ombyggnad av kök och bar", 310000, "Offert Kajbygg AB 2026-07-28"],
+        ["Hyresdeposition", 115500, "Hyreskontrakt KH-0412-01, punkt 5"],
+        ["Varulager och startkostnader", 84500, "Egen kalkyl"],
+        ["Summa kostnader", 930000, "–"]
+      ]
+    },
+    {
+      "name": "Finansiering",
+      "columns": ["Källa", "Belopp (kr)", "Underlag", "Status"],
+      "rows": [
+        ["Eget kapital, aktieägartillskott", 200000, "Kontoutdrag företagskonto 2026-07-31", "Bifogas"],
+        ["Banklån, Selångers Sparbank", 450000, "Lånelöfte SSB-KRE-26-3318", "Bifogat"],
+        ["Privat lån från Tomas Berglund", 280000, "Skuldebrev 2026-06-30", "Bifogat"],
+        ["Summa finansiering", 930000, "–", "–"]
+      ]
+    },
+    {
+      "name": "Kapitalets ursprung",
+      "columns": ["Källa", "Från", "Belopp (kr)", "Insatt", "Ursprung", "Verifikation"],
+      "rows": [
+        ["Aktieägartillskott", "Johan Ekholm", 100000, "2026-06-19", "Försäljning av bostadsrätt maj 2026", "Köpekontrakt och kontoutdrag bifogas"],
+        ["Aktieägartillskott", "Leila Haddad", 60000, "2026-06-19", "Eget sparande", "Kontoutdrag bifogas"],
+        ["Aktieägartillskott", "Mikael Strand", 40000, "2026-06-19", "Eget sparande", "Kontoutdrag bifogas"],
+        ["Privat lån", "Tomas Berglund", 280000, "2026-07-15", "Långivarens sparande", "Kontoutdrag från långivaren skickas senare"]
+      ]
+    }
+  ]
+}

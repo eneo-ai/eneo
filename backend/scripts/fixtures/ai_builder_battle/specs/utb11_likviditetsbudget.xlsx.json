@@ -1,0 +1,159 @@
+{
+  "file": "utb11_likviditetsbudget.xlsx",
+  "format": "xlsx",
+  "source": {
+    "catalogue_id": "UTB-11",
+    "url": "https://sjalvservice.malmo.se/oversikt/overview/479"
+  },
+  "description": "Likviditetsbudget per månad för första verksamhetsåret i Malmö stads mall, bilaga till ansökan om godkännande; bidraget betalas först från februari.",
+  "sheets": [
+    {
+      "name": "Likviditetsbudget 2027",
+      "columns": [
+        "Månad",
+        "Ingående saldo (kr)",
+        "Inbetalning bidrag (kr)",
+        "Inbetalning föräldraavgifter (kr)",
+        "Utbetalning personal (kr)",
+        "Utbetalning lokal (kr)",
+        "Övriga utbetalningar (kr)",
+        "Utgående saldo (kr)",
+        "Kommentar"
+      ],
+      "rows": [
+        [
+          "2027-01",
+          150000,
+          0,
+          0,
+          315000,
+          208000,
+          95000,
+          -468000,
+          "Startkapital 150 000 kr. Hyresdeposition 156 000 kr. Bidraget betalas ut första gången i februari."
+        ],
+        [
+          "2027-02",
+          -468000,
+          465600,
+          42600,
+          315000,
+          52000,
+          63000,
+          -389800,
+          "–"
+        ],
+        [
+          "2027-03",
+          -389800,
+          465600,
+          42600,
+          315000,
+          52000,
+          63000,
+          -311600,
+          "–"
+        ],
+        [
+          "2027-04",
+          -311600,
+          465600,
+          42600,
+          315000,
+          52000,
+          63000,
+          -233400,
+          "–"
+        ],
+        [
+          "2027-05",
+          -233400,
+          465600,
+          42600,
+          315000,
+          52000,
+          63000,
+          -155200,
+          "–"
+        ],
+        [
+          "2027-06",
+          -155200,
+          465600,
+          42600,
+          315000,
+          52000,
+          63000,
+          -77000,
+          "–"
+        ],
+        [
+          "2027-07",
+          -77000,
+          465600,
+          42600,
+          315000,
+          52000,
+          63000,
+          1200,
+          "–"
+        ],
+        [
+          "2027-08",
+          1200,
+          465600,
+          42600,
+          315000,
+          52000,
+          63000,
+          79400,
+          "–"
+        ],
+        [
+          "2027-09",
+          79400,
+          465600,
+          42600,
+          315000,
+          52000,
+          63000,
+          157600,
+          "–"
+        ],
+        [
+          "2027-10",
+          157600,
+          465600,
+          42600,
+          315000,
+          52000,
+          63000,
+          235800,
+          "–"
+        ],
+        [
+          "2027-11",
+          235800,
+          465600,
+          42600,
+          315000,
+          52000,
+          63000,
+          314000,
+          "–"
+        ],
+        [
+          "2027-12",
+          314000,
+          465600,
+          42600,
+          315000,
+          52000,
+          63000,
+          392200,
+          "–"
+        ]
+      ]
+    }
+  ]
+}

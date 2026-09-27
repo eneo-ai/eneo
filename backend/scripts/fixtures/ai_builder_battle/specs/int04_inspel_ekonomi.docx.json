@@ -1,0 +1,81 @@
+{
+  "file": "int04_inspel_ekonomi.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-04",
+    "url": "https://www.regeringen.se/contentassets/ee59c69b63014c19a08b0e8ca47334b2/svara-pa-remiss-pm2021_1-rev-2026.pdf"
+  },
+  "description": "Ekonomiavdelningens underlag till remissvar: sammanställer kommunens kostnader och avstyrker ersättningsmodellen, med ett eget beräknat bidragsbelopp som skiljer sig från betänkandets bilagetabell.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Kommunstyrelsekontoret, ekonomiavdelningen",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-10-07",
+  "diarienummer": "KS-2026-00544",
+  "title": "Underlag till remissvar – SOU 2026:41 Kommunal beredskap i en ny tid",
+  "blocks": [
+    {
+      "paragraph": "Ekonomiavdelningen har sammanställt förvaltningarnas och bolagens kostnadsberäkningar och jämfört dem med den föreslagna ersättningen."
+    },
+    {
+      "heading": "Kostnader för Sundsvalls kommun"
+    },
+    {
+      "table": {
+        "columns": [
+          "Post",
+          "Investering, mnkr",
+          "Årlig kostnad, mnkr"
+        ],
+        "rows": [
+          [
+            "Reservkraft vård- och omsorgsboenden och LSS (vård- och omsorgsförvaltningen)",
+            "22,0",
+            "0,9"
+          ],
+          [
+            "Nödvatten (Nordvatten Sundsvall AB)",
+            "14,2",
+            "1,9"
+          ],
+          [
+            "Reservledningsplats, lager (säkerhetsavdelningen)",
+            "0,4",
+            "0,1"
+          ],
+          [
+            "Livsmedelslager sju dygn (vård- och omsorgsförvaltningen)",
+            "3,5",
+            "1,6"
+          ],
+          [
+            "Personal för planering, övning och uppföljning",
+            "–",
+            "4,2"
+          ],
+          [
+            "Summa",
+            "40,1",
+            "8,7"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Avsnitt 12.4 Ersättningsmodellen"
+    },
+    {
+      "paragraph": "Enligt vår beräkning med utredningens schablon får Sundsvalls kommun cirka 4,1 miljoner kronor per år i riktat statsbidrag. Den årliga kostnaden är 8,7 miljoner kronor, och av investeringen om 40,1 miljoner kronor täcker investeringsstödet högst hälften. Förslaget innebär därmed att kommunen själv får finansiera minst 4,6 miljoner kronor per år och drygt 20 miljoner kronor i investeringar."
+    },
+    {
+      "paragraph": "Ekonomiavdelningen avstyrker ersättningsmodellen i dess nuvarande utformning. Finansieringsprincipen ska tillämpas fullt ut, och ersättningen bör i stället beräknas utifrån antalet vård- och omsorgsboenden, LSS-bostäder och vattenverk i kommunen."
+    },
+    {
+      "signature": {
+        "name": "Maria Östberg",
+        "role": "Ekonomidirektör"
+      }
+    }
+  ]
+}

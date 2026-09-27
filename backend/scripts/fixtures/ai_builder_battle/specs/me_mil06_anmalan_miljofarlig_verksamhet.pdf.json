@@ -1,0 +1,173 @@
+{
+  "file": "me_mil06_anmalan_miljofarlig_verksamhet.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "MIL-06",
+    "url": "https://sjalvservice.malmo.se/oversikt/overview/529"
+  },
+  "description": "Ifylld blankett för anmälan om miljöfarlig verksamhet enligt 9 kap. 6 § miljöbalken (C-verksamhet, industrilackering) med administrativa uppgifter, verksamhetskod, drifttider, utsläpp, avfall och bilageförteckning där VA-ritningen saknas och uppgift om buller inte är ifylld.",
+  "letterhead": {
+    "organisation": "Malmö stad",
+    "unit": "Miljöförvaltningen",
+    "address": "205 80 Malmö"
+  },
+  "date": "2026-09-14",
+  "diarienummer": "MN-2026-4711",
+  "title": "Anmälan om miljöfarlig verksamhet enligt 9 kap. 6 § miljöbalken och 1 kap. 10 § miljöprövningsförordningen (2013:251)",
+  "blocks": [
+    {
+      "heading": "1. Administrativa uppgifter"
+    },
+    {
+      "table": {
+        "columns": [
+          "Administrativ uppgift",
+          "Ifyllt"
+        ],
+        "rows": [
+          [
+            "Verksamhetsutövare",
+            "Norrlacks Industrilackering AB"
+          ],
+          [
+            "Organisationsnummer",
+            "556934-2217"
+          ],
+          [
+            "Fastighetsbeteckning",
+            "Malmö Svetsaren 9"
+          ],
+          [
+            "Besöksadress",
+            "Fraktgatan 12, 212 41 Malmö"
+          ],
+          [
+            "Kontaktperson",
+            "Emir Hadžić, produktionschef, 040-615 33 20"
+          ],
+          [
+            "Fastighetsägare",
+            "Hamnporten Fastigheter AB"
+          ],
+          [
+            "Anmälan gäller",
+            "Ny verksamhet, planerad start 2026-12-01"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "2. Verksamheten"
+    },
+    {
+      "table": {
+        "columns": [
+          "Uppgift om verksamheten",
+          "Ifyllt"
+        ],
+        "rows": [
+          [
+            "Verksamhetskod enligt miljöprövningsförordningen",
+            "39.50-C, förbrukning av mer än totalt 5 ton organiska lösningsmedel per kalenderår"
+          ],
+          [
+            "Beskrivning",
+            "Våtlackering av stålkomponenter till lantbruksmaskiner i två sprutboxar, med avfettning före lackering"
+          ],
+          [
+            "Förbrukning av organiska lösningsmedel",
+            "Cirka 6,5 ton per år"
+          ],
+          [
+            "Drifttider",
+            "Måndag–fredag 06.00–22.00, två skift"
+          ],
+          [
+            "Antal anställda",
+            "14"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "3. Utsläpp och omgivningspåverkan"
+    },
+    {
+      "table": {
+        "columns": [
+          "Uppgift om omgivningspåverkan",
+          "Ifyllt"
+        ],
+        "rows": [
+          [
+            "Utsläpp till luft",
+            "Ventilation från sprutboxarna via torrfilter, avsedd kolfilteranläggning installeras 2027"
+          ],
+          [
+            "Utsläpp till vatten",
+            "Endast sanitärt spillvatten. Golvbrunn i tvätthallen ansluten via oljeavskiljare"
+          ],
+          [
+            "Buller",
+            "(ej ifyllt)"
+          ],
+          [
+            "Transporter",
+            "Cirka 6 lastbilstransporter per vecka"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "4. Farligt avfall"
+    },
+    {
+      "paragraph": "Se kemikalieförteckningen, blad Farligt avfall. Avfallet hämtas av auktoriserad transportör."
+    },
+    {
+      "heading": "5. Rutiner vid driftstörning och olycka"
+    },
+    {
+      "paragraph": "(ej ifyllt)"
+    },
+    {
+      "heading": "6. Bilagor"
+    },
+    {
+      "table": {
+        "columns": [
+          "Bilaga",
+          "Bifogad"
+        ],
+        "rows": [
+          [
+            "1. Situationsplan",
+            "Ja"
+          ],
+          [
+            "2. Ritning över lokalen",
+            "Ja"
+          ],
+          [
+            "3. Kemikalieförteckning",
+            "Ja"
+          ],
+          [
+            "4. VA-ritning med brunnar och oljeavskiljare",
+            "Nej, skickas senare"
+          ],
+          [
+            "5. Verksamhetsbeskrivning",
+            "Ja"
+          ]
+        ]
+      }
+    },
+    {
+      "signature": {
+        "name": "Emir Hadžić",
+        "role": "Produktionschef, Norrlacks Industrilackering AB"
+      }
+    }
+  ]
+}

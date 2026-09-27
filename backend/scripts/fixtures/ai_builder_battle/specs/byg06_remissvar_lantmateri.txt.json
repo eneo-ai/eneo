@@ -1,0 +1,16 @@
+{
+  "file": "byg06_remissvar_lantmateri.txt",
+  "format": "txt",
+  "source": {"catalogue_id": "BYG-06", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/428"},
+  "description": "Lantmäteriavdelningens remissvar på en gammal mall som fortfarande hänvisar till den upphävda paragrafen för förhandsbesked (9 kap. 17 § PBL); avstyckning bedöms möjlig med servitut och hänsyn till ett dikningsföretag.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Lantmäteriavdelningen (kommunal lantmäterimyndighet)"},
+  "date": "2026-05-22",
+  "title": "Yttrande över ansökan om förhandsbesked enligt 9 kap. 17 § plan- och bygglagen",
+  "blocks": [
+    {"paragraph": "Till: Stadsbyggnadsnämnden, Sundsvalls kommun. Ärende: BYGG-2026-000512, avstyckning av bostadstomt från Sundsvall Lövsta 3:28."},
+    {"paragraph": "Lantmäteriavdelningen bedömer att en avstyckning av en bostadstomt på cirka 2 000 m² är möjlig enligt 3 kap. fastighetsbildningslagen, om lämplig utfart kan ordnas."},
+    {"list": ["Tillfart via befintlig utfart för Lövsta 3:28 kan säkras med servitut eller genom en gemensamhetsanläggning i samband med avstyckningen.", "Den tänkta västra tomtgränsen korsar ett dike som ingår i Lövsta dikningsföretag av år 1932. Diket får inte kulverteras eller flyttas utan samråd med dikningsföretaget.", "Tomtens slutliga utformning bestäms i lantmäteriförrättningen."]},
+    {"paragraph": "Lantmäteriavdelningen har i övrigt inget att erinra."},
+    {"signature": {"name": "Anton Berglund", "role": "Förrättningslantmätare"}}
+  ]
+}

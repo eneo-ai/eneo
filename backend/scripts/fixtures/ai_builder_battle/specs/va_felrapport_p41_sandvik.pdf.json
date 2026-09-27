@@ -1,0 +1,46 @@
+{
+  "file": "va_felrapport_p41_sandvik.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "MIL-15", "url": "https://e-tjanster.kristianstad.se/oversikt/overview/69"},
+  "description": "VA-avdelningens driftstörningsrapport, bilaga till anmälan om driftstörning: bräddning från avloppspumpstation P41 Norra Sandvik under ett nattligt strömavbrott, skriven av jouren på morgonen med preliminär orsak och uppskattade tider.",
+  "letterhead": {"organisation": "Kristianstads kommun", "unit": "Tekniska förvaltningen – VA-avdelningen, drift avlopp", "address": "291 80 Kristianstad"},
+  "date": "2026-08-17",
+  "diarienummer": "TF-VA 2026-0417",
+  "title": "Driftstörningsrapport – bräddning vid avloppspumpstation P41 Norra Sandvik",
+  "blocks": [
+    {"paragraph": "Rapporten upprättad 2026-08-17 kl. 06:30 av jourhavande drifttekniker efter utryckning. Uppgifterna är preliminära och kompletteras när driftdata har gåtts igenom. Rapporten bifogas anmälan om driftstörning till Miljö- och hälsoskyddsförvaltningen."},
+    {"heading": "1. Anläggning"},
+    {
+      "table": {
+        "columns": ["Anläggningsuppgift", "Värde"],
+        "rows": [
+          ["Anläggning", "Avloppspumpstation P41 Norra Sandvik"],
+          ["Placering", "Sandviksvägen, vid infarten till Norra Sandviks fritidshusområde, Åhus"],
+          ["Ansluten bebyggelse", "ca 310 hushåll (Norra Sandvik och Sandviks camping)"],
+          ["Utrustning", "Två dränkbara pumpar, fast reservkraftaggregat (diesel), bräddavlopp med bräddgivare"],
+          ["Recipient för bräddning", "Sandviksbäcken, som mynnar i Hanöbukten ca 250 m norr om Sandviksbadet"],
+          ["Tillståndsgrund", "Ingår i Åhus avloppsreningsverks verksamhet; egenkontroll enligt förordningen (1998:901) om verksamhetsutövares egenkontroll"]
+        ]
+      }
+    },
+    {"heading": "2. Händelseförlopp enligt jouren"},
+    {"paragraph": "Kraftigt åskväder över Åhus under natten mot måndag 17 augusti. Jouren larmades av driftövervakningen kl. 03:05 om högnivå i P41 och var på plats kl. 04:20. Stationen var strömlös och reservkraftaggregatet hade inte startat. Pump 1 visade utlöst motorskydd på panelen. Mobilt reservkraftverk beställdes från förrådet i Kristianstad och anslöts kl. 04:55; pumparna gick igång kl. 05:12."},
+    {"paragraph": "Bräddning till Sandviksbäcken bedöms ha pågått ungefär mellan kl. 03.30 och 06.00. Bräddad volym är inte beräknad ännu."},
+    {"heading": "3. Preliminär orsak"},
+    {"paragraph": "Troligen pumphaveri: pump 1 löste ut och pump 2 klarade inte inflödet under åskregnet. Varför reservkraften inte startade är inte utrett. Felsökning görs under förmiddagen."},
+    {"heading": "4. Vidtagna åtgärder"},
+    {"list": [
+      "Mobilt reservkraftverk anslutet kl. 04:55, pumpning återupptagen kl. 05:12.",
+      "Bräddavloppet och Sandviksbäckens mynning inspekterade kl. 05:50; synligt avloppsvatten och toalettpapper i bäckfåran.",
+      "Kontakt med Miljö- och hälsoskyddsförvaltningen tas när kontoret öppnar.",
+      "Skylt om avrådan från bad beställd till Sandviksbadet efter samråd med miljö."
+    ]},
+    {"heading": "5. Planerade åtgärder"},
+    {"list": [
+      "Felsökning av pumpar och reservkraftaggregat.",
+      "Beräkning av bräddad volym ur driftdata.",
+      "Städning av bäckfåran vid mynningen."
+    ]},
+    {"signature": {"name": "Drifttekniker, jour VA", "role": "Tekniska förvaltningen, VA-avdelningen"}}
+  ]
+}

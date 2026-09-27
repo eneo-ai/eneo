@@ -1,0 +1,22 @@
+{
+  "file": "nar05_delegering_forestandare.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "NAR-05", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/468"},
+  "description": "Verksamhetsutövarens skriftliga delegering av uppgifter och befogenheter till föreståndare för brandfarlig vara, bilaga till ansökan om tillstånd; omfattar bara en av de två föreståndare som ansökan anger.",
+  "letterhead": {"organisation": "Tunadals Industrilack AB", "unit": "Ledningen", "address": "Tunadalsvägen 31, 856 41 Sundsvall"},
+  "date": "2026-09-01",
+  "title": "Delegering av uppgifter och befogenheter – föreståndare för brandfarlig vara",
+  "blocks": [
+    {"paragraph": "Enligt 9 § lagen (2010:1011) om brandfarliga och explosiva varor ska den som har tillstånd till hantering av brandfarliga varor ha en eller flera föreståndare med tillräckliga befogenheter. Tunadals Industrilack AB delegerar därför följande uppgifter och befogenheter."},
+    {"heading": "Föreståndare"},
+    {"paragraph": "Anders Holm, produktionschef, utses till föreståndare för hanteringen av brandfarlig gas vid anläggningen på Tunadalsvägen 31 (gasolskåp F1 och gasolcentral F2)."},
+    {"heading": "Uppgifter"},
+    {"list": ["Se till att hanteringen sker enligt tillståndet och gällande regler.", "Se till att personal som hanterar gasol har den utbildning och de instruktioner som behövs.", "Se till att kontroller och underhåll av gasolinstallationer görs och dokumenteras.", "Rapportera olyckor och tillbud till räddningstjänsten."]},
+    {"heading": "Befogenheter"},
+    {"list": ["Stoppa hantering som strider mot tillståndet eller innebär risk för brand eller explosion.", "Beställa reparationer och kontroller upp till 50 000 kronor per tillfälle utan att fråga verkställande direktören.", "Ge instruktioner till all personal och till entreprenörer inom området."]},
+    {"heading": "Giltighet"},
+    {"paragraph": "Delegeringen gäller tills vidare från och med 2026-09-01 och ska ses över när verksamheten ändras."},
+    {"signature": {"name": "Mats Ödling", "role": "Verkställande direktör"}},
+    {"signature": {"name": "Anders Holm", "role": "Föreståndare, delegeringen mottagen och accepterad"}}
+  ]
+}

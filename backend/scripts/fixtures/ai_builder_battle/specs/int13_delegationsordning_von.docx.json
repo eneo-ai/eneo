@@ -1,0 +1,379 @@
+{
+  "file": "int13_delegationsordning_von.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-13",
+    "url": "https://lagen.nu/2017:725"
+  },
+  "description": "Vård- och omsorgsnämndens delegationsordning 2026 med allmänna regler (ersättare, brådskande ärenden, anmälan, avidentifiering) och tabeller per område med delegat, ersättare och beloppsgränser.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Vård- och omsorgsnämnden",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-01-28",
+  "diarienummer": "VON 2025/00931",
+  "title": "Delegationsordning för vård- och omsorgsnämnden",
+  "blocks": [
+    {
+      "paragraph": "Antagen av vård- och omsorgsnämnden 2026-01-28, § 9. Gäller från och med 2026-02-01 och ersätter delegationsordningen antagen 2024-12-11, § 187."
+    },
+    {
+      "heading": "1. Allmänna bestämmelser"
+    },
+    {
+      "paragraph": "1.1 Delegering. Nämnden delegerar beslutanderätt enligt 6 kap. 37 § och 7 kap. 5 § kommunallagen (2017:725), KL, i den omfattning som anges i denna delegationsordning. Beslut i ärenden som inte finns i delegationsordningen fattas av nämnden. Vidaredelegering enligt 7 kap. 6 § KL är inte tillåten."
+    },
+    {
+      "paragraph": "1.2 Ersättare. Vid förhinder för delegaten fattas beslutet av den ersättare som anges i kolumnen Ersättare. Saknas angiven ersättare fattas beslutet av nämnden. Någon annan än delegaten eller den angivna ersättaren får inte fatta beslutet."
+    },
+    {
+      "paragraph": "1.3 Brådskande ärenden. Ordföranden, eller vid förhinder vice ordföranden, får enligt 6 kap. 39 § KL besluta på nämndens vägnar i ärenden som är så brådskande att nämndens avgörande inte kan avvaktas. Sådana beslut anmäls vid nämndens nästa sammanträde."
+    },
+    {
+      "paragraph": "1.4 Beloppsgränser. Angivna belopp avser belopp exklusive mervärdesskatt per avtal eller tillfälle. Ett beslut som överstiger delegatens beloppsgräns är inte fattat med stöd av delegation."
+    },
+    {
+      "paragraph": "1.5 Anmälan. Beslut som fattas med stöd av delegation anmäls till nämnden vid nästkommande sammanträde enligt 6 kap. 40 § och 7 kap. 8 § KL. Nämndsekreteraren sammanställer anmälningslistan ur verksamhetssystemen."
+    },
+    {
+      "paragraph": "1.6 Individärenden. Beslut i ärenden som rör enskilda enligt socialtjänstlagen (2025:400), SoL, och lagen (1993:387) om stöd och service till vissa funktionshindrade, LSS, anmäls i avidentifierad form: antal beslut per delegationspunkt. Uppgifter om enskilda omfattas av sekretess enligt 26 kap. 1 § offentlighets- och sekretesslagen (2009:400)."
+    },
+    {
+      "heading": "2. Förkortningar"
+    },
+    {
+      "table": {
+        "columns": [
+          "Förkortning",
+          "Befattning"
+        ],
+        "rows": [
+          [
+            "BiH",
+            "Biståndshandläggare"
+          ],
+          [
+            "LSS-H",
+            "LSS-handläggare"
+          ],
+          [
+            "EC MYN",
+            "Enhetschef myndighetsenheten"
+          ],
+          [
+            "VC MYN",
+            "Verksamhetschef myndighet"
+          ],
+          [
+            "EC",
+            "Enhetschef i utförarverksamheten"
+          ],
+          [
+            "VC",
+            "Verksamhetschef"
+          ],
+          [
+            "AH",
+            "Avgiftshandläggare"
+          ],
+          [
+            "EC AVG",
+            "Enhetschef avgiftsenheten"
+          ],
+          [
+            "FC",
+            "Förvaltningschef"
+          ],
+          [
+            "ORD",
+            "Nämndens ordförande"
+          ],
+          [
+            "V ORD",
+            "Nämndens vice ordförande"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "3. Insatser enligt socialtjänstlagen (2025:400)"
+    },
+    {
+      "table": {
+        "columns": [
+          "Nr",
+          "Ärende",
+          "Lagrum",
+          "Delegat",
+          "Ersättare"
+        ],
+        "rows": [
+          [
+            "3.1",
+            "Beslut om hemtjänst, bifall",
+            "11 kap. 1 § SoL",
+            "BiH",
+            "EC MYN"
+          ],
+          [
+            "3.2",
+            "Beslut om avslag på ansökan om hemtjänst",
+            "11 kap. 1 § SoL",
+            "EC MYN",
+            "VC MYN"
+          ],
+          [
+            "3.3",
+            "Beslut om bostad i särskild boendeform för äldre, bifall",
+            "11 kap. 1 § och 8 kap. 4 § SoL",
+            "BiH",
+            "EC MYN"
+          ],
+          [
+            "3.4",
+            "Beslut om avslag på ansökan om bostad i särskild boendeform för äldre",
+            "11 kap. 1 § och 8 kap. 4 § SoL",
+            "EC MYN",
+            "VC MYN"
+          ],
+          [
+            "3.5",
+            "Beslut om korttidsvistelse",
+            "11 kap. 1 § SoL",
+            "BiH",
+            "EC MYN"
+          ],
+          [
+            "3.6",
+            "Beslut om trygghetslarm",
+            "11 kap. 1 § SoL",
+            "BiH",
+            "EC MYN"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "4. Insatser enligt LSS"
+    },
+    {
+      "table": {
+        "columns": [
+          "Nr",
+          "Ärende",
+          "Lagrum",
+          "Delegat",
+          "Ersättare"
+        ],
+        "rows": [
+          [
+            "4.1",
+            "Beslut om personlig assistans, bifall",
+            "9 § 2 LSS",
+            "LSS-H",
+            "EC MYN"
+          ],
+          [
+            "4.2",
+            "Beslut om avslag på ansökan om personlig assistans",
+            "9 § 2 LSS",
+            "EC MYN",
+            "VC MYN"
+          ],
+          [
+            "4.3",
+            "Beslut om ledsagarservice",
+            "9 § 3 LSS",
+            "LSS-H",
+            "EC MYN"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "5. Avgifter"
+    },
+    {
+      "table": {
+        "columns": [
+          "Nr",
+          "Ärende",
+          "Lagrum",
+          "Delegat",
+          "Ersättare"
+        ],
+        "rows": [
+          [
+            "5.1",
+            "Beslut om avgift för hemtjänst och särskilt boende",
+            "32 kap. SoL",
+            "AH",
+            "EC AVG"
+          ],
+          [
+            "5.2",
+            "Beslut om nedsättning av avgift",
+            "32 kap. SoL",
+            "EC AVG",
+            "VC"
+          ],
+          [
+            "5.3",
+            "Beslut om avskrivning av avgiftsfordran upp till 10 000 kr",
+            "–",
+            "EC AVG",
+            "FC"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "6. Missförhållanden (lex Sarah)"
+    },
+    {
+      "table": {
+        "columns": [
+          "Nr",
+          "Ärende",
+          "Lagrum",
+          "Delegat",
+          "Ersättare"
+        ],
+        "rows": [
+          [
+            "6.1",
+            "Beslut att inleda utredning av rapport om missförhållande",
+            "27 kap. 5 § SoL",
+            "EC",
+            "VC"
+          ],
+          [
+            "6.2",
+            "Beslut att avsluta utredning av missförhållande, med eller utan anmälan till IVO",
+            "27 kap. 5–6 §§ SoL",
+            "FC",
+            "–"
+          ],
+          [
+            "6.3",
+            "Anmälan till IVO om allvarligt missförhållande",
+            "27 kap. 6 § SoL",
+            "FC",
+            "–"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "7. Ekonomi och upphandling"
+    },
+    {
+      "table": {
+        "columns": [
+          "Nr",
+          "Ärende",
+          "Lagrum",
+          "Delegat",
+          "Ersättare"
+        ],
+        "rows": [
+          [
+            "7.1",
+            "Direktupphandling och avrop från ramavtal upp till 100 000 kr",
+            "19 kap. LOU",
+            "EC",
+            "VC"
+          ],
+          [
+            "7.2",
+            "Direktupphandling och avrop från ramavtal över 100 000 kr upp till 700 000 kr",
+            "19 kap. LOU",
+            "VC",
+            "FC"
+          ],
+          [
+            "7.3",
+            "Upphandling över 700 000 kr",
+            "LOU",
+            "FC",
+            "–"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "8. Personal"
+    },
+    {
+      "table": {
+        "columns": [
+          "Nr",
+          "Ärende",
+          "Lagrum",
+          "Delegat",
+          "Ersättare"
+        ],
+        "rows": [
+          [
+            "8.1",
+            "Anställning av enhetschef",
+            "–",
+            "VC",
+            "FC"
+          ],
+          [
+            "8.2",
+            "Anställning av verksamhetschef",
+            "–",
+            "FC",
+            "–"
+          ],
+          [
+            "8.3",
+            "Anställning av övrig personal",
+            "–",
+            "EC",
+            "VC"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "9. Övrigt"
+    },
+    {
+      "table": {
+        "columns": [
+          "Nr",
+          "Ärende",
+          "Lagrum",
+          "Delegat",
+          "Ersättare"
+        ],
+        "rows": [
+          [
+            "9.1",
+            "Yttrande till IVO i tillsynsärende när nämndens yttrande inte kan avvaktas",
+            "6 kap. 39 § KL",
+            "ORD",
+            "V ORD"
+          ],
+          [
+            "9.2",
+            "Beslut att överklaga dom eller beslut",
+            "–",
+            "FC",
+            "–"
+          ]
+        ]
+      }
+    },
+    {
+      "signature": {
+        "name": "Margareta Ekholm",
+        "role": "Ordförande, vård- och omsorgsnämnden"
+      }
+    }
+  ]
+}

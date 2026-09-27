@@ -1,0 +1,138 @@
+{
+  "name": "Bygglov tillbyggnad – planenlighet och beslutsförslag",
+  "description": "Läser ansökan, bygglovsritningarna och detaljplanens bestämmelser, kontrollerar planenligheten punkt för punkt och skriver ett förslag till beslut om bygglov som handläggaren granskar före delegationsbeslutet. Byggt våren 2025 av bygglovavdelningen.",
+  "metadata_json": {
+    "form_schema": {
+      "fields": [
+        {"name": "handlaggare", "type": "text", "label": "Handläggare (namn och titel)", "required": true, "order": 1}
+      ]
+    }
+  },
+  "steps": [
+    {
+      "name": "Läs ansökan, ritningar och detaljplan",
+      "instructions": "Du får en ansökan om bygglov för tillbyggnad med bygglovsritningar och ett utdrag ur den detaljplan som gäller för fastigheten. Hämta uppgifterna exakt som de står i handlingarna. Mått och areor anges i meter och kvadratmeter med decimalkomma, som i ritningarna. Ta med byggnadsarean för varje byggnad på fastigheten efter åtgärden, även komplementbyggnader som bara syns på situationsplanen. Ta med alla planbestämmelser för kvartersmarken med beteckning och text, planens namn, datum för laga kraft och när genomförandetiden gick eller går ut. Lista handlingar som saknas jämfört med en komplett ansökan (situationsplan, plan-, fasad- och sektionsritningar, förslag till kontrollplan och uppgift om kontrollansvarig). Skriv null för uppgifter som inte finns i handlingarna. Gissa aldrig ett mått.",
+      "input_source": "flow_input",
+      "input_type": "document",
+      "input_config": {
+        "runtime_input": {
+          "enabled": true,
+          "required": true,
+          "max_files": 10,
+          "input_format": "document",
+          "label": "Ansökan, ritningar och detaljplan",
+          "description": "Ladda upp ansökan (utskrift från e-tjänsten), bygglovsritningarna och planbestämmelserna för fastigheten."
+        }
+      },
+      "input_bindings": {"question": "{{ step_input.text }}"},
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["diarienummer", "fastighetsbeteckning", "fastighetens_area_m2", "sokande", "atgard", "byggnader", "tillbyggnad", "kontrollansvarig", "detaljplan", "planbestammelser", "saknade_handlingar"],
+        "properties": {
+          "diarienummer": {"type": ["string", "null"]},
+          "fastighetsbeteckning": {"type": "string"},
+          "fastighetens_area_m2": {"type": ["number", "null"]},
+          "sokande": {"type": "string"},
+          "atgard": {"type": "string"},
+          "byggnader": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["byggnad", "byggnadsarea_m2"],
+              "properties": {"byggnad": {"type": "string"}, "byggnadsarea_m2": {"type": ["number", "null"]}}
+            }
+          },
+          "tillbyggnad": {
+            "type": "object",
+            "required": ["byggnadsarea_m2", "nockhojd_m", "avstand_till_fastighetsgrans_m", "fasadmaterial", "takvinkel"],
+            "properties": {
+              "byggnadsarea_m2": {"type": ["number", "null"]},
+              "nockhojd_m": {"type": ["number", "null"]},
+              "avstand_till_fastighetsgrans_m": {"type": ["number", "null"]},
+              "fasadmaterial": {"type": ["string", "null"]},
+              "takvinkel": {"type": ["string", "null"]}
+            }
+          },
+          "kontrollansvarig": {"type": ["string", "null"]},
+          "detaljplan": {
+            "type": "object",
+            "required": ["namn", "laga_kraft", "genomforandetid_slut"],
+            "properties": {
+              "namn": {"type": "string"},
+              "laga_kraft": {"type": ["string", "null"]},
+              "genomforandetid_slut": {"type": ["string", "null"]}
+            }
+          },
+          "planbestammelser": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["beteckning", "bestammelse"],
+              "properties": {"beteckning": {"type": "string"}, "bestammelse": {"type": "string"}}
+            }
+          },
+          "saknade_handlingar": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    {
+      "name": "Kontrollera planenlighet",
+      "instructions": "Jämför åtgärden med varje planbestämmelse i underlaget: användning, största byggnadsarea (räkna ihop byggnadsarean för alla byggnader på fastigheten efter åtgärden och jämför med byggrätten), placering och avstånd till fastighetsgräns, prickmark, högsta nockhöjd, takvinkel och fasadmaterial. Ange för varje kontroll bestämmelsen, värdet enligt ansökan och ritningarna och om bestämmelsen uppfylls. Beskriv varje avvikelse med dess storlek, till exempel hur många meter närmare gränsen än planen tillåter. Bedöm om åtgärden sammantaget är planenlig, en liten avvikelse som är förenlig med planens syfte eller en avvikelse som inte är liten, och motivera utifrån planens syfte. Grannehörande krävs när det finns en avvikelse. Notera också om något uppenbart strider mot kraven på lämplighet och god form-, färg- och materialverkan i 8 kap. 1 § plan- och bygglagen.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [{"step_ref": "step_1", "output": "structured", "label": "Uppgifter ur ansökan, ritningar och detaljplan"}]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["kontroller", "total_byggnadsarea_m2", "byggratt_m2", "avvikelser", "bedomning", "motivering", "grannehorande_kravs"],
+        "properties": {
+          "kontroller": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["kontroll", "planbestammelse", "varde_enligt_ansokan", "uppfylls", "kommentar"],
+              "properties": {
+                "kontroll": {"type": "string"},
+                "planbestammelse": {"type": "string"},
+                "varde_enligt_ansokan": {"type": "string"},
+                "uppfylls": {"type": "boolean"},
+                "kommentar": {"type": "string"}
+              }
+            }
+          },
+          "total_byggnadsarea_m2": {"type": ["number", "null"]},
+          "byggratt_m2": {"type": ["number", "null"]},
+          "avvikelser": {"type": "array", "items": {"type": "string"}},
+          "bedomning": {"type": "string", "enum": ["planenlig", "liten avvikelse", "avvikelse som inte är liten"]},
+          "motivering": {"type": "string"},
+          "grannehorande_kravs": {"type": "boolean"}
+        }
+      }
+    },
+    {
+      "name": "Skriv beslutsförslag",
+      "instructions": "Skriv ett förslag till beslut om bygglov på svenska enligt stadsbyggnadsnämndens beslutsmall, med rubrikerna Beslut, Motivering, Upplysningar och Hur man överklagar i den ordningen. Börja med diarienummer, fastighetsbeteckning och sökande exakt som i underlaget.\n\nBeslut: Om åtgärden är planenlig skriver du: \"Stadsbyggnadsnämnden beviljar bygglov för [åtgärd] på fastigheten [fastighetsbeteckning] med stöd av 9 kap. 30 § plan- och bygglagen (2010:900), PBL.\" Om bedömningen är en liten avvikelse skriver du i stället \"med stöd av 9 kap. 31 b § 1 PBL\". Om avvikelsen inte är liten skriver du ett förslag till avslag med stöd av 9 kap. 30 § PBL.\n\nMotivering: Börja med att åtgärden är bygglovspliktig enligt 9 kap. 2 § första stycket 2 PBL och att förutsättningarna för bygglov inom detaljplan framgår av 9 kap. 30 § PBL. Redovisa sedan planenlighetskontrollen punkt för punkt med planbestämmelse och värde enligt ansökan. Beskriv varje avvikelse och varför den är eller inte är liten och förenlig med detaljplanens syfte. Om grannehörande krävs skriver du att berörda sakägare har underrättats och getts tillfälle att yttra sig enligt 9 kap. 25 § PBL.\n\nUpplysningar: Skriv att beslutet enligt 9 kap. 40 § PBL innehåller följande upplysningar: att bygglovet upphör att gälla om åtgärden inte har påbörjats inom två år och avslutats inom fem år från den dag beslutet vann laga kraft (9 kap. 43 § PBL), att lovet får tas i anspråk tidigast fyra veckor efter att beslutet har kungjorts i Post- och Inrikes Tidningar (9 kap. 42 a § PBL), att åtgärden inte får påbörjas förrän stadsbyggnadsnämnden har gett startbesked (10 kap. 3 § PBL) och vem som är kontrollansvarig. Lista handlingar som saknas och behöver kompletteras före tekniskt samråd.\n\nHur man överklagar: Beslutet kan överklagas till Länsstyrelsen Västernorrland (13 kap. 3 § PBL). Överklagandet ställs till länsstyrelsen men skickas till stadsbyggnadsnämnden och ska ha kommit in inom tre veckor från den dag klaganden fick del av beslutet.\n\nAvsluta med handläggarens namn och titel. Skriv inte ut sökandens personnummer.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Handläggare: {{ flow_input.handlaggare }}",
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "diarienummer", "label": "Diarienummer"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "fastighetsbeteckning", "label": "Fastighetsbeteckning"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "sokande", "label": "Sökande"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "atgard", "label": "Åtgärd"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "kontrollansvarig", "label": "Kontrollansvarig"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "saknade_handlingar", "label": "Saknade handlingar"},
+          {"step_ref": "step_2", "output": "structured", "label": "Planenlighetskontroll"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "text"
+    }
+  ]
+}

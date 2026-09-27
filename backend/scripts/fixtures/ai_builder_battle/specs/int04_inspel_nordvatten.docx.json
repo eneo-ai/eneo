@@ -1,0 +1,52 @@
+{
+  "file": "int04_inspel_nordvatten.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-04",
+    "url": "https://www.regeringen.se/contentassets/ee59c69b63014c19a08b0e8ca47334b2/svara-pa-remiss-pm2021_1-rev-2026.pdf"
+  },
+  "description": "Det kommunala VA-bolagets underlag till remissvar: avstyrker tidpunkten för nödvattenkravet och föreslår en senare tidpunkt, med kostnadsberäkning.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Nordvatten Sundsvall AB (helägt kommunalt VA-bolag)",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-10-02",
+  "diarienummer": "KS-2026-00544",
+  "title": "Underlag till remissvar – SOU 2026:41 Kommunal beredskap i en ny tid",
+  "blocks": [
+    {
+      "paragraph": "Nordvatten Sundsvall AB är huvudman för de allmänna vattentjänsterna i Sundsvalls kommun enligt avtal med kommunen och ansvarar för nödvattenplaneringen."
+    },
+    {
+      "heading": "Avsnitt 8.3 Reservkraft vid vattenverk"
+    },
+    {
+      "paragraph": "Bolagets tre vattenverk har fast reservkraft. Av de 34 tryckstegringsstationer som försörjer fler än 500 personer har 12 fast reservkraft och 22 förberedd anslutning. Vi tillstyrker kravet under förutsättning att förberedd anslutning med avtal om mobila verk godtas, som utredningen föreslår."
+    },
+    {
+      "heading": "Avsnitt 9.2 Nödvatten"
+    },
+    {
+      "paragraph": "Vi tillstyrker att kraven blir tydliga, men 10 liter per person och dygn inom 24 timmar till hela befolkningen, cirka 100 000 personer, kräver tankar, fordon och personal som vi inte har i dag. Vi beräknar investeringen till 14,2 miljoner kronor och den årliga kostnaden till 1,9 miljoner kronor."
+    },
+    {
+      "heading": "Avsnitt 9.4 Tidpunkt"
+    },
+    {
+      "paragraph": "Vi avstyrker att kravet ska vara uppfyllt senast den 30 juni 2029. Upphandling av tankar och fordon tar 12–18 månader och personalen behöver utbildas och öva. En realistisk tidpunkt för Sundsvall är den 31 december 2033. Om tidpunkten ändå blir 2029 måste investeringsstödet kunna betalas ut redan 2027."
+    },
+    {
+      "heading": "Övrigt"
+    },
+    {
+      "paragraph": "Kostnaderna för nödvatten får enligt lagen om allmänna vattentjänster inte tas ut genom VA-taxan i den del de avser befolkningen i stort. Det måste framgå av det fortsatta arbetet hur kostnaderna ska fördelas mellan staten, kommunen och VA-kollektivet."
+    },
+    {
+      "signature": {
+        "name": "Elin Fors",
+        "role": "Chef för produktion och beredskap"
+      }
+    }
+  ]
+}

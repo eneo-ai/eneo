@@ -1,0 +1,63 @@
+{
+  "file": "me_int06_anbud_omsorgslarm.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "INT-06", "url": "https://www.upphandlingsmyndigheten.se/inkopsprocessen/genomfor-upphandlingen/tilldelningsbeslut/"},
+  "description": "Ett inkommet anbud vars följebrev anger ett annat månadspris än prisbilagan och vars batteribackup, som bara står i produktbladet i bilagan, inte når skall-kravet.",
+  "letterhead": {"organisation": "Omsorgslarm Sverige AB", "unit": "Anbud", "address": "Sveavägen 112, 113 50 Stockholm"},
+  "date": "2026-08-16",
+  "diarienummer": "KS-2026-00318",
+  "title": "Anbud – Trygghetslarm med larmmottagning för hemtjänsten",
+  "blocks": [
+    {"heading": "Följebrev"},
+    {"paragraph": "Omsorgslarm Sverige AB tackar för möjligheten att lämna anbud. Vi levererar trygghetslarm till 41 kommuner och erbjuder Sundsvalls kommun marknadens mest konkurrenskraftiga pris: 169 kr per larm och månad, med larmmottagning i egen regi."},
+    {"heading": "Anbudsgivare"},
+    {
+      "table": {
+        "columns": ["Uppgift", "Värde"],
+        "rows": [
+          ["Företag", "Omsorgslarm Sverige AB"],
+          ["Organisationsnummer", "556871-4402"],
+          ["Kontaktperson", "Marcus Ek, anbudsansvarig"],
+          ["E-post", "anbud@omsorgslarm.example"]
+        ]
+      }
+    },
+    {"heading": "Svar på skall-krav"},
+    {
+      "table": {
+        "columns": ["Krav-ID", "Svar", "Anbudsgivarens beskrivning"],
+        "rows": [
+          ["SK1", "Uppfylls", "Larmcentralen i Västerås är certifierad enligt SS-EN 50518. Certifikat i bilaga B."],
+          ["SK2", "Uppfylls", "Se produktblad för OL Hemlarm 4G (bilaga C)."],
+          ["SK3", "Uppfylls", "Åtgärd på plats inom 16 timmar från felanmälan genom vår servicepartner i Sundsvall."],
+          ["SK4", "Uppfylls", "Personuppgifter behandlas inom EU/EES. Personuppgiftsbiträdesavtalet godtas."],
+          ["SK5", "Uppfylls", "Västerås stad (2 400 larm) och Köpings kommun (610 larm), båda pågående sedan 2023."]
+        ]
+      }
+    },
+    {"heading": "Bilaga C – Produktblad OL Hemlarm 4G"},
+    {
+      "table": {
+        "columns": ["Egenskap", "Värde"],
+        "rows": [
+          ["Kommunikation", "4G med reserv via LTE-M"],
+          ["Batteribackup vid strömavbrott", "30 timmar"],
+          ["Räckvidd larmknapp", "Upp till 100 meter inomhus"],
+          ["Vattentålighet larmknapp", "IP67"]
+        ]
+      }
+    },
+    {"heading": "Bilaga 2 – Prisbilaga"},
+    {
+      "table": {
+        "columns": ["Prispost", "Belopp (kr, exkl. moms)"],
+        "rows": [
+          ["Månadsavgift per larm inklusive larmmottagning", "176"],
+          ["Engångskostnad för införande", "120 000"],
+          ["Anbudspris (1 150 larm × 48 månader + engångskostnad)", "9 835 200"]
+        ]
+      }
+    },
+    {"signature": {"name": "Cecilia Wahlberg", "role": "Försäljningschef, Omsorgslarm Sverige AB"}}
+  ]
+}

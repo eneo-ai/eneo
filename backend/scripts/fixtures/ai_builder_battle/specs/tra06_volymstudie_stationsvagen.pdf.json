@@ -1,0 +1,23 @@
+{
+  "file": "tra06_volymstudie_stationsvagen.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "TRA-06", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/33"},
+  "description": "Arkitektens reviderade volymstudie (skiss) som komplettering till planbeskedet: fler lägenheter och en våning mer än begäran, och ett hus 22 meter från spårmitt.",
+  "letterhead": {"organisation": "Arkitektbyrån Ljungdalen AB", "unit": "Volymstudie, revidering B", "address": "Storgatan 8, 852 30 Sundsvall"},
+  "date": "2026-06-24",
+  "title": "Volymstudie – bostäder vid Stationsvägen, Kvissleby",
+  "blocks": [
+    {"paragraph": "Uppdragsgivare: Njurunda Bostadsutveckling AB. Revidering B ersätter volymstudien som bifogades begäran om planbesked. Ändringar: hus A har fått en indragen takvåning, lägenhetsfördelningen är omarbetad och parkeringen utökad."},
+    {"heading": "Byggnader"},
+    {"table": {"columns": ["Hus", "Våningar", "Lägenheter", "Bruttoarea", "Användning"], "rows": [["A", "7 (varav en indragen takvåning)", "28", "3 250 m²", "Bostäder, lokal 180 m² i bottenvåningen"], ["B", "6", "28", "2 950 m²", "Bostäder"], ["C", "4", "16", "1 950 m²", "Bostäder"], ["Summa", "", "72", "8 150 m²", ""]]}},
+    {"heading": "Placering"},
+    {"paragraph": "Husen placeras i en halvsluten kvartersform kring en gemensam gård mot söder. Hus A ligger närmast stationen i kvarterets norra del och bildar entré mot Stationsvägen. Hus A placeras 22 meter från närmaste spårmitt på Ostkustbanan; övriga hus ligger mer än 60 meter från spåret. Mellan hus A och spåret föreslås en bullerskyddsvall."},
+    {"heading": "Parkering och angöring"},
+    {"paragraph": "Parkeringsgarage under hus A och B med 58 platser samt 12 markparkeringar för besökare. Angöring från Stationsvägen. Cykelparkering för 150 cyklar, varav hälften under tak."},
+    {"heading": "Sol och skugga"},
+    {"paragraph": "Solstudien visar att hus A skuggar stationstorget och perrongens norra del efter klockan 15 under vår- och höstdagjämning. Gården får sol mitt på dagen under hela sommarhalvåret."},
+    {"heading": "Dagvatten"},
+    {"paragraph": "Gröna tak på hus B och C och ett fördröjningsmagasin under gården. Området lutar mot Stationsvägen och ansluter till kommunens dagvattennät."},
+    {"signature": {"name": "Hanna Wiklund", "role": "Arkitekt SAR/MSA, Arkitektbyrån Ljungdalen AB"}}
+  ]
+}

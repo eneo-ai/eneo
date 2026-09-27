@@ -1,0 +1,23 @@
+Sundsvalls kommun
+Kommunstyrelsekontoret, kansliavdelningen, registraturen
+
+Datum: 2026-09-25
+
+Utskrift ur diariet, registrerade handlingar 2026-09-21 – 2026-09-25 (vecka 39)
+
+Utskriftsmall: POSTLISTA-VECKA, alla registrerade handlingar sorterade på registreringsdatum. Tomt fält skrivs ut som –.
+
+Reg.datum | Dnr | Hnr | Typ | Skydd | Status | Avsändare/mottagare | Ärendemening / handling | Handläggare
+2026-09-21 | KS-2026-00871 | 1 | I | – | R | Trafikverket Region Mitt | Remiss: åtgärdsvalsstudie E4 Sundsvall–Timrå | Per Hedlund
+2026-09-21 | KS-2026-00872 | 1 | I | K | R | Karin Sjöberg | Medborgarförslag om belysning på gångvägen vid Sidsjön | Anna Wikström
+2026-09-21 | KS-2026-00873 | 1 | I | S | R | Företagshälsan Mitt AB | Rehabiliteringsutredning avseende medarbetare Jonas Åkerlund, Lön och pension | Karin Öhman
+2026-09-22 | KS-2026-00807 | 4 | U | – | R | Länsstyrelsen Västernorrland | Yttrande över ansökan om tillstånd för vindkraftspark Björkberget | Lena Bodin
+2026-09-22 | KS-2026-00874 | 1 | P | – | R | – | Tjänsteanteckning från möte med Mittuniversitetet om campusutveckling | Lena Bodin
+2026-09-22 | KS-2026-00875 | 1 | I | – | M | Mittnorrlands Fjärrvärme AB | Avtal om fjärrvärmeleverans Kulturmagasinet (felregistrerad, rätt dnr KS-2026-00866) | Per Hedlund
+2026-09-23 | KS-2026-00876 | 1 | I | K | R | Ahmed Hassan Warsame | Synpunkt på parkeringsavgifterna i Stenstan | Anna Wikström
+2026-09-23 | KS-2026-00866 | 2 | I | – | R | Mittnorrlands Fjärrvärme AB | Avtal om fjärrvärmeleverans Kulturmagasinet, undertecknat | Per Hedlund
+2026-09-24 | KS-2026-00877 | 1 | I | S | R | Polismyndigheten, Region Nord | Hot mot förtroendevald, kommunalråd, polisanmälan K 418822-26 | Jonas Pettersson
+2026-09-24 | KS-2026-00845 | 3 | U | K | R | Lars-Erik Nordin | Svar på begäran om allmän handling, delvis avslag | Maria Lundin
+2026-09-25 | KS-2026-00878 | 1 | I | – | R | Region Västernorrland | Överenskommelse om samverkan kring barn och unga, för underskrift | Lena Bodin
+2026-09-25 | KS-2026-00879 | 1 | P | S | R | – | PM om säkerhetsåtgärder vid kommunhuset efter hotbild | Jonas Pettersson
+2026-09-25 | KS-2026-00880 | 1 | U | – | R | Hamnbolaget Mitt AB | Beställning av utredning om kajförstärkning Norra kajen | Per Hedlund

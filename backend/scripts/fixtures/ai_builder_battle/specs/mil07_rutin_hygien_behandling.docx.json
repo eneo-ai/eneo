@@ -1,0 +1,40 @@
+{
+  "file": "mil07_rutin_hygien_behandling.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "MIL-07", "url": "https://sjalvservice.malmo.se/oversikt/overview/1243"},
+  "description": "Tatueringsstudions egen hygienrutin före, under och efter behandling, bifogad anmälan om hygienisk behandling: handhygien, arbetskläder, förberedelse av huden, färger, engångsmaterial och kundinformation.",
+  "letterhead": {"organisation": "Bläckfisken Tatuering", "unit": "Hygienrutiner", "address": "Östra Storgatan 31, 291 31 Kristianstad · 070-418 22 64"},
+  "date": "2026-08-20",
+  "title": "Hygienrutin – före, under och efter tatuering",
+  "blocks": [
+    {"paragraph": "Rutinen gäller för alla som tatuerar i studion, även gästtatuerare. Tatuering sker i behandlingsrummet (rum 1:01 bakom butiken, 14 m²). Ansvarig: Linnea Strand."},
+    {"heading": "Före behandling"},
+    {"list": [
+      "Kunden fyller i hälsodeklaration och får muntlig och skriftlig information om risker och skötselråd.",
+      "Arbetsytan (brits, arbetsbord, lampa och maskin) torkas av med ytdesinfektion med tensid.",
+      "Maskin, sladd och sprayflaskor kläs in i engångsplast som byts mellan varje kund.",
+      "Handtvätt i handtvättstället i behandlingsrummet, därefter handdesinfektion och nya engångshandskar.",
+      "Huden tvättas, rakas med engångshyvel och desinfekteras med klorhexidinsprit 0,5 %.",
+      "Stencil sätts med engångsspatel och stencilvätska ur engångskopp."
+    ]},
+    {"heading": "Under behandling"},
+    {"list": [
+      "Nålar och tuber är sterila engångsartiklar som öppnas inför kunden.",
+      "Handskar byts om de går sönder, efter kontakt med något utanför arbetsområdet och vid paus.",
+      "Tatueringsfärg hälls upp i engångsfärgkoppar. Överbliven färg i kopparna sparas till nästa kund om samma kulör används samma dag.",
+      "Vaselin tas ut med engångsspatel, aldrig direkt ur burken."
+    ]},
+    {"heading": "Efter behandling"},
+    {"list": [
+      "Tatueringen tvättas med koksaltlösning och täcks med förband eller plastfilm.",
+      "Nålar kastas direkt i behållare, se rutin för avfall.",
+      "Engångsplast och färgkoppar kastas. Arbetsytor torkas av med ytdesinfektion.",
+      "Kunden får skötselråd skriftligt."
+    ]},
+    {"heading": "Färger"},
+    {"paragraph": "Vi använder färger som uppfyller EU:s regler för tatueringsfärger (Reach bilaga XVII, post 75). Färgernas etiketter och batchnummer antecknas i kundkortet."},
+    {"heading": "Arbetskläder"},
+    {"paragraph": "Kortärmad arbetsklädsel som byts dagligen. Inga smycken eller klocka på händer och underarmar."},
+    {"signature": {"name": "Linnea Strand", "role": "Innehavare, Bläckfisken Tatuering"}}
+  ]
+}

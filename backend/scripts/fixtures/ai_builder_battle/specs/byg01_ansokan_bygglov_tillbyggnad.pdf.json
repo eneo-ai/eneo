@@ -1,0 +1,26 @@
+{
+  "file": "byg01_ansokan_bygglov_tillbyggnad.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/443"},
+  "description": "PDF-utskrift av en ansökan inskickad via e-tjänsten Bygglov – tillbyggnad (steg Ansökan, KA/Kontrollplan, Kontaktuppgifter) med bifogat grannemedgivande; anger ett felaktigt minsta avstånd till tomtgräns och räknar byggnadsarean utan garaget.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "E-tjänst: Bygglov – tillbyggnad (bygga ut en byggnad)"},
+  "date": "2026-08-14",
+  "title": "Ansökan om bygglov för tillbyggnad",
+  "blocks": [
+    {"paragraph": "Ärendenummer i e-tjänsten: 443-2026-001185. Inskickad: 2026-08-14 kl. 19:32. Signerad med BankID av Mikael Norberg."},
+    {"heading": "Ansökan"},
+    {"table": {"columns": ["Fråga", "Svar"], "rows": [["Fastighetsbeteckning", "Sundsvall Tallåsen 4:17"], ["Fastighetens adress", "Tallåsvägen 14, 856 52 Sundsvall"], ["Vad gäller ansökan?", "Tillbyggnad av enbostadshus"], ["Beskriv åtgärden", "Tillbyggnad på husets östra gavel med sovrum, allrum och ett andra badrum. Tillbyggnaden får samma fasad och tak som det befintliga huset och ansluts via nuvarande hall."], ["Byggnadens användning", "Enbostadshus, permanentboende"], ["Befintlig byggnadsarea (bostadshuset)", "118,0 m²"], ["Tillbyggnadens byggnadsarea", "32,5 m²"], ["Tillbyggnadens bruttoarea", "32,5 m²"], ["Byggnadsarea efter tillbyggnad", "150,5 m²"], ["Antal våningar", "1"], ["Minsta avstånd från tillbyggnaden till tomtgräns", "4,6 m"], ["Fasadmaterial och kulör", "Liggande träpanel, grå NCS S 5502-Y, som befintligt"], ["Takmaterial och kulör", "Betongpannor, svarta"], ["Taklutning", "22 grader"], ["Planerad byggstart", "2026-11-02"]]}},
+    {"heading": "KA/Kontrollplan"},
+    {"table": {"columns": ["Fråga om kontrollansvarig", "Svar"], "rows": [["Behövs kontrollansvarig?", "Ja"], ["Kontrollansvarig", "Anders Hedlund, Hedlund Byggkonsult AB"], ["Certifieringsnummer och behörighet", "SC4471-24, behörighetsnivå N (normal)"], ["Förslag till kontrollplan", "Bifogad som separat fil"]]}},
+    {"heading": "Bilagor"},
+    {"list": ["Situationsplan A-01, daterad 2026-08-02", "Planritning A-02, daterad 2026-08-02", "Fasad- och sektionsritning A-03, daterad 2026-08-02", "Förslag till kontrollplan", "Grannemedgivande från ägarna till Sundsvall Tallåsen 4:16 (sida 3)"]},
+    {"heading": "Kontaktuppgifter"},
+    {"list": ["Sökande och byggherre: Mikael Norberg", "Personnummer: 19781125-2399", "Medsökande: Linda Norberg, personnummer 19820604-2387", "Adress: Tallåsvägen 14, 856 52 Sundsvall", "Mobilnummer: 070-318 44 27", "E-post: mikael.norberg@example.com", "Fakturamottagare: Mikael Norberg"]},
+    {"paragraph": "Jag intygar att uppgifterna i ansökan är riktiga. Ansökan och bifogade handlingar blir allmänna handlingar när de kommer in till stadsbyggnadsnämnden."},
+    {"page_break": true},
+    {"heading": "Bilaga: Grannemedgivande"},
+    {"paragraph": "Vi har tagit del av ansökan om bygglov för tillbyggnad av enbostadshuset på fastigheten Sundsvall Tallåsen 4:17 och av situationsplan A-01 och fasadritning A-03, båda daterade 2026-08-02. Vi har inget att invända mot att tillbyggnaden uppförs och placeras så som ritningarna visar."},
+    {"table": {"columns": ["Fastighet", "Ägare", "Personnummer", "Datum", "Underskrift"], "rows": [["Sundsvall Tallåsen 4:16", "Per Holmgren", "19540127-7099", "2026-08-09", "Per Holmgren"], ["Sundsvall Tallåsen 4:16", "Anna Holmgren", "19560730-2329", "2026-08-09", "Anna Holmgren"]]}},
+    {"paragraph": "Medgivandet är lämnat på kommunens blankett och inskannat av sökanden."}
+  ]
+}

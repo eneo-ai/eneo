@@ -1,0 +1,21 @@
+{
+  "file": "byg06_remissvar_miljokontoret.txt",
+  "format": "txt",
+  "source": {"catalogue_id": "BYG-06", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/428"},
+  "description": "Miljökontorets remissvar som textfil: enskilt avlopp möjligt med hög skyddsnivå men markbädden ligger för nära grannens brunn, och åkermarken bedöms som brukningsvärd.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Miljökontoret"},
+  "date": "2026-05-28",
+  "diarienummer": "MN-2026-001388",
+  "title": "Remissvar – förhandsbesked för nybyggnad av enbostadshus på Lövsta 3:28",
+  "blocks": [
+    {"paragraph": "Till: Stadsbyggnadsnämnden, Sundsvalls kommun. Er beteckning: BYGG-2026-000512."},
+    {"heading": "Vatten och avlopp"},
+    {"paragraph": "Jordarten på platsen är sandig morän och det finns förutsättningar för en enskild avloppsanläggning med markbädd. Eftersom det finns flera enskilda dricksvattenbrunnar i närheten ska anläggningen uppfylla hög skyddsnivå för hälsoskydd. Avloppsanläggningen ska placeras minst 50 meter från dricksvattenbrunnar. Enligt sökandens karta ligger markbädden 38 meter från brunnen på Lövsta 3:31, vilket inte är godtagbart. Tomten behöver utformas så att avståndet kan hållas."},
+    {"paragraph": "Tillstånd för avloppsanläggningen söks hos miljönämnden enligt 13 § förordningen (1998:899) om miljöfarlig verksamhet och hälsoskydd innan anläggningen byggs."},
+    {"heading": "Jordbruksmark"},
+    {"paragraph": "Den del av tomten som ligger på åker har klass 4 i 1971 års åkermarksgradering och har brukats fram till 2019. Miljökontoret bedömer att marken är brukningsvärd."},
+    {"heading": "Sammanfattning"},
+    {"paragraph": "Miljökontoret har inget att invända mot att platsen prövas för ett bostadshus, under förutsättning att avloppet kan placeras minst 50 meter från befintliga brunnar. Frågan om jordbruksmarken lämnas till stadsbyggnadsnämndens bedömning."},
+    {"signature": {"name": "Sofia Lindh", "role": "Miljöinspektör, miljökontoret"}}
+  ]
+}

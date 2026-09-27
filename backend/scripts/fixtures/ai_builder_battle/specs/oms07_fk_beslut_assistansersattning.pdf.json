@@ -1,0 +1,94 @@
+{
+  "file": "oms07_fk_beslut_assistansersattning.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "OMS-07",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/80"
+  },
+  "description": "Försäkringskassans beslut om assistansersättning enligt 51 kap. socialförsäkringsbalken för den assistansberättigade: beviljade timmar, period, anordnare som får utbetalningen och 2026 års schablonbelopp.",
+  "letterhead": {
+    "organisation": "Försäkringskassan",
+    "unit": "Beslut – assistansersättning"
+  },
+  "date": "2026-01-14",
+  "title": "Beslut om assistansersättning",
+  "blocks": [
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Värde"
+        ],
+        "rows": [
+          [
+            "Ärendenummer",
+            "118-2025-044913"
+          ],
+          [
+            "Den försäkrade",
+            "Oskar Lindgren, 19940902-2390"
+          ],
+          [
+            "Adress",
+            "Nackstavägen 44 lgh 1001, 852 52 Sundsvall"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Beslut"
+    },
+    {
+      "paragraph": "Du får assistansersättning för 142 timmar per vecka under perioden 2026-01-01 – 2027-12-31."
+    },
+    {
+      "paragraph": "Ersättningen betalas ut till din assistansanordnare Assistanskompaniet Norrland AB, organisationsnummer 559287-4410, efter redovisning av utförda timmar."
+    },
+    {
+      "heading": "Ersättningens storlek"
+    },
+    {
+      "table": {
+        "columns": [
+          "Ersättning",
+          "Värde"
+        ],
+        "rows": [
+          [
+            "Beviljade timmar per vecka",
+            "142"
+          ],
+          [
+            "Timbelopp 2026 (schablonbelopp)",
+            "347,70 kr"
+          ],
+          [
+            "Förhöjt timbelopp",
+            "Nej"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Skäl för beslutet"
+    },
+    {
+      "paragraph": "Du har behov av hjälp med grundläggande behov i form av andning, personlig hygien, måltider, av- och påklädning och kommunikation med andra. Behovet av hjälp med andra personliga behov har räknats med i de beviljade timmarna. Försäkringskassan har utgått från utredningen och det läkarutlåtande som kom in 2025-11-20. Beslutet är fattat enligt 51 kap. socialförsäkringsbalken."
+    },
+    {
+      "paragraph": "Schablonbeloppet ska täcka kostnader för den personliga assistansen. Försäkringskassan betalar inte ersättning för sjuklönekostnader för ordinarie assistenter; sådana merkostnader kan kommunen ersätta."
+    },
+    {
+      "heading": "Om du inte är nöjd med beslutet"
+    },
+    {
+      "paragraph": "Du kan begära att Försäkringskassan omprövar beslutet. Begäran ska ha kommit in inom två månader från den dag du fick del av beslutet."
+    },
+    {
+      "signature": {
+        "name": "Anders Wiklund",
+        "role": "Handläggare, Försäkringskassan"
+      }
+    }
+  ]
+}

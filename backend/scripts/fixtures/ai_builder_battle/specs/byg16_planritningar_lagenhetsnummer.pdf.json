@@ -1,0 +1,25 @@
+{
+  "file": "byg16_planritningar_lagenhetsnummer.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-16", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/155"},
+  "description": "Arkitektens planritningar med lägenhetsnummer för flerbostadshuset (plan 10–13), återgivna som lägenhetstabeller per våningsplan; visar en lägenhet som saknas i förteckningen.",
+  "letterhead": {"organisation": "Arkitektkontoret Sidsjö AB", "unit": "Bygghandlingar – planritningar med lägenhetsnummer", "address": "Sidsjövägen 12, 856 43 Sundsvall"},
+  "date": "2026-08-28",
+  "title": "Planritningar med lägenhetsnummer – Kvarnbacksgatan 7A–7B, Sundsvall Kvarnbacken 1:9",
+  "blocks": [
+    {"paragraph": "Ritningsnummer A-40-1-101 till A-40-1-104, skala 1:100 (A1). Nybyggnad av flerbostadshus i fyra våningar med två entréer, bygglov BYGG-2025-001532. Relationshandling efter ändring 2026-08-28: på entréplanet i 7A har förrådet mot gården gjorts om till en lägenhet."},
+    {"heading": "Lägenhetsnumrering"},
+    {"paragraph": "Lägenhetsnumren är satta enligt Lantmäteriets standard: fyra siffror, där de två första anger våningsplan (10 = entréplan, 11 = en trappa upp och så vidare) och de två sista lägenhetens läge på planet, räknat medurs från trapphuset. Rum och kök anges som antal rum utom kök och typ av kök: rok = rum och kök, r kv = rum och kokvrå."},
+    {"heading": "Plan 10 – entréplan (A-40-1-101)"},
+    {"table": {"columns": ["Lägenhetsnummer plan 10", "Entré", "Rum och kök", "Boarea"], "rows": [["1001", "7A", "2 rok", "58,5 m²"], ["1002", "7A", "1 r kv", "39,0 m²"], ["1003", "7A", "1 rok", "31,0 m²"], ["1001", "7B", "1 r kv", "39,0 m²"], ["1002", "7B", "2 rok", "58,5 m²"]]}},
+    {"heading": "Plan 11 – 1 trappa upp (A-40-1-102)"},
+    {"table": {"columns": ["Lägenhetsnummer plan 11", "Entré", "Rum och kök", "Boarea"], "rows": [["1101", "7A", "3 rok", "74,5 m²"], ["1102", "7A", "2 rok", "58,5 m²"], ["1101", "7B", "2 rok", "58,5 m²"], ["1102", "7B", "3 rok", "74,5 m²"]]}},
+    {"page_break": true},
+    {"heading": "Plan 12 – 2 trappor upp (A-40-1-103)"},
+    {"table": {"columns": ["Lägenhetsnummer plan 12", "Entré", "Rum och kök", "Boarea"], "rows": [["1201", "7A", "3 rok", "74,5 m²"], ["1202", "7A", "2 rok", "58,5 m²"], ["1201", "7B", "2 rok", "58,5 m²"], ["1202", "7B", "3 rok", "74,5 m²"]]}},
+    {"heading": "Plan 13 – 3 trappor upp (A-40-1-104)"},
+    {"table": {"columns": ["Lägenhetsnummer plan 13", "Entré", "Rum och kök", "Boarea"], "rows": [["1301", "7A", "3 rok", "74,5 m²"], ["1302", "7A", "2 rok", "58,5 m²"], ["1301", "7B", "2 rok", "58,5 m²"], ["1302", "7B", "3 rok", "74,5 m²"]]}},
+    {"paragraph": "Boarea är beräknad enligt SS 21054:2020. Vindsplanet innehåller endast förråd och teknikutrymmen och har inga bostadslägenheter."},
+    {"signature": {"name": "Oskar Lindgren", "role": "Ansvarig arkitekt SAR/MSA, Arkitektkontoret Sidsjö AB"}}
+  ]
+}

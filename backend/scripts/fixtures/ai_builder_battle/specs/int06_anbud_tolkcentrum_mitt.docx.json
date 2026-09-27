@@ -1,0 +1,135 @@
+{
+  "file": "int06_anbud_tolkcentrum_mitt.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-06",
+    "url": "https://www.upphandlingsmyndigheten.se/inkopsprocessen/genomfor-upphandlingen/tilldelningsbeslut/"
+  },
+  "description": "Anbud från en tolkförmedling med svar på varje skall-krav, begäran om sekretess för referensuppdragens priser (affärshemlighet) och referensbilaga.",
+  "letterhead": {
+    "organisation": "Tolkcentrum Mitt AB",
+    "unit": "Anbud",
+    "address": "Storgatan 18, 852 30 Sundsvall · org.nr 559204-3318"
+  },
+  "date": "2026-08-30",
+  "diarienummer": "KS-2026-00467",
+  "title": "Anbud – Ramavtal för tolkförmedling 2027–2029, Tolkcentrum Mitt AB",
+  "blocks": [
+    {
+      "heading": "Anbudsbrev"
+    },
+    {
+      "paragraph": "Tolkcentrum Mitt AB, organisationsnummer 559204-3318, lämnar härmed anbud i upphandlingen Ramavtal för tolkförmedling 2027–2029 (KS-2026-00467). Anbudet är giltigt till och med 2026-12-31. Vi har tagit del av upphandlingsdokumentet och accepterar dess villkor."
+    },
+    {
+      "paragraph": "Kontaktperson för anbudet: Nadia Haddad, vd, 060-61 70 20."
+    },
+    {
+      "heading": "Kvalificering"
+    },
+    {
+      "list": [
+        "Registrerad för F-skatt och arbetsgivare; skatter och avgifter är betalda (intyg från Skatteverket bifogas).",
+        "Omsättning enligt bifogade årsredovisningar.",
+        "Referensuppdrag enligt bilaga 3."
+      ]
+    },
+    {
+      "heading": "Svar på skall-krav"
+    },
+    {
+      "table": {
+        "columns": [
+          "Krav",
+          "Uppfylls",
+          "Beskrivning"
+        ],
+        "rows": [
+          [
+            "4.2.1",
+            "Ja",
+            "Vi förmedlar 64 språk, däribland samtliga 40 språk i bilaga 2."
+          ],
+          [
+            "4.2.2",
+            "Ja",
+            "Kontakttolk tillsätts med 24 timmars varsel; akut telefontolk normalt inom 15 minuter."
+          ],
+          [
+            "4.2.3",
+            "Ja",
+            "Bokningscentralen är bemannad alla dagar året runt kl. 06.30–22.00, telefon 060-61 70 00."
+          ],
+          [
+            "4.2.4",
+            "Ja",
+            "Alla tolkar undertecknar tystnadsplikts- och sekretessförbindelse vid anställning. Mall bifogas som bilaga 4."
+          ],
+          [
+            "4.2.5",
+            "Ja",
+            "Webbportalen Tolkbokning Mitt visar status och tolkens kompetensnivå för varje bokning."
+          ],
+          [
+            "4.2.6",
+            "Ja",
+            "Kvartalsrapport per förvaltning skickas senast 15 dagar efter kvartalets slut."
+          ],
+          [
+            "4.2.7",
+            "Ja",
+            "Avvikelser registreras i vårt kvalitetssystem och återkoppling ges inom tre arbetsdagar."
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Pris och mervärde"
+    },
+    {
+      "paragraph": "Priser och förbunden andel auktoriserade tolkar framgår av prisbilagan (bilaga 1)."
+    },
+    {
+      "heading": "Begäran om sekretess"
+    },
+    {
+      "paragraph": "Tolkcentrum Mitt AB begär sekretess enligt 31 kap. 16 § offentlighets- och sekretesslagen för bilaga 3 Referensuppdrag, i den del som anger våra priser och volymer hos andra kunder. Uppgifterna är affärshemligheter; om konkurrenter får del av dem kan de anpassa sina priser mot våra befintliga kunder, vilket skulle skada företaget."
+    },
+    {
+      "heading": "Bilaga 3 Referensuppdrag"
+    },
+    {
+      "table": {
+        "columns": [
+          "Kund",
+          "Period",
+          "Omfattning",
+          "Avtalat timpris kontakttolk",
+          "Referensperson"
+        ],
+        "rows": [
+          [
+            "Region Jämtland Härjedalen",
+            "2023–2026",
+            "2 100 timmar per år",
+            "598 kr",
+            "Helena Strand, upphandlare"
+          ],
+          [
+            "Härnösands kommun",
+            "2024–2026",
+            "1 450 timmar per år",
+            "612 kr",
+            "Per Ekman, enhetschef"
+          ]
+        ]
+      }
+    },
+    {
+      "signature": {
+        "name": "Nadia Haddad",
+        "role": "Behörig företrädare"
+      }
+    }
+  ]
+}

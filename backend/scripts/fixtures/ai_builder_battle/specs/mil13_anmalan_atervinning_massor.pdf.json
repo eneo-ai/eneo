@@ -1,0 +1,60 @@
+{
+  "file": "mil13_anmalan_atervinning_massor.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "MIL-13", "url": "https://sjalvservice.malmo.se/oversikt/overview/748"},
+  "description": "PDF-utskrift av ett inskickat ärende i Kristianstads e-tjänst Återvinning av avfall för anläggningsändamål – anmälan (e-tjänsteplattformens kvittens): stegen kontaktuppgifter, platsinformation och uppgifter kring massorna, med signerarens personnummer och sökandens egen uppgift om vattenskyddsområde.",
+  "letterhead": {"organisation": "Kristianstads kommun", "unit": "E-tjänst: Återvinning av avfall för anläggningsändamål - anmälan", "address": "Miljö- och hälsoskyddsnämnden, 291 80 Kristianstad"},
+  "date": "2026-09-02",
+  "diarienummer": "MHN-2026-1288",
+  "title": "Kvittens – inskickat ärende",
+  "blocks": [
+    {"paragraph": "Ärendet skickades in 2026-09-02 kl. 14:05 och signerades med e-legitimation. Ärende-id i e-tjänsten: 96-2026-00731."},
+    {"heading": "Kontaktuppgifter"},
+    {"table": {
+      "columns": ["Kontaktuppgifter", "Svar"],
+      "rows": [
+        ["Verksamhetsutövare", "Åhus Mark & Schakt AB"],
+        ["Organisationsnummer", "556987-2214"],
+        ["Postadress", "Industrivägen 17, 296 35 Åhus"],
+        ["Kontaktperson", "Johan Persson"],
+        ["Telefon", "044-24 71 09"],
+        ["E-post", "johan.persson@ahusmarkschakt.exempel.se"],
+        ["Fakturareferens", "Projekt 2611 Bullervall Vä"]
+      ]
+    }},
+    {"heading": "Platsinformation"},
+    {"table": {
+      "columns": ["Platsinformation", "Svar"],
+      "rows": [
+        ["Fastighetsbeteckning", "Kristianstad Vä 12:4"],
+        ["Markägare", "Vä Gård Lantbruk HB (medgivande bifogas inte, finns hos oss)"],
+        ["Koordinater (SWEREF 99 TM)", "N 6208410, E 451830"],
+        ["Nuvarande markanvändning", "Åkermark i träda"],
+        ["Framtida markanvändning", "Bullervall mot väg 19, gräsbevuxen"],
+        ["Ligger platsen inom ett vattenskyddsområde?", "Nej"],
+        ["Avstånd till närmaste vattendrag", "260 m"],
+        ["Avstånd till närmaste brunn", "180 m"],
+        ["Karta bifogad", "Ja"]
+      ]
+    }},
+    {"heading": "Uppgifter kring massorna"},
+    {"table": {
+      "columns": ["Uppgifter kring massorna", "Svar"],
+      "rows": [
+        ["Massornas ursprung", "Schaktmassor från ombyggnad av gårdsplan vid tidigare bilverkstad, Kristianstad Hammar 8:12"],
+        ["Typ av massor", "Jord (sandig morän) med inslag av asfalt- och betongkross"],
+        ["Mängd", "2 400 ton (cirka 1 400 m³)"],
+        ["Syfte", "Bullervall, längd 180 m, höjd 3 m"],
+        ["Täckning", "0,3 m matjord från platsen, insådd med gräs"],
+        ["Provtagning", "Sex samlingsprov, ett per delområde enligt provtagningsplan på kartan. Analys av metaller och PAH."],
+        ["Analysprotokoll bifogat", "Ja"],
+        ["Planerad start", "2026-10-19"],
+        ["Planerat slut", "2026-11-27"],
+        ["Verksamhetskod enligt sökanden", "90.141 C"],
+        ["Övrigt", "Massorna mellanlagras inte, de körs direkt från Hammar 8:12 till Vä 12:4."]
+      ]
+    }},
+    {"heading": "Signering"},
+    {"paragraph": "Signerad av Johan Persson, 19870811-2399, 2026-09-02 14:05."}
+  ]
+}

@@ -12410,16 +12410,27 @@ def test_the_edit_corpus_can_start_a_sealed_targeted_run() -> None:
     assert contract.require_clean_source is True
 
 
-@mark.parametrize(
-    "name",
-    [
-        "edit_seed_a.json",
-        "edit_seed_g.json",
-        "edit_seed_s_speaker.json",
-        "edit_chain_10.json",
-        "edit_chain_30.json",
-    ],
+_SCRIPTS_DIR = Path(__file__).resolve().parents[4] / "scripts"
+_SEED_FIXTURES = sorted(
+    path.name
+    for prefix in ("edit_seed_", "edit_chain_")
+    for path in (_SCRIPTS_DIR / "fixtures/ai_builder_battle").glob(f"{prefix}*.json")
 )
+
+
+def test_every_seed_fixture_is_used_by_a_case_and_every_used_seed_exists() -> None:
+    # The fixture drift check exempts seed flows from its orphan check; this is their orphan check.
+    used = {
+        edit["seed_flow_fixture"]
+        for path in _SCRIPTS_DIR.glob("ai_builder_api_*cases.json")
+        for case in json.loads(path.read_text(encoding="utf-8"))["cases"]
+        if isinstance(edit := case.get("edit"), dict)
+    }
+
+    assert set(_SEED_FIXTURES) == used
+
+
+@mark.parametrize("name", _SEED_FIXTURES)
 def test_seed_fixtures_pass_the_products_draft_and_publish_validators(
     name: str,
 ) -> None:

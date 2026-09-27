@@ -1,0 +1,46 @@
+{
+  "file": "int04_inspel_vard_omsorg.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-04",
+    "url": "https://www.regeringen.se/contentassets/ee59c69b63014c19a08b0e8ca47334b2/svara-pa-remiss-pm2021_1-rev-2026.pdf"
+  },
+  "description": "Vård- och omsorgsförvaltningens underlag till remissvar: tillstyrker reservkraft men avstyrker sju dygns livsmedelslager, vilket går emot säkerhetsavdelningens underlag.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Vård- och omsorgsförvaltningen",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-10-05",
+  "diarienummer": "KS-2026-00544",
+  "title": "Underlag till remissvar – SOU 2026:41 Kommunal beredskap i en ny tid",
+  "blocks": [
+    {
+      "paragraph": "Vård- och omsorgsförvaltningen lämnar underlag avseende förslagen som berör vård- och omsorgsboenden, LSS-bostäder och hemtjänstens matdistribution."
+    },
+    {
+      "heading": "Avsnitt 8.3 Reservkraft"
+    },
+    {
+      "paragraph": "Förvaltningen tillstyrker kravet i sak. Av kommunens 11 vård- och omsorgsboenden har 3 fast reservkraft. Kostnaden för att förse övriga 8 boenden och 14 LSS-bostäder med fast reservkraft eller förberedd anslutning beräknas till 22 miljoner kronor. Tidpunkten 31 december 2028 går att hålla bara om investeringsstödet betalas ut 2027."
+    },
+    {
+      "heading": "Avsnitt 10.3 Livsmedelsberedskap"
+    },
+    {
+      "paragraph": "Förvaltningen avstyrker kravet på sju dygn. Boendena saknar lagerutrymmen för sju dygns livsmedel inklusive specialkost och konsistensanpassad kost, och lager måste omsättas för att inte kasseras. Förvaltningen föreslår i stället ett krav på tre dygns lager kombinerat med avtal om prioriterade leveranser. Matdistributionen inom hemtjänsten omfattar cirka 640 personer och kan inte lagerhållas hos den enskilde."
+    },
+    {
+      "heading": "Kapitel 12 Finansiering"
+    },
+    {
+      "paragraph": "Förvaltningen delar utredningens bedömning att kraven ska finansieras av staten men ser en risk för att schablonen inte täcker kostnaderna i kommuner med många boenden."
+    },
+    {
+      "signature": {
+        "name": "Jonas Berglund",
+        "role": "Förvaltningschef"
+      }
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "file": "oms12_tjanstepension_besked_2026.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "OMS-12",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/625"
+  },
+  "description": "Utbetalningsbesked för avtalspension från den tidigare kommunala arbetsgivarens pensionsförvaltare: belopp per månad före och efter skatt.",
+  "letterhead": {
+    "organisation": "Pensionsbolaget Norrtjänst",
+    "unit": "Utbetalningsbesked avtalspension",
+    "address": "Box 1142, 851 11 Sundsvall"
+  },
+  "date": "2026-02-02",
+  "title": "Utbetalningsbesked 2026 – avtalspension KAP-KL",
+  "blocks": [
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Värde"
+        ],
+        "rows": [
+          [
+            "Pensionstagare",
+            "Gunnel Åkerlund"
+          ],
+          [
+            "Personnummer",
+            "19450430-2383"
+          ],
+          [
+            "Tidigare arbetsgivare",
+            "Sundsvalls kommun, undersköterska 1978–2010"
+          ],
+          [
+            "Avtal",
+            "KAP-KL, ålderspension"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Utbetalning per månad 2026"
+    },
+    {
+      "table": {
+        "columns": [
+          "Post",
+          "Belopp"
+        ],
+        "rows": [
+          [
+            "Avgiftsbestämd ålderspension",
+            "1 214 kr"
+          ],
+          [
+            "Förmånsbestämd ålderspension",
+            "1 266 kr"
+          ],
+          [
+            "Summa före skatt",
+            "2 480 kr"
+          ],
+          [
+            "Skatteavdrag 30 % (sidoinkomst)",
+            "-744 kr"
+          ],
+          [
+            "Summa efter skatt",
+            "1 736 kr"
+          ]
+        ]
+      }
+    },
+    {
+      "paragraph": "Pensionen betalas ut livsvarigt den 25:e varje månad. Om du vill jämka skatteavdraget kontaktar du Skatteverket."
+    }
+  ]
+}

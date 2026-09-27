@@ -1,0 +1,45 @@
+{
+  "arende_id": "MK-REG-2026-0057",
+  "inkom": "2026-09-22T14:37",
+  "verksamhetsutovare": {
+    "namn": "Lidens Såg och Hyvleri, enskild firma",
+    "organisationsnummer": "19680124-9290",
+    "sate": "Sundsvall",
+    "kontaktperson": {
+      "namn": "Anders Lidén",
+      "telefon": "070-644 19 32",
+      "epost": "anders@lidenssag.example",
+      "hemadress": "Lidenvägen 88, 860 41 Liden"
+    },
+    "postadress": "Sågvägen 12, 860 41 Liden"
+  },
+  "anlaggning": {
+    "benamning": "Biobränslepanna virkestork (reservbrännare för HVO)",
+    "besoksadress": "Sågvägen 14, 860 41 Liden",
+    "fastighet": "Sundsvall Liden 5:27",
+    "koordinat_x": 6948230,
+    "koordinat_y": 583115,
+    "typ": "T40",
+    "tillford_effekt": 1800,
+    "verkningsgrad": 86,
+    "rening": "Multicyklon",
+    "drifttimmar_per_ar": 5100,
+    "medellast": 70,
+    "driftstart": "2026-11-02",
+    "nace": "16.10"
+  },
+  "branslen": [
+    {
+      "kod": "B11",
+      "andel": 92
+    },
+    {
+      "kod": "O27",
+      "andel": 8
+    }
+  ],
+  "bilagor": [
+    "Datablad Veto 1800.pdf",
+    "Situationsplan Liden 5-27.pdf"
+  ]
+}

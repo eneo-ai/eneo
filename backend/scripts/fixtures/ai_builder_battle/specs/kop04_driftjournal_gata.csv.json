@@ -1,0 +1,44 @@
+{
+  "file": "kop04_driftjournal_gata.csv",
+  "format": "csv",
+  "source": {"catalogue_id": "KOP-04", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/388"},
+  "description": "Export ur gatuavdelningens driftsystem: drift- och underhållsjournal för centrala Sundsvall 17 augusti–4 september 2026, med felanmälan, besiktning och lagning av sättningen på Norrmalmsgatan 18 och en lagning på Norrmalmsgatan 8 som lätt förväxlas med den.",
+  "sheets": [
+    {
+      "name": "Driftjournal",
+      "columns": ["tidpunkt", "arbetsorder", "gata", "plats", "handelsetyp", "beskrivning", "prioritet", "utfort_av", "status"],
+      "rows": [
+        ["2026-08-17 07:10", "AO-2026-04262", "Esplanaden", "korsning Storgatan", "Sopning", "Maskinsopning körbana och cykelbana efter helgens evenemang", "Planerad", "Gatudrift, arbetslag 1", "Utförd"],
+        ["2026-08-17 13:25", "AO-2026-04270", "Skepparegatan", "utanför nr 4", "Felanmälan", "Synpunkt Sundsvall SYN-2026-10641: trasig gatubrunn, galler löst", "Ej bedömd", "Kontaktcenter", "Registrerad"],
+        ["2026-08-18 06:45", "AO-2026-04301", "Norrmalmsgatan", "utanför nr 18", "Återställning", "Återställning efter ledningsarbete (vattenledning), provisorisk kallasfalt ca 1,5 m², slutlig beläggning senare", "Planerad", "Entreprenör Schakt & Väg Norr AB", "Utförd"],
+        ["2026-08-18 09:15", "AO-2026-04270", "Skepparegatan", "utanför nr 4", "Åtgärd", "Galler på gatubrunn fastsatt", "Prio 2", "Gatudrift, arbetslag 2", "Utförd"],
+        ["2026-08-19 10:40", "AO-2026-04318", "Bergsgatan", "vid nr 55", "Besiktning", "Kantsten lös på 2 m, ingen fara för trafik", "Prio 3", "Gatuinspektör", "Pågår"],
+        ["2026-08-20 08:05", "AO-2026-04329", "Storgatan", "gågatan, vid nr 20", "Felanmälan", "Synpunkt Sundsvall SYN-2026-10702: lös marksten i gågatan, snubbelrisk", "Ej bedömd", "Kontaktcenter", "Registrerad"],
+        ["2026-08-20 14:30", "AO-2026-04329", "Storgatan", "gågatan, vid nr 20", "Besiktning", "Två marksten lösa, nivåskillnad ca 3 cm", "Prio 2", "Gatuinspektör", "Pågår"],
+        ["2026-08-21 07:30", "AO-2026-04335", "Sjögatan", "hela sträckan", "Brunnsspolning", "Spolning av 14 dagvattenbrunnar inför höstregn", "Planerad", "Entreprenör Norrlands Rörspolning AB", "Utförd"],
+        ["2026-08-21 11:00", "AO-2026-04318", "Bergsgatan", "vid nr 55", "Åtgärd", "Kantsten återsatt", "Prio 3", "Gatudrift, arbetslag 1", "Utförd"],
+        ["2026-08-24 07:45", "AO-2026-04388", "Norrmalmsgatan", "utanför nr 8", "Felanmälan", "Egen upptäckt vid rondering: potthål i cykelbanans kant ca 20x20 cm, djup 4 cm", "Ej bedömd", "Gatuinspektör", "Registrerad"],
+        ["2026-08-24 16:12", "AO-2026-04417", "Norrmalmsgatan", "utanför nr 18", "Felanmälan", "Synpunkt Sundsvall SYN-2026-10983: gropen där de grävt har sjunkit, djup grop i körbanan, bilar väjer", "Ej bedömd", "Kontaktcenter", "Registrerad"],
+        ["2026-08-25 08:20", "AO-2026-04329", "Storgatan", "gågatan, vid nr 20", "Åtgärd", "Marksten omlagd", "Prio 2", "Gatudrift, arbetslag 1", "Utförd"],
+        ["2026-08-25 09:40", "AO-2026-04417", "Norrmalmsgatan", "utanför nr 18", "Besiktning", "Sättning i återställningsytan ca 60x80 cm, djup ca 9 cm, i höger körfält mot centrum. Prio 1 enligt rutin. Varningsskylt ej uppsatt, skylt saknades i fordonet.", "Prio 1", "Gatuinspektör", "Pågår"],
+        ["2026-08-25 10:05", "AO-2026-04388", "Norrmalmsgatan", "utanför nr 8", "Besiktning", "Potthål i cykelbanans kant, djup 4 cm, ingen risk för biltrafik", "Prio 2", "Gatuinspektör", "Pågår"],
+        ["2026-08-26 13:50", "AO-2026-04388", "Norrmalmsgatan", "utanför nr 8", "Lagning", "Potthål i cykelbanan lagat med kallasfalt", "Prio 2", "Gatudrift, arbetslag 2", "Utförd"],
+        ["2026-08-26 15:10", "AO-2026-04436", "Villagatan", "vid förskolan Solrosen", "Skyltning", "Nedkörd skylt 'Barn' (A15) ersatt", "Prio 2", "Gatudrift, arbetslag 1", "Utförd"],
+        ["2026-08-27 13:05", "AO-2026-04417", "Norrmalmsgatan", "utanför nr 18", "Planering", "Lagning flyttad till vecka 36, asfaltverket stängt vecka 35. Varningsskylt beställd från förrådet.", "Prio 1", "Arbetsledare gata", "Pågår"],
+        ["2026-08-28 06:30", "AO-2026-04452", "Esplanaden", "hela sträckan", "Sopning", "Maskinsopning inför marknadsdagar", "Planerad", "Gatudrift, arbetslag 1", "Utförd"],
+        ["2026-08-28 11:45", "AO-2026-04459", "Skolhusallén", "vid nr 31", "Felanmälan", "Synpunkt Sundsvall SYN-2026-11050: gatlykta släckt", "Ej bedömd", "Kontaktcenter", "Registrerad"],
+        ["2026-08-29 09:20", "AO-2026-04459", "Skolhusallén", "vid nr 31", "Åtgärd", "Ärendet överlämnat till belysningsentreprenör", "Prio 3", "Arbetsledare gata", "Överlämnad"],
+        ["2026-08-31 07:40", "AO-2026-04471", "Storgatan", "korsning Nybrogatan", "Linjemålning", "Övergångsställe ommålat", "Planerad", "Entreprenör Vägmarkering Mitt AB", "Utförd"],
+        ["2026-08-31 16:55", "AO-2026-04478", "Sjögatan", "vid nr 9", "Felanmälan", "Synpunkt Sundsvall SYN-2026-11102: vatten står på gatan efter regnet", "Ej bedömd", "Kontaktcenter", "Registrerad"],
+        ["2026-09-01 07:20", "AO-2026-04417", "Norrmalmsgatan", "utanför nr 18", "Felanmälan", "Polisen meddelar att en personbil skadats i gropen natten mot 1/9. Bilen bärgad.", "Prio 1", "Kontaktcenter", "Pågår"],
+        ["2026-09-01 08:10", "AO-2026-04478", "Sjögatan", "vid nr 9", "Besiktning", "Brunn igensatt av löv, rensad på plats", "Prio 2", "Gatuinspektör", "Utförd"],
+        ["2026-09-01 10:35", "AO-2026-04417", "Norrmalmsgatan", "utanför nr 18", "Avstängning", "Varningsmärke A20 och avstängningsbock uppsatta vid sättningen", "Prio 1", "Gatudrift, arbetslag 2", "Pågår"],
+        ["2026-09-02 09:00", "AO-2026-04490", "Bergsgatan", "vid nr 12", "Felanmälan", "Egen upptäckt vid rondering: spricka i asfalt längs kantsten, ingen nivåskillnad", "Prio 3", "Gatuinspektör", "Registrerad"],
+        ["2026-09-02 14:20", "AO-2026-04494", "Villagatan", "hela sträckan", "Sopning", "Sopning av grus efter VA-arbete", "Planerad", "Gatudrift, arbetslag 1", "Utförd"],
+        ["2026-09-03 11:50", "AO-2026-04417", "Norrmalmsgatan", "utanför nr 18", "Lagning", "Sättningen lagad med varmasfalt, 1,2 m². Avstängning borttagen.", "Prio 1", "Gatudrift, arbetslag 2", "Utförd"],
+        ["2026-09-03 13:30", "AO-2026-04417", "Norrmalmsgatan", "utanför nr 18", "Anteckning", "Anspråk väntas från ägaren till den skadade bilen. Underlag sparat i ärendet.", "Prio 1", "Arbetsledare gata", "Avslutad"],
+        ["2026-09-04 08:15", "AO-2026-04501", "Skepparegatan", "hela sträckan", "Brunnsspolning", "Spolning av 9 dagvattenbrunnar", "Planerad", "Entreprenör Norrlands Rörspolning AB", "Utförd"]
+      ]
+    }
+  ]
+}

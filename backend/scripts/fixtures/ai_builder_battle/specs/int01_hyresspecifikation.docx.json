@@ -1,0 +1,118 @@
+{
+  "file": "int01_hyresspecifikation.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-01",
+    "url": "https://sundsvall.se/kommun/kommun-och-politik/diarium-arkiv-och-sekretess/diarium"
+  },
+  "description": "Hyresvärdens reskontrautdrag för en lägenhet med betalningshistorik och en anteckning om en tidigare underrättelse och kommunens ärendebeteckning.",
+  "letterhead": {
+    "organisation": "Bostads AB Norra Kajen",
+    "unit": "Kundreskontra och inkasso",
+    "address": "Box 311, 851 05 Sundsvall"
+  },
+  "date": "2026-09-18",
+  "title": "Hyresspecifikation – kontrakt NK-22-1102-04",
+  "blocks": [
+    {
+      "paragraph": "Hyresgäst: Kristoffer Åberg, Skönsbergsvägen 22, lgh 1102. Utdraget omfattar januari–september 2026."
+    },
+    {
+      "table": {
+        "columns": [
+          "Förfallodag",
+          "Avser",
+          "Debiterat",
+          "Betalt",
+          "Betaldatum",
+          "Saldo"
+        ],
+        "rows": [
+          [
+            "2025-12-31",
+            "Hyra januari",
+            "8 130 kr",
+            "8 130 kr",
+            "2026-01-05",
+            "0 kr"
+          ],
+          [
+            "2026-01-30",
+            "Hyra februari",
+            "8 130 kr",
+            "0 kr",
+            "",
+            "8 130 kr"
+          ],
+          [
+            "2026-02-27",
+            "Hyra mars",
+            "8 130 kr",
+            "0 kr",
+            "",
+            "16 260 kr"
+          ],
+          [
+            "2026-03-31",
+            "Hyra april",
+            "8 130 kr",
+            "12 195 kr",
+            "2026-04-02",
+            "12 195 kr"
+          ],
+          [
+            "2026-04-30",
+            "Hyra maj",
+            "8 130 kr",
+            "14 195 kr",
+            "2026-05-04",
+            "6 130 kr"
+          ],
+          [
+            "2026-05-29",
+            "Hyra juni",
+            "8 130 kr",
+            "14 260 kr",
+            "2026-06-01",
+            "0 kr"
+          ],
+          [
+            "2026-06-30",
+            "Hyra juli",
+            "8 130 kr",
+            "0 kr",
+            "",
+            "8 130 kr"
+          ],
+          [
+            "2026-07-31",
+            "Hyra augusti",
+            "8 130 kr",
+            "0 kr",
+            "",
+            "16 260 kr"
+          ],
+          [
+            "2026-08-31",
+            "Hyra september",
+            "8 130 kr",
+            "0 kr",
+            "",
+            "24 390 kr"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Anteckningar"
+    },
+    {
+      "list": [
+        "2026-03-09: Underrättelse till socialnämnden om hyresskuld för februari och mars skickad. Kommunen bekräftade mottagandet 2026-03-11 med sin beteckning IAN-2026-00412.",
+        "2026-03-24: Avbetalningsplan upprättad, skulden reglerad 2026-06-01.",
+        "2026-09-10: Påminnelse skickad, ingen kontakt från hyresgästen.",
+        "2026-09-18: Uppsägning delgiven."
+      ]
+    }
+  ]
+}

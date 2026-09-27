@@ -1,0 +1,208 @@
+{
+  "file": "int06_upphandlingsdokument_tolk.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "INT-06",
+    "url": "https://www.upphandlingsmyndigheten.se/inkopsprocessen/genomfor-upphandlingen/tilldelningsbeslut/"
+  },
+  "description": "Upphandlingsdokument för ett ramavtal om tolkförmedling enligt LOU: administrativa föreskrifter, kvalificeringskrav, numrerade skall-krav, utvärderingsmodell med volymer och mervärdesavdrag, avtalsspärr.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Kommunstyrelsekontoret, upphandlingsenheten",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-06-26",
+  "diarienummer": "KS-2026-00467",
+  "title": "Upphandlingsdokument – Ramavtal för tolkförmedling 2027–2029",
+  "blocks": [
+    {
+      "heading": "1. Inbjudan"
+    },
+    {
+      "paragraph": "Sundsvalls kommun inbjuder till anbudsgivning avseende ramavtal för förmedling av språktolkning till kommunens samtliga förvaltningar. Upphandlingen genomförs som ett öppet förfarande enligt lagen (2016:1145) om offentlig upphandling (LOU). Ramavtalet tecknas med en leverantör."
+    },
+    {
+      "heading": "2. Administrativa föreskrifter"
+    },
+    {
+      "table": {
+        "columns": [
+          "Punkt",
+          "Föreskrift"
+        ],
+        "rows": [
+          [
+            "2.1 Sista anbudsdag",
+            "2026-08-31 kl. 23.59. Anbud lämnas elektroniskt i upphandlingssystemet."
+          ],
+          [
+            "2.2 Anbudets giltighet",
+            "Anbudet ska vara giltigt till och med 2026-12-31."
+          ],
+          [
+            "2.3 Anbudets form",
+            "Anbudet ska innehålla anbudsbrev, svar på samtliga krav i avsnitt 4 och ifylld prisbilaga (bilaga 1, Excel)."
+          ],
+          [
+            "2.4 Motstridiga uppgifter",
+            "Vid motstridiga uppgifter i anbudet gäller prisbilagan före uppgifter om pris i anbudets övriga delar."
+          ],
+          [
+            "2.5 Förtydligande och komplettering",
+            "Kommunen kan begära att en anbudsgivare förtydligar eller kompletterar anbudet enligt 4 kap. 9 § LOU, om det kan ske utan risk för särbehandling. Ett krav som inte uppfylls i anbudet kan inte kompletteras i efterhand."
+          ],
+          [
+            "2.6 Sekretess",
+            "Anbud omfattas av absolut sekretess till dess att tilldelningsbeslut har fattats (19 kap. 3 § andra stycket offentlighets- och sekretesslagen). Anbudsgivare som anser att uppgifter i anbudet är affärshemligheter ska ange vilka uppgifter det gäller och skälen för det. Kommunen prövar sekretessen enligt 31 kap. 16 § offentlighets- och sekretesslagen."
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "3. Kvalificering"
+    },
+    {
+      "list": [
+        "3.1 Anbudsgivaren ska vara registrerad för F-skatt och ha fullgjort sina skyldigheter avseende skatter och socialförsäkringsavgifter.",
+        "3.2 Anbudsgivaren ska ha en omsättning om minst 10 miljoner kronor per år under de två senaste räkenskapsåren.",
+        "3.3 Anbudsgivaren ska redovisa två referensuppdrag avseende tolkförmedling till offentlig sektor under de senaste tre åren."
+      ]
+    },
+    {
+      "heading": "4. Kravspecifikation"
+    },
+    {
+      "paragraph": "Kraven i avsnitt 4.2 är obligatoriska (skall-krav). Ett anbud som inte uppfyller samtliga skall-krav förkastas och går inte vidare till utvärdering. Anbudsgivaren ska för varje krav ange om kravet uppfylls och beskriva hur."
+    },
+    {
+      "heading": "4.1 Omfattning"
+    },
+    {
+      "paragraph": "Ramavtalet avser kontakttolkning på plats, telefontolkning och distanstolkning via video för kommunens förvaltningar och helägda bolag. Avtalsperioden är 2027-01-01 – 2028-12-31 med möjlighet till förlängning i ett år."
+    },
+    {
+      "heading": "4.2 Skall-krav"
+    },
+    {
+      "table": {
+        "columns": [
+          "Nr",
+          "Krav"
+        ],
+        "rows": [
+          [
+            "4.2.1",
+            "Leverantören ska förmedla tolkning på minst de 40 språk som anges i bilaga 2."
+          ],
+          [
+            "4.2.2",
+            "Leverantören ska kunna tillsätta kontakttolk med minst 24 timmars varsel och telefontolk inom 30 minuter vid akuta behov."
+          ],
+          [
+            "4.2.3",
+            "Leverantören ska ha en kundtjänst för bokning som är bemannad och nås per telefon alla dagar året runt, lägst kl. 07.00–18.00, inklusive lördagar, söndagar och helgdagar."
+          ],
+          [
+            "4.2.4",
+            "Samtliga tolkar ska ha undertecknat tystnadsplikts- och sekretessförbindelse innan de utför uppdrag. Mall för förbindelsen ska bifogas anbudet."
+          ],
+          [
+            "4.2.5",
+            "Leverantören ska ha ett webbaserat bokningssystem där beställaren kan se bokningens status och tolkens kompetensnivå."
+          ],
+          [
+            "4.2.6",
+            "Leverantören ska kvartalsvis rapportera antal uppdrag, andel tillsatta uppdrag och andel uppdrag utförda av auktoriserade tolkar per förvaltning."
+          ],
+          [
+            "4.2.7",
+            "Leverantören ska ha rutiner för att hantera avvikelser och klagomål och återkoppla till beställaren inom fem arbetsdagar."
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "5. Utvärdering"
+    },
+    {
+      "paragraph": "Anbud som uppfyller kvalificeringskraven och samtliga skall-krav utvärderas enligt grunden bästa förhållandet mellan pris och kvalitet, med lägsta utvärderingspris som modell. Kontraktet tilldelas det anbud som har lägst utvärderingspris."
+    },
+    {
+      "heading": "5.1 Jämförelsepris"
+    },
+    {
+      "paragraph": "Jämförelsepriset beräknas som summan av anbudsgivarens timpris per tjänst i prisbilagan multiplicerat med den uppskattade årsvolymen för tjänsten. Volymerna är uppskattade och inte garanterade."
+    },
+    {
+      "table": {
+        "columns": [
+          "Tjänst",
+          "Uppskattad volym per år (timmar)"
+        ],
+        "rows": [
+          [
+            "Kontakttolkning på plats",
+            "4 200"
+          ],
+          [
+            "Telefontolkning",
+            "6 500"
+          ],
+          [
+            "Distanstolkning via video",
+            "2 300"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "5.2 Mervärde och utvärderingspris"
+    },
+    {
+      "paragraph": "Anbudsgivaren anger i prisbilagan den andel av uppdragen som leverantören förbinder sig att utföra med auktoriserad tolk eller rättstolk enligt Kammarkollegiets register. Andelen ger ett avdrag på jämförelsepriset:"
+    },
+    {
+      "table": {
+        "columns": [
+          "Förbunden andel auktoriserade tolkar",
+          "Avdrag på jämförelsepriset"
+        ],
+        "rows": [
+          [
+            "40 % eller mer",
+            "10 %"
+          ],
+          [
+            "25–39 %",
+            "5 %"
+          ],
+          [
+            "Under 25 %",
+            "0 %"
+          ]
+        ]
+      }
+    },
+    {
+      "paragraph": "Utvärderingspris = jämförelsepris minus avdrag. Priser anges i kronor exklusive moms."
+    },
+    {
+      "heading": "6. Tilldelning och avtalsspärr"
+    },
+    {
+      "paragraph": "Samtliga anbudsgivare underrättas skriftligen och elektroniskt om tilldelningsbeslutet och skälen för det enligt 12 kap. 12 § LOU. Avtal får inte ingås förrän tio (10) dagar har gått från det att underrättelsen skickades (avtalsspärr enligt 20 kap. 1 § LOU). Under avtalsspärren kan en leverantör ansöka om överprövning hos förvaltningsrätten."
+    },
+    {
+      "heading": "7. Kontakt"
+    },
+    {
+      "paragraph": "Frågor ställs i upphandlingssystemet senast 2026-08-21. Upphandlare: Emma Lindkvist."
+    },
+    {
+      "signature": {
+        "name": "Emma Lindkvist",
+        "role": "Upphandlare"
+      }
+    }
+  ]
+}

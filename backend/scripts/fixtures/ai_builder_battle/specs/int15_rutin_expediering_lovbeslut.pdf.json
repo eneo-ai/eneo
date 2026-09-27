@@ -1,0 +1,137 @@
+{
+  "file": "int15_rutin_expediering_lovbeslut.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "INT-15",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/715"
+  },
+  "description": "Bygglovavdelningens rutin för expediering av lovbeslut efter lag (2025:974): vem som delges, får meddelande eller nås av kungörelsen, meddelandets innehåll, överklagandetid enligt 13 kap. 16 § PBL och en varning för äldre beslutsmallar.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Stadsbyggnadskontoret, Bygglovavdelningen",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-02-10",
+  "diarienummer": "SBN 2026/00118",
+  "title": "Rutin: Expediering av beslut om lov och förhandsbesked",
+  "blocks": [
+    {
+      "heading": "1. Syfte och omfattning"
+    },
+    {
+      "paragraph": "Rutinen gäller bygglovsadministratörernas arbete efter att ett beslut om lov eller förhandsbesked har fattats: delgivning, meddelanden till grannar, kungörelse och bevakning av laga kraft. Den gäller från och med 2026-02-15."
+    },
+    {
+      "heading": "2. Vem ska få vad"
+    },
+    {
+      "table": {
+        "columns": [
+          "Mottagare",
+          "Vad som skickas",
+          "Lagrum",
+          "Hur"
+        ],
+        "rows": [
+          [
+            "Sökande och fastighetsägare",
+            "Beslutet med överklagandehänvisning",
+            "9 kap. 108 § PBL",
+            "Delgivning, i första hand förenklad delgivning"
+          ],
+          [
+            "Granne som har lämnat synpunkter som inte har tillgodosetts",
+            "Beslutet med överklagandehänvisning",
+            "9 kap. 108 § PBL",
+            "Delgivning"
+          ],
+          [
+            "Övriga grannar: ägare till fastighet som gränsar till tomten eller skiljs från den bara av väg eller gata",
+            "Meddelande om beslutet",
+            "9 kap. 110 § PBL",
+            "Brev, senast samma dag som kungörelsen"
+          ],
+          [
+            "Allmänheten",
+            "Kungörelse av beslut om att ge lov eller positivt förhandsbesked",
+            "9 kap. 109 § PBL",
+            "Kommunens digitala anslagstavla"
+          ]
+        ]
+      }
+    },
+    {
+      "paragraph": "Den som delges beslutet ska inte också få ett meddelande (9 kap. 110 § andra stycket PBL)."
+    },
+    {
+      "heading": "3. Meddelandets innehåll"
+    },
+    {
+      "list": [
+        "Rubrik: Meddelande om beslut enligt 9 kap. 110 § plan- och bygglagen",
+        "Mottagarens namn och postadress. Ett dödsbo adresseras Dödsbo efter [namn] med c/o-adressen från fastighetsregistret. En bostadsrättsförening eller ett bolag adresseras med c/o-adress om sådan finns.",
+        "Ärendets diarienummer, fastighet och åtgärd",
+        "Beslutets huvudsakliga innehåll, beslutsdatum och vem som fattat beslutet",
+        "Att beslutet har kungjorts på kommunens anslagstavla och vilken dag",
+        "Var beslutet finns tillgängligt: Kontaktcenter, Stadshuset, telefon 060-19 14 00",
+        "Hur man överklagar: skriftligt till stadsbyggnadsnämnden, som prövar om överklagandet kommit in i rätt tid och sedan skickar det till Länsstyrelsen Västernorrland",
+        "Sista dag för överklagande",
+        "Handläggarens namn och telefonnummer"
+      ]
+    },
+    {
+      "paragraph": "Personnummer och organisationsnummer ska aldrig stå i ett meddelande."
+    },
+    {
+      "heading": "4. Överklagandetid och laga kraft"
+    },
+    {
+      "paragraph": "Överklagandetiden är tre veckor (44 § förvaltningslagen). För den som ska delges beslutet enligt 9 kap. 108 § räknas tiden från den dag mottagaren delgavs. För alla andra räknas tiden enligt 13 kap. 16 § PBL från den dag som infaller en vecka efter att beslutet kungjorts på kommunens anslagstavla. Sista dag för överklagande för grannar som fått meddelande blir alltså fyra veckor efter kungörelsedagen."
+    },
+    {
+      "paragraph": "Infaller sista dagen på en lördag, söndag eller helgdag får överklagandet komma in nästa vardag. Beslutet vinner laga kraft när överklagandetiden har gått ut för alla som fått del av beslutet, om ingen har överklagat. Laga kraft kan därför inte fastställas förrän alla delgivningskvitton har kommit in."
+    },
+    {
+      "table": {
+        "columns": [
+          "Räkneexempel",
+          "Kungörelsedag",
+          "Tiden börjar löpa",
+          "Sista dag för överklagande"
+        ],
+        "rows": [
+          [
+            "Exempel ur rutinen",
+            "2026-03-03",
+            "2026-03-10",
+            "2026-03-31"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "5. Kungörelsedag"
+    },
+    {
+      "paragraph": "Bygglovsadministratören anslår kungörelsen och anger kungörelsedagen under rubriken Expediering i beslutsdokumentet. Meddelandena skickas samma dag."
+    },
+    {
+      "heading": "6. Saknad adress"
+    },
+    {
+      "paragraph": "Saknas adress för en granne i fastighetsregistret skickas inget meddelande. Notera grannen i expedieringslistan för manuell uppföljning. Kungörelsen på anslagstavlan gäller även för den grannen."
+    },
+    {
+      "heading": "7. Observera äldre beslutsmallar"
+    },
+    {
+      "paragraph": "Lag (2025:974) trädde i kraft den 1 december 2025 och 9 kap. PBL fick ny paragrafnumrering. Beslutsmallar i ByggR som skapades före dess har kvar ett standardavsnitt om expediering som hänvisar till 9 kap. 41, 41 a och 41 b §§ och till kungörelse i Post- och Inrikes Tidningar. Det avsnittet är inaktuellt: lovbeslut kungörs i dag på kommunens anslagstavla, och meddelanden till grannar skickas enligt 9 kap. 110 §. Hämta kungörelsedagen ur beslutet men skriv aldrig ut de gamla hänvisningarna i meddelanden."
+    },
+    {
+      "signature": {
+        "name": "Karin Sundberg",
+        "role": "Enhetschef, bygglovsadministration"
+      }
+    }
+  ]
+}

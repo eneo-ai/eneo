@@ -1,0 +1,48 @@
+Sundsvalls kommun
+Kommunarkivet, kommunstyrelsekontoret
+
+Datum: 2026-01-20
+Diarienummer: KS-2026-00077
+
+Anvisning för leverans till e-arkivet och gallring vid leverans
+
+1. Omfattning
+
+Anvisningen gäller leveranser av avslutade ärenden till kommunens e-arkiv enligt arkivlagen (1990:782), kommunens arkivreglemente och Riksarkivets FGS Paketstruktur och FGS Ärendehantering. Kommunarkivet tar bara emot avslutade ärenden.
+
+2. Obligatorisk metadata
+
+Varje ärende ska ha: ärendenummer, ärendemening, registreringsdatum, avslutsdatum och klassificering (processkod enligt klassificeringsstrukturen).
+
+Varje handling ska ha: handlings-ID, handlingstyp, handlingsdatum, filnamn, filformat, sekretessuppgift (Ja/Nej) och checksumma.
+
+En handling eller ett ärende som saknar någon obligatorisk uppgift levereras inte. Kommunarkivet listar posterna med handlings-ID eller ärendenummer och vilken uppgift som saknas och skickar listan tillbaka till den levererande förvaltningen för komplettering.
+
+3. Godkända filformat
+
+PDF/A-1b, PDF/A-2b och TIFF. Andra format, till exempel DOCX, ska konverteras före leverans och återredovisas på samma sätt som saknad metadata.
+
+4. Gallringsregler för avloppsärenden (miljönämndens informationshanteringsplan, avsnitt 4.2.1)
+
+Handlingstyp | Bevaras/gallras | Gallringsfrist
+Ansökan om tillstånd för avloppsanordning | Bevaras | –
+Situationsplan | Bevaras | –
+Beslut om tillstånd | Bevaras | –
+Egenkontroll efter utförande | Bevaras | –
+Mottagningsbekräftelse | Gallras | Vid inaktualitet
+E-post om besökstid | Gallras | Vid inaktualitet
+Delgivningskvitto | Gallras | 2 år efter ärendets avslut
+Foton från platsbesök | Gallras | 5 år efter ärendets avslut
+Avgiftsberäkning | Gallras | 10 år efter ärendets avslut
+
+Gallringen görs med stöd av miljönämndens beslut om informationshanteringsplan 2019-05-21 § 88 (MN-2019-00412). Fristen räknas från avslutsdatum till och med dagen för leveransbrevet. En handling vars frist inte har löpt ut ska bevaras tills vidare och ingår inte i gallringsförslaget.
+
+5. Gallringsförslag
+
+Gallringsförslaget är ett underlag för förvaltningens gallringsbeslut och diarieförs. Det ska innehålla leveransnummer, gallringsbeslutets diarienummer (MN-2019-00412) och en rad per handling som föreslås gallras med handlings-ID, ärendenummer, handlingstyp och datum då fristen löpte ut. Handlingar som inte föreslås gallras nämns inte i förslaget. Gallringsförslaget får inte innehålla personnummer eller namn på enskilda; ange ärendenummer och fastighetsbeteckning.
+
+Gallring är oåterkallelig. Förslaget ska godkännas av förvaltningens arkivansvarige innan något gallras.
+
+6. Kontakt
+
+Kommunarkivet, arkivarie Jonas Hedin, 060-19 11 42.

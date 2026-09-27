@@ -1,0 +1,105 @@
+{
+  "file": "int06_anbud_sprakbron_norr.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-06",
+    "url": "https://www.upphandlingsmyndigheten.se/inkopsprocessen/genomfor-upphandlingen/tilldelningsbeslut/"
+  },
+  "description": "Anbud från en tolkförmedling med svar på varje skall-krav och ett telefontolkpris i anbudstexten som skiljer sig från prisbilagan.",
+  "letterhead": {
+    "organisation": "Språkbron Norr AB",
+    "unit": "Anbud",
+    "address": "Köpmangatan 5, 871 31 Härnösand · org.nr 559011-7742"
+  },
+  "date": "2026-08-30",
+  "diarienummer": "KS-2026-00467",
+  "title": "Anbud – Ramavtal för tolkförmedling 2027–2029, Språkbron Norr AB",
+  "blocks": [
+    {
+      "heading": "Anbudsbrev"
+    },
+    {
+      "paragraph": "Språkbron Norr AB, organisationsnummer 559011-7742, lämnar härmed anbud i upphandlingen Ramavtal för tolkförmedling 2027–2029 (KS-2026-00467). Anbudet är giltigt till och med 2026-12-31. Vi har tagit del av upphandlingsdokumentet och accepterar dess villkor."
+    },
+    {
+      "paragraph": "Kontaktperson för anbudet: Mikael Sjögren, affärsområdeschef, 0611-55 40 10."
+    },
+    {
+      "heading": "Kvalificering"
+    },
+    {
+      "list": [
+        "Registrerad för F-skatt och arbetsgivare; skatter och avgifter är betalda (intyg från Skatteverket bifogas).",
+        "Omsättning enligt bifogade årsredovisningar.",
+        "Referensuppdrag enligt bilaga 3."
+      ]
+    },
+    {
+      "heading": "Svar på skall-krav"
+    },
+    {
+      "table": {
+        "columns": [
+          "Krav",
+          "Uppfylls",
+          "Beskrivning"
+        ],
+        "rows": [
+          [
+            "4.2.1",
+            "Ja",
+            "Vi förmedlar 52 språk, samtliga språk i bilaga 2 ingår."
+          ],
+          [
+            "4.2.2",
+            "Ja",
+            "Kontakttolk inom 24 timmar; telefontolk inom 30 minuter vid akuta behov."
+          ],
+          [
+            "4.2.3",
+            "Ja",
+            "Kundtjänsten är bemannad alla dagar kl. 07.00–19.00, även helger, telefon 0611-55 40 00."
+          ],
+          [
+            "4.2.4",
+            "Ja",
+            "Sekretessförbindelse undertecknas av alla tolkar. Mall bifogas."
+          ],
+          [
+            "4.2.5",
+            "Ja",
+            "Bokningssystemet Språkbron Online visar status och tolkens kompetens (auktoriserad, utbildad, övrig)."
+          ],
+          [
+            "4.2.6",
+            "Ja",
+            "Rapport per förvaltning varje kvartal."
+          ],
+          [
+            "4.2.7",
+            "Ja",
+            "Klagomål hanteras av vår kvalitetsansvarige med återkoppling inom fem arbetsdagar."
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Pris"
+    },
+    {
+      "paragraph": "Vårt timpris för kontakttolkning på plats är 640 kr, för telefontolkning 395 kr och för distanstolkning via video 430 kr, exklusive moms. Vi förbinder oss att minst 31 procent av uppdragen utförs av auktoriserade tolkar. Se även prisbilagan."
+    },
+    {
+      "heading": "Om oss"
+    },
+    {
+      "paragraph": "Språkbron Norr AB har förmedlat tolkning i Norrland sedan 2011 och har 380 tolkar i sitt nätverk, varav 118 auktoriserade."
+    },
+    {
+      "signature": {
+        "name": "Mikael Sjögren",
+        "role": "Behörig företrädare"
+      }
+    }
+  ]
+}

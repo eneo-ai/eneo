@@ -1,0 +1,94 @@
+{
+  "name": "Registrering av livsmedelsanläggning – riskklassning och beslut",
+  "description": "Livsmedelskontrollens stöd när en anmälan om registrering kommit in via e-tjänsten: räknar årsarbetskrafter och kontrollpoäng, fastställer riskklass och kontrollfrekvens enligt Livsmedelsverkets modell (LIVSFS 2023:2) och skriver registreringsbeslutet.",
+  "metadata_json": {
+    "form_schema": {
+      "fields": [
+        {"name": "diarienummer", "type": "text", "label": "Diarienummer", "required": true, "order": 1},
+        {"name": "foretag", "type": "text", "label": "Livsmedelsföretagare (företagets namn)", "required": true, "order": 2},
+        {"name": "orgnr", "type": "text", "label": "Organisationsnummer", "required": true, "order": 3},
+        {"name": "skyltnamn", "type": "text", "label": "Anläggningens skyltnamn", "required": true, "order": 4},
+        {"name": "besoksadress", "type": "text", "label": "Besöksadress", "required": true, "order": 5},
+        {"name": "fastighetsbeteckning", "type": "text", "label": "Fastighetsbeteckning", "required": true, "order": 6},
+        {"name": "startdatum", "type": "date", "label": "Planerat startdatum", "required": true, "order": 7},
+        {"name": "anmalan_inkom", "type": "date", "label": "Datum då anmälan kom in", "required": true, "order": 8},
+        {"name": "aktiviteter", "type": "text", "label": "Aktiviteter enligt anmälan (åtskilda med semikolon)", "required": true, "order": 9},
+        {"name": "personal", "type": "text", "label": "Personal enligt anmälan (företagarens beskrivning)", "required": true, "order": 10},
+        {"name": "handlaggare", "type": "text", "label": "Handläggare", "required": true, "order": 11}
+      ]
+    }
+  },
+  "steps": [
+    {
+      "name": "Beräkna omfattning och kontrollpoäng",
+      "instructions": "Du får aktiviteterna och personalbeskrivningen ur en anmälan om registrering av en livsmedelsanläggning i sista led.\n\nÅrsarbetskrafter: räkna alla som arbetar i verksamheten (anställda, ägare och inhyrd personal) omräknat till heltid under ett år. Två som arbetar halvtid är en årsarbetskraft. Antalet personer är inte antalet årsarbetskrafter. Omfattningsklass: Mikro mer än 0 och högst 1 årsarbetskraft, Liten mer än 1 och högst 5, Mellan mer än 5 och högst 15, Stor mer än 15.\n\nKontrollpoäng per aktivitet (varje aktivitet räknas en gång): Inköp av livsmedel 1; Import av livsmedel från länder utanför EU/EES 3; Utformning av märkning för konsumentförpackningar 5; Utformning av övrig livsmedelsinformation 2; Märkning 2; Tillhandahållande av muntlig livsmedelsinformation 4; Försäljning av livsmedel 1 (huvudaktivitet); Distansförsäljning 2; Servering av livsmedel 1 (huvudaktivitet); Tillhandahållande av offentliga måltider 2 (huvudaktivitet); Kylförvaring av livsmedel 1; Frysförvaring av livsmedel 1; Groddning 3; Bakning 1; Hantering av oförpackade färskvaror 2; Hantering av oförpackad färsk fisk 4; Hantering av oförpackat färskt kött inklusive fågel 4; Tillagning av livsmedel med låg hygienisk risk 1; Tillagning av ej värmebehandlade livsmedel 2; Tillagning av värmebehandlade/bearbetade livsmedel 2; Varmhållning av livsmedel 2; Nedkylning av livsmedel 3; Användande av vatten som inte omfattas av dricksvattenföreskrifterna 2; Mobil delverksamhet 3.\n\nKnyt varje aktivitet i anmälan till en aktivitet i listan, ange dess poäng och om den är en huvudaktivitet, och summera poängen. Minst en aktivitet ska vara en huvudaktivitet. Hitta inte på aktiviteter som inte står i anmälan.",
+      "input_source": "flow_input",
+      "input_type": "text",
+      "input_bindings": {"question": "Anläggning: {{ flow_input.skyltnamn }}\nAktiviteter enligt anmälan: {{ flow_input.aktiviteter }}\nPersonal enligt anmälan: {{ flow_input.personal }}"},
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["arsarbetskrafter", "omfattningsklass", "aktiviteter", "summa_kontrollpoang"],
+        "properties": {
+          "arsarbetskrafter": {"type": "number"},
+          "omfattningsklass": {"type": "string", "enum": ["Mikro", "Liten", "Mellan", "Stor"]},
+          "aktiviteter": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["aktivitet", "kontrollpoang", "huvudaktivitet"],
+              "properties": {"aktivitet": {"type": "string"}, "kontrollpoang": {"type": "integer"}, "huvudaktivitet": {"type": "boolean"}}
+            }
+          },
+          "summa_kontrollpoang": {"type": "integer"}
+        }
+      }
+    },
+    {
+      "name": "Fastställ riskklass och kontrollfrekvens",
+      "instructions": "Fastställ riskklass och kontrollfrekvens enligt Livsmedelsverkets föreskrifter LIVSFS 2023:2. Läs ut riskklassen ur omfattningsklassen och summan av kontrollpoäng:\nMikro: 0–10 poäng SL1, 11–20 SL2, 21–35 SL3, 36–50 SL4, mer än 50 SL5.\nLiten: 0–10 SL2, 11–20 SL3, 21–35 SL4, 36–50 SL5, mer än 50 SL6.\nMellan: 0–10 SL3, 11–20 SL4, 21–35 SL5, 36–50 SL6, mer än 50 SL7.\nStor: 0–10 SL4, 11–20 SL5, 21–35 SL6, 36–50 SL7, mer än 50 SL8.\nKontrollfrekvens (kontroller per fem år / per år): SL1 1 / 0,2; SL2 2 / 0,4; SL3 4 / 0,8; SL4 5 / 1; SL5 10 / 2; SL6 15 / 3; SL7 20 / 4; SL8 25 / 5.\nEn ny anläggning får ingen reduktion för god efterlevnad. Den gamla modellen med riskklass 1–8, kontrolltid i timmar och erfarenhetsklass används inte. Motivera kort med omfattningsklass och poängsumma.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "omfattningsklass", "label": "Omfattningsklass"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "summa_kontrollpoang", "label": "Summa kontrollpoäng"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["riskklass", "kontroller_per_fem_ar", "kontroller_per_ar", "motivering"],
+        "properties": {
+          "riskklass": {"type": "string", "enum": ["SL1", "SL2", "SL3", "SL4", "SL5", "SL6", "SL7", "SL8"]},
+          "kontroller_per_fem_ar": {"type": "integer"},
+          "kontroller_per_ar": {"type": "number"},
+          "motivering": {"type": "string"}
+        }
+      }
+    },
+    {
+      "name": "Skriv registreringsbeslut",
+      "instructions": "Skriv miljönämndens beslut om registrering av livsmedelsanläggning och kontrollfrekvens. Rubriker: Beslut, Skäl för beslutet, Avgifter, Information, Hur man överklagar.\n\nUnder Beslut: miljönämnden registrerar anläggningen (skyltnamn, besöksadress, fastighetsbeteckning) för livsmedelsföretagaren (företag och organisationsnummer), fastställer riskklassen och antalet planerade kontroller per fem år och per år, och tar ut en avgift för registreringen på 2 900 kr. Lagstöd: artikel 6.2 i förordning (EG) nr 852/2004, 11 § livsmedelslagen (2006:804), LIVSFS 2023:2 och förordningen (2021:176) om avgifter för offentlig kontroll av livsmedel och vissa jordbruksprodukter.\n\nUnder Skäl för beslutet: redovisa aktiviteterna med kontrollpoäng, summan, årsarbetskrafterna och omfattningsklassen och hur det ger riskklassen.\n\nUnder Avgifter: kontroll debiteras i efterhand för den tid som använts, med timavgiften 1 450 kr enligt miljönämndens taxa 2026; riktvärdet för en planerad kontroll är 3 timmar. Ingen årlig avgift tas ut i förskott.\n\nUnder Information: verksamheten får starta tidigast två veckor efter att anmälan kom in (ange datumet), och livsmedelsföretagaren ska anmäla ändringar i verksamheten.\n\nUnder Hur man överklagar: beslutet kan överklagas hos Länsstyrelsen Västernorrland enligt 31 § livsmedelslagen; överklagandet skickas till miljönämnden och ska ha kommit in inom tre veckor från den dag beslutet togs emot. Avsluta med handläggarens namn. Skriv inga personnummer.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Diarienummer: {{ flow_input.diarienummer }}\nLivsmedelsföretagare: {{ flow_input.foretag }}, org.nr {{ flow_input.orgnr }}\nAnläggning: {{ flow_input.skyltnamn }}, {{ flow_input.besoksadress }}, {{ flow_input.fastighetsbeteckning }}\nPlanerat startdatum: {{ flow_input.startdatum }}\nAnmälan kom in: {{ flow_input.anmalan_inkom }}\nHandläggare: {{ flow_input.handlaggare }}",
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "aktiviteter", "label": "Aktiviteter och kontrollpoäng"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "summa_kontrollpoang", "label": "Summa kontrollpoäng"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "arsarbetskrafter", "label": "Årsarbetskrafter"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "omfattningsklass", "label": "Omfattningsklass"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "riskklass", "label": "Riskklass"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "kontroller_per_fem_ar", "label": "Kontroller per fem år"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "kontroller_per_ar", "label": "Kontroller per år"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "motivering", "label": "Motivering"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "text"
+    }
+  ]
+}

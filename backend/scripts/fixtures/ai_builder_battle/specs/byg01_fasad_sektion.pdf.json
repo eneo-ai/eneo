@@ -1,0 +1,20 @@
+{
+  "file": "byg01_fasad_sektion.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/443"},
+  "description": "Fasad- och sektionsritning A-03 (skala 1:100) för tillbyggnaden, återgiven som höjder, taklutning och material; skiljer byggnadshöjd från nockhöjd.",
+  "letterhead": {"organisation": "Norrljus Arkitektur & Bygg AB", "unit": "Bygglovshandlingar", "address": "Storgatan 31, 852 30 Sundsvall · 060-61 22 40"},
+  "date": "2026-08-02",
+  "title": "A-03 Fasad- och sektionsritning – tillbyggnad av enbostadshus, Sundsvall Tallåsen 4:17",
+  "blocks": [
+    {"paragraph": "Skala 1:100 (A3). Fasader mot öster, norr och söder samt sektion A-A genom tillbyggnaden. Höjder anges över medelmarknivån intill tillbyggnaden."},
+    {"heading": "Höjder och taklutning"},
+    {"table": {"columns": ["Uppgift", "Värde"], "rows": [["Byggnadshöjd, tillbyggnad", "3,1 m"], ["Nockhöjd, tillbyggnad", "5,4 m"], ["Nockhöjd, befintligt bostadshus", "5,6 m"], ["Taklutning, tillbyggnad", "22°"], ["Färdigt golv över mark", "0,4 m"]]}},
+    {"paragraph": "Byggnadshöjden är mätt enligt 1 kap. 3 § plan- och byggförordningen (2011:338): från medelmarknivån intill byggnaden till skärningen mellan fasadplanet och ett plan som med 45 graders lutning inåt byggnaden tangerar takets yttersida."},
+    {"heading": "Material och kulörer"},
+    {"list": ["Fasad: liggande träpanel, grå NCS S 5502-Y, samma som befintligt hus", "Tak: betongpannor, svarta, samma som befintligt hus", "Fönster och dörrar: trä/aluminium, vita", "Grundläggning: platta på mark med 300 mm cellplast"]},
+    {"heading": "Sektion A-A"},
+    {"paragraph": "Takstolar c 1 200 med 45 cm lösull på vinden. Ytterväggar med 220 mm isolering. Tillbyggnadens tak ansluter under befintlig takfot på östra gaveln."},
+    {"signature": {"name": "Karin Sjölund", "role": "Ritare, Norrljus Arkitektur & Bygg AB"}}
+  ]
+}

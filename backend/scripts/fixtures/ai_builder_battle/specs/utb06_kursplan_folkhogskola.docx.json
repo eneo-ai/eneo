@@ -1,0 +1,37 @@
+{
+  "file": "utb06_kursplan_folkhogskola.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "UTB-06", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/644"},
+  "description": "Folkhögskolans kursplan från 2018 för en allmän kurs i samhällskunskap, bifogad ansökan om tillgodoräknande i komvux; innehållet jämförs med Skolverkets ämnesplan för Gy25.",
+  "letterhead": {"organisation": "Stödeviks folkhögskola", "unit": "Allmän kurs", "address": "Stödeviksvägen 2, 855 90 Sundsvall"},
+  "date": "2018-06-12",
+  "title": "Kursplan – Samhällskunskap, allmän kurs",
+  "blocks": [
+    {"heading": "Omfattning och nivå"},
+    {"paragraph": "Kursen omfattar 10 veckor på heltid och ges inom den allmänna kursen. Kursen motsvarar enligt skolans bedömning 100 gymnasiepoäng i samhällskunskap. Folkhögskolan sätter inte betyg; deltagaren får ett intyg och ett studieomdöme enligt Folkbildningsrådets riktlinjer."},
+    {"heading": "Syfte"},
+    {"paragraph": "Kursen ska ge deltagaren kunskaper om hur det svenska samhället är organiserat, hur makt fördelas och utövas och hur samhällsfrågor kan analyseras ur olika perspektiv, som grund för fortsatta studier och ett aktivt medborgarskap."},
+    {"heading": "Kursens innehåll"},
+    {
+      "table": {
+        "columns": ["Moment", "Innehåll", "Veckor"],
+        "rows": [
+          ["1", "Demokrati och diktatur: statsskick, maktdelning och rättsstatens principer", "1"],
+          ["2", "Sveriges politiska system: riksdag, regering, kommun och region", "1,5"],
+          ["3", "EU:s institutioner och beslutsprocess", "0,5"],
+          ["4", "Politiska ideologier och de svenska riksdagspartierna", "1"],
+          ["5", "Mänskliga rättigheter och det svenska rättssystemet", "1"],
+          ["6", "Nationalekonomi: tillväxt, konjunkturer, inflation och välfärdens finansiering", "1,5"],
+          ["7", "Massmedier och medieanalys: dagspress, radio och tv", "1"],
+          ["8", "Sociala skillnader: klass, kön och etnicitet", "1"],
+          ["9", "Samhällsvetenskapligt arbetssätt: enkät, intervju, källkritik och fördjupningsarbete", "1,5"]
+        ]
+      }
+    },
+    {"heading": "Arbetsformer och examination"},
+    {"paragraph": "Undervisningen sker i helklass och i basgrupper med föreläsningar, seminarier och studiebesök i kommunfullmäktige. Kursen examineras med två skriftliga prov (efter moment 3 och 6), en muntlig redovisning och ett fördjupningsarbete inom moment 9."},
+    {"heading": "Intyg och studieomdöme"},
+    {"paragraph": "Den som fullföljer kursen får intyg med kursens innehåll och omfattning. Studieomdöme sätts på en fyrgradig skala efter hela studietiden och lämnas inte för en kurs som avbrutits."},
+    {"signature": {"name": "Per-Olof Dahlin", "role": "Rektor, Stödeviks folkhögskola"}}
+  ]
+}

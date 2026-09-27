@@ -1,0 +1,53 @@
+{
+  "file": "mil01_siktanalys.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "MIL-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/581"},
+  "description": "Laboratoriets analysrapport med kornstorleksfördelning (siktanalys) för jordprovet från provgropen, med siktkurvans värden, d10, d60, graderingstal och en bedömning av jordens lämplighet för infiltration.",
+  "letterhead": {"organisation": "Mittlab Jord & Vatten AB", "unit": "Geotekniskt laboratorium", "address": "Norra Järnvägsgatan 22, 852 38 Sundsvall · Ackrediteringsnummer 2291 (fiktivt)"},
+  "date": "2026-05-20",
+  "diarienummer": "ML-26-05871",
+  "title": "Analysrapport – kornstorleksfördelning genom siktning",
+  "blocks": [
+    {"table": {
+      "columns": ["Uppgift", "Värde"],
+      "rows": [
+        ["Uppdragsgivare", "Alnö Gräv & VA AB, Tomas Berglöf"],
+        ["Projekt", "Enskilt avlopp, Sundsvall Tjärnvik 1:23"],
+        ["Prov", "PG1:2, provgrop PG1, djup 0,8–1,0 m"],
+        ["Provtagningsdatum", "2026-05-12"],
+        ["Ankomstdatum", "2026-05-14"],
+        ["Metod", "SS-EN ISO 17892-4, våtsiktning"]
+      ]
+    }},
+    {"heading": "Resultat – passerande mängd"},
+    {"table": {
+      "columns": ["Sikt (mm)", "Passerande (vikt-%)"],
+      "rows": [
+        ["16", "100"],
+        ["8", "94"],
+        ["4", "85"],
+        ["2", "72"],
+        ["1", "55"],
+        ["0,5", "38"],
+        ["0,25", "24"],
+        ["0,125", "14"],
+        ["0,063", "8"]
+      ]
+    }},
+    {"heading": "Beräknade värden"},
+    {"table": {
+      "columns": ["Parameter", "Värde"],
+      "rows": [
+        ["d10", "0,09 mm"],
+        ["d60", "1,2 mm"],
+        ["Graderingstal Cu (d60/d10)", "13"],
+        ["Finjordshalt (< 0,063 mm)", "8 %"],
+        ["Jordart enligt SS-EN ISO 14688-2", "Sandig morän (saMn)"]
+      ]
+    }},
+    {"heading": "Bedömning"},
+    {"paragraph": "Provet är en välgraderad sandig morän med låg finjordshalt. Materialet bedöms ha god genomsläpplighet och kan användas som infiltrationsjord under förutsättning att avståndet till grundvatten är tillräckligt. Laboratoriet har inte bedömt grundvattenförhållandena."},
+    {"paragraph": "Resultaten gäller endast för det provade materialet. Rapporten får endast återges i sin helhet."},
+    {"signature": {"name": "Elin Sundqvist", "role": "Laboratorieingenjör, Mittlab Jord & Vatten AB"}}
+  ]
+}

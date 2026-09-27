@@ -1,0 +1,76 @@
+{
+  "file": "oms16_stiftelse_alno_understodsfond.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "OMS-16",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/490"
+  },
+  "description": "Stadgar för en understödsfond för behövande som bor inom den gamla Alnö socken, med ansökningsperiod under hösten och högsta belopp.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Kommunstyrelsekontoret, Stiftelseförvaltningen",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2025-11-20",
+  "diarienummer": "KS-2025-00978",
+  "title": "Stiftelseförordnande: Alnö sockens understödsfond",
+  "blocks": [
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Värde"
+        ],
+        "rows": [
+          [
+            "Stiftelse",
+            "Alnö sockens understödsfond"
+          ],
+          [
+            "Organisationsnummer",
+            "802009-5530"
+          ],
+          [
+            "Förvaltare",
+            "Sundsvalls kommun genom kommunstyrelsen"
+          ],
+          [
+            "Ursprung",
+            "Donation från Alnö sockens kommunalstämma 1911, överförd till Sundsvalls kommun 1974"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Ändamål enligt förordnandet"
+    },
+    {
+      "paragraph": "Fondens avkastning ska användas till hjälp åt behövande personer som är bosatta inom Alnö socken."
+    },
+    {
+      "heading": "Villkor för utdelning"
+    },
+    {
+      "list": [
+        "Sökanden är folkbokförd på Alnö (postorterna Alnö, Vi och Hovid inom den tidigare Alnö socken).",
+        "Sökanden har begränsade ekonomiska resurser. Utskottet bedömer behovet utifrån inkomster och boendekostnad.",
+        "Det finns ingen åldersgräns."
+      ]
+    },
+    {
+      "heading": "Utdelning"
+    },
+    {
+      "paragraph": "Högsta utdelning per hushåll och år är 3 000 kr."
+    },
+    {
+      "heading": "Ansökan"
+    },
+    {
+      "paragraph": "Ansökningsperiod: 1 september – 31 oktober. Utdelning beslutas i november."
+    },
+    {
+      "paragraph": "Stiftelsen förvaltas enligt stiftelselagen (1994:1220) och förordnandet. Beslut om utdelning fattas av kommunstyrelsens stiftelseutskott. Den som har fått avslag kan ansöka på nytt nästa ansökningsperiod."
+    }
+  ]
+}

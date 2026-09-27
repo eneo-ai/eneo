@@ -1,0 +1,160 @@
+{
+  "file": "int01_registreringsrutin_ian.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-01",
+    "url": "https://sundsvall.se/kommun/kommun-och-politik/diarium-arkiv-och-sekretess/diarium"
+  },
+  "description": "En nämnds registreringsrutin med klassificeringsstruktur: vad som registreras i diariet, processkoder, regler för offentlig ärendemening och avsändare, sekretessmarkering, koppling till tidigare ärenden och fördelning.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Individ- och arbetsmarknadsförvaltningen, registraturen",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-01-15",
+  "diarienummer": "IAN-2026-00019",
+  "title": "Rutin för registrering och klassificering av inkommande handlingar – individ- och arbetsmarknadsnämnden",
+  "blocks": [
+    {
+      "heading": "Utgångspunkter"
+    },
+    {
+      "paragraph": "Allmänna handlingar ska registreras utan dröjsmål när de har kommit in (5 kap. 1 § OSL). Registret ska visa datum då handlingen kom in, diarienummer, avsändare och i korthet vad handlingen rör (5 kap. 2 § OSL). Diariet är offentligt: uppgifter om avsändare och vad handlingen rör ska utelämnas eller särskiljas om det behövs för att registret i övrigt ska kunna hållas tillgängligt för allmänheten."
+    },
+    {
+      "paragraph": "Handlingar i enskilda ärenden om ekonomiskt bistånd, missbruk och barn och unga registreras inte i diariet. De hålls ordnade i verksamhetssystemet Lifecare med stöd av 5 kap. 3 § OSL och offentlighets- och sekretessförordningen (2009:641). Underrättelser från hyresvärdar och synpunkter registreras däremot i diariet."
+    },
+    {
+      "heading": "Klassificeringsstruktur (utdrag)"
+    },
+    {
+      "table": {
+        "columns": [
+          "Processkod",
+          "Process",
+          "Handlingstyp",
+          "Registreras i",
+          "Sekretessmarkering",
+          "Ärendemening"
+        ],
+        "rows": [
+          [
+            "1.3.2",
+            "Nämndadministration",
+            "Remiss till nämnden",
+            "Diariet",
+            "Nej",
+            "Remiss – [ämne], från [avsändare]"
+          ],
+          [
+            "3.1.1",
+            "Ekonomiskt bistånd",
+            "Ansökan om ekonomiskt bistånd",
+            "Lifecare",
+            "26 kap. 1 § OSL",
+            "Registreras inte i diariet"
+          ],
+          [
+            "3.4.1",
+            "Vräkningsförebyggande arbete",
+            "Underrättelse från hyresvärd om uppsägning på grund av hyresskuld (12 kap. 44 § jordabalken)",
+            "Diariet",
+            "26 kap. 1 § OSL",
+            "Underrättelse om uppsägning av hyresavtal på grund av hyresskuld"
+          ],
+          [
+            "3.4.2",
+            "Vräkningsförebyggande arbete",
+            "Underrättelse från hyresvärd om störningar eller bristande skötsamhet (12 kap. 25 a § jordabalken)",
+            "Diariet",
+            "26 kap. 1 § OSL",
+            "Underrättelse om störningar i boendet"
+          ],
+          [
+            "3.5.1",
+            "Barn och unga",
+            "Orosanmälan",
+            "Lifecare",
+            "26 kap. 1 § OSL",
+            "Registreras inte i diariet"
+          ],
+          [
+            "5.1.1",
+            "Synpunkter och klagomål",
+            "Synpunkt eller klagomål",
+            "Diariet",
+            "Bedöms i varje fall",
+            "Synpunkt på [verksamhet]"
+          ],
+          [
+            "6.2.3",
+            "Informationshantering",
+            "Begäran om allmän handling",
+            "Diariet",
+            "Nej",
+            "Begäran om allmän handling – [ämne]"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Ärendemening och avsändare"
+    },
+    {
+      "list": [
+        "Ärendemeningen är offentlig. I ärenden som rör enskildas personliga förhållanden inom socialtjänsten får den inte innehålla namn, personnummer, adress, lägenhetsnummer eller något annat som gör det möjligt att identifiera den enskilde. Använd ärendemeningen i klassificeringsstrukturen.",
+        "Avsändare som är företag, myndigheter eller organisationer registreras med sitt namn. En enskild person i ett sekretessärende registreras som ”Enskild – sekretess”.",
+        "Uppgifter om den enskilde registreras inte i diariet utan i Lifecare när ärendet fördelats."
+      ]
+    },
+    {
+      "heading": "Sekretessmarkering"
+    },
+    {
+      "paragraph": "Handlingar som sannolikt innehåller sekretessbelagda uppgifter markeras med lagrum enligt klassificeringsstrukturen (5 kap. 5 § OSL). Markeringen är ett stöd; sekretessprövningen görs när någon begär att få ta del av handlingen."
+    },
+    {
+      "heading": "Koppling till tidigare ärenden"
+    },
+    {
+      "paragraph": "Sök efter tidigare ärenden med samma hushåll. En ny underrättelse för ett hushåll som haft ett ärende i processen 3.4 de senaste tolv månaderna registreras i det tidigare ärendet, som öppnas igen. Annars skapas ett nytt ärende."
+    },
+    {
+      "heading": "Fördelning"
+    },
+    {
+      "table": {
+        "columns": [
+          "Processkod",
+          "Fördelas till"
+        ],
+        "rows": [
+          [
+            "3.4.1, 3.4.2",
+            "Vräkningsförebyggande teamet, enheten för ekonomiskt bistånd"
+          ],
+          [
+            "5.1.1",
+            "Berörd enhetschef, kopia till kvalitetsstrateg"
+          ],
+          [
+            "6.2.3",
+            "Den som ansvarar för handlingen, kopia till förvaltningsjurist"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Mottagningsbekräftelse"
+    },
+    {
+      "paragraph": "Skicka mottagningsbekräftelse till avsändare som är organisationer. Ange diarienummer och handläggande enhet."
+    },
+    {
+      "signature": {
+        "name": "Ulrika Sjödin",
+        "role": "Registrator"
+      }
+    }
+  ]
+}

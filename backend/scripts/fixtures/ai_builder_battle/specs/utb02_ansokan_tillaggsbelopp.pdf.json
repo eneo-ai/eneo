@@ -1,0 +1,50 @@
+{
+  "file": "utb02_ansokan_tillaggsbelopp.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "UTB-02", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/210"},
+  "description": "Utskrift av en inskickad ansökan i e-tjänsten Ansökan om tilläggsbelopp från en fristående gymnasieskola till elevens hemkommun, med skolform och lagrum, sökt period och bilageförteckning.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "E-tjänst: Ansökan om tilläggsbelopp", "address": "Barn- och utbildningsförvaltningen, 851 85 Sundsvall"},
+  "date": "2026-09-10",
+  "title": "Ansökan om tilläggsbelopp för elev med omfattande behov av särskilt stöd",
+  "blocks": [
+    {"paragraph": "Ärendenummer i e-tjänsten: 210-2026-000356. Inskickad 2026-09-10 kl. 09:14 av Johanna Berg, rektor. Signerad med BankID."},
+    {"heading": "Huvudman och skolenhet"},
+    {
+      "table": {
+        "columns": ["Fält i e-tjänsten", "Svar"],
+        "rows": [
+          ["Huvudman", "Nordvik Utbildning AB, 556947-2208"],
+          ["Skolenhet", "Nordvik Gymnasium, skolenhetskod 41238765"],
+          ["Rektor", "Johanna Berg, johanna.berg@nordvikgymnasium.example, 060-61 20 15"],
+          ["Skolform", "Gymnasieskola – tilläggsbelopp enligt skollagen 16 kap. 54 §"]
+        ]
+      }
+    },
+    {"heading": "Elev"},
+    {
+      "table": {
+        "columns": ["Elevuppgift", "Svar"],
+        "rows": [
+          ["Namn", "Elias Nyström"],
+          ["Personnummer", "20100903-2390"],
+          ["Program och årskurs", "El- och energiprogrammet, årskurs 1, klass EE26A"],
+          ["Hemkommun", "Sundsvall"],
+          ["Vårdnadshavare informerade om ansökan", "Ja"]
+        ]
+      }
+    },
+    {"heading": "Ansökan avser"},
+    {"paragraph": "Sökt period: 2026-08-17 – 2027-12-22. Sökt belopp: enligt bifogad kostnadsberäkning."},
+    {"paragraph": "Beskrivning av elevens behov och av det extraordinära stödet: Elias behöver en vuxen vid sin sida under de praktiska momenten i verkstad och elsal för att kunna delta säkert. Stödet ges av en elevassistent som bara arbetar med Elias. Skolan har sedan skolstart prövat extra anpassningar i form av visuellt schema, förberedelse inför nya moment och talsyntes. Utöver elevassistenten söker skolan ersättning för specialpedagogisk handledning av arbetslaget och för skolans licens för inläsningstjänst."},
+    {"heading": "Bifogade handlingar"},
+    {
+      "list": [
+        "Åtgärdsprogram 2026-09-03",
+        "Pedagogisk kartläggning 2026-08-31",
+        "Utlåtande från elevhälsan 2026-09-07",
+        "Kostnadsberäkning"
+      ]
+    },
+    {"paragraph": "Jag intygar att uppgifterna är riktiga och att huvudmannen använder tilläggsbeloppet för det stöd som ansökan avser."}
+  ]
+}

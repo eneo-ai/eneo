@@ -1,0 +1,54 @@
+{
+  "file": "int02_begaran_allman_handling.txt",
+  "format": "txt",
+  "source": {
+    "catalogue_id": "INT-02",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/93"
+  },
+  "description": "En diarieförd e-postbegäran från en journalist om att få ta del av allmänna handlingar i ett ärende om hemtjänsten, med begäran om skriftligt beslut vid avslag.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Vård- och omsorgsförvaltningen, registratur"
+  },
+  "date": "2026-09-14",
+  "diarienummer": "VON-2026-01184",
+  "title": "Inkommen e-post: Begäran om allmänna handlingar – hemtjänsten Matfors",
+  "blocks": [
+    {
+      "list": [
+        "Från: Elin Sjöberg <elin.sjoberg@mittpunkten.example>",
+        "Till: Vård- och omsorgsnämndens funktionsbrevlåda",
+        "Skickat: måndag 14 september 2026 08:17",
+        "Ämne: Begäran om allmänna handlingar – hemtjänsten Matfors"
+      ]
+    },
+    {
+      "paragraph": "Hej!"
+    },
+    {
+      "paragraph": "Jag är reporter på Tidningen Mittpunkten och begär med stöd av tryckfrihetsförordningen att få ta del av följande allmänna handlingar i ärende VON-2026-00977 (klagomål och avvikelser inom hemtjänsten i Matfors):"
+    },
+    {
+      "list": [
+        "Tjänsteskrivelsen om uppföljningen av klagomål och avvikelser som enligt föredragningslistan ska behandlas av nämnden den 24 september, med bilagor.",
+        "Utredningen enligt lex Sarah om händelsen i hemtjänsten i Matfors i juli 2026.",
+        "Mejlväxlingen mellan enhetschefen för hemtjänsten Matfors och bemanningsenheten om bemanningen under juli och augusti 2026."
+      ]
+    },
+    {
+      "paragraph": "Jag vill helst få handlingarna elektroniskt som PDF till den här adressen. Om det går att få dem före nämndens sammanträde vore det bra."
+    },
+    {
+      "paragraph": "Om ni bedömer att någon handling eller uppgift inte kan lämnas ut vill jag att myndigheten prövar frågan och fattar ett skriftligt beslut med överklagandehänvisning, så att jag kan överklaga det."
+    },
+    {
+      "paragraph": "Tack på förhand!"
+    },
+    {
+      "signature": {
+        "name": "Elin Sjöberg",
+        "role": "Reporter, Tidningen Mittpunkten, tel. 060-55 21 90"
+      }
+    }
+  ]
+}

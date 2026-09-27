@@ -1,0 +1,26 @@
+{
+  "file": "me_int01_epost_skola.txt",
+  "format": "txt",
+  "source": {"catalogue_id": "INT-01", "url": "https://sundsvall.se/kommun/kommun-och-politik/diarium-arkiv-och-sekretess/diarium"},
+  "description": "Ett e-postmeddelande till förvaltningens funktionsbrevlåda, sparat som text före registrering: en skola skickar en anmälan till huvudmannen, namnger eleven och ber att handlingen läggs i ett befintligt ärende.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Barn- och utbildningsförvaltningen, funktionsbrevlåda"},
+  "date": "2026-09-22",
+  "title": "Inkommen e-post: Anmälan kränkande behandling åk 5 – till huvudman",
+  "blocks": [
+    {
+      "list": [
+        "Från: Norrbrinkens skola expedition <norrbrinkensskola.expedition@sundsvall.example>",
+        "Till: Barn- och utbildningsförvaltningens funktionsbrevlåda",
+        "Skickat: tisdag 22 september 2026 15:42",
+        "Ämne: Anmälan kränkande behandling åk 5 – till huvudman",
+        "Bifogad fil: Anmalan_till_huvudman_2026-09-22.pdf"
+      ]
+    },
+    {"paragraph": "Hej!"},
+    {"paragraph": "På uppdrag av rektor Per Almqvist skickar jag skolans anmälan till huvudmannen om kränkande behandling av en elev i årskurs 5, se bifogad blankett. Det gäller Alva Lindqvist i 5B. Vårdnadshavarna är informerade och skolan har påbörjat utredningen."},
+    {"paragraph": "Det här hänger ihop med anmälan vi skickade i augusti om samma elev, som ni gav diarienummer BUN-2026-00871. Kan ni lägga den nya anmälan i samma ärende?"},
+    {"paragraph": "Observera att bilagan innehåller uppgifter från elevhälsan."},
+    {"paragraph": "Med vänlig hälsning"},
+    {"signature": {"name": "Karin Holmgren", "role": "Skoladministratör, Norrbrinkens skola, tfn 060-19 22 41"}}
+  ]
+}

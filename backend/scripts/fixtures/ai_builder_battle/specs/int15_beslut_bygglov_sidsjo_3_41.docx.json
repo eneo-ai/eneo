@@ -1,0 +1,101 @@
+{
+  "file": "int15_beslut_bygglov_sidsjo_3_41.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-15",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/715"
+  },
+  "description": "Delegationsbeslut om bygglov för enbostadshus och garage på Sidsjö 3:41 ur ByggR, med aktuellt lagrum i beslutet men ett äldre standardavsnitt om expediering (PoIT, 9 kap. 41–41 b §§) som anger kungörelsedagen.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Stadsbyggnadsnämnden",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-09-22",
+  "diarienummer": "BYGG-2026-001243",
+  "title": "Beslut om bygglov för nybyggnad av enbostadshus och garage",
+  "blocks": [
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Värde"
+        ],
+        "rows": [
+          [
+            "Fastighet",
+            "Sidsjö 3:41"
+          ],
+          [
+            "Adress",
+            "Sidsjövägen 14"
+          ],
+          [
+            "Sökande",
+            "Johan Nordin och Sara Nordin, Sidsjövägen 14, 856 45 Sundsvall"
+          ],
+          [
+            "Åtgärd",
+            "Nybyggnad av enbostadshus i en och en halv plan, byggnadsarea 148 m², och fristående garage, byggnadsarea 42 m²"
+          ],
+          [
+            "Planförhållanden",
+            "Detaljplan för Sidsjö 3:1 m.fl., laga kraft 2008-06-19"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Beslut"
+    },
+    {
+      "paragraph": "Stadsbyggnadsnämnden beviljar bygglov med stöd av 9 kap. 56 § plan- och bygglagen (2010:900), PBL."
+    },
+    {
+      "paragraph": "Kontrollansvarig: Anders Mattsson, certifierad kontrollansvarig med behörighet N. Byggnadsarbetena får inte påbörjas innan stadsbyggnadsnämnden har lämnat startbesked."
+    },
+    {
+      "heading": "Motivering"
+    },
+    {
+      "paragraph": "Åtgärden överensstämmer med detaljplanen i fråga om användning, byggnadsarea, höjd och placering. Berörda grannar har getts tillfälle att yttra sig. Ägaren till Sidsjö 3:38 har invänt mot garagets höjd och placering nära tomtgränsen. Garaget placeras 4,5 meter från gränsen och håller planens högsta byggnadshöjd på 3,0 meter; synpunkterna har därför inte föranlett någon ändring."
+    },
+    {
+      "heading": "Avgift"
+    },
+    {
+      "paragraph": "Avgiften för beslutet är 38 412 kronor enligt stadsbyggnadsnämndens taxa. Faktura skickas separat."
+    },
+    {
+      "heading": "Upplysningar"
+    },
+    {
+      "paragraph": "Beslutet om bygglov upphör att gälla om åtgärden inte har påbörjats inom två år och avslutats inom sju år från den dag beslutet vann laga kraft."
+    },
+    {
+      "heading": "Hur man överklagar"
+    },
+    {
+      "paragraph": "Beslutet kan överklagas hos Länsstyrelsen Västernorrland. Överklagandet ska vara skriftligt och skickas till stadsbyggnadsnämnden, Sundsvalls kommun, 851 85 Sundsvall. Överklagandet ska ha kommit in inom tre veckor från den dag du fick del av beslutet."
+    },
+    {
+      "paragraph": "Beslutet har fattats med stöd av delegation från stadsbyggnadsnämnden."
+    },
+    {
+      "signature": {
+        "name": "Elin Häggström",
+        "role": "Bygglovhandläggare, telefon 060-19 23 47"
+      }
+    },
+    {
+      "heading": "Expediering"
+    },
+    {
+      "list": [
+        "Sökande: delges med delgivningskvitto enligt 9 kap. 41 § PBL",
+        "Kända sakägare enligt sakägarförteckningen: underrättelse enligt 9 kap. 41 b § PBL",
+        "Kungörelse i Post- och Inrikes Tidningar enligt 9 kap. 41 a § PBL, kungörelsedag 2026-09-29"
+      ]
+    }
+  ]
+}

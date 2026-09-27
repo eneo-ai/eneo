@@ -1,0 +1,33 @@
+{
+  "file": "nar01_planritning.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "NAR-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/145"},
+  "description": "Planritning A-01 över serveringslokalen med rumsförteckning, sittplatser och bardisk; hänvisar uteserveringen till en separat ritning som inte bifogats.",
+  "letterhead": {"organisation": "Arkitektkontoret Linje AB", "unit": "Bygghandling", "address": "Storgatan 22, 852 30 Sundsvall"},
+  "date": "2026-08-14",
+  "title": "Planritning plan 1 – Bistro Norra Kajen, Norra Kajen 12",
+  "blocks": [
+    {"paragraph": "Ritningsnummer A-01. Fastighet: Sundsvall Norrmalm 3:41. Skala 1:100 (A3). Ritningen redovisar serveringsytor, kök, bardisk och utrymningsvägar i bottenvåningen."},
+    {"heading": "Rumsförteckning"},
+    {
+      "table": {
+        "columns": ["Rum", "Yta (m²)", "Sittplatser", "Anmärkning"],
+        "rows": [
+          ["Matsal", "84", "44", "Bord för 2–6 personer"],
+          ["Bar", "22", "16", "Bardisk 5,4 m med 8 barstolar och 4 ståbord med 2 stolar vardera"],
+          ["Kök", "38", "–", "Varmkök och kallkök med spis, ugnar, kyl- och frysrum"],
+          ["Disk", "9", "–", ""],
+          ["Personalrum och omklädning", "12", "–", ""],
+          ["Toaletter", "8", "–", "Två toaletter, varav en tillgänglighetsanpassad"],
+          ["Förråd", "13", "–", ""]
+        ]
+      }
+    },
+    {"paragraph": "Summa sittplatser inomhus: 60. Största antal personer i lokalen enligt brandskyddsbeskrivningen: 90."},
+    {"heading": "Utrymning"},
+    {"paragraph": "Två av varandra oberoende utrymningsvägar: huvudentrén mot Norra Kajen och nödutgång från köket mot gården."},
+    {"heading": "Uteservering"},
+    {"paragraph": "Uteserveringen på gården mot kajen redovisas på separat situationsplan, ritning A-02."},
+    {"signature": {"name": "Sara Nyberg", "role": "Arkitekt SAR/MSA"}}
+  ]
+}

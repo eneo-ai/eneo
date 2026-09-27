@@ -1,0 +1,18 @@
+{
+  "file": "byg10_grannsvar_etjanst_lindbacken_3_3.txt",
+  "format": "txt",
+  "source": {"catalogue_id": "BYG-10", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/715"},
+  "description": "Textexport av ett svar via e-tjänsten Lämna svar på grannehörande: inga invändningar men önskemål om kulör och takavvattning; innehåller svarandens personnummer.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "E-tjänst: Lämna svar på grannehörande"},
+  "date": "2026-09-11",
+  "title": "Svar på grannehörande",
+  "blocks": [
+    {"paragraph": "Ärendenummer i e-tjänsten: 715-2026-003361. Inskickad: 2026-09-11 kl. 07:58. Signerad med BankID."},
+    {"heading": "Kontaktuppgifter"},
+    {"list": ["Namn: Jonas Öberg", "Personnummer: 19861104-2394", "Adress: Rönnbärsvägen 3, 857 40 Sundsvall", "Mobilnummer: 076-118 30 42", "E-post: jonas.oberg@example.com"]},
+    {"heading": "Ärendeuppgifter"},
+    {"list": ["Diarienummer på underrättelsen: BYGG-2026-000644", "Fastighet som ansökan gäller: Lindbacken 3:9", "Din fastighet: Sundsvall Lindbacken 3:3", "Har du några invändningar mot det som ansökan gäller? Nej, jag har inga invändningar."]},
+    {"paragraph": "Övriga synpunkter: Inget emot garaget i sig, men det borde få samma kulör som bostadshuset så att det smälter in på gatan. Takvattnet ska tas om hand på den egna tomten och inte ledas ut mot gatan, det står redan vatten i diket vid infarten varje vår."},
+    {"paragraph": "Bilagor: inga."}
+  ]
+}

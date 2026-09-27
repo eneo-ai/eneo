@@ -1,0 +1,45 @@
+{
+  "file": "mil07_ovk_protokoll.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "MIL-07", "url": "https://sjalvservice.malmo.se/oversikt/overview/1243"},
+  "description": "Protokoll från obligatorisk ventilationskontroll (OVK) för den lokal där studion ska finnas, upprättat när lokalen var butik: systemtyp, projekterade och uppmätta luftflöden per rum, anmärkningar, resultat och datum för nästa besiktning.",
+  "letterhead": {"organisation": "Skånes Ventilationskontroll AB", "unit": "Obligatorisk ventilationskontroll", "address": "Blekingevägen 88, 291 54 Kristianstad · 044-12 90 37"},
+  "date": "2019-03-11",
+  "diarienummer": "OVK-19-0311-07",
+  "title": "Protokoll från obligatorisk ventilationskontroll",
+  "blocks": [
+    {"table": {
+      "columns": ["Uppgift", "Värde"],
+      "rows": [
+        ["Fastighet", "Kristianstad Tranan 9"],
+        ["Adress", "Östra Storgatan 31, 291 31 Kristianstad"],
+        ["Fastighetsägare", "Tranans Fastigheter i Kristianstad AB"],
+        ["Besiktad del", "Lokal 1 i gatuplan, 46 m²"],
+        ["Verksamhet vid besiktningen", "Butik (blomsterhandel)"],
+        ["Besiktningsdatum", "2019-03-11"],
+        ["Typ av besiktning", "Ordinarie besiktning"],
+        ["Ventilationssystem", "FT-system, aggregat LA1 i vindsutrymme"],
+        ["Certifierad sakkunnig", "Per-Erik Holm, behörighet K, certifikat nr 4471-K (fiktivt)"]
+      ]
+    }},
+    {"heading": "Uppmätta luftflöden"},
+    {"table": {
+      "columns": ["Rum", "Yta", "Tilluft projekterad", "Tilluft uppmätt", "Frånluft projekterad", "Frånluft uppmätt"],
+      "rows": [
+        ["1:01 Arbetsrum bakom butiken", "14 m²", "20 l/s", "11 l/s", "20 l/s", "13 l/s"],
+        ["1:02 Butik", "24 m²", "30 l/s", "29 l/s", "25 l/s", "24 l/s"],
+        ["1:03 Wc", "3 m²", "–", "–", "10 l/s", "10 l/s"],
+        ["1:04 Förråd", "5 m²", "–", "–", "5 l/s", "5 l/s"]
+      ]
+    }},
+    {"heading": "Anmärkningar"},
+    {"list": [
+      "Tilluftsdonet i rum 1:01 är delvis igensatt och spjället strypt. Flödet understiger projekterat värde.",
+      "Filter i LA1 bör bytas oftare än i dag."
+    ]},
+    {"heading": "Resultat"},
+    {"paragraph": "Godkänd med anmärkning. Anmärkningarna ska åtgärdas av fastighetsägaren; någon ny kontrollmätning har inte beställts."},
+    {"paragraph": "Nästa ordinarie besiktning senast: 2022-03-11."},
+    {"signature": {"name": "Per-Erik Holm", "role": "Certifierad sakkunnig funktionskontrollant, behörighet K"}}
+  ]
+}

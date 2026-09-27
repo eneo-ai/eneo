@@ -1,0 +1,95 @@
+{
+  "file": "oms03_lakarintyg_bup_2026.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "OMS-03",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/191"
+  },
+  "description": "Läkarintyg från barn- och ungdomspsykiatrin som underlag för ansökan om LSS-insatser: diagnoser med ICD-koder, funktionsnedsättningens art och varaktighet, tillsynsbehov och sömn.",
+  "letterhead": {
+    "organisation": "Region Västernorrland",
+    "unit": "Barn- och ungdomspsykiatrin Sundsvall",
+    "address": "Sundsvalls sjukhus, 851 86 Sundsvall"
+  },
+  "date": "2026-08-27",
+  "title": "Läkarintyg – underlag för ansökan om insatser enligt LSS",
+  "blocks": [
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Värde"
+        ],
+        "rows": [
+          [
+            "Patient",
+            "Melvin Sjödin"
+          ],
+          [
+            "Personnummer",
+            "20160404-2398"
+          ],
+          [
+            "Intyget är utfärdat på begäran av",
+            "Vårdnadshavarna"
+          ],
+          [
+            "Undersökning",
+            "Mottagningsbesök 2026-08-20; journal från BUP sedan 2021"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Diagnoser"
+    },
+    {
+      "table": {
+        "columns": [
+          "Diagnos",
+          "ICD-10-SE",
+          "Fastställd"
+        ],
+        "rows": [
+          [
+            "Autism",
+            "F84.0",
+            "2021-11-09"
+          ],
+          [
+            "Lindrig intellektuell funktionsnedsättning",
+            "F70",
+            "2026-06-15"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Funktionsnedsättning och konsekvenser i vardagen"
+    },
+    {
+      "paragraph": "Melvin har stora svårigheter med kommunikation och socialt samspel och ett begränsat talat språk. Han behöver förberedelse inför varje övergång och reagerar med utbrott när rutiner bryts. Han saknar förmåga att bedöma faror i trafik och vid vatten och har vid flera tillfällen sprungit ut i gatan. Han behöver därför tillsyn av en vuxen hela den tid han är vaken."
+    },
+    {
+      "paragraph": "Sömnen är störd sedan tidig ålder med insomningssvårigheter och uppvaknanden två till tre gånger per natt trots behandling med melatonin. Föräldrarna har sedan flera år sovit i skift."
+    },
+    {
+      "heading": "Varaktighet"
+    },
+    {
+      "paragraph": "Funktionsnedsättningarna är medfödda och bestående. Behovet av stöd bedöms kvarstå under hela uppväxten och i vuxen ålder."
+    },
+    {
+      "heading": "Bedömning"
+    },
+    {
+      "paragraph": "Enligt min bedömning har Melvin ett omfattande behov av stöd och tillsyn som går utöver vad som kan förväntas för ett barn i hans ålder. Familjen är i behov av avlastning för att orka."
+    },
+    {
+      "signature": {
+        "name": "Hanna Öberg",
+        "role": "Överläkare, specialist i barn- och ungdomspsykiatri"
+      }
+    }
+  ]
+}

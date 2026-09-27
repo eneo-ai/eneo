@@ -1,0 +1,111 @@
+{
+  "name": "Specialkost – anpassad veckomeny till skolköket",
+  "description": "Kostenhetens stöd när en ansökan om specialkost beviljats: läser läkarintyget och veckomenyn med allergenmatris, byter ut rätter som eleven inte tål och skickar en anpassad veckomeny till skolköket utan hälsouppgifter.",
+  "metadata_json": {
+    "form_schema": {
+      "fields": [
+        {"name": "barnets_namn", "type": "text", "label": "Elevens namn", "required": true, "order": 1},
+        {"name": "skola", "type": "text", "label": "Skola", "required": true, "order": 2},
+        {"name": "klass", "type": "text", "label": "Klass eller avdelning", "required": true, "order": 3},
+        {"name": "vecka", "type": "text", "label": "Menyvecka", "required": true, "order": 4}
+      ]
+    }
+  },
+  "steps": [
+    {
+      "name": "Läs intyg och veckomeny",
+      "instructions": "Du får ett läkarintyg om specialkost och skolrestaurangens veckomeny med allergenmatris. Ta ur intyget vilka livsmedel eleven ska undvika, om eleven tål spår av dem och hur länge intyget gäller. Gå sedan igenom varje rätt i menyn, dag för dag: huvudrätt, vegetariskt alternativ, tillbehör och efterrätt. Använd allergenmatrisen för att ange vilka allergener varje rätt innehåller och om rätten måste bytas ut för eleven. Laktosfria mejeriprodukter räknas inte som laktos. Är det oklart om en rätt innehåller något eleven inte tål ska den bytas ut.",
+      "input_source": "flow_input",
+      "input_type": "document",
+      "input_config": {
+        "runtime_input": {
+          "enabled": true,
+          "required": true,
+          "max_files": 5,
+          "input_format": "document",
+          "label": "Läkarintyg och veckomeny",
+          "description": "Ladda upp läkarintyget och skolrestaurangens veckomeny med allergenmatris."
+        }
+      },
+      "input_bindings": {"question": "{{ step_input.text }}\n\nElev: {{ flow_input.barnets_namn }}, {{ flow_input.skola }}, klass {{ flow_input.klass }}\nMenyvecka: {{ flow_input.vecka }}"},
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["livsmedel_att_undvika", "intyg_giltigt_till", "ratter"],
+        "properties": {
+          "livsmedel_att_undvika": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["livsmedel", "tal_spar"],
+              "properties": {"livsmedel": {"type": "string"}, "tal_spar": {"type": "boolean"}}
+            }
+          },
+          "intyg_giltigt_till": {"type": ["string", "null"]},
+          "ratter": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["dag", "ratt", "allergener", "maste_bytas", "orsak"],
+              "properties": {
+                "dag": {"type": "string"},
+                "ratt": {"type": "string"},
+                "allergener": {"type": "array", "items": {"type": "string"}},
+                "maste_bytas": {"type": "boolean"},
+                "orsak": {"type": ["string", "null"]}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Anpassa menyn",
+      "instructions": "Ta fram elevens anpassade meny för veckan. Behåll varje rätt som eleven tål och skriv den exakt som i menyn. För rätter som måste bytas: föreslå en likvärdig ersättning från samma dags meny om den är säker, annars en enkel ersättningsrätt som köket kan laga utan att använda eller riskera kontakt med det eleven ska undvika. Skriv varje dag som en rad med huvudrätt, tillbehör och efterrätt. I specialkost anger du kosten så som köket behöver den, till exempel \"Nötfri kost utan spår, laktosfri\". I att_tanka_pa skriver du det köket måste göra för att undvika kontaminering. Skriv aldrig diagnos, sjukdomshistorik, läkemedel eller personnummer – köket behöver bara veta vad som ska undvikas.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "livsmedel_att_undvika", "label": "Livsmedel att undvika"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "ratter", "label": "Veckans rätter"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["specialkost", "mandag", "tisdag", "onsdag", "torsdag", "fredag", "att_tanka_pa"],
+        "properties": {
+          "specialkost": {"type": "string"},
+          "mandag": {"type": "string"},
+          "tisdag": {"type": "string"},
+          "onsdag": {"type": "string"},
+          "torsdag": {"type": "string"},
+          "fredag": {"type": "string"},
+          "att_tanka_pa": {"type": "string"}
+        }
+      }
+    },
+    {
+      "name": "Skriv menyn till köket",
+      "instructions": "Skriv den anpassade menyn som ett kort meddelande till skolköket. Rubrik: \"Anpassad meny vecka [vecka]\". Ange elevens namn, skola och klass, vilken specialkost som gäller, rätten för varje dag måndag till fredag och vad köket ska tänka på. Skriv inga diagnoser, ingen sjukdomshistorik och inga personnummer.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Elev: {{ flow_input.barnets_namn }}\nSkola: {{ flow_input.skola }}\nKlass: {{ flow_input.klass }}\nVecka: {{ flow_input.vecka }}",
+        "source_refs": [
+          {"step_ref": "step_2", "output": "structured", "field_path": "specialkost", "label": "Specialkost"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "mandag", "label": "Måndag"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "tisdag", "label": "Tisdag"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "onsdag", "label": "Onsdag"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "torsdag", "label": "Torsdag"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "fredag", "label": "Fredag"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "att_tanka_pa", "label": "Att tänka på"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "text"
+    }
+  ]
+}

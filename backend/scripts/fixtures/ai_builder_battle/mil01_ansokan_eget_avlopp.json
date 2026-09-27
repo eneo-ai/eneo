@@ -1,0 +1,103 @@
+{
+  "e_tjanst": "Ansökan/anmälan eget avlopp",
+  "e_tjanst_arendenummer": "581-2026-00412",
+  "inskickad": "2026-08-17T19:42:10+02:00",
+  "registrering": {
+    "diarienummer": "MN-2026-00731",
+    "registrerad": "2026-08-18",
+    "mottagare": "Miljönämnden, Sundsvalls kommun"
+  },
+  "kontaktuppgifter": {
+    "sokande": {
+      "namn": "Maria Hedlund",
+      "personnummer": "19640905-3086",
+      "adress": "Tjärnviksvägen 41",
+      "postnummer": "865 92",
+      "ort": "Alnö",
+      "mobil": "070-341 88 12",
+      "epost": "maria.hedlund@exempelpost.se"
+    },
+    "fastighetsagare_samma_som_sokande": true,
+    "entreprenor": {
+      "firma": "Alnö Gräv & VA AB",
+      "organisationsnummer": "559118-4027",
+      "ansvarig_utforare": "Tomas Berglöf",
+      "telefon": "060-55 21 04",
+      "certifiering": "Kunskapsprov enskilda avlopp (Avloppsguiden), 2023"
+    },
+    "forenklad_delgivning": true
+  },
+  "ansokan_anmalan": {
+    "arendetyp": "Ansökan om tillstånd – ny avloppsanordning som vattentoalett ansluts till",
+    "fastighetsbeteckning": "Sundsvall Tjärnvik 1:23",
+    "fastighetens_adress": "Tjärnviksvägen 41, Alnö",
+    "inom_verksamhetsomrade_for_kommunalt_va": "Nej",
+    "inom_vattenskyddsomrade": "Nej",
+    "boende": "Permanentboende",
+    "antal_hushall": 1,
+    "antal_personer": 5,
+    "gemensam_anlaggning_med_andra_fastigheter": "Nej",
+    "befintlig_anlaggning": "Trekammarbrunn från 1978 med stenkista. Tas ur bruk, töms och fylls igen.",
+    "vald_losning": {
+      "reningsteg": "Minireningsverk med kemisk fällning av fosfor",
+      "fabrikat": "AqvaRen",
+      "modell": "AqvaRen Mini 5",
+      "ce_markt": "Ja",
+      "efterpolering": "Infiltrationsbädd 20 m² efter minireningsverket",
+      "utslappspunkt": "Infiltration i mark"
+    },
+    "slamtomning": {
+      "avstand_till_uppstallningsplats_for_slambil_m": 8,
+      "hojdskillnad_m": 2
+    }
+  },
+  "utredning_mark_och_grundvattenniva": {
+    "provgrop_gravd": "Ja",
+    "datum_for_provgrop": "2026-05-12",
+    "grundvattenniva_under_markyta": "Mer än 2 m, inget vatten i gropen",
+    "jordprov_siktanalys_utford": "Ja",
+    "berg_pafunnet": "Nej",
+    "vattentakter_inom_200_m": [
+      {
+        "fastighet": "Tjärnvik 1:23 (egen)",
+        "typ": "Borrad brunn",
+        "avstand_m": 45
+      },
+      {
+        "fastighet": "Tjärnvik 1:9",
+        "typ": "Borrad brunn",
+        "avstand_m": 62
+      },
+      {
+        "fastighet": "Tjärnvik 1:12",
+        "typ": "Grävd brunn, används inte",
+        "avstand_m": 140
+      }
+    ],
+    "avstand_till_sjo_eller_vattendrag": "Tjärnviksbäcken ca 120 m",
+    "grannar_informerade": "Ja, muntligt"
+  },
+  "handlingar": [
+    {
+      "bilaga": "Situationsplan",
+      "fil": "situationsplan_tjarnvik_1-23.pdf"
+    },
+    {
+      "bilaga": "Siktanalys",
+      "fil": "siktanalys_PG1.pdf"
+    },
+    {
+      "bilaga": "Provgropsprotokoll och jordprov",
+      "fil": "provgrop_PG1.pdf"
+    },
+    {
+      "bilaga": "Produktblad minireningsverk",
+      "fil": "AqvaRen_Mini5_produktblad.pdf"
+    },
+    {
+      "bilaga": "Serviceavtal minireningsverk",
+      "fil": "Skickas senare"
+    }
+  ],
+  "ovrigt_fran_sokanden": "Vi vill gärna gräva i oktober innan tjälen går ner."
+}

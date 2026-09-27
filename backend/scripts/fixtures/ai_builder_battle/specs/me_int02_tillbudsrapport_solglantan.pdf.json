@@ -1,0 +1,94 @@
+{
+  "file": "me_int02_tillbudsrapport_solglantan.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "INT-02",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/93"
+  },
+  "description": "Förskolans rapport om en olycka på förskolegården (blankett i ärendesystemet): barnets namn och personnummer, skadan, vårdnadshavarens kontaktuppgifter, närvarande personal, händelseförlopp och åtgärder, med en fotnot om sekretess enligt 23 kap. 1 § OSL.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Barn- och utbildningsförvaltningen, förskolan Solgläntan",
+    "address": "Solgläntevägen 6, 862 33 Kvissleby"
+  },
+  "date": "2026-08-19",
+  "diarienummer": "BUN-2026-01327",
+  "title": "Rapport om olycka – barn i förskola",
+  "blocks": [
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Ifyllt"
+        ],
+        "rows": [
+          [
+            "Förskola och avdelning",
+            "Förskolan Solgläntan, avdelning Humlan"
+          ],
+          [
+            "Datum och tid",
+            "2026-08-19 kl. 10.40"
+          ],
+          [
+            "Plats",
+            "Förskolegården, klätterställningen med nät vid sandlådan"
+          ],
+          [
+            "Barnets namn",
+            "Elsa Nyberg"
+          ],
+          [
+            "Barnets personnummer",
+            "20220106-2383"
+          ],
+          [
+            "Vårdnadshavare som informerats",
+            "Anna Nyberg, 073-552 19 04, informerad kl. 10.55"
+          ],
+          [
+            "Personal på plats",
+            "Sara Lindahl, förskollärare; Mehmet Kaya, barnskötare"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Vad hände?"
+    },
+    {
+      "paragraph": "Barnet klättrade i nätet på klätterställningen. En bärlina i nätets övre del gick av vid infästningen och barnet föll cirka 1,5 meter ner på marken utanför fallskyddet och landade på vänster arm. Sara Lindahl var närmast och tog hand om barnet direkt."
+    },
+    {
+      "heading": "Skada och vård"
+    },
+    {
+      "paragraph": "Barnet hade ont i vänster underarm och armen svullnade. Vårdnadshavaren hämtade barnet och åkte till akuten på Sundsvalls sjukhus. Enligt vårdnadshavaren konstaterades en fraktur i vänster underarm och barnet fick gips i fyra veckor."
+    },
+    {
+      "heading": "Omedelbara åtgärder"
+    },
+    {
+      "list": [
+        "Klätterställningen spärrades av kl. 10.50.",
+        "Förskolechefen och fastighetsförvaltaren underrättades samma dag.",
+        "Övriga vårdnadshavare informeras genom brev den 20 augusti."
+      ]
+    },
+    {
+      "heading": "Bedömning av orsak"
+    },
+    {
+      "paragraph": "Bärlinan var nött vid infästningen. Slitaget hade anmälts till fastighetsförvaltningen i juni och byte var beställt men inte utfört."
+    },
+    {
+      "signature": {
+        "name": "Karin Holmström",
+        "role": "Förskolechef, förskolan Solgläntan"
+      }
+    },
+    {
+      "paragraph": "Uppgifter om enskilda barn och deras vårdnadshavare i denna rapport kan omfattas av sekretess enligt 23 kap. 1 § offentlighets- och sekretesslagen (2009:400)."
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "file": "ofm01_kontrolluppgifter_2025.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "OFM-01",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/242"
+  },
+  "description": "Utdrag ur huvudmannens förtryckta deklarationsuppgifter för inkomståret 2025: pensioner brutto och avdragen skatt per utbetalare samt ränta.",
+  "letterhead": {
+    "organisation": "Skatteverket",
+    "unit": "Inkomstdeklaration 1, utdrag med förtryckta uppgifter"
+  },
+  "date": "2026-03-16",
+  "title": "Förtryckta uppgifter för inkomståret 2025",
+  "blocks": [
+    {
+      "paragraph": "Deklarant: Gunnel Marklund, 19380104-9267. Deklarationsombud: Lennart Byström."
+    },
+    {
+      "heading": "Tjänst, pension"
+    },
+    {
+      "table": {
+        "columns": [
+          "Utbetalare",
+          "Ruta",
+          "Bruttobelopp (kr)",
+          "Avdragen skatt (kr)"
+        ],
+        "rows": [
+          [
+            "Pensionsmyndigheten, allmän pension",
+            "1.2",
+            "188 400",
+            "30 984"
+          ],
+          [
+            "KPA Pension, tjänstepension",
+            "1.2",
+            "26 400",
+            "4 296"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Kapital"
+    },
+    {
+      "table": {
+        "columns": [
+          "Räntor och utdelningar",
+          "Ruta",
+          "Belopp (kr)",
+          "Avdragen preliminärskatt (kr)"
+        ],
+        "rows": [
+          [
+            "Mittbanken, ränta",
+            "7.1",
+            "1 733",
+            "520"
+          ]
+        ]
+      }
+    },
+    {
+      "paragraph": "Bostadstillägg är skattefritt och redovisas inte i deklarationen."
+    }
+  ]
+}

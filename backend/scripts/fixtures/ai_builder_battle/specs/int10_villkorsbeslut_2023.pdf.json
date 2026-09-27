@@ -1,0 +1,43 @@
+{
+  "file": "int10_villkorsbeslut_2023.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "INT-10", "url": "https://sjalvservice.malmo.se/oversikt/overview/529"},
+  "description": "Miljönämndens tidigare beslut om föreläggande med försiktighetsmått för en anmälningspliktig krossanläggning: numrerade villkor om drifttider, buller (riktvärden), dagvatten (begränsningsvärde och riktvärden) och egenkontroll, med definitioner, motivering och överklagandehänvisning.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Miljönämnden – Miljökontoret", "address": "Miljökontoret, 851 85 Sundsvall · miljonamnden@sundsvall.se"},
+  "date": "2023-06-14",
+  "diarienummer": "MN-2023-00412",
+  "title": "Beslut – föreläggande om försiktighetsmått för krossning av betong och asfalt",
+  "blocks": [
+    {"table": {
+      "columns": ["Uppgift", "Värde"],
+      "rows": [
+        ["Verksamhetsutövare", "Tunadalens Kross & Återvinning AB, org.nr 559208-4471"],
+        ["Adress", "Kajvägen 18, 851 50 Sundsvall"],
+        ["Fastighet", "Sundsvall Tunadal 3:8"],
+        ["Verksamhet", "Mottagning, krossning och sortering av betong och asfalt (anmälningspliktig verksamhet enligt miljöprövningsförordningen (2013:251))"]
+      ]
+    }},
+    {"heading": "Beslut"},
+    {"paragraph": "Miljönämnden förelägger Tunadalens Kross & Återvinning AB att vid verksamheten på fastigheten Sundsvall Tunadal 3:8 följa nedanstående försiktighetsmått."},
+    {"heading": "Försiktighetsmått"},
+    {"list": [
+      "1. Verksamheten ska bedrivas i huvudsak i enlighet med vad som angetts i anmälan och i övrigt i detta beslut.",
+      "2. Krossning och sortering med mobilt krossverk får endast ske vardagar (måndag–fredag) kl. 07.00–17.00. Krossning får inte ske lördag, söndag eller helgdag.",
+      "3. Buller från verksamheten ska begränsas så att den ekvivalenta ljudnivån utomhus vid bostäder inte överskrider följande riktvärden: 50 dB(A) vardagar dagtid kl. 06–18, 45 dB(A) kvällstid kl. 18–22 samt lördag, söndag och helgdag kl. 06–18, och 40 dB(A) nattetid kl. 22–06.",
+      "4. Oljeindex i utgående vatten från oljeavskiljaren får som begränsningsvärde inte överstiga 5 mg/l i något enskilt prov. Halten suspenderade ämnen får som riktvärde inte överstiga 50 mg/l och halten zink som riktvärde inte överstiga 150 µg/l.",
+      "5. Buller ska mätas vid mätpunkterna MP1 och MP2 minst en gång per kvartal när krossning pågår. Mätningar som görs vid en vindhastighet över 5 m/s är ogiltiga och ska göras om.",
+      "6. Utgående vatten från oljeavskiljaren ska provtas minst en gång per kvartal och analyseras av ackrediterat laboratorium.",
+      "7. Driftjournal ska föras över krossningens start- och sluttid och krossad mängd per dag.",
+      "8. Resultat från egenkontrollen ska redovisas till Miljönämnden halvårsvis, senast den 31 juli och den 31 januari."
+    ]},
+    {"heading": "Definitioner"},
+    {"paragraph": "Med riktvärde avses ett värde som, om det överskrids, ska föranleda att verksamhetsutövaren vidtar åtgärder så att värdet kan innehållas. Med begränsningsvärde avses ett värde som inte får överskridas. Ett överskridande av ett begränsningsvärde är en överträdelse av beslutet."},
+    {"heading": "Motivering"},
+    {"paragraph": "Verksamheten ligger cirka 250 meter från bostäderna längs Tunadalsvägen. Krossning av betong och asfalt ger upphov till buller och damm, och dagvattnet från hårdgjorda ytor kan förorenas av olja och metaller. Försiktighetsmåtten är nödvändiga för att förebygga olägenheter för människors hälsa och miljön och är inte orimliga att uppfylla (2 kap. 3 och 7 §§ miljöbalken)."},
+    {"heading": "Lagstöd"},
+    {"paragraph": "Beslutet är fattat med stöd av 26 kap. 9 § miljöbalken (1998:808) och 2 kap. 3 § miljöbalken."},
+    {"heading": "Så överklagar du"},
+    {"paragraph": "Beslutet kan överklagas till Länsstyrelsen Västernorrland. Överklagandet ska ha kommit in till Miljönämnden inom tre veckor från den dag ni fick del av beslutet."},
+    {"signature": {"name": "Karin Öhman", "role": "Miljöinspektör, beslut fattat på delegation"}}
+  ]
+}

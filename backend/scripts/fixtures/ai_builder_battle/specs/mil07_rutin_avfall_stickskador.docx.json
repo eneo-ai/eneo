@@ -1,0 +1,34 @@
+{
+  "file": "mil07_rutin_avfall_stickskador.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "MIL-07", "url": "https://sjalvservice.malmo.se/oversikt/overview/1243"},
+  "description": "Tatueringsstudions rutin för avfall, stickskador och avvikelser, med studions avvikelselogg där en kunds hälsouppgifter står antecknade.",
+  "letterhead": {"organisation": "Bläckfisken Tatuering", "unit": "Hygienrutiner", "address": "Östra Storgatan 31, 291 31 Kristianstad · 070-418 22 64"},
+  "date": "2026-08-20",
+  "title": "Rutin för avfall, stickskador och avvikelser",
+  "blocks": [
+    {"heading": "Avfall"},
+    {"list": [
+      "Använda nålar och tuber läggs efter varje kund i en plastpåse som knyts ihop och slängs i soptunnan på gården tillsammans med övrigt avfall.",
+      "Engångsplast, handskar, färgkoppar och papper slängs i vanliga sopor.",
+      "Tomma färgflaskor lämnas på återvinningscentralen."
+    ]},
+    {"heading": "Stickskador och blodkontakt"},
+    {"list": [
+      "Låt det blöda, tvätta med tvål och vatten och desinfektera med handsprit.",
+      "Ring 1177 för rådgivning om provtagning.",
+      "Skriv in händelsen i avvikelseloggen."
+    ]},
+    {"heading": "Avvikelser"},
+    {"paragraph": "Alla avvikelser, till exempel infektioner, allergiska reaktioner och klagomål från kunder, skrivs in i loggen nedan och gås igenom varje månad."},
+    {"table": {
+      "columns": ["Datum", "Händelse", "Åtgärd"],
+      "rows": [
+        ["2026-05-02", "Gästtatuerare stack sig på använd nål när påsen med avfall knöts ihop.", "Tvättade och ringde 1177. Tog blodprov på vårdcentralen."],
+        ["2026-06-18", "Kunden Tove Almgren fick rodnad och svullnad kring tatueringen dagen efter. Hon berättade att hon har hepatit C och inte ville att det skulle stå i kundkortet.", "Hänvisade till vårdcentral. Bytte inga rutiner."],
+        ["2026-07-30", "Färgkopp med svart färg välte över arbetsbordet.", "Torkade upp med ytdesinfektion."]
+      ]
+    }},
+    {"signature": {"name": "Linnea Strand", "role": "Innehavare, Bläckfisken Tatuering"}}
+  ]
+}

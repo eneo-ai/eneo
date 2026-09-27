@@ -1,0 +1,44 @@
+{
+  "file": "mil01_situationsplan.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "MIL-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/581"},
+  "description": "Entreprenörens situationsplan 1:500 till ansökan om enskilt avlopp: ritningens förklaring, uppmätta avstånd till vattentäkter och ytvatten, grundvattnets strömningsriktning och anläggningens delar.",
+  "letterhead": {"organisation": "Alnö Gräv & VA AB", "unit": "Mark, schakt och enskilda avlopp", "address": "Vikarvägen 6, 865 91 Alnö · 060-55 21 04"},
+  "date": "2026-06-02",
+  "title": "Situationsplan 1:500 – enskild avloppsanordning, Sundsvall Tjärnvik 1:23",
+  "blocks": [
+    {"paragraph": "Bilaga till ansökan om tillstånd för avloppsanordning. Ritningen är upprättad på grundkarta från Lantmäteriet och kompletterad med inmätning i fält 2026-05-12 (GPS och måttband). Skala 1:500 i A3. Planritningen redovisas här med ritningsförklaring och måttabell."},
+    {"heading": "Ritningsförklaring"},
+    {"list": [
+      "A – Bostadshus (befintligt), permanentboende 5 personer",
+      "B – Minireningsverk AqvaRen Mini 5, placeras 4 m från bostadshusets nordvästra hörn",
+      "C – Pumpbrunn och fördelningsbrunn",
+      "D – Infiltrationsbädd för efterpolering, 4 x 5 m (20 m²)",
+      "E – Luftningsrör, 0,5 m över färdig mark",
+      "F – Egen vattentäkt, borrad brunn, 72 m djup",
+      "G – Vattentäkt på grannfastigheten Tjärnvik 1:9, borrad brunn",
+      "H – Grävd brunn på Tjärnvik 1:12, används inte enligt ägaren",
+      "I – Uppställningsplats för slambil vid infarten",
+      "Pil – Grundvattnets bedömda strömningsriktning"
+    ]},
+    {"heading": "Uppmätta avstånd från infiltrationsbädden (D)"},
+    {"table": {
+      "columns": ["Objekt", "Fastighet", "Avstånd", "Läge i förhållande till grundvattnets strömning"],
+      "rows": [
+        ["Egen borrad brunn (F)", "Tjärnvik 1:23", "45 m", "Uppströms"],
+        ["Borrad brunn, granne (G)", "Tjärnvik 1:9", "41 m", "Sidoläge öster om bädden, inte i huvudsaklig strömningsriktning"],
+        ["Grävd brunn, ej i bruk (H)", "Tjärnvik 1:12", "140 m", "Uppströms"],
+        ["Tjärnviksbäcken", "–", "120 m", "Nedströms"],
+        ["Dike längs Tjärnviksvägen", "–", "15 m", "Nedströms"],
+        ["Tomtgräns mot Tjärnvik 1:9", "–", "6 m", "–"],
+        ["Bostadshus (A)", "Tjärnvik 1:23", "12 m", "Uppströms"]
+      ]
+    }},
+    {"paragraph": "Avstånden är mätta från bäddens närmaste kant till brunnslocket respektive strandlinjen."},
+    {"heading": "Grundvatten och höjder"},
+    {"paragraph": "Grundvattnets strömningsriktning bedöms vara mot sydväst, mot Tjärnviksbäcken, efter markens lutning (cirka 3 % fall). Marknivån vid bädden är +14,6 m (RH 2000). Grundvatten i provgrop PG1, se provgropsprotokollet."},
+    {"heading": "Slamtömning"},
+    {"paragraph": "Avstånd från uppställningsplats (I) till minireningsverket 8 m, höjdskillnad cirka 2 m. Framkomligheten för slambil är god året runt."},
+    {"signature": {"name": "Tomas Berglöf", "role": "Ansvarig utförare, Alnö Gräv & VA AB"}}
+  ]
+}

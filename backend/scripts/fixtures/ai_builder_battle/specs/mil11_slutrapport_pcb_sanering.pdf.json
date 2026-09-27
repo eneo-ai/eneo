@@ -1,0 +1,52 @@
+{
+  "file": "mil11_slutrapport_pcb_sanering.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "MIL-11", "url": "https://sjalvservice.malmo.se/oversikt/overview/661"},
+  "description": "Saneringsentreprenörens slutrapport efter PCB-sanering av fogar: ärende, period, sanerade och kvarlämnade fogar per prov-ID, sanerade mängder, kontrollprov, avfallshantering och mottagningskvitton; med felaktigt angivet lagrum och en avskriven halt.",
+  "letterhead": {"organisation": "Sydsanering i Skåne AB", "unit": "PCB-sanering och miljöinventering", "address": "Stenyxegatan 21, 213 76 Malmö · 040-18 66 40"},
+  "date": "2026-09-04",
+  "diarienummer": "MF-2026-02291",
+  "title": "Rapport genomförd PCB-sanering – Malmö Rönnen 14, hus B",
+  "blocks": [
+    {"paragraph": "Slutrapport enligt 28 § förordningen (1998:899) om miljöfarlig verksamhet och hälsoskydd. Rapporten avser saneringen som anmäldes till miljöförvaltningen 2026-05-11 (ert diarienummer ovan)."},
+    {"table": {
+      "columns": ["Uppgift", "Värde"],
+      "rows": [
+        ["Fastighet", "Malmö Rönnen 14, hus B, Rönngatan 7–11"],
+        ["Beställare", "Bostads AB Rönngården"],
+        ["Saneringsentreprenör", "Sydsanering i Skåne AB"],
+        ["Arbetsledare", "Niklas Borg"],
+        ["Saneringsperiod", "2026-06-08 – 2026-07-10"],
+        ["Metod", "Mekanisk utskärning av fog, slipning av kontaktytor, rengöring. Tältat arbetsområde med undertryck mot trapphus."]
+      ]
+    }},
+    {"heading": "Sanerade och kvarlämnade fogar"},
+    {"table": {
+      "columns": ["Prov-ID", "Placering", "Halt enligt inventering (mg/kg)", "Åtgärd", "Löpmeter"],
+      "rows": [
+        ["F-01", "Fasad, elementfogar mot gården", "1900", "Sanerad", "420"],
+        ["F-02", "Fasad, elementfogar mot gatan", "820", "Sanerad", "360"],
+        ["F-03", "Fönsterfogar i trapphus", "2400", "Sanerad", "96"],
+        ["F-04", "Fönsterfogar i lägenheter", "12", "Kvarlämnad, under 50 mg/kg", "–"],
+        ["F-05", "Balkongfogar", "610", "Sanerad", "140"],
+        ["F-06", "Sockelfog", "<5", "Kvarlämnad, under 50 mg/kg", "–"],
+        ["F-07", "Dilatationsfog i entréhall, trapphus 9", "38", "Kvarlämnad, under 50 mg/kg", "–"],
+        ["F-08", "Ventilationsgaller på vinden", "95", "Sanerad", "30"]
+      ]
+    }},
+    {"heading": "Sanerade mängder"},
+    {"paragraph": "Sammanlagt har 1 046 löpmeter fog sanerats. Sanerad mängd fogmassa inklusive kontaktytor: 214 kg. Allt avfall har klassats som farligt avfall med avfallskod 17 09 02* och transporterats till Sydvästra Miljöterminalen AB, se mottagningskvitton."},
+    {"heading": "Kontrollprov efter sanering"},
+    {"table": {
+      "columns": ["Kontrollprov", "Placering", "Halt PCB (mg/kg)"],
+      "rows": [
+        ["KP-1", "Betongkant efter F-01, gården", "6,8"],
+        ["KP-2", "Betongkant efter F-03, trapphus", "4,2"]
+      ]
+    }},
+    {"heading": "Avfall"},
+    {"paragraph": "Transportör: Skåne Miljötransporter AB. Mottagare: Sydvästra Miljöterminalen AB. Mottagningskvitton bifogas."},
+    {"paragraph": "Saneringen är därmed avslutad. Kvarlämnade fogar under 50 mg/kg kräver inga ytterligare åtgärder."},
+    {"signature": {"name": "Niklas Borg", "role": "Arbetsledare, Sydsanering i Skåne AB"}}
+  ]
+}

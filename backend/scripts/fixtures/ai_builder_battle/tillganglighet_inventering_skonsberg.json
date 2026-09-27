@@ -1,0 +1,143 @@
+{
+  "inventering_id": "TI-2026-031",
+  "verktyg": "Inventeringsappen Lokal 3.2",
+  "lokal": {
+    "namn": "Skönsbergs bibliotek och medborgarkontor",
+    "adress": "Skönsbergsvägen 10, 856 41 Sundsvall",
+    "objektnummer": "FA-2281-0417",
+    "verksamhet": "Kultur- och fritidsförvaltningen, bibliotek; kontaktcenter, medborgarkontor"
+  },
+  "datum": "2026-09-09",
+  "inventerare": "Fastighetsavdelningen, tillgänglighetsinventerare",
+  "anledning": "Synpunkter från allmänheten via Lämna synpunkt om tillgängligheten i lokalen (se synpunktsexporten för objektet)",
+  "observationer": [
+    {
+      "id": "ENT-01",
+      "omrade": "Huvudentré",
+      "kontrollpunkt": "Fri passagebredd i dörr",
+      "matvarde": 0.79,
+      "enhet": "m",
+      "kommentar": "Dubbeldörr, bara ett dörrblad öppnas automatiskt"
+    },
+    {
+      "id": "ENT-02",
+      "omrade": "Huvudentré",
+      "kontrollpunkt": "Rampens lutning",
+      "matvarde": 8,
+      "enhet": "%",
+      "kommentar": "Ramp från trottoaren, längd 4,2 m"
+    },
+    {
+      "id": "ENT-03",
+      "omrade": "Sidoentré mot parkeringen",
+      "kontrollpunkt": "Rampens lutning",
+      "matvarde": "1:20",
+      "enhet": "förhållande",
+      "kommentar": "Ny ramp 2024"
+    },
+    {
+      "id": "ENT-04",
+      "omrade": "Huvudentré",
+      "kontrollpunkt": "Tröskel eller nivåskillnad vid entré",
+      "matvarde": 20,
+      "enhet": "mm",
+      "kommentar": "Avfasad tröskel"
+    },
+    {
+      "id": "ENT-05",
+      "omrade": "Huvudentré",
+      "kontrollpunkt": "Manöverdon för dörröppnare, höjd över mark",
+      "matvarde": 1.25,
+      "enhet": "m",
+      "kommentar": "Tryckknapp på fasaden till höger om dörren"
+    },
+    {
+      "id": "ENT-06",
+      "omrade": "Huvudentré",
+      "kontrollpunkt": "Kontrastmarkering på glasdörrar och glaspartier",
+      "matvarde": "saknas",
+      "enhet": "–",
+      "kommentar": "Glasdörrar och glasparti helt utan markering"
+    },
+    {
+      "id": "ENT-07",
+      "omrade": "Dörr mellan bibliotek och medborgarkontor",
+      "kontrollpunkt": "Fri passagebredd i dörr",
+      "matvarde": 85,
+      "enhet": "cm",
+      "kommentar": "Står uppställd dagtid"
+    },
+    {
+      "id": "WC-01",
+      "omrade": "Tillgänglig toalett, entréplan",
+      "kontrollpunkt": "Fri vändyta i tillgänglig toalett, diameter",
+      "matvarde": 1.3,
+      "enhet": "m",
+      "kommentar": "Skötbord och papperskorg minskar ytan"
+    },
+    {
+      "id": "WC-02",
+      "omrade": "Tillgänglig toalett, entréplan",
+      "kontrollpunkt": "Stödhandtag på båda sidor om toalettstolen, uppfällbara",
+      "matvarde": null,
+      "enhet": "–",
+      "kommentar": "Kunde inte kontrolleras: toaletten var låst och personalen hade ingen nyckel under besöket"
+    },
+    {
+      "id": "WC-03",
+      "omrade": "Tillgänglig toalett, entréplan",
+      "kontrollpunkt": "Larm som kan nås från golvet",
+      "matvarde": "finns, larmsnöret uppknutet ca 1,2 m över golvet",
+      "enhet": "–",
+      "kommentar": "Snöret når inte golvet"
+    },
+    {
+      "id": "P-01",
+      "omrade": "Parkering",
+      "kontrollpunkt": "Gångavstånd från parkering för rörelsehindrade till entré",
+      "matvarde": 32,
+      "enhet": "m",
+      "kommentar": "Uppmätt till huvudentrén"
+    },
+    {
+      "id": "P-02",
+      "omrade": "Parkering",
+      "kontrollpunkt": "Bredd på parkeringsplats för rörelsehindrade",
+      "matvarde": 5.0,
+      "enhet": "m",
+      "kommentar": "En plats, skyltad"
+    },
+    {
+      "id": "HISS-01",
+      "omrade": "Hiss till bibliotekets övre plan",
+      "kontrollpunkt": "Hisskorgens invändiga mått (bredd x djup)",
+      "matvarde": "1,10 x 1,40",
+      "enhet": "m",
+      "kommentar": "Hiss från 2019"
+    },
+    {
+      "id": "SKYLT-01",
+      "omrade": "Entréhall",
+      "kontrollpunkt": "Teckenhöjd på informationsskyltar",
+      "matvarde": 12,
+      "enhet": "mm",
+      "kommentar": "Våningsplan och öppettider"
+    },
+    {
+      "id": "REC-01",
+      "omrade": "Medborgarkontorets disk",
+      "kontrollpunkt": "Hörslinga i reception eller informationsdisk",
+      "matvarde": "finns",
+      "enhet": "–",
+      "kommentar": "Testad, fungerar"
+    },
+    {
+      "id": "BELYS-01",
+      "omrade": "Entréhall",
+      "kontrollpunkt": "Belysningsstyrka vid informationsdisk",
+      "matvarde": 310,
+      "enhet": "lux",
+      "kommentar": "Uppmätt mitt på dagen"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "file": "utb11_verksamhetsplan.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "UTB-11", "url": "https://sjalvservice.malmo.se/oversikt/overview/479"},
+  "description": "Den sökande huvudmannens verksamhetsplan för en ny fristående förskola, bilaga till ansökan om godkännande; bygger på en läroplan som inte längre gäller.",
+  "letterhead": {"organisation": "Ekorrens Förskolor AB", "unit": "Förskolan Ekorren", "address": "Kastanjegatan 14, 214 57 Malmö"},
+  "date": "2026-08-30",
+  "title": "Verksamhetsplan för Förskolan Ekorren",
+  "blocks": [
+    {"heading": "Vision"},
+    {"paragraph": "Förskolan Ekorren ska vara en trygg och lustfylld förskola med naturen som klassrum, där varje barn blir sett och får utvecklas utifrån sina förutsättningar."},
+    {"heading": "Styrdokument"},
+    {"paragraph": "Verksamheten utgår från skollagen (2010:800) och Läroplan för förskolan, Lpfö 98 (reviderad 2016). Förskolans pedagogiska inriktning är utomhuspedagogik med inslag av Reggio Emilia-filosofin."},
+    {"heading": "Normer och värden"},
+    {"paragraph": "Vi arbetar aktivt med barnens förståelse för alla människors lika värde. Förskolan har en plan mot kränkande behandling som följs upp varje termin."},
+    {"heading": "Utveckling och lärande"},
+    {"paragraph": "Undervisningen planeras av förskollärarna i tematiska projekt där språk, matematik, naturvetenskap och teknik integreras. Utevistelse minst tre timmar per dag."},
+    {"heading": "Barngrupper"},
+    {"paragraph": "Två avdelningar: Ekorrarna (1–3 år, högst 12 barn) och Rävarna (3–5 år, högst 24 barn). Varje avdelning har minst en legitimerad förskollärare."},
+    {"heading": "Förskola och hem"},
+    {"paragraph": "Inskolning sker med föräldraaktiv modell under tre dagar. Utvecklingssamtal erbjuds en gång per år."},
+    {"heading": "Särskilt stöd"},
+    {"paragraph": "Barn som behöver särskilt stöd får det i barngruppen. Förskolan köper tjänster av specialpedagog vid behov."},
+    {"heading": "Systematiskt kvalitetsarbete"},
+    {"paragraph": "Verksamheten följs upp i en årlig kvalitetsrapport som rektor ansvarar för. Vårdnadshavare svarar på en enkät varje vår."},
+    {"signature": {"name": "Sofie Lindh", "role": "Blivande rektor"}}
+  ]
+}

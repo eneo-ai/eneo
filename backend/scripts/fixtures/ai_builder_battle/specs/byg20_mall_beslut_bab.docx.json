@@ -1,0 +1,29 @@
+{
+  "file": "byg20_mall_beslut_bab.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "BYG-20", "url": "https://sjalvservice.malmo.se/oversikt/overview/1202"},
+  "description": "Stadsbyggnadskontorets Word-mall för beslut om bostadsanpassningsbidrag med innehållskontroller för ärendeuppgifter, beslut och motivering samt fasta avsnitt om utbetalning, lagstöd och överklagande.",
+  "letterhead": {"organisation": "Malmö stad", "unit": "Stadsbyggnadskontoret – Bostadsanpassning", "address": "205 80 Malmö"},
+  "title": "Beslut om bostadsanpassningsbidrag",
+  "blocks": [
+    {"paragraph": "Diarienummer:"},
+    {"control": {"kind": "text", "tag": "diarienummer", "label": "Diarienummer", "hint": "SBN-ÅÅÅÅ-nnnnnn"}},
+    {"paragraph": "Beslutsdatum:"},
+    {"control": {"kind": "text", "tag": "datum", "label": "Beslutsdatum", "hint": "ÅÅÅÅ-MM-DD"}},
+    {"paragraph": "Sökande:"},
+    {"control": {"kind": "text", "tag": "sokande", "label": "Sökande", "hint": "Namn"}},
+    {"paragraph": "Bostad:"},
+    {"control": {"kind": "text", "tag": "bostad", "label": "Bostad", "hint": "Adress och lägenhetsnummer"}},
+    {"heading": "Beslut"},
+    {"control": {"kind": "rich", "tag": "beslut", "label": "Beslut", "hint": "Vilka åtgärder som beviljas och det högsta belopp som kan betalas ut, samt vilka åtgärder som avslås."}},
+    {"heading": "Motivering"},
+    {"control": {"kind": "rich", "tag": "motivering", "label": "Motivering", "hint": "Koppla varje åtgärd till det styrkta behovet utan att ange diagnoser, redovisa fastighetsägarens medgivande och hur skälig kostnad har bestämts."}},
+    {"heading": "Utbetalning"},
+    {"paragraph": "Bidraget betalas ut när åtgärderna är utförda och kostnaderna har redovisats med faktura (20 § lagen (2018:222) om bostadsanpassningsbidrag). Kostnader över det beviljade högsta beloppet ersätts inte."},
+    {"heading": "Lagstöd"},
+    {"paragraph": "Lagen (2018:222) om bostadsanpassningsbidrag, 5, 10, 16 och 18 §§."},
+    {"heading": "Hur man överklagar"},
+    {"paragraph": "Beslutet kan överklagas till Förvaltningsrätten i Malmö (24 § lagen om bostadsanpassningsbidrag). Skicka överklagandet till Stadsbyggnadsnämnden, Malmö stad, 205 80 Malmö. Det måste ha kommit in inom tre veckor från den dag du fick del av beslutet. Skriv vilket beslut du överklagar, hur du vill att det ska ändras och varför."},
+    {"paragraph": "Beslutet skickas i kopia till fastighetsägaren."}
+  ]
+}

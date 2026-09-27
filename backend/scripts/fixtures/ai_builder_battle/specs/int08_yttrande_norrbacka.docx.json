@@ -1,0 +1,46 @@
+{
+  "file": "int08_yttrande_norrbacka.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-08",
+    "url": "https://e-tjanster.kristianstad.se/oversikt/overview/58"
+  },
+  "description": "Ett fastighetsbolags samrådsyttrande som sakägare till en grannfastighet, med synpunkter på dagvattenytans placering och en gångförbindelse.",
+  "letterhead": {
+    "organisation": "Norrbacka Fastigheter AB",
+    "unit": "Fastighetsutveckling",
+    "address": "Box 118, 851 02 Sundsvall"
+  },
+  "date": "2026-06-12",
+  "diarienummer": "SBN-2025-00412",
+  "title": "Yttrande i samråd om detaljplan för Björkängen etapp 2",
+  "blocks": [
+    {
+      "paragraph": "Norrbacka Fastigheter AB äger Sundsvall Björkängen 2:7 med 36 hyreslägenheter i tre hus. Fastigheten gränsar i öster mot den park med dagvattenyta som planförslaget redovisar."
+    },
+    {
+      "heading": "Dagvattenytan"
+    },
+    {
+      "paragraph": "Dagvattendammen är placerad direkt intill vår fastighetsgräns, cirka 3 meter från vår förrådsbyggnad. Vi är oroliga för att en höjd vattennivå vid skyfall ska nå förrådet och våra parkeringsplatser, och för mygg och drunkningsrisk för barn. Vi begär att dagvattenytan flyttas minst 15 meter från vår gräns och att det i planen säkerställs att ytan har flacka släntlutningar."
+    },
+    {
+      "heading": "Gångförbindelse"
+    },
+    {
+      "paragraph": "Våra hyresgäster går i dag över åkern till busshållplatsen på Björkallén. Vi vill att planen säkerställer en allmän gångväg från vår fastighet genom parken till Björkallén."
+    },
+    {
+      "heading": "Övrigt"
+    },
+    {
+      "paragraph": "I övrigt ser vi positivt på planen, särskilt förskolan och den nya parken."
+    },
+    {
+      "signature": {
+        "name": "Fredrik Palm",
+        "role": "Fastighetsutvecklare, Norrbacka Fastigheter AB"
+      }
+    }
+  ]
+}

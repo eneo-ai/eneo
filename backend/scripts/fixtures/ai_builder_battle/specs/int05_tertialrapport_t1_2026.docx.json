@@ -1,0 +1,200 @@
+{
+  "file": "int05_tertialrapport_t1_2026.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-05",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/77"
+  },
+  "description": "Förra tertialens rapport till vård- och omsorgsnämnden om synpunkter och klagomål: upplägg, tabeller, lärdomar och förslag till beslut; hänvisar fortfarande till den upphävda socialtjänstlagen (2001:453).",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Vård- och omsorgsförvaltningen, kvalitet och utveckling",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-05-19",
+  "diarienummer": "VON-2026-00612",
+  "title": "Synpunkter och klagomål inom vård och omsorg – tertial 1 2026",
+  "blocks": [
+    {
+      "heading": "Förslag till beslut"
+    },
+    {
+      "paragraph": "Vård- och omsorgsnämnden noterar rapporten om synpunkter och klagomål för tertial 1 2026 till protokollet."
+    },
+    {
+      "heading": "Inledning"
+    },
+    {
+      "paragraph": "Enligt Socialstyrelsens föreskrifter och allmänna råd (SOSFS 2011:9) om ledningssystem för systematiskt kvalitetsarbete, 5 kap. 3 och 6 §§, ska verksamheten ta emot och utreda klagomål och synpunkter och sammanställa och analysera dem för att se mönster och trender. Klagomål som gäller missförhållanden hanteras även enligt lex Sarah, 14 kap. 3 § socialtjänstlagen (2001:453)."
+    },
+    {
+      "paragraph": "Rapporten bygger på export ur Synpunkt Sundsvall för perioden 2026-01-01 – 2026-04-30. Varje ärende räknas en gång, även om det har flera åtgärder. Makulerade dubbletter och ärenden som gäller andra förvaltningar räknas inte."
+    },
+    {
+      "heading": "Sammanfattning"
+    },
+    {
+      "paragraph": "Under tertial 1 kom 262 synpunkter in, varav 176 klagomål, 51 beröm, 24 synpunkter och 11 förslag. Klagomålen gäller främst kontinuitet och tider i hemtjänsten och mat på vård- och omsorgsboenden. Medianen för svarstid var 6 dagar."
+    },
+    {
+      "heading": "Antal per typ"
+    },
+    {
+      "table": {
+        "columns": [
+          "Typ",
+          "Tertial 1 2026",
+          "Tertial 3 2025"
+        ],
+        "rows": [
+          [
+            "Klagomål",
+            "176",
+            "158"
+          ],
+          [
+            "Beröm",
+            "51",
+            "47"
+          ],
+          [
+            "Synpunkt",
+            "24",
+            "29"
+          ],
+          [
+            "Förslag",
+            "11",
+            "8"
+          ],
+          [
+            "Totalt",
+            "262",
+            "242"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Klagomål per tema"
+    },
+    {
+      "table": {
+        "columns": [
+          "Tema",
+          "Antal",
+          "Andel"
+        ],
+        "rows": [
+          [
+            "Kontinuitet och tider",
+            "54",
+            "31 %"
+          ],
+          [
+            "Omvårdnad och kvalitet",
+            "33",
+            "19 %"
+          ],
+          [
+            "Mat och måltider",
+            "24",
+            "14 %"
+          ],
+          [
+            "Bemötande",
+            "21",
+            "12 %"
+          ],
+          [
+            "Handläggningstid",
+            "18",
+            "10 %"
+          ],
+          [
+            "Information",
+            "14",
+            "8 %"
+          ],
+          [
+            "Läkemedel och hälsa",
+            "8",
+            "5 %"
+          ],
+          [
+            "Lokaler och miljö",
+            "4",
+            "2 %"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Klagomål per verksamhet"
+    },
+    {
+      "table": {
+        "columns": [
+          "Verksamhet",
+          "Antal",
+          "Enhet med flest"
+        ],
+        "rows": [
+          [
+            "Hemtjänst",
+            "84",
+            "Hemtjänst Matfors (31)"
+          ],
+          [
+            "Vård- och omsorgsboende",
+            "47",
+            "Björkbackens vård- och omsorgsboende (22)"
+          ],
+          [
+            "Korttidsvård",
+            "9",
+            "Kvarnbackens korttidsboende (9)"
+          ],
+          [
+            "Funktionsstöd LSS",
+            "12",
+            "Gruppbostad Västergatan (7)"
+          ],
+          [
+            "Myndighetsutövning",
+            "24",
+            "Biståndsenheten äldre (24)"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Analys och lärdomar"
+    },
+    {
+      "paragraph": "Kontinuiteten i hemtjänsten har försämrats i takt med att andelen timanställda ökat. Hemtjänst Matfors har flest klagomål och har infört fasta team i två områden från april. På Björkbackens vård- och omsorgsboende gäller klagomålen främst att maten är ljummen och att nattfastan är lång; en ny måltidsrutin införs i maj. Biståndsenhetens handläggningstider har ökat efter vakanser."
+    },
+    {
+      "heading": "Lex Sarah"
+    },
+    {
+      "paragraph": "Under perioden har två klagomål lett till rapport enligt lex Sarah. Båda har utretts och en har anmälts till IVO."
+    },
+    {
+      "heading": "Fortsatt arbete"
+    },
+    {
+      "list": [
+        "Följa upp effekten av fasta team i Hemtjänst Matfors.",
+        "Följa upp den nya måltidsrutinen på Björkbackens vård- och omsorgsboende.",
+        "Minska handläggningstiderna på Biståndsenheten äldre."
+      ]
+    },
+    {
+      "signature": {
+        "name": "Karin Näslund",
+        "role": "Kvalitetsstrateg"
+      }
+    }
+  ]
+}

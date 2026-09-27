@@ -1,0 +1,15 @@
+{
+  "file": "byg20_offert_soderslatts_bygg.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-20", "url": "https://sjalvservice.malmo.se/oversikt/overview/1202"},
+  "description": "Offert som också omfattar köksåtgärden som varken intyget eller fastighetsägarens medgivande stöder; priser inklusive moms.",
+  "letterhead": {"organisation": "Söderslätts Bygg & Kakel AB", "unit": "Offert", "address": "Hantverkarvägen 5, 231 42 Trelleborg · org.nr 559233-6751"},
+  "date": "2026-08-24",
+  "title": "Offert 24-0826 – bostadsanpassning, Kastanjegatan 12 B",
+  "blocks": [
+    {"paragraph": "Till Birgitta Jönsson. Vi offererar enligt platsbesök 2026-08-21."},
+    {"table": {"columns": ["Pos", "Moment", "Belopp"], "rows": [["1", "Duschplats i stället för badkar inklusive golvbrunn, tätskikt, plattor, duschväggar och stödhandtag", "79 800 kr"], ["2", "Borttagning av trösklar hall–badrum och hall–sovrum", "7 400 kr"], ["3", "Kök: sänkning av arbetsbänk och spis, ny bänkskiva och omdragning av el", "38 500 kr"], ["", "Totalt inklusive moms", "125 700 kr"]]}},
+    {"paragraph": "Priserna är inklusive moms. Byggstart tidigast vecka 44."},
+    {"signature": {"name": "Jenny Håkansson", "role": "Söderslätts Bygg & Kakel AB"}}
+  ]
+}

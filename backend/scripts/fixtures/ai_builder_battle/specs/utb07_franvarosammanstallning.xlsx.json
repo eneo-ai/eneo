@@ -1,0 +1,426 @@
+{
+  "file": "utb07_franvarosammanstallning.xlsx",
+  "format": "xlsx",
+  "source": {
+    "catalogue_id": "UTB-07",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/175"
+  },
+  "description": "Frånvarosammanställning per skoldag ur skolans elevadministrativa system för en skolpliktig elev, bilaga till rapporteringen till hemkommunens skolpliktsbevakning; schemalagd tid och giltig och ogiltig frånvaro i minuter.",
+  "sheets": [
+    {
+      "name": "Frånvaro per dag",
+      "columns": [
+        "Datum",
+        "Veckodag",
+        "Vecka",
+        "Schemalagd tid (min)",
+        "Giltig frånvaro (min)",
+        "Ogiltig frånvaro (min)",
+        "Kommentar"
+      ],
+      "rows": [
+        [
+          "2026-01-12",
+          "Måndag",
+          3,
+          330,
+          0,
+          110,
+          "Kom 10:05, ingen anmälan"
+        ],
+        [
+          "2026-01-13",
+          "Tisdag",
+          3,
+          360,
+          0,
+          0,
+          "–"
+        ],
+        [
+          "2026-01-14",
+          "Onsdag",
+          3,
+          300,
+          0,
+          0,
+          "–"
+        ],
+        [
+          "2026-01-15",
+          "Torsdag",
+          3,
+          360,
+          0,
+          0,
+          "–"
+        ],
+        [
+          "2026-01-16",
+          "Fredag",
+          3,
+          270,
+          0,
+          0,
+          "–"
+        ],
+        [
+          "2026-01-19",
+          "Måndag",
+          4,
+          330,
+          0,
+          330,
+          "Ej närvarande, ingen anmälan"
+        ],
+        [
+          "2026-01-20",
+          "Tisdag",
+          4,
+          360,
+          0,
+          0,
+          "–"
+        ],
+        [
+          "2026-01-21",
+          "Onsdag",
+          4,
+          300,
+          0,
+          0,
+          "–"
+        ],
+        [
+          "2026-01-22",
+          "Torsdag",
+          4,
+          360,
+          0,
+          0,
+          "–"
+        ],
+        [
+          "2026-01-23",
+          "Fredag",
+          4,
+          270,
+          0,
+          270,
+          "Ej närvarande, ingen anmälan"
+        ],
+        [
+          "2026-01-26",
+          "Måndag",
+          5,
+          330,
+          0,
+          110,
+          "Kom 10:05, ingen anmälan"
+        ],
+        [
+          "2026-01-27",
+          "Tisdag",
+          5,
+          360,
+          0,
+          0,
+          "–"
+        ],
+        [
+          "2026-01-28",
+          "Onsdag",
+          5,
+          300,
+          300,
+          0,
+          "Sjukanmäld av vårdnadshavare"
+        ],
+        [
+          "2026-01-29",
+          "Torsdag",
+          5,
+          360,
+          0,
+          0,
+          "–"
+        ],
+        [
+          "2026-01-30",
+          "Fredag",
+          5,
+          270,
+          0,
+          0,
+          "–"
+        ],
+        [
+          "2026-02-02",
+          "Måndag",
+          6,
+          330,
+          0,
+          330,
+          "Ej närvarande, ingen anmälan"
+        ],
+        [
+          "2026-02-03",
+          "Tisdag",
+          6,
+          360,
+          0,
+          360,
+          "Ej närvarande, ingen anmälan"
+        ],
+        [
+          "2026-02-04",
+          "Onsdag",
+          6,
+          300,
+          0,
+          300,
+          "Ej närvarande, ingen anmälan"
+        ],
+        [
+          "2026-02-05",
+          "Torsdag",
+          6,
+          360,
+          0,
+          360,
+          "Ej närvarande, ingen anmälan"
+        ],
+        [
+          "2026-02-06",
+          "Fredag",
+          6,
+          270,
+          0,
+          270,
+          "Ej närvarande, ingen anmälan"
+        ],
+        [
+          "2026-02-09",
+          "Måndag",
+          7,
+          330,
+          0,
+          330,
+          "Ej närvarande, ingen anmälan"
+        ],
+        [
+          "2026-02-10",
+          "Tisdag",
+          7,
+          360,
+          0,
+          0,
+          "–"
+        ],
+        [
+          "2026-02-11",
+          "Onsdag",
+          7,
+          300,
+          0,
+          0,
+          "–"
+        ],
+        [
+          "2026-02-12",
+          "Torsdag",
+          7,
+          360,
+          0,
+          0,
+          "–"
+        ],
+        [
+          "2026-02-13",
+          "Fredag",
+          7,
+          270,
+          0,
+          150,
+          "Gick hem efter lunch utan tillstånd"
+        ],
+        [
+          "2026-02-16",
+          "Måndag",
+          8,
+          330,
+          0,
+          110,
+          "Kom 10:05, ingen anmälan"
+        ],
+        [
+          "2026-02-17",
+          "Tisdag",
+          8,
+          360,
+          0,
+          0,
+          "–"
+        ],
+        [
+          "2026-02-18",
+          "Onsdag",
+          8,
+          300,
+          0,
+          0,
+          "–"
+        ],
+        [
+          "2026-02-19",
+          "Torsdag",
+          8,
+          360,
+          0,
+          0,
+          "–"
+        ],
+        [
+          "2026-02-20",
+          "Fredag",
+          8,
+          270,
+          0,
+          270,
+          "Ej närvarande, ingen anmälan"
+        ],
+        [
+          "2026-03-02",
+          "Måndag",
+          10,
+          330,
+          0,
+          330,
+          "Ej närvarande, ingen anmälan"
+        ],
+        [
+          "2026-03-03",
+          "Tisdag",
+          10,
+          360,
+          0,
+          0,
+          "–"
+        ],
+        [
+          "2026-03-04",
+          "Onsdag",
+          10,
+          300,
+          0,
+          0,
+          "–"
+        ],
+        [
+          "2026-03-05",
+          "Torsdag",
+          10,
+          360,
+          360,
+          0,
+          "Ledighet beviljad av rektor"
+        ],
+        [
+          "2026-03-06",
+          "Fredag",
+          10,
+          270,
+          270,
+          0,
+          "Ledighet beviljad av rektor"
+        ],
+        [
+          "2026-03-09",
+          "Måndag",
+          11,
+          280,
+          0,
+          50,
+          "Anpassat schema från v.11: start 09:40. Kom 10:30"
+        ],
+        [
+          "2026-03-10",
+          "Tisdag",
+          11,
+          360,
+          360,
+          0,
+          "Sjukanmäld av vårdnadshavare"
+        ],
+        [
+          "2026-03-11",
+          "Onsdag",
+          11,
+          300,
+          0,
+          0,
+          "–"
+        ],
+        [
+          "2026-03-12",
+          "Torsdag",
+          11,
+          360,
+          0,
+          0,
+          "–"
+        ],
+        [
+          "2026-03-13",
+          "Fredag",
+          11,
+          270,
+          0,
+          270,
+          "Ej närvarande, ingen anmälan"
+        ]
+      ]
+    },
+    {
+      "name": "Om uttaget",
+      "columns": [
+        "Uppgift",
+        "Värde"
+      ],
+      "rows": [
+        [
+          "Elev",
+          "Leo Sandberg"
+        ],
+        [
+          "Klass",
+          "9B"
+        ],
+        [
+          "Skola",
+          "Ängstaskolan"
+        ],
+        [
+          "Period",
+          "2026-01-12 – 2026-03-13"
+        ],
+        [
+          "Lovdagar som inte ingår",
+          "Sportlov vecka 9 (2026-02-23 – 2026-02-27)"
+        ],
+        [
+          "Giltig frånvaro",
+          "Anmäld sjukdom och ledighet beviljad av rektor"
+        ],
+        [
+          "Ogiltig frånvaro",
+          "All annan frånvaro, även sen ankomst och avvikelse under dagen"
+        ],
+        [
+          "Uttaget gjort",
+          "2026-03-16 av Lena Forsberg, rektor"
+        ]
+      ]
+    }
+  ]
+}

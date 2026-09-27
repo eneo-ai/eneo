@@ -1,0 +1,21 @@
+{
+  "file": "nar01_meny.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "NAR-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/145"},
+  "description": "Restaurangens meny bifogad ansökan om serveringstillstånd för bedömning av matutbudet enligt alkohollagen 8 kap. 15 §, med kvällsmeny efter klockan 23.",
+  "letterhead": {"organisation": "Bistro Norra Kajen", "unit": "Meny hösten 2026", "address": "Norra Kajen 12, 852 29 Sundsvall"},
+  "title": "Meny",
+  "blocks": [
+    {"paragraph": "All mat lagas från grunden i vårt eget kök. Lunch serveras vardagar 11:00–14:00, à la carte från 17:00."},
+    {"heading": "Förrätter"},
+    {"list": ["Toast Skagen med löjrom", "Rödbetscarpaccio med chèvre och valnötter", "Västerbottenpaj med rökt röding", "Dagens soppa med surdegsbröd"]},
+    {"heading": "Varmrätter"},
+    {"list": ["Ugnsbakad röding med brynt smör och potatispuré", "Högrevsburgare med tryffelmajonnäs och pommes frites", "Kalvschnitzel med kapris, sardell och rostad potatis", "Svamprisotto med parmesan", "Wallenbergare med gröna ärtor och lingon"]},
+    {"heading": "Efterrätter"},
+    {"list": ["Crème brûlée", "Chokladfondant med vaniljglass", "Hjortronparfait"]},
+    {"heading": "Kvällsmeny efter klockan 23:00"},
+    {"list": ["Toast Skagen", "Pommes frites med aioli", "Ostbricka med marmelad och knäckebröd"]},
+    {"heading": "Lunch vardagar"},
+    {"paragraph": "Tre rätter varje dag: kött, fisk och vegetariskt, med salladsbuffé, bröd och kaffe."}
+  ]
+}

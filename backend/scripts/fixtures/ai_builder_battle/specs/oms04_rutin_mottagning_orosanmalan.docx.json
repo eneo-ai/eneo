@@ -1,0 +1,110 @@
+{
+  "file": "oms04_rutin_mottagning_orosanmalan.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "OMS-04",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/85"
+  },
+  "description": "Mottagningsgruppens rutin för anmälan om oro för barn: lagrum i socialtjänstlagen (2025:400) och OSL, när en anmälan anses inkommen, kriterier för akut skyddsbehov, förhandsbedömningens rubriker och regler för anmälarens identitet; noterar de upphävda paragraferna i 2001:453.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Individ- och arbetsmarknadsförvaltningen, Barn och familj, Mottagningsgruppen",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-03-02",
+  "diarienummer": "IAN-2026-00412",
+  "title": "Rutin för mottagning av anmälan om oro för barn",
+  "blocks": [
+    {
+      "heading": "Syfte och omfattning"
+    },
+    {
+      "paragraph": "Rutinen beskriver hur mottagningsgruppen hanterar en anmälan om oro för att ett barn far illa, från det att anmälan kommer in till beslut om att inleda eller inte inleda utredning. Den gäller anmälningar som kommer in via e-tjänsten Oro för barn – anmälan, per telefon, brev eller vid besök."
+    },
+    {
+      "heading": "Lagrum"
+    },
+    {
+      "list": [
+        "Socialtjänstlagen (2025:400) 19 kap. 1 § – anmälningsskyldighet för myndigheter och yrkesverksamma; 19 kap. 4 § – var och en som misstänker att ett barn far illa bör anmäla.",
+        "Socialtjänstlagen (2025:400) 20 kap. 1 § – omedelbar skyddsbedömning, som ska dokumenteras i barnets personakt.",
+        "Socialtjänstlagen (2025:400) 20 kap. 2 § – förhandsbedömning: beslut om att inleda eller inte inleda utredning inom fjorton dagar efter att anmälan har kommit in.",
+        "Socialtjänstlagen (2025:400) 19 kap. 6 § – information till anmälaren.",
+        "Offentlighets- och sekretesslagen (2009:400) 26 kap. 1 § – sekretess inom socialtjänsten; 26 kap. 5 § – uppgifter i en enskilds anmälan i förhållande till den som anmälan gäller."
+      ]
+    },
+    {
+      "paragraph": "Äldre mallar hänvisar till 14 kap. 1 § och 11 kap. 1 a § i den upphävda socialtjänstlagen (2001:453). De hänvisningarna ska inte användas i nya dokument."
+    },
+    {
+      "heading": "1. Registrering"
+    },
+    {
+      "paragraph": "Anmälan registreras i verksamhetssystemet senast arbetsdagen efter att den kom in. En anmälan anses ha kommit in den dag den kom in till e-tjänsten, även om den skickades efter kontorstid eller registreras först nästa dag. Från det datumet räknas fristen för förhandsbedömningen."
+    },
+    {
+      "heading": "2. Omedelbar skyddsbedömning"
+    },
+    {
+      "paragraph": "En omedelbar skyddsbedömning görs samma dag som anmälan kommer till mottagningsgruppen, och senast första arbetsdagen om anmälan kom in efter kontorstid. Bedömningen ska besvara frågan om barnet behöver omedelbart skydd och dokumenteras med datum, vem som har gjort bedömningen, vilka uppgifter den bygger på och vilka åtgärder som vidtas."
+    },
+    {
+      "paragraph": "Följande uppgifter i en anmälan innebär alltid att gruppledaren eller socialjouren kontaktas direkt och att skyddsbehovet bedöms som akut tills motsatsen är utredd:"
+    },
+    {
+      "list": [
+        "barnet berättar att det har utsatts för våld eller sexuella övergrepp, eller har synliga skador,",
+        "våld mellan vuxna i hemmet det senaste dygnet eller pågående hot i hemmet,",
+        "barnet vill inte eller vågar inte gå hem,",
+        "vårdnadshavaren är påverkad av alkohol eller droger och ensam med barnet,",
+        "barnet har lämnats utan tillsyn eller saknar en plats att sova,",
+        "risk för att barnet förs utomlands eller utsätts för hedersrelaterat våld eller förtryck."
+      ]
+    },
+    {
+      "paragraph": "Gäller anmälan flera barn i samma hushåll görs skyddsbedömningen för varje barn, även för syskon som inte nämns vid namn i anmälan."
+    },
+    {
+      "heading": "3. Förhandsbedömning"
+    },
+    {
+      "paragraph": "Förhandsbedömningen ska leda till beslut om att inleda eller inte inleda utredning senast fjorton dagar efter att anmälan kom in. Beslutet fattas av gruppledaren på delegation. I förhandsbedömningen får handläggaren tala med barnet, vårdnadshavarna och anmälaren och ta del av uppgifter som redan finns hos nämnden. Tiden får förlängas bara om det finns synnerliga skäl, och skälen ska dokumenteras."
+    },
+    {
+      "paragraph": "Förhandsbedömningen dokumenteras i barnets personakt under rubrikerna:"
+    },
+    {
+      "list": [
+        "Anmälan: datum då den kom in, hur den kom in och anmälarens kategori",
+        "Barnet och vårdnadshavarna",
+        "Anmälans innehåll",
+        "Omedelbar skyddsbedömning",
+        "Tidigare kännedom",
+        "Bedömning",
+        "Förslag till beslut",
+        "Sista dag för beslut"
+      ]
+    },
+    {
+      "heading": "4. Anmälaren och sekretess"
+    },
+    {
+      "paragraph": "Förhandsbedömningen kan lämnas ut till vårdnadshavarna, som blir parter om utredning inleds. Har en privatperson bett om att inte bli känd för familjen, eller kan det antas att anmälaren eller någon närstående utsätts för våld eller annat allvarligt men om uppgiften röjs, ska anmälarens namn, adress, telefonnummer och e-postadress inte skrivas i förhandsbedömningen. Skriv i stället anmälarens kategori, till exempel privatperson, och hänvisa till anmälan i akten."
+    },
+    {
+      "paragraph": "En anmälningsskyldig yrkesverksam kan inte vara anonym. Den som har anmält enligt 19 kap. 1 § informeras på begäran om att utredning har inletts, inte har inletts eller redan pågår."
+    },
+    {
+      "heading": "5. Ansvar"
+    },
+    {
+      "paragraph": "Handläggare i mottagningsgruppen ansvarar för registrering, omedelbar skyddsbedömning och förhandsbedömning. Gruppledaren beslutar om att inleda eller inte inleda utredning och ansvarar för att fristen hålls."
+    },
+    {
+      "signature": {
+        "name": "Maria Engström",
+        "role": "Enhetschef, Barn och familj"
+      }
+    }
+  ]
+}

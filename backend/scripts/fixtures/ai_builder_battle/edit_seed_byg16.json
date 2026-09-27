@@ -1,0 +1,203 @@
+{
+  "name": "Lägenhetsregister – kontroll av lägenhetsförteckning",
+  "description": "Adressregistrets stöd när en fastighetsägare anmäler nya eller ändrade bostäder: läser lägenhetsförteckningen och planritningarna, kontrollerar lägenhetsnumren enligt Lantmäteriets standard och boarea, rum och kök mot ritningarna, tar fram posterna för registrering och skriver en felrapport till fastighetsägaren.",
+  "metadata_json": {
+    "form_schema": {
+      "fields": [
+        {"name": "fastighet", "type": "text", "label": "Fastighetsbeteckning", "required": true, "order": 1},
+        {"name": "arendenummer", "type": "text", "label": "Ärendenummer", "required": true, "order": 2},
+        {"name": "fastighetsagare", "type": "text", "label": "Fastighetsägare", "required": true, "order": 3},
+        {"name": "handlaggare", "type": "text", "label": "Handläggare", "required": true, "order": 4}
+      ]
+    }
+  },
+  "steps": [
+    {
+      "name": "Läs lägenhetsförteckning och planritningar",
+      "instructions": "Du får fastighetsägarens lägenhetsförteckning och planritningarna med lägenhetsnummer. Ta ut varje rad i förteckningen exakt som den står: trappuppgång (adress), lägenhetsnummer, våningsplan, antal rum, köksutrustning, boarea och ändringstyp. Ta sedan ut varje lägenhet som är utritad på planritningarna: adress, våningsplan enligt ritningen, lägenhetsnumret som står i lägenheten, antal rum, kök och boarea enligt ritningen. Skriv lägenhetsnummer exakt som de står, även om de ser fel ut. Skriv null där en uppgift saknas.",
+      "input_source": "flow_input",
+      "input_type": "document",
+      "input_config": {
+        "runtime_input": {
+          "enabled": true,
+          "required": true,
+          "max_files": 10,
+          "input_format": "document",
+          "label": "Lägenhetsförteckning och planritningar",
+          "description": "Ladda upp lägenhetsförteckningen (Excel) och planritningarna med lägenhetsnummer."
+        }
+      },
+      "input_bindings": {"question": "{{ step_input.text }}\n\nFastighet: {{ flow_input.fastighet }}"},
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["forteckning", "ritning"],
+        "properties": {
+          "forteckning": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["adress", "lagenhetsnummer", "vaningsplan", "antal_rum", "kok", "boarea_kvm", "andringstyp"],
+              "properties": {
+                "adress": {"type": "string"},
+                "lagenhetsnummer": {"type": "string"},
+                "vaningsplan": {"type": ["string", "null"]},
+                "antal_rum": {"type": ["integer", "null"]},
+                "kok": {"type": ["string", "null"]},
+                "boarea_kvm": {"type": ["number", "null"]},
+                "andringstyp": {"type": ["string", "null"]}
+              }
+            }
+          },
+          "ritning": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["adress", "vaningsplan", "lagenhetsnummer", "antal_rum", "kok", "boarea_kvm"],
+              "properties": {
+                "adress": {"type": "string"},
+                "vaningsplan": {"type": "string"},
+                "lagenhetsnummer": {"type": "string"},
+                "antal_rum": {"type": ["integer", "null"]},
+                "kok": {"type": ["string", "null"]},
+                "boarea_kvm": {"type": ["number", "null"]}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Kontrollera lägenhetsnumren",
+      "instructions": "Kontrollera varje lägenhetsnummer i förteckningen enligt Lantmäteriets standard för lägenhetsnummer. Numret har fyra siffror. De två första anger våningsplanet: 10 är entréplanet, 11 är planet en trappa upp, 12 två trappor upp och så vidare, 09 är planet under entréplanet. De två sista anger lägenhetens läge på planet, räknat från 01 medurs från trapphuset. Ett nummer får bara finnas en gång per trappuppgång. Jämför numret med planritningen: numret ska stå i samma lägenhet på ritningen och planet ska stämma med de två första siffrorna. Ange för varje nummer om det är korrekt och i så fall inget förslag; annars vad som är fel och vilket nummer lägenheten ska ha enligt ritningen och standarden.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "forteckning", "label": "Lägenhetsförteckning"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "ritning", "label": "Lägenheter enligt planritningarna"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["nummerkontroll"],
+        "properties": {
+          "nummerkontroll": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["adress", "lagenhetsnummer", "korrekt", "fel", "foreslaget_nummer"],
+              "properties": {
+                "adress": {"type": "string"},
+                "lagenhetsnummer": {"type": "string"},
+                "korrekt": {"type": "boolean"},
+                "fel": {"type": ["string", "null"]},
+                "foreslaget_nummer": {"type": ["string", "null"]}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Kontrollera boarea, rum och kök",
+      "instructions": "Jämför för varje lägenhet i förteckningen boarean, antalet rum och köksutrustningen med samma lägenhet på planritningen. Para ihop lägenheterna efter adress och läge på ritningen, inte bara efter numret, eftersom numret kan vara fel. Köksutrustning anges som K (kök), KV (kokvrå) eller KS (kokskåp). Boarean ska stämma på hela kvadratmetern. Ange för varje lägenhet om uppgifterna stämmer, och annars vilka värden förteckningen och ritningen anger.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "forteckning", "label": "Lägenhetsförteckning"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "ritning", "label": "Lägenheter enligt planritningarna"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["ytkontroll"],
+        "properties": {
+          "ytkontroll": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["adress", "lagenhetsnummer", "stammer", "avvikelser"],
+              "properties": {
+                "adress": {"type": "string"},
+                "lagenhetsnummer": {"type": "string"},
+                "stammer": {"type": "boolean"},
+                "avvikelser": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["uppgift", "forteckning", "ritning"],
+                    "properties": {"uppgift": {"type": "string"}, "forteckning": {"type": ["string", "null"]}, "ritning": {"type": ["string", "null"]}}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Ta fram poster för registrering",
+      "instructions": "Ta fram en post per lägenhet för registrering i lägenhetsregistret. Ta bara med lägenheter där både numret och boarea, rum och kök är kontrollerade utan fel; övriga läggs i listan ej_registrerade med skälet. Använd uppgifterna ur förteckningen oförändrade.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Fastighet: {{ flow_input.fastighet }}",
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "forteckning", "label": "Lägenhetsförteckning"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "nummerkontroll", "label": "Kontroll av lägenhetsnummer"},
+          {"step_ref": "step_3", "output": "structured", "field_path": "ytkontroll", "label": "Kontroll av boarea, rum och kök"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["fastighet", "poster", "ej_registrerade"],
+        "properties": {
+          "fastighet": {"type": "string"},
+          "poster": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["adress", "lagenhetsnummer", "antal_rum", "kok", "boarea_kvm", "andringstyp"],
+              "properties": {
+                "adress": {"type": "string"},
+                "lagenhetsnummer": {"type": "string"},
+                "antal_rum": {"type": "integer"},
+                "kok": {"type": "string"},
+                "boarea_kvm": {"type": "number"},
+                "andringstyp": {"type": "string"}
+              }
+            }
+          },
+          "ej_registrerade": {
+            "type": "array",
+            "items": {"type": "object", "required": ["adress", "lagenhetsnummer", "skal"], "properties": {"adress": {"type": "string"}, "lagenhetsnummer": {"type": "string"}, "skal": {"type": "string"}}}
+          }
+        }
+      }
+    },
+    {
+      "name": "Skriv felrapport till fastighetsägaren",
+      "instructions": "Skriv ett brev till fastighetsägaren med de fel som måste rättas innan lägenheterna kan registreras. Inled med fastighet och ärendenummer. Räkna upp varje felaktigt lägenhetsnummer med adress, vad som är fel och vilket nummer lägenheten ska ha, och därefter varje lägenhet där boarea, rum eller kök skiljer mellan förteckningen och ritningen, med båda värdena. Be fastighetsägaren skicka in en rättad förteckning eller rättade ritningar och tala om att övriga lägenheter registreras. Hänvisa till lagen (2006:378) om lägenhetsregister. Avsluta med handläggarens namn.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Fastighet: {{ flow_input.fastighet }}\nÄrendenummer: {{ flow_input.arendenummer }}\nFastighetsägare: {{ flow_input.fastighetsagare }}\nHandläggare: {{ flow_input.handlaggare }}",
+        "source_refs": [
+          {"step_ref": "step_2", "output": "structured", "field_path": "nummerkontroll", "label": "Kontroll av lägenhetsnummer"},
+          {"step_ref": "step_3", "output": "structured", "field_path": "ytkontroll", "label": "Kontroll av boarea, rum och kök"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "text"
+    }
+  ]
+}

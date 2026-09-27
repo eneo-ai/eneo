@@ -1,0 +1,35 @@
+{
+  "file": "utb11_rektor_meritforteckning.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "UTB-11", "url": "https://sjalvservice.malmo.se/oversikt/overview/479"},
+  "description": "Meritförteckning och examensuppgifter för den tilltänkta rektorn, bilaga till ansökan om godkännande för bedömning av pedagogisk insikt enligt skollagen 2 kap. 11 §.",
+  "letterhead": {"organisation": "Ekorrens Förskolor AB", "unit": "Bilaga till ansökan om godkännande", "address": "Kastanjegatan 14, 214 57 Malmö"},
+  "date": "2026-08-28",
+  "title": "Meritförteckning – Sofie Lindh",
+  "blocks": [
+    {"heading": "Utbildning"},
+    {
+      "table": {
+        "columns": ["År", "Utbildning", "Lärosäte"],
+        "rows": [
+          ["2005–2008", "Förskollärarexamen, 210 högskolepoäng", "Malmö högskola"],
+          ["2021–2024", "Rektorsprogrammet, 30 högskolepoäng, avslutat", "Uppsala universitet"]
+        ]
+      }
+    },
+    {"heading": "Legitimation"},
+    {"paragraph": "Legitimerad förskollärare sedan 2012, legitimationsnummer utfärdat av Skolverket."},
+    {"heading": "Yrkeserfarenhet"},
+    {
+      "table": {
+        "columns": ["Period", "Befattning", "Arbetsgivare"],
+        "rows": [
+          ["2008–2016", "Förskollärare", "Malmö stad, förskoleförvaltningen"],
+          ["2016–2020", "Biträdande förskolechef", "Lunds kommun"],
+          ["2020–", "Rektor för två förskolor", "Solrosens Förskolor AB"]
+        ]
+      }
+    },
+    {"paragraph": "Sofie Lindh tillträder som rektor för Förskolan Ekorren med 50 % tjänstgöring från 2027-01-01."}
+  ]
+}

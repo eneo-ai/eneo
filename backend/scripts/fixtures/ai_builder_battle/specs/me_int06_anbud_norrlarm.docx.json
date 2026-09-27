@@ -1,0 +1,51 @@
+{
+  "file": "me_int06_anbud_norrlarm.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "INT-06", "url": "https://www.upphandlingsmyndigheten.se/inkopsprocessen/genomfor-upphandlingen/tilldelningsbeslut/"},
+  "description": "Ett inkommet anbud med anbudsgivarens uppgifter, svar på varje skall-krav med hänvisning till bilagor, beskrivning av åtgärdstid och prisbilaga.",
+  "letterhead": {"organisation": "Norrlarm Trygghet AB", "unit": "Anbud", "address": "Storgatan 41, 852 30 Sundsvall"},
+  "date": "2026-08-14",
+  "diarienummer": "KS-2026-00318",
+  "title": "Anbud – Trygghetslarm med larmmottagning för hemtjänsten",
+  "blocks": [
+    {"heading": "Anbudsgivare"},
+    {
+      "table": {
+        "columns": ["Uppgift", "Värde"],
+        "rows": [
+          ["Företag", "Norrlarm Trygghet AB"],
+          ["Organisationsnummer", "559234-7718"],
+          ["Kontaktperson", "Jenny Åström, affärsansvarig offentlig sektor"],
+          ["E-post", "jenny.astrom@norrlarm.example"]
+        ]
+      }
+    },
+    {"heading": "Svar på skall-krav"},
+    {
+      "table": {
+        "columns": ["Krav-ID", "Svar", "Anbudsgivarens beskrivning"],
+        "rows": [
+          ["SK1", "Uppfylls", "Vår larmcentral i Härnösand är certifierad enligt SS-EN 50518:2019. Certifikatet bifogas (bilaga A)."],
+          ["SK2", "Uppfylls", "Larmet NL Care 4G har batteribackup på 48 timmar. Produktblad bifogas (bilaga B)."],
+          ["SK3", "Uppfylls", "Tekniker i Sundsvall åtgärdar fel inom 12 timmar från felanmälan, alla dagar."],
+          ["SK4", "Uppfylls", "All data lagras i Sverige. Vi godtar personuppgiftsbiträdesavtalet i bilaga 4."],
+          ["SK5", "Uppfylls", "Timrå kommun (820 larm, 2023–2026) och Ånge kommun (560 larm, 2024–2026). Referenslista bifogas."]
+        ]
+      }
+    },
+    {"heading": "Införande"},
+    {"paragraph": "Införandet sker under åtta veckor med byte av samtliga befintliga larm, utbildning av hemtjänstens personal och en utsedd projektledare."},
+    {"heading": "Bilaga 2 – Prisbilaga"},
+    {
+      "table": {
+        "columns": ["Prispost", "Belopp (kr, exkl. moms)"],
+        "rows": [
+          ["Månadsavgift per larm inklusive larmmottagning", "189"],
+          ["Engångskostnad för införande", "45 000"],
+          ["Anbudspris (1 150 larm × 48 månader + engångskostnad)", "10 477 800"]
+        ]
+      }
+    },
+    {"signature": {"name": "Håkan Nordlund", "role": "Verkställande direktör, Norrlarm Trygghet AB"}}
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "file": "byg01_rutin_planenlighet_lovbeslut.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/443"},
+  "description": "Bygglovavdelningens interna rutin för planenlighetsprövning och lovbeslut, reviderad efter omnumreringen av PBL 9 kap. genom SFS 2025:974, med tabell över nya och upphävda paragrafhänvisningar.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Stadsbyggnadsnämnden – Bygglovavdelningen", "address": "851 85 Sundsvall"},
+  "date": "2025-12-01",
+  "title": "Rutin: planenlighetsprövning och lovbeslut för tillbyggnad inom detaljplan",
+  "blocks": [
+    {"paragraph": "Rutin BL-07, version 4. Gäller från 2025-12-01 och ersätter version 3."},
+    {"heading": "Syfte"},
+    {"paragraph": "Rutinen beskriver hur handläggaren prövar om en tillbyggnad av ett en- eller tvåbostadshus stämmer med detaljplanen och hur lovbeslutet skrivs i avdelningens mall för lovbeslut."},
+    {"heading": "Ny paragrafnumrering i 9 kap. PBL"},
+    {"paragraph": "Den 1 december 2025 trädde lag (2025:974) om ändring i plan- och bygglagen (2010:900) i kraft. 9 kap. har fått ny paragrafnumrering. Nya beslut ska alltid hänvisa till de paragrafer som gäller från 2025-12-01. Äldre mallar, tidigare beslut och vissa e-tjänsttexter hänvisar fortfarande till de upphävda paragraferna; de får inte användas i nya beslut."},
+    {"table": {"columns": ["Fråga", "Gäller från 2025-12-01", "Tidigare paragraf (får inte användas)"], "rows": [["Bygglov inom detaljplan", "9 kap. 56 § PBL", "9 kap. 30 §"], ["Liten avvikelse från detaljplan", "9 kap. 60 § PBL", "9 kap. 31 b §"], ["Underrättelse till grannar och andra sakägare", "9 kap. 94–96 §§ PBL", "9 kap. 25 §"], ["Beslut inom tio veckor", "9 kap. 99 § PBL", "9 kap. 27 §"], ["Lovbeslutets innehåll", "9 kap. 105 § PBL", "9 kap. 40 §"], ["Lovets giltighetstid", "9 kap. 115 § PBL", "9 kap. 43 §"]]}},
+    {"heading": "Planenlighet – så gör du"},
+    {"list": ["Gå igenom varje bestämmelse i detaljplanen, även tillägg och ändringar, och notera vad planen medger och vad ansökan visar.", "När planen reglerar hur stor del av tomten som får bebyggas räknas byggnadsarean för alla byggnader på fastigheten, även garage och andra komplementbyggnader.", "Uppgifterna i ansökningsformuläret är sökandens egna. När de skiljer sig från de måttsatta ritningarna gäller ritningarna; notera skillnaden.", "Äldre planer reglerar ofta byggnadshöjd, inte nockhöjd. Jämför med den höjd planen faktiskt reglerar.", "Varje bestämmelse bedöms som uppfylld eller som avvikelse. En avvikelse beskrivs med planens värde och ansökans värde."]},
+    {"heading": "Lovbeslutet"},
+    {"list": ["Planenlig åtgärd: bygglov ges med stöd av 9 kap. 56 § PBL.", "Avvikelse som bedöms som liten och förenlig med planens syfte: bygglov ges med stöd av 9 kap. 56 § och 9 kap. 60 § PBL. Motiveringen ska förklara varför avvikelsen är liten.", "Berörda grannar ska ha fått tillfälle att yttra sig enligt 9 kap. 94–96 §§ PBL. Ett skriftligt grannemedgivande från ägaren till den fastighet som avvikelsen gäller redovisas i motiveringen med fastighetsbeteckning.", "Upplysningar: kontrollansvarig, att åtgärden inte får påbörjas förrän startbesked har getts, och lovets giltighetstid enligt 9 kap. 115 § PBL (påbörjat inom två år och avslutat inom fem år från att beslutet fått laga kraft).", "Beslutet delges grannar som har yttrat sig och kungörs på kommunens anslagstavla. Personnummer skrivs därför aldrig i lovbeslutet; ange sökanden med namn och adress."]},
+    {"signature": {"name": "Helena Strand", "role": "Avdelningschef, bygglovavdelningen"}}
+  ]
+}

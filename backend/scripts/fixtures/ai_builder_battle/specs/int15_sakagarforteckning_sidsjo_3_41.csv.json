@@ -1,0 +1,126 @@
+{
+  "file": "int15_sakagarforteckning_sidsjo_3_41.csv",
+  "format": "csv",
+  "source": {
+    "catalogue_id": "INT-15",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/715"
+  },
+  "description": "Sakägarförteckning ur fastighetsregistret för bygglovet på Sidsjö 3:41 med personnummer, c/o-adresser, ett dödsbo, en bostadsrättsförening, en granne utan adress och resultatet av grannehörandet per ägare.",
+  "sheets": [
+    {
+      "name": "Sakägare",
+      "columns": [
+        "Fastighet",
+        "Ägare",
+        "Personnr/Orgnr",
+        "c/o",
+        "Utdelningsadress",
+        "Postnummer",
+        "Postort",
+        "Kategori",
+        "Grannehörande"
+      ],
+      "rows": [
+        [
+          "Sidsjö 3:41",
+          "Johan Nordin",
+          "19870520-2391",
+          "–",
+          "Sidsjövägen 14",
+          "856 45",
+          "Sundsvall",
+          "Sökande och fastighetsägare",
+          "–"
+        ],
+        [
+          "Sidsjö 3:41",
+          "Sara Nordin",
+          "19671127-3026",
+          "–",
+          "Sidsjövägen 14",
+          "856 45",
+          "Sundsvall",
+          "Sökande och fastighetsägare",
+          "–"
+        ],
+        [
+          "Sidsjö 3:40",
+          "Birgitta Holmström",
+          "19670129-2846",
+          "–",
+          "Sidsjövägen 12",
+          "856 45",
+          "Sundsvall",
+          "Granne, gränsar",
+          "Inga erinringar"
+        ],
+        [
+          "Sidsjö 3:42",
+          "Dödsbo efter Karl-Erik Wallin",
+          "19830605-2393",
+          "c/o Anneli Wallin",
+          "Storgatan 7 B",
+          "852 30",
+          "Sundsvall",
+          "Granne, gränsar",
+          "Inget yttrande"
+        ],
+        [
+          "Sidsjö 3:38",
+          "Mikael Åberg",
+          "19840720-2392",
+          "–",
+          "Sidsjövägen 10",
+          "856 45",
+          "Sundsvall",
+          "Granne, gränsar",
+          "Synpunkter, ej tillgodosedda"
+        ],
+        [
+          "Sidsjö 3:39",
+          "Leila Karimi",
+          "19760926-2386",
+          "–",
+          "Adress saknas i fastighetsregistret",
+          "–",
+          "–",
+          "Granne, gränsar",
+          "Inget yttrande"
+        ],
+        [
+          "Sidsjö 3:52",
+          "Brf Sidsjöhöjden",
+          "769631-4482",
+          "c/o Norrlands Fastighetsförvaltning AB",
+          "Box 812",
+          "851 23",
+          "Sundsvall",
+          "Granne, över gata",
+          "Inget yttrande"
+        ],
+        [
+          "Sidsjö 3:44",
+          "Per-Olof Sjödin",
+          "19891026-2396",
+          "–",
+          "Sidsjövägen 17",
+          "856 45",
+          "Sundsvall",
+          "Granne, över gata",
+          "Inga erinringar"
+        ],
+        [
+          "Sidsjö 3:44",
+          "Marianne Sjödin",
+          "19761024-2385",
+          "–",
+          "Sidsjövägen 17",
+          "856 45",
+          "Sundsvall",
+          "Granne, över gata",
+          "Inga erinringar"
+        ]
+      ]
+    }
+  ]
+}

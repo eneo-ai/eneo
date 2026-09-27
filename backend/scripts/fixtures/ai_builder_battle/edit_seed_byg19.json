@@ -1,0 +1,100 @@
+{
+  "name": "Tillfällig upplåtelse av kommunal mark – beslut",
+  "description": "Mark- och exploateringsavdelningens stöd för ansökningar om att tillfälligt använda kommunens mark (evenemang, försäljning, byggetablering): läser ansökan från e-tjänsten och bilagorna, bedömer den mot riktlinjerna och taxan och skriver beslutet om upplåtelse som Word-dokument.",
+  "metadata_json": {
+    "form_schema": {
+      "fields": [
+        {"name": "handlaggare", "type": "text", "label": "Handläggare", "required": true, "order": 1}
+      ]
+    }
+  },
+  "steps": [
+    {
+      "name": "Läs ansökan och bilagor",
+      "instructions": "Du får en ansökan om tillfällig upplåtelse av kommunal mark från e-tjänsten och sökandens bilagor (situationsplan, etableringsbeskrivning). Ta ut uppgifterna exakt som de står: ärendenummer, sökande och organisationsnummer, kontaktperson, platsen och fastighetsbeteckningen, ändamålet, första och sista dag för upplåtelsen (ÅÅÅÅ-MM-DD, inklusive dagar för uppbyggnad och nedmontering), hur ytan fördelas enligt ansökan och situationsplanen (varje delyta med användning och kvadratmeter) och den sammanlagda sökta ytan, behov av el och vatten och om fordon ska stå på ytan. Lista uppgifter som saknas. Om bilagorna och ansökan anger olika uppgifter, ange båda.",
+      "input_source": "flow_input",
+      "input_type": "document",
+      "input_config": {
+        "runtime_input": {
+          "enabled": true,
+          "required": true,
+          "max_files": 6,
+          "input_format": "document",
+          "label": "Ansökan och bilagor",
+          "description": "Ladda upp ansökan från e-tjänsten och sökandens bilagor."
+        }
+      },
+      "input_bindings": {"question": "{{ step_input.text }}"},
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["arendenummer", "sokande", "organisationsnummer", "kontaktperson", "plats", "fastighet", "andamal", "forsta_dag", "sista_dag", "delytor", "sokt_yta_kvm", "el_och_vatten", "fordon_pa_ytan", "saknade_uppgifter", "motstridiga_uppgifter"],
+        "properties": {
+          "arendenummer": {"type": "string"},
+          "sokande": {"type": "string"},
+          "organisationsnummer": {"type": ["string", "null"]},
+          "kontaktperson": {"type": ["string", "null"]},
+          "plats": {"type": "string"},
+          "fastighet": {"type": ["string", "null"]},
+          "andamal": {"type": "string"},
+          "forsta_dag": {"type": "string"},
+          "sista_dag": {"type": "string"},
+          "delytor": {
+            "type": "array",
+            "items": {"type": "object", "required": ["anvandning", "kvm"], "properties": {"anvandning": {"type": "string"}, "kvm": {"type": "number"}}}
+          },
+          "sokt_yta_kvm": {"type": "number"},
+          "el_och_vatten": {"type": ["string", "null"]},
+          "fordon_pa_ytan": {"type": ["string", "null"]},
+          "saknade_uppgifter": {"type": "array", "items": {"type": "string"}},
+          "motstridiga_uppgifter": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    {
+      "name": "Bedöm ansökan mot riktlinjer och taxa",
+      "instructions": "Bedöm ansökan enligt samhällsbyggnadsnämndens riktlinjer för tillfällig upplåtelse av kommunens mark som inte är offentlig plats.\n1. Upplåtelsen gäller högst 30 dagar i följd. Dagar för uppbyggnad och nedmontering räknas in.\n2. Ytor för parkering av fordon upplåts inte. Fordon får bara stå på ytan vid lastning och lossning. Räkna bort sådana delytor från den yta som upplåts.\n3. En fri passage på minst 3 meter för räddningstjänstens fordon ska finnas längs kajkanten.\n4. Elanslutning beställs av sökanden hos Sundsvall Elnät; kommunen tillhandahåller inte el eller vatten.\n5. Ytan ska lämnas städad och i samma skick som före upplåtelsen. Skador återställs på sökandens bekostnad.\n6. Upplåtelsen ersätter inte polistillstånd eller bygglov om sådant behövs.\nAvgift enligt taxan 2026: 12 kr per kvadratmeter upplåten yta och påbörjad dag, lägst 600 kr per upplåtelse. Redovisa beräkningen.\nBeslut: Bifall när allt sökt kan upplåtas, Delvis bifall när en del av ytan eller tiden inte kan upplåtas, Avslag när inget kan upplåtas. Villkoren formuleras som en numrerad lista som gäller just den här upplåtelsen. Motivera beslutet kort med hänvisning till riktlinjernas punkter.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {"source_refs": [{"step_ref": "step_1", "output": "structured", "label": "Uppgifter ur ansökan"}]},
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["beslut", "upplaten_yta_kvm", "antal_dagar", "avgift_kr", "avgiftsberakning", "villkor", "motivering"],
+        "properties": {
+          "beslut": {"type": "string", "enum": ["Bifall", "Delvis bifall", "Avslag"]},
+          "upplaten_yta_kvm": {"type": "number"},
+          "antal_dagar": {"type": "integer"},
+          "avgift_kr": {"type": "number"},
+          "avgiftsberakning": {"type": "string"},
+          "villkor": {"type": "string"},
+          "motivering": {"type": "string"}
+        }
+      }
+    },
+    {
+      "name": "Skriv beslutet",
+      "instructions": "Skriv beslutet om tillfällig upplåtelse av kommunal mark som ett Word-dokument från Sundsvalls kommun, samhällsbyggnadsförvaltningen, mark- och exploateringsavdelningen. Rubrik: Beslut om tillfällig upplåtelse av kommunal mark. Ange ärendenummer, sökande med organisationsnummer, plats och fastighet, ändamål, upplåtelsetiden från och med första dagen till och med sista dagen, den yta som upplåts i kvadratmeter, beslutet, villkoren som numrerad lista, avgiften med beräkning och att faktura skickas i efterhand, och motiveringen. Avsluta med att upplåtelsen är ett civilrättsligt avtal om nyttjanderätt som inte kan överklagas, och handläggarens namn.",
+      "input_source": "previous_step",
+      "input_type": "json",
+      "input_bindings": {
+        "question": "Handläggare: {{ flow_input.handlaggare }}",
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "arendenummer", "label": "Ärendenummer"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "sokande", "label": "Sökande"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "organisationsnummer", "label": "Organisationsnummer"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "plats", "label": "Plats"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "fastighet", "label": "Fastighet"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "andamal", "label": "Ändamål"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "forsta_dag", "label": "Första dag"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "sista_dag", "label": "Sista dag"},
+          {"step_ref": "step_2", "output": "structured", "label": "Bedömning"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "docx"
+    }
+  ]
+}

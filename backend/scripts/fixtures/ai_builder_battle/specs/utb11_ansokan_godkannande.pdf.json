@@ -1,0 +1,62 @@
+{
+  "file": "utb11_ansokan_godkannande.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "UTB-11", "url": "https://sjalvservice.malmo.se/oversikt/overview/479"},
+  "description": "Ansökningsblankett om godkännande som enskild huvudman för fristående förskola enligt skollagen 2 kap. 5 §, med ägar- och ledningskrets, planerat barnantal per period, personal, rektor, lokal och bilagor.",
+  "letterhead": {"organisation": "Malmö stad", "unit": "Förskoleförvaltningen – ansökan om godkännande, fristående förskola", "address": "205 80 Malmö"},
+  "date": "2026-09-03",
+  "diarienummer": "FSN-2026-01877",
+  "title": "Ansökan om godkännande som huvudman för fristående förskola",
+  "blocks": [
+    {"paragraph": "Inkom till förskoleförvaltningen 2026-09-03. Ansökningsavgiften är betald."},
+    {"heading": "1. Sökande huvudman"},
+    {
+      "table": {
+        "columns": ["Fråga i blanketten", "Svar"],
+        "rows": [
+          ["Huvudman", "Ekorrens Förskolor AB"],
+          ["Organisationsnummer", "559402-7715"],
+          ["Adress", "Kastanjegatan 14, 214 57 Malmö"],
+          ["Firmatecknare", "Malin Ek och Karim Nasser i förening"],
+          ["Kontaktperson", "Malin Ek, 070-512 88 34, malin.ek@ekorrensforskolor.example"]
+        ]
+      }
+    },
+    {"heading": "2. Ägar- och ledningskrets"},
+    {
+      "table": {
+        "columns": ["Namn", "Personnummer", "Roll", "Ägarandel"],
+        "rows": [
+          ["Malin Ek", "19760924-2388", "Styrelseordförande och verkställande direktör", "60 %"],
+          ["Karim Nasser", "19810919-2396", "Styrelseledamot", "40 %"],
+          ["Sofie Lindh", "19831119-2382", "Rektor (anställd, ingen ägarandel)", "0 %"]
+        ]
+      }
+    },
+    {"heading": "3. Förskoleenheten"},
+    {"paragraph": "Namn: Förskolan Ekorren. Adress: Kastanjegatan 14, 214 57 Malmö. Planerad start: 2027-01-11. Öppettider: måndag–fredag 06:30–18:00."},
+    {"heading": "4. Barn, avdelningar och personal"},
+    {"paragraph": "Planerat antal barn: 24 barn vid start i januari 2027 och 36 barn från och med augusti 2027, i två avdelningar (1–3 år och 3–5 år)."},
+    {
+      "table": {
+        "columns": ["Personalkategori", "Antal årsarbetare vid start", "Antal årsarbetare från augusti 2027"],
+        "rows": [
+          ["Legitimerade förskollärare", "2,0", "3,0"],
+          ["Barnskötare", "2,0", "3,0"],
+          ["Kock", "0,5", "0,5"],
+          ["Rektor", "0,5", "0,5"]
+        ]
+      }
+    },
+    {"heading": "5. Rektor"},
+    {"paragraph": "Sofie Lindh, legitimerad förskollärare. Meritförteckning och examensbevis bifogas."},
+    {"heading": "6. Lokal"},
+    {"paragraph": "Lokalen på Kastanjegatan 14 är i dag kontor och ska byggas om till förskola. Avsiktsförklaring från fastighetsägaren bifogas. Anmälan till miljöförvaltningen görs när bygglov finns."},
+    {"heading": "7. Ekonomi"},
+    {"paragraph": "Startkapital 150 000 kronor genom aktieägartillskott. Resultatbudget och likviditetsbudget i kommunens mall bifogas."},
+    {"heading": "8. Bilagor"},
+    {"list": ["Registreringsbevis och bolagsordning", "Verksamhetsplan", "Resultatbudget", "Likviditetsbudget", "Avsiktsförklaring om lokal", "Meritförteckning och examensbevis för rektor"]},
+    {"signature": {"name": "Malin Ek", "role": "Firmatecknare, Ekorrens Förskolor AB"}},
+    {"signature": {"name": "Karim Nasser", "role": "Firmatecknare, Ekorrens Förskolor AB"}}
+  ]
+}

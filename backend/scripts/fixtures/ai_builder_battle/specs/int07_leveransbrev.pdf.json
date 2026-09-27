@@ -1,0 +1,104 @@
+{
+  "file": "int07_leveransbrev.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "INT-07",
+    "url": "https://riksarkivet.se/fgs-earkiv"
+  },
+  "description": "Förvaltningens leveransbrev till kommunarkivet för en e-arkivleverans: omfattning, system, informationshanteringsplan, begäran om gallringsförslag; anger fler ärenden och handlingar än manifestet innehåller.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Miljökontoret",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-09-10",
+  "diarienummer": "MN-2026-01377",
+  "title": "Leveransbrev – arkivleverans MK-2026-03 till e-arkivet",
+  "blocks": [
+    {
+      "paragraph": "Till: Kommunarkivet, kommunstyrelsekontoret"
+    },
+    {
+      "heading": "Leveransen"
+    },
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Innehåll"
+        ],
+        "rows": [
+          [
+            "Leveransnummer",
+            "MK-2026-03"
+          ],
+          [
+            "Arkivbildare",
+            "Miljönämnden, Sundsvalls kommun"
+          ],
+          [
+            "Källsystem",
+            "Ecos 2, uttag 2026-09-08"
+          ],
+          [
+            "Innehåll",
+            "Avslutade ärenden om tillstånd för enskilda avloppsanordningar, processkod 4.2.1"
+          ],
+          [
+            "Tidsomfång",
+            "Ärenden registrerade 2013–2016"
+          ],
+          [
+            "Omfattning",
+            "21 ärenden, 141 handlingar"
+          ],
+          [
+            "Filformat",
+            "PDF/A-1b och TIFF"
+          ],
+          [
+            "Metadata",
+            "CSV-manifest enligt kommunarkivets leveransmall, FGS Ärendehantering"
+          ],
+          [
+            "Kontaktperson",
+            "Petra Sahlén, miljöinspektör och arkivredogörare, 060-19 23 70"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Gallring"
+    },
+    {
+      "paragraph": "Enligt miljönämndens informationshanteringsplan ska flera handlingstyper i avloppsärendena gallras efter viss tid. Ecos kan inte gallra per handlingstyp, så ingenting har gallrats före leveransen. Vi ber kommunarkivet ta fram ett gallringsförslag för de handlingar vars gallringsfrist har löpt ut, så att miljökontoret kan fatta beslut om gallring innan paketet tas emot slutligt."
+    },
+    {
+      "heading": "Kända brister"
+    },
+    {
+      "paragraph": "Två ansökningar från 2014 finns bara som Word-filer eftersom de skannades om i efterhand. Vi har inte kunnat kontrollera att alla handlingar har datum och klassificering."
+    },
+    {
+      "heading": "Bilagor"
+    },
+    {
+      "list": [
+        "Leveransmanifest (CSV)",
+        "Miljönämndens informationshanteringsplan, avsnitt 4.2 (finns hos kommunarkivet)"
+      ]
+    },
+    {
+      "signature": {
+        "name": "Petra Sahlén",
+        "role": "Arkivredogörare, miljökontoret"
+      }
+    },
+    {
+      "signature": {
+        "name": "Henrik Ahl",
+        "role": "Miljöchef"
+      }
+    }
+  ]
+}

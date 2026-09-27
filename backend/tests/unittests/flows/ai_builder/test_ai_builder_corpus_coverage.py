@@ -4,6 +4,7 @@ import copy
 import importlib.util
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -445,3 +446,23 @@ def test_the_tracked_policy_and_sources_are_well_formed() -> None:
     assert policy.require_source is True
     # The corpus plan's smoke composition.
     assert dict(policy.smoke_kinds) == {"create": 12, "edit": 5, "dialogue": 3}
+
+
+def test_the_delivered_municipal_tier_keeps_its_size_and_meets_its_policy() -> None:
+    coverage = _coverage()
+    cases = coverage.load_cases(SCRIPTS / "ai_builder_api_municipal_cases.json")
+    policy = coverage.parse_policy(
+        json.loads(
+            (SCRIPTS / "ai_builder_municipal_policy.json").read_text(encoding="utf-8")
+        )
+    )
+    sources = coverage.parse_sources(
+        json.loads(
+            (SCRIPTS / "ai_builder_municipal_sources.json").read_text(encoding="utf-8")
+        )
+    )
+    kinds = Counter(coverage.case_coverage(case).kind for case in cases)
+
+    assert coverage.check(cases, policy, sources) == []
+    # The delivered tier; the policy's per-class minimums pin its formats.
+    assert kinds["create"] >= 62 and kinds["edit"] >= 20 and kinds["dialogue"] >= 7

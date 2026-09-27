@@ -1,0 +1,86 @@
+{
+  "name": "Anbudsutvärdering – utvärderingsmatris och tilldelningsbeslut",
+  "description": "Upphandlingsenhetens stöd vid anbudsutvärdering: kontrollerar skall-kraven i varje anbud mot upphandlingsdokumentet, räknar jämförelsepris enligt utvärderingsmodellen och skriver tilldelningsbeslut med underrättelse till anbudsgivarna.",
+  "metadata_json": {
+    "form_schema": {
+      "fields": [
+        {"name": "upphandlare", "type": "text", "label": "Ansvarig upphandlare", "required": true, "order": 1}
+      ]
+    }
+  },
+  "steps": [
+    {
+      "name": "Utvärdera anbuden",
+      "instructions": "Du får upphandlingsdokumentet och alla anbud som kommit in i upphandlingen. Läs skall-kraven och utvärderingsmodellen i upphandlingsdokumentet. Kontrollera för varje anbud varje skall-krav mot anbudets svar och bilagor, och citera den mening eller tabellrad i anbudet som visar om kravet uppfylls. Ett anbud som inte uppfyller alla skall-krav ska förkastas och utvärderas inte vidare. Räkna anbudspris, mervärdesavdrag och jämförelsepris exakt enligt utvärderingsmodellen. Vid motstridiga prisuppgifter i ett anbud gäller det som upphandlingsdokumentet säger. Rangordna de anbud som går vidare efter lägst jämförelsepris och ange vinnaren.",
+      "input_source": "flow_input",
+      "input_type": "document",
+      "input_config": {
+        "runtime_input": {
+          "enabled": true,
+          "required": true,
+          "max_files": 20,
+          "input_format": "document",
+          "label": "Upphandlingsdokument och anbud",
+          "description": "Ladda upp upphandlingsdokumentet och samtliga anbud med bilagor, exporterade från upphandlingssystemet."
+        }
+      },
+      "input_bindings": {"question": "{{ step_input.text }}"},
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["upphandling", "anbud", "rangordning", "vinnare"],
+        "properties": {
+          "upphandling": {
+            "type": "object",
+            "required": ["namn", "diarienummer", "sista_anbudsdag"],
+            "properties": {"namn": {"type": "string"}, "diarienummer": {"type": "string"}, "sista_anbudsdag": {"type": ["string", "null"]}}
+          },
+          "anbud": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["anbudsgivare", "organisationsnummer", "skallkrav", "forkastas", "skal_for_forkastande", "anbudspris_kr", "mervardesavdrag_kr", "jamforelsepris_kr"],
+              "properties": {
+                "anbudsgivare": {"type": "string"},
+                "organisationsnummer": {"type": ["string", "null"]},
+                "skallkrav": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["krav_id", "uppfylls", "citat"],
+                    "properties": {"krav_id": {"type": "string"}, "uppfylls": {"type": "boolean"}, "citat": {"type": "string"}}
+                  }
+                },
+                "forkastas": {"type": "boolean"},
+                "skal_for_forkastande": {"type": ["string", "null"]},
+                "anbudspris_kr": {"type": ["number", "null"]},
+                "mervardesavdrag_kr": {"type": ["number", "null"]},
+                "jamforelsepris_kr": {"type": ["number", "null"]}
+              }
+            }
+          },
+          "rangordning": {"type": "array", "items": {"type": "string"}},
+          "vinnare": {"type": ["string", "null"]}
+        }
+      }
+    },
+    {
+      "name": "Skriv tilldelningsbeslut",
+      "instructions": "Skriv tilldelningsbeslut med underrättelse till samtliga anbudsgivare enligt 12 kap. 12 § lagen (2016:1145) om offentlig upphandling (LOU). Ange upphandlingens namn och diarienummer och vilken anbudsgivare som tilldelas kontraktet. Redovisa skälen för beslutet: utvärderingsresultatet för varje anbud som gått vidare med anbudspris, mervärdesavdrag och jämförelsepris, och för varje förkastat anbud vilket skall-krav som inte uppfylls, med anbudets egen uppgift återgiven ordagrant. Ange att avtalsspärr gäller i tio dagar från det att underrättelsen skickats elektroniskt (20 kap. 1 § LOU) och att avtal tidigast får tecknas när avtalsspärren har löpt ut. Avsluta med upphandlarens namn.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Upphandlare: {{ flow_input.upphandlare }}",
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "upphandling", "label": "Upphandling"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "anbud", "label": "Utvärdering per anbud"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "rangordning", "label": "Rangordning"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "vinnare", "label": "Vinnare"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "text"
+    }
+  ]
+}

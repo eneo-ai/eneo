@@ -1,0 +1,31 @@
+{
+  "file": "byg01_mall_lovbeslut.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "BYG-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/443"},
+  "description": "Bygglovavdelningens Word-mall för lovbeslut med innehållskontroller för ärendeuppgifter, beslut, motivering och upplysningar samt fasta avsnitt om avgift och överklagande.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Stadsbyggnadsnämnden – Bygglovavdelningen", "address": "851 85 Sundsvall"},
+  "title": "Beslut i bygglovsärende",
+  "blocks": [
+    {"paragraph": "Diarienummer:"},
+    {"control": {"kind": "text", "tag": "diarienummer", "label": "Diarienummer", "hint": "BYGG-ÅÅÅÅ-nnnnnn"}},
+    {"paragraph": "Beslutsdatum:"},
+    {"control": {"kind": "text", "tag": "beslutsdatum", "label": "Beslutsdatum", "hint": "ÅÅÅÅ-MM-DD"}},
+    {"paragraph": "Fastighet:"},
+    {"control": {"kind": "text", "tag": "fastighet", "label": "Fastighet", "hint": "Fastighetsbeteckning"}},
+    {"paragraph": "Sökande:"},
+    {"control": {"kind": "text", "tag": "sokande", "label": "Sökande", "hint": "Namn och adress, aldrig personnummer"}},
+    {"paragraph": "Åtgärd:"},
+    {"control": {"kind": "text", "tag": "atgard", "label": "Åtgärd", "hint": "Kort beskrivning av den sökta åtgärden"}},
+    {"heading": "Beslut"},
+    {"control": {"kind": "rich", "tag": "beslut", "label": "Beslut", "hint": "Stadsbyggnadsnämndens beslut med lagrum, till exempel att bygglov beviljas med stöd av angivna paragrafer i plan- och bygglagen (2010:900), PBL."}},
+    {"heading": "Motivering"},
+    {"control": {"kind": "rich", "tag": "motivering", "label": "Motivering", "hint": "Redovisa planenligheten bestämmelse för bestämmelse, avvikelser och varför de godtas eller inte, samt grannars synpunkter och medgivanden."}},
+    {"heading": "Villkor och upplysningar"},
+    {"control": {"kind": "rich", "tag": "upplysningar", "label": "Villkor och upplysningar", "hint": "Kontrollansvarig, startbesked, lovets giltighetstid och andra upplysningar."}},
+    {"heading": "Avgift"},
+    {"paragraph": "Avgift tas ut enligt stadsbyggnadsnämndens taxa. Fakturan skickas separat."},
+    {"heading": "Hur man överklagar"},
+    {"paragraph": "Beslutet kan överklagas hos Länsstyrelsen Västernorrland. Överklagandet ska vara skriftligt och skickas till stadsbyggnadsnämnden, Sundsvalls kommun, 851 85 Sundsvall. Stadsbyggnadsnämnden måste ha fått överklagandet inom tre veckor från den dag du fick del av beslutet. Ange beslutets diarienummer, varför du anser att beslutet är fel och hur du vill att det ska ändras."},
+    {"paragraph": "Beslutet har fattats på delegation från stadsbyggnadsnämnden och har signerats digitalt."}
+  ]
+}

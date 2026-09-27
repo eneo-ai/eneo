@@ -1,0 +1,50 @@
+{
+  "file": "me_tra01_lakarintyg_parkering.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "TRA-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/569"},
+  "description": "Kommunens blankett för läkarintyg vid ansökan om parkeringstillstånd för rörelsehindrad, ifylld av läkare: diagnos, gångsträcka på plan mark, pauser, hjälpmedel, behov av hjälp utanför fordonet och varaktighet, samt diagnoser som inte rör förflyttningen.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Stadsbyggnadskontoret, trafik – blankett läkarintyg parkeringstillstånd", "address": "851 85 Sundsvall"},
+  "date": "2026-09-02",
+  "title": "Läkarintyg för parkeringstillstånd för rörelsehindrade",
+  "blocks": [
+    {"paragraph": "Intyget ska fyllas i av legitimerad läkare som känner den sökande väl. Uppgifterna används för att bedöma rätten till parkeringstillstånd enligt trafikförordningen (1998:1276) 13 kap. 8 §. Beskriv förflyttningsförmågan utomhus på plan mark."},
+    {"heading": "Sökande"},
+    {
+      "table": {
+        "columns": ["Uppgift", "Värde"],
+        "rows": [
+          ["Namn", "Bengt Håkansson"],
+          ["Personnummer", "19580319-3258"],
+          ["Adress", "Skönsbergsvägen 44, 856 41 Sundsvall"]
+        ]
+      }
+    },
+    {"heading": "Funktionsnedsättning"},
+    {
+      "table": {
+        "columns": ["Uppgift", "Läkarens svar"],
+        "rows": [
+          ["Diagnos som påverkar förflyttningsförmågan", "Artros i båda knälederna och i höger höft. Höftprotes höger sida 2022 med kvarstående smärta och stelhet."],
+          ["Övriga diagnoser", "Depression, behandlas med läkemedel. Typ 2-diabetes utan komplikationer."]
+        ]
+      }
+    },
+    {"heading": "Förflyttningsförmåga"},
+    {
+      "table": {
+        "columns": ["Fråga", "Läkarens svar"],
+        "rows": [
+          ["Gångsträcka på plan mark utan vila", "Cirka 100 meter med rollator"],
+          ["Antal pauser på den sträckan", "2"],
+          ["Hjälpmedel", "Rollator utomhus, käpp inomhus"],
+          ["Trappor", "Klarar högst en halv trappa med ledstång"],
+          ["Behöver sökanden hjälp av föraren utanför fordonet?", "Nej, sökanden kör själv"],
+          ["Varaktighet", "Bestående. Ingen förbättring förväntas."]
+        ]
+      }
+    },
+    {"heading": "Läkarens bedömning"},
+    {"paragraph": "Patienten har väsentligt nedsatt gångförmåga på grund av artros och kvarstående besvär efter höftprotesoperationen. Gångförmågan har försämrats under det senaste året och han behöver kunna parkera nära målpunkten."},
+    {"signature": {"name": "Maria Lindström", "role": "Leg. läkare, specialist i allmänmedicin, Hälsocentralen Skönsberg, Region Västernorrland"}}
+  ]
+}

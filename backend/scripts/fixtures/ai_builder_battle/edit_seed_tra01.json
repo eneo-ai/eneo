@@ -1,0 +1,63 @@
+{
+  "name": "Parkeringstillstånd för rörelsehindrad – bedömning och beslut",
+  "description": "Trafikhandläggarens stöd vid ansökan om parkeringstillstånd för rörelsehindrad: bedömer läkarintyget mot kriterierna och skriver förslag till beslut med skäl och överklagandehänvisning.",
+  "metadata_json": {
+    "form_schema": {
+      "fields": [
+        {"name": "arendenummer", "type": "text", "label": "Ärendenummer", "required": true, "order": 1},
+        {"name": "sokande", "type": "text", "label": "Sökandens namn", "required": true, "order": 2},
+        {"name": "soker_som", "type": "select", "label": "Söker som", "required": true, "order": 3, "options": ["Förare", "Passagerare"]},
+        {"name": "ansokan_typ", "type": "select", "label": "Typ av ansökan", "required": true, "order": 4, "options": ["Ny ansökan", "Förnyelse"]},
+        {"name": "handlaggare", "type": "text", "label": "Handläggare", "required": true, "order": 5}
+      ]
+    }
+  },
+  "steps": [
+    {
+      "name": "Bedöm läkarintyget",
+      "instructions": "Bedöm läkarintyget mot kriterierna för parkeringstillstånd för rörelsehindrade i trafikförordningen (1998:1276) 13 kap. 8 §. En förare ska ha ett varaktigt funktionshinder som gör att hen har väsentliga svårigheter att förflytta sig på egen hand. En passagerare ska dessutom regelmässigt behöva förarens hjälp utanför fordonet. Kommunens riktlinjer: gångsträcka på plan mark på högst cirka 100–200 meter även med hjälpmedel, och varaktighet på minst sex månader. Hämta gångsträcka, hjälpmedel, antal pauser och varaktighet exakt som i intyget. Ta bara med uppgifter som rör förflyttningsförmågan; andra diagnoser tas inte med. Lista det som är oklart i intyget.",
+      "input_source": "flow_input",
+      "input_type": "document",
+      "input_config": {
+        "runtime_input": {
+          "enabled": true,
+          "required": true,
+          "max_files": 3,
+          "input_format": "document",
+          "label": "Läkarintyg",
+          "description": "Ladda upp läkarintyget (kommunens blankett) som kom in med ansökan."
+        }
+      },
+      "input_bindings": {"question": "{{ step_input.text }}\n\nSökande: {{ flow_input.sokande }}\nSöker som: {{ flow_input.soker_som }}\nTyp av ansökan: {{ flow_input.ansokan_typ }}"},
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["gangstracka", "hjalpmedel", "antal_pauser", "varaktighet", "behov_av_hjalp_utanfor_fordonet", "forflyttningsformaga", "kriterierna_uppfylls", "motivering", "oklarheter"],
+        "properties": {
+          "gangstracka": {"type": ["string", "null"]},
+          "hjalpmedel": {"type": ["string", "null"]},
+          "antal_pauser": {"type": ["integer", "null"]},
+          "varaktighet": {"type": ["string", "null"]},
+          "behov_av_hjalp_utanfor_fordonet": {"type": ["boolean", "null"]},
+          "forflyttningsformaga": {"type": "string"},
+          "kriterierna_uppfylls": {"type": "boolean"},
+          "motivering": {"type": "string"},
+          "oklarheter": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    {
+      "name": "Skriv beslut",
+      "instructions": "Skriv ett beslut om parkeringstillstånd för rörelsehindrad till sökanden. Rubriker: Beslut, Skäl för beslutet, Hur man överklagar. Beslut: bifall eller avslag, med ärendenummer och sökandens namn. Skäl för beslutet: bygg på bedömningen av läkarintyget (gångsträcka, hjälpmedel, pauser och varaktighet) och trafikförordningen (1998:1276) 13 kap. 8 §. Nämn bara uppgifter som rör förflyttningsförmågan, inga andra diagnoser. Vid bifall: upplys om att tillståndskortet tillverkas när foto och namnteckning har kommit in och att kortet ska sitta väl synligt i vindrutan. Hur man överklagar: beslutet kan överklagas till Länsstyrelsen Västernorrland; överklagandet ska ställas till länsstyrelsen men skickas till kommunen och ha kommit in inom tre veckor från den dag sökanden fick del av beslutet. Avsluta med handläggarens namn.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Ärendenummer: {{ flow_input.arendenummer }}\nSökande: {{ flow_input.sokande }}\nSöker som: {{ flow_input.soker_som }}\nHandläggare: {{ flow_input.handlaggare }}",
+        "source_refs": [{"step_ref": "step_1", "output": "structured", "label": "Bedömning av läkarintyget"}]
+      },
+      "output_mode": "pass_through",
+      "output_type": "text"
+    }
+  ]
+}

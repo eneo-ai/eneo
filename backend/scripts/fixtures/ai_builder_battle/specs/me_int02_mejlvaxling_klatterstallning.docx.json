@@ -1,0 +1,54 @@
+{
+  "file": "me_int02_mejlvaxling_klatterstallning.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-02",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/93"
+  },
+  "description": "Diarieförd mejlväxling mellan förskolechefen, fastighetsförvaltaren och en HR-partner om en sliten klätterställning, olyckan och en medarbetares sjukskrivning, med HR:s påpekande om sekretess enligt 39 kap. 3 § OSL och kostnaden för det nya nätet.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Barn- och utbildningsförvaltningen, registratur"
+  },
+  "date": "2026-08-21",
+  "diarienummer": "BUN-2026-01327",
+  "title": "Mejlväxling om klätterställningen på förskolan Solgläntan, juni–augusti 2026",
+  "blocks": [
+    {
+      "heading": "1. Från Karin Holmström till Anders Nilsson, 2026-06-10 14:22"
+    },
+    {
+      "paragraph": "Hej Anders! Bärlinan högst upp i klätternätet vid sandlådan ser nött ut vid infästningen, besiktningen i maj anmärkte på den. Kan ni titta på det innan hösten? Vi håller barnen borta från översta delen så länge. /Karin, förskolechef Solgläntan"
+    },
+    {
+      "heading": "2. Från Anders Nilsson till Karin Holmström, 2026-06-12 09:05"
+    },
+    {
+      "paragraph": "Hej! Byte av nätet är beställt via ramavtalet för lekplatsutrustning, order FO-2026-2291. Leverantören planerar montering vecka 34. /Anders Nilsson, fastighetsförvaltare, Lokalförsörjningen"
+    },
+    {
+      "heading": "3. Från Karin Holmström till Anders Nilsson, 2026-08-19 11:30"
+    },
+    {
+      "paragraph": "Anders, vi har haft en olycka i dag. Ett barn föll från nätet när bärlinan gick av och har åkt till akuten med sin mamma. Ställningen är avspärrad. Vi måste få ett nytt nät monterat så snart som möjligt. /Karin"
+    },
+    {
+      "heading": "4. Från Karin Holmström till Lena Berg, kopia Anders Nilsson, 2026-08-20 08:10"
+    },
+    {
+      "paragraph": "Hej Lena! Sara Lindahl, som var närmast när barnet föll, är sjukskriven från i dag på grund av en akut stressreaktion efter händelsen. Kan vi få stöd från företagshälsovården för henne och arbetslaget? /Karin"
+    },
+    {
+      "heading": "5. Från Lena Berg till Karin Holmström, 2026-08-20 09:47"
+    },
+    {
+      "paragraph": "Hej Karin! Jag bokar samtalsstöd hos företagshälsovården för arbetslaget i veckan. Observera att uppgifter om medarbetares hälsa omfattas av sekretess enligt 39 kap. 3 § offentlighets- och sekretesslagen och inte ska spridas i fler mejl eller med kopia till andra. /Lena Berg, HR-partner"
+    },
+    {
+      "heading": "6. Från Anders Nilsson till Karin Holmström, 2026-08-21 13:15"
+    },
+    {
+      "paragraph": "Hej! Leverantören kommer tidigare: nytt nät och nya bärlinor monteras den 28 augusti. Kostnaden blir 38 400 kr exklusive moms enligt ramavtalet. Montören besiktigar ställningen efter monteringen. /Anders"
+    }
+  ]
+}

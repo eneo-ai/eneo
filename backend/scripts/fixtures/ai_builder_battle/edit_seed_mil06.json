@@ -1,0 +1,123 @@
+{
+  "name": "Anmälan om miljöfarlig verksamhet (C) – granskning och föreläggande",
+  "description": "Miljöinspektörens stöd när en anmälan om C-verksamhet kommit in: läser anmälningsblanketten, kemikalieförteckningen och verksamhetsbeskrivningen, granskar anmälan och kemikaliehanteringen och skriver ett förslag till föreläggande om försiktighetsmått.",
+  "metadata_json": {
+    "form_schema": {
+      "fields": [
+        {"name": "diarienummer", "type": "text", "label": "Diarienummer", "required": true, "order": 1},
+        {"name": "inspektor", "type": "text", "label": "Miljöinspektör", "required": true, "order": 2}
+      ]
+    }
+  },
+  "steps": [
+    {
+      "name": "Läs anmälan och bilagor",
+      "instructions": "Du får en anmälan om miljöfarlig verksamhet enligt 9 kap. 6 § miljöbalken med bilagor: anmälningsblanketten, kemikalieförteckningen och verksamhetsbeskrivningen. Ta ut verksamhetsutövaren, organisationsnumret, fastigheten och besöksadressen, verksamhetskoden enligt miljöprövningsförordningen (2013:251), vad verksamheten gör och drifttiderna, vilka bilagor som finns med, och varje uppgift blanketten efterfrågar som inte är ifylld. Ta ur kemikalieförteckningen varje produkt för sig: produktnamn, användning, förbrukning per år, största förpackning i liter, faroangivelser (H-fraser), var den förvaras och om förvaringen är invallad, exakt som i förteckningen. Ta ur förteckningen och blanketten också farligt avfall med avfallskod och mängd. Står uppgifterna om förvaring olika i verksamhetsbeskrivningen och kemikalieförteckningen, ange båda.",
+      "input_source": "flow_input",
+      "input_type": "document",
+      "input_config": {
+        "runtime_input": {
+          "enabled": true,
+          "required": true,
+          "max_files": 10,
+          "input_format": "document",
+          "label": "Anmälan och bilagor",
+          "description": "Ladda upp anmälningsblanketten, kemikalieförteckningen och verksamhetsbeskrivningen."
+        }
+      },
+      "input_bindings": {"question": "{{ step_input.text }}"},
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["verksamhetsutovare", "organisationsnummer", "fastighet", "adress", "verksamhetskod", "verksamhet", "bilagor", "ej_ifyllda_uppgifter", "kemikalier", "farligt_avfall", "motstridiga_uppgifter"],
+        "properties": {
+          "verksamhetsutovare": {"type": "string"},
+          "organisationsnummer": {"type": ["string", "null"]},
+          "fastighet": {"type": ["string", "null"]},
+          "adress": {"type": ["string", "null"]},
+          "verksamhetskod": {"type": ["string", "null"]},
+          "verksamhet": {"type": "string"},
+          "bilagor": {"type": "array", "items": {"type": "string"}},
+          "ej_ifyllda_uppgifter": {"type": "array", "items": {"type": "string"}},
+          "kemikalier": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["produkt", "anvandning", "forbrukning_per_ar", "storsta_forpackning_liter", "faroangivelser", "forvaring", "invallad"],
+              "properties": {
+                "produkt": {"type": "string"},
+                "anvandning": {"type": ["string", "null"]},
+                "forbrukning_per_ar": {"type": ["string", "null"]},
+                "storsta_forpackning_liter": {"type": ["number", "null"]},
+                "faroangivelser": {"type": "array", "items": {"type": "string"}},
+                "forvaring": {"type": ["string", "null"]},
+                "invallad": {"type": ["boolean", "null"]}
+              }
+            }
+          },
+          "farligt_avfall": {
+            "type": "array",
+            "items": {"type": "object", "required": ["avfall", "avfallskod", "mangd_per_ar"], "properties": {"avfall": {"type": "string"}, "avfallskod": {"type": ["string", "null"]}, "mangd_per_ar": {"type": ["string", "null"]}}}
+          },
+          "motstridiga_uppgifter": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    {
+      "name": "Granska anmälan och kemikaliehantering",
+      "instructions": "Granska anmälan i två delar.\n\nFullständighet: kontrollera att anmälan innehåller det som anvisningen kräver: verksamhetskod, verksamhetsbeskrivning med drifttider, situationsplan, VA-ritning med brunnar och oljeavskiljare, kemikalieförteckning, uppgifter om farligt avfall med avfallskoder och mängder, uppgifter om utsläpp till luft och vatten och om buller, och rutiner vid driftstörning. Lista varje uppgift eller bilaga som saknas.\n\nKemikaliehantering: bedöm varje produkt i kemikalieförteckningen. Flytande produkter med faroangivelse för miljö (H400, H410, H411, H412) eller brandfarlighet (H224, H225, H226) ska förvaras invallat, och invallningen ska rymma den största behållaren plus 10 procent av övriga. Sådana produkter som förvaras utan invallning, eller där det är oklart om förvaringen är invallad, är en brist. Produkter utan dessa faroangivelser, och produkter som inte är flytande, bedöms inte här. Uppgifter i kemikalieförteckningen går före allmänna påståenden i verksamhetsbeskrivningen. Föreslå för varje brist ett försiktighetsmått som kan föreläggas med stöd av 26 kap. 9 § och 2 kap. 3 § miljöbalken, med en rimlig tidpunkt när det ska vara åtgärdat.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "verksamhetskod", "label": "Verksamhetskod"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "verksamhet", "label": "Verksamhet"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "bilagor", "label": "Bilagor"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "ej_ifyllda_uppgifter", "label": "Ej ifyllda uppgifter"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "kemikalier", "label": "Kemikalieförteckning"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "farligt_avfall", "label": "Farligt avfall"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "motstridiga_uppgifter", "label": "Motstridiga uppgifter"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["saknade_uppgifter", "kemikaliebrister"],
+        "properties": {
+          "saknade_uppgifter": {"type": "array", "items": {"type": "string"}},
+          "kemikaliebrister": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["produkt", "brist", "forsiktighetsmatt", "atgardat_senast"],
+              "properties": {"produkt": {"type": "string"}, "brist": {"type": "string"}, "forsiktighetsmatt": {"type": "string"}, "atgardat_senast": {"type": "string"}}
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Skriv förslag till föreläggande",
+      "instructions": "Skriv miljönämndens förslag till beslut om föreläggande om försiktighetsmått för den anmälda verksamheten. Rubriker: Beslut, Ärendet, Motivering, Upplysningar, Hur man överklagar. Under Beslut: miljönämnden förelägger verksamhetsutövaren (namn och organisationsnummer) att vidta varje försiktighetsmått, numrerat, med produkten och tidpunkten när det ska vara åtgärdat, med stöd av 26 kap. 9 § och 2 kap. 3 § miljöbalken. Under Ärendet: anmälan, verksamheten, fastigheten och verksamhetskoden. Under Motivering: varför varje försiktighetsmått behövs. Under Upplysningar: uppgifter och bilagor som saknas i anmälan och ska kompletteras. Under Hur man överklagar: beslutet kan överklagas hos länsstyrelsen; överklagandet skickas till miljönämnden inom tre veckor från den dag beslutet togs emot. Avsluta med inspektörens namn.",
+      "input_source": "previous_step",
+      "input_type": "json",
+      "input_bindings": {
+        "question": "Diarienummer: {{ flow_input.diarienummer }}\nMiljöinspektör: {{ flow_input.inspektor }}",
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "verksamhetsutovare", "label": "Verksamhetsutövare"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "organisationsnummer", "label": "Organisationsnummer"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "fastighet", "label": "Fastighet"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "adress", "label": "Adress"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "verksamhetskod", "label": "Verksamhetskod"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "verksamhet", "label": "Verksamhet"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "saknade_uppgifter", "label": "Saknade uppgifter"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "kemikaliebrister", "label": "Brister i kemikaliehanteringen"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "docx"
+    }
+  ]
+}

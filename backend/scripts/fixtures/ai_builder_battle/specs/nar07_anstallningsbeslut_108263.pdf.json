@@ -1,0 +1,51 @@
+{
+  "file": "nar07_anstallningsbeslut_108263.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "NAR-07", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/178"},
+  "description": "Anställningsavtal ur personalsystemet för en särskild visstidsanställning som elevassistent, med skriftligt besked om att anställningen inte förlängs; underlag för avsnitt 2–8 i arbetsgivarintyget.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Barn- och utbildningsförvaltningen, Kvarnbäckens skola", "address": "851 85 Sundsvall"},
+  "date": "2025-12-18",
+  "diarienummer": "BUF-PA-2025-10417",
+  "title": "Anställningsavtal – särskild visstidsanställning",
+  "blocks": [
+    {"heading": "Parter"},
+    {
+      "table": {
+        "columns": ["Avtalspart", "Uppgifter"],
+        "rows": [
+          ["Arbetsgivare", "Sundsvalls kommun, organisationsnummer 212000-2411"],
+          ["Arbetstagare", "Anna Sjöberg, 19790412-2384"],
+          ["Adress", "Rönnvägen 7, 856 50 Sundsvall"],
+          ["Anställningsnummer", "108263"]
+        ]
+      }
+    },
+    {"heading": "Anställningen"},
+    {
+      "table": {
+        "columns": ["Villkor", "Enligt avtalet"],
+        "rows": [
+          ["Förvaltning och arbetsplats", "Barn- och utbildningsförvaltningen, Kvarnbäckens skola"],
+          ["Befattning", "Elevassistent"],
+          ["Arbetsuppgifter", "Stöd till elever i årskurs 1–3 under lektioner, raster och måltider enligt rektors uppdrag"],
+          ["Anställningsform", "Särskild visstidsanställning enligt 5 § lagen (1982:80) om anställningsskydd"],
+          ["Anställningstid", "2026-01-07 – 2026-06-12 (avtalat slutdatum)"],
+          ["Sysselsättningsgrad", "75 % av heltid, 30 timmar per vecka (heltid 40 timmar per vecka)"],
+          ["Semester", "Semestertjänst, inte ferietjänst"]
+        ]
+      }
+    },
+    {"heading": "Lön och villkor"},
+    {"paragraph": "Månadslön 19 800 kronor vid 75 % sysselsättningsgrad, motsvarande 26 400 kronor vid heltid. Lönen betalas ut den 25:e varje månad. Semesterersättning för intjänade och ej uttagna semesterdagar betalas ut med slutlönen när anställningen upphör."},
+    {"paragraph": "För anställningen gäller Allmänna bestämmelser (AB) och den huvudöverenskommelse (HÖK) om lön som gäller för befattningen. Anställningen är inte en anställning i bemanningsföretag."},
+    {"signature": {"name": "Maria Holmgren", "role": "Rektor, Kvarnbäckens skola"}},
+    {"signature": {"name": "Anna Sjöberg", "role": "Arbetstagare"}},
+    {"page_break": true},
+    {"heading": "Besked om att tidsbegränsad anställning upphör"},
+    {"paragraph": "Datum för beskedet: 2026-05-08."},
+    {"paragraph": "Din särskilda visstidsanställning som elevassistent vid Kvarnbäckens skola upphör enligt avtal den 2026-06-12. Anställningen kommer inte att förlängas och du erbjuds ingen fortsatt anställning i befattningen efter den dagen. Något avtal om avgångsvederlag eller annan ersättning med anledning av att anställningen upphör har inte träffats."},
+    {"paragraph": "Beskedet har lämnats personligen och tagits emot av arbetstagaren samma dag."},
+    {"signature": {"name": "Maria Holmgren", "role": "Rektor, Kvarnbäckens skola"}},
+    {"signature": {"name": "Anna Sjöberg", "role": "Mottaget av arbetstagaren 2026-05-08"}}
+  ]
+}

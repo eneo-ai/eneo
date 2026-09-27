@@ -1,0 +1,35 @@
+{
+  "file": "mil06_verksamhetsbeskrivning.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "MIL-06", "url": "https://sjalvservice.malmo.se/oversikt/overview/529"},
+  "description": "Verksamhetsutövarens tekniska beskrivning och verksamhetsbeskrivning som bilaga till anmälan: lokaler, processer, vatten och avlopp med golvbrunnar, kemikalie- och avfallshantering, buller och egenkontroll.",
+  "letterhead": {"organisation": "Lindängens Släpvagnsservice AB", "unit": "Bilaga till anmälan om miljöfarlig verksamhet", "address": "Grusgropsgatan 14, 212 41 Malmö · 040-630 48 17"},
+  "date": "2026-09-08",
+  "title": "Verksamhetsbeskrivning och teknisk beskrivning – Grusgropsgatan 14",
+  "blocks": [
+    {"heading": "1. Bakgrund"},
+    {"paragraph": "Lindängens Släpvagnsservice AB har sedan 2011 bedrivit service, reparation och renovering av släpvagnar och tippflak i hyrd lokal i Lindängen. Verksamheten flyttar i november 2026 till en större verkstadsbyggnad på fastigheten Malmö Grusgropen 7, där vi också börjar blästra och rostskyddsmåla ramar i egen regi i stället för att köpa tjänsten."},
+    {"heading": "2. Lokaler"},
+    {"list": [
+      "Hall 1, verkstad (620 m²): fyra arbetsplatser för service och reparation, oljeförråd och tank för spillolja.",
+      "Hall 2, tvätt- och avfettningshall (240 m²): spolbås för avfettning av detaljer och spolplats för släpvagnarnas utsida.",
+      "Blästerkabin (60 m²) med stoftfilter och återvinning av blästermedel.",
+      "Sprutbox (48 m²) med filter och utsug över tak.",
+      "Färgförråd (18 m²) med tät tröskel som invallning.",
+      "Förråd för farligt avfall (12 m²) med tät tröskel och låsbar dörr."
+    ]},
+    {"heading": "3. Processer"},
+    {"paragraph": "Ramarna avfettas i spolbåset med alkaliskt avfettningsmedel och sköljs med vatten. Därefter blästras de i kabinen med granatsand och grundmålas med tvåkomponents rostskyddsgrund inom fyra timmar. Täckmålning sker i sprutboxen. Vi räknar med att blästra cirka 720 m² per år, fördelat på 60–70 ramar."},
+    {"heading": "4. Vatten och avlopp"},
+    {"paragraph": "I hall 2 finns tre golvbrunnar. GB1 och GB2 vid spolbåset är kopplade till oljeavskiljaren klass 1 och vidare till spillvattennätet. GB3 vid porten mot gården är enligt fastighetsägarens ritning ansluten till dagvattenledningen. GB3 används när vi spolar av släpvagnarnas utsida innan de körs in i hall 1."},
+    {"paragraph": "Oljeavskiljaren har larm för oljeskikt och slamnivå. Den har inte provtagits sedan fastighetsägaren installerade den 2014."},
+    {"heading": "5. Kemikalier och farligt avfall"},
+    {"paragraph": "Kemikalierna framgår av kemikalieförteckningen. Färger och lösningsmedel förvaras i färgförrådet. Avfettningsmedlet står i en IBC-behållare vid spolbåset i hall 2 och oljor och förtunning på fat i hall 1, eftersom de används dagligen. Blästeravfallet samlas i en container på gården och hämtas när den är full."},
+    {"paragraph": "Rostskyddsgrunden ZC-Primer 410 har vi använt i över tio år och kunderna efterfrågar den. Vi har inte utrett något alternativ."},
+    {"heading": "6. Buller"},
+    {"paragraph": "Kompressorn till blästern står i eget rum med ljuddämpad ventilation. Blästring sker endast dagtid och med stängda portar."},
+    {"heading": "7. Egenkontroll"},
+    {"paragraph": "Vi har en egenkontrollpärm med kemikalieförteckning, säkerhetsdatablad, avfallsjournal och tömningskvitton. Ansvarig för egenkontrollen är verkstadschef Mattias Holm."},
+    {"signature": {"name": "Anders Kvist", "role": "VD, Lindängens Släpvagnsservice AB"}}
+  ]
+}

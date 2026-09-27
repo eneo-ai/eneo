@@ -1,0 +1,19 @@
+{
+  "file": "me_int04_inspel_vabolaget.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "INT-04", "url": "https://www.regeringen.se/contentassets/ee59c69b63014c19a08b0e8ca47334b2/svara-pa-remiss-pm2021_1-rev-2026.pdf"},
+  "description": "Ett kommunalt VA-bolags inspel som avstyrker ett förslag med en kostnadsuppskattning, går emot en förvaltnings ställningstagande och hänvisar till en myndighet med dess gamla namn.",
+  "letterhead": {"organisation": "Sundsbygdens Vatten och Avlopp AB", "unit": "VD-staben", "address": "Box 408, 851 06 Sundsvall"},
+  "date": "2026-10-05",
+  "title": "SVAB:s inspel till Sundsvalls kommuns remissvar – SOU 2026:47",
+  "blocks": [
+    {"paragraph": "Sundsbygdens Vatten och Avlopp AB (SVAB) är huvudman för den allmänna VA-anläggningen i Sundsvall och lämnar följande inspel till kommunens yttrande."},
+    {"heading": "7.4 (reservvatten)"},
+    {"paragraph": "SVAB avstyrker förslaget i dess nuvarande utformning. Att leverera reservvatten motsvarande 50 liter per person och dygn i tre dygn till hela Sundsvall kräver en ny reservvattentäkt och överföringsledningar. Vår uppskattning är att investeringen uppgår till cirka 480 miljoner kronor, vilket skulle höja VA-taxan med omkring 18 procent. SVAB föreslår i stället ett riskbaserat krav där huvudmannen själv visar vilka områden som ska prioriteras."},
+    {"heading": "8.3 (nödvatten)"},
+    {"paragraph": "SVAB har redan en nödvattenplan som följer Myndigheten för samhällsskydd och beredskaps vägledning för nödvattenförsörjning. SVAB tillstyrker att kommunens nödvattenplan samordnas med beredskapsplaneringen."},
+    {"heading": "10.1 (finansiering)"},
+    {"paragraph": "SVAB tillstyrker med synpunkter. Stödet på 200 miljoner kronor per år räcker inte ens till en bråkdel av investeringsbehovet i landets kommuner. Stödet bör fördelas efter antal invånare som saknar reservvatten."},
+    {"signature": {"name": "Tomas Engström", "role": "Verkställande direktör, SVAB"}}
+  ]
+}

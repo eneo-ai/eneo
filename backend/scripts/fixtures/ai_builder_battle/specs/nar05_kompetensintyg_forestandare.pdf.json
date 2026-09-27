@@ -1,0 +1,22 @@
+{
+  "file": "nar05_kompetensintyg_forestandare.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "NAR-05", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/468"},
+  "description": "Kursintyg för två föreståndare för brandfarlig vara, bilaga till ansökan om tillstånd som styrker föreståndarnas kompetens enligt 9 § lagen om brandfarliga och explosiva varor.",
+  "letterhead": {"organisation": "Brandskyddsakademin Norr AB", "unit": "Kursintyg", "address": "Norra Järnvägsgatan 3, 852 37 Sundsvall"},
+  "date": "2025-10-08",
+  "title": "Intyg – Föreståndare för brandfarlig vara",
+  "blocks": [
+    {"paragraph": "Kursen omfattar två dagar och behandlar lagstiftning, egenskaper hos brandfarliga gaser och vätskor, förvaring, riskutredning, klassning av explosionsfarlig miljö, kontroll och underhåll samt föreståndarens uppgifter och befogenheter."},
+    {
+      "table": {
+        "columns": ["Deltagare", "Kurs", "Datum", "Resultat"],
+        "rows": [
+          ["Anders Holm", "Föreståndare brandfarlig gas och vätska, 2 dagar", "2024-03-11 – 2024-03-12", "Godkänd"],
+          ["Petra Lindgren", "Föreståndare brandfarlig gas och vätska, 2 dagar", "2025-10-07 – 2025-10-08", "Godkänd"]
+        ]
+      }
+    },
+    {"signature": {"name": "Rolf Engström", "role": "Kursledare, Brandskyddsakademin Norr AB"}}
+  ]
+}

@@ -20,7 +20,45 @@
         "PBL 10 kap. 6 § (kontrollplan), 10 kap. 14 § (tekniskt samråd), 10 kap. 23 § (startbesked)",
         "PBL 12 kap. 8–8 a §§ (avgift, reduktion vid överskriden tidsfrist)",
         "plan- och bygglagen (2010:900) 13 kap. 3 § (överklagande till länsstyrelsen)",
-        "Obs: 9 kap. numrerades om genom lag (2025:974) i kraft 1 december 2025; äldre mallar hänvisar till 9 kap. 21, 25, 27, 30–31 §§"
+        "Obs: 9 kap. numrerades om genom lag (2025:974) i kraft 1 december 2025; äldre mallar hänvisar till de upphävda paragraferna, bland annat 9 kap. 21 § (ansökan), 25 § (underrättelse), 27 § (tio veckor), 30 § (bygglov inom detaljplan) och 31 b § (liten avvikelse, i dag 9 kap. 60 §)"
+      ]
+    },
+    "BYG-02": {
+      "name": "Bygglov - ny byggnad eller anläggning",
+      "municipalities": [
+        "Sundsvall",
+        "Malmö",
+        "Kristianstad"
+      ],
+      "urls": [
+        "https://e-tjanster.sundsvall.se/oversikt/overview/530"
+      ],
+      "legal_basis": [
+        "plan- och bygglagen (2010:900) 9 kap. 2 § (lovplikt), 9 kap. 56–57 §§ (förutsättningar för bygglov inom/utom detaljplan), 9 kap. 86 § (ansökans innehåll)",
+        "PBL 9 kap. 98 § (kommunicering), 99 § (beslut inom tio veckor), 105 § (lovbeslutets innehåll), 108 § (delgivning med överklagandeinformation), 109 § (kungörelse)",
+        "PBL 10 kap. 6, 14, 23 och 34 §§ (kontrollplan, tekniskt samråd, startbesked, slutbesked)",
+        "PBL 8 kap. (tekniska egenskapskrav, tillgänglighet)",
+        "plan- och bygglagen (2010:900) 13 kap. 3 § (överklagande till länsstyrelsen)",
+        "Obs: 9 kap. numrerades om genom lag (2025:974) i kraft 1 december 2025"
+      ]
+    },
+    "BYG-05": {
+      "name": "Rivning - rivningslov eller rivningsanmälan",
+      "municipalities": [
+        "Sundsvall",
+        "Malmö",
+        "Kristianstad"
+      ],
+      "urls": [
+        "https://e-tjanster.sundsvall.se/oversikt/overview/716",
+        "https://sjalvservice.malmo.se/oversikt/overview/655",
+        "https://e-tjanster.kristianstad.se/oversikt/overview/187"
+      ],
+      "legal_basis": [
+        "plan- och bygglagen (2010:900) 9 kap. 43–44 §§ (rivningslov) och 75–76 §§ (förutsättningar), lydelse enligt lag (2025:974)",
+        "PBL 10 kap. 8 a § (avfallshanteringsplan: byggprodukter som kan återanvändas, vilket avfall åtgärden ger och hur farliga ämnen hanteras och avlägsnas; lag 2026:712)",
+        "avfallsförordningen (2020:614) bilaga 3 (avfallsförteckning; farligt avfall markerat med asterisk) och 3 kap. (utsortering av bygg- och rivningsavfall)",
+        "förordningen (2007:19) om PCB m.m. (inventering och sanering före rivning)"
       ]
     },
     "BYG-06": {
@@ -38,7 +76,8 @@
         "PBL 9 kap. 74 § (förutsättningar), 9 kap. 104 § (beslutets innehåll)",
         "PBL 2 kap. (allmänna intressen)",
         "PBL 9 kap. 98 § (kommunicering), 99 § (beslut inom tio veckor), 105 § (lovbeslutets innehåll), 108 § (delgivning med överklagandeinformation), 109 § (kungörelse)",
-        "plan- och bygglagen (2010:900) 13 kap. 3 § (överklagande till länsstyrelsen)"
+        "plan- och bygglagen (2010:900) 13 kap. 3 § (överklagande till länsstyrelsen)",
+        "Obs: före lag (2025:974), i kraft 1 december 2025, reglerades förhandsbesked i 9 kap. 17 § och dess bindande verkan i 9 kap. 39 §; äldre mallar och remissvar hänvisar fortfarande dit"
       ]
     },
     "BYG-08": {
@@ -51,9 +90,11 @@
         "https://e-tjanster.sundsvall.se/oversikt/overview/437"
       ],
       "legal_basis": [
-        "PBF (2011:338) 6 kap. 5 § (anmälningsplikt för eldstäder och rökkanaler; kontrollera aktuell lydelse)",
-        "PBL 10 kap. 3, 23, 34 §§",
-        "BBR (Boverkets byggregler) avsnitt 5 och 6:7"
+        "plan- och byggförordningen (2011:338) 6 kap. 1 § 4 (anmälan krävs för installation eller väsentlig ändring av eldstad eller rökkanal; lydelse enligt förordning 2025:979, tidigare 6 kap. 5 §)",
+        "PBF 6 kap. 5 § (9 kap. 99 § PBL gäller en anmälan med tidsfristen fyra veckor), 7 kap. 5 § 2 (ingen kontrollansvarig för anmälningspliktig åtgärd)",
+        "PBL 10 kap. 3 § (startbesked krävs), 10 kap. 4 § (slutbesked innan ibruktagande), 10 kap. 6 § (kontrollplan), 10 kap. 23 § (startbesked), 10 kap. 34 § (slutbesked)",
+        "PBL 13 kap. 15 § (startbesked får överklagas endast av sökanden eller anmälaren)",
+        "Boverkets föreskrifter och allmänna råd om säkerhet i händelse av brand i byggnader (BFS 2024:7), i kraft 1 juli 2025; ersätter brandavsnittet i BBR efter övergångstiden som löpte ut 30 juni 2026"
       ]
     },
     "BYG-10": {
@@ -69,7 +110,8 @@
       "legal_basis": [
         "PBL 9 kap. 94–96 §§ (underrättelse)",
         "PBL 9 kap. 108 § (delgivning till sakägare som yttrat sig)",
-        "PBL 2 kap. 9 § (betydande olägenhet)"
+        "PBL 2 kap. 9 § (betydande olägenhet)",
+        "Obs: före lag (2025:974), i kraft 1 december 2025, reglerades underrättelsen i 9 kap. 25 §"
       ]
     },
     "BYG-16": {
@@ -82,8 +124,8 @@
         "https://e-tjanster.sundsvall.se/oversikt/overview/155"
       ],
       "legal_basis": [
-        "lagen (2006:378) om lägenhetsregister 10–12 §§",
-        "förordningen (2007:108) om lägenhetsregister"
+        "lagen (2006:378) om lägenhetsregister 10–11 §§ (kommunen fastställer belägenhetsadress och lägenhetsnummer), 14–15 §§ (fastighetsägarens uppgifter och förslag till lägenhetsnummer, senast en månad efter förändringen), 25 § (beslut om lägenhetsnummer får inte överklagas)",
+        "förordningen (2007:108) om lägenhetsregister 2 § (antal rum utom kök; kökstyp kök, kokvrå, kokskåp, gemensamt kök eller köksutrustning saknas; bostadsarea), 5 § (fyrsiffrigt lägenhetsnummer: våningsplan och läge)"
       ]
     },
     "BYG-19": {
@@ -99,7 +141,8 @@
       "legal_basis": [
         "lag (2014:899) om riktlinjer för kommunala markanvisningar",
         "kommunallagen (2017:725) 2 kap. 8 § (förbud mot individuellt stöd till näringsidkare)",
-        "jordabalken 8 kap. (arrende)"
+        "jordabalken 8 kap. (arrende)",
+        "lag (1957:259) om rätt för kommun att ta ut avgift för vissa upplåtelser av offentlig plats, m.m. (taxa för torgplats)"
       ]
     },
     "BYG-20": {
@@ -114,6 +157,7 @@
       ],
       "legal_basis": [
         "lagen (2018:222) om bostadsanpassningsbidrag 1, 5–7, 9–10, 16–19 §§",
+        "lagen (2018:222) 18 § (beslutet anger åtgärderna och det högsta belopp som kan betalas ut), 20 § (utbetalning när åtgärderna är utförda och kostnaderna redovisade), 24 § (överklagande till allmän förvaltningsdomstol)",
         "OSL 26 kap. 12 § (sekretess i BAB-ärenden)",
         "förvaltningslagen (2017:900) 25 § (kommunicering före beslut)",
         "förvaltningslagen (2017:900) 32 § (motivering), 33 § (underrättelse med överklagandehänvisning), 44–45 §§ (överklagande inom tre veckor, rättidsprövning)"
@@ -317,7 +361,8 @@
       ],
       "legal_basis": [
         "kommunallagen (2017:725) 6 kap. 37–40 §§, 7 kap. 5–8 §§",
-        "KL 13 kap. (laglighetsprövning)"
+        "KL 13 kap. (laglighetsprövning)",
+        "socialtjänstlagen (2025:400) 11 kap. 1 § (insatser för personliga behov, tidigare 4 kap. 1 § SoL 2001:453), 8 kap. 4 § (särskilda boendeformer), 27 kap. 5–6 §§ (utredning och anmälan av missförhållanden, lex Sarah), 32 kap. (avgifter), 30 kap. 5–10 §§ (delegering)"
       ]
     },
     "INT-14": {
@@ -342,8 +387,43 @@
         "https://e-tjanster.sundsvall.se/oversikt/overview/715"
       ],
       "legal_basis": [
-        "PBL 9 kap. 108–109 §§",
-        "delgivningslagen (2010:1932)"
+        "plan- och bygglagen (2010:900) 9 kap. 108 § (beslut om lov delges sökanden, fastighetsägaren och grannar med synpunkter som inte tillgodosetts), 109 § (kungörelse på kommunens anslagstavla), 110 § (meddelande till grannar enligt 96 § första stycket 1, senast på kungörelsedagen; inte till den som delges); lag (2025:974)",
+        "PBL 13 kap. 16 § (för den som inte delges räknas överklagandetiden från dagen en vecka efter kungörelsen på anslagstavlan)",
+        "förvaltningslagen (2017:900) 44 § (överklagande inom tre veckor)",
+        "delgivningslagen (2010:1932)",
+        "Obs: före lag (2025:974), i kraft 1 december 2025, reglerades expedieringen i 9 kap. 41, 41 a och 41 b §§ med kungörelse i Post- och Inrikes Tidningar; äldre beslutsmallar hänvisar fortfarande dit"
+      ]
+    },
+    "KOP-01": {
+      "name": "Kopia av allmän handling från kommunarkivet",
+      "municipalities": [
+        "Sundsvall",
+        "Kristianstad"
+      ],
+      "urls": [
+        "https://e-tjanster.sundsvall.se/oversikt/overview/93"
+      ],
+      "legal_basis": [
+        "tryckfrihetsförordningen 2 kap. 1, 15–16 och 18 §§ (rätt att ta del, skyndsamhet, kopior, anonymitet)",
+        "offentlighets- och sekretesslagen (2009:400) 6 kap. 3–4 §§ (prövning), 6 kap. 7–8 §§ (överklagande till kammarrätt)",
+        "OSL 26 kap. 1 § (socialtjänst), 25 kap. 1 § (hälso- och sjukvård), 23 kap. 2 § (skola), 21 kap. 3 § (skyddade personuppgifter)",
+        "arkivlagen (1990:782) 3–6 §§"
+      ]
+    },
+    "KOP-02": {
+      "name": "Lämna synpunkt / kontakta kommunen (felanmälan, fråga, klagomål)",
+      "municipalities": [
+        "Sundsvall",
+        "Malmö",
+        "Kristianstad"
+      ],
+      "urls": [
+        "https://e-tjanster.sundsvall.se/oversikt/overview/77"
+      ],
+      "legal_basis": [
+        "förvaltningslagen (2017:900) 6 § (service)",
+        "offentlighets- och sekretesslagen (2009:400) 5 kap. 1 § (registrering; synpunkten blir allmän handling)",
+        "kommunens riktlinjer för synpunktshantering"
       ]
     },
     "KOP-04": {
@@ -356,8 +436,25 @@
         "https://e-tjanster.sundsvall.se/oversikt/overview/388"
       ],
       "legal_basis": [
-        "skadeståndslagen (1972:207) 3 kap. 2 § (det allmännas ansvar vid myndighetsutövning) och 2 kap. 1 § (culpa)",
+        "skadeståndslagen (1972:207) 2 kap. 1 § (ansvar vid fel eller försummelse, culpa) och 6 kap. 1 § (jämkning vid medvållande); gatuunderhåll är inte myndighetsutövning",
+        "civilrättslig skadereglering: beskedet kan inte överklagas, tvist prövas i allmän domstol",
         "lagen (1971:948) om allmänna vägar / väghållaransvar"
+      ]
+    },
+    "KOP-05": {
+      "name": "Begära registerutdrag, rättelse, begränsning eller radering enligt dataskyddsförordningen",
+      "municipalities": [
+        "Sundsvall",
+        "Malmö"
+      ],
+      "urls": [
+        "https://e-tjanster.sundsvall.se/oversikt/overview/81"
+      ],
+      "legal_basis": [
+        "dataskyddsförordningen (EU) 2016/679 art. 12.3 (svar inom en månad, förlängning med två månader), art. 15 (rätt till tillgång), art. 16–21 (rättelse, radering, begränsning, dataportabilitet, invändning)",
+        "lagen (2018:218) med kompletterande bestämmelser till EU:s dataskyddsförordning",
+        "offentlighets- och sekretesslagen (2009:400) 21 kap. 7 § och sekretessprövning av uppgifter om tredje man före utlämnande",
+        "arkivlagen (1990:782): allmänna handlingar får inte raderas i strid med arkivlagstiftningen"
       ]
     },
     "KOP-07": {
@@ -412,6 +509,41 @@
         "förvaltningslagen (2017:900) 32 § (motivering), 33 § (underrättelse med överklagandehänvisning), 44–45 §§ (överklagande inom tre veckor, rättidsprövning)"
       ]
     },
+    "MIL-04": {
+      "name": "Anmälan kyltorn",
+      "municipalities": [
+        "Sundsvall",
+        "Malmö"
+      ],
+      "urls": [
+        "https://e-tjanster.sundsvall.se/oversikt/overview/674",
+        "https://sjalvservice.malmo.se/oversikt/overview/1285"
+      ],
+      "legal_basis": [
+        "förordningen (1998:899) om miljöfarlig verksamhet och hälsoskydd 38 a § (anmälningsplikt för kyltorn; uppförande eller användning tidigast sex veckor efter anmälan) och 38 b § (ändrade förhållanden), lydelse enligt förordning (2023:932)",
+        "förordningen (1998:901) om verksamhetsutövares egenkontroll",
+        "miljöbalken (1998:808) 26 kap. 1, 9 och 19 §§ (tillsyn, förelägganden, egenkontroll)",
+        "Obs: Sundsvalls e-tjänst anger felaktigt '(1998:889) §38a'; rätt är 38 a § förordningen (1998:899)"
+      ]
+    },
+    "MIL-05": {
+      "name": "Registrering av medelstor förbränningsanläggning",
+      "municipalities": [
+        "Sundsvall",
+        "Malmö",
+        "Kristianstad"
+      ],
+      "urls": [
+        "https://e-tjanster.sundsvall.se/oversikt/overview/613",
+        "https://sjalvservice.malmo.se/oversikt/overview/1208",
+        "https://e-tjanster.kristianstad.se/oversikt/overview/109"
+      ],
+      "legal_basis": [
+        "förordningen (2018:471) om medelstora förbränningsanläggningar 4 § (anläggningseffekt 1 megawatt eller högre men högst 50 megawatt; förordning 2020:696) och 5 § (2018-anläggning eller ny förbränningsanläggning)",
+        "förordningen (2018:471) 18 § (uppgifter till tillsynsmyndigheten: anläggningseffekten i megawatt, typ- och bränslebeteckningar; förordning 2024:484), 21–22 §§ (registrering inom en månad), 23 § (offentliggörande utan personnummer, födelsedatum och bostadsadresser)",
+        "direktiv (EU) 2015/2193 (MCP-direktivet)"
+      ]
+    },
     "MIL-06": {
       "name": "Miljöfarlig verksamhet - anmälan (C-verksamhet)",
       "municipalities": [
@@ -450,11 +582,12 @@
         "Malmö"
       ],
       "urls": [
-        "https://sjalvservice.malmo.se/oversikt/overview/530"
+        "https://sjalvservice.malmo.se/oversikt/overview/530",
+        "https://sjalvservice.malmo.se/oversikt/overview/661"
       ],
       "legal_basis": [
-        "förordningen (2007:19) om PCB m.m.",
-        "förordningen (1998:899) 28 §",
+        "förordningen (2007:19) om PCB m.m. 3 § (PCB-produkt: halt över 50 mg/kg), 16 § (inventering), 17 och 17 a §§ (avlägsnande över 500 mg/kg respektive 50–500 mg/kg senast vid renovering, ombyggnad eller rivning), 18 § (anmälan senast tre veckor före åtgärden)",
+        "Obs: 28 § förordningen (1998:899) gäller avhjälpandeåtgärder vid föroreningsskada, inte PCB-sanering; slutrapport efter sanering begärs i tillsynsmyndighetens beslut",
         "miljöbalken (1998:808) 26 kap. 1, 9 och 19 §§ (tillsyn, förelägganden, egenkontroll)"
       ]
     },
@@ -540,6 +673,35 @@
         "OSL 39 kap. (personaladministrativ verksamhet)"
       ]
     },
+    "NAR-08": {
+      "name": "Begär företrädesrätt vid Sundsvalls kommun",
+      "municipalities": [
+        "Sundsvall"
+      ],
+      "urls": [
+        "https://e-tjanster.sundsvall.se/oversikt/overview/307"
+      ],
+      "legal_basis": [
+        "lagen (1982:80) om anställningsskydd 25 § (företrädesrätt till återanställning: sammanlagt mer än tolv månader under de senaste tre åren, eller mer än nio månader i särskild visstidsanställning för företrädesrätt till ny sådan anställning; gäller till dess nio månader förflutit från den dag anställningen upphörde; lag 2022:835)",
+        "LAS 26 § (turordning mellan flera företrädesberättigade) och 27 § (anmälan av anspråk)",
+        "gällande kollektivavtal (Allmänna bestämmelser, AB)"
+      ]
+    },
+    "NAR-10": {
+      "name": "Räddningstjänsten - ansökan tillsvidareanställd brandman och sommarvikariat",
+      "municipalities": [
+        "Sundsvall"
+      ],
+      "urls": [
+        "https://e-tjanster.sundsvall.se/oversikt/overview/745"
+      ],
+      "legal_basis": [
+        "regeringsformen 1 kap. 9 § (saklighet och opartiskhet); lagen (1994:260) om offentlig anställning 4 § gäller inte kommunala arbetsgivare eller kommunalförbund (lagens 1–2 §§)",
+        "diskrimineringslagen (2008:567) 2 kap. 1 § (förbud mot diskriminering i arbetslivet, även vid urval) och 3 kap. (aktiva åtgärder)",
+        "AI-förordningen (EU) 2024/1689 art. 6.2 och bilaga III p. 4 a: AI-system för rekrytering och urval, bl.a. för att analysera och filtrera ansökningar och bedöma kandidater, är högrisk; kontrollera tillämpningsdatum",
+        "dataskyddsförordningen (EU) 2016/679 art. 22 (enbart automatiserade beslut)"
+      ]
+    },
     "OFM-01": {
       "name": "Redogörelse och årsräkning för ställföreträdare (god man/förvaltare/förmyndare)",
       "municipalities": [
@@ -553,8 +715,10 @@
       "legal_basis": [
         "föräldrabalken 14 kap. 15 § (årsräkning före 1 mars)",
         "föräldrabalken 16 kap. 3 § (överförmyndarens granskning)",
+        "föräldrabalken 16 kap. 5 § (anmärkning mot verksamheten: ställföreträdaren ges tillfälle att yttra sig, anteckning i akten; lydelse enligt lag 2026:490)",
         "föräldrabalken 12 kap. 16 § (arvode)",
-        "förmynderskapsförordningen (1995:379)",
+        "ställföreträdarförordningen (2026:667), i kraft 2026-07-01: 2 kap. (ställföreträdarens redovisning) och 2 kap. 3 § (besked om granskningen av en årsräkning, med uppgift om huruvida den föranlett anmärkning)",
+        "förmynderskapsförordningen (1995:379), upphävd 2026-07-01 genom förordning (2026:667); enligt övergångsbestämmelserna gäller 9–16 och 18 §§ till 2028-01-01 och 25–27 §§ till 2029-01-01",
         "föräldrabalken 20 kap. 6 § (överklagande till tingsrätten)",
         "OSL 32 kap. 4 § (sekretess hos överförmyndarnämnd)"
       ]
@@ -653,6 +817,24 @@
         "förvaltningslagen (2017:900) 32 § (motivering), 33 § (underrättelse med överklagandehänvisning), 44–45 §§ (överklagande inom tre veckor, rättidsprövning)"
       ]
     },
+    "OMS-08": {
+      "name": "Färdtjänst/riksfärdtjänst - ansökan",
+      "municipalities": [
+        "Sundsvall",
+        "Malmö"
+      ],
+      "urls": [
+        "https://e-tjanster.sundsvall.se/oversikt/overview/753"
+      ],
+      "legal_basis": [
+        "lagen (1997:736) om färdtjänst 7 § (funktionsnedsättning som inte endast är tillfällig, väsentliga svårigheter), 8 § (ledsagare), 9 § (tillstånd för viss tid eller tills vidare, föreskrifter om färdsätt), 12 § (återkallelse)",
+        "lagen (1997:736) om färdtjänst 16 § (överklagande till allmän förvaltningsdomstol)",
+        "lagen (1997:735) om riksfärdtjänst",
+        "offentlighets- och sekretesslagen (2009:400) 29 kap. 6 § (sekretess i färdtjänstärenden)",
+        "förvaltningslagen (2017:900) 32 § (motivering), 33 § (underrättelse med överklagandehänvisning), 44–45 §§ (överklagande inom tre veckor, rättidsprövning)",
+        "AI-förordningen (EU) 2024/1689 bilaga III p. 5 a: AI som bedömer rätt till offentliga förmåner och tjänster kan vara högrisk; håll AI-steget beslutsstödjande"
+      ]
+    },
     "OMS-09": {
       "name": "Klagomål och synpunkter - vård och omsorg / socialtjänst",
       "municipalities": [
@@ -683,6 +865,20 @@
         "socialtjänstlag (2025:400) 35 kap. 1 § (överklagande till förvaltningsrätten)",
         "OSL 26 kap. 1 § (socialtjänstsekretess)",
         "förvaltningslagen (2017:900) 32 § (motivering), 33 § (underrättelse med överklagandehänvisning), 44–45 §§ (överklagande inom tre veckor, rättidsprövning)"
+      ]
+    },
+    "OMS-15": {
+      "name": "Vräkning eller uppsägning - hyresvärdens underrättelse till socialtjänsten",
+      "municipalities": [
+        "Kristianstad"
+      ],
+      "urls": [
+        "https://e-tjanster.kristianstad.se/oversikt/overview/79"
+      ],
+      "legal_basis": [
+        "jordabalken (1970:994) 12 kap. 44 § (bostadshyresgästen får inte skiljas från lägenheten om hyran betalas inom tre veckor från det att hyresgästen delgetts underrättelse om återvinning och meddelande om uppsägningen lämnats till socialnämnden; socialnämndens åtagande om betalningsansvar; lag 2019:533)",
+        "jordabalken 12 kap. 42 § första stycket 1, 3 och 9 (förverkande vid dröjsmål med hyran, otillåten andrahandsupplåtelse, störningar)",
+        "offentlighets- och sekretesslagen (2009:400) 26 kap. 1 § (socialtjänstsekretess)"
       ]
     },
     "OMS-16": {
@@ -743,7 +939,8 @@
       ],
       "legal_basis": [
         "PBL 5 kap. 2–5 §§ (planbesked, innehåll, fyra månader)",
-        "PBL 12 kap. 8 § (avgift)"
+        "PBL 12 kap. 8 § 1 (avgift för beslut om planbesked)",
+        "PBL 13 kap. 2 § 2 (planbesked får inte överklagas)"
       ]
     },
     "TRA-07": {
@@ -757,6 +954,22 @@
       "legal_basis": [
         "PBL 5 kap. 11, 17, 18, 23 §§",
         "PBL 13 kap. 11 § (klagorätt kräver skriftliga synpunkter)"
+      ]
+    },
+    "UPP-01": {
+      "name": "Ansökan om föreningsbidrag / verksamhetsstöd och redovisning",
+      "municipalities": [
+        "Sundsvall",
+        "Malmö",
+        "Kristianstad"
+      ],
+      "urls": [
+        "https://e-tjanster.sundsvall.se/oversikt/overview/540",
+        "https://sundsvall.se/uppleva-och-gora/foreningar/bidrag-och-stod/regler-for-foreningsbidrag/"
+      ],
+      "legal_basis": [
+        "kommunallagen (2017:725) 2 kap. 1–2 §§ (allmänna befogenheter, likställighet)",
+        "Regler för föreningsbidrag, Sundsvalls kommun, 9 § (aktivitetsbidrag för ledarledda aktiviteter för barn och ungdom från 7 år till och med 20 år, minst tio tillfällen, minst 60 minuter)"
       ]
     },
     "UTB-01": {
@@ -790,6 +1003,21 @@
         "skollagen 28 kap. 5 § (överklagande till förvaltningsrätten)",
         "OSL 23 kap. 2 §, 25 kap. 1 § (elevhälsa)",
         "förvaltningslagen (2017:900) 32 § (motivering), 33 § (underrättelse med överklagandehänvisning), 44–45 §§ (överklagande inom tre veckor, rättidsprövning)"
+      ]
+    },
+    "UTB-04": {
+      "name": "Ansökan om modersmålsundervisning (grundskola/gymnasium) och uppsägning",
+      "municipalities": [
+        "Sundsvall",
+        "Malmö"
+      ],
+      "urls": [
+        "https://e-tjanster.sundsvall.se/oversikt/overview/141",
+        "https://sjalvservice.malmo.se/oversikt/overview/925"
+      ],
+      "legal_basis": [
+        "skollagen (2010:800) 10 kap. 7 § (dagligt umgängesspråk och grundläggande kunskaper; elev som tillhör en nationell minoritet ska erbjudas undervisning i sitt minoritetsspråk; lag 2014:458)",
+        "skolförordningen (2011:185) 5 kap. 7 § (adoptivbarn), 10 § (minst fem elever och lämplig lärare; femgränsen gäller inte nationella minoritetsspråk), 11 § (högst sju läsår)"
       ]
     },
     "UTB-05": {
@@ -835,6 +1063,23 @@
       "legal_basis": [
         "skollagen (2010:800) 7 kap. 19 a § (utredning av frånvaro), 7 kap. 21–23 §§ (skolplikt, föreläggande)",
         "OSL 23 kap. 2 §"
+      ]
+    },
+    "UTB-08": {
+      "name": "In- och utskrivning av elev / månadsrapport från fristående huvudmän (ersättningsunderlag)",
+      "municipalities": [
+        "Sundsvall",
+        "Malmö",
+        "Kristianstad"
+      ],
+      "urls": [
+        "https://e-tjanster.sundsvall.se/oversikt/overview/637",
+        "https://sjalvservice.malmo.se/oversikt/overview/1375"
+      ],
+      "legal_basis": [
+        "skollagen (2010:800) 10 kap. 37 § (grundbelopp till fristående grundskola), 16 kap. 52 § (bidrag till fristående gymnasieskola)",
+        "skollagen (2010:800) 29 kap. 9 § (kommunala aktivitetsansvaret)",
+        "offentlighets- och sekretesslagen (2009:400) 23 kap. 2 §"
       ]
     },
     "UTB-10": {

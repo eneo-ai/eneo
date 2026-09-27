@@ -1,0 +1,59 @@
+{
+  "file": "md_portal_lagrum_anmalan_kyltorn.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "MIL-04", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/674"},
+  "description": "Utskrift (PDF) av en inskickad anmälan i Sundsvalls e-tjänst Anmälan kyltorn, med e-tjänstens rubrik som bär portalens felaktiga SFS-nummer (1998:889) §38a, e-tjänstens fält i ordning, signering med BankID och registreringsstämpel med diarienummer.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Miljönämnden – e-tjänst Anmälan kyltorn", "address": "Miljönämnden, 851 85 Sundsvall, miljonamnden@sundsvall.se"},
+  "date": "2026-09-14",
+  "diarienummer": "MN-2026-01482",
+  "title": "Anmälan kyltorn enligt förordningen om miljöfarligverksamhet och hälsoskydd (1998:889) §38a",
+  "blocks": [
+    {"paragraph": "Inskickad: 2026-09-14 10:42. Ärende-ID i e-tjänsten: 318804. Registrerad i Ecos 2026-09-15 av registrator."},
+    {"heading": "Uppgifter anläggning"},
+    {
+      "table": {
+        "columns": ["Anläggning", "Uppgift"],
+        "rows": [
+          ["Anläggningens namn", "Kyltorn KT2, Kylcentral Birsta"],
+          ["Fastighetsbeteckning", "Sundsvall Birsta 1:112"],
+          ["Huvudman", "Nordfrost Logistik AB"],
+          ["Organisationsnummer", "556921-4478"]
+        ]
+      }
+    },
+    {"heading": "Adresser"},
+    {
+      "table": {
+        "columns": ["Adress", "Uppgift"],
+        "rows": [
+          ["Besöksadress", "Birstavägen 42, 863 41 Sundsvall"],
+          ["Postadress", "Box 118, 851 04 Sundsvall"],
+          ["Fakturaadress", "Nordfrost Logistik AB, Fakturaskanning, Box 5620, 102 42 Stockholm"],
+          ["Fakturareferens", "4410-KYL"]
+        ]
+      }
+    },
+    {"heading": "Kontaktperson"},
+    {
+      "table": {
+        "columns": ["Kontaktperson", "Uppgift"],
+        "rows": [
+          ["Förnamn", "Johan"],
+          ["Efternamn", "Eriksson"],
+          ["E-postadress", "johan.eriksson@nordfrost-logistik.se"],
+          ["Telefon", "060-61 72 40"]
+        ]
+      }
+    },
+    {"heading": "Placering av kyltornet"},
+    {"paragraph": "Markerat på kartan i e-tjänsten: tak på byggnad C, norra delen. Punkt ritad vid koordinat N 6 925 480, E 618 310 (SWEREF 99 TM)."},
+    {"heading": "Egenkontroll"},
+    {"paragraph": "Ska minst omfatta obligatoriska uppgifter enligt förordningen (1998:901) om verksamhetsutövares egenkontroll."},
+    {"paragraph": "Bifogad fil: Egenkontrollprogram_KT2_Nordfrost_rev2.docx (84 kB)"},
+    {"heading": "Övriga bilagor"},
+    {"paragraph": "Inga bilagor bifogade."},
+    {"heading": "Signering"},
+    {"paragraph": "Anmälan är signerad med BankID 2026-09-14 kl. 10:42 av Johan Eriksson, personnummer 19830422-2394."},
+    {"paragraph": "Detta är en utskrift av den inskickade anmälan. Frågor om ärendet besvaras av miljökontoret, tel. 060-19 10 00. Ange diarienummer MN-2026-01482."}
+  ]
+}

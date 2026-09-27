@@ -1,0 +1,41 @@
+{
+  "file": "mil11_inventering_fogmassor.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "MIL-11", "url": "https://sjalvservice.malmo.se/oversikt/overview/661"},
+  "description": "Ifyllt inventeringsprotokoll PCB för fogmassor enligt miljöförvaltningens blankett: byggnad, byggår, provpunkter med placering, fogtyp, löpmeter och analyserad halt.",
+  "letterhead": {"organisation": "Malmö stad", "unit": "Miljöförvaltningen – Fogmassor, inventeringsprotokoll PCB", "address": "Miljöförvaltningen, 205 80 Malmö"},
+  "date": "2025-11-18",
+  "title": "Inventeringsprotokoll PCB – fogmassor",
+  "blocks": [
+    {"paragraph": "Inventering enligt 16 § förordningen (2007:19) om PCB m.m. Uppgifterna redovisas byggnadsvis; en blankett per byggnad."},
+    {"table": {
+      "columns": ["Uppgift", "Ifyllt"],
+      "rows": [
+        ["Fastighetsbeteckning", "Malmö Rönnen 14"],
+        ["Byggnad", "Hus B, flerbostadshus i fyra våningar, Rönngatan 7–11"],
+        ["Byggår / renoveringsår", "1968 / 1972 (fönsterbyte)"],
+        ["Fastighetsägare", "Bostads AB Rönngården, org.nr 556702-8841"],
+        ["Inventeringen utförd av", "Miljöinventering Syd AB, Hanna Rydén"],
+        ["Datum för inventering", "2025-10-06"]
+      ]
+    }},
+    {"heading": "Provpunkter och resultat"},
+    {"table": {
+      "columns": ["Prov-ID", "Placering", "Fogtyp", "Löpmeter", "Halt PCB (mg/kg)"],
+      "rows": [
+        ["F-01", "Fasad, elementfogar mot gården", "Elastisk fog, grå", "420", "1900"],
+        ["F-02", "Fasad, elementfogar mot gatan", "Elastisk fog, grå", "360", "820"],
+        ["F-03", "Fönsterfogar, ursprungliga fönster i trapphus", "Elastisk fog, vit", "96", "2400"],
+        ["F-04", "Fönsterfogar, bytta fönster 1972 i lägenheter", "Elastisk fog, vit", "610", "12"],
+        ["F-05", "Balkongfogar", "Elastisk fog, svart", "140", "610"],
+        ["F-06", "Sockelfog mot mark", "Plastisk fog", "180", "<5"],
+        ["F-07", "Dilatationsfog i entréhall, trapphus 9", "Elastisk fog, grå", "24", "380"],
+        ["F-08", "Fogar kring ventilationsgaller på vinden", "Elastisk fog, grå", "30", "95"]
+      ]
+    }},
+    {"paragraph": "Analyser utförda av Analyslaboratoriet Öresund AB, se analysprotokoll. Halt avser total PCB i fogmassan."},
+    {"heading": "Åtgärdsplan"},
+    {"paragraph": "Fogar med halt över 500 mg/kg saneras under 2026 i samband med fasadrenoveringen. Fogar med halt mellan 50 och 500 mg/kg avlägsnas senast i samband med renovering, ombyggnad eller rivning. Sanering anmäls till miljöförvaltningen senast tre veckor före start."},
+    {"signature": {"name": "Hanna Rydén", "role": "Miljöinventerare, Miljöinventering Syd AB"}}
+  ]
+}

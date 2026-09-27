@@ -1,0 +1,288 @@
+{
+  "file": "mb_byg05_materialinventering_mall_exempel.xlsx",
+  "format": "xlsx",
+  "source": {
+    "catalogue_id": "BYG-05",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/716"
+  },
+  "description": "Stadsbyggnadskontorets mall för materialinventering och avfallshantering vid rivning, med instruktion, ett ifyllt exempel och avfallskoderna ur avfallsförordningen (2020:614) bilaga 3 som mallen använder.",
+  "sheets": [
+    {
+      "name": "Instruktion",
+      "columns": [
+        "Nr",
+        "Instruktion"
+      ],
+      "rows": [
+        [
+          1,
+          "Fyll i en rad per material eller byggdel som rivs. Ange avfallskod enligt fliken Avfallskoder, mängd och enhet (kg eller ton) och vem som tar emot avfallet."
+        ],
+        [
+          2,
+          "Farligt avfall är de koder som har asterisk (*) i avfallsförordningen (2020:614) bilaga 3. Många sökande skriver koden utan asterisk och utan mellanslag (170605 i stället för 17 06 05*); handläggaren slår alltid upp koden i fliken Avfallskoder."
+        ],
+        [
+          3,
+          "Farligt avfall summeras i kg i granskningen. 1 ton = 1 000 kg."
+        ],
+        [
+          4,
+          "Asfalt: stadsbyggnadskontoret klassar asfalt som 17 03 01* (farligt avfall) bara om analysen visar PAH-16 över 1 000 mg/kg. Med lägre halt är det 17 03 02 och inte farligt avfall, även om sökanden har skrivit 170301; ange då rätt kod i granskningen. Saknas analys räknas asfalten som 17 03 01* tills analys visar annat."
+        ],
+        [
+          5,
+          "Finns asbest (17 06 01* eller 17 06 05*) ska en asbestinventering bifogas. Finns PCB (17 09 02*) ska PCB-inventeringen enligt förordningen (2007:19) om PCB m.m. bifogas. Saknas inventeringen begärs komplettering innan startbesked."
+        ],
+        [
+          6,
+          "Farligt avfall ska lämnas till mottagare med tillstånd för farligt avfall och får inte blandas med annat avfall."
+        ],
+        [
+          7,
+          "Materialinventeringen är underlag till avfallshanteringsplanen enligt 10 kap. 8 a § plan- och bygglagen (2010:900) och granskas inför startbeskedet."
+        ]
+      ]
+    },
+    {
+      "name": "Exempel uppgifter",
+      "columns": [
+        "Uppgift",
+        "Värde"
+      ],
+      "rows": [
+        [
+          "Diarienummer",
+          "SBN 2026-00642"
+        ],
+        [
+          "Fastighet",
+          "Sundsvall Bydalen 2:41"
+        ],
+        [
+          "Byggnad",
+          "Panncentral, envåningsbyggnad från 1962"
+        ],
+        [
+          "Byggherre",
+          "Bydalens Värme AB"
+        ],
+        [
+          "Kontrollansvarig",
+          "Ulrika Sjöström, certifierad KA, behörighet N"
+        ],
+        [
+          "Datum",
+          "2026-05-12"
+        ]
+      ]
+    },
+    {
+      "name": "Exempel ifyllt",
+      "columns": [
+        "Nr",
+        "Byggdel/material",
+        "Avfallskod",
+        "Mängd",
+        "Enhet",
+        "Hantering/mottagare",
+        "Kommentar"
+      ],
+      "rows": [
+        [
+          1,
+          "Stomme och grund, betong",
+          "17 01 01",
+          120,
+          "ton",
+          "Krossning, Blåberget avfallsanläggning",
+          "–"
+        ],
+        [
+          2,
+          "Fasadtegel",
+          "17 01 02",
+          38,
+          "ton",
+          "Återbruk, Tegelbanken Mitt",
+          "–"
+        ],
+        [
+          3,
+          "Takpapp, äldre (tjärhaltig enligt analys)",
+          "17 03 01*",
+          1.4,
+          "ton",
+          "Farligt avfall, Blåberget",
+          "Analys PAH bifogad"
+        ],
+        [
+          4,
+          "Armering och balkar",
+          "17 04 05",
+          6.2,
+          "ton",
+          "Metallåtervinning",
+          "–"
+        ],
+        [
+          5,
+          "Rörisolering i pannrum (asbest)",
+          "17 06 01*",
+          180,
+          "kg",
+          "Asbestsanering, certifierad entreprenör",
+          "Asbestinventering bifogad"
+        ],
+        [
+          6,
+          "Lysrörsarmaturer",
+          "20 01 21*",
+          24,
+          "kg",
+          "Farligt avfall, El-kretsen",
+          "–"
+        ],
+        [
+          7,
+          "Blandat rivningsavfall",
+          "17 09 04",
+          9,
+          "ton",
+          "Sortering, Blåberget",
+          "–"
+        ]
+      ]
+    },
+    {
+      "name": "Avfallskoder",
+      "columns": [
+        "Avfallskod",
+        "Benämning",
+        "Farligt avfall"
+      ],
+      "rows": [
+        [
+          "17 01 01",
+          "Betong",
+          "Nej"
+        ],
+        [
+          "17 01 02",
+          "Tegel",
+          "Nej"
+        ],
+        [
+          "17 01 03",
+          "Klinker, kakel och keramik",
+          "Nej"
+        ],
+        [
+          "17 01 06*",
+          "Blandningar av eller separata fraktioner av betong, tegel, klinker, kakel och keramik som innehåller farliga ämnen",
+          "Ja"
+        ],
+        [
+          "17 01 07",
+          "Blandningar av betong, tegel, klinker, kakel och keramik andra än de som anges i 17 01 06",
+          "Nej"
+        ],
+        [
+          "17 02 01",
+          "Trä",
+          "Nej"
+        ],
+        [
+          "17 02 02",
+          "Glas",
+          "Nej"
+        ],
+        [
+          "17 02 03",
+          "Plast",
+          "Nej"
+        ],
+        [
+          "17 02 04*",
+          "Glas, plast och trä som innehåller eller är förorenade med farliga ämnen",
+          "Ja"
+        ],
+        [
+          "17 03 01*",
+          "Bitumenblandningar som innehåller stenkolstjära",
+          "Ja"
+        ],
+        [
+          "17 03 02",
+          "Andra bitumenblandningar än de som anges i 17 03 01",
+          "Nej"
+        ],
+        [
+          "17 04 01",
+          "Koppar, brons, mässing",
+          "Nej"
+        ],
+        [
+          "17 04 05",
+          "Järn och stål",
+          "Nej"
+        ],
+        [
+          "17 04 10*",
+          "Kablar som innehåller olja, stenkolstjära eller andra farliga ämnen",
+          "Ja"
+        ],
+        [
+          "17 04 11",
+          "Andra kablar än de som anges i 17 04 10",
+          "Nej"
+        ],
+        [
+          "17 06 01*",
+          "Isoleringsmaterial som innehåller asbest",
+          "Ja"
+        ],
+        [
+          "17 06 03*",
+          "Annat isoleringsmaterial som består av eller innehåller farliga ämnen",
+          "Ja"
+        ],
+        [
+          "17 06 04",
+          "Andra isoleringsmaterial än de som anges i 17 06 01 och 17 06 03",
+          "Nej"
+        ],
+        [
+          "17 06 05*",
+          "Byggmaterial som innehåller asbest",
+          "Ja"
+        ],
+        [
+          "17 08 02",
+          "Gipsbaserade byggnadsmaterial andra än de som anges i 17 08 01",
+          "Nej"
+        ],
+        [
+          "17 09 02*",
+          "Bygg- och rivningsavfall som innehåller PCB",
+          "Ja"
+        ],
+        [
+          "17 09 04",
+          "Blandat bygg- och rivningsavfall annat än det som anges i 17 09 01, 17 09 02 och 17 09 03",
+          "Nej"
+        ],
+        [
+          "16 06 01*",
+          "Blybatterier",
+          "Ja"
+        ],
+        [
+          "20 01 21*",
+          "Lysrör och annat kvicksilverhaltigt avfall",
+          "Ja"
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "file": "byg08_mall_startbesked.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "BYG-08", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/437"},
+  "description": "Bygglovavdelningens Word-mall för startbesked för anmälningspliktig installation av eldstad och rökkanal, med innehållskontroller för ärendeuppgifter, fastställd kontrollplan och upplysningar samt fasta avsnitt med gällande lagrum.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Stadsbyggnadsnämnden – Bygglovavdelningen", "address": "851 85 Sundsvall"},
+  "title": "Startbesked – eldstad och rökkanal",
+  "blocks": [
+    {"paragraph": "Diarienummer:"},
+    {"control": {"kind": "text", "tag": "diarienummer", "label": "Diarienummer", "hint": "BYGG-ÅÅÅÅ-nnnnnn"}},
+    {"paragraph": "Datum:"},
+    {"control": {"kind": "text", "tag": "datum", "label": "Datum", "hint": "ÅÅÅÅ-MM-DD"}},
+    {"paragraph": "Fastighet:"},
+    {"control": {"kind": "text", "tag": "fastighet", "label": "Fastighet", "hint": "Fastighetsbeteckning"}},
+    {"paragraph": "Byggherre:"},
+    {"control": {"kind": "text", "tag": "byggherre", "label": "Byggherre", "hint": "Namn och adress"}},
+    {"paragraph": "Åtgärd:"},
+    {"control": {"kind": "text", "tag": "atgard", "label": "Åtgärd", "hint": "Den anmälda eldstaden och rökkanalen, fabrikat och modell"}},
+    {"heading": "Beslut"},
+    {"paragraph": "Stadsbyggnadsnämnden ger startbesked för den anmälda åtgärden med stöd av 10 kap. 23 § plan- och bygglagen (2010:900), PBL. Åtgärden är anmälningspliktig enligt 6 kap. 1 § 4 plan- och byggförordningen (2011:338). Kontrollplanen nedan fastställs."},
+    {"heading": "Fastställd kontrollplan"},
+    {"control": {"kind": "rich", "tag": "kontrollplan", "label": "Kontrollplan", "hint": "Varje kontrollpunkt: vad som kontrolleras, vilket krav som gäller enligt tillverkarens anvisning, hur och av vem."}},
+    {"heading": "Villkor och upplysningar"},
+    {"control": {"kind": "rich", "tag": "upplysningar", "label": "Villkor och upplysningar", "hint": "Villkor för installationen och upplysningar till byggherren."}},
+    {"heading": "Slutbesked"},
+    {"paragraph": "Eldstaden och rökkanalen får inte tas i bruk förrän stadsbyggnadsnämnden har gett slutbesked (10 kap. 4 § PBL). Skicka in intyg om utförd brandskyddskontroll från skorstensfejarmästare och byggherrens intyg om att kontrollplanen har följts."},
+    {"heading": "Avgift"},
+    {"paragraph": "Avgift tas ut enligt stadsbyggnadsnämndens taxa. Fakturan skickas separat."},
+    {"heading": "Hur man överklagar"},
+    {"paragraph": "Startbeskedet kan överklagas av den som har gjort anmälan (13 kap. 15 § PBL). Överklagandet ställs till Länsstyrelsen Västernorrland men skickas till stadsbyggnadsnämnden, Sundsvalls kommun, 851 85 Sundsvall, inom tre veckor från den dag du fick del av beslutet."}
+  ]
+}

@@ -1,0 +1,183 @@
+{
+  "name": "Detaljplan – samrådsredogörelse",
+  "description": "Planavdelningens stöd efter ett detaljplanesamråd: läser in yttrandena och fastighetsförteckningen, avgör vilka avsändare som är remissinstanser, sakägare eller övriga, föreslår kommunens kommentar per synpunkt, listar sakägare vars synpunkter inte tillgodosetts och skriver samrådsredogörelsen.",
+  "metadata_json": {
+    "form_schema": {
+      "fields": [
+        {"name": "planens_namn", "type": "text", "label": "Detaljplanens namn", "required": true, "order": 1},
+        {"name": "diarienummer", "type": "text", "label": "Diarienummer", "required": true, "order": 2},
+        {"name": "samradstid", "type": "text", "label": "Samrådstid (från och med – till och med)", "required": true, "order": 3},
+        {"name": "planandringar", "type": "text", "label": "Ändringar i planförslaget som redan är beslutade inför granskningen", "required": false, "order": 4},
+        {"name": "handlaggare", "type": "text", "label": "Planhandläggare", "required": true, "order": 5}
+      ]
+    }
+  },
+  "steps": [
+    {
+      "name": "Läs yttranden och fastighetsförteckning",
+      "instructions": "Du får de yttranden som kommit in under samrådet om en detaljplan och planens fastighetsförteckning. För varje yttrande: avsändaren exakt som den står (myndighet, organisation eller person), avsändarens fastighet om den anges, datum för yttrandet och varje synpunkt för sig med sakfråga (till exempel trafik, dagvatten, buller, byggnadshöjd, naturmiljö, parkering, förfarandet) och en kort, saklig återgivning av vad avsändaren anför eller begär. Fastighetsförteckningen läses rad för rad: fastighet, lagfaren ägare, läge och hur fastigheten berörs. Hitta inte på fastigheter som inte står i underlaget.",
+      "input_source": "flow_input",
+      "input_type": "document",
+      "input_config": {
+        "runtime_input": {
+          "enabled": true,
+          "required": true,
+          "max_files": 60,
+          "input_format": "document",
+          "label": "Yttranden och fastighetsförteckning",
+          "description": "Ladda upp alla yttranden från samrådet och fastighetsförteckningen."
+        }
+      },
+      "input_bindings": {"question": "{{ step_input.text }}\n\nSamrådstid: {{ flow_input.samradstid }}"},
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["yttranden", "fastighetsforteckning"],
+        "properties": {
+          "yttranden": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["avsandare", "fastighet", "datum", "synpunkter"],
+              "properties": {
+                "avsandare": {"type": "string"},
+                "fastighet": {"type": ["string", "null"]},
+                "datum": {"type": ["string", "null"]},
+                "synpunkter": {
+                  "type": "array",
+                  "items": {"type": "object", "required": ["sakfraga", "synpunkt"], "properties": {"sakfraga": {"type": "string"}, "synpunkt": {"type": "string"}}}
+                }
+              }
+            }
+          },
+          "fastighetsforteckning": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["fastighet", "agare", "lage", "berors"],
+              "properties": {"fastighet": {"type": "string"}, "agare": {"type": "string"}, "lage": {"type": "string"}, "berors": {"type": "string"}}
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Klassa avsändarna",
+      "instructions": "Avgör för varje avsändare om den är remissinstans (statliga myndigheter, kommunala nämnder och förvaltningar, ledningsägare), sakägare eller övrig. Sakägare är de som äger en fastighet i fastighetsförteckningen eller företräder en sådan ägare; ange då fastigheten exakt som i förteckningen. En boende som inte står i förteckningen är övrig, även om den bor nära planområdet. Ange också om yttrandet kom in efter samrådstidens slut. Motivera kort.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Samrådstid: {{ flow_input.samradstid }}",
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "yttranden", "label": "Yttranden"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "fastighetsforteckning", "label": "Fastighetsförteckning"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["avsandare"],
+        "properties": {
+          "avsandare": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["avsandare", "kategori", "fastighet", "inkom_for_sent", "motivering"],
+              "properties": {
+                "avsandare": {"type": "string"},
+                "kategori": {"type": "string", "enum": ["Remissinstans", "Sakägare", "Övrig"]},
+                "fastighet": {"type": ["string", "null"]},
+                "inkom_for_sent": {"type": "boolean"},
+                "motivering": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Föreslå kommunens kommentar per synpunkt",
+      "instructions": "Skriv för varje synpunkt en kort sammanfattning av synpunkten och ett förslag till kommunens kommentar i planavdelningens sakliga stil. Utgå från de ändringar i planförslaget som redan är beslutade: en synpunkt tillgodoses (Ja) om en beslutad ändring möter den helt, delvis (Delvis) om den möter en del av den, annars Nej. Lova inga ändringar som inte är beslutade; skriv i stället vad kommunen ska utreda eller varför planen inte ändras.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Detaljplan: {{ flow_input.planens_namn }}\nBeslutade ändringar inför granskningen: {{ flow_input.planandringar }}",
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "yttranden", "label": "Yttranden"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["kommentarer"],
+        "properties": {
+          "kommentarer": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["avsandare", "sakfraga", "sammanfattning", "kommunens_kommentar", "tillgodoses"],
+              "properties": {
+                "avsandare": {"type": "string"},
+                "sakfraga": {"type": "string"},
+                "sammanfattning": {"type": "string"},
+                "kommunens_kommentar": {"type": "string"},
+                "tillgodoses": {"type": "string", "enum": ["Ja", "Delvis", "Nej"]}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Sakägare med synpunkter som inte tillgodosetts",
+      "instructions": "Lista varje sakägare som har minst en synpunkt som inte tillgodosetts (Nej eller Delvis). Ange sakägaren och fastigheten exakt som i klassningen och vilka sakfrågor som inte tillgodosetts. Remissinstanser och övriga tas inte med.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {"step_ref": "step_2", "output": "structured", "field_path": "avsandare", "label": "Avsändare"},
+          {"step_ref": "step_3", "output": "structured", "field_path": "kommentarer", "label": "Kommentarer"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["sakagare"],
+        "properties": {
+          "sakagare": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["sakagare", "fastighet", "ej_tillgodosedda_sakfragor"],
+              "properties": {
+                "sakagare": {"type": "string"},
+                "fastighet": {"type": "string"},
+                "ej_tillgodosedda_sakfragor": {"type": "array", "items": {"type": "string"}}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Skriv samrådsredogörelse",
+      "instructions": "Skriv samrådsredogörelsen för detaljplanen enligt 5 kap. 17 § plan- och bygglagen. Överst planens namn, diarienummer och samrådstid, och en kort beskrivning av hur samrådet genomförts och hur många yttranden som kommit in. Redovisa sedan yttrandena i tre avsnitt: Remissinstanser, Sakägare och Övriga. Under varje avsändare skrivs synpunkterna sammanfattade, var och en följd av Kommunens kommentar. Sakägare anges med fastighet. Yttranden som kommit in efter samrådstidens slut redovisas ändå, med en notering om det. Avsluta med avsnittet Synpunkter som inte tillgodosetts, där sakägarna och deras sakfrågor räknas upp, och planhandläggarens namn. Skriv inga personnummer, e-postadresser eller telefonnummer.",
+      "input_source": "previous_step",
+      "input_type": "json",
+      "input_bindings": {
+        "question": "Detaljplan: {{ flow_input.planens_namn }}\nDiarienummer: {{ flow_input.diarienummer }}\nSamrådstid: {{ flow_input.samradstid }}\nPlanhandläggare: {{ flow_input.handlaggare }}",
+        "source_refs": [
+          {"step_ref": "step_2", "output": "structured", "field_path": "avsandare", "label": "Avsändare"},
+          {"step_ref": "step_3", "output": "structured", "field_path": "kommentarer", "label": "Synpunkter och kommentarer"},
+          {"step_ref": "step_4", "output": "structured", "field_path": "sakagare", "label": "Sakägare med synpunkter som inte tillgodosetts"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "docx"
+    }
+  ]
+}

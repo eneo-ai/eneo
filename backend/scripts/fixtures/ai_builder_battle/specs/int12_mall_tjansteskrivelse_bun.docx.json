@@ -1,0 +1,169 @@
+{
+  "file": "int12_mall_tjansteskrivelse_bun.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-12",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/547"
+  },
+  "description": "Barn- och utbildningsförvaltningens Word-mall för tjänsteskrivelse till nämnden, med innehållskontroller för ärendeuppgifter och fasta rubriker från Sammanfattning till Beslutet skickas till.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Barn- och utbildningsförvaltningen",
+    "address": "851 85 Sundsvall"
+  },
+  "title": "Tjänsteskrivelse",
+  "blocks": [
+    {
+      "paragraph": "Diarienummer:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "diarienummer",
+        "label": "Diarienummer",
+        "hint": "Nämndens diarienummer, BUN ÅÅÅÅ/nnnnn"
+      }
+    },
+    {
+      "paragraph": "Datum:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "datum",
+        "label": "Datum",
+        "hint": "ÅÅÅÅ-MM-DD"
+      }
+    },
+    {
+      "paragraph": "Handläggare:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "handlaggare",
+        "label": "Handläggare",
+        "hint": "Namn och befattning"
+      }
+    },
+    {
+      "paragraph": "Till: Barn- och utbildningsnämnden"
+    },
+    {
+      "paragraph": "Ärende:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "arende",
+        "label": "Ärende",
+        "hint": "Ärendets rubrik, till exempel Yttrande över motion om ..."
+      }
+    },
+    {
+      "heading": "Sammanfattning"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "sammanfattning",
+        "label": "Sammanfattning",
+        "hint": "Kort sammanfattning av ärendet och förvaltningens förslag, högst en halv sida."
+      }
+    },
+    {
+      "heading": "Förslag till beslut"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "forslag_till_beslut",
+        "label": "Förslag till beslut",
+        "hint": "Barn- och utbildningsnämnden föreslås besluta att ... Numrera att-satserna."
+      }
+    },
+    {
+      "heading": "Ärendet"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "arendet",
+        "label": "Ärendet",
+        "hint": "Bakgrund: vem som väckt motionen eller förslaget och när, vad som yrkas, hur ärendet remitterats och när yttrandet senast ska lämnas."
+      }
+    },
+    {
+      "heading": "Beslutsunderlag"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "beslutsunderlag",
+        "label": "Beslutsunderlag",
+        "hint": "Förteckning över de handlingar som ligger till grund för beslutet, med datum och diarienummer."
+      }
+    },
+    {
+      "heading": "Överväganden"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "overvaganden",
+        "label": "Överväganden",
+        "hint": "Förvaltningens bedömning mot gällande styrdokument, lagstiftning och verksamhetens förutsättningar."
+      }
+    },
+    {
+      "heading": "Konsekvenser"
+    },
+    {
+      "heading": "Ekonomiska konsekvenser"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "ekonomiska_konsekvenser",
+        "label": "Ekonomiska konsekvenser",
+        "hint": "Kostnader, engångs- och årliga, och hur de ska finansieras."
+      }
+    },
+    {
+      "heading": "Barnkonsekvensanalys"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "barnkonsekvensanalys",
+        "label": "Barnkonsekvensanalys",
+        "hint": "Hur förslaget påverkar barn och elever, med utgångspunkt i barnkonventionen, lag (2018:1197)."
+      }
+    },
+    {
+      "heading": "Jämställdhet"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "jamstalldhet",
+        "label": "Jämställdhet",
+        "hint": "Hur förslaget påverkar flickor och pojkar, kvinnor och män."
+      }
+    },
+    {
+      "heading": "Beslutet skickas till"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "beslutet_skickas_till",
+        "label": "Beslutet skickas till",
+        "hint": "Mottagare av protokollsutdrag."
+      }
+    },
+    {
+      "paragraph": "Tjänsteskrivelsen signeras digitalt av förvaltningschef och handläggare i ärendehanteringssystemet."
+    }
+  ]
+}

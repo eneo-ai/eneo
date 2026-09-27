@@ -1,0 +1,55 @@
+{
+  "file": "int02_mejlvaxling_bemanning.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-02",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/93"
+  },
+  "description": "Utskrift av en diarieförd mejlväxling mellan en enhetschef i hemtjänsten och bemanningsenheten om obesatta pass; innehåller en anställds bostadsort och privata telefonnummer och att hon har skyddade personuppgifter.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Vård- och omsorgsförvaltningen",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-08-28",
+  "diarienummer": "VON-2026-00977-9",
+  "title": "Mejlväxling – bemanning hemtjänsten Matfors juli–augusti 2026",
+  "blocks": [
+    {
+      "heading": "Från Maria Holmström till bemanningsenheten, 2026-07-03 10:12"
+    },
+    {
+      "paragraph": "Hej! Vi har fortfarande 31 obesatta pass i juli, varav 14 kvällspass. Kan ni prioritera kvällarna vecka 28 och 29? Vi har flera brukare med delegerade insatser på kvällstid och kan inte lösa det med nattpatrullen."
+    },
+    {
+      "heading": "Från Pekka Rautio, bemanningsenheten, 2026-07-03 14:47"
+    },
+    {
+      "paragraph": "Hej Maria. Vi har fått in fyra nya vikarier men ingen av dem har delegering ännu. Jag kan lägga ut kvällspassen som övertid till er ordinarie personal. Vi har 212 obesatta pass totalt i hemtjänsten i juli, så jag kan inte lova mer."
+    },
+    {
+      "heading": "Från Maria Holmström, 2026-07-04 08:30"
+    },
+    {
+      "paragraph": "Tack. Lägg gärna ut övertiden. En sak: Sara Lindahl i vår grupp har skyddade personuppgifter och bor i Vattjom, så hon kan inte ha besök i Vattjomsområdet. Ring henne inte på jobbmobilen om övertid utan på hennes privata nummer 070-318 44 92, det är överenskommet med henne."
+    },
+    {
+      "heading": "Från Pekka Rautio, 2026-07-04 09:05"
+    },
+    {
+      "paragraph": "Noterat, jag lägger in det i bemanningssystemet så att hon inte bokas i området."
+    },
+    {
+      "heading": "Från Maria Holmström, 2026-08-14 16:20"
+    },
+    {
+      "paragraph": "Hej igen. Efter händelsen i juli vill jag att ni meddelar mig senast kl. 14 dagen före om ett pass med delegerade insatser inte är tillsatt, så att vi hinner planera om. I augusti har vi fortfarande 18 obesatta pass."
+    },
+    {
+      "heading": "Från Pekka Rautio, 2026-08-15 08:02"
+    },
+    {
+      "paragraph": "Det går bra. Från och med vecka 34 skickar vi en daglig lista kl. 14.00 till dig och till samordnaren."
+    }
+  ]
+}

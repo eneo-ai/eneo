@@ -1,0 +1,33 @@
+{
+  "file": "tra01_mall_beslut_prh.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "TRA-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/569"},
+  "description": "Trafikavdelningens Word-mall för beslut om parkeringstillstånd för rörelsehindrad, med innehållskontroller för ärendeuppgifter, underlag, utfall, giltighet, motivering och upplysningar samt fasta avsnitt om lagrum och överklagande.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Stadsbyggnadskontoret – Trafikavdelningen", "address": "851 85 Sundsvall · 060-19 10 00"},
+  "title": "Beslut om parkeringstillstånd för rörelsehindrad",
+  "blocks": [
+    {"paragraph": "Diarienummer:"},
+    {"control": {"kind": "text", "tag": "diarienummer", "label": "Diarienummer", "hint": "SBN-ÅÅÅÅ-nnnnn"}},
+    {"paragraph": "Beslutsdatum:"},
+    {"control": {"kind": "text", "tag": "beslutsdatum", "label": "Beslutsdatum", "hint": "ÅÅÅÅ-MM-DD"}},
+    {"paragraph": "Sökande:"},
+    {"control": {"kind": "text", "tag": "sokande", "label": "Sökande", "hint": "Namn och postadress"}},
+    {"paragraph": "Ansökan avser:"},
+    {"control": {"kind": "text", "tag": "ansokan_avser", "label": "Ansökan avser", "hint": "Ny ansökan eller förnyelse, som förare eller passagerare"}},
+    {"heading": "Underlag"},
+    {"control": {"kind": "rich", "tag": "underlag", "label": "Underlag", "hint": "De handlingar beslutet grundas på, med datum och utfärdare."}},
+    {"heading": "Beslut"},
+    {"control": {"kind": "text", "tag": "utfall", "label": "Utfall", "hint": "Beslutets utfall i ett ord"}},
+    {"paragraph": "Giltighet:"},
+    {"control": {"kind": "text", "tag": "giltighet", "label": "Giltighet", "hint": "Gäller från och till och med, ÅÅÅÅ-MM-DD"}},
+    {"heading": "Motivering"},
+    {"control": {"kind": "rich", "tag": "motivering", "label": "Motivering", "hint": "Bedömningen av varje förutsättning för tillstånd, med hänvisning till underlaget."}},
+    {"heading": "Upplysningar"},
+    {"control": {"kind": "rich", "tag": "upplysningar", "label": "Upplysningar", "hint": "Till exempel om ny ansökan, om tillståndskortet och hur det används."}},
+    {"heading": "Lagrum"},
+    {"paragraph": "Ärendet har prövats enligt 13 kap. 8 § trafikförordningen (1998:1276). Ett parkeringstillstånd får endast utfärdas till den som har ett varaktigt funktionshinder som innebär väsentliga svårigheter att förflytta sig på egen hand, och gäller under viss tid, längst fem år."},
+    {"heading": "Hur man överklagar"},
+    {"paragraph": "Om du inte är nöjd med beslutet kan du överklaga det hos Länsstyrelsen Västernorrland. Skicka överklagandet till Stadsbyggnadsnämnden, Sundsvalls kommun, 851 85 Sundsvall. Överklagandet måste ha kommit in inom tre veckor från den dag du fick del av beslutet. Skriv vilket beslut du överklagar, med diarienummer, varför du anser att det är fel och hur du vill att det ska ändras. Om du behöver hjälp kan du ringa trafikavdelningen via kontaktcenter, 060-19 10 00."},
+    {"paragraph": "Beslutet har fattats på delegation från stadsbyggnadsnämnden och har signerats digitalt av handläggaren."}
+  ]
+}

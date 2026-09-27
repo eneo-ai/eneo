@@ -1,0 +1,386 @@
+{
+  "file": "mb_upp01_narvaroexport_vt2026.json",
+  "format": "json",
+  "source": {
+    "catalogue_id": "UPP-01",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/540"
+  },
+  "description": "En förenings närvaroexport för VT 2026 ur den nya bokningstjänsten, bilaga till redovisningen för aktivitetsbidrag i e-tjänsten Ansökan om föreningsbidrag.",
+  "data": {
+    "export": {
+      "system": "Boka Sundsvall, föreningsmodulen",
+      "skapad": "2026-08-31T09:14",
+      "period": {
+        "fran": "2026-01-01",
+        "till": "2026-06-30"
+      }
+    },
+    "forening": {
+      "namn": "Västhagens Innebandyklubb",
+      "organisationsnummer": "802492-3057",
+      "bankgiro": "5530-2187",
+      "kontaktperson": "Therese Bylund, kassör"
+    },
+    "aktiviteter": [
+      {
+        "aktivitet_id": "AKT-2026-0147",
+        "namn": "Innebandy P12",
+        "sammankomster": [
+          {
+            "datum": "2026-01-13",
+            "start": "18:00",
+            "slut": "19:30",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 11
+            }
+          },
+          {
+            "datum": "2026-01-20",
+            "start": "18:00",
+            "slut": "19:30",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 12,
+              "C": 1
+            }
+          },
+          {
+            "datum": "2026-01-27",
+            "start": "18:00",
+            "slut": "19:30",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 10
+            }
+          },
+          {
+            "datum": "2026-02-03",
+            "start": "18:00",
+            "slut": "19:30",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 13
+            }
+          },
+          {
+            "datum": "2026-02-10",
+            "start": "18:00",
+            "slut": "19:30",
+            "status": "I",
+            "ledare": 2,
+            "deltagare": {
+              "B": 0
+            }
+          },
+          {
+            "datum": "2026-02-17",
+            "start": "18:00",
+            "slut": "19:30",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 12
+            }
+          },
+          {
+            "datum": "2026-03-03",
+            "start": "18:00",
+            "slut": "19:30",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 11
+            }
+          },
+          {
+            "datum": "2026-03-10",
+            "start": "18:00",
+            "slut": "19:30",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 14
+            }
+          },
+          {
+            "datum": "2026-03-17",
+            "start": "18:00",
+            "slut": "19:30",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 12
+            }
+          },
+          {
+            "datum": "2026-03-24",
+            "start": "18:00",
+            "slut": "18:45",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 10
+            }
+          },
+          {
+            "datum": "2026-03-31",
+            "start": "18:00",
+            "slut": "19:30",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 13
+            }
+          },
+          {
+            "datum": "2026-04-14",
+            "start": "18:00",
+            "slut": "19:30",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 12
+            }
+          }
+        ]
+      },
+      {
+        "aktivitet_id": "AKT-2026-0148",
+        "namn": "Innebandy F14",
+        "sammankomster": [
+          {
+            "datum": "2026-01-15",
+            "start": "17:00",
+            "slut": "18:30",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 9
+            }
+          },
+          {
+            "datum": "2026-01-22",
+            "start": "17:00",
+            "slut": "18:30",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 10
+            }
+          },
+          {
+            "datum": "2026-01-29",
+            "start": "17:00",
+            "slut": "18:30",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 8
+            }
+          },
+          {
+            "datum": "2026-02-05",
+            "start": "17:00",
+            "slut": "18:30",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 11
+            }
+          },
+          {
+            "datum": "2026-02-12",
+            "start": "17:00",
+            "slut": "18:30",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 9
+            }
+          },
+          {
+            "datum": "2026-02-19",
+            "start": "17:00",
+            "slut": "18:30",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 10
+            }
+          },
+          {
+            "datum": "2026-03-05",
+            "start": "17:00",
+            "slut": "18:30",
+            "status": "E",
+            "ledare": 2,
+            "deltagare": {
+              "B": 9
+            }
+          },
+          {
+            "datum": "2026-03-12",
+            "start": "17:00",
+            "slut": "18:30",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 8
+            }
+          },
+          {
+            "datum": "2026-03-19",
+            "start": "17:00",
+            "slut": "17:50",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 10
+            }
+          },
+          {
+            "datum": "2026-03-26",
+            "start": "17:00",
+            "slut": "18:30",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 11
+            }
+          },
+          {
+            "datum": "2026-04-02",
+            "start": "17:00",
+            "slut": "18:30",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "B": 9
+            }
+          }
+        ]
+      },
+      {
+        "aktivitet_id": "AKT-2026-0152",
+        "namn": "Knattebandy 5–7 år",
+        "sammankomster": [
+          {
+            "datum": "2026-01-17",
+            "start": "10:00",
+            "slut": "11:00",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "A": 8,
+              "B": 4
+            }
+          },
+          {
+            "datum": "2026-01-24",
+            "start": "10:00",
+            "slut": "11:00",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "A": 9,
+              "B": 3
+            }
+          },
+          {
+            "datum": "2026-01-31",
+            "start": "10:00",
+            "slut": "11:00",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "A": 7,
+              "B": 5
+            }
+          },
+          {
+            "datum": "2026-02-07",
+            "start": "10:00",
+            "slut": "11:00",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "A": 8,
+              "B": 4
+            }
+          },
+          {
+            "datum": "2026-02-14",
+            "start": "10:00",
+            "slut": "11:00",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "A": 10,
+              "B": 3
+            }
+          },
+          {
+            "datum": "2026-02-21",
+            "start": "10:00",
+            "slut": "11:00",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "A": 9,
+              "B": 4
+            }
+          },
+          {
+            "datum": "2026-03-07",
+            "start": "10:00",
+            "slut": "11:00",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "A": 8,
+              "B": 5
+            }
+          },
+          {
+            "datum": "2026-03-14",
+            "start": "10:00",
+            "slut": "11:00",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "A": 7,
+              "B": 4
+            }
+          },
+          {
+            "datum": "2026-03-21",
+            "start": "10:00",
+            "slut": "11:00",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "A": 9,
+              "B": 3
+            }
+          },
+          {
+            "datum": "2026-03-28",
+            "start": "10:00",
+            "slut": "11:00",
+            "status": "G",
+            "ledare": 2,
+            "deltagare": {
+              "A": 8,
+              "B": 5
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

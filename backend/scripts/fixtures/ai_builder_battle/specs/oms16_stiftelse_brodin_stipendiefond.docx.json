@@ -1,0 +1,76 @@
+{
+  "file": "oms16_stiftelse_brodin_stipendiefond.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "OMS-16",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/490"
+  },
+  "description": "Stadgar för en stipendiefond för studerande unga från kommunen.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Kommunstyrelsekontoret, Stiftelseförvaltningen",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2025-11-20",
+  "diarienummer": "KS-2025-00980",
+  "title": "Stiftelseförordnande: Anna-Lisa Brodins stipendiefond",
+  "blocks": [
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Värde"
+        ],
+        "rows": [
+          [
+            "Stiftelse",
+            "Anna-Lisa Brodins stipendiefond"
+          ],
+          [
+            "Organisationsnummer",
+            "802012-7719"
+          ],
+          [
+            "Förvaltare",
+            "Sundsvalls kommun genom kommunstyrelsen"
+          ],
+          [
+            "Ursprung",
+            "Testamente av folkskollärarinnan Anna-Lisa Brodin, daterat 1987-09-14"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Ändamål enligt förordnandet"
+    },
+    {
+      "paragraph": "Avkastningen ska användas till stipendier åt studerande ungdomar från Sundsvall, i första hand till studier inom vård, omsorg och undervisning."
+    },
+    {
+      "heading": "Villkor för utdelning"
+    },
+    {
+      "list": [
+        "Sökanden är högst 25 år.",
+        "Sökanden bedriver studier på gymnasie- eller högskolenivå, styrkt med intyg.",
+        "Sökanden är uppvuxen i eller folkbokförd i Sundsvalls kommun."
+      ]
+    },
+    {
+      "heading": "Utdelning"
+    },
+    {
+      "paragraph": "Stipendiet är 4 000 kr per person och år."
+    },
+    {
+      "heading": "Ansökan"
+    },
+    {
+      "paragraph": "Ansökningsperiod: 1 april – 15 maj."
+    },
+    {
+      "paragraph": "Stiftelsen förvaltas enligt stiftelselagen (1994:1220) och förordnandet. Beslut om utdelning fattas av kommunstyrelsens stiftelseutskott. Den som har fått avslag kan ansöka på nytt nästa ansökningsperiod."
+    }
+  ]
+}

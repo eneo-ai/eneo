@@ -1,0 +1,149 @@
+{
+  "file": "kop07_register_sundsvallsforslag.json",
+  "format": "json",
+  "source": {
+    "catalogue_id": "KOP-07",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/547"
+  },
+  "description": "Export ur Sundsvallsförslagets förslagsregister för två områden: tio tidigare förslag med status, röster och nämndbeslut, bland dem en dubblett behandlad inom tolv månader, en äldre liknande och flera som bara liknar.",
+  "data": {
+    "export": {
+      "system": "Sundsvallsförslaget, förslagsregister",
+      "exporterad": "2026-09-22",
+      "urval": "Förslag inkomna från 2024-01-01 inom områdena Parker, natur och friluftsliv samt Trafik och gator, utom förslag som avvisats",
+      "troskel_roster": 100
+    },
+    "forslag": [
+      {
+        "id": "SF-2024-093",
+        "rubrik": "Hundrastgård på Norra Stadsberget",
+        "inkom": "2024-03-11",
+        "omrade": "Parker, natur och friluftsliv",
+        "status": "Behandlat",
+        "roster": 212,
+        "handlaggande_namnd": "Samhällsbyggnadsnämnden",
+        "beslut": {
+          "datum": "2024-10-15",
+          "paragraf": "§ 142",
+          "utfall": "Bifall",
+          "motivering": "En hundrastgård anläggs vid Norra Stadsbergets friluftsområde under 2025."
+        },
+        "sammanfattning": "Förslag om en inhägnad hundrastgård vid Norra Stadsberget."
+      },
+      {
+        "id": "SF-2024-120",
+        "rubrik": "Farthinder på Nackstavägen vid förskolan",
+        "inkom": "2024-05-02",
+        "omrade": "Trafik och gator",
+        "status": "Behandlat",
+        "roster": 131,
+        "handlaggande_namnd": "Samhällsbyggnadsnämnden",
+        "beslut": {
+          "datum": "2025-02-18",
+          "paragraf": "§ 23",
+          "utfall": "Delvis bifall",
+          "motivering": "Hastigheten sänks till 30 km/h; fysiska farthinder prövas i trafikplanen."
+        },
+        "sammanfattning": "Förslag om farthinder och sänkt hastighet på Nackstavägen."
+      },
+      {
+        "id": "SF-2025-012",
+        "rubrik": "Fler bänkar längs Selångersån",
+        "inkom": "2025-01-20",
+        "omrade": "Parker, natur och friluftsliv",
+        "status": "Avslutat, under tröskeln",
+        "roster": 37,
+        "handlaggande_namnd": null,
+        "beslut": null,
+        "sammanfattning": "Förslag om fler sittplatser längs promenadstråket vid Selångersån."
+      },
+      {
+        "id": "SF-2025-047",
+        "rubrik": "Hundrastgård i Nackstaparken",
+        "inkom": "2025-03-04",
+        "omrade": "Parker, natur och friluftsliv",
+        "status": "Behandlat",
+        "roster": 164,
+        "handlaggande_namnd": "Samhällsbyggnadsnämnden",
+        "beslut": {
+          "datum": "2025-11-18",
+          "paragraf": "§ 187",
+          "utfall": "Avslag",
+          "motivering": "En inhägnad hundrastgård ingår i planeringen för upprustningen av Nackstaparken, som påbörjas 2027. Nämnden avslår därför förslaget om en separat hundrastgård nu."
+        },
+        "sammanfattning": "Förslag om en inhägnad hundrastgård med bänkar och belysning i parken i Nacksta."
+      },
+      {
+        "id": "SF-2025-066",
+        "rubrik": "Belysning på gångvägen mellan Nacksta och Sidsjön",
+        "inkom": "2025-04-14",
+        "omrade": "Trafik och gator",
+        "status": "Behandlat",
+        "roster": 118,
+        "handlaggande_namnd": "Samhällsbyggnadsnämnden",
+        "beslut": {
+          "datum": "2026-02-17",
+          "paragraf": "§ 21",
+          "utfall": "Bifall",
+          "motivering": "Belysning sätts upp under 2026."
+        },
+        "sammanfattning": "Förslag om belysning på den oupplysta gångvägen mellan Nacksta och Sidsjön."
+      },
+      {
+        "id": "SF-2025-081",
+        "rubrik": "Hundbad vid Sidsjön",
+        "inkom": "2025-06-02",
+        "omrade": "Parker, natur och friluftsliv",
+        "status": "Avslutat, under tröskeln",
+        "roster": 58,
+        "handlaggande_namnd": null,
+        "beslut": null,
+        "sammanfattning": "Förslag om en anvisad badplats för hundar vid Sidsjön."
+      },
+      {
+        "id": "SF-2026-019",
+        "rubrik": "Ny lekplats i Haga",
+        "inkom": "2026-01-15",
+        "omrade": "Parker, natur och friluftsliv",
+        "status": "Avslutat, under tröskeln",
+        "roster": 44,
+        "handlaggande_namnd": null,
+        "beslut": null,
+        "sammanfattning": "Förslag om en lekplats för mindre barn i Haga."
+      },
+      {
+        "id": "SF-2026-054",
+        "rubrik": "Utegym i Nackstaparken",
+        "inkom": "2026-04-08",
+        "omrade": "Parker, natur och friluftsliv",
+        "status": "Publicerat, röstning pågår till 2026-10-31",
+        "roster": 71,
+        "handlaggande_namnd": null,
+        "beslut": null,
+        "sammanfattning": "Förslag om ett utegym med räckstänger och bänkar i Nackstaparken."
+      },
+      {
+        "id": "SF-2026-087",
+        "rubrik": "Hundrastgård i Bredsand",
+        "inkom": "2026-06-19",
+        "omrade": "Parker, natur och friluftsliv",
+        "status": "Publicerat, röstning pågår till 2026-12-15",
+        "roster": 26,
+        "handlaggande_namnd": null,
+        "beslut": null,
+        "sammanfattning": "Förslag om en inhägnad hundrastgård nära badplatsen i Bredsand."
+      },
+      {
+        "id": "SF-2026-102",
+        "rubrik": "Fler hundlatriner och papperskorgar i Nacksta",
+        "inkom": "2026-08-11",
+        "omrade": "Parker, natur och friluftsliv",
+        "status": "Publicerat, röstning pågår till 2026-11-15",
+        "roster": 39,
+        "handlaggande_namnd": null,
+        "beslut": null,
+        "sammanfattning": "Förslag om fler hundlatriner och papperskorgar längs gångvägarna i Nacksta."
+      }
+    ]
+  }
+}

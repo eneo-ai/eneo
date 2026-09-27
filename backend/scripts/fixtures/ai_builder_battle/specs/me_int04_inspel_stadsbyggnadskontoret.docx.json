@@ -1,0 +1,17 @@
+{
+  "file": "me_int04_inspel_stadsbyggnadskontoret.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "INT-04", "url": "https://www.regeringen.se/contentassets/ee59c69b63014c19a08b0e8ca47334b2/svara-pa-remiss-pm2021_1-rev-2026.pdf"},
+  "description": "En förvaltnings korta inspel till kommunens remissvar som bara berör ett avsnitt och uttryckligen avstår från övriga.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Stadsbyggnadskontoret, översiktsplanering", "address": "851 85 Sundsvall"},
+  "date": "2026-10-02",
+  "diarienummer": "SBN-2026-00904",
+  "title": "Synpunkter på SOU 2026:47 inför kommunens remissvar",
+  "blocks": [
+    {"heading": "Avsnitt 6.2"},
+    {"paragraph": "Stadsbyggnadskontoret tillstyrker med synpunkter. Vattenförsörjningsplanen bör tas fram samtidigt med nästa aktualitetsprövning av översiktsplanen 2027 så att reservvattentäkter och skyddsbehov kan säkras i planeringen. Tidsgränsen 2029 är rimlig om planen får göras som ett tematiskt tillägg till översiktsplanen."},
+    {"heading": "Övriga avsnitt"},
+    {"paragraph": "Stadsbyggnadskontoret har inga synpunkter på avsnitt 7.4, 8.3 och 10.1."},
+    {"signature": {"name": "Jonas Berglöf", "role": "Planchef"}}
+  ]
+}

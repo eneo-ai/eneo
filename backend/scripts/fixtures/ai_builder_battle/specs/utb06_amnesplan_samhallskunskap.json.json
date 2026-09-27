@@ -1,0 +1,75 @@
+{
+  "file": "utb06_amnesplan_samhallskunskap.json",
+  "format": "json",
+  "source": {"catalogue_id": "UTB-06", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/644"},
+  "description": "Utdrag i JSON ur Skolverkets ämnesplan i samhällskunskap för komvux på gymnasial nivå (Gy25) med nivåer, poäng och centralt innehåll per område, som handläggaren hämtar via Skolverkets API.",
+  "data": {
+    "kalla": "Skolverket, ämnesplaner för komvux på gymnasial nivå (Gy25), syllabus-API",
+    "hamtad": "2026-09-02",
+    "amne": {
+      "namn": "Samhällskunskap",
+      "skolform": "Kommunal vuxenutbildning på gymnasial nivå",
+      "galler_utbildning_som_paborjas_efter": "2025-06-30",
+      "betygssattning": "Ämnesbetyg; en elev som läser flera nivåer får ett betyg i ämnet",
+      "nivaer": [
+        {
+          "namn": "Samhällskunskap nivå 1a1",
+          "kod": "SAMH1A10X",
+          "poang": 50,
+          "bygger_pa": "Grundläggande kunskaper motsvarande grundskolan"
+        },
+        {
+          "namn": "Samhällskunskap nivå 1a2",
+          "kod": "SAMH1A20X",
+          "poang": 50,
+          "bygger_pa": "Samhällskunskap nivå 1a1"
+        },
+        {
+          "namn": "Samhällskunskap nivå 1b",
+          "kod": "SAMH1B00X",
+          "poang": 100,
+          "bygger_pa": "Grundläggande kunskaper motsvarande grundskolan; motsvarar nivå 1a1 och 1a2 tillsammans",
+          "centralt_innehall": [
+            {
+              "omrade": "Inflytande och beslutsfattande",
+              "punkter": [
+                {"id": "1b-1", "text": "Demokrati som samhällsidé, demokratibärande samhällsinstitutioner och hur de skyddas, samt auktoritära styrelseskick."},
+                {"id": "1b-2", "text": "Folkrätt, svensk utrikes- och säkerhetspolitik och Natos roll."},
+                {"id": "1b-3", "text": "Fri- och rättigheter, skyldigheter och mänskliga rättigheter i demokratier."},
+                {"id": "1b-4", "text": "Politiska system på lokal och nationell nivå i Sverige och på EU-nivå."},
+                {"id": "1b-5", "text": "Svenska politiska partiers historia och ideologiska skiljelinjer."},
+                {"id": "1b-6", "text": "Mediers roll i samhället och granskning av nyheter och information i digitala miljöer."}
+              ]
+            },
+            {
+              "omrade": "Ekonomi och resursfördelning",
+              "punkter": [
+                {"id": "1b-7", "text": "Samhällsekonomiska strukturer, tillväxt, konjunkturer, ekonomisk politik och välfärdsfrågor."},
+                {"id": "1b-8", "text": "Privatekonomi: inkomster, utgifter, betalningar, sparande, försäkringar och lån."}
+              ]
+            },
+            {
+              "omrade": "Individer, grupper och sociala strukturer",
+              "punkter": [
+                {"id": "1b-9", "text": "Identitet, relationer och sociala levnadsvillkor, bland annat hur kön och socioekonomisk bakgrund påverkar dem."}
+              ]
+            },
+            {
+              "omrade": "Samhällsvetenskapliga perspektiv och arbetsmetoder",
+              "punkter": [
+                {"id": "1b-10", "text": "Begrepp, teorier och modeller för att analysera samhällsfrågor."},
+                {"id": "1b-11", "text": "Samhällsvetenskapliga metoder, källkritik och värdering av information."}
+              ]
+            }
+          ]
+        },
+        {
+          "namn": "Samhällskunskap nivå 2",
+          "kod": "SAMH2000X",
+          "poang": 100,
+          "bygger_pa": "Samhällskunskap nivå 1b eller nivå 1a2"
+        }
+      ]
+    }
+  }
+}

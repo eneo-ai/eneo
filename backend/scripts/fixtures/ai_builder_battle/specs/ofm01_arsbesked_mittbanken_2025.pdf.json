@@ -1,0 +1,114 @@
+{
+  "file": "ofm01_arsbesked_mittbanken_2025.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "OFM-01",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/242"
+  },
+  "description": "Bankens årsbesked och kontosammanställning per 2025-12-31 för huvudmannens två konton, med spärrmarkering, ränta och sparkontots transaktioner där uttaget i juni syns.",
+  "letterhead": {
+    "organisation": "Mittbanken",
+    "unit": "Kontor Sundsvall",
+    "address": "Storgatan 21, 852 30 Sundsvall"
+  },
+  "date": "2026-01-12",
+  "title": "Årsbesked och kontosammanställning per 2025-12-31",
+  "blocks": [
+    {
+      "paragraph": "Kontohavare: Gunnel Marklund, 19380104-9267, c/o Lennart Byström (god man), Bergsgatan 44, 852 32 Sundsvall"
+    },
+    {
+      "table": {
+        "columns": [
+          "Konto",
+          "Kontonummer",
+          "Saldo 2025-01-01 (kr)",
+          "Saldo 2025-12-31 (kr)",
+          "Spärr"
+        ],
+        "rows": [
+          [
+            "Privatkonto",
+            "9563 214 558 107-3",
+            "8 412,35",
+            "35 733,35",
+            "Nej"
+          ],
+          [
+            "Sparkonto",
+            "9563 214 558 226-1",
+            "96 540,00",
+            "83 253,00",
+            "Ja, överförmyndarspärr"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Ränta 2025"
+    },
+    {
+      "table": {
+        "columns": [
+          "Räntekonto",
+          "Ränta brutto (kr)",
+          "Avdragen preliminärskatt (kr)",
+          "Insatt ränta (kr)"
+        ],
+        "rows": [
+          [
+            "Sparkonto 9563 214 558 226-1",
+            "1 733,00",
+            "520,00",
+            "1 213,00"
+          ]
+        ]
+      }
+    },
+    {
+      "paragraph": "Räntan och den avdragna skatten har rapporterats till Skatteverket som kontrolluppgift."
+    },
+    {
+      "heading": "Transaktioner på sparkontot 2025"
+    },
+    {
+      "table": {
+        "columns": [
+          "Datum",
+          "Transaktion på sparkontot",
+          "Belopp (kr)",
+          "Saldo efter transaktion (kr)"
+        ],
+        "rows": [
+          [
+            "2025-01-01",
+            "Ingående saldo",
+            "0,00",
+            "96 540,00"
+          ],
+          [
+            "2025-06-12",
+            "Överföring till privatkonto 9563 214 558 107-3",
+            "-14 500,00",
+            "82 040,00"
+          ],
+          [
+            "2025-12-31",
+            "Årsränta efter skatt",
+            "1 213,00",
+            "83 253,00"
+          ]
+        ]
+      }
+    },
+    {
+      "paragraph": "Uttag från ett konto med överförmyndarspärr kräver överförmyndarens skriftliga samtycke. Frågor om spärren besvaras av överförmyndaren."
+    },
+    {
+      "signature": {
+        "name": "Mittbanken",
+        "role": "Kontor Sundsvall"
+      }
+    }
+  ]
+}

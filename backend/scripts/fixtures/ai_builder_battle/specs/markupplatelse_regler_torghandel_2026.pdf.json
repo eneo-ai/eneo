@@ -1,0 +1,51 @@
+{
+  "file": "markupplatelse_regler_torghandel_2026.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-19", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/688"},
+  "description": "Kommunens regler och taxa för upplåtelse av torgplats 2026 på Stora torget och Navet: zoner, största yta, fordon, el, livsmedel, gasol, standardvillkor och avgifter per kvadratmeter och dag.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Stadsbyggnadskontoret – Mark och exploatering", "address": "Stadsbyggnadskontoret, 851 85 Sundsvall · stadsbyggnadsnamnden@sundsvall.se"},
+  "date": "2026-01-01",
+  "diarienummer": "SBN-2025-01977",
+  "title": "Regler och taxa för upplåtelse av torgplats 2026 – Stora torget och Navet",
+  "blocks": [
+    {"heading": "1. Allmänt"},
+    {"paragraph": "Torgplatser på Stora torget och Navet upplåts av Mark och exploatering på delegation från Stadsbyggnadsnämnden. Upplåtelsen gäller för en namngiven sökande, en plats och en period och får inte överlåtas. Den som får en torgplats ska följa dessa regler, kommunens lokala ordningsföreskrifter och villkoren i beslutet."},
+    {"heading": "2. Zoner och största yta"},
+    {"table": {
+      "columns": ["Zon", "Område", "Platser", "Största yta per plats"],
+      "rows": [
+        ["A", "Stora torget", "A1–A12", "20 m²"],
+        ["B", "Navet och Esplanaden", "B1–B8", "30 m²"]
+      ]
+    }},
+    {"paragraph": "Största ytan omfattar allt som står på platsen: vagn, stånd, bord, stolar, skyltar och gasol. Ansöker någon om större yta än zonen medger upplåts högst den största ytan."},
+    {"heading": "3. Fordon"},
+    {"paragraph": "Fordon och släpvagnar med en totalvikt på högst 3 500 kg får stå på en torgplats i zon A och B. Under julmarknaden 2026-11-27 – 2026-12-20 får försäljningsvagnar stå kvar dygnet runt. Under övrig tid ska fordon flyttas från torget mellan kl. 01.00 och 06.00."},
+    {"heading": "4. El, livsmedel och gasol"},
+    {"list": [
+      "El finns i elstolpar vid platserna A5–A9 och B2–B4. Anslutning beställs i ansökan och debiteras per dag.",
+      "Den som säljer livsmedel ska vara registrerad hos en kontrollmyndighet och kunna visa registreringsbeslutet på begäran.",
+      "Gasol får användas i högst två flaskor om högst 11 kg vardera. Hanteringen ska följa de föreskrifter som Myndigheten för civilt försvar (MCF) har meddelat om brandfarlig gas i lös behållare. En brandsläckare om minst 6 kg pulver ska finnas vid platsen."
+    ]},
+    {"heading": "5. Standardvillkor"},
+    {"list": [
+      "Platsen ska hållas ren och städas varje dag efter stängning. Avfall tas om hand av den som har platsen.",
+      "Markbeläggningen får inte skadas. Skador återställs på innehavarens bekostnad.",
+      "Fri passage om minst 3 m ska finnas framför butiksentréer och för utryckningsfordon.",
+      "Upplåtelsen kan återkallas om villkoren inte följs eller om platsen behövs för ett evenemang som kommunen beslutat om."
+    ]},
+    {"heading": "6. Taxa 2026"},
+    {"paragraph": "Taxan är antagen av kommunfullmäktige med stöd av lagen (1957:259) om rätt för kommun att ta ut avgift för vissa upplåtelser av offentlig plats, m.m. Avgiften beräknas på den upplåtna ytan och det antal dagar platsen är upplåten, inklusive dagar då försäljning inte sker."},
+    {"table": {
+      "columns": ["Avgiftsslag", "Zon A", "Zon B"],
+      "rows": [
+        ["Dagupplåtelse, kr per m² och dag", "14 kr", "8 kr"],
+        ["Säsongsupplåtelse, minst 14 dagar i följd, kr per m² och dag", "9 kr", "5 kr"],
+        ["Elanslutning 16 A, kr per dag", "55 kr", "55 kr"],
+        ["Elanslutning 10 A, kr per dag", "35 kr", "35 kr"]
+      ]
+    }},
+    {"paragraph": "Avgiften faktureras i förskott och ska vara betald innan platsen tas i bruk. Avgiften återbetalas inte om platsen inte används."},
+    {"paragraph": "Reglerna är antagna av Stadsbyggnadsnämnden 2025-11-26 och taxan av kommunfullmäktige 2025-11-24. Båda gäller från 2026-01-01."}
+  ]
+}

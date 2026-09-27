@@ -1,0 +1,39 @@
+{
+  "file": "mil06_kemikalieforteckning.xlsx",
+  "format": "xlsx",
+  "source": {"catalogue_id": "MIL-06", "url": "https://sjalvservice.malmo.se/oversikt/overview/529"},
+  "description": "Verksamhetens kemikalieförteckning enligt miljöförvaltningens mall, med ett blad för kemiska produkter (faroangivelser, förvaring, mängder, invallning) och ett blad för farligt avfall.",
+  "sheets": [
+    {
+      "name": "Kemiska produkter",
+      "columns": ["Produktnamn", "Leverantör", "Användning", "Faroangivelser", "Förvaringsplats", "Förpackning", "Max lagrad mängd (l eller kg)", "Förbrukning per år (l eller kg)", "Invallad", "SDB daterat"],
+      "rows": [
+        ["Kemtvätt Alka 40", "Nordkem AB", "Avfettning i spolbås", "H290, H314", "Hall 2, vid spolbåset", "IBC-behållare 1000 l", 600, 2400, "Nej", "2024-03-11"],
+        ["ZC-Primer 410 komp A", "Färgcentrum Syd AB", "Rostskyddsgrund på blästrade ramar", "H226, H317, H350, H410", "Färgförråd", "Burk 20 l", 60, 240, "Ja", "2019-05-02"],
+        ["ZC-Primer 410 komp B (härdare)", "Färgcentrum Syd AB", "Härdare till rostskyddsgrund", "H226, H315, H317, H412", "Färgförråd", "Burk 5 l", 15, 60, "Ja", "2019-05-02"],
+        ["Xylensoft T", "Färgcentrum Syd AB", "Förtunning och rengöring av sprututrustning", "H226, H304, H312, H332, H373", "Hall 1, verkstad", "Fat 200 l", 200, 600, "Nej", "2023-10-01"],
+        ["Epoxifärg EP-Top", "Färgcentrum Syd AB", "Täckfärg", "H315, H317, H319, H411", "Färgförråd", "Burk 20 l", 20, 480, "Ja", "2025-01-15"],
+        ["PU-lack 2K härdare", "Färgcentrum Syd AB", "Härdare till täcklack", "H317, H332, H334, H335", "Färgförråd", "Burk 5 l", 20, 90, "Ja", "2022-08-30"],
+        ["Motorolja 10W-40", "Oljeservice Syd AB", "Service", "H412", "Hall 1, verkstad", "Fat 208 l", 208, 416, "Nej", "2025-06-02"],
+        ["Hydraulolja HV 46", "Oljeservice Syd AB", "Service, hydraulik på tippflak", "Ej klassificerad", "Hall 1, verkstad", "Fat 208 l", 416, 624, "Nej", "2024-11-20"],
+        ["Kylarvätska Glykol Plus", "Nordkem AB", "Service", "H302, H373", "Hall 1, verkstad", "Dunk 25 l", 50, 100, "Nej", "2023-02-14"],
+        ["Hålrumsvax HV-12", "Nordkem AB", "Korrosionsskydd", "H222, H229, H411", "Färgförråd", "Sprayburk 0,5 l", 24, 120, "Ja", "2025-04-07"],
+        ["Isopropanol 99 %", "Nordkem AB", "Avfettning före lackering", "H225, H319, H336", "Färgförråd", "Dunk 10 l", 10, 60, "Ja", "2024-09-09"],
+        ["Blästermedel Garnet 80", "Skånsk Blästermedel AB", "Blästring", "Ej klassificerad", "Förråd vid blästerkabinen", "Säck 25 kg", 2000, 9000, "Ej aktuellt", "2021-05-18"],
+        ["Handrengöring Orange", "Nordkem AB", "Handtvätt", "Ej klassificerad", "Hall 1 och hall 2", "Flaska 4 l", 12, 60, "Ej aktuellt", "2025-02-01"]
+      ]
+    },
+    {
+      "name": "Farligt avfall",
+      "columns": ["Avfallsslag", "Avfallskod", "Mängd per år", "Max lagrad mängd", "Förvaring", "Invallat", "Under tak", "Transportör"],
+      "rows": [
+        ["Spillolja", "13 02 05*", "800 l", "400 l", "Tank 400 l i hall 1", "Nej", "Ja", "Oljeservice Syd AB"],
+        ["Blästeravfall med farliga ämnen", "12 01 16*", "3 ton", "1 ton", "Öppen container på gården", "Nej", "Nej", "Skåne Miljötransporter AB"],
+        ["Slam från oljeavskiljare", "13 05 02*", "1,5 m³", "–", "I oljeavskiljaren", "Ej aktuellt", "Ej aktuellt", "Skåne Miljötransporter AB"],
+        ["Färg- och lackavfall", "08 01 11*", "400 kg", "100 kg", "Förråd för farligt avfall", "Ja", "Ja", "Skåne Miljötransporter AB"],
+        ["Använd förtunning", "14 06 03*", "150 l", "60 l", "Dunkar i färgförrådet", "Ja", "Ja", "Skåne Miljötransporter AB"],
+        ["Absorbenter och trasor med olja", "15 02 02*", "150 kg", "50 kg", "Tunna i förråd för farligt avfall", "Ja", "Ja", "Skåne Miljötransporter AB"]
+      ]
+    }
+  ]
+}

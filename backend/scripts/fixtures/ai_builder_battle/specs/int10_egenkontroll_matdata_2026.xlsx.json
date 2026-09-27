@@ -1,0 +1,55 @@
+{
+  "file": "int10_egenkontroll_matdata_2026.xlsx",
+  "format": "xlsx",
+  "source": {"catalogue_id": "INT-10", "url": "https://sjalvservice.malmo.se/oversikt/overview/529"},
+  "description": "Miljöinspektörens tillsynsunderlag i Excel för första halvåret 2026: verksamhetsutövarens redovisade bullermätningar, dagvattenprover och driftjournal, samt klagomål från närboende som kommit in till miljökontoret.",
+  "sheets": [
+    {
+      "name": "Buller",
+      "columns": ["Datum", "Mätpunkt", "Plats", "Tid", "LAeq dB(A)", "Vind m/s", "Mätt av", "Kommentar"],
+      "rows": [
+        ["2026-03-18", "MP1", "Tunadalsvägen 40, närmaste bostad", "09.10–09.40", 47, 2.1, "Ljudbolaget Norr AB", "–"],
+        ["2026-03-18", "MP2", "Tunadalsvägen 62, bostad mot kajen", "09.50–10.20", 48, 2.4, "Ljudbolaget Norr AB", "–"],
+        ["2026-04-22", "MP1", "Tunadalsvägen 40, närmaste bostad", "13.05–13.35", 49, 6.2, "Ljudbolaget Norr AB", "Ogiltig, vind över 5 m/s. Mäts om."],
+        ["2026-04-22", "MP2", "Tunadalsvägen 62, bostad mot kajen", "13.45–14.15", 58, 6.8, "Ljudbolaget Norr AB", "Ogiltig, vind över 5 m/s. Mäts om."],
+        ["2026-05-05", "MP1", "Tunadalsvägen 40, närmaste bostad", "10.00–10.30", 49, 3.0, "Ljudbolaget Norr AB", "Omätning efter 22 april"],
+        ["2026-05-05", "MP2", "Tunadalsvägen 62, bostad mot kajen", "10.40–11.10", 53, 3.2, "Ljudbolaget Norr AB", "Omätning efter 22 april. Två krossar i drift."],
+        ["2026-06-09", "MP1", "Tunadalsvägen 40, närmaste bostad", "14.00–14.30", 48, 1.8, "Ljudbolaget Norr AB", "–"],
+        ["2026-06-09", "MP2", "Tunadalsvägen 62, bostad mot kajen", "14.40–15.10", 52, 2.0, "Ljudbolaget Norr AB", "–"]
+      ]
+    },
+    {
+      "name": "Dagvatten",
+      "columns": ["Provdatum", "Provpunkt", "Oljeindex mg/l", "Suspenderade ämnen mg/l", "Zink µg/l", "Koppar µg/l", "Bly µg/l", "Laboratorium"],
+      "rows": [
+        ["2026-03-24", "Utlopp oljeavskiljare", 0.8, 22, 95, 12, 2.1, "Mittlab Jord & Vatten AB"],
+        ["2026-06-10", "Utlopp oljeavskiljare", 7.8, 42, 210, 18, 3.0, "Mittlab Jord & Vatten AB"]
+      ]
+    },
+    {
+      "name": "Driftjournal",
+      "columns": ["Datum", "Veckodag", "Krossning start", "Krossning slut", "Krossad mängd ton", "Anteckning"],
+      "rows": [
+        ["2026-05-04", "Måndag", "07:00", "16:30", 610, "–"],
+        ["2026-05-05", "Tisdag", "07:00", "16:45", 640, "Två krossar i drift för Kajvägsprojektet"],
+        ["2026-05-06", "Onsdag", "07:00", "16:30", 590, "–"],
+        ["2026-05-07", "Torsdag", "07:15", "16:30", 570, "–"],
+        ["2026-05-08", "Fredag", "07:00", "15:00", 420, "–"],
+        ["2026-05-16", "Lördag", "08:00", "14:30", 380, "Extra körning för att hinna leverera till Kajvägsprojektet"],
+        ["2026-06-01", "Måndag", "07:00", "16:30", 600, "–"],
+        ["2026-06-02", "Tisdag", "06:15", "16:40", 680, "Tidig start, leverans kl. 07"],
+        ["2026-06-03", "Onsdag", "07:00", "16:30", 610, "–"],
+        ["2026-06-09", "Tisdag", "07:00", "16:30", 620, "–"],
+        ["2026-06-10", "Onsdag", "07:00", "16:00", 560, "Oljespill vid tankning av krossen, sanerat med absorbent"]
+      ]
+    },
+    {
+      "name": "Klagomål till miljökontoret",
+      "columns": ["Datum", "Klagande", "Adress", "Klagomål", "Hantering"],
+      "rows": [
+        ["2026-05-16", "Gunnel Åberg", "Tunadalsvägen 44", "Buller och damm från krossen på lördagsförmiddagen", "Klaganden vill inte att namnet lämnas till företaget"],
+        ["2026-06-02", "Gunnel Åberg", "Tunadalsvägen 44", "Krossen startade före sju på morgonen", "Noterat inför tillsynen"]
+      ]
+    }
+  ]
+}

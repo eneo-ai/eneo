@@ -1,0 +1,79 @@
+{
+  "file": "oms12_bostadstillagg_beslut_2026.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "OMS-12",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/625"
+  },
+  "description": "Pensionsmyndighetens beslut om ändrat bostadstillägg från april 2026 efter hyreshöjning, med nytt och tidigare månadsbelopp och den bostadskostnad beslutet bygger på.",
+  "letterhead": {
+    "organisation": "Pensionsmyndigheten",
+    "unit": "Beslut om bostadstillägg"
+  },
+  "date": "2026-03-18",
+  "title": "Beslut om bostadstillägg",
+  "blocks": [
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Värde"
+        ],
+        "rows": [
+          [
+            "Beslutet gäller",
+            "Gunnel Åkerlund, 19450430-2383"
+          ],
+          [
+            "Ärendenummer",
+            "BTP-2026-0331-7741"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Beslut"
+    },
+    {
+      "paragraph": "Du får bostadstillägg med 3 915 kr per månad från och med april 2026. Tidigare fick du 3 640 kr per månad."
+    },
+    {
+      "heading": "Skäl för beslutet"
+    },
+    {
+      "paragraph": "Du har meddelat att hyran har höjts. Vi har räknat om ditt bostadstillägg med den nya bostadskostnaden."
+    },
+    {
+      "table": {
+        "columns": [
+          "Beräkningsunderlag",
+          "Belopp"
+        ],
+        "rows": [
+          [
+            "Bostadskostnad per månad (hyra)",
+            "7 480 kr"
+          ],
+          [
+            "Tidigare bostadskostnad per månad",
+            "7 150 kr"
+          ],
+          [
+            "Inkomster per år som ingår i beräkningen",
+            "162 192 kr"
+          ],
+          [
+            "Förmögenhet",
+            "Under fribeloppet"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Om du inte är nöjd med beslutet"
+    },
+    {
+      "paragraph": "Du kan begära omprövning av beslutet. Begäran ska ha kommit in till Pensionsmyndigheten inom två månader från den dag du fick del av beslutet."
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "file": "byg20_offert_oresunds_badrum.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-20", "url": "https://sjalvservice.malmo.se/oversikt/overview/1202"},
+  "description": "Offert på samma två åtgärder med lägre summa men priser exklusive moms, vilket bara framgår av en fotnot.",
+  "letterhead": {"organisation": "Öresunds Badrumsteknik AB", "unit": "Offert", "address": "Industrigatan 9, 212 14 Malmö · org.nr 556981-2036"},
+  "date": "2026-08-22",
+  "title": "Offert – anpassning av badrum och hall, Kastanjegatan 12 B",
+  "blocks": [
+    {"paragraph": "Kund: Birgitta Jönsson, Kastanjegatan 12 B, lgh 1102, Malmö. Referens: bostadsanpassning."},
+    {"table": {"columns": ["Pos", "Moment", "Belopp"], "rows": [["1", "Badrum: rivning av badkar, golvbrunn, fall, tätskikt, plattsättning, duschväggar och stödhandtag, VVS", "64 900 kr"], ["2", "Hall: borttagning av två trösklar och nya lister", "5 800 kr"], ["", "Summa", "70 700 kr"]]}},
+    {"paragraph": "Betalning 30 dagar netto. Material enligt bifogad materiallista. Offerten gäller 30 dagar."},
+    {"paragraph": "* Samtliga priser ovan är exklusive mervärdesskatt. Moms tillkommer med 25 %."},
+    {"signature": {"name": "Ahmed Rahimi", "role": "Öresunds Badrumsteknik AB"}}
+  ]
+}

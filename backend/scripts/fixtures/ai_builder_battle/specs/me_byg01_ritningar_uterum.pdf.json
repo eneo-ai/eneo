@@ -1,0 +1,55 @@
+{
+  "file": "me_byg01_ritningar_uterum.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/443"},
+  "description": "Bygglovsritningar för tillbyggnad (situationsplan, plan, fasader, sektion) med ritningshuvud och måttuppgifter som text; avståndet till fastighetsgränsen och ett befintligt förråd syns bara här.",
+  "letterhead": {"organisation": "Ritkontoret Norr AB", "unit": "Bygglovshandlingar", "address": "Köpmangatan 12, 852 31 Sundsvall"},
+  "date": "2026-08-20",
+  "title": "Tillbyggnad uterum – Kvarnbäcken 4:27, Björnvägen 9",
+  "blocks": [
+    {"heading": "A-01 Situationsplan 1:500"},
+    {"paragraph": "Baserad på nybyggnadskarta från Sundsvalls kommun, beställd 2026-06-12. Koordinatsystem SWEREF 99 16 30, höjdsystem RH 2000. Tillbyggnaden redovisas med röd skraffering."},
+    {
+      "table": {
+        "columns": ["Måttsättning", "Mått"],
+        "rows": [
+          ["Befintligt bostadshus till fastighetsgräns mot gata (Björnvägen, söder)", "7,2 m"],
+          ["Befintligt bostadshus till fastighetsgräns mot Kvarnbäcken 4:26 (norr)", "5,8 m"],
+          ["Tillbyggnad (uterum) till fastighetsgräns mot Kvarnbäcken 4:28 (öster)", "3,2 m"],
+          ["Befintligt förråd, 12,0 m² byggnadsarea, till fastighetsgräns mot Kvarnbäcken 4:28", "1,5 m"],
+          ["Tillbyggnad till prickmarkerad mark mot gata", "Tillbyggnaden ligger utanför prickmarken"]
+        ]
+      }
+    },
+    {"page_break": true},
+    {"heading": "A-02 Planritning 1:100"},
+    {"paragraph": "Uterum 4,5 × 4,0 m, byggnadsarea och bruttoarea 18,0 m². Golvnivå +0,15 m över befintligt golv i vardagsrummet. Nytt öppningsbart glasparti mellan vardagsrum och uterum."},
+    {"heading": "A-03 Fasadritningar 1:100"},
+    {
+      "table": {
+        "columns": ["Fasad", "Uppgift"],
+        "rows": [
+          ["Fasad mot öster", "Nockhöjd uterum +3,4 m över medelmarknivå. Nockhöjd befintligt bostadshus +6,1 m."],
+          ["Fasad mot söder", "Glasparti i hela fasaden, takfot +2,3 m."],
+          ["Fasad mot norr", "Stående träpanel NCS S 1002-Y, som befintligt."]
+        ]
+      }
+    },
+    {"page_break": true},
+    {"heading": "A-04 Sektion A-A 1:100"},
+    {"paragraph": "Takvinkel 27°. Platta på mark med 300 mm cellplast. Bärande stomme i limträ, glastak med härdat laminerat glas."},
+    {"heading": "Ritningsförteckning"},
+    {
+      "table": {
+        "columns": ["Ritning", "Benämning", "Skala", "Datum"],
+        "rows": [
+          ["A-01", "Situationsplan", "1:500", "2026-08-20"],
+          ["A-02", "Planritning", "1:100", "2026-08-20"],
+          ["A-03", "Fasadritningar", "1:100", "2026-08-20"],
+          ["A-04", "Sektion A-A", "1:100", "2026-08-20"]
+        ]
+      }
+    },
+    {"signature": {"name": "Oskar Lindgren", "role": "Byggnadsingenjör, Ritkontoret Norr AB"}}
+  ]
+}

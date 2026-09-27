@@ -1,0 +1,148 @@
+{
+  "file": "int04_mall_tjansteskrivelse_remiss.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-04",
+    "url": "https://www.regeringen.se/contentassets/ee59c69b63014c19a08b0e8ca47334b2/svara-pa-remiss-pm2021_1-rev-2026.pdf"
+  },
+  "description": "Kommunstyrelsekontorets Word-mall för tjänsteskrivelse med förslag till remissyttrande: fasta rubriker och innehållskontroller för diarienummer, datum, handläggare, förslag till beslut och yttrandets delar.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Kommunstyrelsekontoret",
+    "address": "851 85 Sundsvall"
+  },
+  "title": "Tjänsteskrivelse – Förslag till yttrande över remiss",
+  "blocks": [
+    {
+      "control": {
+        "kind": "text",
+        "tag": "diarienummer",
+        "label": "Diarienummer",
+        "hint": "Kommunens diarienummer, KS-ÅÅÅÅ-NNNNN"
+      }
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "datum",
+        "label": "Datum",
+        "hint": "ÅÅÅÅ-MM-DD"
+      }
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "remiss",
+        "label": "Remiss",
+        "hint": "Remissens titel, betänkandets beteckning och departementets diarienummer"
+      }
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "sista_svarsdag",
+        "label": "Sista svarsdag",
+        "hint": "Sista dag för svar enligt remissmissivet"
+      }
+    },
+    {
+      "heading": "Förslag till beslut"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "forslag_till_beslut",
+        "label": "Förslag till beslut",
+        "hint": "Kommunstyrelsen beslutar att ... Formulera beslutssatserna."
+      }
+    },
+    {
+      "heading": "Ärendet"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "arendet",
+        "label": "Ärendet",
+        "hint": "Vad remissen gäller, vem som har skickat den och vilka delar kommunen särskilt ombeds yttra sig över."
+      }
+    },
+    {
+      "heading": "Beredning"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "beredning",
+        "label": "Beredning",
+        "hint": "Vilka förvaltningar och bolag som har lämnat underlag och när."
+      }
+    },
+    {
+      "heading": "Förslag till yttrande"
+    },
+    {
+      "heading": "Sammanfattande ställningstagande"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "sammanfattande_stallningstagande",
+        "label": "Sammanfattande ställningstagande",
+        "hint": "Kommunens övergripande ställningstagande i några meningar: tillstyrker, tillstyrker med förbehåll eller avstyrker."
+      }
+    },
+    {
+      "heading": "Synpunkter per avsnitt"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "synpunkter_per_avsnitt",
+        "label": "Synpunkter per avsnitt",
+        "hint": "En underrubrik per avsnitt i betänkandet med avsnittsnummer och rubrik, kommunens ställningstagande och motivering."
+      }
+    },
+    {
+      "heading": "Skiljaktiga uppfattningar i underlaget"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "skiljaktiga_uppfattningar",
+        "label": "Skiljaktiga uppfattningar",
+        "hint": "Där förvaltningarnas eller bolagens underlag går isär: vilka som tycker vad, så att kommunstyrelsen kan ta ställning."
+      }
+    },
+    {
+      "heading": "Ekonomiska konsekvenser för kommunen"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "ekonomiska_konsekvenser",
+        "label": "Ekonomiska konsekvenser",
+        "hint": "Kostnader och ersättning för kommunen enligt förslagen, med belopp."
+      }
+    },
+    {
+      "heading": "Beslutsunderlag"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "beslutsunderlag",
+        "label": "Beslutsunderlag",
+        "hint": "Förteckning över remissen och de underlag som ärendet bygger på."
+      }
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "handlaggare",
+        "label": "Handläggare",
+        "hint": "Namn och titel på handläggaren"
+      }
+    }
+  ]
+}

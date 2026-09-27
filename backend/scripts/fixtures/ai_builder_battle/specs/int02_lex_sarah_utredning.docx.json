@@ -1,0 +1,115 @@
+{
+  "file": "int02_lex_sarah_utredning.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-02",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/93"
+  },
+  "description": "Utredning enligt lex Sarah (27 kap. 5 § socialtjänstlagen 2025:400) om en missad delegerad läkemedelsinsats i hemtjänsten, sekretessmarkerad, med brukarens identitet och hälsouppgifter.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Vård- och omsorgsförvaltningen",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-08-26",
+  "diarienummer": "VON-2026-00977-7",
+  "title": "Utredning enligt lex Sarah – missad läkemedelsinsats, hemtjänsten Matfors",
+  "blocks": [
+    {
+      "paragraph": "Sekretessmarkering: Sekretess enligt 26 kap. 1 § OSL. Markerad 2026-08-26 av registrator, vård- och omsorgsförvaltningen."
+    },
+    {
+      "heading": "Uppgifter om den enskilde"
+    },
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Innehåll"
+        ],
+        "rows": [
+          [
+            "Namn",
+            "Gunnel Ekholm"
+          ],
+          [
+            "Personnummer",
+            "19420903-9140"
+          ],
+          [
+            "Adress",
+            "Nyängsvägen 14, 864 31 Matfors"
+          ],
+          [
+            "Insatser",
+            "Hemtjänst sju besök per dygn, trygghetslarm, delegerad insulingivning morgon och kväll"
+          ],
+          [
+            "Anhörig",
+            "Anna-Karin Ekholm (dotter)"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Rapporten"
+    },
+    {
+      "paragraph": "Den 13 juli 2026 rapporterade undersköterska A enligt 27 kap. 2 § socialtjänstlagen (2025:400) att Gunnel Ekholm, som har typ 1-diabetes, inte hade fått sin kvällsdos insulin den 11 och den 12 juli. Den 13 juli på morgonen hittades hon med hypoglykemi och blodsocker 2,1 mmol/l och fördes med ambulans till Sundsvalls sjukhus, där hon vårdades i tre dygn."
+    },
+    {
+      "heading": "Utredning"
+    },
+    {
+      "paragraph": "Utredningen har gjorts av enhetschef och medicinskt ansvarig sjuksköterska. Underlaget är planeringssystemets besökslogg, signeringslistor för läkemedel, bemanningsenhetens underlag och samtal med berörd personal och med dottern."
+    },
+    {
+      "heading": "Händelseförlopp"
+    },
+    {
+      "list": [
+        "11 juli: kvällsbesöket kl. 21.00 var bemannat med en vikarie utan delegering. Insulinet skulle ges av kvällspatrullen, men uppgiften fanns inte med i patrullens lista.",
+        "12 juli: kvällspasset var obemannat. Besöket gjordes kl. 22.40 av nattpatrullen som endast gav tillsyn.",
+        "13 juli kl. 07.35: morgonpersonalen hittade Gunnel Ekholm förvirrad och kallsvettig och larmade 112."
+      ]
+    },
+    {
+      "heading": "Orsaker"
+    },
+    {
+      "list": [
+        "Delegerade insatser flyttades inte med när besök fördes över från ordinarie grupp till kvällspatrullen.",
+        "Bemanningsenheten kunde inte tillsätta 23 procent av passen i juli, vilket gjorde att besök lades om med kort varsel.",
+        "Signeringslistan kontrollerades inte vid passbyte, trots att rutinen kräver det."
+      ]
+    },
+    {
+      "heading": "Bedömning"
+    },
+    {
+      "paragraph": "Händelsen bedöms som ett allvarligt missförhållande som har inneburit ett påtagligt hot mot den enskildes liv och hälsa. Händelsen anmäldes till IVO den 20 augusti 2026 enligt 27 kap. 6 § socialtjänstlagen. Samma händelse har även anmälts enligt lex Maria av medicinskt ansvarig sjuksköterska, eftersom insulingivningen är en delegerad hälso- och sjukvårdsinsats."
+    },
+    {
+      "heading": "Åtgärder"
+    },
+    {
+      "list": [
+        "Delegerade insatser visas i en egen lista i planeringssystemet och följer med vid omplanering.",
+        "Enhetschefen stämmer av listan dagligen kl. 15.00.",
+        "Vikarier utan delegering får inte schemaläggas ensamma på pass med delegerade insatser."
+      ]
+    },
+    {
+      "signature": {
+        "name": "Maria Holmström",
+        "role": "Enhetschef, hemtjänsten Matfors"
+      }
+    },
+    {
+      "signature": {
+        "name": "Leif Sundqvist",
+        "role": "Medicinskt ansvarig sjuksköterska"
+      }
+    }
+  ]
+}

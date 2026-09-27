@@ -1,0 +1,79 @@
+{
+  "file": "kop04_kvitton_berglund.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "KOP-04", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/388"},
+  "description": "Den skadelidandes inskannade kvitton som bilaga till begäran om skadestånd: kvitto från bärgningsföretaget och verkstadsfaktura från däckfirman där en post (däckhotell) inte hör till skadan.",
+  "letterhead": {"organisation": "Sundsvalls Bärgning & Assistans AB", "unit": "Bärgning, assistans och transport · Jour dygnet runt", "address": "Förrådsgatan 12, 856 50 Sundsvall · Org.nr 556734-2218 · Tel. 060-15 88 00"},
+  "date": "2026-08-31",
+  "title": "Kvitto – bärgning",
+  "blocks": [
+    {"paragraph": "Bilaga 1 till begäran om skadestånd, SBN-2026-01204. Kvitto nr 26-3311."},
+    {
+      "table": {
+        "columns": ["Uppdrag (bärgning)", "Uppgift"],
+        "rows": [
+          ["Beställare", "Johanna Berglund, Bruksgatan 7 B, 856 33 Sundsvall"],
+          ["Fordon", "Volvo V60, PLX 42C"],
+          ["Larmat", "2026-08-31 kl. 21:52"],
+          ["På plats", "2026-08-31 kl. 22:28"],
+          ["Hämtplats", "Norrmalmsgatan 18, Sundsvall"],
+          ["Lämnat hos", "Däckcentrum Birsta AB, Birstavägen 41 (nyckel i nyckelbrevlåda)"],
+          ["Förarens anteckning", "Höger framhjul, däck sönder och fälg sprucken. Fordonet ej körbart. Grop i körbanan med vatten, ingen utmärkning på platsen."]
+        ]
+      }
+    },
+    {
+      "table": {
+        "columns": ["Debiterad tjänst (bärgning)", "Belopp inkl. moms"],
+        "rows": [
+          ["Bärgning personbil, grundavgift inom Sundsvall", "1 150,00 kr"],
+          ["Tillägg kvälls- och nattid (efter kl. 18)", "475,00 kr"],
+          ["Att betala", "1 625,00 kr"],
+          ["varav moms 25 %", "325,00 kr"]
+        ]
+      }
+    },
+    {"paragraph": "Betalt med kort 2026-08-31 kl. 23:04. Tack för att du anlitade oss."},
+    {"page_break": true},
+    {"heading": "Däckcentrum Birsta AB – Faktura"},
+    {"paragraph": "Birstavägen 41, 861 36 Timrå · Org.nr 556901-4437 · Tel. 060-57 31 10 · Godkänd för F-skatt"},
+    {
+      "table": {
+        "columns": ["Fakturauppgift", "Värde"],
+        "rows": [
+          ["Fakturanummer", "88412"],
+          ["Fakturadatum", "2026-09-04"],
+          ["Kund", "Johanna Berglund, Bruksgatan 7 B, 856 33 Sundsvall"],
+          ["Fordon", "Volvo V60 2019, PLX 42C, mätarställning 71 480 km"],
+          ["Arbetsorder", "AO 26-2290, inlämnad 2026-08-31 (bärgad), klar 2026-09-04"]
+        ]
+      }
+    },
+    {
+      "table": {
+        "columns": ["Artikel (verkstadsfaktura)", "Antal", "À-pris inkl. moms", "Belopp inkl. moms"],
+        "rows": [
+          ["Michelin Primacy 4 225/50 R17 98W, sommardäck", "1", "1 890,00", "1 890,00"],
+          ["Aluminiumfälg Volvo original 7,5x17 ET50", "1", "4 190,00", "4 190,00"],
+          ["Montering och balansering, 1 hjul", "1", "380,00", "380,00"],
+          ["Hjulinställning, fyrhjulsmätning och justering", "1", "1 095,00", "1 095,00"],
+          ["Däckhotell vinterdäck, säsong 2026/2027", "1", "695,00", "695,00"]
+        ]
+      }
+    },
+    {
+      "table": {
+        "columns": ["Summering (faktura 88412)", "Belopp"],
+        "rows": [
+          ["Summa inkl. moms", "8 250,00 kr"],
+          ["varav moms 25 %", "1 650,00 kr"],
+          ["Betalt", "8 250,00 kr, kort, 2026-09-04"],
+          ["Att betala", "0,00 kr"]
+        ]
+      }
+    },
+    {"heading": "Verkstadens anmärkning"},
+    {"paragraph": "Fälgen är sprucken i innerkanten och kan inte riktas eller svetsas. Däcket har sidoväggsskada och går inte att laga. Övriga tre däck har ca 4 mm mönsterdjup och byttes inte. Hjulinställningen visade att toe höger fram låg utanför tolerans efter smällen och justerades."},
+    {"paragraph": "Kunden lämnade samtidigt in vinterdäcken för förvaring över säsongen (däckhotell)."}
+  ]
+}

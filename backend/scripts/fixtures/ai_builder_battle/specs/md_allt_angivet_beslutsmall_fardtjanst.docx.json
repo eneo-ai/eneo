@@ -1,0 +1,156 @@
+{
+  "file": "md_allt_angivet_beslutsmall_fardtjanst.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "OMS-08",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/753"
+  },
+  "description": "Gatuavdelningens beslutsmall för färdtjänst med Word-innehållskontroller för ärendeuppgifter, beslut, omfattning, motivering och handläggare, och fast lagrums- och överklagandetext; mallen handläggaren bifogar i Buildern.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Stadsbyggnadskontoret, Gatuavdelningen – Färdtjänst",
+    "address": "Gatuavdelningen, Färdtjänst, 851 85 Sundsvall"
+  },
+  "title": "Beslut om färdtjänst",
+  "blocks": [
+    {
+      "paragraph": "Diarienummer:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "diarienummer",
+        "label": "Diarienummer",
+        "hint": "Ärendets diarienummer"
+      }
+    },
+    {
+      "paragraph": "Beslutsdatum:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "beslutsdatum",
+        "label": "Beslutsdatum",
+        "hint": "ÅÅÅÅ-MM-DD"
+      }
+    },
+    {
+      "paragraph": "Sökande:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "sokande",
+        "label": "Sökande",
+        "hint": "Sökandens namn"
+      }
+    },
+    {
+      "paragraph": "Adress:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "adress",
+        "label": "Adress",
+        "hint": "Sökandens folkbokföringsadress"
+      }
+    },
+    {
+      "heading": "Beslut"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "beslut",
+        "label": "Beslut",
+        "hint": "Beviljar eller avslår färdtjänst och från vilket datum"
+      }
+    },
+    {
+      "heading": "Tillståndets omfattning"
+    },
+    {
+      "paragraph": "Färdsätt:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "fardsatt",
+        "label": "Färdsätt",
+        "hint": "Personbil eller specialfordon"
+      }
+    },
+    {
+      "paragraph": "Ledsagare:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "ledsagare",
+        "label": "Ledsagare",
+        "hint": "Ja eller nej"
+      }
+    },
+    {
+      "paragraph": "Giltighetstid:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "giltighetstid",
+        "label": "Giltighetstid",
+        "hint": "Tillståndet gäller till och med ÅÅÅÅ-MM-DD"
+      }
+    },
+    {
+      "heading": "Motivering"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "motivering",
+        "label": "Motivering",
+        "hint": "Skälen för beslutet med hänvisning till ansökan och utlåtandet"
+      }
+    },
+    {
+      "heading": "Lagrum"
+    },
+    {
+      "paragraph": "Beslutet är fattat med stöd av 7–9 §§ lagen (1997:736) om färdtjänst. Tillstånd till färdtjänst ges till den som på grund av en funktionsnedsättning som inte bara är tillfällig har väsentliga svårigheter att förflytta sig på egen hand eller att resa med allmänna kommunikationsmedel."
+    },
+    {
+      "heading": "Så överklagar du"
+    },
+    {
+      "paragraph": "Om du inte är nöjd med beslutet kan du överklaga det till Förvaltningsrätten i Härnösand (16 § lagen om färdtjänst)."
+    },
+    {
+      "list": [
+        "Skriv vilket beslut du överklagar, vilken ändring du vill ha och varför.",
+        "Skicka överklagandet till Sundsvalls kommun, Gatuavdelningen, Färdtjänst, 851 85 Sundsvall – inte direkt till förvaltningsrätten.",
+        "Överklagandet måste ha kommit in till oss inom tre veckor från den dag du fick del av beslutet (44 § förvaltningslagen).",
+        "Om vi inte ändrar beslutet skickar vi överklagandet vidare till förvaltningsrätten."
+      ]
+    },
+    {
+      "paragraph": "Har du frågor om beslutet är du välkommen att kontakta färdtjänsthandläggaren via kommunens kontaktcenter, 060-19 10 00. Ange diarienumret."
+    },
+    {
+      "paragraph": "Beslutet har fattats av:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "handlaggare",
+        "label": "Handläggare",
+        "hint": "Handläggarens namn"
+      }
+    },
+    {
+      "paragraph": "Färdtjänsthandläggare, beslut fattat på delegation"
+    }
+  ]
+}

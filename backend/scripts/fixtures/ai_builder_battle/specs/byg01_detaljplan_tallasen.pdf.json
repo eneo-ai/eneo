@@ -1,0 +1,25 @@
+{
+  "file": "byg01_detaljplan_tallasen.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/443"},
+  "description": "Utdrag ur planarkivet: byggnadsplan från 1984 (gäller som detaljplan utan genomförandetid) med bestämmelser i tabell och ett tillägg från 1998 som bara gäller uthus och garage.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Stadsbyggnadskontoret – planarkivet", "address": "851 85 Sundsvall"},
+  "date": "2026-08-20",
+  "title": "Byggnadsplan för del av Tallåsen (Tallåsen 4:1 m.fl.) i Sundsvalls kommun",
+  "blocks": [
+    {"paragraph": "Akt 2281K-P84/12. Utdrag ur planarkivet, utskrivet 2026-08-20. Byggnadsplanen fastställdes av länsstyrelsen och vann laga kraft 1984-05-22. Planen upprättades före plan- och bygglagen (1987:10) och gäller i dag som detaljplan. Den saknar genomförandetid."},
+    {"heading": "Planområdet"},
+    {"paragraph": "Planområdet omfattar 42 tomter för friliggande bostadshus längs Tallåsvägen och Barrstigen samt ett grönområde i norr. Tomterna har en storlek mellan 800 och 1 150 m². Plankartan redovisar tomtindelning, gator, prickmark och beteckningar enligt tabellen nedan."},
+    {"heading": "Beteckningar på plankartan"},
+    {"table": {"columns": ["Beteckning", "Betydelse"], "rows": [["BFI", "Område för bostadsändamål. Endast fristående hus. Högst en våning."], ["Punktprickad mark", "Mark som inte får bebyggas."], ["Streckprickad linje", "Tomtgräns enligt tomtindelning."], ["Heldragen linje med ring", "Planområdets gräns."]]}},
+    {"page_break": true},
+    {"heading": "Byggnadsplanebestämmelser"},
+    {"table": {"columns": ["§", "Rubrik", "Bestämmelse"], "rows": [["1", "Byggnadsplanens omfattning", "Dessa bestämmelser gäller inom det område som på plankartan omges av heldragen linje med ring."], ["2", "Bostadsändamål", "Med B betecknat område får användas endast för bostadsändamål. Med F betecknat område får bebyggas endast med hus som uppförs fristående."], ["3", "Mark som inte får bebyggas", "Med punktprickning betecknad mark får inte bebyggas."], ["4", "Tomts bebyggande", "Tomt får bebyggas med högst en fjärdedel av sin areal. Byggnadsarea för uthus och garage räknas in."], ["5", "Byggnads placering", "Byggnad får inte uppföras närmare tomtgräns än 4,5 meter."], ["6", "Våningsantal", "Inom område betecknat med I får byggnad uppföras med högst en våning."], ["7", "Byggnads höjd", "Byggnad får inte uppföras till större byggnadshöjd än 4,5 meter."], ["8", "Taklutning", "Tak får inte ges större lutning än 30 grader."], ["9", "Tomtstorlek", "Tomt får inte ges mindre areal än 800 m²."]]}},
+    {"paragraph": "Byggnadshöjd avser höjd enligt byggnadsstadgan (1959:612), vilket motsvarar byggnadshöjd enligt plan- och byggförordningen. Nockhöjd regleras inte i planen."},
+    {"page_break": true},
+    {"heading": "Tillägg till byggnadsplanen (2281K-P98/7)"},
+    {"paragraph": "Tillägget antogs av byggnadsnämnden och vann laga kraft 1998-03-10. Genomförandetiden för tillägget gick ut 2003-03-10."},
+    {"paragraph": "Uthus, garage och carport med en sammanlagd byggnadsarea om högst 40 m² per tomt får placeras närmare tomtgräns än 4,5 meter, dock minst 1,0 meter från tomtgräns. Tillägget gäller inte bostadsbyggnad eller tillbyggnad av bostadsbyggnad. I övrigt gäller byggnadsplanens bestämmelser."},
+    {"signature": {"name": "Planarkivet", "role": "Stadsbyggnadskontoret, Sundsvalls kommun"}}
+  ]
+}

@@ -1,0 +1,99 @@
+{
+  "file": "int06_anbud_nordtolk.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-06",
+    "url": "https://www.upphandlingsmyndigheten.se/inkopsprocessen/genomfor-upphandlingen/tilldelningsbeslut/"
+  },
+  "description": "Anbud från en rikstäckande tolkförmedling som svarar Ja på alla skall-krav men vars beskrivning visar att kundtjänsten inte är bemannad på helger.",
+  "letterhead": {
+    "organisation": "Nordtolk Sverige AB",
+    "unit": "Anbud",
+    "address": "Sveavägen 44, 111 34 Stockholm · org.nr 556987-2051"
+  },
+  "date": "2026-08-30",
+  "diarienummer": "KS-2026-00467",
+  "title": "Anbud – Ramavtal för tolkförmedling 2027–2029, Nordtolk Sverige AB",
+  "blocks": [
+    {
+      "heading": "Anbudsbrev"
+    },
+    {
+      "paragraph": "Nordtolk Sverige AB, organisationsnummer 556987-2051, lämnar härmed anbud i upphandlingen Ramavtal för tolkförmedling 2027–2029 (KS-2026-00467). Anbudet är giltigt till och med 2026-12-31. Vi har tagit del av upphandlingsdokumentet och accepterar dess villkor."
+    },
+    {
+      "paragraph": "Kontaktperson för anbudet: Linda Berg, anbudsansvarig, 08-120 455 00."
+    },
+    {
+      "heading": "Kvalificering"
+    },
+    {
+      "list": [
+        "Registrerad för F-skatt och arbetsgivare; skatter och avgifter är betalda (intyg från Skatteverket bifogas).",
+        "Omsättning enligt bifogade årsredovisningar.",
+        "Referensuppdrag enligt bilaga 3."
+      ]
+    },
+    {
+      "heading": "Svar på skall-krav"
+    },
+    {
+      "table": {
+        "columns": [
+          "Krav",
+          "Uppfylls",
+          "Beskrivning"
+        ],
+        "rows": [
+          [
+            "4.2.1",
+            "Ja",
+            "Över 100 språk."
+          ],
+          [
+            "4.2.2",
+            "Ja",
+            "Kontakttolk inom 24 timmar, telefontolk direkt via vår app."
+          ],
+          [
+            "4.2.3",
+            "Ja",
+            "Vår bokningscentral är bemannad vardagar kl. 07.00–18.00. Lördagar, söndagar och helgdagar bokar kunden i webbportalen eller appen, som är öppen dygnet runt, och en jourtolk ringer upp vid akuta behov."
+          ],
+          [
+            "4.2.4",
+            "Ja",
+            "Samtliga tolkar undertecknar sekretessförbindelse. Mall bifogas."
+          ],
+          [
+            "4.2.5",
+            "Ja",
+            "Webbportal och app med status och kompetensnivå."
+          ],
+          [
+            "4.2.6",
+            "Ja",
+            "Rapporter tas fram kvartalsvis på begäran."
+          ],
+          [
+            "4.2.7",
+            "Ja",
+            "Avvikelser hanteras enligt vår ISO 9001-certifierade process."
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Pris"
+    },
+    {
+      "paragraph": "Se prisbilagan. Nordtolk erbjuder landets mest konkurrenskraftiga priser tack vare vår digitala plattform."
+    },
+    {
+      "signature": {
+        "name": "Linda Berg",
+        "role": "Behörig företrädare"
+      }
+    }
+  ]
+}

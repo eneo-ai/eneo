@@ -1,0 +1,52 @@
+{
+  "file": "nar05_ansokan_brandfarlig_vara.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "NAR-05", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/468"},
+  "description": "Utskrift av en inskickad ansökan i e-tjänsten Räddningstjänsten – ansökan om tillstånd för brandfarlig vara, med administrativa uppgifter, uppgifter om gods, föreståndare och bilageförteckning.",
+  "letterhead": {"organisation": "Medelpads räddningstjänstförbund", "unit": "E-tjänst: Ansökan om tillstånd för brandfarlig vara", "address": "Box 853, 851 24 Sundsvall"},
+  "date": "2026-09-09",
+  "title": "Ansökan om tillstånd för hantering av brandfarlig vara enligt 16 § lagen (2010:1011) om brandfarliga och explosiva varor",
+  "blocks": [
+    {"heading": "Administrativa uppgifter"},
+    {
+      "table": {
+        "columns": ["Fält", "Ifyllt av sökanden"],
+        "rows": [
+          ["Sökande", "Tunadals Industrilack AB"],
+          ["Organisationsnummer", "556733-0918"],
+          ["Verksamhet", "Industrilackering av metalldetaljer med våtlack och härdning i gasoleldad ugn"],
+          ["Besöksadress", "Tunadalsvägen 31, 856 41 Sundsvall"],
+          ["Fastighetsbeteckning", "Sundsvall Tunadal 7:22"],
+          ["Kontaktperson", "Mats Ödling, verkställande direktör, 060-12 44 70"],
+          ["Ansökan avser", "Ny hantering (utökning från 180 liter gasol och 250 liter brandfarlig vätska utan tillstånd)"]
+        ]
+      }
+    },
+    {"heading": "Uppgifter om gods"},
+    {
+      "table": {
+        "columns": ["Vara", "Kategori", "Förpackning", "Största mängd", "Förvaringsplats"],
+        "rows": [
+          ["Gasol för truckar och svetsning", "Brandfarlig gas, kategori 1", "12 gasolflaskor P26", "312 liter", "Gasolskåp utomhus vid fasad mot norr"],
+          ["Gasol för härdugn", "Brandfarlig gas, kategori 1", "2 gasolflaskor P190 i gasolcentral", "380 liter", "Gasolcentral i fasad mot öster"],
+          ["Lackförtunning", "Brandfarlig vätska, kategori 2", "Dunkar 25 liter", "800 liter", "Brandcell B2, förråd för brandfarlig vätska"],
+          ["Lacknafta", "Brandfarlig vätska, kategori 3", "Fat 200 liter", "600 liter", "Brandcell B2, förråd för brandfarlig vätska"],
+          ["Lack i arbetsförpackning", "Brandfarlig vätska, kategori 2", "Burkar 1–5 liter", "60 liter", "Blandningsrum och sprutbox"]
+        ]
+      }
+    },
+    {"heading": "Föreståndare"},
+    {
+      "table": {
+        "columns": ["Namn", "Personnummer", "Befattning", "Ansvarsområde"],
+        "rows": [
+          ["Anders Holm", "19711002-1834", "Produktionschef", "Brandfarlig gas"],
+          ["Petra Lindgren", "19860608-9889", "Lackeringsansvarig", "Brandfarlig vätska"]
+        ]
+      }
+    },
+    {"heading": "Bilagor"},
+    {"list": ["Situationsplan", "Riskutredning", "Klassningsplan för explosionsfarlig miljö", "Intyg om föreståndarnas kompetens", "Delegering av befogenheter till föreståndare"]},
+    {"paragraph": "Ärendenummer i e-tjänsten: 468-2026-000207. Inskickad 2026-09-09 kl. 15:41 och signerad med BankID av Mats Ödling."}
+  ]
+}

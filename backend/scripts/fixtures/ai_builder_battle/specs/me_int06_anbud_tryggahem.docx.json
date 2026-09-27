@@ -1,0 +1,49 @@
+{
+  "file": "me_int06_anbud_tryggahem.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "INT-06", "url": "https://www.upphandlingsmyndigheten.se/inkopsprocessen/genomfor-upphandlingen/tilldelningsbeslut/"},
+  "description": "Ett inkommet anbud som uppfyller alla skall-krav men har längre åtgärdstid och högre månadsavgift utan engångskostnad.",
+  "letterhead": {"organisation": "Trygga Hem Larmtjänst i Norr AB", "unit": "Anbud", "address": "Prästgatan 18, 831 31 Östersund"},
+  "date": "2026-08-17",
+  "diarienummer": "KS-2026-00318",
+  "title": "Anbud – Trygghetslarm med larmmottagning för hemtjänsten",
+  "blocks": [
+    {"heading": "Anbudsgivare"},
+    {
+      "table": {
+        "columns": ["Uppgift", "Värde"],
+        "rows": [
+          ["Företag", "Trygga Hem Larmtjänst i Norr AB"],
+          ["Organisationsnummer", "559011-2264"],
+          ["Kontaktperson", "Petra Lindholm, VD"],
+          ["E-post", "petra.lindholm@tryggahem.example"]
+        ]
+      }
+    },
+    {"heading": "Svar på skall-krav"},
+    {
+      "table": {
+        "columns": ["Krav-ID", "Svar", "Anbudsgivarens beskrivning"],
+        "rows": [
+          ["SK1", "Uppfylls", "Larmmottagning dygnet runt i vår certifierade larmcentral i Östersund (SS-EN 50518). Certifikat bifogas."],
+          ["SK2", "Uppfylls", "TH Trygg 4G med batteribackup på 40 timmar. Produktblad bifogas."],
+          ["SK3", "Uppfylls", "Åtgärd inom 20 timmar från felanmälan."],
+          ["SK4", "Uppfylls", "Lagring och behandling sker inom EU/EES. Vi godtar bilaga 4."],
+          ["SK5", "Uppfylls", "Östersunds kommun (1 300 larm) och Krokoms kommun (520 larm), avtal sedan 2022."]
+        ]
+      }
+    },
+    {"heading": "Bilaga 2 – Prisbilaga"},
+    {
+      "table": {
+        "columns": ["Prispost", "Belopp (kr, exkl. moms)"],
+        "rows": [
+          ["Månadsavgift per larm inklusive larmmottagning", "199"],
+          ["Engångskostnad för införande", "0"],
+          ["Anbudspris (1 150 larm × 48 månader + engångskostnad)", "10 984 800"]
+        ]
+      }
+    },
+    {"signature": {"name": "Petra Lindholm", "role": "Verkställande direktör, Trygga Hem Larmtjänst i Norr AB"}}
+  ]
+}

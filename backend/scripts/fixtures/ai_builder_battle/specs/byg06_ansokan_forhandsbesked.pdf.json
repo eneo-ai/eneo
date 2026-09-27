@@ -1,0 +1,22 @@
+{
+  "file": "byg06_ansokan_forhandsbesked.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-06", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/428"},
+  "description": "PDF-utskrift av en ansökan via e-tjänsten Ansökan – förhandsbesked med registreringsuppgift, aktuella lagrum i e-tjänstens informationstext och en karta återgiven som måttsatta avstånd (bland annat avloppets avstånd till grannens brunn).",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "E-tjänst: Ansökan – förhandsbesked"},
+  "date": "2026-05-04",
+  "title": "Ansökan om förhandsbesked",
+  "blocks": [
+    {"paragraph": "Ärendenummer i e-tjänsten: 428-2026-000211. Inskickad: 2026-05-04 kl. 20:41. Registrerad hos stadsbyggnadsnämnden 2026-05-05 med diarienummer BYGG-2026-000512."},
+    {"paragraph": "Information från e-tjänsten: I ett förhandsbesked prövar stadsbyggnadsnämnden om platsen är lämplig för det du vill bygga (9 kap. 41 och 74 §§ plan- och bygglagen). Ett positivt förhandsbesked är bindande vid bygglovsprövningen om du söker bygglov inom två år från att beslutet fått laga kraft (9 kap. 42 §). Förhandsbesked avgörs alltid av stadsbyggnadsnämnden."},
+    {"heading": "Ansökan"},
+    {"table": {"columns": ["Fråga", "Svar"], "rows": [["Fastighet där den nya tomten ska ligga", "Sundsvall Lövsta 3:28"], ["Fastighetsägare", "Bengt Nordin (medgivande bifogat)"], ["Vad vill du bygga?", "Enbostadshus i ett plan med inredd vindsvåning, cirka 140 m² byggnadsarea, och ett fristående garage på cirka 40 m²"], ["Tomtens storlek", "Cirka 2 000 m², avstyckas från Lövsta 3:28"], ["Nuvarande markanvändning", "Del av åker som inte har brukats sedan 2019, och en remsa betesmark mot väg 634"], ["Vatten", "Egen borrad brunn"], ["Avlopp", "Enskild avloppsanläggning med markbädd"], ["Tillfart", "Ny utfart mot väg 634. Alternativt kan befintlig utfart för Lövsta 3:28 användas."], ["Övrigt", "Vi vill bo nära föräldrarna som bor på gården och kunna hjälpa till med skogen."]]}},
+    {"heading": "Kontaktuppgifter"},
+    {"list": ["Sökande: Johanna Nordin, personnummer 19861022-2385", "Sökande: Erik Nordin, personnummer 19810506-2395", "Adress: Lövstavägen 41, 862 96 Njurunda", "Mobilnummer: 070-514 22 83", "E-post: johanna.nordin@example.com"]},
+    {"page_break": true},
+    {"heading": "Bilaga: karta och situationsplan"},
+    {"paragraph": "Kartunderlag: utdrag ur kommunens karttjänst, skala 1:2 000, med den tänkta tomten, huset, garaget och avloppsanläggningen inritade av sökanden. Avstånden nedan är uppmätta i karttjänsten."},
+    {"table": {"columns": ["Från", "Till", "Avstånd"], "rows": [["Planerat bostadshus", "Vägkant, väg 634", "52 m"], ["Tomtgräns i söder", "Vägkant, väg 634", "45 m"], ["Tomtgräns i väster", "Strandlinjen vid Lövstaån", "140 m"], ["Planerad markbädd", "Dricksvattenbrunn på Lövsta 3:31", "38 m"], ["Planerad markbädd", "Egen planerad brunn", "55 m"], ["Planerat bostadshus", "Närmaste bostadshus, Lövsta 3:31", "85 m"]]}},
+    {"paragraph": "Cirka 1 200 m² av tomten ligger på åkermark, resten på betesmark. Befintlig utfart för Lövsta 3:28 ligger 60 m öster om den tänkta tomten."}
+  ]
+}

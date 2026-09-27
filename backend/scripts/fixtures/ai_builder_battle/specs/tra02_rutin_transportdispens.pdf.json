@@ -1,0 +1,55 @@
+{
+  "file": "tra02_rutin_transportdispens.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "TRA-02", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/204"},
+  "description": "Gatuavdelningens handläggningsrutin för transportdispenser inom Sundsvalls kommun: lagstöd, kontroll av färdväg mot bärighetsregistret, standardvillkor efter mått och vikt, och taxan med avgiftskategorier.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Stadsbyggnadskontoret – Gatuavdelningen", "address": "851 85 Sundsvall · gatuavdelningen@sundsvall.se"},
+  "date": "2026-02-02",
+  "diarienummer": "SBN-2026-00188",
+  "title": "Handläggningsrutin – transportdispenser inom Sundsvalls kommun",
+  "blocks": [
+    {"heading": "1. Lagstöd och ansvar"},
+    {"paragraph": "Kommunen prövar enligt 13 kap. 3 § trafikförordningen (1998:1276) ansökningar om undantag från bestämmelserna om fordons bredd, längd, vikt och axeltryck (4 kap. 12–18 §§) när färden sker enbart inom kommunen. Går färden även genom en annan kommun ska sökanden hänvisas till Trafikverket. Undantag som föranleds av lastens längd eller bredd får medges endast om lasten är odelbar (13 kap. 4 §). Undantag får medges om det behövs av särskilda skäl och kan ske utan fara för trafiksäkerheten, skada på vägen eller annan avsevärd olägenhet."},
+    {"paragraph": "Beslut fattas av trafikhandläggare på delegation från stadsbyggnadsnämnden. Beslutet kan överklagas hos Länsstyrelsen Västernorrland."},
+    {"heading": "2. Kontroll av färdvägen"},
+    {"list": [
+      "Kontrollera att färdvägen går enbart inom kommunen.",
+      "Kontrollera varje gata och bro i sökt färdväg mot bärighetsregistret: fordonets bruttovikt får inte överstiga objektets högsta bruttovikt vid dispens, och inget axeltryck får överstiga objektets högsta axeltryck.",
+      "Kontrollera fri höjd: den fria höjden ska vara minst 0,10 m större än transportens höjd.",
+      "Klarar sökt färdväg inte kontrollen ska beslutet anvisa en annan färdväg om registret anger en omledning som klarar transporten; kontrollera då omledningens objekt på samma sätt. Finns ingen godtagbar färdväg avslås ansökan.",
+      "Beslutet ska ange tillåten färdväg gata för gata och högsta tillåtna bruttovikt för varje gata och bro på vägen."
+    ]},
+    {"heading": "3. Standardvillkor"},
+    {
+      "table": {
+        "columns": ["Villkor (standard)", "Gäller när"],
+        "rows": [
+          ["Transporten får endast ske mellan kl. 22.00 och 06.00", "Bredd över 3,00 m eller bruttovikt över 74 000 kg"],
+          ["Följebil med gult varningsljus och skylten Bred transport ska köra före transporten", "Bredd över 3,50 m"],
+          ["Vägtransportledare ska styra trafiken i korsningar och cirkulationsplatser", "Bredd över 4,50 m eller längd över 25,0 m"],
+          ["Transporten ska passera broar ensam på bron, i mittläge och i högst 10 km/h", "Bruttovikt över 64 000 kg"],
+          ["Transporten ska anmälas till gatuavdelningens jour minst ett dygn före start", "Alltid"],
+          ["Beslutet ska medföras under transporten och visas upp på begäran", "Alltid"]
+        ]
+      }
+    },
+    {"page_break": true},
+    {"heading": "4. Avgift"},
+    {"paragraph": "Avgift tas ut enligt taxa beslutad av kommunfullmäktige, gällande från 2024-07-01. Brådskande handläggning innebär att ansökan har kommit in mindre än två arbetsdagar före transportens start. Avser ansökan flera kategorier, till exempel både tung och bred transport, tas avgift ut enligt kategorin Övriga kombinationer. Avgiften tas ut även om ansökan avslås."},
+    {
+      "table": {
+        "columns": ["Avgiftskategori", "Normal handläggning", "Brådskande handläggning"],
+        "rows": [
+          ["Tung transport", "1 850 kr", "3 532 kr"],
+          ["Bred transport, högst 4,50 m", "970 kr", "1 940 kr"],
+          ["Bred transport, över 4,50 m", "1 850 kr", "3 700 kr"],
+          ["Lång transport, högst 35 m", "970 kr", "1 940 kr"],
+          ["Lång transport, över 35 m", "1 850 kr", "3 700 kr"],
+          ["Övriga kombinationer", "1 850 kr", "3 700 kr"]
+        ]
+      }
+    },
+    {"heading": "5. Beslutet"},
+    {"paragraph": "Använd gatuavdelningens beslutsmall. Beslutet ska innehålla sökande, fordon med registreringsnummer, transportens mått och bruttovikt, giltighetsperiod, tillåten färdväg, villkor, avgift och en motivering som redovisar kontrollen av färdvägen och skälen för en ändrad färdväg eller ett avslag. Datum skrivs ÅÅÅÅ-MM-DD."}
+  ]
+}

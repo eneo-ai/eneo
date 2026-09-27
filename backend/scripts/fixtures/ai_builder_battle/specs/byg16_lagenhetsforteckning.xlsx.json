@@ -1,0 +1,46 @@
+{
+  "file": "byg16_lagenhetsforteckning.xlsx",
+  "format": "xlsx",
+  "source": {"catalogue_id": "BYG-16", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/155"},
+  "description": "Fastighetsägarens lägenhetsförteckning (Excel) bifogad till e-tjänsten Anmäla bostäder för registrering: 16 nya lägenheter i två entréer, med felaktiga och dubblerade lägenhetsnummer, en ogiltig kökstyp och avvikande uppgifter mot ritningarna, samt ett blad med uppgiftslämnaren.",
+  "sheets": [
+    {
+      "name": "Lägenheter",
+      "columns": ["Adress", "Lägenhetsnummer", "Våningsplan", "Antal rum", "Kökstyp", "Boarea (m²)", "Förändring"],
+      "rows": [
+        ["Kvarnbacksgatan 7A", "1001", "Entréplan", 2, "Kök", 58.5, "Ny"],
+        ["Kvarnbacksgatan 7A", "1002", "Entréplan", 1, "Pentry", 39, "Ny"],
+        ["Kvarnbacksgatan 7A", "1101", "1 tr", 3, "Kök", 74.5, "Ny"],
+        ["Kvarnbacksgatan 7A", "1102", "1 tr", 2, "Kök", 58.5, "Ny"],
+        ["Kvarnbacksgatan 7A", "1201", "2 tr", 3, "Kök", 74.5, "Ny"],
+        ["Kvarnbacksgatan 7A", "1102", "2 tr", 2, "Kök", 58.5, "Ny"],
+        ["Kvarnbacksgatan 7A", "1301", "3 tr", 3, "Kök", 74.5, "Ny"],
+        ["Kvarnbacksgatan 7A", "1302", "3 tr", 2, "Kök", 85.5, "Ny"],
+        ["Kvarnbacksgatan 7B", "1001", "Entréplan", 1, "Kokvrå", 39, "Ny"],
+        ["Kvarnbacksgatan 7B", "1002", "Entréplan", 2, "Kök", 58.5, "Ny"],
+        ["Kvarnbacksgatan 7B", "1101", "1 tr", 3, "Kök", 58.5, "Ny"],
+        ["Kvarnbacksgatan 7B", "1102", "1 tr", 3, "Kök", 74.5, "Ny"],
+        ["Kvarnbacksgatan 7B", "12-01", "2 tr", 2, "Kök", 58.5, "Ny"],
+        ["Kvarnbacksgatan 7B", "1202", "2 tr", 3, "Kök", 74.5, "Ny"],
+        ["Kvarnbacksgatan 7B", "1301", "3 tr", 2, "Kök", 58.5, "Ny"],
+        ["Kvarnbacksgatan 7B", "1402", "3 tr", 3, "Kök", 74.5, "Ny"]
+      ]
+    },
+    {
+      "name": "Uppgiftslämnare",
+      "columns": ["Uppgift", "Värde"],
+      "rows": [
+        ["Fastighet", "Sundsvall Kvarnbacken 1:9"],
+        ["Fastighetsägare", "Mittbygg Bostäder AB"],
+        ["Organisationsnummer", "556734-2190"],
+        ["Kontaktperson", "Elin Forsberg, förvaltare"],
+        ["Telefon", "060-17 42 90"],
+        ["E-post", "elin.forsberg@mittbygg.example"],
+        ["Bygglov", "BYGG-2025-001532"],
+        ["Beräknad inflyttning", "2026-11-15"],
+        ["Ärendenummer i e-tjänsten", "155-2026-000318"],
+        ["Upprättad", "2026-09-08"]
+      ]
+    }
+  ]
+}

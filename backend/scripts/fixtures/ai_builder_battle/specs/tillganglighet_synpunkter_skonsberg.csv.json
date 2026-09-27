@@ -1,0 +1,17 @@
+{
+  "file": "tillganglighet_synpunkter_skonsberg.csv",
+  "format": "csv",
+  "source": {"catalogue_id": "KOP-02", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/77"},
+  "description": "Export ur synpunktssystemet (Lämna synpunkt) för objektet Skönsbergs bibliotek och medborgarkontor: två synpunkter om tillgänglighet som ledde till inventeringen och en om öppettider, med lämnarens kontaktuppgifter.",
+  "sheets": [
+    {
+      "name": "Synpunkter FA-2281-0417",
+      "columns": ["synpunkt_id", "inkom", "kanal", "kategori", "rubrik", "beskrivning", "objekt", "lamnare_namn", "lamnare_epost", "lamnare_telefon", "onskar_aterkoppling", "status", "hanvisad_till"],
+      "rows": [
+        ["SYN-2026-09318", "2026-06-04 10:22", "E-tjänst", "Synpunkt/klagomål", "Kommer inte in med rullstol", "Jag använder elrullstol och kommer inte in genom huvudentrén på Skönsbergs bibliotek. Bara ena dörrhalvan öppnas och den är för smal, och knappen till dörröppnaren sitter så högt att jag inte når den från stolen. Rampen från trottoaren är också väldigt brant.", "Skönsbergs bibliotek och medborgarkontor", "Gunnel Åström", "gunnel.astrom@exempelpost.se", "070-455 19 82", "Ja, e-post", "Överlämnad för åtgärd", "Fastighetsavdelningen"],
+        ["SYN-2026-09877", "2026-07-15 16:40", "Telefon, kontaktcenter", "Fråga", "Öppettider i sommar", "Varför har biblioteket i Skönsberg stängt på lördagar hela sommaren? Det är den enda dagen jag kan gå dit.", "Skönsbergs bibliotek och medborgarkontor", "Anonym", "saknas", "saknas", "Nej", "Besvarad", "Kultur- och fritidsförvaltningen"],
+        ["SYN-2026-10077", "2026-08-12 13:05", "E-tjänst", "Synpunkt/klagomål", "Toaletten går inte att använda", "Min mamma går med rollator och vi kunde inte använda den tillgängliga toaletten på medborgarkontoret. Det gick inte att vända med rollatorn för skötbordet och papperskorgen, och vi hittade inga handtag att hålla i. Larmsnöret var uppknutet.", "Skönsbergs bibliotek och medborgarkontor", "Peter Wiklund", "peter.wiklund@exempelpost.se", "073-612 40 38", "Ja, telefon", "Överlämnad för åtgärd", "Fastighetsavdelningen"]
+      ]
+    }
+  ]
+}

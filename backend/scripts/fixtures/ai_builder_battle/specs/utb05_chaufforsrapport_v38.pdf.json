@@ -1,0 +1,29 @@
+{
+  "file": "utb05_chaufforsrapport_v38.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "UTB-05", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/773"},
+  "description": "Trafikföretagets veckorapport till kommunen om skolskjutsen vecka 38 med chaufförernas noteringar om förseningar, inställd tur och fordonsfel; nämner en elev vid namn och saknar en försening som bara syns i positionsdata.",
+  "letterhead": {"organisation": "Norrskjuts AB", "unit": "Trafikledningen", "address": "Verkstadsvägen 4, 856 33 Sundsvall"},
+  "date": "2026-09-21",
+  "title": "Veckorapport skolskjuts vecka 38 (2026-09-14 – 2026-09-18)",
+  "blocks": [
+    {"paragraph": "Rapporten sammanställs av trafikledningen från chaufförernas körjournaler och lämnas till Sundsvalls kommun, barn- och utbildningsförvaltningen, enligt bilaga 4 om avvikelserapportering i avtal BUF 2024/0318, skolskjuts område Viskan."},
+    {"heading": "Chaufförernas noteringar"},
+    {
+      "table": {
+        "columns": ["Datum", "Tur", "Fordon", "Notering"],
+        "rows": [
+          ["2026-09-14", "L-08", "HGS 903", "Väntade på grusbil som backade vid bron före Lillvik, cirka 5 minuter. Resten av turen enligt tidtabell."],
+          ["2026-09-15", "L-42", "KLM 481", "Omledning vid Sidsjövägen på grund av vägarbete. Cirka 8 minuter sen till Tallstigen, knappade in något till skolan."],
+          ["2026-09-16", "L-17", "DTR 216", "GPS-enheten ur funktion hela förmiddagen. Turen körd enligt tidtabell enligt chauffören."],
+          ["2026-09-17", "L-17", "DTR 216", "Turen inställd på grund av fordonsfel (startade inte, batteri). Ersättningstaxi beställd 07:05, eleverna var framme vid skolan 08:02."],
+          ["2026-09-18", "L-42", "KLM 481", "Väntade vid Björkvägen på Wilma som kom springande, cirka 3 minuter."]
+        ]
+      }
+    },
+    {"paragraph": "Övriga turer under veckan har körts utan anmärkning enligt chaufförernas journaler."},
+    {"heading": "Åtgärder"},
+    {"list": ["DTR 216 har fått nytt batteri 2026-09-17 och GPS-enheten byttes 2026-09-18.", "Vägarbetet vid Sidsjövägen pågår enligt Trafikverket till 2026-10-09; vi föreslår att L-42 tidigareläggs fem minuter under perioden."]},
+    {"signature": {"name": "Mikaela Grönlund", "role": "Trafikledare, Norrskjuts AB"}}
+  ]
+}

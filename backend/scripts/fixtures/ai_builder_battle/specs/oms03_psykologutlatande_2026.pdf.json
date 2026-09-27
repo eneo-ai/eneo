@@ -1,0 +1,111 @@
+{
+  "file": "oms03_psykologutlatande_2026.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "OMS-03",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/191"
+  },
+  "description": "Psykologutlåtande från barn- och ungdomshabiliteringen efter utredning av begåvning och adaptiv förmåga, med familjebakgrund som nämner ett syskons diagnos och rekommendationer om avlastning.",
+  "letterhead": {
+    "organisation": "Region Västernorrland",
+    "unit": "Barn- och ungdomshabiliteringen Sundsvall",
+    "address": "Storgatan 71, 852 30 Sundsvall"
+  },
+  "date": "2026-06-11",
+  "title": "Psykologutlåtande",
+  "blocks": [
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Värde"
+        ],
+        "rows": [
+          [
+            "Namn",
+            "Melvin Sjödin"
+          ],
+          [
+            "Personnummer",
+            "20160404-2398"
+          ],
+          [
+            "Remittent",
+            "Barn- och ungdomspsykiatrin Sundsvall"
+          ],
+          [
+            "Utredningstillfällen",
+            "2026-05-12, 2026-05-19 och 2026-05-26"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Bakgrund"
+    },
+    {
+      "paragraph": "Melvin bor med mamma Petra, pappa Mikael och storasystern Tilde, 13 år, som själv har diagnosen ADHD och går på samma skola. Melvin fick diagnosen autism 2021. Skolan har uppmärksammat att han har svårt att följa undervisningen även med anpassningar, och han går sedan hösten 2025 i en resursklass inom anpassad grundskola."
+    },
+    {
+      "heading": "Metoder"
+    },
+    {
+      "list": [
+        "WISC-V, Wechsler Intelligence Scale for Children",
+        "ABAS-3, skattning av adaptiv förmåga, besvarad av båda vårdnadshavarna och klassläraren",
+        "Observation i skolan och intervju med vårdnadshavarna"
+      ]
+    },
+    {
+      "heading": "Resultat"
+    },
+    {
+      "table": {
+        "columns": [
+          "Mått",
+          "Resultat",
+          "Tolkning"
+        ],
+        "rows": [
+          [
+            "WISC-V helskala, IK",
+            "62 (95 % konfidensintervall 58–68)",
+            "Mycket lågt"
+          ],
+          [
+            "ABAS-3 sammanvägd adaptiv förmåga",
+            "64",
+            "Mycket låg"
+          ],
+          [
+            "ABAS-3 praktisk förmåga",
+            "61",
+            "Mycket låg"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Bedömning"
+    },
+    {
+      "paragraph": "Resultaten visar en begåvningsnivå och en adaptiv förmåga som sammantaget uppfyller kriterierna för lindrig intellektuell funktionsnedsättning. Tillsammans med autismen innebär det att Melvin behöver omfattande stöd i vardagen, tydlig struktur och en vuxen i närheten hela tiden."
+    },
+    {
+      "heading": "Rekommendationer"
+    },
+    {
+      "list": [
+        "Regelbunden avlastning för familjen, till exempel korttidsvistelse och avlösning i hemmet.",
+        "Bildstöd och förberedelse inför förändringar i alla miljöer.",
+        "Uppföljning hos habiliteringen om ett år."
+      ]
+    },
+    {
+      "signature": {
+        "name": "Linnéa Holmström",
+        "role": "Leg. psykolog"
+      }
+    }
+  ]
+}

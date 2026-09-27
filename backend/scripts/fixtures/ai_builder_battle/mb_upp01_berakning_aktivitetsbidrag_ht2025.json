@@ -1,0 +1,325 @@
+{
+  "system": "Föreningsportalen Sundsvall, beräkningsmodul aktivitetsbidrag (avvecklad 2026-06-30)",
+  "period": {
+    "benamning": "HT 2025",
+    "fran": "2025-07-01",
+    "till": "2025-12-31"
+  },
+  "regler": {
+    "kalla": "Regler för föreningsbidrag, Sundsvalls kommun, 9 § aktivitetsbidrag",
+    "bidrag_for": "Ledarledda aktiviteter för barn och ungdom från 7 år till och med 20 år",
+    "aldersgrupp_som_ger_bidrag": "B",
+    "min_langd_minuter": 60,
+    "min_giltiga_sammankomster_per_aktivitet_och_period": 10,
+    "sats_kr_per_deltagartillfalle": 14,
+    "sats_beslutad": "Kultur- och fritidsnämnden 2024-12-11, gäller 2025 och 2026",
+    "ledare_ger_bidrag": false,
+    "om_aktiviteten_har_farre_an_10_giltiga": "Inget bidrag alls för aktiviteten under perioden"
+  },
+  "kodlista": {
+    "status": {
+      "G": "Genomförd",
+      "I": "Inställd",
+      "E": "Rapporterad efter sista rapporteringsdag (räknas inte)"
+    },
+    "deltagare": {
+      "A": "0–6 år",
+      "B": "7–20 år",
+      "C": "21–25 år",
+      "D": "26 år och äldre"
+    }
+  },
+  "forening": {
+    "namn": "Sidsjöns Friidrottsklubb",
+    "organisationsnummer": "802470-6619",
+    "bankgiro": "5412-8830"
+  },
+  "aktiviteter": [
+    {
+      "aktivitet_id": "AKT-2025-0311",
+      "namn": "Friidrott 10–12 år",
+      "sammankomster": [
+        {
+          "datum": "2025-09-02",
+          "start": "17:30",
+          "slut": "19:00",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 14,
+            "C": 0
+          }
+        },
+        {
+          "datum": "2025-09-09",
+          "start": "17:30",
+          "slut": "19:00",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 15,
+            "C": 0
+          }
+        },
+        {
+          "datum": "2025-09-16",
+          "start": "17:30",
+          "slut": "19:00",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 12
+          }
+        },
+        {
+          "datum": "2025-09-23",
+          "start": "17:30",
+          "slut": "19:00",
+          "status": "I",
+          "ledare": 2,
+          "deltagare": {
+            "B": 16
+          }
+        },
+        {
+          "datum": "2025-09-30",
+          "start": "17:30",
+          "slut": "19:00",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 13
+          }
+        },
+        {
+          "datum": "2025-10-07",
+          "start": "17:30",
+          "slut": "19:00",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 15
+          }
+        },
+        {
+          "datum": "2025-10-14",
+          "start": "17:30",
+          "slut": "19:00",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 11
+          }
+        },
+        {
+          "datum": "2025-10-21",
+          "start": "17:30",
+          "slut": "18:15",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 14
+          }
+        },
+        {
+          "datum": "2025-10-28",
+          "start": "17:30",
+          "slut": "19:00",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 12
+          }
+        },
+        {
+          "datum": "2025-11-04",
+          "start": "17:30",
+          "slut": "19:00",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 15
+          }
+        },
+        {
+          "datum": "2025-11-11",
+          "start": "17:30",
+          "slut": "19:00",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 13
+          }
+        },
+        {
+          "datum": "2025-11-18",
+          "start": "17:30",
+          "slut": "19:00",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 10
+          }
+        }
+      ]
+    },
+    {
+      "aktivitet_id": "AKT-2025-0312",
+      "namn": "Löpargruppen vuxna och unga",
+      "sammankomster": [
+        {
+          "datum": "2025-09-04",
+          "start": "18:00",
+          "slut": "19:15",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 3,
+            "C": 4,
+            "D": 6
+          }
+        },
+        {
+          "datum": "2025-09-11",
+          "start": "18:00",
+          "slut": "19:15",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 2,
+            "C": 5,
+            "D": 7
+          }
+        },
+        {
+          "datum": "2025-09-18",
+          "start": "18:00",
+          "slut": "19:15",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 4,
+            "C": 3,
+            "D": 5
+          }
+        },
+        {
+          "datum": "2025-09-25",
+          "start": "18:00",
+          "slut": "19:15",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 3,
+            "C": 4,
+            "D": 8
+          }
+        },
+        {
+          "datum": "2025-10-02",
+          "start": "18:00",
+          "slut": "19:15",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 2,
+            "C": 2,
+            "D": 6
+          }
+        },
+        {
+          "datum": "2025-10-09",
+          "start": "18:00",
+          "slut": "19:15",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 3,
+            "C": 5,
+            "D": 7
+          }
+        },
+        {
+          "datum": "2025-10-16",
+          "start": "18:00",
+          "slut": "19:15",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 4,
+            "C": 4,
+            "D": 6
+          }
+        },
+        {
+          "datum": "2025-10-23",
+          "start": "18:00",
+          "slut": "19:15",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 3,
+            "C": 3,
+            "D": 5
+          }
+        },
+        {
+          "datum": "2025-10-30",
+          "start": "18:00",
+          "slut": "19:15",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 2,
+            "C": 4,
+            "D": 7
+          }
+        },
+        {
+          "datum": "2025-11-06",
+          "start": "18:00",
+          "slut": "19:15",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 3,
+            "C": 3,
+            "D": 6
+          }
+        },
+        {
+          "datum": "2025-11-13",
+          "start": "18:00",
+          "slut": "19:15",
+          "status": "G",
+          "ledare": 2,
+          "deltagare": {
+            "B": 4,
+            "C": 4,
+            "D": 8
+          }
+        }
+      ]
+    }
+  ],
+  "berakning": {
+    "per_aktivitet": [
+      {
+        "aktivitet_id": "AKT-2025-0311",
+        "giltiga_sammankomster": 10,
+        "deltagartillfallen_7_20": 130,
+        "bidrag_kr": 1820,
+        "kommentar": "Sammankomsten 2025-09-23 inställd och 2025-10-21 kortare än 60 minuter (45 min), räknas inte. 10 giltiga sammankomster."
+      },
+      {
+        "aktivitet_id": "AKT-2025-0312",
+        "giltiga_sammankomster": 11,
+        "deltagartillfallen_7_20": 33,
+        "bidrag_kr": 462,
+        "kommentar": "Bara åldersgrupp B (7–20 år) ger bidrag; C och D räknas inte."
+      }
+    ],
+    "total_bidrag_kr": 2282,
+    "beslut": "Delegationsbeslut 2026-02-09, dnr KFN-2026-00087"
+  }
+}

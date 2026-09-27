@@ -1,0 +1,131 @@
+{
+  "file": "me_mil06_kemikalieforteckning.xlsx",
+  "format": "xlsx",
+  "source": {
+    "catalogue_id": "MIL-06",
+    "url": "https://sjalvservice.malmo.se/oversikt/overview/529"
+  },
+  "description": "Verksamhetsutövarens kemikalieförteckning enligt miljöförvaltningens mall: kemiska produkter med förbrukning, största förpackning, faroangivelser, förvaringsplats och invallning, och ett blad med farligt avfall; två brandfarliga vätskor förvaras utan invallning.",
+  "sheets": [
+    {
+      "name": "Kemiska produkter",
+      "columns": [
+        "Produkt",
+        "Leverantör",
+        "Användning",
+        "Förbrukning per år",
+        "Största förpackning (liter)",
+        "Faroangivelser",
+        "Förvaringsplats",
+        "Invallning"
+      ],
+      "rows": [
+        [
+          "Nordlack Epoxigrund 2K",
+          "Nordlack AB",
+          "Grundfärg",
+          "1 800 liter",
+          200,
+          "H226, H315, H317, H411",
+          "Kemförrådet",
+          "Ja"
+        ],
+        [
+          "Nordlack Härdare 25",
+          "Nordlack AB",
+          "Härdare till grundfärg",
+          "450 liter",
+          20,
+          "H226, H317, H332, H412",
+          "Kemförrådet",
+          "Ja"
+        ],
+        [
+          "Polyuretanlack PU 400",
+          "Nordlack AB",
+          "Täcklack",
+          "1 200 liter",
+          20,
+          "H226, H317, H411",
+          "Kemförrådet",
+          "Ja"
+        ],
+        [
+          "Spädning 1030",
+          "Solventa Kemi AB",
+          "Spädning och rengöring av sprututrustning",
+          "2 400 liter",
+          200,
+          "H226, H304, H312, H315, H319, H332, H335, H373, H412",
+          "Vid sprutbox 2",
+          "Nej"
+        ],
+        [
+          "Avfettning AX-7",
+          "Solventa Kemi AB",
+          "Avfettning av stål före lackering",
+          "600 liter",
+          25,
+          "H225, H319, H336",
+          "Förbehandlingsrummet",
+          "Nej"
+        ],
+        [
+          "Alkalisk rengöring 12",
+          "Rentex AB",
+          "Golvrengöring i tvätthallen",
+          "300 liter",
+          25,
+          "H314",
+          "Tvätthallen",
+          "Nej"
+        ],
+        [
+          "Hydraulolja HV 46",
+          "Oljebolaget Syd AB",
+          "Hydraulik i lyftbord",
+          "200 liter",
+          208,
+          "Inga",
+          "Verkstaden",
+          "Nej"
+        ]
+      ]
+    },
+    {
+      "name": "Farligt avfall",
+      "columns": [
+        "Avfall",
+        "Avfallskod",
+        "Mängd per år",
+        "Förvaring"
+      ],
+      "rows": [
+        [
+          "Färg- och lackavfall med organiska lösningsmedel",
+          "08 01 11*",
+          "3,2 ton",
+          "Invallad container på gården"
+        ],
+        [
+          "Förorenad spädning",
+          "14 06 03*",
+          "1,8 ton",
+          "Fat i kemförrådet"
+        ],
+        [
+          "Spillolja",
+          "13 02 05*",
+          "150 liter",
+          "Fat i verkstaden"
+        ],
+        [
+          "Filter och absorbenter",
+          "15 02 02*",
+          "0,4 ton",
+          "Säckar i kemförrådet"
+        ]
+      ]
+    }
+  ]
+}

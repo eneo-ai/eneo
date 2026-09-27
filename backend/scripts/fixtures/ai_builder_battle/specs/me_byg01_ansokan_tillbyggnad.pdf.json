@@ -1,0 +1,82 @@
+{
+  "file": "me_byg01_ansokan_tillbyggnad.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/443"},
+  "description": "Utskrift av en inskickad ansökan i e-tjänsten Bygglov - tillbyggnad (stegen Ansökan, KA/Kontrollplan, Kontaktuppgifter) för ett inglasat uterum som placeras närmare fastighetsgränsen än planen tillåter, med grannemedgivande.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Stadsbyggnadsnämnden, e-tjänst Bygglov - tillbyggnad", "address": "851 85 Sundsvall"},
+  "date": "2026-08-31",
+  "diarienummer": "BYGG-2026-000418",
+  "title": "Ansökan om bygglov – tillbyggnad (utskrift från e-tjänsten)",
+  "blocks": [
+    {"paragraph": "Ärendet registrerades automatiskt när ansökan skickades in. Ansökan är signerad med e-legitimation 2026-08-31 kl. 21.47. Kompletterande handlingar lämnas via e-tjänsten Komplettering av ärende."},
+    {"heading": "Fastighet"},
+    {
+      "table": {
+        "columns": ["Fält", "Svar"],
+        "rows": [
+          ["Fastighetsbeteckning", "Kvarnbäcken 4:27"],
+          ["Besöksadress", "Björnvägen 9, 856 42 Sundsvall"],
+          ["Fastighetens area", "812 m²"],
+          ["Gällande plan enligt sökanden", "Detaljplan för Kvarnbäcken, del 2"]
+        ]
+      }
+    },
+    {"heading": "Sökande och byggherre"},
+    {
+      "table": {
+        "columns": ["Fält (sökande)", "Svar"],
+        "rows": [
+          ["Namn", "Maria Ekholm"],
+          ["Personnummer", "19860908-2386"],
+          ["Adress", "Björnvägen 9, 856 42 Sundsvall"],
+          ["E-post", "maria.ekholm@example.com"],
+          ["Telefon", "070-318 44 72"],
+          ["Fakturamottagare", "Samma som sökande"]
+        ]
+      }
+    },
+    {"heading": "Åtgärd"},
+    {
+      "table": {
+        "columns": ["Fält (åtgärd)", "Svar"],
+        "rows": [
+          ["Typ av åtgärd", "Tillbyggnad av enbostadshus med inglasat uterum"],
+          ["Beskrivning", "Uppvärmt inglasat uterum i ett plan mot öster, sadeltak med samma lutning som huvudbyggnaden (27°). Nytt öppningsbart glasparti mot vardagsrummet."],
+          ["Byggnadsarea befintligt bostadshus", "118,0 m²"],
+          ["Byggnadsarea tillbyggnad", "18,0 m²"],
+          ["Byggnadsarea bostadshus efter åtgärd", "136,0 m²"],
+          ["Bruttoarea tillbyggnad", "18,0 m²"],
+          ["Nockhöjd tillbyggnad", "3,4 m över medelmarknivå"],
+          ["Fasadmaterial och kulör", "Stående träpanel, NCS S 1002-Y, som befintligt"],
+          ["Taktäckning", "Glas och bandtäckt plåt, svart"],
+          ["Planerad byggstart", "2026-11-02"]
+        ]
+      }
+    },
+    {"heading": "Kontrollansvarig och kontrollplan"},
+    {
+      "table": {
+        "columns": ["Fält (KA/kontrollplan)", "Svar"],
+        "rows": [
+          ["Kontrollansvarig", "Fredrik Sjödin"],
+          ["Certifieringsnummer", "SC0911-19"],
+          ["Behörighetsnivå", "N (normal art)"],
+          ["Förslag till kontrollplan", "Bifogas (Kontrollplan uterum Kvarnbäcken 4:27)"]
+        ]
+      }
+    },
+    {"heading": "Bifogade handlingar"},
+    {
+      "list": [
+        "Situationsplan 1:500 (ritning A-01)",
+        "Planritning 1:100 (A-02)",
+        "Fasadritningar 1:100 (A-03)",
+        "Sektionsritning 1:100 (A-04)",
+        "Förslag till kontrollplan",
+        "Grannemedgivande från ägarna till Kvarnbäcken 4:28"
+      ]
+    },
+    {"heading": "Övriga upplysningar från sökanden"},
+    {"paragraph": "Uterummet placeras närmare gränsen mot Kvarnbäcken 4:28 än 4,5 meter eftersom tomten sluttar kraftigt mot väster. Grannarna på Kvarnbäcken 4:28 har skrivit under ett medgivande som bifogas. Förrådet i tomtens nordöstra hörn ändras inte."}
+  ]
+}

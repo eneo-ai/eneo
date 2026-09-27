@@ -1,0 +1,50 @@
+{
+  "file": "mil13_riktvarden_massor.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "MIL-13", "url": "https://sjalvservice.malmo.se/oversikt/overview/748"},
+  "description": "Miljöförvaltningens handläggarstöd för återvinning av massor: riktvärdestabell (mindre än ringa risk, KM, MKM) per ämne och bedömningsgrunder för prövningsnivå, vattenskyddsområden, mindre än-värden och saknade analyser.",
+  "letterhead": {"organisation": "Kristianstads kommun", "unit": "Miljö- och hälsoskyddsförvaltningen", "address": "Miljö- och hälsoskyddsförvaltningen, 291 80 Kristianstad"},
+  "date": "2026-02-01",
+  "diarienummer": "MHN-2026-0142",
+  "title": "Handläggarstöd – återvinning av massor för anläggningsändamål",
+  "blocks": [
+    {"paragraph": "Stödet används när en anmälan eller inrapportering om återvinning av jord- och schaktmassor ska bedömas. Det sammanfattar Naturvårdsverkets nivåer och förvaltningens praxis. Beslut fattas alltid efter en bedömning i det enskilda fallet."},
+    {"heading": "Rättslig ram"},
+    {"list": [
+      "Återvinning av avfall för anläggningsändamål där föroreningsrisken är ringa är anmälningspliktig (C, verksamhetskod 90.141, 29 kap. 35 § miljöprövningsförordningen (2013:251)).",
+      "Är föroreningsrisken mer än ringa krävs tillstånd från länsstyrelsen (B, verksamhetskod 90.131, 29 kap. 34 §).",
+      "Är risken mindre än ringa krävs varken anmälan eller tillstånd.",
+      "Nämnden kan förelägga om försiktighetsmått enligt 26 kap. 9 § miljöbalken med stöd av 2 kap. 3 § miljöbalken."
+    ]},
+    {"heading": "Riktvärden (mg/kg TS)"},
+    {"table": {
+      "columns": ["Ämne", "Mindre än ringa risk (MRR)", "Känslig markanvändning (KM)", "Mindre känslig markanvändning (MKM)"],
+      "rows": [
+        ["Arsenik As", "10", "10", "25"],
+        ["Bly Pb", "20", "50", "400"],
+        ["Kadmium Cd", "0,2", "0,8", "12"],
+        ["Krom Cr", "40", "80", "150"],
+        ["Koppar Cu", "40", "80", "200"],
+        ["Kvicksilver Hg", "0,1", "0,25", "2,5"],
+        ["Nickel Ni", "35", "40", "120"],
+        ["Zink Zn", "120", "250", "500"],
+        ["PAH-L", "0,6", "3", "15"],
+        ["PAH-M", "2", "3,5", "20"],
+        ["PAH-H", "0,5", "1", "10"]
+      ]
+    }},
+    {"paragraph": "Källor: nivåer för mindre än ringa risk enligt Naturvårdsverkets handbok 2010:1 Återvinning av avfall i anläggningsarbeten; generella riktvärden för förorenad mark enligt Naturvårdsverkets rapport 5976, reviderad 2016."},
+    {"heading": "Bedömningsgrunder"},
+    {"list": [
+      "Varje provpunkt representerar sitt delområde i provtagningsplanen. Massorna bedöms delområde för delområde, inte som ett medelvärde.",
+      "Alla halter i ett delområde under eller lika med MRR: massorna kan återvinnas utan anmälan.",
+      "Någon halt över MRR men ingen över KM: föroreningsrisken är normalt ringa och anmälan enligt 90.141 är rätt väg. Försiktighetsmått föreläggs vid behov.",
+      "Någon halt över KM: föroreningsrisken är normalt mer än ringa. Massorna från delområdet får inte återvinnas med stöd av anmälan; de sorteras bort och lämnas till godkänd mottagare, eller så söks tillstånd hos länsstyrelsen.",
+      "Inom vattenskyddsområde får endast massor med halter under eller lika med MRR användas, oavsett markanvändning.",
+      "Ett mindre än-värde (till exempel <0,1) är under laboratoriets rapporteringsgräns. Det är inget överskridande om rapporteringsgränsen är lägre än riktvärdet.",
+      "Saknas analys för ett ämne i ett delområde är halten okänd. Massorna från delområdet får inte användas förrän analys finns.",
+      "Mätosäkerheten läggs inte till eller dras av; det rapporterade värdet jämförs med riktvärdet."
+    ]},
+    {"signature": {"name": "Ingrid Bengtsson", "role": "Miljöchef, Miljö- och hälsoskyddsförvaltningen"}}
+  ]
+}

@@ -1,0 +1,355 @@
+{
+  "file": "liv01_handlaggarstod_riskklassning_2026.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "LIV-01",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/495"
+  },
+  "description": "Miljökontorets handläggarstöd för registrering och riskklassning av livsmedelsanläggningar i sista led 2026: lagstöd, omfattningsklasser i årsarbetskrafter, kontrollpoäng per aktivitet, riskklass- och kontrollfrekvenstabellerna enligt LIVSFS 2023:2 och avgifterna enligt miljönämndens taxa; noterar att den gamla modellen med erfarenhetsklass har upphört.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Miljökontoret, Livsmedelskontroll",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-01-08",
+  "diarienummer": "MN-2026-00031",
+  "title": "Handläggarstöd: registrering och riskklassning av livsmedelsanläggningar i sista led 2026",
+  "blocks": [
+    {
+      "paragraph": "Stödet sammanfattar hur miljökontoret registrerar livsmedelsanläggningar och fastställer kontrollfrekvens enligt Livsmedelsverkets riskklassningsmodell för anläggningar som huvudsakligen säljer eller serverar livsmedel till konsument (inriktning Sista led): restauranger, kaféer, butiker, storkök och liknande. Beslut om registrering och kontrollfrekvens fattas på delegation från miljönämnden."
+    },
+    {
+      "heading": "Lagstöd"
+    },
+    {
+      "list": [
+        "Förordning (EG) nr 852/2004 artikel 6.2 – livsmedelsföretagaren ska anmäla anläggningen till kontrollmyndigheten för registrering.",
+        "Förordning (EU) 2017/625 – offentlig kontroll och annan offentlig verksamhet.",
+        "Livsmedelslagen (2006:804) 11 § – kommunen är kontrollmyndighet; 31 § – kommunala nämndens beslut överklagas hos länsstyrelsen.",
+        "LIVSFS 2023:2 – Livsmedelsverkets föreskrifter och allmänna råd om kontrollfrekvens för riskbaserad offentlig kontroll.",
+        "Förordningen (2021:176) om avgifter för offentlig kontroll av livsmedel och vissa jordbruksprodukter – 7 § avgifter för kontroll debiteras i efterhand, 11 § avgift för registrering."
+      ]
+    },
+    {
+      "paragraph": "Den tidigare modellen med riskklass 1–8, kontrolltid i timmar per år och erfarenhetsklass A–C används inte sedan den 1 januari 2024, och kommunen tar inte längre ut någon årlig kontrollavgift i förskott. Äldre beslutsmallar ska inte användas."
+    },
+    {
+      "heading": "1. Omfattning"
+    },
+    {
+      "paragraph": "Omfattningen anges i årsarbetskrafter. Alla som arbetar i verksamheten räknas: anställda, ägare och inhyrd personal, omräknat till heltid under ett år. Två personer som arbetar halvtid är tillsammans en årsarbetskraft. Antalet personer är alltså inte detsamma som antalet årsarbetskrafter. Portioner per dag används inte längre för att bestämma omfattningen."
+    },
+    {
+      "table": {
+        "columns": [
+          "Omfattningsklass",
+          "Årsarbetskrafter"
+        ],
+        "rows": [
+          [
+            "Mikro",
+            "mer än 0 och högst 1"
+          ],
+          [
+            "Liten",
+            "mer än 1 och högst 5"
+          ],
+          [
+            "Mellan",
+            "mer än 5 och högst 15"
+          ],
+          [
+            "Stor",
+            "mer än 15"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "2. Aktiviteter och kontrollpoäng"
+    },
+    {
+      "paragraph": "Summera kontrollpoängen för alla aktiviteter som verksamheten bedriver. Varje aktivitet räknas en gång, oavsett hur många produkter den gäller. Minst en aktivitet ska vara en huvudaktivitet."
+    },
+    {
+      "table": {
+        "columns": [
+          "Aktivitet",
+          "Kontrollpoäng",
+          "Huvudaktivitet"
+        ],
+        "rows": [
+          [
+            "Inköp av livsmedel",
+            "1",
+            "Nej"
+          ],
+          [
+            "Import av livsmedel från länder utanför EU/EES",
+            "3",
+            "Nej"
+          ],
+          [
+            "Utformning av märkning för konsumentförpackningar",
+            "5",
+            "Nej"
+          ],
+          [
+            "Utformning av övrig livsmedelsinformation",
+            "2",
+            "Nej"
+          ],
+          [
+            "Märkning",
+            "2",
+            "Nej"
+          ],
+          [
+            "Tillhandahållande av muntlig livsmedelsinformation",
+            "4",
+            "Nej"
+          ],
+          [
+            "Försäljning av livsmedel",
+            "1",
+            "Ja"
+          ],
+          [
+            "Distansförsäljning",
+            "2",
+            "Nej"
+          ],
+          [
+            "Servering av livsmedel",
+            "1",
+            "Ja"
+          ],
+          [
+            "Tillhandahållande av offentliga måltider",
+            "2",
+            "Ja"
+          ],
+          [
+            "Kylförvaring av livsmedel",
+            "1",
+            "Nej"
+          ],
+          [
+            "Frysförvaring av livsmedel",
+            "1",
+            "Nej"
+          ],
+          [
+            "Groddning",
+            "3",
+            "Nej"
+          ],
+          [
+            "Bakning",
+            "1",
+            "Nej"
+          ],
+          [
+            "Hantering av oförpackade färskvaror",
+            "2",
+            "Nej"
+          ],
+          [
+            "Hantering av oförpackad färsk fisk",
+            "4",
+            "Nej"
+          ],
+          [
+            "Hantering av oförpackat färskt kött inklusive fågel",
+            "4",
+            "Nej"
+          ],
+          [
+            "Tillagning av livsmedel med låg hygienisk risk",
+            "1",
+            "Nej"
+          ],
+          [
+            "Tillagning av ej värmebehandlade livsmedel",
+            "2",
+            "Nej"
+          ],
+          [
+            "Tillagning av värmebehandlade/bearbetade livsmedel",
+            "2",
+            "Nej"
+          ],
+          [
+            "Varmhållning av livsmedel",
+            "2",
+            "Nej"
+          ],
+          [
+            "Nedkylning av livsmedel",
+            "3",
+            "Nej"
+          ],
+          [
+            "Användande av vatten som inte omfattas av dricksvattenföreskrifterna",
+            "2",
+            "Nej"
+          ],
+          [
+            "Mobil delverksamhet",
+            "3",
+            "Nej"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "3. Riskklass"
+    },
+    {
+      "paragraph": "Riskklassen läses ut ur tabellen med omfattningsklassen och summan av kontrollpoäng."
+    },
+    {
+      "table": {
+        "columns": [
+          "Omfattning",
+          "0–10 poäng",
+          "11–20 poäng",
+          "21–35 poäng",
+          "36–50 poäng",
+          "Mer än 50 poäng"
+        ],
+        "rows": [
+          [
+            "Mikro",
+            "SL1",
+            "SL2",
+            "SL3",
+            "SL4",
+            "SL5"
+          ],
+          [
+            "Liten",
+            "SL2",
+            "SL3",
+            "SL4",
+            "SL5",
+            "SL6"
+          ],
+          [
+            "Mellan",
+            "SL3",
+            "SL4",
+            "SL5",
+            "SL6",
+            "SL7"
+          ],
+          [
+            "Stor",
+            "SL4",
+            "SL5",
+            "SL6",
+            "SL7",
+            "SL8"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "4. Kontrollfrekvens"
+    },
+    {
+      "table": {
+        "columns": [
+          "Riskklass",
+          "Kontroller per fem år",
+          "Kontroller per år"
+        ],
+        "rows": [
+          [
+            "SL1",
+            "1",
+            "0,2"
+          ],
+          [
+            "SL2",
+            "2",
+            "0,4"
+          ],
+          [
+            "SL3",
+            "4",
+            "0,8"
+          ],
+          [
+            "SL4",
+            "5",
+            "1"
+          ],
+          [
+            "SL5",
+            "10",
+            "2"
+          ],
+          [
+            "SL6",
+            "15",
+            "3"
+          ],
+          [
+            "SL7",
+            "20",
+            "4"
+          ],
+          [
+            "SL8",
+            "25",
+            "5"
+          ]
+        ]
+      }
+    },
+    {
+      "paragraph": "En ny anläggning får ingen reduktion för god efterlevnad förrän minst två planerade kontroller har genomförts. Reduktion för tredjepartscertifiering prövas bara om ett giltigt certifikat har bifogats anmälan. Beslutet om kontrollfrekvens gäller i fem år från beslutsdagen."
+    },
+    {
+      "heading": "5. Avgifter 2026"
+    },
+    {
+      "table": {
+        "columns": [
+          "Avgift",
+          "Belopp"
+        ],
+        "rows": [
+          [
+            "Timavgift för offentlig kontroll enligt miljönämndens taxa 2026",
+            "1 450 kr per timme"
+          ],
+          [
+            "Avgift för registrering av livsmedelsanläggning (två timmars handläggning)",
+            "2 900 kr"
+          ],
+          [
+            "Riktvärde för kontrolltid per planerad kontroll i sista led",
+            "3 timmar"
+          ]
+        ]
+      }
+    },
+    {
+      "paragraph": "Kontroll debiteras i efterhand för den tid som har använts vid varje kontrolltillfälle. I beslutet anges timavgiften och riktvärdet för kontrolltid så att livsmedelsföretagaren kan uppskatta kostnaden för en kontroll."
+    },
+    {
+      "heading": "6. Beslutets innehåll"
+    },
+    {
+      "paragraph": "Beslutet ska innehålla registreringen av anläggningen, den fastställda riskklassen och kontrollfrekvensen med redovisning av aktiviteter, kontrollpoäng, årsarbetskrafter och omfattningsklass, avgiften för registreringen, information om efterhandsdebitering och hur beslutet överklagas till Länsstyrelsen Västernorrland. Använd beslutsmallen för registrering."
+    },
+    {
+      "signature": {
+        "name": "Johan Sundqvist",
+        "role": "Livsmedelsinspektör, samordnare för riskklassning"
+      }
+    }
+  ]
+}

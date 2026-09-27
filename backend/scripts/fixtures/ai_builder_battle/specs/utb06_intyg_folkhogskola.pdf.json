@@ -1,0 +1,29 @@
+{
+  "file": "utb06_intyg_folkhogskola.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "UTB-06", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/644"},
+  "description": "Folkhögskolans intyg om deltagande i en allmän kurs i samhällskunskap, bifogat som betyg eller intyg till ansökan om tillgodoräknande; visar att kursen avbröts efter halva tiden.",
+  "letterhead": {"organisation": "Stödeviks folkhögskola", "unit": "Expeditionen", "address": "Stödeviksvägen 2, 855 90 Sundsvall"},
+  "date": "2019-03-04",
+  "title": "Intyg om studier vid folkhögskola",
+  "blocks": [
+    {
+      "table": {
+        "columns": ["Intyget avser", "Uppgift"],
+        "rows": [
+          ["Intygsnummer", "SFH-INT-2019-0147"],
+          ["Deltagare", "Nadia Karimi"],
+          ["Personnummer", "19950519-2386"],
+          ["Kurs", "Samhällskunskap, allmän kurs (enligt kursplan fastställd 2018-06-12)"],
+          ["Kursperiod enligt kursplan", "2019-01-14 – 2019-03-22, 10 veckor heltid"],
+          ["Deltagit", "2019-01-14 – 2019-02-15"]
+        ]
+      }
+    },
+    {"heading": "Genomförda moment"},
+    {"paragraph": "Deltagaren har genomfört moment 1–5 och godkänts på det skriftliga provet efter moment 3. Deltagaren avbröt studierna på egen begäran 2019-02-15 och har inte deltagit i moment 6–9, provet efter moment 6, den muntliga redovisningen eller fördjupningsarbetet."},
+    {"heading": "Studieomdöme"},
+    {"paragraph": "Studieomdöme har inte satts eftersom kursen inte fullföljts. Folkhögskolan sätter inte betyg."},
+    {"signature": {"name": "Per-Olof Dahlin", "role": "Rektor, Stödeviks folkhögskola"}}
+  ]
+}

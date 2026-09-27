@@ -1,0 +1,100 @@
+{
+  "file": "int02_bilaga_klagomal_matfors.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "INT-02",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/93"
+  },
+  "description": "Bilaga till tjänsteskrivelsen: tabell över klagomål på en hemtjänstgrupp ur synpunktssystemet; en rad namnger en brukare och hennes anhöriga och beskriver en hälsohändelse.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Vård- och omsorgsförvaltningen",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-09-08",
+  "diarienummer": "VON-2026-00977-5",
+  "title": "Bilaga 1. Sammanställning av klagomål på hemtjänsten Matfors januari–augusti 2026",
+  "blocks": [
+    {
+      "paragraph": "Sammanställningen är gjord ur synpunktssystemet 2026-09-02. Klagomål som gäller samma händelse är sammanslagna."
+    },
+    {
+      "table": {
+        "columns": [
+          "Datum",
+          "Kategori",
+          "Sammanfattning",
+          "Åtgärd"
+        ],
+        "rows": [
+          [
+            "2026-01-12",
+            "Missat besök",
+            "Morgonbesök uteblev, brukaren ringde själv till hemtjänsten kl. 10.",
+            "Planeringen ändrad, återkoppling given."
+          ],
+          [
+            "2026-02-03",
+            "Kontinuitet",
+            "Anhörig räknade till 16 olika personal på två veckor.",
+            "Kontaktman och fast team infört i området."
+          ],
+          [
+            "2026-03-18",
+            "Bemötande",
+            "Personal pratade i telefon under besöket.",
+            "Samtal med personalgruppen."
+          ],
+          [
+            "2026-04-07",
+            "Information",
+            "Ändrad tid för dusch meddelades inte.",
+            "Rutin för information vid ändring."
+          ],
+          [
+            "2026-05-26",
+            "Missat besök",
+            "Kvällsbesök uteblev två kvällar i rad.",
+            "Avvikelse utredd, schemat justerat."
+          ],
+          [
+            "2026-06-15",
+            "Bemötande",
+            "Vikarie kunde inte svenska tillräckligt för att förstå önskemål.",
+            "Språkstöd och introduktion ses över."
+          ],
+          [
+            "2026-07-09",
+            "Missat besök",
+            "Lunchbesök uteblev, maten stod kvar i kylen.",
+            "Avvikelse, bemanningsenheten kontaktad."
+          ],
+          [
+            "2026-07-14",
+            "Läkemedel",
+            "Dottern Anna-Karin Ekholm klagar på att hennes mamma Gunnel Ekholm, Nyängsvägen 14, inte fick sitt insulin två kvällar och fick åka in till akuten med lågt blodsocker.",
+            "Lex Sarah-rapport, utredning VON-2026-00977-7."
+          ],
+          [
+            "2026-07-22",
+            "Kontinuitet",
+            "Brukaren visste inte vem som skulle komma och öppnade inte.",
+            "Besked om personal dagen före."
+          ],
+          [
+            "2026-08-05",
+            "Missat besök",
+            "Promenad ställdes in fyra veckor i rad.",
+            "Insatsen återupptagen från vecka 34."
+          ],
+          [
+            "2026-08-19",
+            "Information",
+            "Hemtjänsten hade inte fått veta att brukaren kommit hem från sjukhuset.",
+            "Samordnad utskrivning följs upp med regionen."
+          ]
+        ]
+      }
+    }
+  ]
+}

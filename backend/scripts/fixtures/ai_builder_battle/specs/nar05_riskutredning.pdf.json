@@ -1,0 +1,34 @@
+{
+  "file": "nar05_riskutredning.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "NAR-05", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/468"},
+  "description": "Konsultens riskutredning för hantering av brandfarlig gas och vätska vid en lackeringsverkstad, bilaga till ansökan om tillstånd; hänvisar till den myndighet som ersatts och anger ett annat skyddsavstånd än situationsplanen.",
+  "letterhead": {"organisation": "Brandkonsult Mitt AB", "unit": "Uppdrag 26-114", "address": "Bankgatan 15, 852 31 Sundsvall"},
+  "date": "2026-08-20",
+  "title": "Riskutredning – hantering av brandfarlig vara, Tunadals Industrilack AB",
+  "blocks": [
+    {"heading": "1. Uppdrag och underlag"},
+    {"paragraph": "Brandkonsult Mitt AB har på uppdrag av Tunadals Industrilack AB utrett riskerna med den hantering av brandfarlig vara som ansökan om tillstånd avser, enligt 7 § lagen (2010:1011) om brandfarliga och explosiva varor. Underlag har varit platsbesök 2026-08-12, verksamhetens produktblad och säkerhetsdatablad samt ritningar."},
+    {"heading": "2. Hanterade varor"},
+    {"paragraph": "Gasol för truckar, svetsning och härdugn (sammanlagt 692 liter), lackförtunning och lack i kategori 2 (860 liter) och lacknafta i kategori 3 (600 liter). Mängderna överstiger gränserna för tillståndsplikt i MSBFS 2013:3."},
+    {"heading": "3. Riskidentifiering"},
+    {
+      "table": {
+        "columns": ["Händelse", "Sannolikhet", "Konsekvens", "Åtgärd"],
+        "rows": [
+          ["Gasolläckage vid byte av flaska i gasolskåp", "Låg", "Brand eller explosion vid fasad", "Skyddsavstånd och ventilerat skåp"],
+          ["Spill av lackförtunning vid omtappning", "Medel", "Pölbrand i blandningsrum", "Invallning och spilltråg"],
+          ["Antändning av ångor i sprutbox", "Låg", "Brand i sprutbox", "Klassning av explosionsfarlig miljö och Ex-klassad utrustning"],
+          ["Brand i verkstad som sprider sig till brandcell B2", "Låg", "Brand i förråd", "Brandcell EI 60 och självstängande dörr"]
+        ]
+      }
+    },
+    {"heading": "4. Skyddsavstånd"},
+    {"paragraph": "Gasolskåpet (F1) placeras 8 meter från byggnad med fönster, vilket uppfyller skyddsavstånden i Myndigheten för samhällsskydd och beredskaps (MSB) vägledning Förvaring av brandfarlig gas i lös behållare. Gasolcentralen (F2) är utförd som egen brandcell i fasaden och kräver därför inget skyddsavstånd till den egna byggnaden."},
+    {"heading": "5. Explosionsfarlig miljö"},
+    {"paragraph": "Sprutbox och blandningsrum är klassade enligt SS-EN IEC 60079-10-1, se klassningsplan K-01. All elektrisk utrustning i zon 1 och zon 2 ska vara lämplig för zonen."},
+    {"heading": "6. Slutsats"},
+    {"paragraph": "Med de åtgärder som anges ovan bedöms hanteringen kunna ske med godtagbar risk. Tillsynsvägledning finns hos Myndigheten för samhällsskydd och beredskap."},
+    {"signature": {"name": "Linnea Sjölander", "role": "Brandingenjör, Brandkonsult Mitt AB"}}
+  ]
+}

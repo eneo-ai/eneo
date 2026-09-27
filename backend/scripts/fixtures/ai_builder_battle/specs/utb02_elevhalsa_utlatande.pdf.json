@@ -1,0 +1,32 @@
+{
+  "file": "utb02_elevhalsa_utlatande.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "UTB-02", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/210"},
+  "description": "Utlåtande från elevhälsans psykolog och skolläkare med diagnoser och testresultat, bilaga till ansökan om tilläggsbelopp; hälsouppgifter som inte ska föras vidare i beslutet.",
+  "letterhead": {"organisation": "Nordvik Gymnasium", "unit": "Elevhälsans medicinska och psykologiska insats", "address": "Nordvik Utbildning AB, Industrigatan 6, 852 38 Sundsvall"},
+  "date": "2026-09-07",
+  "title": "Utlåtande från elevhälsan – underlag för ansökan om tilläggsbelopp",
+  "blocks": [
+    {"paragraph": "Handlingen innehåller känsliga personuppgifter om hälsa. Den lämnas till elevens hemkommun endast som underlag för prövning av tilläggsbelopp."},
+    {"heading": "Elev"},
+    {"paragraph": "Elias Nyström, 20100903-2390, El- och energiprogrammet årskurs 1."},
+    {"heading": "Diagnoser"},
+    {"list": ["Autismspektrumtillstånd, F84.0, fastställt av BUP Sundsvall 2019.", "ADHD, kombinerad form, F90.0, fastställt av BUP Sundsvall 2021. Medicinering sedan 2021."]},
+    {"heading": "Psykologisk bedömning"},
+    {
+      "table": {
+        "columns": ["Index (WISC-V, 2025-11-12)", "Resultat", "Tolkning"],
+        "rows": [
+          ["Verbal förståelse", "96", "Genomsnittlig nivå"],
+          ["Visuospatial förmåga", "104", "Genomsnittlig nivå"],
+          ["Arbetsminne", "72", "Klart under genomsnittet"],
+          ["Snabbhet", "78", "Under genomsnittet"]
+        ]
+      }
+    },
+    {"heading": "Bedömning"},
+    {"paragraph": "Det nedsatta arbetsminnet och svårigheterna med uppmärksamhet gör att Elias inte kan hålla flera säkerhetsinstruktioner i minnet samtidigt i en bullrig miljö. Risken för olyckor i verkstaden bedöms som hög utan kontinuerligt vuxenstöd. Elevhälsan instämmer i den pedagogiska kartläggningens slutsats om en vuxen vid hans sida under samtliga praktiska moment."},
+    {"signature": {"name": "Maja Lundqvist", "role": "Leg. psykolog"}},
+    {"signature": {"name": "Olof Fransson", "role": "Skolläkare"}}
+  ]
+}

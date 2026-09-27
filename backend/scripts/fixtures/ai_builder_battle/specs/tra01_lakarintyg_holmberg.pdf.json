@@ -1,0 +1,61 @@
+{
+  "file": "tra01_lakarintyg_holmberg.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "TRA-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/569"},
+  "description": "Läkarintyg på kommunens blankett för parkeringstillstånd för rörelsehindrad: diagnoser, gångsträcka på plan mark, pauser, hjälpmedel och en beräknad varaktighet på 3–4 månader efter en höftoperation.",
+  "letterhead": {"organisation": "Region Västernorrland", "unit": "Ortopedmottagningen, Sundsvalls sjukhus", "address": "Lasarettsvägen 19, 856 43 Sundsvall"},
+  "date": "2026-09-08",
+  "title": "Läkarintyg för parkeringstillstånd för rörelsehindrad",
+  "blocks": [
+    {"paragraph": "Intyget lämnas till Sundsvalls kommun, stadsbyggnadsnämnden, som underlag för prövning av parkeringstillstånd enligt 13 kap. 8 § trafikförordningen (1998:1276). Intyget innehåller uppgifter om patientens hälsa. Patienten har informerats om att intyget lämnas till kommunen."},
+    {"heading": "1. Patient"},
+    {
+      "table": {
+        "columns": ["Patientuppgift", "Värde"],
+        "rows": [
+          ["Namn", "Sture Holmberg"],
+          ["Personnummer", "19481216-1596"],
+          ["Undersökt", "2026-09-08, återbesök efter operation"],
+          ["Känd sedan", "2025-11, remiss från Haga hälsocentral"]
+        ]
+      }
+    },
+    {"heading": "2. Diagnos"},
+    {"list": [
+      "Z96.6 Status efter höftledsplastik höger, opererad 2026-08-19.",
+      "M17.1 Primär gonartros (artros) vänster knä."
+    ]},
+    {"heading": "3. Funktionsnedsättning"},
+    {"paragraph": "Normalt postoperativt förlopp. Full belastning tillåten. Går med två kryckkäppar inomhus och rollator utomhus. Sjukgymnastik två gånger per vecka. Knäartrosen ger måttlig belastningssmärta men begränsade före operationen inte gångsträckan till under ca 500 meter och motiverar inte ensam parkeringstillstånd."},
+    {"heading": "4. Gångförmåga"},
+    {
+      "table": {
+        "columns": ["Gångförmåga (läkarens bedömning)", "Uppgift"],
+        "rows": [
+          ["Gångsträcka på plan mark utan vila", "ca 50 meter"],
+          ["Antal pauser på den sträckan", "1"],
+          ["Hjälpmedel", "Två kryckkäppar, rollator utomhus"],
+          ["Trappor", "Klarar en våning med stöd av ledstång"],
+          ["Kan ta sig i och ur bilen själv", "Ja"]
+        ]
+      }
+    },
+    {"heading": "5. Varaktighet"},
+    {
+      "table": {
+        "columns": ["Funktionsnedsättningens varaktighet", "Läkarens svar"],
+        "rows": [
+          ["Beräknad varaktighet", "3–4 månader"],
+          ["Är funktionsnedsättningen bestående i minst 6 månader?", "Nej"],
+          ["Grund för bedömningen", "Förväntad återhämtning efter höftledsplastik; patienten beräknas gå utan hjälpmedel och minst 500 meter senast vid årsskiftet 2026/2027"],
+          ["Förnyad bedömning rekommenderas", "Endast om rehabiliteringen inte går som förväntat"]
+        ]
+      }
+    },
+    {"heading": "6. Om sökanden är passagerare"},
+    {"paragraph": "Ej aktuellt, patienten söker som förare. Patienten kör bil och behöver inte hjälp av någon annan utanför fordonet."},
+    {"heading": "7. Läkarens underskrift"},
+    {"paragraph": "Jag intygar att uppgifterna ovan grundar sig på egen undersökning och journalanteckningar."},
+    {"signature": {"name": "Anneli Sjögren", "role": "Leg. läkare, specialist i ortopedi, Ortopedmottagningen Sundsvalls sjukhus"}}
+  ]
+}

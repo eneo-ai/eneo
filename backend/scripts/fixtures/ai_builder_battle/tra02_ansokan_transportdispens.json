@@ -1,0 +1,141 @@
+{
+  "etjanst": "Ansökan om transportdispens",
+  "arendenummer_etjanst": "OEP-2026-588214",
+  "inkom": "2026-09-15T10:42:18+02:00",
+  "signerad": {
+    "namn": "Peter Åkerlund",
+    "metod": "BankID",
+    "tidpunkt": "2026-09-15T10:41:57+02:00"
+  },
+  "steg_1_ansokan": {
+    "sokande": {
+      "foretag": "Mittnorrländsk Tungtransport AB",
+      "organisationsnummer": "556812-4407",
+      "adress": "Förrådsvägen 6, 862 32 Kvissleby",
+      "kontaktperson": "Peter Åkerlund",
+      "telefon": "060-61 44 20",
+      "mobil": "070-391 58 02",
+      "epost": "trafikledning@mntungtransport.se"
+    },
+    "dispensen_avser": [
+      "Tung transport",
+      "Bred transport"
+    ],
+    "antal_transporter": "Enstaka transport (en tur, retur utan last)",
+    "period_fran": "2026-10-06",
+    "period_till": "2026-10-09",
+    "onskad_tid_pa_dygnet": "Nattetid, start tidigast kl. 22.00",
+    "fardvag": {
+      "start": "Tunadal hamn, kaj 3",
+      "mal": "Birsta ställverk, Ställverksgatan 4",
+      "gator_i_ordning": [
+        "Hamnleden",
+        "Sågverksvägen",
+        "Selångersbron",
+        "Norrländska vägen",
+        "Ställverksgatan"
+      ],
+      "enbart_inom_sundsvalls_kommun": true,
+      "retur": "Samma väg, olastad (bruttovikt 40 900 kg, bredd 3,00 m)"
+    },
+    "last": {
+      "beskrivning": "Krafttransformator 130/20 kV, 40 MVA, för nya Birsta ställverk",
+      "odelbar": true,
+      "vikt_kg": 41500,
+      "matt_l_b_h_m": [
+        7.2,
+        3.6,
+        3.1
+      ]
+    },
+    "eskort": {
+      "foljebil": "Nej",
+      "vagtransportledare": "Nej",
+      "polis": "Nej"
+    },
+    "ovrigt": "Transporten är samordnad med Kustkraft Nät AB som tar emot transformatorn på plats. Vi har tidigare kört via Selångersbron med lättare last."
+  },
+  "steg_2_fordon": {
+    "fordonskombination": "Dragbil med modulsläp",
+    "dragfordon": {
+      "registreringsnummer": "TKR 481",
+      "typ": "Dragbil, 4 axlar",
+      "tjanstevikt_kg": 12800
+    },
+    "slap": {
+      "registreringsnummer": "XWD 39J",
+      "typ": "Modulsläp, 5 axellinjer",
+      "tjanstevikt_kg": 28100
+    },
+    "bruttovikt_kg": 82400,
+    "langd_m": 27.5,
+    "bredd_m": 3.6,
+    "hojd_m": 4.45,
+    "axlar": [
+      {
+        "axel": 1,
+        "fordon": "Dragbil",
+        "axeltryck_kg": 7200,
+        "avstand_till_nasta_m": 1.95
+      },
+      {
+        "axel": 2,
+        "fordon": "Dragbil",
+        "axeltryck_kg": 7200,
+        "avstand_till_nasta_m": 2.8
+      },
+      {
+        "axel": 3,
+        "fordon": "Dragbil",
+        "axeltryck_kg": 11400,
+        "avstand_till_nasta_m": 1.36
+      },
+      {
+        "axel": 4,
+        "fordon": "Dragbil",
+        "axeltryck_kg": 11400,
+        "avstand_till_nasta_m": 6.1
+      },
+      {
+        "axel": 5,
+        "fordon": "Släp",
+        "axeltryck_kg": 9040,
+        "avstand_till_nasta_m": 1.5
+      },
+      {
+        "axel": 6,
+        "fordon": "Släp",
+        "axeltryck_kg": 9040,
+        "avstand_till_nasta_m": 1.5
+      },
+      {
+        "axel": 7,
+        "fordon": "Släp",
+        "axeltryck_kg": 9040,
+        "avstand_till_nasta_m": 1.5
+      },
+      {
+        "axel": 8,
+        "fordon": "Släp",
+        "axeltryck_kg": 9040,
+        "avstand_till_nasta_m": 1.5
+      },
+      {
+        "axel": 9,
+        "fordon": "Släp",
+        "axeltryck_kg": 9040,
+        "avstand_till_nasta_m": 0
+      }
+    ],
+    "bilagor": [
+      "Fordonsritning_TKR481_XWD39J.pdf",
+      "Karta_fardvag_Tunadal_Birsta.pdf"
+    ]
+  },
+  "steg_3_fakturering": {
+    "fakturamottagare": "Mittnorrländsk Tungtransport AB",
+    "fakturaadress": "Box 114, 862 22 Kvissleby",
+    "referens": "PO 26-1187",
+    "brådskande_handlaggning": false
+  }
+}

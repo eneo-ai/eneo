@@ -1,0 +1,33 @@
+{
+  "file": "mil07_rutin_rengoring_sterilisering.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "MIL-07", "url": "https://sjalvservice.malmo.se/oversikt/overview/1243"},
+  "description": "Rutin för rengöring, desinfektion och sterilisering av instrument, bifogad anmälan om hygienisk behandling men kopierad från en annan verksamhet (en fotvårdsklinik) och inte anpassad till tatuering; beskriver autoklav, kontroll och instrumenthantering.",
+  "letterhead": {"organisation": "Fotvårdskliniken Lyckan", "unit": "Rutiner för hygien", "address": "Storgatan 5, 262 32 Ängelholm"},
+  "date": "2021-02-15",
+  "title": "Rutin för rengöring, desinfektion och sterilisering av instrument",
+  "blocks": [
+    {"paragraph": "Rutinen gäller för fotvårdsinstrument som används vid behandling: tänger, nagelsaxar, skalpellhandtag, hudhyvlar och fräsar."},
+    {"heading": "Rengöring"},
+    {"list": [
+      "Instrumenten läggs direkt efter användning i ett tråg med rengöringsmedel.",
+      "Instrumenten borstas under vatten med skyddsglasögon och handskar och sköljs.",
+      "Fräsar rengörs i ultraljudsbad i 10 minuter.",
+      "Instrumenten torkas med engångspapper och kontrolleras visuellt."
+    ]},
+    {"heading": "Desinfektion"},
+    {"paragraph": "Instrument som inte ska steriliseras desinfekteras med alkoholbaserat desinfektionsmedel med tensid."},
+    {"heading": "Sterilisering"},
+    {"list": [
+      "Instrumenten packas i steriliseringspåsar och märks med datum.",
+      "Påsarna steriliseras i klinikens autoklav SteriMax 18 N (typ N) vid 134 °C i 4 minuter.",
+      "Sterila påsar förvaras i stängd låda och används inom sex månader.",
+      "Kontroll av autoklaven görs vid behov och vid service."
+    ]},
+    {"heading": "Engångsmaterial"},
+    {"paragraph": "Skalpellblad och fräsar för engångsbruk används en gång och kastas i stickfast behållare."},
+    {"heading": "Ansvar"},
+    {"paragraph": "Fotterapeuten ansvarar för att rutinen följs. Rutinen ses över vid behov."},
+    {"signature": {"name": "Karin Lyck", "role": "Legitimerad fotterapeut, Fotvårdskliniken Lyckan"}}
+  ]
+}

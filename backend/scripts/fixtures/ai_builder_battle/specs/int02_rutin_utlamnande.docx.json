@@ -1,0 +1,116 @@
+{
+  "file": "int02_rutin_utlamnande.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-02",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/93"
+  },
+  "description": "Förvaltningens rutin för prövning av begäran om allmän handling: steg, vanliga sekretessbestämmelser med skaderekvisit, delegation, beslutsinnehåll och överklagandehänvisning.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Vård- och omsorgsförvaltningen",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-02-10",
+  "diarienummer": "VON-2026-00081",
+  "title": "Rutin – Utlämnande av allmänna handlingar och sekretessprövning",
+  "blocks": [
+    {
+      "heading": "Syfte"
+    },
+    {
+      "paragraph": "Rutinen beskriver hur vård- och omsorgsförvaltningen prövar en begäran om att ta del av allmänna handlingar. Den som har ansvar för handlingen gör prövningen i första hand (6 kap. 3 § OSL). Begäran ska behandlas skyndsamt; normalt ska besked lämnas samma dag eller inom några dagar (2 kap. 15 § tryckfrihetsförordningen)."
+    },
+    {
+      "heading": "Steg för steg"
+    },
+    {
+      "list": [
+        "Registrera begäran och identifiera vilka handlingar den avser. Sökanden behöver inte uppge vem hon eller han är eller varför handlingen begärs (2 kap. 18 § tryckfrihetsförordningen).",
+        "Pröva om handlingarna är allmänna: inkomna eller upprättade och förvarade hos förvaltningen.",
+        "Gå igenom varje handling uppgift för uppgift. Sekretess gäller för uppgifter, inte för hela handlingar. Det som inte omfattas av sekretess ska lämnas ut.",
+        "Ange för varje uppgift som inte lämnas ut vilken sekretessbestämmelse som är tillämplig och hur skaderekvisitet har bedömts.",
+        "Maska sekretessbelagda uppgifter och lämna ut resten.",
+        "Om sökanden begär det ska förvaltningen fatta ett skriftligt beslut om avslag eller delvis avslag med överklagandehänvisning."
+      ]
+    },
+    {
+      "heading": "Vanliga sekretessbestämmelser i förvaltningens verksamhet"
+    },
+    {
+      "table": {
+        "columns": [
+          "Bestämmelse",
+          "Vad som skyddas",
+          "Skaderekvisit"
+        ],
+        "rows": [
+          [
+            "26 kap. 1 § OSL",
+            "Enskildas personliga förhållanden inom socialtjänsten, till exempel hemtjänst, särskilt boende och LSS",
+            "Omvänt – sekretess gäller om det inte står klart att uppgiften kan röjas utan men"
+          ],
+          [
+            "25 kap. 1 § OSL",
+            "Enskildas hälsotillstånd inom hälso- och sjukvården, till exempel kommunal hemsjukvård och delegerade insatser",
+            "Omvänt"
+          ],
+          [
+            "21 kap. 3 § OSL",
+            "Adress, telefonnummer och liknande uppgifter om personer som riskerar hot eller våld, till exempel personer med skyddade personuppgifter",
+            "Rakt – sekretess gäller om det av särskild anledning kan antas att personen kan utsättas för hot eller våld eller lida annat allvarligt men"
+          ],
+          [
+            "39 kap. 3 § första stycket OSL",
+            "Anställdas personliga förhållanden i övrigt i personaladministrativ verksamhet",
+            "Rakt, kvalificerat – våld eller annat allvarligt men"
+          ],
+          [
+            "39 kap. 3 § tredje stycket OSL (lydelse enligt SFS 2025:581)",
+            "Anställdas bostadsadress, privata telefonnummer och jämförbara uppgifter, bilder för tjänstekort och uppgifter om anställdas närstående i personaladministrativ verksamhet",
+            "Omvänt"
+          ],
+          [
+            "31 kap. 16 § OSL",
+            "Affärs- eller driftförhållanden hos företag som förvaltningen har affärsförbindelse med",
+            "Rakt, kvalificerat – skada av särskild anledning"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Delegation"
+    },
+    {
+      "paragraph": "Beslut om att helt eller delvis avslå en begäran fattas av förvaltningsjurist enligt vård- och omsorgsnämndens delegationsordning, punkt 1.6. Beslutet anmäls till nämnden."
+    },
+    {
+      "heading": "Beslutets innehåll"
+    },
+    {
+      "list": [
+        "Sökandens namn och datum för begäran.",
+        "Diarienummer för begäran och för de handlingar som prövats.",
+        "Vilka handlingar som lämnas ut helt, vilka som lämnas ut med maskeringar och vilka som inte lämnas ut.",
+        "Vilka slags uppgifter som maskats och tillämplig sekretessbestämmelse för varje slag av uppgift. Ange bestämmelsen med kapitel och paragraf på samma sätt som i tabellen ovan, till exempel 26 kap. 1 § OSL.",
+        "En motivering som inte röjer det som omfattas av sekretess (32 § förvaltningslagen).",
+        "Överklagandehänvisning (33 § förvaltningslagen)."
+      ]
+    },
+    {
+      "heading": "Överklagandehänvisning"
+    },
+    {
+      "paragraph": "Använd följande text: Du kan överklaga beslutet hos Kammarrätten i Sundsvall. Skicka överklagandet till vård- och omsorgsnämnden, Sundsvalls kommun, 851 85 Sundsvall. Överklagandet ska ha kommit in inom tre veckor från den dag du fick del av beslutet. Ange vilket beslut du överklagar och hur du vill att det ska ändras."
+    },
+    {
+      "paragraph": "Bestämmelser om överklagande finns i 6 kap. 7 och 8 §§ OSL och 44 § förvaltningslagen (2017:900)."
+    },
+    {
+      "signature": {
+        "name": "Henrik Ståhl",
+        "role": "Förvaltningsjurist"
+      }
+    }
+  ]
+}

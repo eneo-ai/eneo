@@ -1,0 +1,172 @@
+{
+  "name": "Nämndprotokoll från inspelat sammanträde",
+  "description": "Nämndsekreterarens stöd efter ett sammanträde: transkriberar inspelningen, kopplar talarna till ledamöterna, läser föredragningslistan och tjänsteskrivelserna, protokollför varje paragraf med yrkanden och beslut, sammanställer ett beslutsregister för uppföljning och skriver protokollet enligt kommunens mall.",
+  "metadata_json": {
+    "form_schema": {
+      "fields": [
+        {"name": "namnd", "type": "text", "label": "Nämnd", "required": true, "order": 1},
+        {"name": "sammantradesdatum", "type": "date", "label": "Sammanträdesdatum", "required": true, "order": 2},
+        {"name": "deltagare", "type": "text", "label": "Närvarande ledamöter, ersättare och tjänstepersoner (en per rad, med roll)", "required": true, "order": 3},
+        {"name": "justerare", "type": "text", "label": "Utsedd justerare", "required": true, "order": 4},
+        {"name": "forsta_paragraf", "type": "number", "label": "Första paragrafnummer", "required": true, "order": 5}
+      ]
+    },
+    "wizard": {"transcription_enabled": true, "transcription_language": "sv", "transcription_diarization": true}
+  },
+  "steps": [
+    {
+      "name": "Transkribera sammanträdet",
+      "instructions": "Transkribera inspelningen av sammanträdet ordagrant.",
+      "input_source": "flow_input",
+      "input_type": "audio",
+      "output_mode": "transcribe_only",
+      "output_type": "text"
+    },
+    {
+      "name": "Koppla talare till ledamöter",
+      "instructions": "Föreslå vilken av de närvarande varje talaretikett i transkriptet är. Ordföranden leder sammanträdet, ställer propositioner och konstaterar beslut. Tjänstepersoner föredrar ärenden men yrkar aldrig. Gissa inte: lämna en talare okopplad om det inte går att avgöra vem det är.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "output_mode": "speaker_mapping",
+      "output_type": "json",
+      "review_policy": {"mode": "edit"},
+      "output_config": {"speaker_mapping": {"participants_field": "deltagare"}}
+    },
+    {
+      "name": "Läs föredragningslista och tjänsteskrivelser",
+      "instructions": "Du får föredragningslistan och tjänsteskrivelserna till sammanträdet. Ta för varje punkt på föredragningslistan ut punktens nummer, ärendets rubrik och diarienummer exakt som de står, förvaltningens förslag till beslut ordagrant ur tjänsteskrivelsen och vilka beslutet ska skickas till. Ange om ärendet enligt föredragningslistan ska behandlas inom stängda dörrar. Hitta inte på diarienummer; skriv null om det saknas.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_config": {
+        "runtime_input": {
+          "enabled": true,
+          "required": true,
+          "max_files": 40,
+          "input_format": "document",
+          "label": "Föredragningslista och tjänsteskrivelser",
+          "description": "Ladda upp föredragningslistan och alla tjänsteskrivelser till sammanträdet."
+        }
+      },
+      "input_bindings": {"question": "{{ step_input.text }}"},
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["arenden"],
+        "properties": {
+          "arenden": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["punkt", "rubrik", "diarienummer", "forslag_till_beslut", "beslutet_skickas_till", "stangda_dorrar"],
+              "properties": {
+                "punkt": {"type": "integer"},
+                "rubrik": {"type": "string"},
+                "diarienummer": {"type": ["string", "null"]},
+                "forslag_till_beslut": {"type": "string"},
+                "beslutet_skickas_till": {"type": "array", "items": {"type": "string"}},
+                "stangda_dorrar": {"type": "boolean"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Sammanställ besluten per paragraf",
+      "instructions": "Protokollför sammanträdet paragraf för paragraf i föredragningslistans ordning. Numrera paragraferna i följd från första paragrafnumret. För varje paragraf: ärendets rubrik och diarienummer, förvaltningens förslag till beslut, varje yrkande med ledamotens namn och yrkandet ordagrant som det framfördes, propositionsordningen och eventuell omröstning med röstsiffror, beslutet ordagrant som ordföranden konstaterade det, reservationer med namn och om de ska lämnas skriftligt, och ledamöter som anmält jäv och inte deltagit. Ärenden som behandlats inom stängda dörrar markeras, och deras överläggningar återges inte. Skriv bara det som sades på sammanträdet; skriv null där något inte framgår.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Första paragrafnummer: {{ flow_input.forsta_paragraf }}",
+        "source_refs": [
+          {"step_ref": "step_2", "output": "text", "label": "Transkript med ledamöternas namn"},
+          {"step_ref": "step_3", "output": "structured", "field_path": "arenden", "label": "Ärenden enligt föredragningslistan"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["paragrafer"],
+        "properties": {
+          "paragrafer": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["paragraf", "rubrik", "diarienummer", "forslag_till_beslut", "yrkanden", "propositionsordning", "omrostning", "beslut", "reservationer", "jav", "stangda_dorrar", "beslutet_skickas_till"],
+              "properties": {
+                "paragraf": {"type": "integer"},
+                "rubrik": {"type": "string"},
+                "diarienummer": {"type": ["string", "null"]},
+                "forslag_till_beslut": {"type": "string"},
+                "yrkanden": {
+                  "type": "array",
+                  "items": {"type": "object", "required": ["ledamot", "yrkande"], "properties": {"ledamot": {"type": "string"}, "yrkande": {"type": "string"}}}
+                },
+                "propositionsordning": {"type": ["string", "null"]},
+                "omrostning": {"type": ["string", "null"]},
+                "beslut": {"type": "string"},
+                "reservationer": {"type": "array", "items": {"type": "string"}},
+                "jav": {"type": "array", "items": {"type": "string"}},
+                "stangda_dorrar": {"type": "boolean"},
+                "beslutet_skickas_till": {"type": "array", "items": {"type": "string"}}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Sammanställ beslutsregister",
+      "instructions": "Gör ett beslutsregister för uppföljning av nämndens beslut. Ta med en post per paragraf där nämnden gav någon ett uppdrag eller beslutade om en åtgärd; paragrafer där nämnden bara lade något till handlingarna tas inte med. Ange paragraf, diarienummer, ärendets rubrik, uppdraget eller åtgärden kort, vem som ansvarar (förvaltning eller funktion enligt beslutet) och när återrapportering senast ska ske om beslutet anger det, annars null. Ärenden inom stängda dörrar registreras bara med paragraf och diarienummer.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Nämnd: {{ flow_input.namnd }}\nSammanträdesdatum: {{ flow_input.sammantradesdatum }}",
+        "source_refs": [
+          {"step_ref": "step_4", "output": "structured", "field_path": "paragrafer", "label": "Paragrafer"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["namnd", "sammantradesdatum", "beslut"],
+        "properties": {
+          "namnd": {"type": "string"},
+          "sammantradesdatum": {"type": "string"},
+          "beslut": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["paragraf", "diarienummer", "rubrik", "uppdrag", "ansvarig", "aterrapportering_senast"],
+              "properties": {
+                "paragraf": {"type": "integer"},
+                "diarienummer": {"type": ["string", "null"]},
+                "rubrik": {"type": "string"},
+                "uppdrag": {"type": "string"},
+                "ansvarig": {"type": "string"},
+                "aterrapportering_senast": {"type": ["string", "null"]}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Skriv protokollet",
+      "instructions": "Skriv sammanträdesprotokollet enligt kommunens protokollsmall. Överst: nämndens namn, Sammanträdesprotokoll, datum, närvarande ledamöter och ersättare med roll, övriga närvarande tjänstepersoner och utsedd justerare. Sedan en paragraf i taget med paragrafnummer (§), rubrik och diarienummer, en kort beskrivning av ärendet utifrån förslaget till beslut, yrkanden, propositionsordning och omröstning, beslutet ordagrant under rubriken Beslut, reservationer och jäv, och sist Beslutet skickas till. För ärenden inom stängda dörrar skriver du bara rubrik, diarienummer och beslut. Avsluta med underskrifter: ordförande, justerare och sekreterare, och raden Justeringens tillkännagivande på kommunens anslagstavla med datum att fylla i.",
+      "input_source": "previous_step",
+      "input_type": "json",
+      "input_bindings": {
+        "question": "Nämnd: {{ flow_input.namnd }}\nSammanträdesdatum: {{ flow_input.sammantradesdatum }}\nNärvarande: {{ flow_input.deltagare }}\nJusterare: {{ flow_input.justerare }}",
+        "source_refs": [
+          {"step_ref": "step_4", "output": "structured", "field_path": "paragrafer", "label": "Paragrafer"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "docx"
+    }
+  ]
+}

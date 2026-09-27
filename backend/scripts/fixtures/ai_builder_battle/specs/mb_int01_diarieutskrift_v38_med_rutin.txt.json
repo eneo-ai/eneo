@@ -1,0 +1,166 @@
+{
+  "file": "mb_int01_diarieutskrift_v38_med_rutin.txt",
+  "format": "txt",
+  "source": {
+    "catalogue_id": "INT-01",
+    "url": "https://sundsvall.se/kommun/kommun-och-politik/diarium-arkiv-och-sekretess/diarium"
+  },
+  "description": "Registraturens veckoutskrift ur diariet (vecka 38) med diariesystemets teckenförklaring och registratorns anteckningar om hur den publicerade postlistan tas fram.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Kommunstyrelsekontoret, kansliavdelningen, registraturen"
+  },
+  "date": "2026-09-18",
+  "title": "Utskrift ur diariet, registrerade handlingar 2026-09-14 – 2026-09-18 (vecka 38)",
+  "blocks": [
+    {
+      "paragraph": "Utskriftsmall: POSTLISTA-VECKA, alla registrerade handlingar sorterade på registreringsdatum. Tomt fält skrivs ut som –."
+    },
+    {
+      "table": {
+        "columns": [
+          "Reg.datum",
+          "Dnr",
+          "Hnr",
+          "Typ",
+          "Skydd",
+          "Status",
+          "Avsändare/mottagare",
+          "Ärendemening / handling",
+          "Handläggare"
+        ],
+        "rows": [
+          [
+            "2026-09-14",
+            "KS-2026-00838",
+            "1",
+            "I",
+            "–",
+            "R",
+            "Trafikverket Region Mitt",
+            "Samråd om vägplan väg 86, Indal–Kovland",
+            "Per Hedlund"
+          ],
+          [
+            "2026-09-14",
+            "KS-2026-00839",
+            "1",
+            "I",
+            "K",
+            "R",
+            "Gunilla Strand",
+            "Medborgarförslag om hundrastgård i Haga",
+            "Anna Wikström"
+          ],
+          [
+            "2026-09-15",
+            "KS-2026-00812",
+            "3",
+            "U",
+            "–",
+            "R",
+            "Region Västernorrland",
+            "Yttrande över regional utvecklingsstrategi 2027–2035",
+            "Lena Bodin"
+          ],
+          [
+            "2026-09-15",
+            "KS-2026-00840",
+            "1",
+            "I",
+            "S",
+            "R",
+            "Företagshälsan Mitt AB",
+            "Arbetsförmågebedömning avseende medarbetare, HR-avdelningen",
+            "Karin Öhman"
+          ],
+          [
+            "2026-09-16",
+            "KS-2026-00841",
+            "1",
+            "P",
+            "–",
+            "R",
+            "–",
+            "Tjänsteanteckning från dialogmöte med Sundsvalls Näringsliv",
+            "Per Hedlund"
+          ],
+          [
+            "2026-09-16",
+            "KS-2026-00842",
+            "1",
+            "I",
+            "–",
+            "M",
+            "Mittuniversitetet",
+            "Avsiktsförklaring om studentbostäder (felregistrerad, rätt dnr KS-2026-00817)",
+            "Lena Bodin"
+          ],
+          [
+            "2026-09-17",
+            "KS-2026-00817",
+            "2",
+            "I",
+            "–",
+            "R",
+            "Mittuniversitetet",
+            "Avsiktsförklaring om studentbostäder, undertecknad",
+            "Lena Bodin"
+          ],
+          [
+            "2026-09-17",
+            "KS-2026-00843",
+            "1",
+            "U",
+            "K",
+            "R",
+            "Mohammed Ali Hassan",
+            "Svar på begäran om allmän handling",
+            "Maria Lundin"
+          ],
+          [
+            "2026-09-18",
+            "KS-2026-00844",
+            "1",
+            "I",
+            "S",
+            "R",
+            "Polismyndigheten, Region Nord",
+            "Underrättelse om hotbild mot förtroendevald inför kommunfullmäktige",
+            "Jonas Pettersson"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Teckenförklaring (ur diariesystemets handbok, avsnitt 4.2)"
+    },
+    {
+      "list": [
+        "Hnr: handlingens löpnummer i ärendet.",
+        "Typ: I = inkommande handling, U = utgående (expedierad) handling, P = upprättad handling som inte har expedierats (PM, tjänsteanteckning).",
+        "Skydd: – = ingen markering, K = avsändaren eller mottagaren är en privatperson, S = sekretessmarkerad vid registreringen efter sekretessprövning enligt offentlighets- och sekretesslagen (2009:400).",
+        "Status: R = registrerad, M = makulerad (felregistrering, handlingen är flyttad till det diarienummer som anges)."
+      ]
+    },
+    {
+      "heading": "Så gör vi den publicerade postlistan (Maria Lundin, registrator)"
+    },
+    {
+      "list": [
+        "Postlistan på sundsvall.se tar bara med typ I och U. P-handlingar publiceras inte.",
+        "Makulerade rader (status M) tas bort helt. Handlingen finns kvar under det rätta diarienumret.",
+        "Skydd K: avsändare/mottagare skrivs som Privatperson. Ärendemeningen står kvar.",
+        "Skydd S: avsändare/mottagare och ärendemening/handling ersätts båda med texten Sekretessmarkerad uppgift. Datum, diarienummer och typ står kvar, så att det går att begära ut handlingen och få en sekretessprövning.",
+        "Handläggarens namn tas med, det är tjänstepersoner.",
+        "En rad per handling, sorterad på diarienummer: Datum | Dnr | Typ | Avsändare/mottagare | Ärendemening / handling | Handläggare."
+      ]
+    },
+    {
+      "signature": {
+        "name": "Maria Lundin",
+        "role": "Registrator"
+      }
+    }
+  ]
+}

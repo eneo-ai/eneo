@@ -1,0 +1,106 @@
+{
+  "file": "oms12_avgiftsbeslut_mall.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "OMS-12",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/625"
+  },
+  "description": "Vård- och omsorgsnämndens beslutsmall för avgift för hemtjänst, med Word-innehållskontroller för ärendeuppgifter, beslut, beräkning och skäl samt fasta avsnitt om ändrade förhållanden och överklagande.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Vård- och omsorgsnämnden, Avgiftshandläggningen",
+    "address": "851 85 Sundsvall"
+  },
+  "title": "Beslut om avgift för hemtjänst",
+  "blocks": [
+    {
+      "paragraph": "Diarienummer:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "diarienummer",
+        "label": "Diarienummer",
+        "hint": "VON-ÅÅÅÅ-NNNNN"
+      }
+    },
+    {
+      "paragraph": "Beslutsdatum:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "beslutsdatum",
+        "label": "Beslutsdatum",
+        "hint": "ÅÅÅÅ-MM-DD"
+      }
+    },
+    {
+      "paragraph": "Beslutet gäller:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "mottagare",
+        "label": "Beslutet gäller",
+        "hint": "Namn och adress"
+      }
+    },
+    {
+      "heading": "Beslut"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "beslut",
+        "label": "Beslut",
+        "hint": "Avgiften per månad och från vilket datum den gäller."
+      }
+    },
+    {
+      "heading": "Så har vi räknat"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "berakning",
+        "label": "Beräkning",
+        "hint": "Inkomster efter skatt och bostadstillägg per månad, minimibelopp, boendekostnad, förbehållsbelopp, avgiftsutrymme, avgift enligt taxa och högkostnadsskydd."
+      }
+    },
+    {
+      "heading": "Skäl för beslutet"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "skal",
+        "label": "Skäl för beslutet",
+        "hint": "Motivering med lagrum."
+      }
+    },
+    {
+      "heading": "Om dina förhållanden ändras"
+    },
+    {
+      "paragraph": "Du ska meddela avgiftshandläggningen om dina inkomster eller din boendekostnad ändras. Avgiften ändras från och med månaden efter den månad då förändringen inträffade."
+    },
+    {
+      "heading": "Hur man överklagar"
+    },
+    {
+      "paragraph": "Du kan överklaga beslutet hos förvaltningsrätten. Skicka överklagandet till vård- och omsorgsnämnden, Sundsvalls kommun, 851 85 Sundsvall. Ange vilket beslut du överklagar och varför. Överklagandet måste ha kommit in inom tre veckor från den dag du fick del av beslutet."
+    },
+    {
+      "paragraph": "Handläggare:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "handlaggare",
+        "label": "Handläggare",
+        "hint": "Namn och telefonnummer"
+      }
+    }
+  ]
+}

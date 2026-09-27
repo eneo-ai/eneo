@@ -1,0 +1,72 @@
+{
+  "file": "va_badvatten_provsvar.json",
+  "format": "json",
+  "source": {"catalogue_id": "MIL-15", "url": "https://e-tjanster.kristianstad.se/oversikt/overview/69"},
+  "description": "Laboratoriets provsvar i JSON för miljöförvaltningens extra badvattenprover efter bräddningen vid P41: otjänligt vatten vid Sandviksbadet, recipientprov i bäckmynningen, tjänligt vid Norra stranden och ett omprov vid Sandviksbadet där analysen pågår.",
+  "data": {
+    "laboratorium": "Labbet Syd AB, Kristianstad (ackrediterat laboratorium nr 2291)",
+    "bestallare": "Kristianstads kommun, Miljö- och hälsoskyddsförvaltningen",
+    "uppdrag": "Extra badvattenprovtagning efter anmäld driftstörning P41 Norra Sandvik",
+    "rapport_skapad": "2026-08-19T13:02:00+02:00",
+    "bedomningsgrund": "Havs- och vattenmyndighetens föreskrifter och allmänna råd (HVMFS 2012:14) om badvatten, kustvatten, enskilt prov",
+    "prover": [
+      {
+        "provnummer": "LS-26-081744",
+        "provpunkt": "Sandviksbadet, badbryggan",
+        "typ": "Badvatten",
+        "provtagning": "2026-08-17T10:05:00+02:00",
+        "provtagare": "Miljö- och hälsoskyddsförvaltningen",
+        "status": "Klar",
+        "resultat": [
+          {"parameter": "Escherichia coli", "varde": 2400, "enhet": "cfu/100 ml", "metod": "SS-EN ISO 9308-2"},
+          {"parameter": "Intestinala enterokocker", "varde": 610, "enhet": "cfu/100 ml", "metod": "SS-EN ISO 7899-1"}
+        ],
+        "bedomning": "Otjänligt",
+        "svar_lamnat": "2026-08-18T14:20:00+02:00"
+      },
+      {
+        "provnummer": "LS-26-081745",
+        "provpunkt": "Sandviksbäckens mynning",
+        "typ": "Recipientprov (ej badplats)",
+        "provtagning": "2026-08-17T10:25:00+02:00",
+        "provtagare": "Miljö- och hälsoskyddsförvaltningen",
+        "status": "Klar",
+        "resultat": [
+          {"parameter": "Escherichia coli", "varde": 12000, "enhet": "cfu/100 ml", "metod": "SS-EN ISO 9308-2"},
+          {"parameter": "Intestinala enterokocker", "varde": 3100, "enhet": "cfu/100 ml", "metod": "SS-EN ISO 7899-1"}
+        ],
+        "bedomning": "Ingen bedömning (ej badvatten)",
+        "svar_lamnat": "2026-08-18T14:20:00+02:00"
+      },
+      {
+        "provnummer": "LS-26-081746",
+        "provpunkt": "Norra stranden, livräddartornet",
+        "typ": "Badvatten",
+        "provtagning": "2026-08-17T10:50:00+02:00",
+        "provtagare": "Miljö- och hälsoskyddsförvaltningen",
+        "status": "Klar",
+        "resultat": [
+          {"parameter": "Escherichia coli", "varde": 31, "enhet": "cfu/100 ml", "metod": "SS-EN ISO 9308-2"},
+          {"parameter": "Intestinala enterokocker", "varde": 10, "enhet": "cfu/100 ml", "metod": "SS-EN ISO 7899-1"}
+        ],
+        "bedomning": "Tjänligt",
+        "svar_lamnat": "2026-08-18T14:20:00+02:00"
+      },
+      {
+        "provnummer": "LS-26-081902",
+        "provpunkt": "Sandviksbadet, badbryggan",
+        "typ": "Badvatten, omprov",
+        "provtagning": "2026-08-19T07:50:00+02:00",
+        "provtagare": "Miljö- och hälsoskyddsförvaltningen",
+        "status": "Analys pågår",
+        "resultat": [
+          {"parameter": "Escherichia coli", "varde": null, "enhet": "cfu/100 ml", "metod": "SS-EN ISO 9308-2"},
+          {"parameter": "Intestinala enterokocker", "varde": null, "enhet": "cfu/100 ml", "metod": "SS-EN ISO 7899-1"}
+        ],
+        "bedomning": null,
+        "beraknat_svar": "2026-08-20"
+      }
+    ],
+    "kontakt_laboratorium": {"namn": "Jenny Wahlberg, kundansvarig", "telefon": "044-20 88 15"}
+  }
+}

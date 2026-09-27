@@ -1,0 +1,147 @@
+{
+  "file": "utb11_resultatbudget.xlsx",
+  "format": "xlsx",
+  "source": {
+    "catalogue_id": "UTB-11",
+    "url": "https://sjalvservice.malmo.se/oversikt/overview/479"
+  },
+  "description": "Resultatbudget i Malmö stads mall för en ny fristående förskola, bilaga till ansökan om godkännande; räknar med fullt barnantal från start till skillnad från ansökan.",
+  "sheets": [
+    {
+      "name": "Resultatbudget",
+      "columns": [
+        "Post",
+        "2027",
+        "2028",
+        "2029"
+      ],
+      "rows": [
+        [
+          "Antal barn (årsgenomsnitt)",
+          36,
+          36,
+          36
+        ],
+        [
+          "Bidrag per barn och år (kr)",
+          155200,
+          159900,
+          164700
+        ],
+        [
+          "Intäkter: bidrag från hemkommuner",
+          5587200,
+          5756400,
+          5929200
+        ],
+        [
+          "Intäkter: föräldraavgifter",
+          511200,
+          525600,
+          540000
+        ],
+        [
+          "Summa intäkter",
+          6098400,
+          6282000,
+          6469200
+        ],
+        [
+          "Kostnad: Personal (7 årsarbetare inkl. rektor, lön och sociala avgifter)",
+          3780000,
+          3893400,
+          4010200
+        ],
+        [
+          "Kostnad: Lokalhyra",
+          624000,
+          642700,
+          662000
+        ],
+        [
+          "Kostnad: Livsmedel",
+          324000,
+          333700,
+          343700
+        ],
+        [
+          "Kostnad: Pedagogiskt material",
+          90000,
+          92700,
+          95500
+        ],
+        [
+          "Kostnad: Administration och ekonomitjänster",
+          180000,
+          185400,
+          191000
+        ],
+        [
+          "Kostnad: Försäkringar",
+          25000,
+          25800,
+          26500
+        ],
+        [
+          "Kostnad: Specialpedagogiska tjänster",
+          60000,
+          61800,
+          63700
+        ],
+        [
+          "Kostnad: Avskrivningar inventarier",
+          80000,
+          80000,
+          80000
+        ],
+        [
+          "Summa kostnader",
+          5163000,
+          5315500,
+          5472600
+        ],
+        [
+          "Resultat",
+          935400,
+          966500,
+          996600
+        ]
+      ]
+    },
+    {
+      "name": "Antaganden",
+      "columns": [
+        "Antagande",
+        "Värde",
+        "Källa"
+      ],
+      "rows": [
+        [
+          "Antal barn från start",
+          "36",
+          "Egen planering"
+        ],
+        [
+          "Bidrag per barn och år 2027",
+          "155 200 kr",
+          "Malmö stads grundbelopp 2026, uppräknat 3 %"
+        ],
+        [
+          "Föräldraavgift per barn och år",
+          "14 200 kr",
+          "Maxtaxa, genomsnitt"
+        ],
+        [
+          "Personal",
+          "7 årsarbetare från januari 2027",
+          "Bemanningsplan"
+        ],
+        [
+          "Löneökning och prisuppräkning",
+          "3 % per år",
+          "Egen bedömning"
+        ]
+      ]
+    }
+  ]
+}

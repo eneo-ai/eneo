@@ -1,0 +1,47 @@
+{
+  "file": "markupplatelse_exempel_beslut_2025.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "BYG-19", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/688"},
+  "description": "Ett tidigare utskickat beslut om upplåtelse av torgplats från 2025 (annan sökande, annan plats och 2025 års taxa), som handläggaren bifogar för att visa formuleringar och ton; dess villkor hänvisar till myndigheten som hette MSB.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Stadsbyggnadskontoret – Mark och exploatering", "address": "Stadsbyggnadskontoret, 851 85 Sundsvall · stadsbyggnadsnamnden@sundsvall.se"},
+  "date": "2025-05-12",
+  "diarienummer": "SBN-2025-00311",
+  "title": "Beslut om upplåtelse av torgplats",
+  "blocks": [
+    {"table": {
+      "columns": ["Uppgift", "Värde"],
+      "rows": [
+        ["Sökande", "Glassbaren Solkatten HB, org.nr 969781-4420"],
+        ["Kontaktperson", "Emma Solberg"],
+        ["Torgplats", "B3, Navet"],
+        ["Period", "2025-06-01 – 2025-08-31 (92 dagar)"],
+        ["Upplåten yta", "18 m²"],
+        ["Verksamhet", "Försäljning av glass och läsk från glassvagn"]
+      ]
+    }},
+    {"heading": "Beslut"},
+    {"paragraph": "Mark och exploatering upplåter torgplats B3 på Navet till Glassbaren Solkatten HB under perioden 2025-06-01 – 2025-08-31 för försäljning av glass och läsk. Den upplåtna ytan är 18 m²."},
+    {"heading": "Villkor"},
+    {"list": [
+      "Glassvagnen ska flyttas från torget mellan kl. 01.00 och 06.00.",
+      "Platsen ska hållas ren och städas varje dag efter stängning.",
+      "Fri passage om minst 3 m ska finnas framför butiksentréer och för utryckningsfordon.",
+      "Gasol hanteras enligt Myndigheten för samhällsskydd och beredskaps (MSB:s) föreskrifter om brandfarlig gas i lös behållare, och en brandsläckare ska finnas vid platsen.",
+      "Registreringsbeslut för livsmedelsanläggningen ska kunna visas på begäran."
+    ]},
+    {"heading": "Avgift"},
+    {"table": {
+      "columns": ["Avgiftsslag", "Beräkning", "Belopp"],
+      "rows": [
+        ["Säsongsupplåtelse zon B", "18 m² x 92 dagar x 5 kr", "8 280 kr"],
+        ["Elanslutning 10 A", "92 dagar x 35 kr", "3 220 kr"],
+        ["Summa", "", "11 500 kr"]
+      ]
+    }},
+    {"paragraph": "Avgiften faktureras i förskott enligt taxan för upplåtelse av torgplats 2025."},
+    {"heading": "Motivering"},
+    {"paragraph": "Ansökan avser en plats i zon B och ytan ryms inom den största yta som reglerna medger. Verksamheten passar på Navet under sommaren och platsen är ledig under perioden."},
+    {"paragraph": "Har ni frågor om beslutet är ni välkomna att kontakta Mark och exploatering via kommunens kontaktcenter. Ange diarienumret."},
+    {"signature": {"name": "Jenny Wallin", "role": "Markhandläggare, Mark och exploatering"}}
+  ]
+}

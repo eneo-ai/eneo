@@ -1,0 +1,25 @@
+{
+  "file": "byg10_grannsvar_lindbacken_3_7.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "BYG-10", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/715"},
+  "description": "Grannars Word-brev med invändning mot ett garage 1,5 m från tomtgränsen: skuggning av uteplatsen och snö och vatten från taket, med hänvisning till betydande olägenhet enligt 2 kap. 9 § PBL.",
+  "letterhead": {"organisation": "Göran och Marie Sandin", "unit": "Rönnbärsvägen 7, 857 40 Sundsvall", "address": "070-221 58 90 · sandin.rbv7@example.com"},
+  "date": "2026-09-14",
+  "title": "Synpunkter på ansökan om bygglov för garage på Lindbacken 3:9",
+  "blocks": [
+    {"paragraph": "Till: Sundsvalls kommun, Stadsbyggnadskontoret, Bygglovavdelningen, 851 85 Sundsvall"},
+    {"paragraph": "Ert diarienummer: BYGG-2026-000644. Vår fastighet: Sundsvall Lindbacken 3:7."},
+    {"paragraph": "Vi har fått underrättelsen daterad 2026-09-01 om att ägaren till Lindbacken 3:9 har sökt bygglov för ett garage med förråd som avviker från detaljplanen. Vi vill lämna följande synpunkter och vi motsätter oss att bygglov ges i den form som ansökan har nu."},
+    {"heading": "Placeringen och höjden"},
+    {"paragraph": "Garaget ska enligt situationsplanen stå 1,5 meter från gränsen mot vår tomt och ha en nockhöjd på 5,2 meter. Detaljplanen säger minst 2,0 meter från tomtgräns och högst 4,0 meter i nockhöjd för garage och uthus. Det är alltså två avvikelser, och båda går ut över oss."},
+    {"heading": "Skuggning av vår uteplats"},
+    {"paragraph": "Vår uteplats och våra odlingsbäddar ligger på västra sidan av vårt hus, direkt mot den planerade garagegaveln. Från eftermiddagen och hela kvällen skulle garaget skugga uteplatsen från april till september. Det är där vi tillbringar sommarkvällarna. Vi anser att placeringen och höjden innebär en betydande olägenhet enligt 2 kap. 9 § plan- och bygglagen."},
+    {"heading": "Snö och vatten från taket"},
+    {"paragraph": "Takfallet är ritat mot vår tomt. Med 1,5 meter till gränsen kommer snöras och takvatten att hamna hos oss. Ansökan säger ingenting om snörasskydd eller hur takvattnet ska tas om hand."},
+    {"heading": "Vad vi föreslår"},
+    {"list": ["att garaget flyttas så att det står minst 4 meter från gränsen mot Lindbacken 3:7, eller", "att nockhöjden sänks till planens 4,0 meter och takfallet vänds bort från vår tomt."]},
+    {"paragraph": "Vi står gärna till tjänst om ni vill göra ett platsbesök. Vi vill bli underrättade om beslutet."},
+    {"signature": {"name": "Göran Sandin", "role": "Fastighetsägare, Lindbacken 3:7"}},
+    {"signature": {"name": "Marie Sandin", "role": "Fastighetsägare, Lindbacken 3:7"}}
+  ]
+}

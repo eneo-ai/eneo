@@ -1,0 +1,115 @@
+{
+  "name": "Remissvar – kommunens yttrande över betänkande",
+  "description": "Kommunledningskontorets stöd för remissvar: läser betänkandet och förvaltningarnas och bolagens inspel, sammanfattar utredningens förslag och skriver ett utkast till kommunstyrelsens yttrande per avsnitt där oenighet lyfts till politiken.",
+  "metadata_json": {
+    "form_schema": {
+      "fields": [
+        {"name": "remiss", "type": "text", "label": "Remissens diarienummer hos departementet", "required": true, "order": 1},
+        {"name": "kommunens_diarienummer", "type": "text", "label": "Kommunens diarienummer", "required": true, "order": 2},
+        {"name": "handlaggare", "type": "text", "label": "Handläggare på kommunledningskontoret", "required": true, "order": 3}
+      ]
+    }
+  },
+  "steps": [
+    {
+      "name": "Läs betänkandet och inspelen",
+      "instructions": "Du får ett betänkande som kommunen fått på remiss och de inspel som förvaltningar och kommunala bolag lämnat inför kommunens yttrande. Lista utredningens förslag per avsnitt med avsnittsnummer och rubrik exakt som i betänkandet, en kort beskrivning av förslaget och om det berör kommunerna. Lista varje inspel per avsnitt med avsändare, ställningstagande (tillstyrker, avstyrker, tillstyrker med synpunkter eller inga synpunkter) och motivering med avsändarens egna sakuppgifter. Om två inspel har olika ställningstaganden till samma avsnitt beskriver du konflikten. Välj inte sida själv.",
+      "input_source": "flow_input",
+      "input_type": "document",
+      "input_config": {
+        "runtime_input": {
+          "enabled": true,
+          "required": true,
+          "max_files": 12,
+          "input_format": "document",
+          "label": "Betänkande och inspel",
+          "description": "Ladda upp remissen med betänkandet och alla inspel från förvaltningar och bolag."
+        }
+      },
+      "input_bindings": {"question": "{{ step_input.text }}"},
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["betankande", "avsnitt", "inspel", "konflikter"],
+        "properties": {
+          "betankande": {
+            "type": "object",
+            "required": ["titel", "beteckning", "departement", "sista_svarsdag"],
+            "properties": {
+              "titel": {"type": "string"},
+              "beteckning": {"type": "string"},
+              "departement": {"type": ["string", "null"]},
+              "sista_svarsdag": {"type": ["string", "null"]}
+            }
+          },
+          "avsnitt": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["avsnittsnummer", "rubrik", "forslag", "beror_kommunen"],
+              "properties": {
+                "avsnittsnummer": {"type": "string"},
+                "rubrik": {"type": "string"},
+                "forslag": {"type": "string"},
+                "beror_kommunen": {"type": "boolean"}
+              }
+            }
+          },
+          "inspel": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["avsandare", "avsnittsnummer", "standpunkt", "motivering"],
+              "properties": {
+                "avsandare": {"type": "string"},
+                "avsnittsnummer": {"type": "string"},
+                "standpunkt": {"type": "string", "enum": ["tillstyrker", "avstyrker", "tillstyrker med synpunkter", "inga synpunkter"]},
+                "motivering": {"type": "string"}
+              }
+            }
+          },
+          "konflikter": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["avsnittsnummer", "beskrivning"],
+              "properties": {"avsnittsnummer": {"type": "string"}, "beskrivning": {"type": "string"}}
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Sammanfatta betänkandet",
+      "instructions": "Sammanfatta utredningens förslag som berör kommunerna på högst en halv sida, i den ordning de kommer i betänkandet och med avsnittsnummer och rubrik. Beskriv vad förslagen innebär för kommunen i praktiken. Ta inte med kommunens egna ställningstaganden.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "betankande", "label": "Betänkandet"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "avsnitt", "label": "Utredningens förslag per avsnitt"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "text"
+    },
+    {
+      "name": "Skriv yttrandet",
+      "instructions": "Skriv ett utkast till kommunstyrelsens yttrande enligt Statsrådsberedningens promemoria Svara på remiss. Inled med rubriken \"Yttrande över [titel] ([beteckning])\", remissens diarienummer och kommunens diarienummer. Därefter avsnittet Sammanfattning med utredningens förslag enligt sammanfattningen, och sedan kommunens ställningstaganden per avsnitt i betänkandets ordning, med avsnittsnummer och rubrik. Bygg ställningstagandena på inspelen och återge deras sakuppgifter. Där inspelen går isär redovisar du båda ståndpunkterna med avsändare och markerar att frågan behöver avgöras politiskt – välj inte sida själv. Kommentera inte avsnitt som inte berör kommunen. Avsluta med \"Sundsvalls kommun, kommunstyrelsen\" och handläggarens namn.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Remissens diarienummer: {{ flow_input.remiss }}\nKommunens diarienummer: {{ flow_input.kommunens_diarienummer }}\nHandläggare: {{ flow_input.handlaggare }}",
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "betankande", "label": "Betänkandet"},
+          {"step_ref": "step_2", "output": "text", "label": "Sammanfattning av utredningens förslag"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "inspel", "label": "Inspel per avsnitt"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "konflikter", "label": "Konflikter mellan inspelen"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "text"
+    }
+  ]
+}

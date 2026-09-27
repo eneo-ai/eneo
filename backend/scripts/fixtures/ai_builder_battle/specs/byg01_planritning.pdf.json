@@ -1,0 +1,17 @@
+{
+  "file": "byg01_planritning.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/443"},
+  "description": "Planritning A-02 (skala 1:100) för tillbyggnaden, återgiven som rumsförteckning och yttermått.",
+  "letterhead": {"organisation": "Norrljus Arkitektur & Bygg AB", "unit": "Bygglovshandlingar", "address": "Storgatan 31, 852 30 Sundsvall · 060-61 22 40"},
+  "date": "2026-08-02",
+  "title": "A-02 Planritning – tillbyggnad av enbostadshus, Sundsvall Tallåsen 4:17",
+  "blocks": [
+    {"paragraph": "Skala 1:100 (A3). Tillbyggnaden ansluts till befintligt hus via nuvarande hall. Ny dörr från allrummet mot trädgården i öster. Befintliga rum påverkas inte utöver att ett fönster i hallen byts mot en dörröppning."},
+    {"heading": "Rumsförteckning, tillbyggnad"},
+    {"table": {"columns": ["Rum", "Boarea"], "rows": [["Sovrum 3", "11,2 m²"], ["Allrum", "11,6 m²"], ["Badrum 2 (dusch, wc)", "4,8 m²"], ["Passage", "0,8 m²"], ["Summa boarea", "28,4 m²"]]}},
+    {"heading": "Mått och areor"},
+    {"table": {"columns": ["Uppgift", "Värde"], "rows": [["Tillbyggnadens yttermått", "6,5 × 5,0 m"], ["Byggnadsarea, tillbyggnad", "32,5 m²"], ["Bruttoarea, tillbyggnad", "32,5 m²"], ["Boarea, tillbyggnad", "28,4 m²"], ["Antal våningar", "1"]]}},
+    {"signature": {"name": "Karin Sjölund", "role": "Ritare, Norrljus Arkitektur & Bygg AB"}}
+  ]
+}

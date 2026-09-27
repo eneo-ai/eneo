@@ -1,0 +1,80 @@
+{
+  "file": "md_portal_lagrum_egenkontrollprogram_kyltorn.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "MIL-04", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/674"},
+  "description": "Verksamhetsutövarens egenkontrollprogram för ett nytt kyltorn (legionella), bilaga till anmälan: anläggningsdata, ansvar, riskbedömning, skötselintervall, vattenbehandling, provtagning och åtgärdsnivåer; anger lagrummet korrekt (38 a § förordningen 1998:899) men provtagningen av legionella saknar fast intervall.",
+  "letterhead": {"organisation": "Nordfrost Logistik AB", "unit": "Kylcentral Birsta – fastighetsdrift", "address": "Birstavägen 42, 863 41 Sundsvall"},
+  "date": "2026-09-08",
+  "title": "Egenkontrollprogram för kyltorn KT2 – förebyggande av legionella (rev. 2)",
+  "blocks": [
+    {"heading": "1. Syfte och omfattning"},
+    {"paragraph": "Programmet beskriver hur Nordfrost Logistik AB sköter och kontrollerar kyltorn KT2 på fastigheten Sundsvall Birsta 1:112 så att tillväxt och spridning av legionellabakterier förebyggs. Programmet gäller från idrifttagningen och ses över minst en gång per år."},
+    {"paragraph": "Kyltornet anmäls till miljönämnden i Sundsvalls kommun enligt 38 a § förordningen (1998:899) om miljöfarlig verksamhet och hälsoskydd. Egenkontrollen följer förordningen (1998:901) om verksamhetsutövares egenkontroll och miljöbalkens krav på egenkontroll i 26 kap. 19 §."},
+    {"heading": "2. Anläggningsuppgifter"},
+    {
+      "table": {
+        "columns": ["Uppgift", "Värde"],
+        "rows": [
+          ["Beteckning", "KT2 (ersätter inte KT1, som är ett slutet torrkylarsystem utan vattenspridning)"],
+          ["Typ", "Öppet kyltorn med avdunstningskylning och motströmsfläkt"],
+          ["Fabrikat och modell", "EvapCool EC-240"],
+          ["Kyleffekt", "2 400 kW"],
+          ["Cirkulerande vattenvolym", "6,5 m³"],
+          ["Droppavskiljare", "Ja, lamelltyp, tillverkarens uppgift om droppförlust högst 0,002 % av cirkulationsflödet"],
+          ["Placering", "Tak på byggnad C, norra delen, cirka 11 meter över mark"],
+          ["Avstånd till närmaste luftintag", "18 meter till ventilationsaggregatets uteluftsintag på byggnad B"],
+          ["Planerad idrifttagning", "2026-10-05"]
+        ]
+      }
+    },
+    {"heading": "3. Organisation och ansvar"},
+    {
+      "table": {
+        "columns": ["Roll", "Namn", "Ansvar"],
+        "rows": [
+          ["Driftansvarig", "Karin Holm, fastighetschef", "Programmet, budget och kontakt vid avvikelser"],
+          ["Kontaktperson mot miljönämnden", "Johan Eriksson, teknisk förvaltare", "Anmälan, rapportering och journal"],
+          ["Service och rengöring", "KylTeknik Norr AB (avtal 2026–2029)", "Rengöring, desinfektion och service enligt avsnitt 5"],
+          ["Daglig tillsyn", "Driftteknikerna på Kylcentral Birsta", "Veckokontroller och dosering"]
+        ]
+      }
+    },
+    {"heading": "4. Riskbedömning"},
+    {"paragraph": "Legionella kan växa i vatten mellan 25 och 45 °C och spridas med aerosoler från kyltornets utlopp. Cirkulationsvattnet i KT2 håller normalt 27–32 °C under drift, vilket ligger inom tillväxtintervallet. Risken för spridning bedöms som förhöjd på grund av avståndet på 18 meter till luftintaget på byggnad B och att lastkajen med personal ligger nedströms vid sydvästlig vind. Stillastående vatten kan uppstå vid driftstopp under vintern."},
+    {"page_break": true},
+    {"heading": "5. Skötsel och rengöring"},
+    {
+      "table": {
+        "columns": ["Åtgärd", "Intervall", "Utförs av"],
+        "rows": [
+          ["Visuell kontroll av droppavskiljare, fyllkroppar och bassäng", "Varje vecka", "Driftteknikerna"],
+          ["Kontroll av biociddosering och konduktivitet", "Varje vecka", "Driftteknikerna"],
+          ["Rengöring och desinfektion av bassäng, fyllkroppar och droppavskiljare", "Två gånger per år (april och oktober)", "KylTeknik Norr AB"],
+          ["Genomspolning efter driftstopp längre än en vecka", "Vid varje uppstart", "Driftteknikerna"],
+          ["Översyn av programmet", "En gång per år", "Driftansvarig"]
+        ]
+      }
+    },
+    {"heading": "6. Vattenbehandling"},
+    {"paragraph": "Cirkulationsvattnet behandlas med ett oxiderande biocid som doseras automatiskt och med konduktivitetsstyrd avsaltning. Vid avvikande konduktivitet larmar styrsystemet till driftteknikerna. Säkerhetsdatablad för biociden finns i driftpärmen."},
+    {"heading": "7. Provtagning"},
+    {"paragraph": "Den totala halten odlingsbara mikroorganismer kontrolleras med dipslide en gång i månaden."},
+    {"paragraph": "Provtagning av legionella görs vid behov, till exempel efter driftstopp eller om dipslide visar förhöjda halter. Proverna analyseras av ackrediterat laboratorium."},
+    {"heading": "8. Åtgärdsnivåer för legionella"},
+    {
+      "table": {
+        "columns": ["Halt legionella (cfu/l)", "Åtgärd"],
+        "rows": [
+          ["Under 1 000", "Normal drift och ordinarie skötsel"],
+          ["1 000–10 000", "Förstärkt rengöring och desinfektion, nytt prov inom två veckor"],
+          ["Över 10 000", "Kyltornet stängs av, desinfektion, nytt prov före återstart och miljönämnden underrättas samma dag"]
+        ]
+      }
+    },
+    {"heading": "9. Driftjournal och dokumentation"},
+    {"paragraph": "Kontroller, provsvar, rengöringar och avvikelser förs in i driftjournalen i fastighetssystemet. Journalen och provsvaren sparas i minst fem år och visas för tillsynsmyndigheten på begäran."},
+    {"heading": "10. Ändringar"},
+    {"paragraph": "Om något förhållande som har anmälts ändras, till exempel placering, kyleffekt eller vattenbehandling, underrättar vi miljönämnden genast enligt 38 b § förordningen (1998:899)."},
+    {"signature": {"name": "Karin Holm", "role": "Fastighetschef, Nordfrost Logistik AB"}}
+  ]
+}

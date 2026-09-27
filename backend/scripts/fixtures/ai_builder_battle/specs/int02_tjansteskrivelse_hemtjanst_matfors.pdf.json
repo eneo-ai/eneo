@@ -1,0 +1,162 @@
+{
+  "file": "int02_tjansteskrivelse_hemtjanst_matfors.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "INT-02",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/93"
+  },
+  "description": "Förvaltningens tjänsteskrivelse till vård- och omsorgsnämnden om uppföljning av klagomål och avvikelser i en hemtjänstgrupp, med statistiktabell; offentlig i sin helhet.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Vård- och omsorgsförvaltningen",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-09-08",
+  "diarienummer": "VON-2026-00977-4",
+  "title": "Tjänsteskrivelse – Uppföljning av klagomål och avvikelser inom hemtjänsten Matfors januari–augusti 2026",
+  "blocks": [
+    {
+      "heading": "Förslag till beslut"
+    },
+    {
+      "paragraph": "Vård- och omsorgsnämnden noterar uppföljningen och ger förvaltningen i uppdrag att återrapportera effekten av åtgärderna vid nämndens sammanträde i december 2026."
+    },
+    {
+      "heading": "Sammanfattning"
+    },
+    {
+      "paragraph": "Hemtjänsten Matfors har under perioden januari–augusti 2026 fått 41 klagomål och registrerat 118 avvikelser, vilket är fler än under samma period 2025. Ökningen är störst i juli, då andelen obemannade pass var hög. En händelse i juli har bedömts som ett allvarligt missförhållande och anmälts till Inspektionen för vård och omsorg (IVO). Förvaltningen har infört åtgärder för bemanning, introduktion av vikarier och läkemedelshantering."
+    },
+    {
+      "heading": "Ärendet"
+    },
+    {
+      "paragraph": "Nämnden beslutade den 21 maj 2026 (§ 64) att förvaltningen skulle följa upp klagomål och avvikelser inom hemtjänsten Matfors efter att antalet klagomål ökat under våren. Hemtjänsten Matfors ger insatser till cirka 190 personer i Matfors, Kovland, Stöde och Lucksta och har 74 tillsvidareanställda."
+    },
+    {
+      "heading": "Klagomål och avvikelser per månad"
+    },
+    {
+      "table": {
+        "columns": [
+          "Månad",
+          "Klagomål",
+          "Avvikelser",
+          "Varav missade besök",
+          "Obemannade pass (%)"
+        ],
+        "rows": [
+          [
+            "Januari",
+            "3",
+            "11",
+            "4",
+            "6"
+          ],
+          [
+            "Februari",
+            "4",
+            "12",
+            "3",
+            "7"
+          ],
+          [
+            "Mars",
+            "5",
+            "14",
+            "5",
+            "9"
+          ],
+          [
+            "April",
+            "4",
+            "13",
+            "4",
+            "8"
+          ],
+          [
+            "Maj",
+            "6",
+            "15",
+            "6",
+            "11"
+          ],
+          [
+            "Juni",
+            "5",
+            "14",
+            "5",
+            "14"
+          ],
+          [
+            "Juli",
+            "9",
+            "23",
+            "12",
+            "23"
+          ],
+          [
+            "Augusti",
+            "5",
+            "16",
+            "6",
+            "15"
+          ],
+          [
+            "Summa/genomsnitt",
+            "41",
+            "118",
+            "45",
+            "12"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Analys"
+    },
+    {
+      "paragraph": "Klagomålen gäller främst att besök inte blivit av eller blivit sena (19 klagomål), att det kommer många olika personer (11), bemötande (6) och brister i information vid förändringar (5). Avvikelserna gäller främst missade eller försenade besök och läkemedelshantering. Förvaltningens analys är att bristerna till stor del beror på att sommarvikarier fick kort introduktion och att bemanningsenheten inte kunde tillsätta alla pass i juli."
+    },
+    {
+      "paragraph": "Under juli inträffade en händelse där en brukare inte fick en delegerad läkemedelsinsats vid två tillfällen. Händelsen har utretts enligt 27 kap. 5 § socialtjänstlagen (2025:400) och anmälts till IVO enligt 27 kap. 6 § samma lag. Utredningen har diarienummer VON-2026-00977-7 och redovisas inte i denna skrivelse."
+    },
+    {
+      "heading": "Åtgärder"
+    },
+    {
+      "list": [
+        "Från och med den 1 september schemaläggs minst två ordinarie medarbetare på varje kvällspass.",
+        "Vikarier får tre dagars introduktion med handledare innan de arbetar ensamma.",
+        "Delegerade läkemedelsinsatser ligger i en särskild lista i planeringssystemet som enhetschefen stämmer av dagligen.",
+        "Bemanningsenheten rapporterar obesatta pass till enhetschefen senast kl. 14.00 dagen före."
+      ]
+    },
+    {
+      "heading": "Ekonomiska konsekvenser"
+    },
+    {
+      "paragraph": "Förstärkningen av kvällspassen beräknas kosta 1,4 miljoner kronor per år och ryms inom verksamhetsområdets budget för 2026 genom minskade kostnader för timanställda."
+    },
+    {
+      "heading": "Bilagor"
+    },
+    {
+      "list": [
+        "Bilaga 1. Sammanställning av klagomål januari–augusti 2026"
+      ]
+    },
+    {
+      "signature": {
+        "name": "Katarina Wiklund",
+        "role": "Verksamhetschef hemtjänst"
+      }
+    },
+    {
+      "signature": {
+        "name": "Jonas Berglund",
+        "role": "Förvaltningschef"
+      }
+    }
+  ]
+}

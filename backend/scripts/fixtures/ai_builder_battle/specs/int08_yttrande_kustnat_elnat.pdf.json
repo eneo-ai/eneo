@@ -1,0 +1,44 @@
+{
+  "file": "int08_yttrande_kustnat_elnat.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "INT-08",
+    "url": "https://e-tjanster.kristianstad.se/oversikt/overview/58"
+  },
+  "description": "Ett elnätsföretags samrådsyttrande som ledningsrättshavare (sakägare) med krav på u-område, flyttkostnader och en ny nätstation.",
+  "letterhead": {
+    "organisation": "Kustnät Elnät AB",
+    "unit": "Nätplanering och tillstånd",
+    "address": "Box 404, 851 05 Sundsvall"
+  },
+  "date": "2026-06-11",
+  "diarienummer": "KN-2026-1187",
+  "title": "Yttrande – samråd om detaljplan för Björkängen etapp 2",
+  "blocks": [
+    {
+      "paragraph": "Till: Sundsvalls kommun, stadsbyggnadsnämnden. Ert diarienummer: SBN-2025-00412."
+    },
+    {
+      "paragraph": "Kustnät Elnät AB har ledningsrätt 2281-09/112 för en markförlagd 12 kV-kabel inom Sundsvall Björkängen 1:1. Kabeln går i den blivande förlängningen av Björkallén."
+    },
+    {
+      "heading": "Synpunkter"
+    },
+    {
+      "list": [
+        "Kabeln ska säkerställas med ett u-område om minst 4 meter i plankartan, eller ligga inom allmän plats gata med rätt för ledningen att ligga kvar.",
+        "Om kabeln måste flyttas på grund av planen ska kostnaden bäras av exploatören eller kommunen, inte av Kustnät Elnät AB. Detta bör anges i planbeskrivningen och regleras i exploateringsavtalet.",
+        "För att försörja cirka 65 bostäder, en förskola och laddplatser i mobilitetshubben behövs en ny nätstation. Vi begär att ett E-område om 6 × 8 meter läggs in, lämpligen i anslutning till mobilitetshubben, minst 5 meter från byggnader med bostäder."
+      ]
+    },
+    {
+      "paragraph": "Kustnät Elnät AB vill delta i fortsatt samråd om ledningarnas placering inför granskningen."
+    },
+    {
+      "signature": {
+        "name": "Johanna Eklöf",
+        "role": "Nätplanerare"
+      }
+    }
+  ]
+}

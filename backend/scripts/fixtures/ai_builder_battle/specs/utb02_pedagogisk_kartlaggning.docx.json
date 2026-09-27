@@ -1,0 +1,22 @@
+{
+  "file": "utb02_pedagogisk_kartlaggning.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "UTB-02", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/210"},
+  "description": "Pedagogisk kartläggning av en gymnasieelevs situation på individ-, grupp- och organisationsnivå, bilaga till ansökan om tilläggsbelopp.",
+  "letterhead": {"organisation": "Nordvik Gymnasium", "unit": "Elevhälsan", "address": "Nordvik Utbildning AB, Industrigatan 6, 852 38 Sundsvall"},
+  "date": "2026-08-31",
+  "title": "Pedagogisk kartläggning",
+  "blocks": [
+    {"paragraph": "Elev: Elias Nyström, EE26A. Kartläggningen är gjord av specialpedagog Lina Öberg genom observationer i verkstad, elsal och klassrum 2026-08-18 – 2026-08-28, samtal med eleven och vårdnadshavare samt uppgifter från grundskolans överlämning."},
+    {"heading": "Organisationsnivå"},
+    {"paragraph": "Programmet har 32 lektionstimmar per vecka i årskurs 1, varav cirka 20 timmar är praktiska moment i verkstad och elsal i grupper om 16 elever med en lärare. Skolan har ingen gemensam resurs i verkstaden."},
+    {"heading": "Gruppnivå"},
+    {"paragraph": "Klassen är lugn och arbetar väl. Lärmiljön i verkstaden är bullrig och instruktionerna ges oftast muntligt till hela gruppen."},
+    {"heading": "Individnivå"},
+    {"paragraph": "Elias följer inte muntliga säkerhetsinstruktioner till hela gruppen utan att någon upprepar dem för honom. Vid två av fem observerade verkstadspass (2026-08-20 och 2026-08-26) gjorde han moment som hade kunnat skada honom själv eller andra: han lämnade en pelarborrmaskin igång och började ansluta en kabel innan läraren kontrollerat att kretsen var spänningslös. Med en vuxen bredvid sig som delar upp momenten och upprepar instruktionerna arbetar han säkert och med gott resultat."},
+    {"paragraph": "I teoretiska ämnen läser Elias på en nivå som motsvarar årskurs 5–6 men når kunskapskraven med talsyntes, inläsningstjänst och förberedelse, som redan är extra anpassningar."},
+    {"heading": "Slutsats"},
+    {"paragraph": "Elias behöver en vuxen vid sin sida under samtliga praktiska moment, cirka 20 av 32 lektionstimmar per vecka. Det stödet kan inte ges inom ramen för ordinarie undervisning eller extra anpassningar. Övriga behov kan tillgodoses med extra anpassningar."},
+    {"signature": {"name": "Lina Öberg", "role": "Specialpedagog"}}
+  ]
+}

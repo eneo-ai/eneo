@@ -1,0 +1,45 @@
+{
+  "file": "va_kommunikationslogg_p41.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "MIL-15", "url": "https://e-tjanster.kristianstad.se/oversikt/overview/69"},
+  "description": "VA-avdelningens interna kommunikationslogg för driftstörningen vid P41 Norra Sandvik: vem som informerades när, med interna jour- och direktnummer, en enskild abonnents källaröversvämning och överenskommelsen med miljöförvaltningen om vart allmänheten ska hänvisas.",
+  "letterhead": {"organisation": "Kristianstads kommun", "unit": "Tekniska förvaltningen – VA-avdelningen", "address": "291 80 Kristianstad"},
+  "date": "2026-08-17",
+  "diarienummer": "TF-VA 2026-0417",
+  "title": "Kommunikationslogg – driftstörning P41 Norra Sandvik",
+  "blocks": [
+    {"paragraph": "Intern logg. Förs av jourhavande och VA-avdelningens driftledning under händelsen. Innehåller interna kontaktuppgifter som inte ska lämnas ut till allmänheten."},
+    {"heading": "Kontaktlista under händelsen (intern)"},
+    {
+      "table": {
+        "columns": ["Funktion (intern kontaktlista)", "Namn", "Telefon"],
+        "rows": [
+          ["Jourhavande drifttekniker VA", "Tomas Lindgren", "070-591 22 37"],
+          ["VA-jourens interna jourtelefon", "Växlas till jourhavande", "044-13 59 90"],
+          ["Driftchef avlopp", "Helena Ståhl", "070-318 76 04"],
+          ["Miljö- och hälsoskyddsförvaltningen, handläggande inspektör", "Karin Lund", "044-13 57 21"],
+          ["Kommunikatör tekniska förvaltningen", "Sofia Berg", "044-13 58 12"]
+        ]
+      }
+    },
+    {"heading": "Logg"},
+    {
+      "table": {
+        "columns": ["Tid (logg)", "Från", "Till", "Kanal", "Innehåll"],
+        "rows": [
+          ["2026-08-17 03:14", "Jour VA", "Driftchef avlopp", "Telefon", "Högnivålarm P41, strömlöst i området, åker ut. Driftchefen väcks."],
+          ["2026-08-17 03:50", "Jour VA", "Abonnenter Norra Sandvik (ca 310 hushåll)", "SMS-utskick", "Strömavbrott har stoppat avloppspumpningen. Undvik att spola, diska och duscha tills vidare."],
+          ["2026-08-17 05:25", "Jour VA", "Abonnenter Norra Sandvik (ca 310 hushåll)", "SMS-utskick", "Pumpningen fungerar igen. Tack för att ni begränsat vattenanvändningen."],
+          ["2026-08-17 06:40", "Abonnent", "Jour VA", "Telefon", "Birgitta Ek, Sandviksvägen 12, har fått avloppsvatten i källaren via golvbrunn. Jouren hänvisar till skadeanmälan hos VA-kundtjänst. Uppgiften hanteras i separat skadeärende."],
+          ["2026-08-17 07:15", "Driftchef avlopp", "Miljö- och hälsoskyddsförvaltningen", "Telefon och e-tjänsten Driftstörning", "Anmälan om driftstörning: bräddning från P41 till Sandviksbäcken ca 03–06, orsak preliminärt pumphaveri. Felrapport bifogad i e-tjänsten."],
+          ["2026-08-17 08:30", "Miljö- och hälsoskyddsförvaltningen", "Driftchef avlopp", "Telefon", "Miljö tar badvattenprover vid Sandviksbadet, i bäckmynningen och vid Norra stranden i dag. VA sätter upp skylt om avrådan från bad vid Sandviksbadet. Allmänhetens frågor om bad hänvisas till Kontaktcenter Kristianstad, 044-13 61 00, som har fått information."],
+          ["2026-08-17 09:15", "Jour VA", "Sandviksbadet", "Skylt", "Skylt uppsatt vid Sandviksbadet: Avrådan från bad på grund av avloppsutsläpp."],
+          ["2026-08-17 10:00", "Kommunikatör", "Allmänheten", "kristianstad.se, driftinformation", "Kort notis om strömavbrott och avloppsutsläpp vid Norra Sandvik. Hänvisar till Kontaktcenter för frågor om bad."],
+          ["2026-08-17 12:05", "Driftchef avlopp", "Miljö- och hälsoskyddsförvaltningen", "E-post", "Komplettering: bräddning enligt driftdata 03:31–05:40, beräknad volym 310 m3. Orsaken är fastställd: strömavbrott och reservkraftaggregatet startade inte på grund av urladdat startbatteri. Pumparna är utan fel. Driftjournalen bifogad."],
+          ["2026-08-17 14:10", "Driftchef avlopp", "Abonnenter Norra Sandvik", "SMS-utskick", "Information: utsläppet är stoppat och orsaken åtgärdad. Följ kommunens information om bad vid Sandviksbadet."]
+        ]
+      }
+    },
+    {"paragraph": "Loggen fortsätter i ärendet TF-VA 2026-0417 när provsvaren kommit."}
+  ]
+}

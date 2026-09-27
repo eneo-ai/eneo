@@ -1,0 +1,124 @@
+{
+  "file": "mb_nar08_anstallningshistorik_september_2026.xlsx",
+  "format": "xlsx",
+  "source": {
+    "catalogue_id": "NAR-08",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/307"
+  },
+  "description": "Personalsystemets export av anställningshistoriken för dem som anmält anspråk på företrädesrätt via e-tjänsten i september 2026.",
+  "sheets": [
+    {
+      "name": "Export september",
+      "columns": [
+        "Anst.nr",
+        "Namn",
+        "Personnr",
+        "Fr.o.m.",
+        "T.o.m.",
+        "Anst.form",
+        "Befattning",
+        "Förvaltning",
+        "Syss.grad %",
+        "Avg.orsak"
+      ],
+      "rows": [
+        [
+          "104233",
+          "Johanna Lindqvist",
+          "19850102-2381",
+          "2024-01-01",
+          "2024-05-31",
+          "11",
+          "Undersköterska",
+          "Vård- och omsorgsförvaltningen",
+          100,
+          "35"
+        ],
+        [
+          "104233",
+          "Johanna Lindqvist",
+          "19850102-2381",
+          "2025-03-01",
+          "2025-04-30",
+          "11",
+          "Undersköterska",
+          "Vård- och omsorgsförvaltningen",
+          80,
+          "35"
+        ],
+        [
+          "104233",
+          "Johanna Lindqvist",
+          "19850102-2381",
+          "2026-05-01",
+          "2026-07-31",
+          "11",
+          "Undersköterska",
+          "Vård- och omsorgsförvaltningen",
+          100,
+          "32"
+        ],
+        [
+          "104301",
+          "Mikael Strand",
+          "19780101-2399",
+          "2024-09-01",
+          "2025-03-31",
+          "12",
+          "Elevassistent",
+          "Barn- och utbildningsförvaltningen",
+          100,
+          "35"
+        ],
+        [
+          "104301",
+          "Mikael Strand",
+          "19780101-2399",
+          "2025-08-01",
+          "2026-01-31",
+          "11",
+          "Elevassistent",
+          "Barn- och utbildningsförvaltningen",
+          100,
+          "32"
+        ],
+        [
+          "104388",
+          "Sara Nyberg",
+          "19920101-2383",
+          "2023-02-01",
+          "2023-12-31",
+          "11",
+          "Lokalvårdare",
+          "Servicecenter, Lokalvård",
+          100,
+          "35"
+        ],
+        [
+          "104388",
+          "Sara Nyberg",
+          "19920101-2383",
+          "2026-04-01",
+          "2026-08-31",
+          "11",
+          "Lokalvårdare",
+          "Servicecenter, Lokalvård",
+          100,
+          "32"
+        ],
+        [
+          "104415",
+          "Ahmed Yusuf",
+          "19960101-2397",
+          "2024-06-01",
+          "2025-12-31",
+          "11",
+          "Barnskötare",
+          "Barn- och utbildningsförvaltningen",
+          100,
+          "41"
+        ]
+      ]
+    }
+  ]
+}

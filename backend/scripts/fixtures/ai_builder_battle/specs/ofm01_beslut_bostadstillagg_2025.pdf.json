@@ -1,0 +1,65 @@
+{
+  "file": "ofm01_beslut_bostadstillagg_2025.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "OFM-01",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/242"
+  },
+  "description": "Pensionsmyndighetens beslut om bostadstillägg från januari 2025 med beräkningsunderlag och omprövningsinformation.",
+  "letterhead": {
+    "organisation": "Pensionsmyndigheten",
+    "unit": "Bostadstillägg",
+    "address": "Box 38190, 100 64 Stockholm"
+  },
+  "date": "2025-01-09",
+  "diarienummer": "BT-2024-7718253",
+  "title": "Beslut om bostadstillägg",
+  "blocks": [
+    {
+      "paragraph": "Beslutet gäller: Gunnel Marklund, 19380104-9267. Beslutet skickas till god man Lennart Byström."
+    },
+    {
+      "heading": "Beslut"
+    },
+    {
+      "paragraph": "Du får bostadstillägg med 3 460 kronor per månad från och med januari 2025. Beslutet gäller tills vidare."
+    },
+    {
+      "heading": "Så har vi beräknat bostadstillägget"
+    },
+    {
+      "table": {
+        "columns": [
+          "Beräkningsuppgift",
+          "Belopp per månad (kr)"
+        ],
+        "rows": [
+          [
+            "Boendekostnad, hyra Solgården",
+            "7 245"
+          ],
+          [
+            "Inkomster som påverkar bostadstillägget, före skatt",
+            "17 900"
+          ],
+          [
+            "Bostadstillägg",
+            "3 460"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Du måste anmäla ändringar"
+    },
+    {
+      "paragraph": "Du måste meddela oss om din boendekostnad, dina inkomster eller din förmögenhet ändras. Annars kan du bli återbetalningsskyldig."
+    },
+    {
+      "heading": "Om du inte är nöjd med beslutet"
+    },
+    {
+      "paragraph": "Du kan begära att vi omprövar beslutet. Din begäran ska ha kommit in till oss inom två månader från den dag du fick del av beslutet."
+    }
+  ]
+}

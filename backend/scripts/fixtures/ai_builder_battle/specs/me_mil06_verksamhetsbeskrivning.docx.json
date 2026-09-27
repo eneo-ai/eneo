@@ -1,0 +1,58 @@
+{
+  "file": "me_mil06_verksamhetsbeskrivning.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "MIL-06",
+    "url": "https://sjalvservice.malmo.se/oversikt/overview/529"
+  },
+  "description": "Verksamhetsbeskrivning som bilaga till anmälan om industrilackering: process, lokaler, kemikaliehantering, avfall och egenkontroll; påstår att alla kemiska produkter förvaras invallat i kemförrådet, vilket kemikalieförteckningen motsäger.",
+  "letterhead": {
+    "organisation": "Norrlacks Industrilackering AB",
+    "unit": "Produktion",
+    "address": "Fraktgatan 12, 212 41 Malmö"
+  },
+  "date": "2026-09-10",
+  "title": "Verksamhetsbeskrivning – bilaga 5 till anmälan om miljöfarlig verksamhet",
+  "blocks": [
+    {
+      "heading": "Process"
+    },
+    {
+      "paragraph": "Stålkomponenter till lantbruksmaskiner tas emot från kunder, avfettas med lösningsmedelsbaserat avfettningsmedel i förbehandlingsrummet och lackeras i två sprutboxar med grundfärg och täcklack. Detaljerna härdar i en ugn vid 80 °C. Cirka 900 ton gods per år."
+    },
+    {
+      "heading": "Lokaler"
+    },
+    {
+      "paragraph": "Verksamheten hyr en industrilokal om 2 400 kvadratmeter på fastigheten Malmö Svetsaren 9 med förbehandlingsrum, två sprutboxar, härdugn, kemförråd, tvätthall och verkstad. Närmaste bostäder ligger cirka 350 meter från lokalen."
+    },
+    {
+      "heading": "Kemikaliehantering"
+    },
+    {
+      "paragraph": "Samtliga kemiska produkter förvaras invallat i kemförrådet, som har ett tätt golv utan golvbrunn och en invallning som rymmer 1 200 liter. Endast dagsbehov tas ut till produktionen. Säkerhetsdatablad finns i pärm i kemförrådet och digitalt."
+    },
+    {
+      "heading": "Avfall"
+    },
+    {
+      "paragraph": "Farligt avfall sorteras enligt kemikalieförteckningens blad Farligt avfall och hämtas av auktoriserad transportör var fjärde vecka. Transportdokument sparas i fem år."
+    },
+    {
+      "heading": "Egenkontroll"
+    },
+    {
+      "list": [
+        "Filterbyte i sprutboxarna varje vecka och vid tryckfallslarm.",
+        "Årlig kontroll av oljeavskiljaren i tvätthallen.",
+        "Kemikalieförteckningen uppdateras när en ny produkt köps in."
+      ]
+    },
+    {
+      "signature": {
+        "name": "Emir Hadžić",
+        "role": "Produktionschef"
+      }
+    }
+  ]
+}

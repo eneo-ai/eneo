@@ -1,0 +1,234 @@
+{
+  "file": "me_byg16_planritningar.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "BYG-16",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/155"
+  },
+  "description": "Arkitektens relationsritningar för ett nytt flerbostadshus, återgivna som planritningar per trappuppgång och våningsplan med lägenhetsnummer, läge från trapphuset, rum, kök och boarea; två sidor.",
+  "letterhead": {
+    "organisation": "Wennberg Arkitektkontor AB",
+    "unit": "Relationshandlingar",
+    "address": "Storgatan 31, 852 30 Sundsvall"
+  },
+  "date": "2026-09-04",
+  "title": "Planritningar med lägenhetsnummer – Sundsvall Kaptenen 7",
+  "blocks": [
+    {
+      "paragraph": "Bilaga till anmälan om nya lägenheter, fastighet Sundsvall Kaptenen 7, bygglov BN-2024-00871. Relationsritningar efter slutbesiktning. Lägenhetsnumren är utsatta i varje lägenhet på ritningen. Läget räknas medurs från trapphuset."
+    },
+    {
+      "heading": "Kaptensgatan 3A – plan 10 (entréplan)"
+    },
+    {
+      "table": {
+        "columns": [
+          "Nummer (3A, plan 10)",
+          "Läge från trapphuset",
+          "Antal rum",
+          "Kök",
+          "Boarea (m²)"
+        ],
+        "rows": [
+          [
+            "1001",
+            "Första lägenheten till vänster",
+            "2",
+            "K",
+            "58"
+          ],
+          [
+            "1002",
+            "Mitt emot trapphuset",
+            "1",
+            "KV",
+            "34"
+          ],
+          [
+            "1003",
+            "Till höger",
+            "3",
+            "K",
+            "74"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Kaptensgatan 3A – plan 11 (1 tr)"
+    },
+    {
+      "table": {
+        "columns": [
+          "Nummer (3A, plan 11)",
+          "Läge från trapphuset",
+          "Antal rum",
+          "Kök",
+          "Boarea (m²)"
+        ],
+        "rows": [
+          [
+            "1101",
+            "Första lägenheten till vänster",
+            "2",
+            "K",
+            "58"
+          ],
+          [
+            "1102",
+            "Mitt emot trapphuset",
+            "1",
+            "KV",
+            "34"
+          ],
+          [
+            "1103",
+            "Till höger",
+            "3",
+            "K",
+            "74"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Kaptensgatan 3A – plan 12 (2 tr)"
+    },
+    {
+      "table": {
+        "columns": [
+          "Nummer (3A, plan 12)",
+          "Läge från trapphuset",
+          "Antal rum",
+          "Kök",
+          "Boarea (m²)"
+        ],
+        "rows": [
+          [
+            "1201",
+            "Första lägenheten till vänster",
+            "2",
+            "K",
+            "58"
+          ],
+          [
+            "1202",
+            "Mitt emot trapphuset",
+            "1",
+            "KV",
+            "34"
+          ],
+          [
+            "1203",
+            "Till höger",
+            "4",
+            "K",
+            "92"
+          ]
+        ]
+      }
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "Kaptensgatan 3B – plan 10 (entréplan)"
+    },
+    {
+      "table": {
+        "columns": [
+          "Nummer (3B, plan 10)",
+          "Läge från trapphuset",
+          "Antal rum",
+          "Kök",
+          "Boarea (m²)"
+        ],
+        "rows": [
+          [
+            "1001",
+            "Till vänster",
+            "3",
+            "K",
+            "71"
+          ],
+          [
+            "1002",
+            "Till höger",
+            "2",
+            "K",
+            "55"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Kaptensgatan 3B – plan 11 (1 tr)"
+    },
+    {
+      "table": {
+        "columns": [
+          "Nummer (3B, plan 11)",
+          "Läge från trapphuset",
+          "Antal rum",
+          "Kök",
+          "Boarea (m²)"
+        ],
+        "rows": [
+          [
+            "1101",
+            "Till vänster",
+            "3",
+            "K",
+            "71"
+          ],
+          [
+            "1102",
+            "Till höger",
+            "2",
+            "K",
+            "55"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Kaptensgatan 3B – plan 12 (2 tr)"
+    },
+    {
+      "table": {
+        "columns": [
+          "Nummer (3B, plan 12)",
+          "Läge från trapphuset",
+          "Antal rum",
+          "Kök",
+          "Boarea (m²)"
+        ],
+        "rows": [
+          [
+            "1201",
+            "Till vänster",
+            "3",
+            "K",
+            "71"
+          ],
+          [
+            "1202",
+            "Till höger",
+            "2",
+            "K",
+            "55"
+          ]
+        ]
+      }
+    },
+    {
+      "paragraph": "Boarea är uppmätt enligt SS 21054:2020. Förråd i källaren ingår inte i boarean."
+    },
+    {
+      "signature": {
+        "name": "Per Wennberg",
+        "role": "Arkitekt SAR/MSA, Wennberg Arkitektkontor AB"
+      }
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "e_tjanst": "Kommunal mark - använda, köpa eller sälja mark till kommunen",
+  "inskickad": "2026-09-08T10:14:52+02:00",
+  "diarienummer": "SBN-2026-00862",
+  "kontaktuppgifter": {
+    "sokande_ar": "Företag",
+    "foretagsnamn": "Kaffevagnen Norrsken AB",
+    "organisationsnummer": "559341-7702",
+    "adress": "Skepparegatan 12, 852 34 Sundsvall",
+    "kontaktperson": "Mikael Norén",
+    "inloggad_med_e_legitimation": {
+      "namn": "Mikael Norén",
+      "personnummer": "19711008-9294"
+    },
+    "mobil": "070-512 66 03",
+    "epost": "info@norrskenkaffe.exempel.se"
+  },
+  "ansokan": {
+    "arendetyp": "Ansöka om torgplats",
+    "plats": "Stora torget",
+    "onskad_torgplats": "A7, eller annan plats i zon A nära julgranen",
+    "period_fran": "2026-11-27",
+    "period_till": "2026-12-20",
+    "dagar": "Alla dagar under perioden",
+    "oppettider": "10.00–19.00",
+    "verksamhet": "Försäljning av kaffe, varm choklad, glögg utan alkohol och bakverk från kaffevagn",
+    "yta": "Kaffevagn 2,4 x 5 m (12 m²) och fyra ståbord framför vagnen, cirka 14 m². Totalt 26 m².",
+    "fordon_pa_ytan": "Ja. Kaffevagnen är en släpvagn med totalvikt 1 800 kg och står kvar under hela perioden.",
+    "el": "Ja, en 16 A-anslutning",
+    "gasol": "Ja, en gasolflaska 11 kg till våffeljärnet",
+    "livsmedel": "Registrerad livsmedelsanläggning (mobil), registreringsbeslut från Miljönämnden 2024",
+    "ovrigt": "Vi hade plats på Navet sommaren 2025 och vill gärna vara med på julmarknaden i år."
+  },
+  "bilagor": [
+    "Foto på kaffevagnen",
+    "Registreringsbeslut livsmedelsanläggning"
+  ]
+}

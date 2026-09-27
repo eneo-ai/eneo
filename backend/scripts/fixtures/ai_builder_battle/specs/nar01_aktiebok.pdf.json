@@ -1,0 +1,37 @@
+{
+  "file": "nar01_aktiebok.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "NAR-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/145"},
+  "description": "Aktiebok enligt aktiebolagslagen 5 kap. för sökandebolaget, bifogad för prövning av ägarförhållanden; visar en tredje aktieägare som inte anges som person med betydande inflytande i ansökan.",
+  "letterhead": {"organisation": "Norra Kajen Bistro AB", "unit": "Styrelsen", "address": "Norra Kajen 12, 852 29 Sundsvall"},
+  "date": "2026-08-31",
+  "title": "Aktiebok för Norra Kajen Bistro AB, 559341-6620",
+  "blocks": [
+    {"paragraph": "Aktiekapital 25 000 kronor fördelat på 500 aktier med kvotvärde 50 kronor. Samtliga aktier är av samma slag. Bolaget registrerades hos Bolagsverket 2025-11-03."},
+    {"heading": "Förteckning över aktier och ägare"},
+    {
+      "table": {
+        "columns": ["Aktienummer", "Antal", "Ägare", "Person- eller organisationsnummer", "Postadress", "Införd", "Anteckning"],
+        "rows": [
+          ["1–250", "250", "Johan Ekholm", "19841009-2392", "Västra Allén 18, 852 38 Sundsvall", "2025-11-03", "Aktier vid bolagsbildning"],
+          ["251–400", "150", "Leila Haddad", "19880326-2388", "Granlidsvägen 5, 856 43 Sundsvall", "2025-11-03", "Aktier vid bolagsbildning"],
+          ["401–500", "100", "Mikael Strand", "19791110-9291", "Bergsgatan 31, 852 34 Sundsvall", "2026-06-20", "Nyemission enligt beslut på extra bolagsstämma 2026-06-15, betalda 2026-06-19"]
+        ]
+      }
+    },
+    {"heading": "Sammanställning per ägare"},
+    {
+      "table": {
+        "columns": ["Ägare", "Antal aktier", "Andel av aktier och röster"],
+        "rows": [
+          ["Johan Ekholm", "250", "50 %"],
+          ["Leila Haddad", "150", "30 %"],
+          ["Mikael Strand", "100", "20 %"]
+        ]
+      }
+    },
+    {"paragraph": "Aktieboken är uppdaterad till och med 2026-08-31. Inga förbehåll, pantsättningar eller aktiebrev finns utfärdade."},
+    {"signature": {"name": "Johan Ekholm", "role": "Styrelseledamot"}},
+    {"signature": {"name": "Leila Haddad", "role": "Styrelsesuppleant"}}
+  ]
+}

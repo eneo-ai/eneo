@@ -1,0 +1,34 @@
+{
+  "file": "md_mall_bifogad_tjansteskrivelse_tidigare_arende.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "BYG-06", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/428"},
+  "description": "Bygglovsavdelningens tjänsteskrivelse i ett tidigare, avslutat ärende om förhandsbesked (bedömning och förslag till beslut); bifogas bredvid beslutsmallen som exempel på underlaget, så att mallen måste väljas efter det namn begäran ger den.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Stadsbyggnadskontoret, Bygglovsavdelningen", "address": "Stadsbyggnadskontoret, 851 85 Sundsvall"},
+  "date": "2026-04-21",
+  "diarienummer": "BN-2026-000318",
+  "title": "Tjänsteskrivelse – förhandsbesked för nybyggnad av enbostadshus, Sundsvall Kovland 3:27",
+  "blocks": [
+    {"heading": "Ärendet"},
+    {"paragraph": "Sökande Emil och Sofia Hedlund ansöker om förhandsbesked för att uppföra ett enbostadshus med garage på en avstyckning från fastigheten Sundsvall Kovland 3:27. Platsen ligger utanför detaljplanelagt område och utanför sammanhållen bebyggelse. Ansökan kom in 2026-02-09 och var komplett 2026-02-26."},
+    {"heading": "Förutsättningar"},
+    {
+      "table": {
+        "columns": ["Förutsättning", "Uppgift"],
+        "rows": [
+          ["Planförhållanden", "Utanför detaljplan; översiktsplanen anger landsbygd med möjlighet till enstaka kompletterande bebyggelse"],
+          ["Riksintressen och skydd", "Inga riksintressen; inget strandskydd (närmaste vattendrag 420 meter)"],
+          ["Väg", "Utfart mot enskild väg, vägsamfälligheten har yttrat sig utan erinran"],
+          ["Vatten och avlopp", "Enskild brunn och enskilt avlopp; miljökontoret bedömer att en godtagbar avloppslösning kan ordnas"],
+          ["Grannar", "Tre sakägare underrättade; en granne har lämnat synpunkter om ökad trafik"]
+        ]
+      }
+    },
+    {"heading": "Bedömning"},
+    {"paragraph": "Platsen är lämplig för ett enbostadshus. Åtgärden bedöms inte medföra betydande olägenhet för omgivningen. Den ökade trafiken från ett hushåll är begränsad. Vatten och avlopp kan ordnas på fastigheten. Byggnaden ska placeras och utformas så att den anpassas till landskapet och den befintliga gårdsbebyggelsen."},
+    {"heading": "Förslag till beslut"},
+    {"paragraph": "Positivt förhandsbesked, med villkoren att byggnaden placeras inom det område som markerats på situationsplanen och att en godtagbar avloppsanordning redovisas i ansökan om bygglov."},
+    {"heading": "Avgift"},
+    {"paragraph": "Avgiften är 11 850 kronor enligt stadsbyggnadsnämndens plan- och bygglovtaxa."},
+    {"signature": {"name": "Maja Lindström", "role": "Bygglovshandläggare"}}
+  ]
+}

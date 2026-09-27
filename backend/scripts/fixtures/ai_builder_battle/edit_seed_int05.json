@@ -1,0 +1,45 @@
+{
+  "name": "Synpunkter och klagomål – kvartalsrapport till nämnden",
+  "description": "Kvalitetsenhetens kvartalsuppföljning: tematiserar exporten från synpunktssystemet och skriver rapporten om inkomna synpunkter och klagomål till nämnden.",
+  "metadata_json": {
+    "form_schema": {
+      "fields": [
+        {"name": "period", "type": "text", "label": "Period (till exempel kvartal 3 2026)", "required": true, "order": 1},
+        {"name": "namnd", "type": "text", "label": "Nämnd som rapporten går till", "required": true, "order": 2}
+      ]
+    }
+  },
+  "steps": [
+    {
+      "name": "Tematisera synpunkterna",
+      "instructions": "Du får en export av synpunkter och klagomål från synpunktssystemet, ett ärende per rad. Gruppera ärendena i teman utifrån kategori och fritext, till exempel bemötande, kontinuitet, tillgänglighet, handläggningstid, mat och måltider och information. Ange för varje tema antal ärenden, andel av alla ärenden i procent med en decimal, vilka enheter som berörs och hur många som är klagomål, synpunkter respektive beröm. Ange för varje enhet antal ärenden och hur många som saknar svar. Beskriv två avidentifierade exempel per tema med egna ord. Återge aldrig namn, personnummer, adresser eller hälsouppgifter från fritexterna. Räkna exakt och gissa inte.",
+      "input_source": "flow_input",
+      "input_type": "document",
+      "input_config": {
+        "runtime_input": {
+          "enabled": true,
+          "required": true,
+          "max_files": 3,
+          "input_format": "document",
+          "label": "Export från synpunktssystemet",
+          "description": "Ladda upp kvartalets export (CSV) från synpunktssystemet."
+        }
+      },
+      "input_bindings": {"question": "{{ step_input.text }}\n\nPeriod: {{ flow_input.period }}"},
+      "output_mode": "pass_through",
+      "output_type": "text"
+    },
+    {
+      "name": "Skriv rapport till nämnden",
+      "instructions": "Skriv en rapport till nämnden om de synpunkter och klagomål som kommit in under perioden, som en del av uppföljningen i ledningssystemet för systematiskt kvalitetsarbete. Rubriker: Sammanfattning, Inkomna ärenden, Teman, Enheter som sticker ut, Åtgärder och lärdomar, Förslag till beslut. Använd antal och andelar exakt som i underlaget och nämn enheterna vid namn. Förslag till beslut: \"Nämnden noterar informationen.\" Namnge inga enskilda personer.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Nämnd: {{ flow_input.namnd }}\nPeriod: {{ flow_input.period }}",
+        "source_refs": [{"step_ref": "step_1", "output": "text", "label": "Teman och antal"}]
+      },
+      "output_mode": "pass_through",
+      "output_type": "text"
+    }
+  ]
+}

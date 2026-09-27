@@ -1,0 +1,28 @@
+{
+  "file": "nar01_skuldebrev_och_lanelofte.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "NAR-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/145"},
+  "description": "Finansieringsunderlag till ansökan om serveringstillstånd: skuldebrev för ett privat lån till bolaget och bankens lånelöfte; skuldebrevets belopp skiljer sig från ansökan.",
+  "letterhead": {"organisation": "Norra Kajen Bistro AB", "unit": "Finansieringsunderlag", "address": "Norra Kajen 12, 852 29 Sundsvall"},
+  "date": "2026-06-30",
+  "title": "Skuldebrev",
+  "blocks": [
+    {"heading": "Långivare"},
+    {"paragraph": "Tomas Berglund, 19580713-3052, Sidsjövägen 44, 856 53 Sundsvall"},
+    {"heading": "Låntagare"},
+    {"paragraph": "Norra Kajen Bistro AB, 559341-6620, Norra Kajen 12, 852 29 Sundsvall"},
+    {"heading": "Lånebelopp och utbetalning"},
+    {"paragraph": "Långivaren lånar ut 250 000 kronor (tvåhundrafemtiotusen kronor) till låntagaren. Beloppet sätts in på låntagarens företagskonto i Selångers Sparbank senast 2026-07-15."},
+    {"heading": "Ränta och återbetalning"},
+    {"paragraph": "Lånet löper med 4,0 procent årlig ränta från utbetalningsdagen. Lånet amorteras med 10 000 kronor per månad från och med januari 2027. Låntagaren får betala tillbaka lånet i förtid utan avgift."},
+    {"heading": "Säkerhet"},
+    {"paragraph": "Lånet lämnas utan säkerhet. Långivaren har inga aktier i bolaget och ingen rätt att påverka verksamheten."},
+    {"signature": {"name": "Tomas Berglund", "role": "Långivare"}},
+    {"signature": {"name": "Johan Ekholm", "role": "För Norra Kajen Bistro AB, verkställande direktör"}},
+    {"page_break": true},
+    {"heading": "Lånelöfte från Selångers Sparbank"},
+    {"paragraph": "Datum: 2026-08-20. Referens: SSB-KRE-26-3318."},
+    {"paragraph": "Selångers Sparbank lämnar Norra Kajen Bistro AB ett lånelöfte om 450 000 kronor för inventarier och ombyggnad av restauranglokal vid Norra Kajen 12. Lånelöftet gäller till och med 2026-12-31 under förutsättning att bolaget beviljas stadigvarande serveringstillstånd och att hyreskontrakt i bolagets namn visas upp innan lånet betalas ut."},
+    {"signature": {"name": "Erik Söderlund", "role": "Företagsrådgivare, Selångers Sparbank"}}
+  ]
+}

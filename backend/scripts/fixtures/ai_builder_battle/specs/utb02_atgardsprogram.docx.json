@@ -1,0 +1,42 @@
+{
+  "file": "utb02_atgardsprogram.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "UTB-02", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/210"},
+  "description": "Åtgärdsprogram enligt skollagen 3 kap. 9 § för en gymnasieelev, bilaga till ansökan om tilläggsbelopp; skiljer särskilt stöd från extra anpassningar och anger stödets omfattning.",
+  "letterhead": {"organisation": "Nordvik Gymnasium", "unit": "Elevhälsan och El- och energiprogrammet", "address": "Nordvik Utbildning AB, Industrigatan 6, 852 38 Sundsvall"},
+  "date": "2026-09-03",
+  "title": "Åtgärdsprogram",
+  "blocks": [
+    {
+      "table": {
+        "columns": ["Rubrik", "Innehåll"],
+        "rows": [
+          ["Elev", "Elias Nyström"],
+          ["Klass", "EE26A, El- och energiprogrammet årskurs 1"],
+          ["Mentor", "Ahmed Rashid"],
+          ["Utredning av behov av särskilt stöd", "Pedagogisk kartläggning 2026-08-31"],
+          ["Åtgärdsprogrammet gäller", "2026-09-07 – 2027-06-11"]
+        ]
+      }
+    },
+    {"heading": "Elevens behov av särskilt stöd"},
+    {"paragraph": "Elias har svårt att uppfatta och komma ihåg muntliga säkerhetsinstruktioner och att bedöma risker i verkstaden och elsalen. Utan en vuxen bredvid sig har han under de första veckorna lämnat en maskin igång och börjat arbeta med en installation som inte var spänningslös. I teoretiska ämnen klarar han kunskapskraven med de extra anpassningar som redan finns."},
+    {"heading": "Åtgärder"},
+    {
+      "table": {
+        "columns": ["Åtgärd", "Typ", "Ansvarig", "Omfattning", "Uppföljning"],
+        "rows": [
+          ["Elevassistent som bara arbetar med Elias under samtliga praktiska moment i verkstad och elsal", "Särskilt stöd", "Rektor", "20 timmar per vecka", "2026-11-13"],
+          ["Förberedelse inför nya praktiska moment med bildstöd och genomgång av säkerhetsrutiner", "Särskilt stöd", "Karaktärsämneslärare", "1 timme per vecka", "2026-11-13"],
+          ["Visuellt schema och förvarning vid ändringar", "Extra anpassning", "Mentor", "Löpande", "2026-10-02"],
+          ["Talsyntes och inläsningstjänst i teoretiska ämnen", "Extra anpassning", "Speciallärare", "Löpande", "2026-10-02"],
+          ["Specialpedagogisk handledning av arbetslaget kring klassens lärmiljö", "Handledning", "Specialpedagog", "4 timmar per vecka", "2026-12-18"]
+        ]
+      }
+    },
+    {"heading": "Elevens och vårdnadshavarnas synpunkter"},
+    {"paragraph": "Elias och hans mamma Jenny Nyström deltog i utarbetandet 2026-09-03 och är positiva till elevassistent i verkstaden. Elias vill inte ha assistent på teorilektionerna."},
+    {"signature": {"name": "Johanna Berg", "role": "Rektor"}},
+    {"signature": {"name": "Ahmed Rashid", "role": "Mentor"}}
+  ]
+}

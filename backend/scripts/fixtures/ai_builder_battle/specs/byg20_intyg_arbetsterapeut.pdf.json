@@ -1,0 +1,20 @@
+{
+  "file": "byg20_intyg_arbetsterapeut.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-20", "url": "https://sjalvservice.malmo.se/oversikt/overview/1202"},
+  "description": "Intyg från legitimerad arbetsterapeut som underlag för bostadsanpassningsbidrag, med diagnoser (sekretess enligt OSL 26 kap. 12 §), behovsbedömning per åtgärd och ett uttryckligt nej till behov av sänkt köksbänk.",
+  "letterhead": {"organisation": "Vårdcentralen Kastanjen", "unit": "Rehabenheten", "address": "Kastanjegatan 3, 214 55 Malmö"},
+  "date": "2026-08-12",
+  "title": "Intyg för ansökan om bostadsanpassningsbidrag",
+  "blocks": [
+    {"table": {"columns": ["Uppgift", "Värde"], "rows": [["Patient", "Birgitta Jönsson, 19430918-9126"], ["Bostad", "Kastanjegatan 12 B, lgh 1102, Malmö"], ["Hembesök", "2026-08-06"]]}},
+    {"heading": "Diagnos och funktionsnedsättning"},
+    {"paragraph": "Parkinsons sjukdom sedan 2019. Status efter höftledsplastik på höger sida i mars 2025. Nedsatt balans och benstyrka och ökad fallrisk. Går med rollator inomhus och utomhus. Funktionsnedsättningen är bestående."},
+    {"heading": "Aktivitetsförmåga i bostaden"},
+    {"paragraph": "Patienten kan inte kliva över badkarskanten, som är 48 cm hög, och har vid två tillfällen i år fallit i badrummet. Hon duschar i dag sittande på badkarskanten med hjälp av hemtjänst. Trösklarna mellan hall och badrum och mellan hall och sovrum är cirka 2 cm höga, och rollatorn fastnar i dem."},
+    {"heading": "Bedömning av behov"},
+    {"list": ["Duschplats utan kant med golvbrunn, vikbara duschväggar och två stödhandtag är nödvändig för att patienten självständigt och säkert ska kunna sköta sin personliga hygien.", "Borttagning av de två trösklarna är nödvändig för att patienten ska kunna förflytta sig med rollator mellan hall, badrum och sovrum.", "Köket: patienten lagar enklare måltider stående med stöd mot arbetsbänken. Jag har inte bedömt något behov av sänkt arbetsbänk eller spis."]},
+    {"paragraph": "Duschstol är förskriven som hjälpmedel 2026-06-10 och ingår inte i ansökan om bostadsanpassningsbidrag."},
+    {"signature": {"name": "Lina Persson", "role": "Legitimerad arbetsterapeut, Vårdcentralen Kastanjen"}}
+  ]
+}

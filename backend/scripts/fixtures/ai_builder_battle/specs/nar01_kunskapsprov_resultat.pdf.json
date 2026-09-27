@@ -1,0 +1,27 @@
+{
+  "file": "nar01_kunskapsprov_resultat.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "NAR-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/145"},
+  "description": "Kommunens resultatbesked för Folkhälsomyndighetens kunskapsprov för serveringstillstånd, bifogat ansökan som bevis på kunskaper i alkohollagen.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Individ- och arbetsmarknadsförvaltningen, Tillståndsenheten", "address": "851 85 Sundsvall"},
+  "date": "2026-08-27",
+  "title": "Resultat av kunskapsprov för serveringstillstånd",
+  "blocks": [
+    {"paragraph": "Kunskapsprovet är framtaget av Folkhälsomyndigheten och genomförs digitalt hos kommunen. Provet visar om den som söker serveringstillstånd har de kunskaper i alkohollagen som krävs enligt 8 kap. 12 § alkohollagen (2010:1622)."},
+    {
+      "table": {
+        "columns": ["Provuppgift", "Utfall"],
+        "rows": [
+          ["Provdeltagare", "Johan Ekholm"],
+          ["Bolag", "Norra Kajen Bistro AB"],
+          ["Provtyp", "Stadigvarande serveringstillstånd till allmänheten och slutna sällskap"],
+          ["Provdatum", "2026-08-27"],
+          ["Provtillfälle", "Första"],
+          ["Resultat", "Godkänt"]
+        ]
+      }
+    },
+    {"paragraph": "Resultatet gäller för ansökan om serveringstillstånd för det bolag som anges ovan. Legitimationen kontrollerades före provet."},
+    {"signature": {"name": "Hanna Wiklund", "role": "Alkoholhandläggare"}}
+  ]
+}

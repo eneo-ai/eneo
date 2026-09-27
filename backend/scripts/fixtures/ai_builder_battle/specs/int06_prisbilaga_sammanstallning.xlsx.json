@@ -1,0 +1,69 @@
+{
+  "file": "int06_prisbilaga_sammanstallning.xlsx",
+  "format": "xlsx",
+  "source": {
+    "catalogue_id": "INT-06",
+    "url": "https://www.upphandlingsmyndigheten.se/inkopsprocessen/genomfor-upphandlingen/tilldelningsbeslut/"
+  },
+  "description": "Upphandlarens sammanställning av anbudsgivarnas ifyllda prisbilagor: timpris per tjänst och förbunden andel auktoriserade tolkar, och de uppskattade volymerna.",
+  "sheets": [
+    {
+      "name": "Priser",
+      "columns": [
+        "Anbudsgivare",
+        "Organisationsnummer",
+        "Kontakttolkning på plats kr/tim",
+        "Telefontolkning kr/tim",
+        "Distanstolkning via video kr/tim",
+        "Förbunden andel auktoriserade tolkar"
+      ],
+      "rows": [
+        [
+          "Tolkcentrum Mitt AB",
+          "559204-3318",
+          685,
+          420,
+          450,
+          "42 %"
+        ],
+        [
+          "Språkbron Norr AB",
+          "559011-7742",
+          640,
+          415,
+          430,
+          "31 %"
+        ],
+        [
+          "Nordtolk Sverige AB",
+          "556987-2051",
+          590,
+          360,
+          380,
+          "20 %"
+        ]
+      ]
+    },
+    {
+      "name": "Volymer",
+      "columns": [
+        "Tjänst",
+        "Uppskattad volym per år (timmar)"
+      ],
+      "rows": [
+        [
+          "Kontakttolkning på plats",
+          4200
+        ],
+        [
+          "Telefontolkning",
+          6500
+        ],
+        [
+          "Distanstolkning via video",
+          2300
+        ]
+      ]
+    }
+  ]
+}

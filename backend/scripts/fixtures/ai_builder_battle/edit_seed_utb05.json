@@ -1,0 +1,151 @@
+{
+  "name": "Skolskjuts – veckouppföljning av avvikelser",
+  "description": "Skolskjutssamordnarens veckouppföljning av upphandlad skolskjuts: jämför turplanen med trafikföretagets GPS-logg och chaufförsrapporten, tar fram försenade och uteblivna turer, beräknar vite enligt trafikavtalet och skriver veckorapporten.",
+  "metadata_json": {
+    "form_schema": {
+      "fields": [
+        {"name": "vecka", "type": "text", "label": "Vecka (år och veckonummer)", "required": true, "order": 1},
+        {"name": "trafikforetag", "type": "text", "label": "Trafikföretag", "required": true, "order": 2},
+        {"name": "avtalsnummer", "type": "text", "label": "Avtalsnummer", "required": true, "order": 3},
+        {"name": "samordnare", "type": "text", "label": "Skolskjutssamordnare", "required": true, "order": 4}
+      ]
+    }
+  },
+  "steps": [
+    {
+      "name": "Läs turplan, GPS-logg och chaufförsrapport",
+      "instructions": "Du får veckans turplan (CSV), trafikföretagets GPS-logg (JSON) och chaufförernas veckorapport (PDF). Ta för varje planerad tur och dag ut turnummer, linje, datum, den hållplats där turen ska vara vid skolan, planerad ankomsttid enligt turplanen och faktisk ankomsttid enligt GPS-loggen (HH:MM). Finns ingen GPS-post för turen, skriv null. Ta ur chaufförsrapporten varje händelse med tur, datum, vad chauffören angett som orsak och den försening chauffören själv uppger. Skriv tider och turnummer exakt som de står.",
+      "input_source": "flow_input",
+      "input_type": "document",
+      "input_config": {
+        "runtime_input": {
+          "enabled": true,
+          "required": true,
+          "max_files": 5,
+          "input_format": "document",
+          "label": "Turplan, GPS-logg och chaufförsrapport",
+          "description": "Ladda upp veckans turplan, GPS-exporten från trafikföretaget och chaufförsrapporten."
+        }
+      },
+      "input_bindings": {"question": "{{ step_input.text }}\n\nVecka: {{ flow_input.vecka }}"},
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["turer", "chaufforsrapport"],
+        "properties": {
+          "turer": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["tur", "linje", "datum", "hallplats", "planerad_ankomst", "faktisk_ankomst"],
+              "properties": {
+                "tur": {"type": "string"},
+                "linje": {"type": "string"},
+                "datum": {"type": "string"},
+                "hallplats": {"type": "string"},
+                "planerad_ankomst": {"type": "string"},
+                "faktisk_ankomst": {"type": ["string", "null"]}
+              }
+            }
+          },
+          "chaufforsrapport": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["tur", "datum", "orsak", "uppgiven_forsening_min"],
+              "properties": {
+                "tur": {"type": "string"},
+                "datum": {"type": "string"},
+                "orsak": {"type": "string"},
+                "uppgiven_forsening_min": {"type": ["integer", "null"]}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Ta fram avvikelser",
+      "instructions": "Räkna ut förseningen i hela minuter för varje tur som faktisk ankomsttid minus planerad ankomsttid. GPS-loggen gäller; chaufförens egen uppgift om förseningen används inte, men chaufförens angivna orsak tas med. En tur räknas som försenad om den kom fram mer än 5 minuter efter planerad tid. En tur utan GPS-post räknas som utebliven om inte chaufförsrapporten visar att den körts; då är den ej verifierad. Lista bara försenade, uteblivna och ej verifierade turer, och räkna antalet planerade turer och antalet försenade.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "turer", "label": "Turer"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "chaufforsrapport", "label": "Chaufförsrapport"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["avvikelser", "antal_planerade_turer", "antal_forsenade_turer"],
+        "properties": {
+          "avvikelser": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["tur", "datum", "hallplats", "typ", "forsening_min", "orsak"],
+              "properties": {
+                "tur": {"type": "string"},
+                "datum": {"type": "string"},
+                "hallplats": {"type": "string"},
+                "typ": {"type": "string", "enum": ["Försenad", "Utebliven", "Ej verifierad"]},
+                "forsening_min": {"type": ["integer", "null"]},
+                "orsak": {"type": ["string", "null"]}
+              }
+            }
+          },
+          "antal_planerade_turer": {"type": "integer"},
+          "antal_forsenade_turer": {"type": "integer"}
+        }
+      }
+    },
+    {
+      "name": "Beräkna vite enligt trafikavtalet",
+      "instructions": "Beräkna vite enligt trafikavtalets bilaga om kvalitetsbrister: en tur som kommer fram mer än 10 minuter efter planerad tid ger vite 800 kr, en utebliven tur ger vite 3 000 kr. Försenade turer med högst 10 minuters försening och ej verifierade turer ger inget vite men redovisas. Vite tas inte ut om förseningen beror på avstängd väg eller olycka som trafikföretaget inte kunnat förutse enligt chaufförens angivna orsak; ange då skälet. Redovisa vite per tur och summan.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {"step_ref": "step_2", "output": "structured", "field_path": "avvikelser", "label": "Avvikelser"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["viten", "summa_vite_kr"],
+        "properties": {
+          "viten": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["tur", "datum", "vite_kr", "skal"],
+              "properties": {"tur": {"type": "string"}, "datum": {"type": "string"}, "vite_kr": {"type": "number"}, "skal": {"type": "string"}}
+            }
+          },
+          "summa_vite_kr": {"type": "number"}
+        }
+      }
+    },
+    {
+      "name": "Skriv veckorapport",
+      "instructions": "Skriv veckorapporten om skolskjutsen till trafikföretaget och skolskjutsenheten. Ange vecka, trafikföretag och avtalsnummer, antal planerade och antal försenade turer, och sedan varje avvikelse med tur, datum, hållplats, typ, försening i minuter och chaufförens orsak. Redovisa vitet per tur och summan och att vitet dras på nästa faktura enligt avtalet. Avsluta med att trafikföretaget kan lämna synpunkter inom tio arbetsdagar, och samordnarens namn.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Vecka: {{ flow_input.vecka }}\nTrafikföretag: {{ flow_input.trafikforetag }}\nAvtalsnummer: {{ flow_input.avtalsnummer }}\nSamordnare: {{ flow_input.samordnare }}",
+        "source_refs": [
+          {"step_ref": "step_2", "output": "structured", "field_path": "avvikelser", "label": "Avvikelser"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "antal_planerade_turer", "label": "Antal planerade turer"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "antal_forsenade_turer", "label": "Antal försenade turer"},
+          {"step_ref": "step_3", "output": "structured", "label": "Vite"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "text"
+    }
+  ]
+}

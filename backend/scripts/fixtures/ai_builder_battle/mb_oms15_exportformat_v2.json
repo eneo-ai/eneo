@@ -1,0 +1,103 @@
+{
+  "exportformat": "E-tjänsten Vräkning eller uppsägning – JSON-export, version 2",
+  "utgivare": "Kristianstads kommun, Digitaliseringsenheten",
+  "giltig_fran": "2026-03-01",
+  "beskrivning": "Exporten körs varje fredag kl. 06.00 och innehåller alla underrättelser som hyresvärdar har skickat in via e-tjänsten sedan föregående export. Filen läggs i socialtjänstens mapp för mottagningsgruppen ekonomiskt bistånd. Samma ärende kan komma igen i en senare export om hyresvärden kompletterar.",
+  "faltbeskrivning": {
+    "arende_id": "E-tjänstens ärendenummer, VU-ÅÅÅÅ-NNNN.",
+    "inkom": "Tidpunkt då underrättelsen kom in via e-tjänsten, ÅÅÅÅ-MM-DDTHH:MM. Detta är dagen då meddelandet om uppsägningen och anledningen till den har lämnats till socialnämnden enligt 12 kap. 44 § jordabalken.",
+    "hyresvard": "Hyresvärdens namn, organisationsnummer och kontaktväg.",
+    "hyresgast": "Hyresgästens namn, personnummer och telefon (telefon är frivilligt i e-tjänsten).",
+    "lagenhet.lagenhetstyp": "Kod, se kodlistor.lagenhetstyp. E-tjänsten tar bara emot bostadslägenheter sedan version 2.",
+    "grund": "Kod för grunden, se kodlistor.grund.",
+    "skuld": "Obetald hyra vid underrättelsen, angiven i öre som heltal. 1462000 betyder alltså 14 620 kronor.",
+    "manader_obetalda": "Antal hyresmånader som inte är betalda.",
+    "delgiven": "Datum då hyresgästen delgavs uppsägningen och underrättelsen om att hyresrätten kan återvinnas genom betalning, ÅÅÅÅ-MM-DD. null om hyresvärden ännu inte har fått delgivningskvitto; hyresvärden kompletterar då ärendet senare. Vid grund 1 är sista dagen att betala för att få behålla lägenheten tre veckor efter delgiven eller inkom, räknat från det datum som är senast (12 kap. 44 § jordabalken: fristen börjar först när hyresgästen har delgetts och meddelandet har lämnats till socialnämnden). Är delgiven null har fristen inte börjat.",
+    "kronofogden.avhysning_planerad": "Datum för Kronofogdens planerade avhysning när grund är 3, annars null.",
+    "hushall": "Antal vuxna och antal barn under 18 år som bor i lägenheten enligt hyresvärdens kännedom.",
+    "atgarder_hyresvard": "Fritext om vad hyresvärden har gjort före uppsägningen."
+  },
+  "kodlistor": {
+    "lagenhetstyp": {
+      "B": "Bostadslägenhet"
+    },
+    "grund": {
+      "1": "Uppsägning på grund av dröjsmål med hyran (12 kap. 42 § första stycket 1 jordabalken)",
+      "2": "Uppsägning på grund av störningar i boendet eller bristande skötsamhet (12 kap. 42 § första stycket 9 jordabalken)",
+      "3": "Hyresvärden har ansökt om avhysning hos Kronofogden",
+      "4": "Uppsägning på grund av otillåten andrahandsuthyrning (12 kap. 42 § första stycket 3 jordabalken)"
+    }
+  },
+  "exempel": {
+    "export": {
+      "skapad": "2026-08-21T06:00",
+      "antal": 2
+    },
+    "underrattelser": [
+      {
+        "arende_id": "VU-2026-0351",
+        "inkom": "2026-08-11T10:24",
+        "hyresvard": {
+          "namn": "Bostads AB Linnéstaden",
+          "orgnr": "556318-4406",
+          "kontakt": "Hyresreskontran, 044-13 51 00"
+        },
+        "hyresgast": {
+          "namn": "Lena Mårtensson",
+          "personnummer": "19810101-2386",
+          "telefon": "072-551 30 18"
+        },
+        "lagenhet": {
+          "adress": "Tallvägen 7 B, 291 45 Kristianstad",
+          "lagenhetsnummer": "1102",
+          "lagenhetstyp": "B"
+        },
+        "grund": "1",
+        "skuld": 1462000,
+        "manader_obetalda": 2,
+        "delgiven": "2026-08-06",
+        "kronofogden": {
+          "mal_nummer": null,
+          "avhysning_planerad": null
+        },
+        "hushall": {
+          "vuxna": 1,
+          "barn": 1
+        },
+        "atgarder_hyresvard": "Påminnelse 2026-07-08, betalningsplan erbjuden men inte besvarad"
+      },
+      {
+        "arende_id": "VU-2026-0358",
+        "inkom": "2026-08-19T13:05",
+        "hyresvard": {
+          "namn": "Fastighets AB Näsby Park",
+          "orgnr": "559114-2277",
+          "kontakt": "Peter Lund, 070-218 44 90"
+        },
+        "hyresgast": {
+          "namn": "Rasmus Holgersson",
+          "personnummer": "19940101-2399",
+          "telefon": null
+        },
+        "lagenhet": {
+          "adress": "Näsbyvägen 22, 291 50 Kristianstad",
+          "lagenhetsnummer": "1201",
+          "lagenhetstyp": "B"
+        },
+        "grund": "2",
+        "skuld": 0,
+        "manader_obetalda": 0,
+        "delgiven": "2026-08-17",
+        "kronofogden": {
+          "mal_nummer": null,
+          "avhysning_planerad": null
+        },
+        "hushall": {
+          "vuxna": 1,
+          "barn": 0
+        },
+        "atgarder_hyresvard": "Två skriftliga varningar om nattliga störningar 2026-06 och 2026-07"
+      }
+    ]
+  }
+}

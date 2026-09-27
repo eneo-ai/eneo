@@ -1,0 +1,26 @@
+{
+  "file": "byg08_produktblad_kv610.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-08", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/437"},
+  "description": "Tillverkarens produktblad för en kaminserie med två modeller (KV-610 och KV-610 H): tekniska data och tabeller över avstånd till brännbart material med och utan strålningsskydd, där bara en rad gäller den anmälda modellen.",
+  "letterhead": {"organisation": "Kaminverket Sverige AB", "unit": "Produktblad och installationsanvisning (utdrag)", "address": "Industrigatan 4, 824 34 Hudiksvall · kaminverket.example"},
+  "date": "2025-03-01",
+  "title": "Kaminverket KV-610 och KV-610 H – braskaminer för ved",
+  "blocks": [
+    {"paragraph": "KV-610 är en kompakt braskamin med ett stort glas. KV-610 H har samma eldstad men ett högre värmemagasin av täljsten ovanpå, vilket ger längre värmeavgivning men högre yttemperatur mot sidorna. Kaminerna är provade enligt EN 13240 och CE-märkta."},
+    {"heading": "Tekniska data"},
+    {"table": {"columns": ["Egenskap", "KV-610", "KV-610 H"], "rows": [["Nominell effekt", "6 kW", "6 kW"], ["Verkningsgrad", "80 %", "81 %"], ["Vikt", "98 kg", "186 kg"], ["Höjd", "1 010 mm", "1 420 mm"], ["Rökrörsanslutning", "Ø 150 mm, topp eller bak", "Ø 150 mm, topp"], ["Rökgastemperatur", "280 °C", "265 °C"], ["Prestandadeklaration", "KV-610-DoP-2023", "KV-610H-DoP-2024"]]}},
+    {"heading": "Golvskydd"},
+    {"paragraph": "Kaminen ska stå på obrännbart underlag. Vid brännbart golv ska en golvplåt eller glasplatta täcka golvet minst 300 mm framför luckan och 100 mm på vardera sidan om lucköppningen."},
+    {"page_break": true},
+    {"heading": "Avstånd till brännbart material"},
+    {"paragraph": "Avstånden gäller från kaminens yttermått till brännbar byggnadsdel eller möbel. Tak anges från kaminens ovansida. Följ alltid tabellen för rätt modell."},
+    {"table": {"columns": ["Modell (utan strålningsskydd)", "Bakom", "Sida", "Framför", "Tak"], "rows": [["KV-610", "100 mm", "350 mm", "1 000 mm", "700 mm"], ["KV-610 H", "125 mm", "450 mm", "1 000 mm", "550 mm"]]}},
+    {"heading": "Avstånd med strålningsskydd SK-610 (tillbehör)"},
+    {"table": {"columns": ["Modell (med strålningsskydd SK-610)", "Bakom", "Sida", "Framför", "Tak"], "rows": [["KV-610", "50 mm", "150 mm", "1 000 mm", "700 mm"], ["KV-610 H", "50 mm", "200 mm", "1 000 mm", "550 mm"]]}},
+    {"heading": "Anslutning till skorsten"},
+    {"list": ["Kaminen får anslutas till en murad skorsten eller en CE-märkt stålskorsten för fastbränsle med temperaturklass minst T450 och sotbrandsklass G.", "Kaminen får inte anslutas till en rökkanal som redan betjänar en annan eldstad.", "Skorstenens avstånd till brännbart material bestäms av skorstenens märkning och tillverkarens anvisning."]},
+    {"paragraph": "Installationen ska göras enligt denna anvisning och gällande byggregler. Innan kaminen används första gången ska installationen kontrolleras av skorstensfejarmästare."},
+    {"signature": {"name": "Kaminverket Sverige AB", "role": "Teknisk dokumentation, utgåva 2025-03"}}
+  ]
+}

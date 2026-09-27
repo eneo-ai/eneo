@@ -1,0 +1,76 @@
+{
+  "file": "oms16_stiftelse_forsell_synskadade.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "OMS-16",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/490"
+  },
+  "description": "Stiftelseförordnande till minne av en ögonläkare, för blinda och gravt synskadade i länet; kräver intyg från syncentral och gäller inte vanliga glasögon.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Kommunstyrelsekontoret, Stiftelseförvaltningen",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2025-11-20",
+  "diarienummer": "KS-2025-00981",
+  "title": "Stiftelseförordnande: Stiftelsen till minne av doktor Erik Forsell",
+  "blocks": [
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Värde"
+        ],
+        "rows": [
+          [
+            "Stiftelse",
+            "Stiftelsen till minne av doktor Erik Forsell"
+          ],
+          [
+            "Organisationsnummer",
+            "802006-3342"
+          ],
+          [
+            "Förvaltare",
+            "Sundsvalls kommun genom kommunstyrelsen"
+          ],
+          [
+            "Ursprung",
+            "Gåva av familjen Forsell 1966 till minne av ögonläkaren Erik Forsell"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Ändamål enligt förordnandet"
+    },
+    {
+      "paragraph": "Avkastningen ska användas till stöd åt blinda och gravt synskadade personer i Västernorrlands län, för hjälpmedel, rehabilitering och rekreation som underlättar ett självständigt liv."
+    },
+    {
+      "heading": "Villkor för utdelning"
+    },
+    {
+      "list": [
+        "Sökanden är blind eller gravt synskadad, styrkt med intyg från syncentral eller ögonläkare.",
+        "Sökanden är folkbokförd i Västernorrlands län.",
+        "Bidrag lämnas inte till vanliga glasögon eller linser som korrigerar brytningsfel eller ålderssynthet."
+      ]
+    },
+    {
+      "heading": "Utdelning"
+    },
+    {
+      "paragraph": "Högsta utdelning per person och år är 8 000 kr."
+    },
+    {
+      "heading": "Ansökan"
+    },
+    {
+      "paragraph": "Stiftelsen är öppen för ansökan hela året."
+    },
+    {
+      "paragraph": "Stiftelsen förvaltas enligt stiftelselagen (1994:1220) och förordnandet. Beslut om utdelning fattas av kommunstyrelsens stiftelseutskott. Den som har fått avslag kan ansöka på nytt nästa ansökningsperiod."
+    }
+  ]
+}

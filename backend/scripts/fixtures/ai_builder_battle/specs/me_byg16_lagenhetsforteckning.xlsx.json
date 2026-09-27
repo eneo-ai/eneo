@@ -1,0 +1,197 @@
+{
+  "file": "me_byg16_lagenhetsforteckning.xlsx",
+  "format": "xlsx",
+  "source": {
+    "catalogue_id": "BYG-16",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/155"
+  },
+  "description": "Fastighetsägarens lägenhetsförteckning för registrering av nya bostäder i ett flerbostadshus med två trappuppgångar (Excel enligt Lantmäteriets mall): en rad per lägenhet och ett blad med uppgiftslämnaren; innehåller ett nummer med fel våningssiffror, ett tresiffrigt nummer, ett dubblerat nummer och avvikande boarea, kök och rum.",
+  "sheets": [
+    {
+      "name": "Lägenheter",
+      "columns": [
+        "Adress",
+        "Lägenhetsnummer",
+        "Våningsplan",
+        "Antal rum",
+        "Kök",
+        "Boarea (m²)",
+        "Förändring"
+      ],
+      "rows": [
+        [
+          "Kaptensgatan 3A",
+          "1001",
+          "Entréplan",
+          2,
+          "K",
+          58,
+          "Ny"
+        ],
+        [
+          "Kaptensgatan 3A",
+          "1002",
+          "Entréplan",
+          1,
+          "K",
+          34,
+          "Ny"
+        ],
+        [
+          "Kaptensgatan 3A",
+          "1003",
+          "Entréplan",
+          3,
+          "K",
+          74,
+          "Ny"
+        ],
+        [
+          "Kaptensgatan 3A",
+          "1101",
+          "1 tr",
+          2,
+          "K",
+          58,
+          "Ny"
+        ],
+        [
+          "Kaptensgatan 3A",
+          "1102",
+          "1 tr",
+          1,
+          "KV",
+          34,
+          "Ny"
+        ],
+        [
+          "Kaptensgatan 3A",
+          "1102",
+          "1 tr",
+          3,
+          "K",
+          74,
+          "Ny"
+        ],
+        [
+          "Kaptensgatan 3A",
+          "1201",
+          "2 tr",
+          2,
+          "K",
+          58,
+          "Ny"
+        ],
+        [
+          "Kaptensgatan 3A",
+          "1202",
+          "2 tr",
+          1,
+          "KV",
+          34,
+          "Ny"
+        ],
+        [
+          "Kaptensgatan 3A",
+          "1303",
+          "2 tr",
+          4,
+          "K",
+          92,
+          "Ny"
+        ],
+        [
+          "Kaptensgatan 3B",
+          "1001",
+          "Entréplan",
+          3,
+          "K",
+          71,
+          "Ny"
+        ],
+        [
+          "Kaptensgatan 3B",
+          "102",
+          "Entréplan",
+          2,
+          "K",
+          55,
+          "Ny"
+        ],
+        [
+          "Kaptensgatan 3B",
+          "1101",
+          "1 tr",
+          3,
+          "K",
+          81,
+          "Ny"
+        ],
+        [
+          "Kaptensgatan 3B",
+          "1102",
+          "1 tr",
+          2,
+          "K",
+          55,
+          "Ny"
+        ],
+        [
+          "Kaptensgatan 3B",
+          "1201",
+          "2 tr",
+          3,
+          "K",
+          71,
+          "Ny"
+        ],
+        [
+          "Kaptensgatan 3B",
+          "1202",
+          "2 tr",
+          3,
+          "K",
+          55,
+          "Ny"
+        ]
+      ]
+    },
+    {
+      "name": "Uppgiftslämnare",
+      "columns": [
+        "Uppgift",
+        "Värde"
+      ],
+      "rows": [
+        [
+          "Fastighet",
+          "Sundsvall Kaptenen 7"
+        ],
+        [
+          "Fastighetsägare",
+          "Kaptensgården Fastighets AB"
+        ],
+        [
+          "Organisationsnummer",
+          "559287-4410"
+        ],
+        [
+          "Bygglov",
+          "BN-2024-00871"
+        ],
+        [
+          "Inflyttning",
+          "2026-12-01"
+        ],
+        [
+          "Kontaktperson",
+          "Malin Sjöström, förvaltare, 060-61 44 02"
+        ],
+        [
+          "Kökstyp",
+          "K = kök, KV = kokvrå, KS = kokskåp"
+        ]
+      ]
+    }
+  ]
+}

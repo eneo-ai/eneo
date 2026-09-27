@@ -1,0 +1,72 @@
+{
+  "file": "tillganglighet_riktlinje_malvarden.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "KOP-02", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/77"},
+  "description": "Sundsvalls kommuns interna riktlinje för tillgänglighetsinventering av kommunens publika lokaler: målvärden med koder per område, bedömningsregler för gränsvärden, enheter och saknade värden, prioritering och hur bristlistan ska formuleras.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Kommunstyrelsekontoret – Fastighetsavdelningen", "address": "851 85 Sundsvall"},
+  "date": "2025-10-15",
+  "diarienummer": "KS-2025-00944",
+  "title": "Riktlinje för tillgänglighet i kommunens publika lokaler – målvärden vid inventering",
+  "blocks": [
+    {"heading": "1. Syfte och avgränsning"},
+    {"paragraph": "Riktlinjen anger de målvärden fastighetsavdelningen använder när kommunens publika lokaler inventeras, till exempel bibliotek, medborgarkontor, idrottshallar och kulturhus. Inventeringar görs enligt en rullande plan och när synpunkter eller felanmälningar om tillgänglighet kommer in via Lämna synpunkt. Resultatet är en bristlista som läggs in som arbetsordrar i underhållssystemet."},
+    {"paragraph": "Målvärdena är kommunens egna och i flera fall högre ställda än minimikraven i bygglagstiftningen. Bristlistan redovisar därför avvikelse från kommunens målvärden. Den ska inte ange att en lokal uppfyller eller bryter mot lagkrav, BBR eller andra föreskrifter och inte beskriva lokalen som godkänd eller underkänd. Sådana bedömningar görs av byggnadsnämnden."},
+    {"heading": "2. Bedömningsregler"},
+    {"list": [
+      "Varje observation jämförs med det målvärde som har samma kontrollpunkt. En observation utan målvärde i riktlinjen bedöms inte och tas inte med i bristlistan.",
+      "Ett mätvärde som ligger exakt på målvärdet uppfyller målvärdet.",
+      "Avrunda aldrig mätvärden före jämförelsen. 0,79 m är mindre än 0,80 m.",
+      "Kontrollera enheten. Inventeringsverktyget kan ange bredd i m eller cm och lutning som förhållande (1:20) eller i procent. 1:20 motsvarar 5 % och 1:12 motsvarar 8,3 %; en brantare ramp har högre procenttal.",
+      "Saknas mätvärde (null, tomt eller ej mätt) bedöms kontrollpunkten som Ej verifierad. Den tas med i bristlistan som Ej verifierad, aldrig som brist eller som uppfylld.",
+      "Varje observation redovisas för sig med sitt id, även när flera observationer gäller samma kontrollpunkt."
+    ]},
+    {"heading": "3. Målvärden"},
+    {
+      "table": {
+        "columns": ["Kod entré och dörrar", "Kontrollpunkt", "Målvärde", "Prioritet vid brist"],
+        "rows": [
+          ["MV-1.1", "Fri passagebredd i dörr", "Minst 0,80 m", "Prio 1"],
+          ["MV-1.2", "Rampens lutning", "Högst 1:20 (5 %)", "Prio 1"],
+          ["MV-1.3", "Tröskel eller nivåskillnad vid entré", "Högst 25 mm", "Prio 1"],
+          ["MV-1.4", "Manöverdon för dörröppnare, höjd över mark", "0,80–1,10 m", "Prio 2"],
+          ["MV-1.5", "Kontrastmarkering på glasdörrar och glaspartier", "Finns, två markeringsband", "Prio 2"]
+        ]
+      }
+    },
+    {
+      "table": {
+        "columns": ["Kod toalett", "Kontrollpunkt", "Målvärde", "Prioritet vid brist"],
+        "rows": [
+          ["MV-2.1", "Fri vändyta i tillgänglig toalett, diameter", "Minst 1,50 m", "Prio 1"],
+          ["MV-2.2", "Stödhandtag på båda sidor om toalettstolen, uppfällbara", "Finns", "Prio 1"],
+          ["MV-2.3", "Larm som kan nås från golvet", "Finns och nås från golvet", "Prio 2"]
+        ]
+      }
+    },
+    {
+      "table": {
+        "columns": ["Kod angöring och parkering", "Kontrollpunkt", "Målvärde", "Prioritet vid brist"],
+        "rows": [
+          ["MV-3.1", "Gångavstånd från parkering för rörelsehindrade till entré", "Högst 25 m", "Prio 2"],
+          ["MV-3.2", "Bredd på parkeringsplats för rörelsehindrade", "Minst 5,0 m", "Prio 2"]
+        ]
+      }
+    },
+    {
+      "table": {
+        "columns": ["Kod hiss och orientering", "Kontrollpunkt", "Målvärde", "Prioritet vid brist"],
+        "rows": [
+          ["MV-4.1", "Hisskorgens invändiga mått (bredd x djup)", "Minst 1,10 x 1,40 m", "Prio 1"],
+          ["MV-4.2", "Teckenhöjd på informationsskyltar", "Minst 15 mm", "Prio 3"],
+          ["MV-4.3", "Hörslinga i reception eller informationsdisk", "Finns", "Prio 3"]
+        ]
+      }
+    },
+    {"page_break": true},
+    {"heading": "4. Prioritering"},
+    {"paragraph": "Prio 1: hinder som stänger ute personer som använder rullstol eller rollator; åtgärdas inom sex månader. Prio 2: hinder som gör lokalen svår att använda; åtgärdas inom tolv månader. Prio 3: åtgärdas i samband med nästa planerade underhåll. Ej verifierad kontrollpunkt ska kontrolleras vid nästa besök och har ingen prioritet."},
+    {"heading": "5. Bristlistan"},
+    {"paragraph": "Bristlistan innehåller bara brister och ej verifierade kontrollpunkter, inte det som uppfyller målvärdena. För varje post anges observationens id, lokal, kontrollpunkt, målvärdets kod, uppmätt värde med enhet, målvärde och prioritet. Prioritet skrivs Prio 1, Prio 2 eller Prio 3. Kostnader och åtgärdsförslag tas fram av förvaltaren och ska inte hittas på i bristlistan."},
+    {"signature": {"name": "Jenny Forsgren", "role": "Avdelningschef, fastighetsavdelningen"}}
+  ]
+}

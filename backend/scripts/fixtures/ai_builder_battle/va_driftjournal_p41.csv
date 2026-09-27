@@ -1,0 +1,31 @@
+tidpunkt,anlaggning,kalla,handelse,varde,enhet,kommentar
+2026-08-16 22:00,P41,Styrsystem,Nivå pumpsump,0.62,m,Normal drift
+2026-08-16 23:00,P41,Styrsystem,Inflöde,38,m3/h,Normal drift
+2026-08-17 00:00,P41,Styrsystem,Inflöde,41,m3/h,Normal drift
+2026-08-17 01:40,P41,Styrsystem,Inflöde,96,m3/h,"Kraftigt regn, inläckage"
+2026-08-17 02:15,P41,Styrsystem,Pump 1 och pump 2 i drift,2,st,Båda pumparna går
+2026-08-17 02:47,P41,Styrsystem,Larm: nätspänning bortfall,0,V,Strömavbrott i området
+2026-08-17 02:48,P41,Styrsystem,Larm: reservkraft fel vid start,–,–,Aggregatet startade inte
+2026-08-17 02:48,P41,Styrsystem,Pump 1 och pump 2 stopp,0,st,Ingen matning
+2026-08-17 03:05,P41,Styrsystem,Larm: högnivå pumpsump,1.95,m,Larm till jour
+2026-08-17 03:09,P41,Operatör,Larm kvitterat,–,–,"Jour kvitterar, åker ut"
+2026-08-17 03:31,P41,Styrsystem,Bräddgivare aktiv,1,–,Bräddning till Sandviksbäcken startar
+2026-08-17 04:00,P41,Styrsystem,Bräddflöde,118,m3/h,Beräknat från nivå över bräddkant
+2026-08-17 04:20,P41,Operatör,Jour på plats,–,–,"Stationen strömlös, aggregatet ej startat, motorskydd pump 1 utlöst"
+2026-08-17 04:30,P41,Styrsystem,Bräddflöde,142,m3/h,Beräknat från nivå över bräddkant
+2026-08-17 04:55,P41,Operatör,Mobilt reservkraftverk anslutet,–,–,"Motorskydd pump 1 återställt, ingen skada"
+2026-08-17 05:00,P41,Styrsystem,Bräddflöde,131,m3/h,Beräknat från nivå över bräddkant
+2026-08-17 05:12,P41,Styrsystem,Pump 1 och pump 2 i drift,2,st,Matning från mobilt aggregat
+2026-08-17 05:30,P41,Styrsystem,Bräddflöde,46,m3/h,Nivån sjunker
+2026-08-17 05:40,P41,Styrsystem,Bräddgivare ej aktiv,0,–,Bräddningen upphör
+2026-08-17 05:50,P41,Operatör,Inspektion bäckmynning,–,–,Synligt avloppsvatten i Sandviksbäcken vid mynningen
+2026-08-17 06:30,P41,Styrsystem,Nivå pumpsump,0.71,m,Normal nivå
+2026-08-17 07:32,P41,Styrsystem,Nätspänning åter,400,V,Nätägaren meddelar att avbrottet berodde på åsknedslag i nätstation
+2026-08-17 07:40,P41,Operatör,Mobilt reservkraftverk frånkopplat,–,–,Stationen på nätmatning
+2026-08-17 09:10,P41,Operatör,Felsökning pumpar,–,–,"Pump 1 och pump 2 provkörda utan anmärkning, isolationsmätning OK"
+2026-08-17 10:05,P41,Operatör,Felsökning reservkraft,–,–,"Startbatteri till reservkraftaggregatet urladdat, laddare trasig sedan okänd tid"
+2026-08-17 11:20,P41,Operatör,Beräknad bräddvolym,310,m3,Beräknad ur bräddflöde 03:31–05:40
+2026-08-17 11:25,P41,Operatör,Orsak fastställd,–,–,Strömavbrott 02:47–07:32 och reservkraftaggregatet startade inte (urladdat startbatteri). Pumparna utan fel; motorskyddet löste ut vid spänningsbortfallet.
+2026-08-17 13:40,P41,Operatör,Åtgärd reservkraft,–,–,"Nytt startbatteri och ny laddare monterade, provstart OK"
+2026-08-17 14:00,P41,Operatör,Beslut om kontroll,–,–,Provstart av reservkraft på samtliga 14 pumpstationer med fast aggregat senast 2026-08-21
+2026-08-17 16:00,P41,Styrsystem,Inflöde,44,m3/h,Normal drift

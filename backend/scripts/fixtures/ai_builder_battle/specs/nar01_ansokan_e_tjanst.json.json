@@ -1,0 +1,106 @@
+{
+  "file": "nar01_ansokan_e_tjanst.json",
+  "format": "json",
+  "source": {"catalogue_id": "NAR-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/145"},
+  "description": "Export från e-tjänsten Servering av alkoholdrycker: ansökan om stadigvarande serveringstillstånd till allmänheten med serveringsställe, omfattning, personer med betydande inflytande, kostnader och finansiering samt bilageförteckning.",
+  "data": {
+    "arende": {
+      "e_tjanst": "Servering av alkoholdrycker",
+      "arendenummer": "145-2026-000913",
+      "inskickad": "2026-09-08T14:22:05+02:00",
+      "signerad_med": "BankID",
+      "signerad_av": "Johan Ekholm",
+      "personuppgiftsansvarig": "Individ- och arbetsmarknadsnämnden"
+    },
+    "ansokan": {
+      "typ": "Nytt stadigvarande serveringstillstånd",
+      "omfattning": "Servering till allmänheten",
+      "alkoholdrycker": ["Spritdrycker", "Vin", "Starköl", "Andra jästa alkoholdrycker", "Alkoholdrycksliknande preparat"],
+      "tillagg": ["Uteservering"]
+    },
+    "sokande": {
+      "bolagsnamn": "Norra Kajen Bistro AB",
+      "organisationsnummer": "559341-6620",
+      "bolagsform": "Aktiebolag",
+      "adress": "Norra Kajen 12, 852 29 Sundsvall",
+      "fakturaadress": "Norra Kajen Bistro AB, Box 118, 851 03 Sundsvall",
+      "kontaktperson": {
+        "namn": "Johan Ekholm",
+        "telefon": "070-318 44 27",
+        "epost": "johan.ekholm@norrakajenbistro.example"
+      },
+      "ombud": null
+    },
+    "serveringsstalle": {
+      "namn": "Bistro Norra Kajen",
+      "adress": "Norra Kajen 12, 852 29 Sundsvall",
+      "fastighetsbeteckning": "Sundsvall Norrmalm 3:41",
+      "planerad_oppning": "2026-11-01"
+    },
+    "serveringens_omfattning": {
+      "sittplatser_inne": 60,
+      "sittplatser_ute": 24,
+      "hogsta_antal_personer_i_lokalen": 90,
+      "gemensamt_serveringsutrymme": false,
+      "serveringstider": {
+        "inne_vardag": "11:00–01:00",
+        "inne_helg": "11:00–01:00",
+        "ute_vardag": "11:00–24:00",
+        "ute_helg": "11:00–24:00"
+      }
+    },
+    "verksamhetsbeskrivning": {
+      "inriktning": "Bistro med lunchservering vardagar och à la carte på kvällar",
+      "oppettider": "Måndag–fredag 11:00–24:00, lördag–söndag 12:00–01:00",
+      "malgrupp": "Lunchgäster från kontoren vid kajen och middagsgäster i alla åldrar",
+      "aldersgrans": "20 år efter klockan 22:00 fredag och lördag",
+      "underhallning": "Trubadur fredagar 20:00–23:00"
+    },
+    "matutbud": {
+      "kok": "Eget kök i anslutning till serveringslokalen",
+      "meny_bifogad": true,
+      "mat_efter_klockan_23": "Enklare rätter enligt kvällsmenyn"
+    },
+    "personer_med_betydande_inflytande": [
+      {
+        "namn": "Johan Ekholm",
+        "personnummer": "19841009-2392",
+        "roll": "Styrelseledamot och verkställande direktör",
+        "agarandel_procent": 50,
+        "kunskapsprov": "Godkänt 2026-08-27"
+      },
+      {
+        "namn": "Leila Haddad",
+        "personnummer": "19880326-2388",
+        "roll": "Styrelsesuppleant",
+        "agarandel_procent": 30,
+        "kunskapsprov": "Ej genomfört"
+      }
+    ],
+    "kostnader_och_finansiering": {
+      "kostnader": [
+        {"post": "Köp av inventarier och köksutrustning", "belopp_kr": 420000},
+        {"post": "Ombyggnad av kök och bar", "belopp_kr": 310000},
+        {"post": "Hyresdeposition", "belopp_kr": 115500},
+        {"post": "Varulager och startkostnader", "belopp_kr": 84500}
+      ],
+      "summa_kostnader_kr": 930000,
+      "finansiering": [
+        {"kalla": "Eget kapital, aktieägartillskott", "belopp_kr": 200000},
+        {"kalla": "Banklån, Selångers Sparbank", "belopp_kr": 450000},
+        {"kalla": "Privat lån från Tomas Berglund", "belopp_kr": 280000}
+      ],
+      "summa_finansiering_kr": 930000
+    },
+    "bilagor": [
+      {"bilaga": "Hyresavtal för lokalen", "fil": "nar01_hyresavtal_lokal.pdf"},
+      {"bilaga": "Aktiebok", "fil": "nar01_aktiebok.pdf"},
+      {"bilaga": "Skuldebrev och lånelöfte", "fil": "nar01_skuldebrev_och_lanelofte.pdf"},
+      {"bilaga": "Finansieringsredovisning", "fil": "nar01_finansieringsredovisning.xlsx"},
+      {"bilaga": "Kontoutdrag som visar långivarens medel", "fil": null, "kommentar": "Skickas senare"},
+      {"bilaga": "Intyg om godkänt kunskapsprov", "fil": "nar01_kunskapsprov_resultat.pdf"},
+      {"bilaga": "Ritning över serveringsytor", "fil": "nar01_planritning.pdf"},
+      {"bilaga": "Meny", "fil": "nar01_meny.pdf"}
+    ]
+  }
+}

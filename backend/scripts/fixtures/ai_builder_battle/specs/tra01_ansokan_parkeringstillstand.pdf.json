@@ -1,0 +1,67 @@
+{
+  "file": "tra01_ansokan_parkeringstillstand.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "TRA-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/569"},
+  "description": "Utskrift av en inskickad ansökan om parkeringstillstånd för rörelsehindrad (PRH) från Sundsvalls e-tjänst: ny ansökan som förare, sökandens egen beskrivning av gångförmågan och önskad giltighetstid på fem år.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "E-tjänst: Ansökan om parkeringstillstånd för rörelsehindrad", "address": "Stadsbyggnadsnämnden · 851 85 Sundsvall · 060-19 10 00"},
+  "date": "2026-09-10",
+  "diarienummer": "SBN-2026-01873",
+  "title": "Ansökan om parkeringstillstånd för rörelsehindrad",
+  "blocks": [
+    {"paragraph": "Utskrift av inskickat ärende. Ärendet har registrerats hos stadsbyggnadsnämnden och handläggs av trafikavdelningen."},
+    {
+      "table": {
+        "columns": ["Ärende (e-tjänst)", "Uppgift"],
+        "rows": [
+          ["E-tjänstens ärendenummer", "421906"],
+          ["Inskickat", "2026-09-10 kl. 09:17"],
+          ["Inloggad med", "BankID"],
+          ["Diarienummer", "SBN-2026-01873"]
+        ]
+      }
+    },
+    {"heading": "Steg 1. Ansökan"},
+    {
+      "table": {
+        "columns": ["Fråga i e-tjänsten", "Svar"],
+        "rows": [
+          ["Är det en ny ansökan eller en förnyelse?", "Ny ansökan"],
+          ["Söker du för dig själv eller för någon annan?", "För mig själv"],
+          ["Söker du som förare eller passagerare?", "Förare"],
+          ["Är du folkbokförd i Sundsvalls kommun?", "Ja"],
+          ["Har du körkort?", "Ja, behörighet B"],
+          ["Önskad giltighetstid", "5 år"]
+        ]
+      }
+    },
+    {"heading": "Steg 2. Personuppgifter"},
+    {
+      "table": {
+        "columns": ["Sökandens uppgifter", "Ifyllt"],
+        "rows": [
+          ["Namn", "Sture Holmberg"],
+          ["Personnummer", "19481216-1596"],
+          ["Adress", "Granvägen 23, 853 57 Sundsvall"],
+          ["Telefon", "060-12 47 93"],
+          ["E-post", "sture.holmberg@exempelpost.se"]
+        ]
+      }
+    },
+    {"heading": "Steg 3. Beskriv dina svårigheter att förflytta dig"},
+    {"paragraph": "Jag opererade höger höft den 19 augusti och går nu med två kryckor. Jag har också haft ont i vänster knä i flera år. Just nu klarar jag bara att gå ungefär 20 meter, sedan måste jag stanna och vila. Min fru har ingen bil och jag kör själv till vårdcentralen, till sjukgymnastiken och till affären. Parkeringen vid vårdcentralen i Haga ligger långt från entrén."},
+    {"paragraph": "Jag söker på fem år eftersom knät inte kommer att bli bättre."},
+    {"heading": "Steg 4. Bilagor"},
+    {
+      "table": {
+        "columns": ["Bilaga", "Fil", "Status"],
+        "rows": [
+          ["Läkarintyg", "Lakarintyg_Holmberg.pdf", "Bifogad"],
+          ["Porträttfoto", "foto_sture.jpg", "Bifogad"],
+          ["Namnteckning", "namnteckning.jpg", "Bifogad"]
+        ]
+      }
+    },
+    {"heading": "Steg 5. Intygande"},
+    {"paragraph": "Jag intygar att uppgifterna är riktiga och har tagit del av informationen om hur Sundsvalls kommun behandlar personuppgifter. Signerat med BankID av Sture Holmberg 2026-09-10 kl. 09:17."}
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "file": "mil11_inventering_golvmassor.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "MIL-11", "url": "https://sjalvservice.malmo.se/oversikt/overview/661"},
+  "description": "Ifyllt inventeringsprotokoll PCB för halkskyddade golvmassor enligt miljöförvaltningens blankett, för samma byggnad som fogmassorna.",
+  "letterhead": {"organisation": "Malmö stad", "unit": "Miljöförvaltningen – Golvmassor, inventeringsprotokoll PCB", "address": "Miljöförvaltningen, 205 80 Malmö"},
+  "date": "2025-11-18",
+  "title": "Inventeringsprotokoll PCB – golvmassor",
+  "blocks": [
+    {"paragraph": "Inventering enligt 16 § förordningen (2007:19) om PCB m.m. av halkskyddade golvmassor."},
+    {"table": {
+      "columns": ["Uppgift", "Ifyllt"],
+      "rows": [
+        ["Fastighetsbeteckning", "Malmö Rönnen 14"],
+        ["Byggnad", "Hus B, Rönngatan 7–11"],
+        ["Fastighetsägare", "Bostads AB Rönngården"],
+        ["Inventeringen utförd av", "Miljöinventering Syd AB, Hanna Rydén"],
+        ["Datum för inventering", "2025-10-06"]
+      ]
+    }},
+    {"heading": "Provpunkter och resultat"},
+    {"table": {
+      "columns": ["Prov-ID", "Placering", "Golvtyp", "Yta (m²)", "Halt PCB (mg/kg)"],
+      "rows": [
+        ["G-01", "Trapphus 7, entréplan", "Halkskyddad golvmassa, grå", "18", "<5"],
+        ["G-02", "Tvättstuga i källaren", "Halkskyddad golvmassa, röd", "32", "72"],
+        ["G-03", "Källarförråd", "Epoxibeläggning", "60", "8"]
+      ]
+    }},
+    {"heading": "Åtgärdsplan"},
+    {"paragraph": "Golvmassan i tvättstugan (G-02) avlägsnas när tvättstugan renoveras. Renoveringen är inte tidsatt."},
+    {"signature": {"name": "Hanna Rydén", "role": "Miljöinventerare, Miljöinventering Syd AB"}}
+  ]
+}

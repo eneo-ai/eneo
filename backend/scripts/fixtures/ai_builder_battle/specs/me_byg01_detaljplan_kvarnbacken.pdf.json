@@ -1,0 +1,59 @@
+{
+  "file": "me_byg01_detaljplan_kvarnbacken.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/443"},
+  "description": "Utdrag ur en antagen detaljplan för ett villaområde: planbestämmelser med beteckningar (användning, byggrätt, placering, höjd, utformning), genomförandetid och planens syfte.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Stadsbyggnadskontoret, planavdelningen", "address": "851 85 Sundsvall"},
+  "date": "2011-05-24",
+  "diarienummer": "SBN-2009-00233",
+  "title": "Detaljplan för Kvarnbäcken, del 2 – planbestämmelser (utdrag)",
+  "blocks": [
+    {"paragraph": "Detaljplanen antogs av stadsbyggnadsnämnden 2011-05-24 och vann laga kraft 2011-06-21. Aktbeteckning 2281K-P11/14. Utdraget omfattar bestämmelserna för kvartersmark för bostäder. Plankartan redovisas separat."},
+    {"heading": "Användning av kvartersmark"},
+    {"table": {"columns": ["Beteckning", "Användning"], "rows": [["B", "Bostäder"]]}},
+    {"heading": "Begränsningar av markens bebyggande"},
+    {
+      "table": {
+        "columns": ["Beteckning", "Begränsning av markens bebyggande"],
+        "rows": [
+          ["Prickmark", "Marken får inte förses med byggnad. Prickmarken är 6 meter bred mot gata."],
+          ["e1", "Största byggnadsarea är 25 procent av fastighetsarean."]
+        ]
+      }
+    },
+    {"heading": "Placering"},
+    {
+      "table": {
+        "columns": ["Beteckning", "Placering"],
+        "rows": [
+          ["p1", "Huvudbyggnad och tillbyggnad ska placeras minst 4,5 meter från fastighetsgräns."],
+          ["p2", "Komplementbyggnad får placeras minst 1,0 meter från fastighetsgräns."]
+        ]
+      }
+    },
+    {"heading": "Höjd på byggnadsverk"},
+    {
+      "table": {
+        "columns": ["Beteckning", "Höjd på byggnadsverk"],
+        "rows": [
+          ["Nockhöjd", "Högsta nockhöjd är 7,0 meter över medelmarknivå."],
+          ["II", "Högsta antal våningar är två."]
+        ]
+      }
+    },
+    {"heading": "Utformning"},
+    {
+      "table": {
+        "columns": ["Beteckning", "Utformning"],
+        "rows": [
+          ["f1", "Fasader ska utföras i trä."],
+          ["Takvinkel", "Takvinkeln ska vara mellan 18 och 35 grader."]
+        ]
+      }
+    },
+    {"heading": "Genomförandetid"},
+    {"paragraph": "Genomförandetiden är tio år från den dag planen vann laga kraft."},
+    {"heading": "Planens syfte (ur planbeskrivningen)"},
+    {"paragraph": "Syftet med planen är att möjliggöra en småskalig villabebyggelse med sammanhållen karaktär, trädgårdsmiljö och gröna släpp mellan tomterna. Placeringsbestämmelsen p1 ska säkerställa ljus, begränsad insyn och brandskydd mellan grannfastigheter."}
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "e_tjanst": "Planbesked - begäran",
+  "arendenummer": "33-2026-000147",
+  "inskickad": "2026-06-18T10:42:00+02:00",
+  "signerad_av": "David Engström",
+  "omrade": {
+    "adress": "Stationsvägen 3–7, 862 32 Kvissleby",
+    "omradets_areal_kvm": 9800,
+    "fastigheter": [
+      {
+        "beteckning": "Sundsvall Kvissleby 2:118",
+        "agare": "Njurunda Bostadsutveckling AB",
+        "organisationsnummer": "559418-3372"
+      },
+      {
+        "beteckning": "Sundsvall Kvissleby 2:119",
+        "agare": "Sundsvalls kommun",
+        "kommentar": "Markanvisningsavtal med sökanden tecknat 2026-03-02"
+      },
+      {
+        "beteckning": "Sundsvall Kvissleby 2:120",
+        "agare": "Rolf Sjödin",
+        "personnummer": "19490210-2138",
+        "kommentar": "Ägaren är positiv till att ingå men något avtal finns inte ännu"
+      }
+    ],
+    "karta_bifogad": true
+  },
+  "atgard": {
+    "beskrivning": "Ny detaljplan för bostäder i flerbostadshus med en lokal för handel eller service i bottenvåningen mot Stationsvägen. Gällande plan medger småindustri och parkering.",
+    "gallande_plan": "Detaljplan för Kvissleby centrum, 2281K-P92/15",
+    "huvudsakligt_andamal": "Bostäder",
+    "byggnader": [
+      {
+        "hus": "A",
+        "vaningar": 6,
+        "lagenheter": 24,
+        "anvandning": "Bostäder, lokal i bottenvåningen"
+      },
+      {
+        "hus": "B",
+        "vaningar": 6,
+        "lagenheter": 24,
+        "anvandning": "Bostäder"
+      },
+      {
+        "hus": "C",
+        "vaningar": 4,
+        "lagenheter": 16,
+        "anvandning": "Bostäder"
+      }
+    ],
+    "antal_lagenheter_totalt": 64,
+    "bruttoarea_kvm": 7400,
+    "parkering": "Parkeringsgarage under hus A och B med 52 platser",
+    "motivering": "Området ligger 300 meter från Kvissleby station med pendeltåg till Sundsvall på 12 minuter. Det saknas hyresrätter i Kvissleby och marken används i dag som grusad parkering och en tom verkstadsbyggnad.",
+    "onskar_besked_om_planeringsunderlag": true,
+    "onskar_lansstyrelsens_yttrande": false
+  },
+  "sokande": {
+    "typ": "Företag",
+    "namn": "Njurunda Bostadsutveckling AB",
+    "organisationsnummer": "559418-3372",
+    "kontaktperson": "David Engström",
+    "telefon": "070-552 18 09",
+    "epost": "david.engstrom@njbu.example",
+    "adress": "Box 214, 862 22 Kvissleby"
+  },
+  "fakturamottagare": {
+    "namn": "Njurunda Bostadsutveckling AB",
+    "referens": "Projekt Stationsvägen"
+  },
+  "bilagor": [
+    "Karta_avgransning_Stationsvagen.pdf",
+    "Volymstudie_Stationsvagen.pdf"
+  ]
+}

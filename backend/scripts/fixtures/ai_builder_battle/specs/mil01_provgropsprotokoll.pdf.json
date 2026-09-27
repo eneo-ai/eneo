@@ -1,0 +1,38 @@
+{
+  "file": "mil01_provgropsprotokoll.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "MIL-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/581"},
+  "description": "Entreprenörens protokoll från provgropsgrävning och jordprovtagning: jordlagerföljd, observerat grundvatten, bedömd högsta grundvattennivå och planerat djup för infiltrationsbäddens spridningslager.",
+  "letterhead": {"organisation": "Alnö Gräv & VA AB", "unit": "Mark, schakt och enskilda avlopp", "address": "Vikarvägen 6, 865 91 Alnö · 060-55 21 04"},
+  "date": "2026-05-12",
+  "title": "Protokoll provgrop och jordprovtagning – Sundsvall Tjärnvik 1:23",
+  "blocks": [
+    {"table": {
+      "columns": ["Uppgift", "Värde"],
+      "rows": [
+        ["Provgrop", "PG1, i läget för planerad infiltrationsbädd (D på situationsplanen)"],
+        ["Grävd", "2026-05-12 kl. 08.30 med bandgrävare"],
+        ["Grävdjup", "1,9 m under markyta"],
+        ["Väder", "Uppehåll, snösmältningen avslutad sedan cirka två veckor"],
+        ["Utförd av", "Tomas Berglöf och Jonas Eklund"]
+      ]
+    }},
+    {"heading": "Jordlagerföljd"},
+    {"table": {
+      "columns": ["Djup under markyta", "Jordart", "Anmärkning"],
+      "rows": [
+        ["0–0,3 m", "Mulljord", "Rötter"],
+        ["0,3–1,2 m", "Sandig morän", "Jordprov PG1:2 taget 0,8–1,0 m, se siktanalys"],
+        ["1,2–1,9 m", "Siltig morän, fastare", "Rostfläckar från cirka 1,2 m"],
+        ["1,9 m", "Grävstopp", "Inget berg påträffat"]
+      ]
+    }},
+    {"heading": "Grundvatten"},
+    {"paragraph": "Vatten trängde in i gropen efter cirka 30 minuter. Grundvattenytan stabiliserades på 1,4 m under markyta kl. 09.15."},
+    {"paragraph": "Rostfläckarna från 1,2 m tyder på att grundvattnet periodvis står högre. Högsta grundvattennivå bedöms därför till 1,2 m under markyta, vid snösmältning och kraftig höstnederbörd."},
+    {"heading": "Planerad utformning"},
+    {"paragraph": "Infiltrationsbädden planeras med spridningslagrets underkant 0,5 m under befintlig markyta, med 0,3 m fyllning av makadam 8–16 mm ovanpå, geotextil och 0,3 m återfyllnad."},
+    {"paragraph": "Gropen återfylldes samma dag. Foton finns hos entreprenören."},
+    {"signature": {"name": "Tomas Berglöf", "role": "Ansvarig utförare, Alnö Gräv & VA AB"}}
+  ]
+}

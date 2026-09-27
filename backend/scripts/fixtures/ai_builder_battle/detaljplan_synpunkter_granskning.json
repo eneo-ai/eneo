@@ -1,0 +1,202 @@
+{
+  "export": {
+    "etjanst": "Lämna synpunkter på en detaljplan",
+    "mottagare": "Byggnadsnämnden, Kristianstads kommun",
+    "urval": "Plan: Detaljplan för Ängdala 4:12 m.fl. i Åhus, skede granskning",
+    "skapad": "2026-09-16T08:30:00+02:00",
+    "antal": 11
+  },
+  "inlamningar": [
+    {
+      "id": "GR-01",
+      "inkom": "2026-08-26T19:12:44+02:00",
+      "plan_vald_i_etjansten": "Detaljplan för Ängdala 4:12 m.fl. i Åhus",
+      "avsandare": {
+        "typ": "Privatperson",
+        "namn": "Anders Persson",
+        "personnummer": "19620108-2697",
+        "adress": "Strandängsvägen 3, 296 32 Åhus",
+        "fastighet": "Ängdala 4:19",
+        "epost": "anders.persson62@exempelpost.se",
+        "telefon": "070-614 28 90"
+      },
+      "sakagare_enligt_avsandaren": "Ja",
+      "synpunkt": "Den nya lokalgatan ansluter till Strandängsvägen precis där barnen går till skolbussen. 180 bilar om dygnet till är för mycket för en smal gata utan trottoar. Jag vill att infarten flyttas norrut eller att Strandängsvägen får trottoar och farthinder. Parkeringen med 0,9 platser per lägenhet räcker inte, folk kommer att parkera längs vår gata.",
+      "bilagor": []
+    },
+    {
+      "id": "GR-02",
+      "inkom": "2026-08-29T10:03:11+02:00",
+      "plan_vald_i_etjansten": "Detaljplan för Ängdala 4:12 m.fl. i Åhus",
+      "avsandare": {
+        "typ": "Förening",
+        "namn": "Föreningen Åhus Natur och Miljö",
+        "organisationsnummer": "835000-4417",
+        "adress": "c/o sekreteraren, Kastanjegatan 4, 296 34 Åhus",
+        "fastighet": null,
+        "epost": "styrelsen@exempelahusnatur.se",
+        "telefon": "044-12 30 45"
+      },
+      "sakagare_enligt_avsandaren": "Nej",
+      "synpunkt": "Vi välkomnar att ekallén skyddas med n1 men motsätter oss att två skyddsvärda ekar fälls för lokalgatan. Gatan kan dras så att ekarna står kvar. Nyplanterade ekar ersätter inte gamla träd på flera decennier. Vi vill också att fördröjningsdammen utformas så att den gynnar groddjur i Ängdalabäcken.",
+      "bilagor": [
+        "Naturvärden_Ängdala_NF.pdf"
+      ]
+    },
+    {
+      "id": "GR-03",
+      "inkom": "2026-09-02T21:47:05+02:00",
+      "plan_vald_i_etjansten": "Detaljplan för Ängdala 4:12 m.fl. i Åhus",
+      "avsandare": {
+        "typ": "Privatperson",
+        "namn": "Maj Lindblad",
+        "personnummer": "19510511-2584",
+        "adress": "Strandängsvägen 9, 296 32 Åhus",
+        "fastighet": null,
+        "epost": "maj.lindblad@exempelpost.se",
+        "telefon": "044-24 17 63"
+      },
+      "sakagare_enligt_avsandaren": "Vet inte",
+      "synpunkt": "Vi har bott här i 40 år och trädgården är vårt allt. Fyra våningar är fortfarande för högt, skuggstudien visar ju att våra trädgårdar hamnar i skugga på kvällarna vår och höst. Husen passar inte in bland villorna. Sänk till tre våningar. Jag skriver för både mig och min man Göran.",
+      "bilagor": []
+    },
+    {
+      "id": "GR-04",
+      "inkom": "2026-09-04T16:20:37+02:00",
+      "plan_vald_i_etjansten": "Detaljplan för Ängdala 4:12 m.fl. i Åhus",
+      "avsandare": {
+        "typ": "Förening",
+        "namn": "Ängdala samfällighetsförening",
+        "organisationsnummer": "717900-2266",
+        "adress": "c/o ordföranden, Strandängsvägen 13, 296 32 Åhus",
+        "fastighet": "Ängdala s:3",
+        "epost": "styrelsen@exempelangdalasf.se",
+        "telefon": "saknas"
+      },
+      "sakagare_enligt_avsandaren": "Ja",
+      "synpunkt": "Samfällighetens dike tar redan i dag emot vatten från villorna och svämmar över vid kraftigt regn, senast i juli 2024. Planen säger att diket inte ska belastas mer, men det framgår inte vem som ansvarar om dammen blir full vid skyfall. Vi vill att kommunen tar över driften av diket eller skriver avtal med föreningen innan planen antas.",
+      "bilagor": [
+        "foto_oversvamning_juli2024.jpg"
+      ]
+    },
+    {
+      "id": "GR-05",
+      "inkom": "2026-09-06T09:15:58+02:00",
+      "plan_vald_i_etjansten": "Detaljplan för Ängdala 4:12 m.fl. i Åhus",
+      "avsandare": {
+        "typ": "Privatperson",
+        "namn": "Karin Mårtensson",
+        "personnummer": "19791107-2382",
+        "adress": "Järnvägsgatan 3, 296 31 Åhus",
+        "fastighet": null,
+        "epost": "karin.m@exempelpost.se",
+        "telefon": "073-208 44 19"
+      },
+      "sakagare_enligt_avsandaren": "Ja",
+      "synpunkt": "Jag är orolig för bullret från väg 118 för dem som ska bo i husen, 58 dBA är mycket. Dessutom blir det ännu svårare att parkera i centrala Åhus på sommaren när det kommer fler invånare. Bygg hellre bostäderna någon annanstans.",
+      "bilagor": []
+    },
+    {
+      "id": "GR-06",
+      "inkom": "2026-09-08T12:41:20+02:00",
+      "plan_vald_i_etjansten": "Detaljplan för Ängdala 4:12 m.fl. i Åhus",
+      "avsandare": {
+        "typ": "Organisation",
+        "namn": "AB Åhushem",
+        "organisationsnummer": "556418-7730",
+        "adress": "Box 305, 296 23 Åhus",
+        "fastighet": "Ängdala 4:30",
+        "epost": "fastighet@exempelahushem.se",
+        "telefon": "044-28 90 00"
+      },
+      "sakagare_enligt_avsandaren": "Ja",
+      "synpunkt": "Åhushem står bakom planförslaget. Vi önskar att parkeringstalet sänks till 0,7 med hänvisning till bilpool och närheten till busshållplatsen vid väg 118, och att byggrätten för flerbostadshusen inte minskas ytterligare.",
+      "bilagor": []
+    },
+    {
+      "id": "GR-07",
+      "inkom": "2026-09-10T18:05:02+02:00",
+      "plan_vald_i_etjansten": "Detaljplan för Ängdala 4:12 m.fl. i Åhus",
+      "avsandare": {
+        "typ": "Förening",
+        "namn": "Åhus Cykelförening",
+        "organisationsnummer": "802488-1502",
+        "adress": "Box 88, 296 21 Åhus",
+        "fastighet": null,
+        "epost": "info@exempelahuscykel.se",
+        "telefon": "saknas"
+      },
+      "sakagare_enligt_avsandaren": "Nej",
+      "synpunkt": "Bra att gång- och cykelvägen ansluter till cykelvägen längs väg 118. Korsningen med den nya lokalgatan behöver en upphöjd passage så att cyklister har företräde i praktiken.",
+      "bilagor": []
+    },
+    {
+      "id": "GR-08",
+      "inkom": "2026-09-11T07:58:40+02:00",
+      "plan_vald_i_etjansten": "Detaljplan för Ängdala 4:12 m.fl. i Åhus",
+      "avsandare": {
+        "typ": "Privatperson",
+        "namn": "Lars-Erik Nilsson",
+        "personnummer": "19560808-2656",
+        "adress": "Östra Boulevarden 41, 291 31 Kristianstad",
+        "fastighet": null,
+        "epost": "le.nilsson@exempelpost.se",
+        "telefon": "070-822 05 61"
+      },
+      "sakagare_enligt_avsandaren": "Nej",
+      "synpunkt": "Jag protesterar mot att det gamla bankhuset i kvarteret Tranan i Kristianstad ska rivas för ett parkeringshus. Byggnaden är kulturhistoriskt värdefull och ska skyddas i detaljplanen.",
+      "bilagor": []
+    },
+    {
+      "id": "GR-09",
+      "inkom": "2026-09-13T22:30:15+02:00",
+      "plan_vald_i_etjansten": "Detaljplan för Ängdala 4:12 m.fl. i Åhus",
+      "avsandare": {
+        "typ": "Privatperson",
+        "namn": "Anders Persson",
+        "personnummer": "19620108-2697",
+        "adress": "Strandängsvägen 3, 296 32 Åhus",
+        "fastighet": "Ängdala 4:19",
+        "epost": "anders.persson62@exempelpost.se",
+        "telefon": "070-614 28 90"
+      },
+      "sakagare_enligt_avsandaren": "Ja",
+      "synpunkt": "Tillägg till mitt tidigare yttrande: dammen på 45 kubikmeter känns liten. Vart tar vattnet vägen när det regnar som i juli 2024? Min källare har redan fått in vatten en gång.",
+      "bilagor": []
+    },
+    {
+      "id": "GR-10",
+      "inkom": "2026-09-15T08:12:09+02:00",
+      "plan_vald_i_etjansten": "Detaljplan för Ängdala 4:12 m.fl. i Åhus",
+      "avsandare": {
+        "typ": "Privatperson",
+        "namn": "Emma Holmqvist",
+        "personnummer": "19841017-2384",
+        "adress": "Strandängsvägen 7, 296 32 Åhus",
+        "fastighet": "Ängdala 4:22",
+        "epost": "emma.holmqvist@exempelpost.se",
+        "telefon": "076-155 90 32"
+      },
+      "sakagare_enligt_avsandaren": "Ja",
+      "synpunkt": "Förlåt att jag är sen. Jag är emot att byggtrafiken under tre år ska gå förbi våra hus, det står att den ska gå via väg 118 men det finns inga garantier. Och infarten från Strandängsvägen kommer att ge köer på morgonen.",
+      "bilagor": []
+    },
+    {
+      "id": "GR-11",
+      "inkom": "2026-09-14T15:44:51+02:00",
+      "plan_vald_i_etjansten": "Detaljplan för Ängdala 4:12 m.fl. i Åhus",
+      "avsandare": {
+        "typ": "Privatperson",
+        "namn": "Leila Karimi",
+        "personnummer": "19900128-2384",
+        "adress": "Strandängsvägen 11, 296 32 Åhus",
+        "fastighet": "Ängdala 4:28",
+        "epost": "leila.karimi@exempelpost.se",
+        "telefon": "072-340 16 77"
+      },
+      "sakagare_enligt_avsandaren": "Ja",
+      "synpunkt": "Vi har inga invändningar mot bostäderna men vill att ekarna mot vår tomt står kvar och att det inte sätts upp belysning i parken som lyser in mot oss.",
+      "bilagor": []
+    }
+  ]
+}

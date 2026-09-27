@@ -1,0 +1,137 @@
+{
+  "file": "int12_elevhalsoplan_2025_2026.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "INT-12",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/547"
+  },
+  "description": "Barn- och utbildningsförvaltningens elevhälsoplan för läsåret 2025/2026 med elevhälsans organisation, resurser per rektorsområde och hälsofrämjande arbete, där dagens utdelning av mensskydd hos skolsköterskan beskrivs.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Barn- och utbildningsförvaltningen, Centrala elevhälsan",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2025-08-11",
+  "diarienummer": "BUN 2025/00688",
+  "title": "Elevhälsoplan läsåret 2025/2026",
+  "blocks": [
+    {
+      "heading": "1. Syfte"
+    },
+    {
+      "paragraph": "Elevhälsoplanen beskriver hur elevhälsan i grundskolan och gymnasieskolan är organiserad och hur det hälsofrämjande, förebyggande och åtgärdande arbetet ska bedrivas enligt 2 kap. 25–28 §§ skollagen (2010:800). Planen fastställs årligen av förvaltningschefen."
+    },
+    {
+      "heading": "2. Organisation och resurser"
+    },
+    {
+      "paragraph": "Elevhälsan omfattar medicinska, psykologiska, psykosociala och specialpedagogiska insatser. Skolsköterskor och skolläkare ingår i den medicinska elevhälsan och leds av verksamhetschef för medicinsk elevhälsa."
+    },
+    {
+      "table": {
+        "columns": [
+          "Rektorsområde",
+          "Antal skolor",
+          "Skolsköterska (tjänstgöringsgrad)",
+          "Kurator (tjänstgöringsgrad)"
+        ],
+        "rows": [
+          [
+            "Nord",
+            "2 grundskolor",
+            "1,6",
+            "1,2"
+          ],
+          [
+            "Syd",
+            "2 grundskolor",
+            "1,4",
+            "1,0"
+          ],
+          [
+            "Väst",
+            "2 grundskolor",
+            "1,5",
+            "1,2"
+          ],
+          [
+            "Öst",
+            "2 grundskolor",
+            "1,3",
+            "1,0"
+          ],
+          [
+            "Centrum",
+            "1 grundskola",
+            "1,0",
+            "0,8"
+          ],
+          [
+            "Gymnasiet",
+            "2 gymnasieskolor",
+            "3,0",
+            "2,5"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "3. Hälsofrämjande och förebyggande arbete"
+    },
+    {
+      "paragraph": "Varje skolsköterska har ett akutförråd med bland annat plåster, värmekuddar och mensskydd. Mensskydd lämnas ut kostnadsfritt till elever som frågar efter det. Under läsåret 2024/2025 lämnade elevhälsan ut mensskydd vid cirka 1 900 tillfällen."
+    },
+    {
+      "paragraph": "I Elevenkäten 2025 uppgav 21 procent av flickorna i årskurs 8 att de någon gång under läsåret stannat hemma eller gått hem från skolan på grund av mens eller mensvärk. Elevhälsan ser att tillgången till skolsköterskan varierar under skoldagen och att en del elever inte vill fråga."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "4. Hälsobesök"
+    },
+    {
+      "table": {
+        "columns": [
+          "Årskurs",
+          "Hälsobesök",
+          "Innehåll"
+        ],
+        "rows": [
+          [
+            "Förskoleklass",
+            "Hälsobesök",
+            "Tillväxt, syn, hörsel, levnadsvanor"
+          ],
+          [
+            "Årskurs 4",
+            "Hälsosamtal",
+            "Tillväxt, levnadsvanor, trivsel"
+          ],
+          [
+            "Årskurs 7",
+            "Hälsosamtal",
+            "Tillväxt, rygg, levnadsvanor, pubertet och psykisk hälsa"
+          ],
+          [
+            "Gymnasiet år 1",
+            "Hälsosamtal",
+            "Levnadsvanor, sexuell och reproduktiv hälsa, psykisk hälsa"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "5. Uppföljning"
+    },
+    {
+      "paragraph": "Elevhälsans arbete följs upp i det systematiska kvalitetsarbetet och redovisas för barn- och utbildningsnämnden i januari."
+    },
+    {
+      "signature": {
+        "name": "Pernilla Dahlberg",
+        "role": "Verksamhetschef medicinsk elevhälsa"
+      }
+    }
+  ]
+}

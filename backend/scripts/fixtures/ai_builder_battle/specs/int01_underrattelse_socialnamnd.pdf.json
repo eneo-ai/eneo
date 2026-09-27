@@ -1,0 +1,115 @@
+{
+  "file": "int01_underrattelse_socialnamnd.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "INT-01",
+    "url": "https://sundsvall.se/kommun/kommun-och-politik/diarium-arkiv-och-sekretess/diarium"
+  },
+  "description": "Hyresvärdens formella underrättelse till socialnämnden om uppsägning av bostadshyresavtal på grund av hyresskuld enligt 12 kap. 44 § jordabalken, med hyresgästens personuppgifter och återvinningsfrist.",
+  "letterhead": {
+    "organisation": "Bostads AB Norra Kajen",
+    "unit": "Kundreskontra och inkasso",
+    "address": "Box 311, 851 05 Sundsvall · org.nr 556814-2207"
+  },
+  "date": "2026-09-18",
+  "title": "Underrättelse till socialnämnden om uppsägning av hyresavtal på grund av hyresskuld",
+  "blocks": [
+    {
+      "paragraph": "Till: Socialnämnden i Sundsvalls kommun (individ- och arbetsmarknadsnämnden), 851 85 Sundsvall"
+    },
+    {
+      "paragraph": "Enligt 12 kap. 44 § jordabalken lämnar hyresvärden meddelande om uppsägningen och anledningen till den till socialnämnden i den kommun där lägenheten ligger."
+    },
+    {
+      "heading": "Hyresgäst"
+    },
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Innehåll"
+        ],
+        "rows": [
+          [
+            "Namn",
+            "Kristoffer Åberg"
+          ],
+          [
+            "Personnummer",
+            "19900708-2390"
+          ],
+          [
+            "Lägenhet",
+            "Skönsbergsvägen 22, lägenhet 1102, 856 41 Sundsvall"
+          ],
+          [
+            "Kontraktsnummer",
+            "NK-22-1102-04"
+          ],
+          [
+            "Hushåll enligt hyresvärden",
+            "Hyresgästen och två barn (6 och 9 år) varannan vecka"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Hyresskuld"
+    },
+    {
+      "table": {
+        "columns": [
+          "Period",
+          "Månadshyra",
+          "Obetalt"
+        ],
+        "rows": [
+          [
+            "Juli 2026",
+            "8 130 kr",
+            "8 130 kr"
+          ],
+          [
+            "Augusti 2026",
+            "8 130 kr",
+            "8 130 kr"
+          ],
+          [
+            "September 2026",
+            "8 130 kr",
+            "8 130 kr"
+          ],
+          [
+            "Summa",
+            "",
+            "24 390 kr"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Uppsägning"
+    },
+    {
+      "paragraph": "Hyresrätten är förverkad enligt 12 kap. 42 § första stycket 1 jordabalken på grund av dröjsmål med betalning av hyran. Uppsägningen delgavs hyresgästen den 18 september 2026 genom stämningsman."
+    },
+    {
+      "heading": "Återvinning"
+    },
+    {
+      "paragraph": "Hyresgästen har fått underrättelse om att han får tillbaka hyresrätten om hela den förfallna hyran, 24 390 kr, betalas senast den 9 oktober 2026, det vill säga inom tre veckor från delgivningen. Hyresgästen får inte heller skiljas från lägenheten om socialnämnden inom samma tid skriftligen meddelar hyresvärden att nämnden åtar sig betalningsansvaret för hyran."
+    },
+    {
+      "heading": "Kontaktperson hos hyresvärden"
+    },
+    {
+      "paragraph": "Maria Nordin, inkassohandläggare, 060-12 40 57, maria.nordin@norrakajen.example"
+    },
+    {
+      "signature": {
+        "name": "Maria Nordin",
+        "role": "Inkassohandläggare, Bostads AB Norra Kajen"
+      }
+    }
+  ]
+}

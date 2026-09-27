@@ -1,0 +1,44 @@
+{
+  "file": "md_kallkonflikt_exempel_bekraftelse_registrering.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "LIV-01", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/495"},
+  "description": "Ett tidigare skickat brev från miljökontoret: bekräftelse av registrering av en livsmedelsanläggning (Word-brev till livsmedelsföretagaren); bifogas som exempel på 'det färdiga resultatet' fast begäran säger JSON.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Miljökontoret, Livsmedelskontroll", "address": "Miljökontoret, 851 85 Sundsvall"},
+  "date": "2026-06-03",
+  "diarienummer": "MN-2026-00917",
+  "title": "Bekräftelse av registrering av livsmedelsanläggning",
+  "blocks": [
+    {"paragraph": "Café Kvarnbacken AB"},
+    {"paragraph": "Att: Lina Åkesson"},
+    {"paragraph": "Kvarnbacksvägen 3, 852 38 Sundsvall"},
+    {"paragraph": "Miljönämnden har tagit emot er anmälan om registrering av livsmedelsanläggning den 2026-05-28 och har registrerat anläggningen enligt artikel 6.2 i förordning (EG) nr 852/2004. Det här brevet är en bekräftelse på registreringen."},
+    {"heading": "Registrerade uppgifter"},
+    {
+      "table": {
+        "columns": ["Uppgift", "Registrerat"],
+        "rows": [
+          ["Livsmedelsföretagare", "Café Kvarnbacken AB"],
+          ["Organisationsnummer", "559318-4420"],
+          ["Anläggningens namn", "Café Kvarnbacken"],
+          ["Anläggningens adress", "Kvarnbacksvägen 3, 852 38 Sundsvall"],
+          ["Verksamhet", "Café med servering av smörgåsar, sallader och bakverk som bakas på plats"],
+          ["Planerat startdatum", "2026-06-15"],
+          ["Servering till förskola eller skola", "Nej"],
+          ["Registreringsdatum", "2026-06-02"]
+        ]
+      }
+    },
+    {"heading": "Riskklassning och avgift"},
+    {"paragraph": "Miljönämnden kommer att riskklassa anläggningen och besluta om årlig kontrollavgift enligt förordningen (2021:176) om avgifter för offentlig kontroll av livsmedel. Det beslutet får ni i ett separat brev."},
+    {"heading": "Bra att veta"},
+    {
+      "list": [
+        "Ni ansvarar för att livsmedlen är säkra och att det finns rutiner som bygger på HACCP-principerna.",
+        "Anmäl till oss om verksamheten ändras väsentligt, byter ägare eller upphör.",
+        "Vi kommer att göra kontrollbesök. De flesta besök sker utan förvarning."
+      ]
+    },
+    {"paragraph": "Har ni frågor är ni välkomna att kontakta mig. Ange diarienummer MN-2026-00917."},
+    {"signature": {"name": "Hanna Sjödin", "role": "Livsmedelsinspektör, Miljökontoret"}}
+  ]
+}

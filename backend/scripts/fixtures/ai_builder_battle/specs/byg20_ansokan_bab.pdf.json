@@ -1,0 +1,30 @@
+{
+  "file": "byg20_ansokan_bab.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-20", "url": "https://sjalvservice.malmo.se/oversikt/overview/1202"},
+  "description": "Inskannad blankett Ansökan om bostadsanpassningsbidrag med diarieföringsstämpel och fastighetsägarens medgivande, som bara omfattar två av de tre sökta åtgärderna.",
+  "letterhead": {"organisation": "Malmö stad", "unit": "Stadsbyggnadskontoret – Bostadsanpassning", "address": "205 80 Malmö"},
+  "date": "2026-08-27",
+  "diarienummer": "SBN-2026-004120",
+  "title": "Ansökan om bostadsanpassningsbidrag",
+  "blocks": [
+    {"paragraph": "Inkom till stadsbyggnadskontoret 2026-08-27 (stämpel). Blanketten är inskannad och registrerad med diarienumret ovan."},
+    {"heading": "1. Sökande"},
+    {"table": {"columns": ["Uppgift om sökanden", "Ifyllt av sökanden"], "rows": [["Namn", "Birgitta Jönsson"], ["Personnummer", "19430918-9126"], ["Adress", "Kastanjegatan 12 B, lgh 1102, 214 57 Malmö"], ["Telefon", "040-18 77 24"], ["Kontaktperson", "Karin Jönsson (dotter), 070-455 31 08"]]}},
+    {"heading": "2. Bostaden"},
+    {"table": {"columns": ["Uppgift om bostaden", "Ifyllt av sökanden"], "rows": [["Upplåtelseform", "Hyresrätt"], ["Fastighetsägare", "Kastanjen Bostäder AB"], ["Fastighetsbeteckning", "Malmö Kastanjen 8"], ["Våning", "3 (hiss finns)"], ["Storlek", "2 rum och kök, byggår 1964"], ["Folkbokförd i bostaden sedan", "1991"], ["Antal personer i hushållet", "1"]]}},
+    {"heading": "3. Sökta åtgärder"},
+    {"table": {"columns": ["Nr", "Åtgärd", "Rum"], "rows": [["1", "Ta bort badkaret och ordna duschplats utan kant med golvbrunn, duschväggar och stödhandtag", "Badrum"], ["2", "Ta bort trösklarna mellan hall och badrum och mellan hall och sovrum", "Hall"], ["3", "Sänka arbetsbänk och spis", "Kök"]]}},
+    {"paragraph": "4. Funktionsnedsättning: se bifogat intyg från arbetsterapeut."},
+    {"paragraph": "5. Bilagor: intyg från arbetsterapeut, offerter från tre företag, medgivande från fastighetsägaren (sida 2)."},
+    {"paragraph": "6. Jag försäkrar på heder och samvete att uppgifterna i ansökan är riktiga. Jag är medveten om att bidrag som lämnats på grund av felaktiga uppgifter kan krävas tillbaka."},
+    {"signature": {"name": "Birgitta Jönsson", "role": "Sökande, Malmö 2026-08-25"}},
+    {"page_break": true},
+    {"heading": "Medgivande från fastighetsägare"},
+    {"paragraph": "Fastighetsägaren Kastanjen Bostäder AB, ägare till Malmö Kastanjen 8, medger att följande anpassningsåtgärder får utföras i lägenhet 1102, Kastanjegatan 12 B, som innehas med hyresrätt av Birgitta Jönsson:"},
+    {"list": ["Åtgärd 1: duschplats i stället för badkar, med golvbrunn, duschväggar och stödhandtag.", "Åtgärd 2: borttagning av trösklar mellan hall och badrum och mellan hall och sovrum."]},
+    {"paragraph": "Åtgärd 3 (sänkt arbetsbänk och spis i köket) omfattas inte av detta medgivande. Köken i fastigheten byts i samband med stambytet 2027 och vi vill inte att köket byggs om dessförinnan."},
+    {"paragraph": "Fastighetsägaren utfäster sig att inte kräva ersättning av sökanden för att återställa de medgivna åtgärderna."},
+    {"signature": {"name": "Pernilla Strand", "role": "Förvaltare, Kastanjen Bostäder AB, 2026-08-20"}}
+  ]
+}

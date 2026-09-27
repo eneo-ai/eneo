@@ -1,0 +1,321 @@
+{
+  "file": "int14_loggutdrag_e_post_och_servicedesk.json",
+  "format": "json",
+  "source": {
+    "catalogue_id": "INT-14",
+    "url": "https://www.imy.se/verksamhet/utfora-arenden/anmal-personuppgiftsincident/"
+  },
+  "description": "IT-avdelningens loggutdrag för incidenten: meddelandespårning per mottagare, resultat av återkallelsen och servicedeskärendet vars första anteckning visar att skolsköterskan anmälde felet söndag kväll.",
+  "data": {
+    "export": {
+      "system": "Microsoft 365 meddelandespårning och Servicedesk, Sundsvalls kommun IT",
+      "exporterad": "2026-09-15T10:12:05+02:00",
+      "exporterad_av": "Mattias Grön, IT-säkerhetssamordnare",
+      "servicedeskarende": "SD-2026-118734"
+    },
+    "meddelande": {
+      "meddelande_id": "<a41f93c2e8.20260913194831@mail.kyrkbacken.exempel>",
+      "avsandare": "karin.lindgren@skola.exempel",
+      "amne": "Information inför föräldramöte åk 8 den 24 september",
+      "skickat": "2026-09-13T19:48:31+02:00",
+      "mottagarlista": "Vårdnadshavare 8B Kyrkbacken",
+      "antal_mottagare": 41,
+      "bilagor": [
+        {
+          "filnamn": "Inbjudan_foraldramote_ak8.pdf",
+          "storlek_kb": 212,
+          "kanslighetsetikett": "Ingen"
+        },
+        {
+          "filnamn": "Elevhalsa_8B_uppfoljning_ht26.xlsx",
+          "storlek_kb": 84,
+          "kanslighetsetikett": "Ingen"
+        }
+      ]
+    },
+    "leveransstatus": [
+      {
+        "mottagare": "anna.berglund@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:34+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "p.sundin@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:35+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "maria.nyman@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:36+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "jonas.hellstrom@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:37+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "sofie.ek@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:38+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "k.akerlund@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:33+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "linda.westin@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:34+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "mats.olofsson@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:35+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "h.jonsson@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:36+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "therese.lind@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:37+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "e.bergkvist@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:38+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "farah.ali@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:33+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "c.molin@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:34+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "petra.aslund@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:35+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "r.eklund@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:36+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "jenny.vikstrom@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:37+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "t.hermansson@exempelpost.se",
+        "status": "Misslyckad",
+        "tid": "2026-09-13T19:48:38+02:00",
+        "detalj": "550 5.1.1 Mottagaren finns inte"
+      },
+      {
+        "mottagare": "sara.nilsson@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:33+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "a.karimi@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:34+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "helena.falk@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:35+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "m.sandstrom@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:36+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "ulrika.hed@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:37+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "b.nordin@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:38+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "niklas.ost@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:33+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "johanna.lidstrom@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:34+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "o.wiklund@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:35+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "emelie.backlund@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:36+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "s.dahlgren@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:37+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "katarina.strom@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:38+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "d.hassan@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:33+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "lena.berg@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:34+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "f.lundqvist@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:35+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "camilla.oberg@exempelpost.se",
+        "status": "Misslyckad",
+        "tid": "2026-09-13T19:48:36+02:00",
+        "detalj": "550 5.1.1 Mottagaren finns inte"
+      },
+      {
+        "mottagare": "j.persson@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:37+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "malin.wall@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:38+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "r.andersson@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:33+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "ida.holmberg@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:34+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "k.nordqvist@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:35+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "tove.alm@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:36+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "g.sjolander@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:37+02:00",
+        "detalj": "250 OK"
+      },
+      {
+        "mottagare": "mikael.frost@exempelpost.se",
+        "status": "Levererad",
+        "tid": "2026-09-13T19:48:38+02:00",
+        "detalj": "250 OK"
+      }
+    ],
+    "aterkallelse": {
+      "begard": "2026-09-13T20:31:10+02:00",
+      "begard_av": "Servicedesk jour",
+      "resultat": "Återkallelse ej möjlig: meddelandet har levererats till externa adresser utanför organisationen.",
+      "levererade_externt": 39
+    },
+    "servicedesk_arende": {
+      "arendenummer": "SD-2026-118734",
+      "skapat": "2026-09-13T20:17:52+02:00",
+      "kanal": "Telefon, jourlinjen",
+      "anmalare": "Karin Lindgren, skolsköterska, Kyrkbackens skola",
+      "kategori": "Informationssäkerhet, felskickad e-post",
+      "prioritet": "Hög",
+      "anteckningar": [
+        {
+          "tid": "2026-09-13T20:17:52+02:00",
+          "av": "Oskar Näslund, servicedesk jour",
+          "text": "Anmälaren ringde jourlinjen 2026-09-13 kl. 20:17. Hon har för några minuter sedan sett att hon kl. 19:48 skickade fel bilaga, elevhälsans uppföljningslista för åk 8 med personnummer och hälsouppgifter, till distributionslistan Vårdnadshavare 8B Kyrkbacken. Hon ber om hjälp att återkalla meddelandet."
+        },
+        {
+          "tid": "2026-09-13T20:31:10+02:00",
+          "av": "Oskar Näslund, servicedesk jour",
+          "text": "Återkallelse begärd i Exchange. Misslyckades för samtliga externa mottagare. Anmälaren informerad om att kontakta rektor."
+        },
+        {
+          "tid": "2026-09-14T07:55:00+02:00",
+          "av": "Linda Ahl, servicedesk",
+          "text": "Ärendet eskalerat till IT-säkerhetssamordnare och till rektor Annika Holmberg per e-post."
+        },
+        {
+          "tid": "2026-09-14T09:05:00+02:00",
+          "av": "Mattias Grön, IT-säkerhetssamordnare",
+          "text": "Distributionslistan låst för utskick från andra än mentorer. Dataskyddssamordnaren informerad."
+        }
+      ]
+    }
+  }
+}

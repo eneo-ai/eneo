@@ -1,0 +1,98 @@
+{
+  "file": "oms12_pensionsbesked_2026.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "OMS-12",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/625"
+  },
+  "description": "Pensionsmyndighetens utbetalningsbesked för allmän pension 2026 per månad: pensionsdelar före skatt, preliminär skatt, summa efter skatt och det bostadstillägg som gällde i januari.",
+  "letterhead": {
+    "organisation": "Pensionsmyndigheten",
+    "unit": "Utbetalningsbesked"
+  },
+  "date": "2026-01-15",
+  "title": "Utbetalningsbesked – allmän pension 2026",
+  "blocks": [
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Värde"
+        ],
+        "rows": [
+          [
+            "Mottagare",
+            "Gunnel Åkerlund"
+          ],
+          [
+            "Personnummer",
+            "19450430-2383"
+          ],
+          [
+            "Adress",
+            "Solhemsvägen 9 lgh 1301, 856 33 Sundsvall"
+          ],
+          [
+            "Civilstånd enligt folkbokföringen",
+            "Änka"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Din pension per månad från januari 2026"
+    },
+    {
+      "table": {
+        "columns": [
+          "Pensionsdel",
+          "Belopp per månad"
+        ],
+        "rows": [
+          [
+            "Inkomstpension",
+            "8 941 kr"
+          ],
+          [
+            "Tilläggspension",
+            "1 186 kr"
+          ],
+          [
+            "Garantipension",
+            "612 kr"
+          ],
+          [
+            "Premiepension",
+            "297 kr"
+          ],
+          [
+            "Summa före skatt",
+            "11 036 kr"
+          ],
+          [
+            "Preliminär skatt",
+            "-1 176 kr"
+          ],
+          [
+            "Summa efter skatt",
+            "9 860 kr"
+          ],
+          [
+            "Bostadstillägg (skattefritt)",
+            "3 640 kr"
+          ],
+          [
+            "Att få utbetalt",
+            "13 500 kr"
+          ]
+        ]
+      }
+    },
+    {
+      "paragraph": "Pensionen betalas ut den 19:e varje månad, eller närmast föregående bankdag. Bostadstillägget följer det senaste beslutet om bostadstillägg; om beloppet ändras får du ett nytt beslut."
+    },
+    {
+      "paragraph": "Skatten är beräknad enligt skattetabell 33 med hänsyn till det förhöjda grundavdraget för dig som fyllt 66 år."
+    }
+  ]
+}

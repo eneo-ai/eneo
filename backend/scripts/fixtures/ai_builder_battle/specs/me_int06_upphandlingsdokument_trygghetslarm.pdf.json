@@ -1,0 +1,54 @@
+{
+  "file": "me_int06_upphandlingsdokument_trygghetslarm.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "INT-06", "url": "https://www.upphandlingsmyndigheten.se/inkopsprocessen/genomfor-upphandlingen/tilldelningsbeslut/"},
+  "description": "Upphandlingsdokument i ett öppet förfarande enligt LOU: föremål, skall-krav med verifiering, utvärderingsmodell med mervärdesavdrag och regel om att prisbilagan gäller vid motstridiga uppgifter.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Kommunstyrelsekontoret, upphandlingsenheten", "address": "851 85 Sundsvall"},
+  "date": "2026-06-15",
+  "diarienummer": "KS-2026-00318",
+  "title": "Upphandlingsdokument – Trygghetslarm med larmmottagning för hemtjänsten",
+  "blocks": [
+    {"heading": "1 Om upphandlingen"},
+    {"paragraph": "Sundsvalls kommun, genom vård- och omsorgsförvaltningen, upphandlar digitala trygghetslarm med larmmottagning dygnet runt för personer som beviljats trygghetslarm i hemtjänsten. Upphandlingen genomförs som ett öppet förfarande enligt lagen (2016:1145) om offentlig upphandling (LOU)."},
+    {
+      "table": {
+        "columns": ["Uppgift", "Värde"],
+        "rows": [
+          ["Diarienummer", "KS-2026-00318"],
+          ["Sista anbudsdag", "2026-08-17"],
+          ["Anbudets giltighetstid", "Till och med 2026-12-31"],
+          ["Avtalstid", "2027-01-01 – 2030-12-31"],
+          ["Uppskattad volym", "1 150 larm per månad"],
+          ["Upphandlare", "Annika Strand"]
+        ]
+      }
+    },
+    {"heading": "2 Skall-krav"},
+    {"paragraph": "Anbud som inte uppfyller samtliga skall-krav förkastas och utvärderas inte vidare. Anbudsgivaren ska besvara varje krav och bifoga den verifiering som anges."},
+    {
+      "table": {
+        "columns": ["Krav-ID", "Krav", "Verifiering"],
+        "rows": [
+          ["SK1", "Larmmottagning dygnet runt, årets alla dagar, i egen larmcentral som är certifierad enligt SS-EN 50518.", "Kopia av giltigt certifikat."],
+          ["SK2", "Digitala trygghetslarm (4G eller LTE-M) med batteribackup på minst 36 timmar vid strömavbrott.", "Produktblad för erbjudet larm."],
+          ["SK3", "Åtgärdstid vid tekniskt fel på larm i brukarens hem på högst 24 timmar från felanmälan.", "Beskrivning i anbudet."],
+          ["SK4", "Personuppgifter behandlas och lagras inom EU/EES. Anbudsgivaren godtar personuppgiftsbiträdesavtalet i bilaga 4.", "Bekräftelse i anbudet."],
+          ["SK5", "Minst två referensuppdrag med minst 500 larm vardera under de senaste tre åren.", "Referenslista med kontaktperson."]
+        ]
+      }
+    },
+    {"heading": "3 Utvärderingsmodell"},
+    {"paragraph": "Kontrakt tilldelas det anbud som har lägst jämförelsepris."},
+    {
+      "list": [
+        "Anbudspris = månadsavgift per larm × 1 150 larm × 48 månader + engångskostnad för införande.",
+        "Mervärdesavdrag för åtgärdstid vid fel: 12 timmar eller kortare ger avdrag med 100 000 kr, 13–18 timmar ger avdrag med 50 000 kr, 19–24 timmar ger inget avdrag.",
+        "Jämförelsepris = anbudspris − mervärdesavdrag."
+      ]
+    },
+    {"paragraph": "Priser anges i svenska kronor exklusive mervärdesskatt i prisbilagan (bilaga 2). Vid motstridiga uppgifter i anbudet gäller uppgifterna i prisbilagan."},
+    {"heading": "4 Tilldelning och avtalsspärr"},
+    {"paragraph": "Tilldelningsbeslut skickas samtidigt till samtliga anbudsgivare med de skäl som ligger till grund för beslutet (12 kap. 12 § LOU). Avtal får inte ingås under avtalsspärren på tio dagar från det att underrättelsen skickats elektroniskt (20 kap. 1 § LOU)."},
+    {"signature": {"name": "Annika Strand", "role": "Upphandlare, upphandlingsenheten"}}
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "file": "md_mall_bifogad_beslutsmall_forhandsbesked.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "BYG-06", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/428"},
+  "description": "Bygglovsavdelningens beslutsmall för förhandsbesked med ifyllnadsfält i {{ }}-form (ärendeuppgifter, beslut, villkor, skäl, avgift) och fast upplysnings- och överklagandetext; mallen som bifogas och nämns vid namn i begäran.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Stadsbyggnadskontoret, Bygglovsavdelningen", "address": "Stadsbyggnadskontoret, 851 85 Sundsvall"},
+  "title": "Beslut – förhandsbesked",
+  "blocks": [
+    {
+      "table": {
+        "columns": ["Uppgift", "Värde"],
+        "rows": [
+          ["Diarienummer", "{{ diarienummer }}"],
+          ["Beslutsdatum", "{{ beslutsdatum }}"],
+          ["Handläggare", "{{ handlaggare }}"],
+          ["Sökande", "{{ sokande }}"],
+          ["Fastighet", "{{ fastighet }}"],
+          ["Åtgärd", "{{ atgard }}"]
+        ]
+      }
+    },
+    {"heading": "Beslut"},
+    {"paragraph": "{{ beslut }}"},
+    {"heading": "Villkor"},
+    {"paragraph": "{{ villkor }}"},
+    {"heading": "Skäl för beslutet"},
+    {"paragraph": "{{ skal_for_beslutet }}"},
+    {"heading": "Avgift"},
+    {"paragraph": "{{ avgift }}"},
+    {"paragraph": "Avgiften tas ut enligt stadsbyggnadsnämndens plan- och bygglovtaxa. Faktura skickas separat."},
+    {"heading": "Upplysningar"},
+    {
+      "list": [
+        "Ett förhandsbesked är inte ett bygglov. Åtgärden får inte påbörjas förrän bygglov och startbesked har getts.",
+        "Ett positivt förhandsbesked är bindande vid prövningen av en ansökan om bygglov som görs inom två år från den dag förhandsbeskedet fick laga kraft.",
+        "Beslutet kungörs i Post- och Inrikes Tidningar och skickas till kända sakägare som har lämnat synpunkter som inte har blivit tillgodosedda."
+      ]
+    },
+    {"heading": "Hur man överklagar"},
+    {"paragraph": "Beslutet kan överklagas hos Länsstyrelsen Västernorrland. Skicka överklagandet till Stadsbyggnadsnämnden, Sundsvalls kommun, 851 85 Sundsvall. Det måste ha kommit in inom tre veckor från den dag du fick del av beslutet. Ange diarienumret och vilken ändring du vill ha."},
+    {"signature": {"name": "{{ handlaggare }}", "role": "Bygglovshandläggare, enligt delegation från stadsbyggnadsnämnden"}}
+  ]
+}

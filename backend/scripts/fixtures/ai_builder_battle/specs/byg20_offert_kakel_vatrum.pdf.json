@@ -1,0 +1,20 @@
+{
+  "file": "byg20_offert_kakel_vatrum.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-20", "url": "https://sjalvservice.malmo.se/oversikt/overview/1202"},
+  "description": "Specificerad offert på duschplats och borttagning av trösklar, priser inklusive moms.",
+  "letterhead": {"organisation": "Kakel & Våtrum i Malmö AB", "unit": "Offert", "address": "Bergsgatan 40, 214 22 Malmö · org.nr 559102-4478"},
+  "date": "2026-08-19",
+  "title": "Offert nr 2026-118 – bostadsanpassning Kastanjegatan 12 B, lgh 1102",
+  "blocks": [
+    {"paragraph": "Till: Birgitta Jönsson, Kastanjegatan 12 B, 214 57 Malmö. Offerten gäller 60 dagar från offertdatum."},
+    {"heading": "Åtgärd 1: duschplats i stället för badkar"},
+    {"table": {"columns": ["Pos", "Moment, åtgärd 1", "Belopp inkl. moms"], "rows": [["1.1", "Rivning av badkar, golvmatta och kakel på väggar", "9 800 kr"], ["1.2", "Ny golvbrunn, bjälklagsgenomföring och golv med fall mot brunn", "18 400 kr"], ["1.3", "Tätskikt och keramiska plattor på golv och väggar enligt Säker Vatten", "27 600 kr"], ["1.4", "Vikbara duschväggar och två stödhandtag, montage", "8 900 kr"], ["1.5", "VVS: ny blandare med termostat, flytt av tvättställ", "6 500 kr"], ["", "Summa åtgärd 1", "71 200 kr"]]}},
+    {"heading": "Åtgärd 2: borttagning av trösklar"},
+    {"table": {"columns": ["Pos", "Moment, åtgärd 2", "Belopp inkl. moms"], "rows": [["2.1", "Borttagning av två trösklar, utjämning av golv och nya övergångslister", "6 900 kr"], ["", "Summa åtgärd 2", "6 900 kr"]]}},
+    {"heading": "Summering"},
+    {"table": {"columns": ["Sammanställning", "Belopp"], "rows": [["Totalt åtgärd 1 och 2", "78 100 kr"]]}},
+    {"paragraph": "Samtliga priser är inklusive moms (25 %). Arbetet utförs av behörigt våtrumsföretag enligt Säker Vatten, certifikat SV-24-3318. ROT-avdrag är inte tillämpligt för åtgärder som bekostas med bostadsanpassningsbidrag."},
+    {"signature": {"name": "Tobias Nilsson", "role": "Projektledare, Kakel & Våtrum i Malmö AB"}}
+  ]
+}

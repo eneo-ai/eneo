@@ -1,0 +1,128 @@
+{
+  "file": "liv01_registreringsbeslut_mall.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "LIV-01",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/495"
+  },
+  "description": "Miljönämndens beslutsmall för registrering av livsmedelsanläggning och fastställd kontrollfrekvens, med Word-innehållskontroller för ärendeuppgifter, beslut, riskklassning, avgifter och skäl samt fasta avsnitt om upplysningar och överklagande.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Miljönämnden",
+    "address": "Miljökontoret, 851 85 Sundsvall"
+  },
+  "title": "Beslut om registrering av livsmedelsanläggning och kontrollfrekvens",
+  "blocks": [
+    {
+      "paragraph": "Diarienummer:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "diarienummer",
+        "label": "Diarienummer",
+        "hint": "MN-ÅÅÅÅ-NNNNN"
+      }
+    },
+    {
+      "paragraph": "Beslutsdatum:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "beslutsdatum",
+        "label": "Beslutsdatum",
+        "hint": "ÅÅÅÅ-MM-DD"
+      }
+    },
+    {
+      "paragraph": "Livsmedelsföretagare:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "livsmedelsforetagare",
+        "label": "Livsmedelsföretagare",
+        "hint": "Företagets namn och organisationsnummer"
+      }
+    },
+    {
+      "paragraph": "Anläggning:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "anlaggning",
+        "label": "Anläggning",
+        "hint": "Anläggningens namn, besöksadress och fastighetsbeteckning"
+      }
+    },
+    {
+      "heading": "Beslut"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "beslut",
+        "label": "Beslut",
+        "hint": "Miljönämnden registrerar anläggningen och fastställer riskklass och kontrollfrekvens. Ange riskklassen som i tabellen, utan mellanslag (till exempel SL3), antal kontroller per fem år och från vilket datum beslutet gäller."
+      }
+    },
+    {
+      "heading": "Riskklassning"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "riskklassning",
+        "label": "Riskklassning",
+        "hint": "Redovisa aktiviteterna med kontrollpoäng, summan av kontrollpoäng, årsarbetskrafter och omfattningsklass."
+      }
+    },
+    {
+      "heading": "Avgifter"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "avgifter",
+        "label": "Avgifter",
+        "hint": "Avgift för registreringen, timavgift, riktvärde för kontrolltid och att kontroll debiteras i efterhand."
+      }
+    },
+    {
+      "heading": "Skäl för beslutet"
+    },
+    {
+      "control": {
+        "kind": "rich",
+        "tag": "skal",
+        "label": "Skäl för beslutet",
+        "hint": "Motivering med lagrum."
+      }
+    },
+    {
+      "heading": "Upplysningar"
+    },
+    {
+      "paragraph": "Verksamheten får starta tidigast två veckor efter att anmälan om registrering kom in till miljökontoret. Ändringar i verksamheten, till exempel nya aktiviteter, ändrad omfattning eller byte av livsmedelsföretagare, ska anmälas till miljökontoret."
+    },
+    {
+      "heading": "Hur man överklagar"
+    },
+    {
+      "paragraph": "Beslutet kan överklagas hos Länsstyrelsen Västernorrland enligt 31 § livsmedelslagen (2006:804). Skicka överklagandet till miljönämnden, Sundsvalls kommun, 851 85 Sundsvall, och ange vilket beslut du överklagar och varför. Överklagandet måste ha kommit in inom tre veckor från den dag du fick del av beslutet."
+    },
+    {
+      "paragraph": "Handläggare:"
+    },
+    {
+      "control": {
+        "kind": "text",
+        "tag": "handlaggare",
+        "label": "Handläggare",
+        "hint": "Namn och titel"
+      }
+    }
+  ]
+}

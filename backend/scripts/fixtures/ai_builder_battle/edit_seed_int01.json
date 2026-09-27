@@ -1,0 +1,140 @@
+{
+  "name": "Registrering av inkommande post – förslag till registerpost",
+  "description": "Registratorns stöd för post till förvaltningens funktionsbrevlåda: läser e-post med bilagor, formulerar ärendemening, prövar sekretess och sammanställer ett förslag till offentlig registerpost i diariet.",
+  "metadata_json": {
+    "form_schema": {
+      "fields": [
+        {"name": "registrator", "type": "text", "label": "Registrator", "required": true, "order": 1}
+      ]
+    }
+  },
+  "steps": [
+    {
+      "name": "Läs handlingen",
+      "instructions": "Du får en inkommen handling: ett e-postmeddelande och eventuella bilagor. Hämta avsändare (namn, organisation och e-post), datum då handlingen kom in, ämne, vilken typ av handling det är och avsändarens egen referens eller ärendenummer om ett sådant finns. Ange om handlingen hänvisar till ett befintligt diarienummer hos kommunen. Sammanfatta sakinnehållet kort. Lista alla namngivna personer med deras roll och alla uppgifter om enskildas hälsa eller personliga förhållanden. Lista bilagorna med sina rubriker.",
+      "input_source": "flow_input",
+      "input_type": "document",
+      "input_config": {
+        "runtime_input": {
+          "enabled": true,
+          "required": true,
+          "max_files": 10,
+          "input_format": "document",
+          "label": "E-post och bilagor",
+          "description": "Ladda upp e-postmeddelandet (sparat som text) och dess bilagor."
+        }
+      },
+      "input_bindings": {"question": "{{ step_input.text }}"},
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["avsandare", "inkom_datum", "amne", "handlingstyp", "avsandarens_referens", "hanvisat_diarienummer", "sammanfattning", "namngivna_personer", "kansliga_uppgifter", "bilagor"],
+        "properties": {
+          "avsandare": {
+            "type": "object",
+            "required": ["namn", "organisation", "e_post"],
+            "properties": {"namn": {"type": ["string", "null"]}, "organisation": {"type": ["string", "null"]}, "e_post": {"type": ["string", "null"]}}
+          },
+          "inkom_datum": {"type": "string"},
+          "amne": {"type": "string"},
+          "handlingstyp": {"type": "string"},
+          "avsandarens_referens": {"type": ["string", "null"]},
+          "hanvisat_diarienummer": {"type": ["string", "null"]},
+          "sammanfattning": {"type": "string"},
+          "namngivna_personer": {
+            "type": "array",
+            "items": {"type": "object", "required": ["namn", "roll"], "properties": {"namn": {"type": "string"}, "roll": {"type": "string"}}}
+          },
+          "kansliga_uppgifter": {"type": "array", "items": {"type": "string"}},
+          "bilagor": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    {
+      "name": "Formulera ärendemening",
+      "instructions": "Formulera ärendemeningen för registret: en mening på högst 15 ord som beskriver vad handlingen gäller, i registrets stil, till exempel \"Anmälan om ... vid ...\" eller \"Begäran om ... avseende ...\". Ärendemeningen är offentlig och syns i diariet på webben.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "amne", "label": "Ämne"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "handlingstyp", "label": "Handlingstyp"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "sammanfattning", "label": "Sammanfattning"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["arendemening"],
+        "properties": {"arendemening": {"type": "string"}}
+      }
+    },
+    {
+      "name": "Sekretessprövning",
+      "instructions": "Pröva om handlingen innehåller uppgifter som kan omfattas av sekretess enligt offentlighets- och sekretesslagen (2009:400), OSL, till exempel uppgifter om enskildas hälsa och personliga förhållanden i skolans elevhälsa och särskilda elevstöd (23 kap. 2 §) eller i socialtjänsten (26 kap. 1 §). Ange vilken bestämmelse som kan bli tillämplig, vilka uppgifter som inte får röjas och om handlingen ska sekretessmarkeras (5 kap. 5 §). Uppgifter som skulle röja sekretessbelagda förhållanden får inte tas med i registret (5 kap. 2 § andra stycket).",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "handlingstyp", "label": "Handlingstyp"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "sammanfattning", "label": "Sammanfattning"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "namngivna_personer", "label": "Namngivna personer"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "kansliga_uppgifter", "label": "Känsliga uppgifter"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["sekretess_kan_galla", "osl_hanvisning", "uppgifter_som_inte_far_rojas", "sekretessmarkering", "motivering"],
+        "properties": {
+          "sekretess_kan_galla": {"type": "boolean"},
+          "osl_hanvisning": {"type": ["string", "null"]},
+          "uppgifter_som_inte_far_rojas": {"type": "array", "items": {"type": "string"}},
+          "sekretessmarkering": {"type": "boolean"},
+          "motivering": {"type": "string"}
+        }
+      }
+    },
+    {
+      "name": "Sammanställ registerpost",
+      "instructions": "Sammanställ ett förslag till registerpost i diariet. Registerposten är offentlig: ta inte med namn på enskilda, hälsouppgifter eller andra uppgifter som omfattas av sekretess. Avsändaren anges med organisation och funktion när avsändaren är en myndighet, skola eller annan verksamhet. Ange avsändarens referens och de handlingar som registreras (e-post och bilagor). Om handlingen hänvisar till ett befintligt diarienummer föreslår du att den registreras i det ärendet.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Registrator: {{ flow_input.registrator }}",
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "inkom_datum", "label": "Inkom"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "avsandare", "label": "Avsändare"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "handlingstyp", "label": "Handlingstyp"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "avsandarens_referens", "label": "Avsändarens referens"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "hanvisat_diarienummer", "label": "Hänvisat diarienummer"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "bilagor", "label": "Bilagor"},
+          {"step_ref": "step_2", "output": "structured", "field_path": "arendemening", "label": "Ärendemening"},
+          {"step_ref": "step_3", "output": "structured", "field_path": "sekretessmarkering", "label": "Sekretessmarkering"},
+          {"step_ref": "step_3", "output": "structured", "field_path": "osl_hanvisning", "label": "Sekretessbestämmelse"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["inkom_datum", "avsandare", "avsandarens_referens", "handlingstyp", "arendemening", "registreras_i_diarienummer", "handlingar", "sekretessmarkering", "sekretessbestammelse", "registrator"],
+        "properties": {
+          "inkom_datum": {"type": "string"},
+          "avsandare": {"type": "string"},
+          "avsandarens_referens": {"type": ["string", "null"]},
+          "handlingstyp": {"type": "string"},
+          "arendemening": {"type": "string"},
+          "registreras_i_diarienummer": {"type": ["string", "null"]},
+          "handlingar": {"type": "array", "items": {"type": "string"}},
+          "sekretessmarkering": {"type": "boolean"},
+          "sekretessbestammelse": {"type": ["string", "null"]},
+          "registrator": {"type": "string"}
+        }
+      }
+    }
+  ]
+}

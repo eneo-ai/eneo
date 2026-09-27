@@ -1,0 +1,21 @@
+{
+  "file": "byg08_anmalan_eldstad.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "BYG-08", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/437"},
+  "description": "PDF-utskrift av en anmälan via e-tjänsten Anmälan – eldstad/rökkanal (steg Anmälan, Kontrollplan, Kontaktuppgifter); e-tjänstens informationstext hänvisar fortfarande till anmälningsplikten i den upphävda lydelsen av 6 kap. 5 § PBF.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "E-tjänst: Anmälan – eldstad/rökkanal"},
+  "date": "2026-09-03",
+  "title": "Anmälan om installation av eldstad och rökkanal",
+  "blocks": [
+    {"paragraph": "Ärendenummer i e-tjänsten: 437-2026-000922. Inskickad: 2026-09-03 kl. 16:05. Signerad med BankID av Tomas Wikström."},
+    {"paragraph": "Information från e-tjänsten: Installation eller väsentlig ändring av eldstad eller rökkanal är anmälningspliktig enligt 6 kap. 5 § plan- och byggförordningen (2011:338). Åtgärden får inte påbörjas förrän du har fått startbesked, och eldstaden får inte användas förrän du har fått slutbesked."},
+    {"heading": "Anmälan"},
+    {"table": {"columns": ["Fråga", "Svar"], "rows": [["Fastighetsbeteckning", "Sundsvall Myrbacken 7:4"], ["Adress", "Myrbacksvägen 22, 862 41 Njurunda"], ["Byggnadstyp", "Enbostadshus, ett och ett halvt plan, byggt 1978"], ["Vad vill du anmäla?", "Installation av ny eldstad och ny rökkanal"], ["Eldstad: fabrikat och modell", "Kaminverket KV-610 H (braskamin med värmemagasin)"], ["Placering", "Vardagsrummet på entréplanet, mot yttervägg i norr"], ["Befintlig eldstad i samma rum?", "Nej"], ["Används strålningsskydd eller skyddsplåt?", "Nej, kaminen ställs fritt med de avstånd tillverkaren anger"], ["Rökkanal", "Ny isolerad stålskorsten Isoline 150 från Skorstensfabriken Norr, CE-märkt enligt EN 1856-1, märkning T450 N1 D 3 G50"], ["Rökkanalens dragning", "Genom bjälklag och yttertak, 1,2 m över taknock"], ["Golv under kaminen", "Trägolv; golvplåt av stål läggs under och framför kaminen"], ["Planerad start", "2026-10-12"]]}},
+    {"heading": "Kontrollplan"},
+    {"table": {"columns": ["Fråga om kontrollplanen", "Svar"], "rows": [["Behövs kontrollansvarig?", "Nej, åtgärden är anmälningspliktig"], ["Förslag till kontroller", "Egenkontroll av installationen mot tillverkarens monteringsanvisning; brandskyddskontroll av skorstensfejarmästare innan eldstaden tas i bruk"], ["Vem utför installationen?", "Njurunda Kakelugn & Kamin AB"], ["Vem utför brandskyddskontrollen?", "Njurunda Sotning AB"]]}},
+    {"heading": "Kontaktuppgifter"},
+    {"list": ["Anmälare och byggherre: Tomas Wikström", "Personnummer: 19610819-3175", "Adress: Myrbacksvägen 22, 862 41 Njurunda", "Mobilnummer: 070-266 90 14", "E-post: tomas.wikstrom@example.com"]},
+    {"heading": "Bilagor"},
+    {"list": ["Produktblad och installationsanvisning för Kaminverket KV-610 (KV-610_produktblad.pdf)", "Planritning med kaminens placering (planritning_vardagsrum.pdf)", "Prestandadeklaration för Isoline 150"]}
+  ]
+}

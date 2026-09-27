@@ -1,0 +1,147 @@
+{
+  "name": "Ekonomiskt bistånd – normberäkning och beslutsförslag",
+  "description": "Beslutsstöd för försörjningsstöd: läser ansökan, bilagor, SSBTEK-svaret och årets normtabell, räknar fram försörjningsstödet enligt riksnormen och skriver ett förslag till beslut som socialsekreteraren fattar beslut om.",
+  "metadata_json": {
+    "form_schema": {
+      "fields": [
+        {"name": "ansokan", "type": "text", "label": "Ansökan (sökandens uppgifter från e-tjänsten)", "required": true, "order": 1},
+        {"name": "handlaggare", "type": "text", "label": "Handläggare", "required": true, "order": 2}
+      ]
+    }
+  },
+  "steps": [
+    {
+      "name": "Läs ansökan, bilagor och registersvar",
+      "instructions": "Du får en ansökan om ekonomiskt bistånd med bilagor (hyresavi och kontoutdrag), registersvaret från SSBTEK och förvaltningens normtabell för året. Hämta uppgifterna exakt som de står. Hushållet: ta med varje person med roll och ålder i den månad ansökan avser. Boende: ta hyran för bostaden och övriga poster på hyresavin var för sig. Fasta utgifter: ta bara med utgifter som syns i bilagorna och ange om de styrks. Inkomster: ta med alla utbetalningar i registersvaret som avser ansökningsmånaden och alla insättningar på kontoutdraget med datum, text och belopp. Insättningar som inte kan kopplas till en känd inkomstkälla anges som oklara. Uppgifter i ansökan som inte styrks av bilagorna anges som ej styrkta. Hitta aldrig på ett belopp.",
+      "input_source": "flow_input",
+      "input_type": "document",
+      "input_config": {
+        "runtime_input": {
+          "enabled": true,
+          "required": true,
+          "max_files": 12,
+          "input_format": "document",
+          "label": "Bilagor, SSBTEK-svar och normtabell",
+          "description": "Ladda upp sökandens bilagor, registersvaret från SSBTEK och förvaltningens normtabell för året."
+        }
+      },
+      "input_bindings": {"question": "{{ step_input.text }}\n\nAnsökan från e-tjänsten:\n{{ flow_input.ansokan }}"},
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["diarienummer", "ansokan_avser_manad", "sokande", "hushall", "boende", "fasta_utgifter", "inkomster", "oklara_insattningar", "normtabell", "registernoteringar"],
+        "properties": {
+          "diarienummer": {"type": ["string", "null"]},
+          "ansokan_avser_manad": {"type": "string"},
+          "sokande": {"type": "string"},
+          "hushall": {
+            "type": "array",
+            "items": {"type": "object", "required": ["roll", "alder"], "properties": {"roll": {"type": "string"}, "alder": {"type": ["integer", "null"]}}}
+          },
+          "boende": {
+            "type": "object",
+            "required": ["hyra_bostad_kr", "ovriga_poster"],
+            "properties": {
+              "hyra_bostad_kr": {"type": ["number", "null"]},
+              "ovriga_poster": {
+                "type": "array",
+                "items": {"type": "object", "required": ["post", "belopp_kr"], "properties": {"post": {"type": "string"}, "belopp_kr": {"type": "number"}}}
+              }
+            }
+          },
+          "fasta_utgifter": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["post", "belopp_kr", "styrkt"],
+              "properties": {"post": {"type": "string"}, "belopp_kr": {"type": "number"}, "styrkt": {"type": "boolean"}}
+            }
+          },
+          "inkomster": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["typ", "belopp_kr", "avser_period", "kalla"],
+              "properties": {"typ": {"type": "string"}, "belopp_kr": {"type": "number"}, "avser_period": {"type": ["string", "null"]}, "kalla": {"type": "string"}}
+            }
+          },
+          "oklara_insattningar": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["datum", "text", "belopp_kr"],
+              "properties": {"datum": {"type": "string"}, "text": {"type": "string"}, "belopp_kr": {"type": "number"}}
+            }
+          },
+          "normtabell": {
+            "type": "array",
+            "items": {"type": "object", "required": ["post", "belopp_kr"], "properties": {"post": {"type": "string"}, "belopp_kr": {"type": "number"}}}
+          },
+          "registernoteringar": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    {
+      "name": "Beräkna försörjningsstöd enligt riksnormen",
+      "instructions": "Beräkna försörjningsstödet för den månad ansökan avser enligt normtabellen och dess beräkningsordning: 1) personliga kostnader enligt riksnormen för varje hushållsmedlem efter ålder, 2) gemensamma hushållskostnader efter antalet personer i hushållet, 3) skäliga kostnader utanför riksnormen som styrks av underlag: boende (hyra enligt hyresavi, utan parkering och garage), hushållsel, hemförsäkring, arbetsresor, fackavgift och a-kassa, 4) dra av hushållets samtliga inkomster för månaden. Använd beloppen exakt som de står i underlaget och redovisa varje post för sig. Underskottet är det bistånd som kan beviljas. Oklara insättningar räknas inte som inkomst men ska lyftas som frågor att utreda. Kostnader som inte godtas redovisas med skäl. Föreslå bifall, delvis bifall eller avslag.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "source_refs": [{"step_ref": "step_1", "output": "structured", "label": "Uppgifter ur ansökan och underlag"}]
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["normposter", "summa_riksnorm_kr", "kostnader_utanfor_normen", "summa_kostnader_utanfor_normen_kr", "inkomster", "summa_inkomster_kr", "bistand_kr", "forslag", "ej_godtagna_kostnader", "att_utreda"],
+        "properties": {
+          "normposter": {
+            "type": "array",
+            "items": {"type": "object", "required": ["post", "belopp_kr"], "properties": {"post": {"type": "string"}, "belopp_kr": {"type": "number"}}}
+          },
+          "summa_riksnorm_kr": {"type": "number"},
+          "kostnader_utanfor_normen": {
+            "type": "array",
+            "items": {"type": "object", "required": ["post", "belopp_kr"], "properties": {"post": {"type": "string"}, "belopp_kr": {"type": "number"}}}
+          },
+          "summa_kostnader_utanfor_normen_kr": {"type": "number"},
+          "inkomster": {
+            "type": "array",
+            "items": {"type": "object", "required": ["typ", "belopp_kr"], "properties": {"typ": {"type": "string"}, "belopp_kr": {"type": "number"}}}
+          },
+          "summa_inkomster_kr": {"type": "number"},
+          "bistand_kr": {"type": "number"},
+          "forslag": {"type": "string", "enum": ["bifall", "delvis bifall", "avslag"]},
+          "ej_godtagna_kostnader": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["post", "belopp_kr", "skal"],
+              "properties": {"post": {"type": "string"}, "belopp_kr": {"type": "number"}, "skal": {"type": "string"}}
+            }
+          },
+          "att_utreda": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    {
+      "name": "Skriv beslutsförslag",
+      "instructions": "Skriv ett förslag till beslut om ekonomiskt bistånd (försörjningsstöd) till sökanden, på svenska och med du-tilltal. Rubriker: Beslut, Så har vi räknat, Motivering, Om du inte är nöjd med beslutet. Ange diarienummer och vilken månad beslutet gäller. Under Så har vi räknat redovisar du varje normpost, varje kostnad utanför normen och varje inkomst med belopp i kronor, summorna och det belopp som beviljas. Motivera beslutet med socialtjänstlagen (2025:400) 12 kap. 1 § och förklara varför kostnader som inte godtas inte räknas med. Nämn de frågor som behöver utredas vidare. Skriv inte ut personnummer för sökanden eller barnen; ange barnen med ålder. Om du inte är nöjd: beslutet kan överklagas till förvaltningsrätten (socialtjänstlagen (2025:400) 35 kap. 1 §); överklagandet ska ha kommit in till individ- och arbetsmarknadsnämnden inom tre veckor från den dag sökanden fick del av beslutet. Avsluta med handläggarens namn.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Handläggare: {{ flow_input.handlaggare }}",
+        "source_refs": [
+          {"step_ref": "step_1", "output": "structured", "field_path": "diarienummer", "label": "Diarienummer"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "ansokan_avser_manad", "label": "Månad"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "sokande", "label": "Sökande"},
+          {"step_ref": "step_1", "output": "structured", "field_path": "hushall", "label": "Hushåll"},
+          {"step_ref": "step_2", "output": "structured", "label": "Normberäkning"}
+        ]
+      },
+      "output_mode": "pass_through",
+      "output_type": "text"
+    }
+  ]
+}

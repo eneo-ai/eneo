@@ -1,0 +1,297 @@
+{
+  "file": "int14_incidentrapport_pui_2026_017.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-14",
+    "url": "https://www.imy.se/verksamhet/utfora-arenden/anmal-personuppgiftsincident/"
+  },
+  "description": "Rektors rapport om en felskickad elevhälsolista till vårdnadshavare, med beskrivning, berörda uppgifter, åtgärder, rektors bedömning och en sekretessbelagd bilaga med elevernas namn och personnummer; upptäcktstidpunkten är angiven som måndag morgon.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Barn- och utbildningsförvaltningen, Kyrkbackens skola",
+    "address": "Kyrkbacksgatan 12, 852 34 Sundsvall"
+  },
+  "date": "2026-09-15",
+  "diarienummer": "BUN 2026/00977",
+  "title": "Rapport om personuppgiftsincident",
+  "blocks": [
+    {
+      "table": {
+        "columns": [
+          "Fält",
+          "Uppgift"
+        ],
+        "rows": [
+          [
+            "Rapport-id",
+            "PUI-2026-017"
+          ],
+          [
+            "Verksamhet",
+            "Kyrkbackens skola, årskurs 7–9"
+          ],
+          [
+            "Personuppgiftsansvarig",
+            "Barn- och utbildningsnämnden"
+          ],
+          [
+            "Rapportör",
+            "Annika Holmberg, rektor"
+          ],
+          [
+            "Datum för rapporten",
+            "2026-09-15"
+          ],
+          [
+            "Tidpunkt då incidenten upptäcktes",
+            "2026-09-14 kl. 08:40"
+          ],
+          [
+            "Hur incidenten upptäcktes",
+            "En vårdnadshavare ringde till skolans expedition och berättade att hon fått ett e-postmeddelande med en bilaga som inte var avsedd för henne."
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Beskrivning av händelsen"
+    },
+    {
+      "paragraph": "Söndagen den 13 september skickade skolsköterskan Karin Lindgren ett e-postmeddelande med information inför föräldramötet för årskurs 8 till distributionslistan Vårdnadshavare 8B Kyrkbacken. Av misstag bifogades filen Elevhalsa_8B_uppfoljning_ht26.xlsx, som är elevhälsoteamets uppföljningslista för klasserna 8B och 8C. Filen skulle ha skickats till elevhälsoteamet inför veckans elevhälsomöte."
+    },
+    {
+      "paragraph": "Filen var inte lösenordsskyddad och hade ingen känslighetsetikett. Distributionslistan består av vårdnadshavarnas privata e-postadresser."
+    },
+    {
+      "heading": "Vilka personuppgifter som berörs"
+    },
+    {
+      "list": [
+        "namn, personnummer och klass",
+        "uppgifter om särskilt stöd och åtgärdsprogram",
+        "uppgifter om hälsa, bland annat diagnoser och kontakter med barn- och ungdomspsykiatrin",
+        "uppgift om att en orosanmälan gjorts till socialtjänsten",
+        "anteckningar från elevhälsomöten om frånvaro"
+      ]
+    },
+    {
+      "paragraph": "Uppgifterna omfattas av sekretess enligt 23 kap. 2 § offentlighets- och sekretesslagen (2009:400). Uppgifterna om hälsa är känsliga personuppgifter enligt artikel 9 i dataskyddsförordningen, och samtliga registrerade är barn."
+    },
+    {
+      "heading": "Berörda registrerade och mottagare"
+    },
+    {
+      "paragraph": "Filen innehåller uppgifter om 24 elever i årskurs 8 (se bilaga 1). Distributionslistan har 41 mottagare, vårdnadshavare till elever i klass 8B."
+    },
+    {
+      "heading": "Vidtagna åtgärder"
+    },
+    {
+      "list": [
+        "IT-servicedesk försökte samma kväll återkalla meddelandet.",
+        "Skolan har ringt de vårdnadshavare som hört av sig och bett dem radera meddelandet och bilagan.",
+        "Distributionslistan har begränsats så att bara mentorer kan skicka till den.",
+        "Skolsköterskan har gått igenom förvaltningens rutin för e-post med känsliga uppgifter med rektor."
+      ]
+    },
+    {
+      "heading": "Rektors bedömning"
+    },
+    {
+      "paragraph": "Jag bedömer att risken för eleverna är begränsad eftersom mottagarna är vårdnadshavare i samma årskurs, men jag lämnar till dataskyddssamordnaren att bedöma om incidenten ska anmälas till Integritetsskyddsmyndigheten och om vårdnadshavarna till de berörda eleverna ska informeras."
+    },
+    {
+      "signature": {
+        "name": "Annika Holmberg",
+        "role": "Rektor, Kyrkbackens skola"
+      }
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "Bilaga 1. Berörda elever (omfattas av sekretess enligt 23 kap. 2 § OSL)"
+    },
+    {
+      "table": {
+        "columns": [
+          "Nr",
+          "Namn",
+          "Personnummer",
+          "Klass",
+          "Uppgift i filen"
+        ],
+        "rows": [
+          [
+            "1",
+            "Hugo Lindgren",
+            "20120220-2394",
+            "8B",
+            "Åtgärdsprogram, läsa och skriva"
+          ],
+          [
+            "2",
+            "Noah Sjöberg",
+            "20120619-2393",
+            "8C",
+            "Diagnos ADHD, anpassningar i klassrummet"
+          ],
+          [
+            "3",
+            "Alva Nordström",
+            "20121009-2381",
+            "8B",
+            "Diabetes typ 1, rutin för insulin"
+          ],
+          [
+            "4",
+            "Elias Wallin",
+            "20120821-2397",
+            "8C",
+            "Kontakt med BUP, frånvaroutredning"
+          ],
+          [
+            "5",
+            "Liam Edlund",
+            "20120507-2398",
+            "8B",
+            "Särskilt stöd i matematik"
+          ],
+          [
+            "6",
+            "Ella Sundqvist",
+            "20120303-2386",
+            "8C",
+            "Dyslexi, inläst material"
+          ],
+          [
+            "7",
+            "Maja Hedström",
+            "20120111-2388",
+            "8B",
+            "Orosanmälan till socialtjänsten 2026"
+          ],
+          [
+            "8",
+            "Arvid Engman",
+            "20120531-2398",
+            "8C",
+            "Hög frånvaro, kontakt med kurator"
+          ],
+          [
+            "9",
+            "Melvin Nyberg",
+            "20120523-2398",
+            "8B",
+            "Åtgärdsprogram, läsa och skriva"
+          ],
+          [
+            "10",
+            "Theo Hedlund",
+            "20120314-2391",
+            "8C",
+            "Diagnos ADHD, anpassningar i klassrummet"
+          ],
+          [
+            "11",
+            "Wilma Lindahl",
+            "20120419-2387",
+            "8B",
+            "Diabetes typ 1, rutin för insulin"
+          ],
+          [
+            "12",
+            "Oscar Blomqvist",
+            "20120808-2394",
+            "8C",
+            "Kontakt med BUP, frånvaroutredning"
+          ],
+          [
+            "13",
+            "Saga Eriksson",
+            "20120926-2383",
+            "8B",
+            "Särskilt stöd i matematik"
+          ],
+          [
+            "14",
+            "Viggo Sahlin",
+            "20120518-2395",
+            "8C",
+            "Dyslexi, inläst material"
+          ],
+          [
+            "15",
+            "Ebba Norlin",
+            "20120128-2389",
+            "8B",
+            "Orosanmälan till socialtjänsten 2026"
+          ],
+          [
+            "16",
+            "Nils Öhman",
+            "20120714-2397",
+            "8C",
+            "Hög frånvaro, kontakt med kurator"
+          ],
+          [
+            "17",
+            "Freja Holmgren",
+            "20120602-2384",
+            "8B",
+            "Åtgärdsprogram, läsa och skriva"
+          ],
+          [
+            "18",
+            "Selma Byström",
+            "20120529-2384",
+            "8C",
+            "Diagnos ADHD, anpassningar i klassrummet"
+          ],
+          [
+            "19",
+            "Adam Rahimi",
+            "20120608-2396",
+            "8B",
+            "Diabetes typ 1, rutin för insulin"
+          ],
+          [
+            "20",
+            "Tilde Östman",
+            "20120506-2381",
+            "8C",
+            "Kontakt med BUP, frånvaroutredning"
+          ],
+          [
+            "21",
+            "Nova Hägglund",
+            "20120706-2389",
+            "8B",
+            "Särskilt stöd i matematik"
+          ],
+          [
+            "22",
+            "Sixten Brandt",
+            "20120404-2392",
+            "8C",
+            "Dyslexi, inläst material"
+          ],
+          [
+            "23",
+            "Lova Forsberg",
+            "20121010-2388",
+            "8B",
+            "Orosanmälan till socialtjänsten 2026"
+          ],
+          [
+            "24",
+            "Albin Källström",
+            "20120206-2392",
+            "8C",
+            "Hög frånvaro, kontakt med kurator"
+          ]
+        ]
+      }
+    }
+  ]
+}

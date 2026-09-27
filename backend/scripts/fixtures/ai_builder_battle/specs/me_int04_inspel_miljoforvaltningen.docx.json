@@ -1,0 +1,20 @@
+{
+  "file": "me_int04_inspel_miljoforvaltningen.docx",
+  "format": "docx",
+  "source": {"catalogue_id": "INT-04", "url": "https://www.regeringen.se/contentassets/ee59c69b63014c19a08b0e8ca47334b2/svara-pa-remiss-pm2021_1-rev-2026.pdf"},
+  "description": "En förvaltnings interna inspel till kommunens remissvar, med ställningstagande och motivering per avsnittsnummer.",
+  "letterhead": {"organisation": "Sundsvalls kommun", "unit": "Miljöförvaltningen", "address": "851 85 Sundsvall"},
+  "date": "2026-09-30",
+  "diarienummer": "MN-2026-01187",
+  "title": "Inspel till kommunens remissvar över SOU 2026:47",
+  "blocks": [
+    {"paragraph": "Miljöförvaltningen har fått kommunledningskontorets begäran om inspel. Förvaltningen lämnar synpunkter på de avsnitt som berör miljö- och hälsoskyddet och tillsynen över dricksvatten."},
+    {"heading": "Avsnitt 6.2"},
+    {"paragraph": "Miljöförvaltningen tillstyrker. En samlad plan gör det lättare att skydda vattentäkterna och att prioritera vattenskyddsområden. Förvaltningen vill vara delaktig i arbetet eftersom vattenskyddsområdena för kommunens två största vattentäkter behöver revideras."},
+    {"heading": "Avsnitt 7.4"},
+    {"paragraph": "Miljöförvaltningen tillstyrker. Vid ledningsbrottet i Sundsvall i mars 2025 saknades reservvatten för delar av Haga och Nacksta i nästan två dygn. Ett tydligt lagkrav behövs för att reservvatten ska prioriteras i investeringsplanerna."},
+    {"heading": "Avsnitt 8.3"},
+    {"paragraph": "Miljöförvaltningen tillstyrker med synpunkten att vägledningen från Myndigheten för civilt försvar bör tas fram tillsammans med Livsmedelsverket så att kraven på nödvattnets kvalitet blir desamma."},
+    {"signature": {"name": "Hanna Fors", "role": "Miljöchef"}}
+  ]
+}

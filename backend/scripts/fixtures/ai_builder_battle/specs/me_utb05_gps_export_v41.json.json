@@ -1,0 +1,189 @@
+{
+  "file": "me_utb05_gps_export_v41.json",
+  "format": "json",
+  "source": {
+    "catalogue_id": "UTB-05",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/773"
+  },
+  "description": "Trafikföretagets GPS-export för skolskjutsen under en vecka: ankomst till skolans hållplats per tur, fordon och dag i JSON; två turer saknar poster.",
+  "data": {
+    "export": {
+      "system": "FleetTrack 4",
+      "trafikforetag": "Ljungans Buss & Taxi AB",
+      "avtal": "BUN-2023-0119",
+      "period": {
+        "fran": "2026-10-05",
+        "till": "2026-10-09"
+      },
+      "skapad": "2026-10-10T06:15:00+02:00",
+      "tidszon": "Europe/Stockholm"
+    },
+    "ankomster": [
+      {
+        "tur": "SK-411",
+        "fordon": "FBX 318",
+        "datum": "2026-10-05",
+        "hallplats": "Stöde skola",
+        "ankomst": "2026-10-05T07:38:00+02:00",
+        "avgang_fran_hallplats": null,
+        "kalla": "GPS"
+      },
+      {
+        "tur": "SK-412",
+        "fordon": "GKL 562",
+        "datum": "2026-10-05",
+        "hallplats": "Stöde skola",
+        "ankomst": "2026-10-05T07:46:00+02:00",
+        "avgang_fran_hallplats": null,
+        "kalla": "GPS"
+      },
+      {
+        "tur": "SK-421",
+        "fordon": "MRT 904",
+        "datum": "2026-10-05",
+        "hallplats": "Kovlands skola",
+        "ankomst": "2026-10-05T07:49:00+02:00",
+        "avgang_fran_hallplats": null,
+        "kalla": "GPS"
+      },
+      {
+        "tur": "SK-431",
+        "fordon": "CDW 217",
+        "datum": "2026-10-05",
+        "hallplats": "Lidens skola",
+        "ankomst": "2026-10-05T08:21:00+02:00",
+        "avgang_fran_hallplats": null,
+        "kalla": "GPS"
+      },
+      {
+        "tur": "SK-411",
+        "fordon": "FBX 318",
+        "datum": "2026-10-06",
+        "hallplats": "Stöde skola",
+        "ankomst": "2026-10-06T07:44:00+02:00",
+        "avgang_fran_hallplats": null,
+        "kalla": "GPS"
+      },
+      {
+        "tur": "SK-412",
+        "fordon": "GKL 562",
+        "datum": "2026-10-06",
+        "hallplats": "Stöde skola",
+        "ankomst": "2026-10-06T08:02:00+02:00",
+        "avgang_fran_hallplats": null,
+        "kalla": "GPS"
+      },
+      {
+        "tur": "SK-421",
+        "fordon": "MRT 904",
+        "datum": "2026-10-06",
+        "hallplats": "Kovlands skola",
+        "ankomst": "2026-10-06T07:51:00+02:00",
+        "avgang_fran_hallplats": null,
+        "kalla": "GPS"
+      },
+      {
+        "tur": "SK-431",
+        "fordon": "CDW 217",
+        "datum": "2026-10-06",
+        "hallplats": "Lidens skola",
+        "ankomst": "2026-10-06T08:04:00+02:00",
+        "avgang_fran_hallplats": null,
+        "kalla": "GPS"
+      },
+      {
+        "tur": "SK-411",
+        "fordon": "FBX 318",
+        "datum": "2026-10-07",
+        "hallplats": "Stöde skola",
+        "ankomst": "2026-10-07T07:41:00+02:00",
+        "avgang_fran_hallplats": null,
+        "kalla": "GPS"
+      },
+      {
+        "tur": "SK-412",
+        "fordon": "GKL 562",
+        "datum": "2026-10-07",
+        "hallplats": "Stöde skola",
+        "ankomst": "2026-10-07T07:47:00+02:00",
+        "avgang_fran_hallplats": null,
+        "kalla": "GPS"
+      },
+      {
+        "tur": "SK-421",
+        "fordon": "MRT 904",
+        "datum": "2026-10-07",
+        "hallplats": "Kovlands skola",
+        "ankomst": "2026-10-07T07:58:00+02:00",
+        "avgang_fran_hallplats": null,
+        "kalla": "GPS"
+      },
+      {
+        "tur": "SK-431",
+        "fordon": "CDW 217",
+        "datum": "2026-10-07",
+        "hallplats": "Lidens skola",
+        "ankomst": "2026-10-07T08:06:00+02:00",
+        "avgang_fran_hallplats": null,
+        "kalla": "GPS"
+      },
+      {
+        "tur": "SK-411",
+        "fordon": "FBX 318",
+        "datum": "2026-10-08",
+        "hallplats": "Stöde skola",
+        "ankomst": "2026-10-08T07:39:00+02:00",
+        "avgang_fran_hallplats": null,
+        "kalla": "GPS"
+      },
+      {
+        "tur": "SK-412",
+        "fordon": "GKL 562",
+        "datum": "2026-10-08",
+        "hallplats": "Stöde skola",
+        "ankomst": "2026-10-08T07:45:00+02:00",
+        "avgang_fran_hallplats": null,
+        "kalla": "GPS"
+      },
+      {
+        "tur": "SK-421",
+        "fordon": "MRT 904",
+        "datum": "2026-10-08",
+        "hallplats": "Kovlands skola",
+        "ankomst": "2026-10-08T07:52:00+02:00",
+        "avgang_fran_hallplats": null,
+        "kalla": "GPS"
+      },
+      {
+        "tur": "SK-412",
+        "fordon": "GKL 562",
+        "datum": "2026-10-09",
+        "hallplats": "Stöde skola",
+        "ankomst": "2026-10-09T07:48:00+02:00",
+        "avgang_fran_hallplats": null,
+        "kalla": "GPS"
+      },
+      {
+        "tur": "SK-421",
+        "fordon": "MRT 904",
+        "datum": "2026-10-09",
+        "hallplats": "Kovlands skola",
+        "ankomst": "2026-10-09T07:50:00+02:00",
+        "avgang_fran_hallplats": null,
+        "kalla": "GPS"
+      },
+      {
+        "tur": "SK-431",
+        "fordon": "CDW 217",
+        "datum": "2026-10-09",
+        "hallplats": "Lidens skola",
+        "ankomst": "2026-10-09T08:07:00+02:00",
+        "avgang_fran_hallplats": null,
+        "kalla": "GPS"
+      }
+    ],
+    "anmarkningar": [
+      "Fordon CDW 217: GPS-enheten rapporterade inga positioner 2026-10-08 06:40–09:30."
+    ]
+  }
+}

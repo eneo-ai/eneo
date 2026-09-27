@@ -1,0 +1,97 @@
+{
+  "file": "int12_remiss_motion_mensskydd.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-12",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/547"
+  },
+  "description": "Kommunstyrelsekontorets remiss till barn- och utbildningsnämnden med den bifogade motionen om kostnadsfria mensskydd i skolan, som hänvisar till en ersatt jämställdhetsplan.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Kommunstyrelsekontoret",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2025-12-03",
+  "diarienummer": "KS-2025-00977",
+  "title": "Remiss: Motion om kostnadsfria mensskydd i skolan",
+  "blocks": [
+    {
+      "paragraph": "Till: Barn- och utbildningsnämnden"
+    },
+    {
+      "table": {
+        "columns": [
+          "Remissuppgift",
+          "Uppgift"
+        ],
+        "rows": [
+          [
+            "Kommunstyrelsens diarienummer",
+            "KS-2025-00977"
+          ],
+          [
+            "Mottagarens diarienummer",
+            "BUN 2025/01142 (registrerad 2025-12-05)"
+          ],
+          [
+            "Motionen väckt",
+            "Kommunfullmäktige 2025-11-24, § 212"
+          ],
+          [
+            "Remitterad",
+            "Kommunfullmäktige remitterade motionen till kommunstyrelsen för beredning"
+          ],
+          [
+            "Yttrande senast",
+            "2026-10-30"
+          ]
+        ]
+      }
+    },
+    {
+      "paragraph": "Kommunstyrelsekontoret begär härmed barn- och utbildningsnämndens yttrande över motionen. Enligt 5 kap. 35 § kommunallagen (2017:725) ska en motion beredas så att fullmäktige kan fatta beslut inom ett år från det att motionen väcktes. Yttrandet ska därför ha kommit in till kommunstyrelsekontoret senast det datum som anges ovan."
+    },
+    {
+      "paragraph": "Yttrandet skickas till kommunstyrelsen@sundsvall.se med angivande av kommunstyrelsens diarienummer."
+    },
+    {
+      "signature": {
+        "name": "Johanna Wiklund",
+        "role": "Kommunsekreterare"
+      }
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "Motion om kostnadsfria mensskydd i skolan"
+    },
+    {
+      "paragraph": "Att ha mens ska aldrig vara ett skäl att missa undervisning. Ändå vittnar elever och skolpersonal om att flickor stannar hemma, går hem tidigt eller avstår från idrottslektioner för att de inte har tillgång till mensskydd när de behöver det. För en del familjer är kostnaden för mensskydd kännbar, och alla elever vill inte gå till skolsköterskan och fråga."
+    },
+    {
+      "paragraph": "Sundsvalls kommuns jämställdhetsplan 2019–2022 slår fast att kommunens verksamheter ska ge flickor och pojkar samma förutsättningar. Kostnadsfria mensskydd på skolans toaletter är ett konkret sätt att leva upp till det. Flera kommuner, bland annat i Norrland, har redan infört mensskydd i dispensrar på elevtoaletterna."
+    },
+    {
+      "paragraph": "Kostnaden uppskattas till cirka 350 000 kronor per år och bör kunna rymmas inom elevhälsans budget."
+    },
+    {
+      "paragraph": "Med anledning av ovanstående yrkar jag"
+    },
+    {
+      "list": [
+        "att kommunen från och med höstterminen 2026 erbjuder kostnadsfria mensskydd på samtliga elevtoaletter i grundskolans årskurs 4–9 och i gymnasieskolan,",
+        "att kostnaden finansieras inom barn- och utbildningsnämndens befintliga budgetram."
+      ]
+    },
+    {
+      "paragraph": "Sundsvall den 17 november 2025"
+    },
+    {
+      "signature": {
+        "name": "Elin Sandqvist (V)",
+        "role": "Ledamot i kommunfullmäktige"
+      }
+    }
+  ]
+}

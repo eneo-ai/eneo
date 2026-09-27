@@ -1,0 +1,73 @@
+{
+  "name": "Årsräkning – avstämning och granskningsbeslut",
+  "description": "Överförmyndarnämndens granskning av ställföreträdares årsräkning: stämmer av årsräkningens summor mot kontoutdragen, listar kontantuttag och uttag från spärrade konton och skriver förslag till granskningsbeslut.",
+  "metadata_json": {
+    "form_schema": {
+      "fields": [
+        {"name": "arende", "type": "text", "label": "Ärendenummer", "required": true, "order": 1},
+        {"name": "huvudman", "type": "text", "label": "Huvudman (namn och personnummer)", "required": true, "order": 2},
+        {"name": "stallforetradare", "type": "text", "label": "Ställföreträdare (god man/förvaltare)", "required": true, "order": 3},
+        {"name": "redovisningsperiod", "type": "text", "label": "Redovisningsperiod", "required": true, "order": 4},
+        {"name": "tillgangar_1_jan", "type": "number", "label": "Tillgångar 1 januari enligt årsräkningen (kr)", "required": true, "order": 5},
+        {"name": "summa_inkomster", "type": "number", "label": "Summa inkomster enligt årsräkningen (kr)", "required": true, "order": 6},
+        {"name": "summa_utgifter", "type": "number", "label": "Summa utgifter enligt årsräkningen (kr)", "required": true, "order": 7},
+        {"name": "tillgangar_31_dec", "type": "number", "label": "Tillgångar 31 december enligt årsräkningen (kr)", "required": true, "order": 8},
+        {"name": "beviljade_samtycken", "type": "text", "label": "Beviljade samtycken till uttag från spärrade konton under perioden", "required": false, "order": 9},
+        {"name": "kontoutdrag", "type": "text", "label": "Kontoutdrag för hela perioden (klistra in från bankens export)", "required": true, "order": 10},
+        {"name": "granskare", "type": "text", "label": "Granskare", "required": true, "order": 11}
+      ]
+    }
+  },
+  "steps": [
+    {
+      "name": "Stäm av årsräkningen",
+      "instructions": "Stäm av årsräkningen mot kontoutdragen. Beräknade tillgångar 31 december = tillgångar 1 januari + summa inkomster − summa utgifter enligt årsräkningen. Differens = beräknade tillgångar − redovisade tillgångar 31 december. Jämför också de redovisade tillgångarna 31 december med summan av kontonas saldon på årets sista dag enligt kontoutdragen. Lista alla kontantuttag (bankomat och uttag på kontor) med datum och belopp. Lista varje uttag och överföring från spärrat konto och ange om den täcks av ett beviljat samtycke; datum och belopp måste stämma. Återge belopp exakt som i kontoutdragen och gissa aldrig.",
+      "input_source": "flow_input",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Ärende: {{ flow_input.arende }}\nHuvudman: {{ flow_input.huvudman }}\nStällföreträdare: {{ flow_input.stallforetradare }}\nPeriod: {{ flow_input.redovisningsperiod }}\n\nÅrsräkningen:\nTillgångar 1 januari: {{ flow_input.tillgangar_1_jan }} kr\nSumma inkomster: {{ flow_input.summa_inkomster }} kr\nSumma utgifter: {{ flow_input.summa_utgifter }} kr\nTillgångar 31 december: {{ flow_input.tillgangar_31_dec }} kr\n\nBeviljade samtycken: {{ flow_input.beviljade_samtycken }}\n\nKontoutdrag:\n{{ flow_input.kontoutdrag }}"
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": ["redovisade_tillgangar_31_dec_kr", "beraknade_tillgangar_31_dec_kr", "differens_kr", "saldo_enligt_kontoutdrag_31_dec_kr", "kontantuttag", "uttag_sparrat_konto", "ovriga_avvikelser"],
+        "properties": {
+          "redovisade_tillgangar_31_dec_kr": {"type": "number"},
+          "beraknade_tillgangar_31_dec_kr": {"type": "number"},
+          "differens_kr": {"type": "number"},
+          "saldo_enligt_kontoutdrag_31_dec_kr": {"type": ["number", "null"]},
+          "kontantuttag": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["datum", "text", "belopp_kr"],
+              "properties": {"datum": {"type": "string"}, "text": {"type": "string"}, "belopp_kr": {"type": "number"}}
+            }
+          },
+          "uttag_sparrat_konto": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["datum", "text", "belopp_kr", "samtycke_finns"],
+              "properties": {"datum": {"type": "string"}, "text": {"type": "string"}, "belopp_kr": {"type": "number"}, "samtycke_finns": {"type": "boolean"}}
+            }
+          },
+          "ovriga_avvikelser": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    {
+      "name": "Skriv granskningsbeslut",
+      "instructions": "Skriv förslag till överförmyndarnämndens beslut om granskning av årsräkningen. Beslutet är antingen \"Årsräkningen granskas utan anmärkning\" eller \"Årsräkningen granskas med anmärkning\". Anmärkning ska göras om det finns en differens som inte är förklarad, uttag från spärrat konto utan samtycke eller kontantuttag som inte är redovisade med kvitton. Redovisa för varje anmärkning datum och belopp och vad ställföreträdaren ska komplettera med. Granskningen görs enligt föräldrabalken 16 kap. 3 §. Upplys om att beslutet kan överklagas till tingsrätten (föräldrabalken 20 kap. 6 §) och att överklagandet ska ha kommit in till överförmyndarnämnden inom tre veckor från den dag ställföreträdaren fick del av beslutet. Ange huvudmannen med namn men skriv inte ut personnumret. Avsluta med granskarens namn.",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_bindings": {
+        "question": "Ärende: {{ flow_input.arende }}\nHuvudman: {{ flow_input.huvudman }}\nStällföreträdare: {{ flow_input.stallforetradare }}\nGranskare: {{ flow_input.granskare }}",
+        "source_refs": [{"step_ref": "step_1", "output": "structured", "label": "Avstämning"}]
+      },
+      "output_mode": "pass_through",
+      "output_type": "text"
+    }
+  ]
+}

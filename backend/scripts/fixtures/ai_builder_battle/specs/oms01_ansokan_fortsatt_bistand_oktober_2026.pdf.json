@@ -1,0 +1,274 @@
+{
+  "file": "oms01_ansokan_fortsatt_bistand_oktober_2026.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "OMS-01",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/180"
+  },
+  "description": "Kvittens från e-tjänsten Ansökan om ekonomiskt bistånd (fortsatt ansökan) med sökandens egna uppgifter om hushåll, boende, utgifter, inkomster, tillgångar och planering; sökanden uppger hyra inklusive parkering och inga övriga inkomster.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "E-tjänst: Ansökan om ekonomiskt bistånd",
+    "address": "Individ- och arbetsmarknadsnämnden, 851 85 Sundsvall"
+  },
+  "date": "2026-09-21",
+  "title": "Ansökan om ekonomiskt bistånd – fortsatt ansökan",
+  "blocks": [
+    {
+      "paragraph": "Ärendenummer i e-tjänsten: 2026-180-044187. Inskickad 2026-09-21 kl. 08:52 och signerad med BankID av sökanden. Den här kvittensen visar uppgifterna så som de lämnades i e-tjänsten."
+    },
+    {
+      "heading": "Ansökan avser"
+    },
+    {
+      "table": {
+        "columns": [
+          "Fråga",
+          "Svar"
+        ],
+        "rows": [
+          [
+            "Typ av ansökan",
+            "Fortsatt ansökan"
+          ],
+          [
+            "Månad som ansökan avser",
+            "Oktober 2026"
+          ],
+          [
+            "Gemensam ansökan med make, maka eller sambo",
+            "Nej"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Personuppgifter"
+    },
+    {
+      "table": {
+        "columns": [
+          "Personuppgift",
+          "Svar"
+        ],
+        "rows": [
+          [
+            "Namn",
+            "Sofia Berglund"
+          ],
+          [
+            "Personnummer",
+            "19880521-2381"
+          ],
+          [
+            "Adress",
+            "Kvarnbäcksvägen 12 lgh 1102, 856 44 Sundsvall"
+          ],
+          [
+            "Mobilnummer",
+            "070-552 18 43"
+          ],
+          [
+            "Civilstånd",
+            "Ensamstående"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Barn i hushållet"
+    },
+    {
+      "table": {
+        "columns": [
+          "Namn",
+          "Personnummer",
+          "Bor hos sökanden"
+        ],
+        "rows": [
+          [
+            "Elsa Berglund",
+            "20160904-2385",
+            "Heltid"
+          ],
+          [
+            "Noah Berglund",
+            "20230218-2395",
+            "Heltid"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Boendesituation"
+    },
+    {
+      "table": {
+        "columns": [
+          "Boende",
+          "Svar"
+        ],
+        "rows": [
+          [
+            "Boendeform",
+            "Hyresrätt, förstahandskontrakt"
+          ],
+          [
+            "Hyresvärd",
+            "Bostads AB Kvarnbäcken"
+          ],
+          [
+            "Storlek",
+            "3 rum och kök"
+          ],
+          [
+            "Hyra per månad enligt sökanden",
+            "8 450 kr"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Utgifter per månad"
+    },
+    {
+      "table": {
+        "columns": [
+          "Utgift",
+          "Belopp",
+          "Underlag bifogat"
+        ],
+        "rows": [
+          [
+            "Hyra",
+            "8 450 kr",
+            "Hyresavi oktober"
+          ],
+          [
+            "Hushållsel",
+            "612 kr",
+            "Nej"
+          ],
+          [
+            "Hemförsäkring",
+            "189 kr",
+            "Nej"
+          ],
+          [
+            "Resor, månadsbiljett buss",
+            "540 kr",
+            "Nej"
+          ],
+          [
+            "Barnomsorg",
+            "0 kr",
+            "–"
+          ],
+          [
+            "Avbetalning Handelskredit",
+            "450 kr",
+            "Nej"
+          ],
+          [
+            "Läkarvård och medicin",
+            "–",
+            "–"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Inkomster per månad"
+    },
+    {
+      "table": {
+        "columns": [
+          "Inkomst",
+          "Belopp"
+        ],
+        "rows": [
+          [
+            "Barnbidrag inklusive flerbarnstillägg",
+            "2 650 kr"
+          ],
+          [
+            "Bostadsbidrag",
+            "2 184 kr"
+          ],
+          [
+            "Underhållsstöd",
+            "Ansökt hos Försäkringskassan 2026-08-20, inget beslut ännu"
+          ],
+          [
+            "Lön",
+            "0 kr"
+          ],
+          [
+            "Arbetslöshetsersättning eller aktivitetsstöd",
+            "0 kr"
+          ],
+          [
+            "Övriga inkomster",
+            "Inga"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Tillgångar"
+    },
+    {
+      "table": {
+        "columns": [
+          "Tillgång",
+          "Svar"
+        ],
+        "rows": [
+          [
+            "Bankkonton",
+            "Privatkonto 7777-12 345 678 i Kustlandets Bank, saldo 2026-09-20: 1 212 kr"
+          ],
+          [
+            "Bil eller annat fordon",
+            "Nej"
+          ],
+          [
+            "Fastighet eller bostadsrätt",
+            "Nej"
+          ],
+          [
+            "Aktier, fonder eller annat sparande",
+            "Nej"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Planering"
+    },
+    {
+      "paragraph": "Jag är inskriven på Arbetsförmedlingen och söker arbete. Den 12 oktober börjar jag en arbetsmarknadsutbildning inom lager och logistik i Birsta. Busskortet behöver jag för att ta mig till utbildningen."
+    },
+    {
+      "heading": "Utbetalning"
+    },
+    {
+      "paragraph": "Utbetalning till sökandens konto 7777-12 345 678 i Kustlandets Bank."
+    },
+    {
+      "heading": "Övriga upplysningar"
+    },
+    {
+      "paragraph": "Elsa har börjat spela fotboll i IFK Kvarnbäcken, höstavgiften på 300 kr betalade jag i augusti. Noah går i förskola 15 timmar i veckan sedan augusti."
+    },
+    {
+      "heading": "Försäkran"
+    },
+    {
+      "paragraph": "Jag försäkrar på heder och samvete att de uppgifter jag har lämnat är riktiga och fullständiga. Jag vet att oriktiga uppgifter kan leda till återkrav och polisanmälan, och jag lovar att genast anmäla ändrade förhållanden."
+    },
+    {
+      "paragraph": "Signerad med BankID 2026-09-21 kl. 08:52 av Sofia Berglund."
+    }
+  ]
+}

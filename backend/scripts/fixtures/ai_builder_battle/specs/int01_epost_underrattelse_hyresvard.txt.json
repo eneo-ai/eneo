@@ -1,0 +1,47 @@
+{
+  "file": "int01_epost_underrattelse_hyresvard.txt",
+  "format": "txt",
+  "source": {
+    "catalogue_id": "INT-01",
+    "url": "https://sundsvall.se/kommun/kommun-och-politik/diarium-arkiv-och-sekretess/diarium"
+  },
+  "description": "Ett oregistrerat e-postmeddelande till en nämnds myndighetsbrevlåda från en hyresvärd, med hyresgästens namn och adress i ämnesraden och två bilagor.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Individ- och arbetsmarknadsnämndens myndighetsbrevlåda, inkorg"
+  },
+  "date": "2026-09-21",
+  "title": "Underrättelse till socialnämnden – Kristoffer Åberg, Skönsbergsvägen 22 lgh 1102",
+  "blocks": [
+    {
+      "list": [
+        "Från: Maria Nordin <maria.nordin@norrakajen.example>",
+        "Till: Individ- och arbetsmarknadsnämnden <ian@sundsvall.example>",
+        "Skickat: måndag 21 september 2026 15:48",
+        "Ämne: Underrättelse till socialnämnden – Kristoffer Åberg, Skönsbergsvägen 22 lgh 1102",
+        "Bilagor: Underrattelse_socialnamnd_1102.pdf; Hyresspecifikation_1102.docx"
+      ]
+    },
+    {
+      "paragraph": "Hej,"
+    },
+    {
+      "paragraph": "Bostads AB Norra Kajen har sagt upp hyresavtalet för lägenhet 1102 på Skönsbergsvägen 22 på grund av obetald hyra för juli, augusti och september. Enligt 12 kap. 44 § jordabalken skickar vi härmed meddelande om uppsägningen och anledningen till den. Uppsägningen delgavs hyresgästen den 18 september 2026."
+    },
+    {
+      "paragraph": "Hyresgästen har haft en avbetalningsplan hos oss tidigare i år som han följde fram till juni. Det bor två barn i lägenheten varannan vecka."
+    },
+    {
+      "paragraph": "Underrättelsen skickas även med post. Hör gärna av er till mig om ni vill veta mer om skulden eller om kommunen överväger att ta över betalningsansvaret."
+    },
+    {
+      "paragraph": "Med vänlig hälsning"
+    },
+    {
+      "signature": {
+        "name": "Maria Nordin",
+        "role": "Inkassohandläggare, Bostads AB Norra Kajen, tel. 060-12 40 57"
+      }
+    }
+  ]
+}

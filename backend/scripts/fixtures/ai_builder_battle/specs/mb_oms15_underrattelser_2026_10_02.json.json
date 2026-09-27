@@ -1,0 +1,177 @@
+{
+  "file": "mb_oms15_underrattelser_2026_10_02.json",
+  "format": "json",
+  "source": {
+    "catalogue_id": "OMS-15",
+    "url": "https://e-tjanster.kristianstad.se/oversikt/overview/79"
+  },
+  "description": "Fredagens JSON-export från e-tjänsten Vräkning eller uppsägning: fem underrättelser från två hyresvärdar.",
+  "data": {
+    "export": {
+      "skapad": "2026-10-02T06:00",
+      "antal": 5
+    },
+    "underrattelser": [
+      {
+        "arende_id": "VU-2026-0412",
+        "inkom": "2026-09-28T09:41",
+        "hyresvard": {
+          "namn": "Bostads AB Linnéstaden",
+          "orgnr": "556318-4406",
+          "kontakt": "Hyresreskontran, 044-13 51 00"
+        },
+        "hyresgast": {
+          "namn": "Jasmina Kovač",
+          "personnummer": "19880101-2389",
+          "telefon": null
+        },
+        "lagenhet": {
+          "adress": "Göingegatan 14 A, 291 38 Kristianstad",
+          "lagenhetsnummer": null,
+          "lagenhetstyp": "B"
+        },
+        "grund": "1",
+        "skuld": 1845000,
+        "manader_obetalda": 2,
+        "delgiven": "2026-09-24",
+        "kronofogden": {
+          "mal_nummer": null,
+          "avhysning_planerad": null
+        },
+        "hushall": {
+          "vuxna": 1,
+          "barn": 2
+        },
+        "atgarder_hyresvard": "Påminnelser 2026-08-06 och 2026-09-03, ingen kontakt"
+      },
+      {
+        "arende_id": "VU-2026-0415",
+        "inkom": "2026-09-25T15:02",
+        "hyresvard": {
+          "namn": "Fastighets AB Näsby Park",
+          "orgnr": "559114-2277",
+          "kontakt": "Peter Lund, 070-218 44 90"
+        },
+        "hyresgast": {
+          "namn": "Bengt Åkesson",
+          "personnummer": "19480117-1770",
+          "telefon": "044-12 40 97"
+        },
+        "lagenhet": {
+          "adress": "Näsbyvägen 18, 291 50 Kristianstad",
+          "lagenhetsnummer": null,
+          "lagenhetstyp": "B"
+        },
+        "grund": "1",
+        "skuld": 2296000,
+        "manader_obetalda": 3,
+        "delgiven": "2026-09-29",
+        "kronofogden": {
+          "mal_nummer": null,
+          "avhysning_planerad": null
+        },
+        "hushall": {
+          "vuxna": 1,
+          "barn": 0
+        },
+        "atgarder_hyresvard": "Hyresgästen har uppgett att han väntar på bostadstillägg"
+      },
+      {
+        "arende_id": "VU-2026-0417",
+        "inkom": "2026-09-29T11:20",
+        "hyresvard": {
+          "namn": "Bostads AB Linnéstaden",
+          "orgnr": "556318-4406",
+          "kontakt": "Hyresreskontran, 044-13 51 00"
+        },
+        "hyresgast": {
+          "namn": "Samira Haddou",
+          "personnummer": "19900101-2385",
+          "telefon": null
+        },
+        "lagenhet": {
+          "adress": "Lingonvägen 3, 291 59 Kristianstad",
+          "lagenhetsnummer": null,
+          "lagenhetstyp": "B"
+        },
+        "grund": "3",
+        "skuld": 3412500,
+        "manader_obetalda": 5,
+        "delgiven": "2026-06-12",
+        "kronofogden": {
+          "mal_nummer": "12-458811-26",
+          "avhysning_planerad": "2026-10-14"
+        },
+        "hushall": {
+          "vuxna": 2,
+          "barn": 3
+        },
+        "atgarder_hyresvard": "Uppsagd i juni, hyran återvanns inte. Kronofogden har beslutat om avhysning"
+      },
+      {
+        "arende_id": "VU-2026-0419",
+        "inkom": "2026-09-30T08:55",
+        "hyresvard": {
+          "namn": "Fastighets AB Näsby Park",
+          "orgnr": "559114-2277",
+          "kontakt": "Peter Lund, 070-218 44 90"
+        },
+        "hyresgast": {
+          "namn": "Dennis Borg",
+          "personnummer": "19970101-2396",
+          "telefon": null
+        },
+        "lagenhet": {
+          "adress": "Näsbyvägen 22, 291 50 Kristianstad",
+          "lagenhetsnummer": null,
+          "lagenhetstyp": "B"
+        },
+        "grund": "2",
+        "skuld": 0,
+        "manader_obetalda": 0,
+        "delgiven": "2026-09-30",
+        "kronofogden": {
+          "mal_nummer": null,
+          "avhysning_planerad": null
+        },
+        "hushall": {
+          "vuxna": 1,
+          "barn": 1
+        },
+        "atgarder_hyresvard": "Tre skriftliga varningar om störningar sedan maj"
+      },
+      {
+        "arende_id": "VU-2026-0421",
+        "inkom": "2026-10-01T08:15",
+        "hyresvard": {
+          "namn": "Bostads AB Linnéstaden",
+          "orgnr": "556318-4406",
+          "kontakt": "Hyresreskontran, 044-13 51 00"
+        },
+        "hyresgast": {
+          "namn": "Aida Nuhanović",
+          "personnummer": "19850101-2382",
+          "telefon": null
+        },
+        "lagenhet": {
+          "adress": "Tallvägen 11 A, 291 45 Kristianstad",
+          "lagenhetsnummer": null,
+          "lagenhetstyp": "B"
+        },
+        "grund": "1",
+        "skuld": 912000,
+        "manader_obetalda": 1,
+        "delgiven": null,
+        "kronofogden": {
+          "mal_nummer": null,
+          "avhysning_planerad": null
+        },
+        "hushall": {
+          "vuxna": 1,
+          "barn": 1
+        },
+        "atgarder_hyresvard": "Uppsägning skickad med bud 2026-09-30, delgivningskvitto saknas ännu"
+      }
+    ]
+  }
+}

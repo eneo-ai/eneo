@@ -1,0 +1,74 @@
+{
+  "file": "me_utb05_chaufforsrapport_v41.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "UTB-05",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/773"
+  },
+  "description": "Trafikföretagets veckorapport från chaufförerna till kommunens skolskjutsenhet: händelser per tur och dag med chaufförens egen uppgift om försening och orsak; en uppgift om försening är lägre än GPS-loggen visar och en tur saknas helt.",
+  "letterhead": {
+    "organisation": "Ljungans Buss & Taxi AB",
+    "unit": "Trafikledningen",
+    "address": "Industrivägen 4, 861 32 Timrå"
+  },
+  "date": "2026-10-10",
+  "title": "Chaufförsrapport skolskjuts vecka 41 – avtal BUN-2023-0119",
+  "blocks": [
+    {
+      "paragraph": "Till: Sundsvalls kommun, barn- och utbildningsförvaltningen, skolskjutsenheten. Rapporten omfattar morgonturerna till Stöde skola, Kovlands skola och Lidens skola måndag 5 oktober till fredag 9 oktober 2026."
+    },
+    {
+      "heading": "Händelser under veckan"
+    },
+    {
+      "table": {
+        "columns": [
+          "Datum",
+          "Tur",
+          "Chaufför",
+          "Händelse och orsak",
+          "Uppgiven försening"
+        ],
+        "rows": [
+          [
+            "2026-10-05",
+            "SK-431",
+            "Mats Östlund",
+            "Väg 86 avstängd efter trafikolycka vid Nedansjö, omledning via Matfors. Skolan informerad 07:55.",
+            "15 min"
+          ],
+          [
+            "2026-10-06",
+            "SK-412",
+            "Leena Haapala",
+            "Köer vid vägarbetet på E14 vid Stöde. Alla elever hämtades.",
+            "ca 8 min"
+          ],
+          [
+            "2026-10-07",
+            "SK-421",
+            "Johan Berglöf",
+            "En elev var inte vid hållplatsen i Västra Kovland, väntade enligt rutin.",
+            "5 min"
+          ],
+          [
+            "2026-10-08",
+            "SK-431",
+            "Mats Östlund",
+            "Tur körd enligt plan. GPS-enheten i fordonet ur funktion, byts vecka 42.",
+            "0 min"
+          ]
+        ]
+      }
+    },
+    {
+      "paragraph": "Inga övriga händelser har rapporterats av chaufförerna under veckan."
+    },
+    {
+      "signature": {
+        "name": "Anneli Rydberg",
+        "role": "Trafikledare, Ljungans Buss & Taxi AB"
+      }
+    }
+  ]
+}

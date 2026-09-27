@@ -1,30 +1,30 @@
 {
   "version": 2,
-  "description": "Coverage policy for the municipal tier (ai_builder_api_municipal_cases.json), checked by ai_builder_corpus_coverage.py over the parsed cases. Until the first batch (the 20 smoke cases) lands this is its target; after that it states what the tier guarantees, raised batch by batch toward the end targets in the corpus plan. Audio runtime input is added after the audio preflight; features after their gold (corpus H2).",
+  "description": "Coverage policy for the municipal tier (ai_builder_api_municipal_cases.json), checked by ai_builder_corpus_coverage.py over the parsed cases. The minimums are the delivered tier's counts (89 cases: 62 create, 20 edit, 7 dialogue), so a change that drops a class fails the check; raise them when cases are added. The smoke set is the corpus plan's 20-case subset. Audio runtime input is added after the audio preflight; features after their gold (corpus H2).",
   "require_source": true,
   "builder_inputs": {
-    "pdf": 1,
-    "docx": 1,
-    "csv": 1,
-    "xlsx": 1,
-    "json": 1,
-    "txt": 1
+    "pdf": 8,
+    "docx": 24,
+    "csv": 2,
+    "xlsx": 3,
+    "json": 2,
+    "txt": 2
   },
   "runtime_inputs": {
-    "pdf": 1,
-    "docx": 1,
-    "csv": 1,
-    "xlsx": 1,
-    "json": 1,
-    "txt": 1,
-    "text": 1,
-    "form": 1
+    "pdf": 51,
+    "docx": 23,
+    "csv": 17,
+    "xlsx": 20,
+    "json": 19,
+    "txt": 14,
+    "text": 6,
+    "form": 29
   },
   "output_kinds": {
-    "text": 1,
-    "json": 1,
-    "docx": 1,
-    "pdf": 1
+    "text": 28,
+    "json": 10,
+    "docx": 40,
+    "pdf": 2
   },
   "smoke": {
     "ids": [

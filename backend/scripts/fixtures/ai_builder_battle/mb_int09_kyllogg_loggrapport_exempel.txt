@@ -1,0 +1,85 @@
+KylLogg Pro 4.2 – loggrapport
+Restaurang Sjöboden, Sundsvall
+
+Datum: 2026-06-11
+
+Loggrapport temperaturövervakning 2026-06-08 – 2026-06-10
+
+Anläggning: Restaurang Sjöboden, registreringsnummer LIV-2021-00144. Loggintervall 4 timmar.
+
+Givare | Placering | Larmgräns
+G1 | Kylrum | över +8,0 °C
+G2 | Frysrum | över −18,0 °C
+G3 | Kyldisk bar | över +8,0 °C
+
+Datum | Tid | Givare | Värde | Status
+2026-06-08 | 00:00 | G1 | 44 | –
+2026-06-08 | 00:00 | G2 | -186 | –
+2026-06-08 | 00:00 | G3 | 68 | –
+2026-06-08 | 04:00 | G1 | 52 | –
+2026-06-08 | 04:00 | G2 | -190 | –
+2026-06-08 | 04:00 | G3 | 72 | –
+2026-06-08 | 08:00 | G1 | 47 | –
+2026-06-08 | 08:00 | G2 | -193 | –
+2026-06-08 | 08:00 | G3 | 66 | –
+2026-06-08 | 12:00 | G1 | 40 | –
+2026-06-08 | 12:00 | G2 | -187 | –
+2026-06-08 | 12:00 | G3 | 58 | –
+2026-06-08 | 16:00 | G1 | 38 | –
+2026-06-08 | 16:00 | G2 | -188 | –
+2026-06-08 | 16:00 | G3 | 55 | –
+2026-06-08 | 20:00 | G1 | 41 | –
+2026-06-08 | 20:00 | G2 | -191 | –
+2026-06-08 | 20:00 | G3 | 61 | –
+2026-06-09 | 00:00 | G1 | 52 | –
+2026-06-09 | 00:00 | G2 | -190 | –
+2026-06-09 | 00:00 | G3 | 72 | –
+2026-06-09 | 04:00 | G1 | 47 | –
+2026-06-09 | 04:00 | G2 | -41 | D
+2026-06-09 | 04:00 | G3 | 66 | –
+2026-06-09 | 08:00 | G1 | 40 | –
+2026-06-09 | 08:00 | G2 | -187 | –
+2026-06-09 | 08:00 | G3 | 58 | –
+2026-06-09 | 12:00 | G1 | 38 | –
+2026-06-09 | 12:00 | G2 | -188 | –
+2026-06-09 | 12:00 | G3 | 86 | L
+2026-06-09 | 16:00 | G1 | 41 | –
+2026-06-09 | 16:00 | G2 | -191 | –
+2026-06-09 | 16:00 | G3 | 91 | –
+2026-06-09 | 20:00 | G1 | 44 | –
+2026-06-09 | 20:00 | G2 | -186 | –
+2026-06-09 | 20:00 | G3 | 74 | –
+2026-06-10 | 00:00 | G1 | 47 | –
+2026-06-10 | 00:00 | G2 | -193 | –
+2026-06-10 | 00:00 | G3 | 66 | –
+2026-06-10 | 04:00 | G1 | 40 | –
+2026-06-10 | 04:00 | G2 | -187 | –
+2026-06-10 | 04:00 | G3 | 58 | –
+2026-06-10 | 08:00 | G1 | 83 | –
+2026-06-10 | 08:00 | G2 | -188 | –
+2026-06-10 | 08:00 | G3 | 55 | –
+2026-06-10 | 12:00 | G1 | 41 | –
+2026-06-10 | 12:00 | G2 | -191 | –
+2026-06-10 | 12:00 | G3 | 61 | –
+2026-06-10 | 16:00 | G1 | --- | B
+2026-06-10 | 16:00 | G2 | -186 | –
+2026-06-10 | 16:00 | G3 | 68 | –
+2026-06-10 | 20:00 | G1 | --- | B
+2026-06-10 | 20:00 | G2 | -190 | –
+2026-06-10 | 20:00 | G3 | 72 | –
+
+Teckenförklaring (KylLogg Pro användarhandbok, avsnitt 7.3)
+
+- Värde anges i tiondels grader Celsius utan decimaltecken: 41 betyder +4,1 °C och -188 betyder −18,8 °C.
+- Status – = normal mätning.
+- Status D = avfrostning pågår. Kyl och frys avfrostas automatiskt och temperaturen är då tillfälligt förhöjd; det är normalt och ingen avvikelse.
+- Status L = larmet har kvitterats av personal. Temperaturen är fortfarande den uppmätta, kvitteringen tar inte bort avvikelsen.
+- Status B = batteriet är slut eller givaren är offline. Värdet saknas (---).
+
+Min anteckning om hur jag bedömer loggen (Hanna Öberg, livsmedelsinspektör)
+
+- En avvikelse är när samma givare ligger över sin larmgräns vid två eller fler mätningar i följd. Ange givare, placering, period (första och sista mätningen över gränsen) och högsta värdet.
+- En enstaka mätning över gränsen noteras men är ingen avvikelse (t.ex. G1 2026-06-10 08:00, +8,3 °C, dörren stod öppen vid varuinleverans).
+- Mätningar med status D räknas inte, varken som avvikelse eller som enstaka mätning.
+- Mätningar med status B är luckor i loggen och noteras som brist i egenkontrollen, med givare och tid.
+- I Sjöbodens logg blev det alltså en avvikelse: G3 kyldisk bar 2026-06-09 12:00–16:00, högst +9,1 °C.

@@ -1,0 +1,137 @@
+{
+  "file": "ofm01_fakturor_solgarden_2025.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "OFM-01",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/242"
+  },
+  "description": "Avgiftsenhetens årssammanställning 2025 av hyra, omsorgsavgift och kost på Solgårdens vård- och omsorgsboende, per månad med betalningsstatus.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Vård- och omsorgsförvaltningen, Avgiftsenheten",
+    "address": "851 85 Sundsvall"
+  },
+  "date": "2026-01-20",
+  "title": "Årssammanställning av hyra och avgifter 2025",
+  "blocks": [
+    {
+      "paragraph": "Kund: Gunnel Marklund, kundnummer 44120, Solgårdens vård- och omsorgsboende, lägenhet 14. Fakturaadress: c/o Lennart Byström, Bergsgatan 44, 852 32 Sundsvall."
+    },
+    {
+      "table": {
+        "columns": [
+          "Månad",
+          "Hyra (kr)",
+          "Omsorgsavgift (kr)",
+          "Kost (kr)",
+          "Att betala (kr)",
+          "Betalning"
+        ],
+        "rows": [
+          [
+            "2025-01",
+            "7 245",
+            "2 576",
+            "3 350",
+            "13 171",
+            "Betald via autogiro 2025-01-28"
+          ],
+          [
+            "2025-02",
+            "7 245",
+            "2 576",
+            "3 350",
+            "13 171",
+            "Betald via autogiro 2025-02-28"
+          ],
+          [
+            "2025-03",
+            "7 245",
+            "2 576",
+            "3 350",
+            "13 171",
+            "Betald via autogiro 2025-03-28"
+          ],
+          [
+            "2025-04",
+            "7 245",
+            "2 576",
+            "3 350",
+            "13 171",
+            "Betald via autogiro 2025-04-28"
+          ],
+          [
+            "2025-05",
+            "7 245",
+            "2 576",
+            "3 350",
+            "13 171",
+            "Betald via autogiro 2025-05-28"
+          ],
+          [
+            "2025-06",
+            "7 245",
+            "2 576",
+            "3 350",
+            "13 171",
+            "Betald via autogiro 2025-06-28"
+          ],
+          [
+            "2025-07",
+            "7 245",
+            "2 576",
+            "3 350",
+            "13 171",
+            "Betald via autogiro 2025-07-28"
+          ],
+          [
+            "2025-08",
+            "7 245",
+            "2 576",
+            "3 350",
+            "13 171",
+            "Betald via autogiro 2025-08-28"
+          ],
+          [
+            "2025-09",
+            "7 245",
+            "2 576",
+            "3 350",
+            "13 171",
+            "Betald via autogiro 2025-09-28"
+          ],
+          [
+            "2025-10",
+            "7 245",
+            "2 576",
+            "3 350",
+            "13 171",
+            "Betald via autogiro 2025-10-28"
+          ],
+          [
+            "2025-11",
+            "7 245",
+            "2 576",
+            "3 350",
+            "13 171",
+            "Betald via autogiro 2025-11-28"
+          ],
+          [
+            "2025-12",
+            "7 245",
+            "2 576",
+            "3 350",
+            "13 171",
+            "Betald via autogiro 2025-12-28"
+          ]
+        ]
+      }
+    },
+    {
+      "paragraph": "Summa 2025: hyra 86 940 kr, omsorgsavgift 30 912 kr och kost 40 200 kr, totalt 158 052 kr. Omsorgsavgiften är beräknad enligt maxtaxan i 32 kap. socialtjänstlagen (2025:400)."
+    },
+    {
+      "paragraph": "Frågor om avgiften besvaras av avgiftsenheten, telefon 060-19 31 80."
+    }
+  ]
+}

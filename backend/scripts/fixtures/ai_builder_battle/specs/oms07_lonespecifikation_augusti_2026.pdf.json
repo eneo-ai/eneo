@@ -1,0 +1,145 @@
+{
+  "file": "oms07_lonespecifikation_augusti_2026.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "OMS-07",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/80"
+  },
+  "description": "Assistansanordnarens lönespecifikation för augusti 2026 för den ordinarie personliga assistenten: arbetad tid och OB, sjuklön och sjuk-OB 80 procent för sjukperioden, karensavdrag, semesterersättning och skatt.",
+  "letterhead": {
+    "organisation": "Assistanskompaniet Norrland AB",
+    "unit": "Lönespecifikation",
+    "address": "Box 823, 851 23 Sundsvall · Org.nr 559287-4410"
+  },
+  "date": "2026-09-25",
+  "title": "Lönespecifikation augusti 2026",
+  "blocks": [
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Värde"
+        ],
+        "rows": [
+          [
+            "Anställd",
+            "Elin Forsberg"
+          ],
+          [
+            "Personnummer",
+            "19910403-2389"
+          ],
+          [
+            "Anställningsnummer",
+            "1047"
+          ],
+          [
+            "Befattning",
+            "Personlig assistent, timavlönad enligt schema"
+          ],
+          [
+            "Kund",
+            "Oskar Lindgren"
+          ],
+          [
+            "Löneperiod",
+            "2026-08-01 – 2026-08-31"
+          ],
+          [
+            "Utbetalningsdag",
+            "2026-09-25"
+          ],
+          [
+            "Timlön",
+            "182,50 kr"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Specifikation"
+    },
+    {
+      "table": {
+        "columns": [
+          "Löneart",
+          "Period",
+          "Antal",
+          "À-pris",
+          "Belopp kr"
+        ],
+        "rows": [
+          [
+            "Timlön arbetad tid",
+            "aug 2026",
+            "109,0 tim",
+            "182,50",
+            "19 892,50"
+          ],
+          [
+            "OB-tillägg kväll och helg",
+            "aug 2026",
+            "45,0 tim",
+            "55,00",
+            "2 475,00"
+          ],
+          [
+            "Sjuklön 80 %",
+            "2026-08-10 – 2026-08-17",
+            "47,0 tim",
+            "146,00",
+            "6 862,00"
+          ],
+          [
+            "Sjuk-OB 80 %",
+            "2026-08-10 – 2026-08-17",
+            "15,0 tim",
+            "44,00",
+            "660,00"
+          ],
+          [
+            "Karensavdrag",
+            "2026-08-10",
+            "1",
+            "",
+            "-1 121,28"
+          ],
+          [
+            "Semesterersättning 12 %",
+            "aug 2026",
+            "",
+            "",
+            "3 452,19"
+          ],
+          [
+            "Bruttolön",
+            "",
+            "",
+            "",
+            "32 220,41"
+          ],
+          [
+            "Preliminärskatt, tabell 33",
+            "",
+            "",
+            "",
+            "-9 183,00"
+          ],
+          [
+            "Att utbetala",
+            "",
+            "",
+            "",
+            "23 037,41"
+          ]
+        ]
+      }
+    },
+    {
+      "paragraph": "Sjuklön betalas med 80 procent av lön och OB-tillägg för de pass som den anställda var schemalagd under sjukperioden, enligt sjuklönelagen (1991:1047). Karensavdraget görs en gång per sjukperiod. Karensavdraget är 20 procent av den genomsnittliga veckosjuklönen 5 606,40 kr (38,4 timmar à 146,00 kr)."
+    },
+    {
+      "paragraph": "Frågor om lönen besvaras av löneadministrationen, lon@assistanskompaniet-norrland.se."
+    }
+  ]
+}
