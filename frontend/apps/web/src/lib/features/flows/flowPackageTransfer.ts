@@ -79,7 +79,58 @@ export const FLOW_PACKAGE_EXPORT_ERROR_CODES = [
 export type FlowPackageImportErrorCode = (typeof FLOW_PACKAGE_IMPORT_ERROR_CODES)[number];
 export type FlowPackageExportErrorCode = (typeof FLOW_PACKAGE_EXPORT_ERROR_CODES)[number];
 type FlowPackageErrorCode = FlowPackageImportErrorCode | FlowPackageExportErrorCode;
-type FlowPackageErrorMessageKey = `flow_package_error_${FlowPackageErrorCode}`;
+
+// One message per code, named literally so a missing code is a type error and
+// the catalogue's unused-key check sees every message in use.
+const FLOW_PACKAGE_ERROR_MESSAGES = {
+  duplicate_slot_binding: m.flow_package_error_duplicate_slot_binding,
+  flow_package_base64_invalid: m.flow_package_error_flow_package_base64_invalid,
+  flow_package_zip_unsafe: m.flow_package_error_flow_package_zip_unsafe,
+  flow_package_manifest_invalid: m.flow_package_error_flow_package_manifest_invalid,
+  flow_package_requirements_invalid: m.flow_package_error_flow_package_requirements_invalid,
+  flow_package_flow_draft_invalid: m.flow_package_error_flow_package_flow_draft_invalid,
+  flow_package_provenance_invalid: m.flow_package_error_flow_package_provenance_invalid,
+  flow_package_schema_unsupported: m.flow_package_error_flow_package_schema_unsupported,
+  flow_package_kind_unsupported: m.flow_package_error_flow_package_kind_unsupported,
+  flow_package_checksum_mismatch: m.flow_package_error_flow_package_checksum_mismatch,
+  flow_package_local_resource_refs_not_portable:
+    m.flow_package_error_flow_package_local_resource_refs_not_portable,
+  flow_package_import_draft_references_undeclared_slot:
+    m.flow_package_error_flow_package_import_draft_references_undeclared_slot,
+  flow_package_import_unknown_resource_binding:
+    m.flow_package_error_flow_package_import_unknown_resource_binding,
+  flow_package_import_missing_required_resource_binding:
+    m.flow_package_error_flow_package_import_missing_required_resource_binding,
+  flow_package_import_unavailable_local_resource:
+    m.flow_package_error_flow_package_import_unavailable_local_resource,
+  flow_package_import_selected_model_ineligible:
+    m.flow_package_error_flow_package_import_selected_model_ineligible,
+  flow_package_import_mcp_unsupported: m.flow_package_error_flow_package_import_mcp_unsupported,
+  flow_package_import_template_assets_unsupported:
+    m.flow_package_error_flow_package_import_template_assets_unsupported,
+  flow_package_import_name_collision: m.flow_package_error_flow_package_import_name_collision,
+  flow_package_file_too_large: m.flow_package_error_flow_package_file_too_large,
+  transcription_model_required: m.flow_package_error_transcription_model_required,
+  flow_package_export_missing_assistant_snapshot:
+    m.flow_package_error_flow_package_export_missing_assistant_snapshot,
+  flow_package_export_unsupported_step_io:
+    m.flow_package_error_flow_package_export_unsupported_step_io,
+  flow_package_export_step_config_not_portable:
+    m.flow_package_error_flow_package_export_step_config_not_portable,
+  flow_package_export_unmapped_resource_ref:
+    m.flow_package_error_flow_package_export_unmapped_resource_ref,
+  flow_package_export_duplicate_resource_binding:
+    m.flow_package_error_flow_package_export_duplicate_resource_binding,
+  flow_package_export_template_asset_payload_unsupported:
+    m.flow_package_error_flow_package_export_template_asset_payload_unsupported,
+  flow_package_export_variable_reference_invalid:
+    m.flow_package_error_flow_package_export_variable_reference_invalid,
+  flow_package_export_json_payload_too_deep:
+    m.flow_package_error_flow_package_export_json_payload_too_deep,
+  flow_package_export_form_schema_invalid:
+    m.flow_package_error_flow_package_export_form_schema_invalid,
+  flow_package_export_too_large: m.flow_package_error_flow_package_export_too_large
+} satisfies Record<FlowPackageErrorCode, () => string>;
 
 export function getFlowPackageSlotKey(
   slotRef: Pick<FlowPackageResourceSlotRef, "kind" | "slot">
@@ -334,13 +385,13 @@ export function normalizeFlowPackageId(value: string): string {
 export function mapFlowPackageImportError(error: unknown): string | null {
   const code = getFlowPackageResponseCode(error);
   if (!code || !isFlowPackageImportErrorCode(code)) return null;
-  return m[flowPackageErrorMessageKey(code)]();
+  return FLOW_PACKAGE_ERROR_MESSAGES[code]();
 }
 
 export function mapFlowPackageExportError(error: unknown): string | null {
   const code = getFlowPackageResponseCode(error);
   if (!code || !isFlowPackageExportErrorCode(code)) return null;
-  const message = m[flowPackageErrorMessageKey(code)]();
+  const message = FLOW_PACKAGE_ERROR_MESSAGES[code]();
   // The server names the refused step and settings field, never their values.
   const context = getFlowPackageResponseContext(error);
   const step = context?.step_order;
@@ -376,10 +427,6 @@ function getRecommendedCandidateKey(resolution: FlowPackageDependencyResolution)
   if (!resolution.auto_select_allowed) return null;
   const [firstCandidate] = resolution.suggestions;
   return firstCandidate ? getFlowPackageCandidateKey(firstCandidate) : null;
-}
-
-function flowPackageErrorMessageKey(code: FlowPackageErrorCode): FlowPackageErrorMessageKey {
-  return `flow_package_error_${code}`;
 }
 
 function isFlowPackageImportErrorCode(code: string): code is FlowPackageImportErrorCode {
