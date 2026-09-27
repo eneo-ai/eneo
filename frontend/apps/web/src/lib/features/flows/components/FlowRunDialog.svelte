@@ -478,6 +478,9 @@
     try {
       runContractError = null;
       runContract = await eneo.flows.runContract.get({ id: flowId });
+      // The first page is there now: focus moves on from the dialog to its heading,
+      // unless the user has moved it meanwhile.
+      focusPageHeading({ onlyFrom: dialogTitleEl() });
     } catch (error) {
       runContract = null;
       runContractError = getFlowRuntimeErrorMessage(
@@ -1358,14 +1361,20 @@
     }
   }
 
-  function focusPageHeading() {
+  // The page heading (in the header area, not inside pageContentEl); the dialog's
+  // title while the run contract loads or failed and there is no page. With
+  // onlyFrom, focus moves only if it is still there when the frame runs: the user
+  // may have moved it meanwhile.
+  let dialogContentEl = $state<HTMLElement | null>(null);
+  function dialogTitleEl() {
+    return dialogContentEl?.querySelector<HTMLElement>("[data-dialog-title]") ?? null;
+  }
+  function focusPageHeading({ onlyFrom }: { onlyFrom?: Element | null } = {}) {
     requestAnimationFrame(() => {
-      // data-wizard-heading is in the header area, not inside pageContentEl
-      const dialogEl = pageContentEl?.closest("[data-slot='dialog-content']");
-      const heading = dialogEl?.querySelector<HTMLElement>("[data-wizard-heading]");
-      if (heading) {
-        heading.focus();
-      }
+      if (onlyFrom !== undefined && document.activeElement !== onlyFrom) return;
+      (
+        dialogContentEl?.querySelector<HTMLElement>("[data-wizard-heading]") ?? dialogTitleEl()
+      )?.focus();
       // Scroll content area to top on page change
       if (pageContentEl) {
         pageContentEl.scrollTop = 0;
@@ -1632,6 +1641,13 @@
     escapeKeydownBehavior={closeBehavior}
     onInteractOutside={handleInteractOutside}
     onEscapeKeydown={handleEscapeKeydown}
+    bind:ref={dialogContentEl}
+    onOpenAutoFocus={(event) => {
+      // The page heading, as on every page change: a screen reader starts there and
+      // Tab reaches the page's first field, not the close button.
+      event.preventDefault();
+      focusPageHeading({ onlyFrom: document.activeElement });
+    }}
   >
     <FlowRunDialogHeader
       flowName={flow.name}
@@ -1659,6 +1675,9 @@
               variant="outline"
               size="sm"
               onclick={() => {
+                // This button goes away as the retry starts; focus waits on the title
+                // and moves on to the page heading once the page is there.
+                dialogTitleEl()?.focus();
                 runContractLoadedForFlowId = null;
               }}
             >

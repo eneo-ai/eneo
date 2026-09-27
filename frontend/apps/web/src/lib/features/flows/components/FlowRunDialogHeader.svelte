@@ -23,7 +23,13 @@
 <header class="border-default/60 shrink-0 border-b px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
   <div class="flex items-start justify-between gap-4">
     <div class="min-w-0">
-      <Dialog.Title class="text-primary text-lg font-semibold tracking-tight sm:text-xl">
+      <!-- Focus rests here while there is no page heading yet: the run contract is
+           loading or failed to load, possibly for good, so it shows a keyboard ring. -->
+      <Dialog.Title
+        class="text-primary focus-visible:ring-ring/50 -mx-1 rounded-sm px-1 text-lg font-semibold tracking-tight outline-none focus-visible:ring-[3px] sm:text-xl"
+        data-dialog-title
+        tabindex={-1}
+      >
         {m.flow_run_trigger()}
       </Dialog.Title>
       <Dialog.Description
