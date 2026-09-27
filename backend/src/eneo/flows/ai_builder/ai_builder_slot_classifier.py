@@ -62,6 +62,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SLOT_CLASSIFICATION_TOOL_NAME,
     ResolvedSlotClassificationOutcome,
     SlotClassificationAttempt,
+    SlotClassificationAttemptOutcome,
     SlotClassificationBias,
     SlotClassificationInput,
     SlotClassificationResult,
@@ -87,7 +88,9 @@ logger = get_logger(__name__)
 # Debug tap for evidence-first parser work: when this env var names a
 # directory, every raw classifier completion is written there BEFORE the
 # parse boundary, so silent parser rejections can be attributed against the
-# exact provider payload. Off in normal operation.
+# exact provider payload. Replies refused before the parser (output cap, empty)
+# are written too, with that outcome; a reply handed to the parser has none.
+# Each file is bounded by the reply's own output cap. Off in normal operation.
 RAW_CLASSIFIER_CAPTURE_DIR_ENV = "ENEO_AI_BUILDER_RAW_CLASSIFIER_CAPTURE_DIR"
 
 
@@ -96,6 +99,8 @@ def _capture_raw_classifier_response(
     *,
     slot_names: Iterable[str],
     model: str,
+    outcome: SlotClassificationAttemptOutcome | None = None,
+    finish_reason: str | None = None,
 ) -> None:
     capture_dir = os.environ.get(RAW_CLASSIFIER_CAPTURE_DIR_ENV)
     if not capture_dir:
@@ -110,6 +115,8 @@ def _capture_raw_classifier_response(
                     "model": model,
                     "slot_names": sorted(slot_names),
                     "content": content,
+                    "outcome": outcome,
+                    "finish_reason": finish_reason,
                 },
                 ensure_ascii=False,
             ),
@@ -365,27 +372,35 @@ async def classify_slots(
             usage=usage,
         )
 
-    if response.choices and response.choices[0].finish_reason == "length":
-        return SlotClassificationAttempt(outcome="output_limit_exceeded")
-
+    finish_reason = response.choices[0].finish_reason if response.choices else None
+    refused: SlotClassificationAttempt | None = None
     if transport is SlotClassificationTransport.STRICT_TOOL and response.choices:
         arguments = _slot_classification_tool_arguments(response.choices[0].message)
         if isinstance(arguments, SlotClassificationAttempt):
-            return arguments
-        content = arguments
-
-    if content is None or (isinstance(content, str) and not content.strip()):
-        return SlotClassificationAttempt(outcome="no_content")
-    if not isinstance(content, str):
-        return SlotClassificationAttempt(outcome="parse_failed")
+            refused = arguments
+        else:
+            content = arguments
+    text = content if isinstance(content, str) else ""
+    if finish_reason == "length":
+        refused = SlotClassificationAttempt(outcome="output_limit_exceeded")
+    elif refused is None and not text.strip():
+        refused = SlotClassificationAttempt(
+            outcome="no_content"
+            if content is None or isinstance(content, str)
+            else "parse_failed"
+        )
 
     _capture_raw_classifier_response(
-        content,
+        text,
         slot_names=slot_names,
         model=litellm_model,
+        outcome=refused.outcome if refused is not None else None,
+        finish_reason=finish_reason if isinstance(finish_reason, str) else None,
     )
+    if refused is not None:
+        return refused
     result = slot_classification_contract.parse_slot_classification_response(
-        content,
+        text,
         allowed_slot_values=slot_values,
         classification_input=classification_input,
         schema_candidate_fingerprints=schema_candidate_fingerprints,
@@ -402,7 +417,7 @@ async def classify_slots(
                     slot_names=slot_names,
                     cached=False,
                 ),
-                "content_chars": len(content),
+                "content_chars": len(text),
             },
         )
         return SlotClassificationAttempt(outcome="parse_failed")

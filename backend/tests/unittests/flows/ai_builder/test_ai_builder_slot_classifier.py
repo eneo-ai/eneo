@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -5827,6 +5828,128 @@ def test_raw_classifier_capture_writes_pre_parse_content(
     payload = json.loads(files[0].read_text())
     assert payload["content"] == raw
     assert payload["slot_names"] == ["structured_io_contract"]
+
+
+async def _classify_captured(
+    response: Any, capture_dir: Path | None, monkeypatch: pytest.MonkeyPatch
+) -> tuple[str, list[dict[str, Any]]]:
+    if capture_dir is None:
+        monkeypatch.delenv(classifier.RAW_CLASSIFIER_CAPTURE_DIR_ENV, raising=False)
+    else:
+        monkeypatch.setenv(classifier.RAW_CLASSIFIER_CAPTURE_DIR_ENV, str(capture_dir))
+    client = AsyncMock()
+    client.acompletion.return_value = response
+    attempt = await classify_slots(
+        litellm_client=client,
+        completion_model_route=_route(model="gpt-test"),
+        classification_input=_classification_input(f"capture-{uuid4()}"),
+        allowed_slot_values={},
+        tenant_id=uuid4(),
+    )
+    captures = (
+        [json.loads(path.read_text()) for path in sorted(capture_dir.iterdir())]
+        if capture_dir is not None
+        else []
+    )
+    return attempt.outcome, captures
+
+
+@pytest.mark.asyncio
+async def test_raw_classifier_capture_keeps_a_reply_that_hit_the_output_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    capped = '{"slots": {"primary_runtime_input": {"outcome": "resolved", "rea'
+    response = _make_response(capped)
+    response.choices[0].finish_reason = "length"
+
+    outcome, captures = await _classify_captured(response, tmp_path, monkeypatch)
+
+    assert outcome == "output_limit_exceeded"
+    assert len(captures) == 1
+    assert captures[0]["content"] == capped
+    assert captures[0]["outcome"] == "output_limit_exceeded"
+    assert captures[0]["finish_reason"] == "length"
+    assert captures[0]["model"] == "gpt-test"
+
+
+@pytest.mark.asyncio
+async def test_raw_classifier_capture_keeps_capped_strict_tool_arguments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(classifier.RAW_CLASSIFIER_CAPTURE_DIR_ENV, str(tmp_path))
+    capped = '{"slots": {"primary_runtime_input": {"outcome": "reso'
+    response = _classification_tool_response(capped)
+    response.choices[0].finish_reason = "length"
+    client = AsyncMock()
+    client.acompletion.return_value = response
+
+    attempt = await classify_slots(
+        litellm_client=client,
+        completion_model_route=_route(supports_strict_tool_schema=True),
+        classification_input=_classification_input(f"capture-{uuid4()}"),
+        allowed_slot_values={},
+        tenant_id=uuid4(),
+    )
+
+    assert attempt.outcome == "output_limit_exceeded"
+    [capture] = [json.loads(path.read_text()) for path in tmp_path.iterdir()]
+    assert (capture["content"], capture["outcome"], capture["finish_reason"]) == (
+        capped,
+        "output_limit_exceeded",
+        "length",
+    )
+
+
+@pytest.mark.asyncio
+async def test_raw_classifier_capture_keeps_an_empty_reply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    response = _make_response("  ")
+    response.choices[0].finish_reason = "stop"
+
+    outcome, captures = await _classify_captured(response, tmp_path, monkeypatch)
+
+    assert outcome == "no_content"
+    assert [(c["content"], c["outcome"], c["finish_reason"]) for c in captures] == [
+        ("  ", "no_content", "stop")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_raw_classifier_capture_of_a_capped_reply_is_off_without_the_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    response = _make_response('{"slots": {')
+    response.choices[0].finish_reason = "length"
+
+    with patch.object(Path, "write_text") as write_text:
+        outcome, _ = await _classify_captured(response, None, monkeypatch)
+
+    assert outcome == "output_limit_exceeded"
+    write_text.assert_not_called()
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_raw_classifier_capture_of_a_parsed_reply_keeps_its_content_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    content = json.dumps(_VALID_CLASSIFICATION_RESPONSE)
+    response = _make_response(content)
+    response.choices[0].finish_reason = "stop"
+
+    outcome, captures = await _classify_captured(response, tmp_path, monkeypatch)
+
+    assert outcome == "resolved"
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
+    assert [path.name for path in tmp_path.iterdir()] == [
+        f"classifier-raw-{digest}.json"
+    ]
+    assert captures[0]["content"] == content
+    assert captures[0]["slot_names"] == []
+    assert captures[0]["finish_reason"] == "stop"
+    assert captures[0]["outcome"] is None
 
 
 def test_parser_accepts_names_cited_with_shape_notation_in_source() -> None:
