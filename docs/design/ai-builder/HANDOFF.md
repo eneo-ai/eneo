@@ -57,5 +57,5 @@ Vite dev server on http://127.0.0.1:3131 from your worktree against a running ba
 devcontainer stack (DB developz_devcontainer-db-1) or a lane API started with the pattern in
 /private/tmp/claude-501/-Users-ccimen-eneo-eneo-flows-clean/606c1cf8-e367-48c5-a92a-80b1f0dd43cb/scratchpad/measure-env.sh
 (own container names, own port; never touch eneo-measure-* or eneo-lane-* containers). Login user@example.com /
-Password1!. Night window: pause 01:00–06:00 Stockholm; no Codex launch after 00:10. Report per slice:
+Password1!. No night pause: work and Codex launches run around the clock (owner 2026-09-27). Report per slice:
 mapping table (design element → component), deviations with reasons, screenshots, gate score, sha, diff stat.
