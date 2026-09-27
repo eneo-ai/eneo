@@ -13,8 +13,8 @@ ENV NODE_OPTIONS=--max-old-space-size=8192
 # Install dependencies with Bun (uses frozen lockfile)
 RUN bun install --frozen-lockfile
 
-# Build the application
-RUN bun run build
+# This image ships apps/web; web-next has its own Dockerfile and build context.
+RUN bun run --filter @eneo/ui build && bun run --filter @eneo/web build
 
 # Stage 2: Production runtime using Node.js
 # Required ENV vars, see README.md
