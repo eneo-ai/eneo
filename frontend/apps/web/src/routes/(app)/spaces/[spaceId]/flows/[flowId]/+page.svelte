@@ -399,7 +399,11 @@
     { id: 2, labelKey: () => m.flow_stage_transcription() },
     { id: 3, labelKey: () => m.flow_stage_input_fields() },
     { id: 4, labelKey: () => m.flow_stage_processing_steps() },
-    { id: 5, labelKey: () => m.flow_stage_review_test() }
+    // A draft can only be checked; running it takes publishing.
+    {
+      id: 5,
+      labelKey: () => ($isPublished ? m.flow_stage_review_test() : m.flow_stage_review())
+    }
   ];
 
   const currentStageIndex = $derived(
@@ -1386,7 +1390,8 @@
                       id="flow-review-testing-heading"
                       class="text-[0.9375rem] font-semibold tracking-[-0.005em]"
                     >
-                      {m.flow_testing()}
+                      <!-- A draft cannot be run yet, only checked. -->
+                      {$isPublished ? m.flow_testing() : m.flow_check_before_publish()}
                     </h3>
                     {#if $isPublished && $userMode === "power_user"}
                       <p class="text-secondary mt-1 text-sm leading-relaxed">
