@@ -610,7 +610,8 @@ const requirementsSummaryEventDataSchema = z.object({
         segments: z.array(z.string()).default([]),
         unplaced: z.boolean().default(false),
         can_contain_fields: z.boolean().default(false),
-        origin: z.enum(["described", "card_edit"]).optional()
+        origin: z.enum(["described", "card_edit"]).optional(),
+        declared_shape: z.enum(["array", "object"]).nullable().optional()
       })
     )
     .optional(),
