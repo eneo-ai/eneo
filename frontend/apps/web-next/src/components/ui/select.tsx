@@ -4,6 +4,7 @@ import * as React from "react";
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { Select as SelectPrimitive } from "radix-ui";
 
+import { useNonce } from "@/components/providers/nonce";
 import { cn } from "@/lib/utils";
 
 function Select({ ...props }: React.ComponentProps<typeof SelectPrimitive.Root>) {
@@ -51,6 +52,7 @@ function SelectContent({
   align = "center",
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
+  const nonce = useNonce();
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
@@ -67,6 +69,7 @@ function SelectContent({
       >
         <SelectScrollUpButton />
         <SelectPrimitive.Viewport
+          nonce={nonce}
           className={cn(
             "p-1",
             position === "popper" &&
