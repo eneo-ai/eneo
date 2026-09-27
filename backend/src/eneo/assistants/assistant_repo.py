@@ -47,7 +47,7 @@ from eneo.database.tables.websites_table import CrawlRuns, Websites
 from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
 from eneo.files.file_models import File, FileMetadata, FileType
 from eneo.files.file_repo import FileRepository
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
 from eneo.prompts.prompt import Prompt
 from eneo.skills.domain.skill import PersonalDefaultsSnapshot
@@ -1070,7 +1070,8 @@ class AssistantRepository:
             .returning(Assistants)
         )
         entry_in_db = await self.session.scalar(query)
-        assert entry_in_db is not None
+        if entry_in_db is None:
+            raise NotFoundException("Assistant not found")
 
         entry_in_db.capabilities = [
             AssistantCapabilities(purpose=p)

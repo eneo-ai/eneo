@@ -1870,8 +1870,12 @@ class AssistantService:
                 mcp_servers_override=mcp_servers_for_validation,
             )
 
-        refreshed_space = await self.space_repo.update(
-            space, include_hidden_assistants=include_hidden
+        # Persist only this assistant: a whole-space update would rewrite every
+        # other assistant from this request's snapshot, failing on one deleted
+        # meanwhile and undoing concurrent edits to the rest.
+        await self.repo.update(assistant)
+        refreshed_space = await self.space_repo.one(
+            id=assistant.space_id, include_hidden_assistants=include_hidden
         )
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
 

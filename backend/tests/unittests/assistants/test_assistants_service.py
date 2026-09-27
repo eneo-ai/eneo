@@ -489,7 +489,7 @@ async def test_update_assistant_rejects_standalone_flow_managed_before_side_effe
 
     setup.service.prompt_service.create_prompt.assert_not_awaited()
     setup.service.effective_config_service.resolve_for.assert_not_awaited()
-    setup.service.space_repo.update.assert_not_awaited()
+    setup.service.repo.update.assert_not_awaited()
     assistant.update.assert_not_called()
 
 
@@ -648,7 +648,7 @@ async def test_update_replaces_assistant_skills_before_fit_and_parent_persist(
     assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
     assistant.space_id = TEST_UUID
     space = setup.service.space_repo.get_space_by_assistant.return_value
-    setup.service.space_repo.update.return_value = space
+    setup.service.space_repo.one.return_value = space
     intents = [
         SkillBindingIntent(
             reference=SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4())
@@ -679,7 +679,7 @@ async def test_update_replaces_assistant_skills_before_fit_and_parent_persist(
         replace_bindings
     )
     setup.service._validate_attachments_fit.side_effect = validate_fit
-    setup.service.space_repo.update.side_effect = persist_parent
+    setup.service.repo.update.side_effect = persist_parent
 
     await _update_assistant(
         setup.service,
@@ -722,7 +722,7 @@ async def test_update_assistant_binding_fit_failure_skips_parent_persist(
         assistant_id=TEST_UUID,
         intents=[],
     )
-    setup.service.space_repo.update.assert_not_awaited()
+    setup.service.repo.update.assert_not_awaited()
 
 
 def configure_personal_default_assistant(
@@ -1285,6 +1285,26 @@ async def test_update_allows_mcp_alongside_knowledge(setup: Setup):
     )
 
     assistant.update.assert_called_once()
+
+
+async def test_update_persists_only_the_updated_assistant(setup: Setup):
+    """The other assistants of the space are not rewritten, so a concurrent
+    change to one of them cannot fail or be lost in this update."""
+    space = setup.service.space_repo.get_space_by_assistant.return_value
+    assistant = space.get_assistant.return_value
+    refreshed = MagicMock()
+    setup.service.space_repo.one.return_value = refreshed
+
+    returned, _ = await _update_assistant(
+        setup.service, include_hidden=True, name="renamed"
+    )
+
+    setup.service.repo.update.assert_awaited_once_with(assistant)
+    setup.service.space_repo.update.assert_not_awaited()
+    setup.service.space_repo.one.assert_awaited_once_with(
+        id=assistant.space_id, include_hidden_assistants=True
+    )
+    assert returned is refreshed.get_assistant.return_value
 
 
 async def test_error_when_assistant_cannot_be_used_in_space(setup: Setup):

@@ -661,7 +661,7 @@ def _personal_default_update_subject(effective_config):
     space.is_completion_model_available.return_value = True
     space.is_completion_model_in_space.return_value = True
     service.space_repo.get_space_by_assistant.return_value = space
-    service.space_repo.update.return_value = space
+    service.space_repo.one.return_value = space
 
     actor = MagicMock()
     actor.can_edit_default_assistant.return_value = True
