@@ -10601,6 +10601,7 @@ def _summarize_applied_flow(flow: Mapping[str, object] | None) -> JsonObject:
         if not isinstance(raw_step, Mapping):
             continue
         review_policy = raw_step.get("review_policy")
+        contract = cast(object, raw_step.get("output_contract"))
         steps.append(
             {
                 "order": _int_value(raw_step.get("step_order")) or index,
@@ -10618,8 +10619,12 @@ def _summarize_applied_flow(flow: Mapping[str, object] | None) -> JsonObject:
                     if isinstance(review_policy, Mapping)
                     else None
                 ),
+                "output_contract_properties": _schema_property_names(contract),
+                "output_contract_nested_properties": _schema_nested_property_names(
+                    contract
+                ),
                 "output_contract_leaf_properties": _schema_leaf_property_names(
-                    raw_step.get("output_contract")
+                    contract
                 ),
             }
         )
@@ -10648,11 +10653,9 @@ def _review_policy_checks(
         expected,
         "target_field_groups",
     )
-    target_fields = (
-        _string_list(target.get("output_contract_leaf_properties"))
-        if target is not None
-        else []
-    )
+    # Property names at every depth, as `expected_leaf_output_field_groups` reads
+    # them: a reviewed list of records is found by its own name.
+    target_fields = _output_fields([target]) if target is not None else []
     missing_field_groups = [
         group
         for group in expected_field_groups
@@ -10711,7 +10714,7 @@ def _review_policy_checks(
             "name": target.get("name"),
             "output_type": target.get("output_type"),
             "output_mode": target.get("output_mode"),
-            "output_contract_leaf_properties": target_fields,
+            "output_contract_fields": target_fields,
         }
         if target is not None
         else None

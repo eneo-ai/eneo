@@ -7182,6 +7182,89 @@ def test_release_inventory_owns_required_dimensions_and_named_cases() -> None:
     }
 
 
+def test_a_review_target_modelled_as_a_record_array_is_found_by_its_own_name() -> None:
+    """`hypotheses: [{hypothesis, confidence}]` has no leaf called hypotheses.
+
+    A correct design may review a list of records; the target group names the
+    list, so the review target is matched by property names at every depth, as
+    `expected_leaf_output_field_groups` is, in the proposed and the applied flow.
+    """
+
+    harness = _battle_harness()
+    plan = {
+        "proposal": {
+            "spec": {
+                "flow_name": "Incident report",
+                "steps": [
+                    {
+                        "plan_step_ref": "structure_incident",
+                        "name": "Structure incident",
+                        "input_source": "flow_input",
+                        "input_type": "document",
+                        "output_type": "json",
+                        "output_mode": "pass_through",
+                        "review_policy": {"mode": "view"},
+                        "output_contract": {
+                            "type": "object",
+                            "properties": {
+                                "hypotheses": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "hypothesis": {"type": "string"},
+                                            "confidence": {"type": "string"},
+                                        },
+                                    },
+                                },
+                                "affected_systems": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                            },
+                        },
+                    },
+                    {
+                        "plan_step_ref": "write_report",
+                        "name": "Write report",
+                        "input_source": "previous_step",
+                        "input_type": "json",
+                        "output_type": "text",
+                        "output_mode": "pass_through",
+                    },
+                ],
+            }
+        }
+    }
+    expected = {
+        "mode": "view",
+        "target_output_type": "json",
+        "target_field_groups": [["hypotheses"], ["affected_systems"]],
+        "target_must_be_non_terminal": True,
+    }
+
+    for scope, summary in (
+        ("proposed", harness._summarize_plan(plan)),
+        ("applied", harness._summarize_applied_flow(_applied_flow_from_plan(plan))),
+    ):
+        checks = {
+            check["name"]: check
+            for check in harness._review_policy_checks(
+                scope=scope, summary=summary, expected=expected
+            )
+        }
+        assert checks[f"{scope}_review_policy_target"]["passed"] is True, scope
+
+    missing = {**expected, "target_field_groups": [["timeline"]]}
+    checks = {
+        check["name"]: check
+        for check in harness._review_policy_checks(
+            scope="proposed", summary=harness._summarize_plan(plan), expected=missing
+        )
+    }
+    assert checks["proposed_review_policy_target"]["passed"] is False
+
+
 def test_complex_authoring_case_enforces_first_pass_topology_independently() -> None:
     harness = _battle_harness()
     cases_path = (
