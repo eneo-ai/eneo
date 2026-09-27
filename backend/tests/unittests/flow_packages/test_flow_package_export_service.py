@@ -755,6 +755,87 @@ def test_export_rejects_forward_or_invalid_runtime_references(template: str) -> 
     assert exc_info.value.code is FlowPackageExportErrorCode.VARIABLE_REFERENCE_INVALID
 
 
+_SECTION_CONTRACT: FlowPersistedJsonObject = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["uppgifter"],
+    "properties": {
+        "uppgifter": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["id"],
+                "properties": {"id": {"type": "string"}},
+            },
+        }
+    },
+}
+
+
+def _section_step(
+    assistant_id: UUID, *, sectioned: bool, question: str | None = None
+) -> FlowStep:
+    return _step(
+        1,
+        assistant_id=assistant_id,
+        output_type="json",
+        output_contract=_SECTION_CONTRACT,
+        input_config=(
+            {"text_processing": {"mode": "process_each_section"}} if sectioned else None
+        ),
+        input_bindings={"question": question} if question else None,
+    )
+
+
+def test_export_accepts_section_index_in_a_sectioned_steps_instructions() -> None:
+    assistant_id = uuid4()
+
+    envelope = _build_envelope(
+        flow=_flow(steps=[_section_step(assistant_id, sectioned=True)]),
+        assistant_snapshots={
+            assistant_id: _snapshot(
+                instructions="Del {{ section_index }}: ge ID S{{ section_index }}-F1.",
+                model_ref=None,
+            )
+        },
+        resource_bindings=tuple(),
+    )
+
+    assert (
+        "{{ section_index }}"
+        in envelope.draft.spec.steps[0].assistant_spec.instructions
+    )
+
+
+@pytest.mark.parametrize(
+    ("sectioned", "instructions", "question"),
+    [
+        (False, "Del {{ section_index }}", None),
+        (True, "Follow the package instructions.", "Del {{ section_index }}"),
+    ],
+)
+def test_export_rejects_section_index_outside_sectioned_instructions(
+    sectioned: bool, instructions: str, question: str | None
+) -> None:
+    assistant_id = uuid4()
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(
+                steps=[
+                    _section_step(assistant_id, sectioned=sectioned, question=question)
+                ]
+            ),
+            assistant_snapshots={
+                assistant_id: _snapshot(instructions=instructions, model_ref=None)
+            },
+            resource_bindings=tuple(),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.VARIABLE_REFERENCE_INVALID
+
+
 def test_export_preserves_public_error_for_unknown_flow_input_key() -> None:
     assistant_id = uuid4()
 
