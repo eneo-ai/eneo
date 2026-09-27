@@ -96,9 +96,9 @@
     {/if}
   </Page.Header>
   <Page.Main>
-    <!-- Starts on the title's left edge and ends on the header actions' right
-         edge; past 80rem it stops growing so a row stays readable on ultrawide. -->
-    <div class="flex w-full max-w-[80rem] flex-col gap-4 py-4 pr-4 pl-2 sm:py-6">
+    <!-- Starts on the title's left edge and ends on the header actions' right edge
+         at every width: the name column takes the room, the others keep theirs. -->
+    <div class="flex w-full flex-col gap-4 py-4 pr-4 pl-2 sm:py-6">
       <FlowsTable
         flows={$flows}
         {drafts}
