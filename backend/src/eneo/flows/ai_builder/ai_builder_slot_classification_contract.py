@@ -1448,7 +1448,6 @@ _REMOVAL_PREFIX_MARKERS = (
 _NEGATION_WORDS = frozenset(
     {"not", "never", "no", "cannot", "without", "inte", "aldrig", "ej", "utan"}
 )
-_REMOVAL_IDIOM = "inte längre"
 _APOSTROPHES = str.maketrans({"\u2019": "'", "\u02bc": "'", "\u2032": "'"})
 
 

@@ -87,7 +87,6 @@ ProposalTerminalFailureKind = Literal[
     "missing_submission_tool",
     "provider_truncation",
     "architecture",
-    "invalid_repair_response",
     "invalid_repair_payload",
     "invalid_repair_plan",
     "repair_quality_failure",

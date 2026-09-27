@@ -181,7 +181,6 @@ ClassifierRetentionIdentity: TypeAlias = tuple[ClassifierRetentionClass, str]
 _MAX_RESULT_OBLIGATIONS = len(RESULT_OBLIGATION_VALUES)
 _MAX_QUESTION_ANSWER_SELECTIONS = 20
 _MAX_UI_LANGUAGE_LENGTH = 16
-_MAX_REQUIREMENTS_VERSION_LENGTH = 128
 
 
 class SlotClassificationEvidence(BaseModel):

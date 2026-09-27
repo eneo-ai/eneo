@@ -117,13 +117,11 @@ CreateAssemblyRejectionReason = Literal[
     "compare_json_requires_structured_producers",
     "confirmed_runtime_input_source_output_collision",
     "audio_requires_linear",
-    "docx_template_form_fields_mismatch",
     "docx_template_shape_unsupported",
     "document_report_compose_topology_missing",
     "empty_steps",
     "explicit_refs_not_supported",
     "form_field_no_legal_target",
-    "form_field_placement_mismatch",
     "form_field_required_semantic_target_missing",
     "invalid_template_fill_mode",
     "plan_invariant_failed",
@@ -166,10 +164,6 @@ _REJECTION_FEEDBACK: dict[CreateAssemblyRejectionReason, str] = {
         "field. Keep the runtime input field and rename the source output field."
     ),
     "audio_requires_linear": "Audio create flows must be linear.",
-    "docx_template_form_fields_mismatch": (
-        "A DOCX template-fill semantic step may only reference declared "
-        "runtime form fields."
-    ),
     "docx_template_shape_unsupported": (
         "DOCX template-fill flows require a linear chain of JSON or text "
         "semantic steps. End with either a JSON step whose string "
@@ -187,10 +181,6 @@ _REJECTION_FEEDBACK: dict[CreateAssemblyRejectionReason, str] = {
     ),
     "form_field_no_legal_target": (
         "A runtime form field has no legal target in the assembled flow topology."
-    ),
-    "form_field_placement_mismatch": (
-        "Every runtime form field must be referenced by at least one semantic "
-        "step, and every referenced field must be declared."
     ),
     "form_field_required_semantic_target_missing": (
         "A runtime form field's purpose requires a semantic target that does not "
@@ -257,13 +247,11 @@ _REJECTION_REPAIR_DISPOSITION: dict[
     "compare_json_requires_structured_producers": "model_correctable",
     "confirmed_runtime_input_source_output_collision": "model_correctable",
     "audio_requires_linear": "user_action",
-    "docx_template_form_fields_mismatch": "model_correctable",
     "docx_template_shape_unsupported": "model_correctable",
     "document_report_compose_topology_missing": "server_defect",
     "empty_steps": "model_correctable",
     "explicit_refs_not_supported": "model_correctable",
     "form_field_no_legal_target": "model_correctable",
-    "form_field_placement_mismatch": "model_correctable",
     "form_field_required_semantic_target_missing": "model_correctable",
     "invalid_template_fill_mode": "server_defect",
     "plan_invariant_failed": "server_defect",

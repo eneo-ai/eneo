@@ -78,7 +78,6 @@ _SOURCE_CAPTURE_FIELD_TOKEN_ALIASES = {
 _DATE_TOKENS = frozenset({"date"})
 _AUTHOR_OR_SENDER_TOKENS = frozenset({"author", "sender"})
 _AUTHOR_SOURCE_TOKENS = frozenset({"author", "source"})
-_SUMMARY_TOKENS = frozenset({"summary"})
 _SUMMARY_MODIFIER_TOKENS = frozenset(
     {"brief", "concise", "kort", "short", "source", "topic"}
 )

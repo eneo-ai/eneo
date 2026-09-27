@@ -88,7 +88,6 @@ logger = get_logger(__name__)
 
 ServerDecisionKind = Literal[
     "ask_question",
-    "continue_proposal",
     "commit_architecture",
     "revise_architecture",
     "confirm_requirements",

@@ -17,11 +17,6 @@ from uuid import uuid4
 import pytest
 
 from eneo.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
-from eneo.flows.ai_builder.ai_builder_edit_effect import (
-    ReadEffect,
-    ReadKey,
-    edit_effect,
-)
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
@@ -49,6 +44,11 @@ from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
+)
+from tests.unittests.flows.ai_builder.edit_effect_test_support import (
+    ReadEffect,
+    ReadKey,
+    edit_effect,
 )
 
 SEEDS = Path(__file__).resolve().parents[4] / "scripts/fixtures/ai_builder_battle"

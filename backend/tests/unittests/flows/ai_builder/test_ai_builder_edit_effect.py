@@ -14,19 +14,6 @@ from uuid import uuid4
 import pytest
 
 from eneo.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
-from eneo.flows.ai_builder.ai_builder_edit_effect import (
-    DocumentBodyWriterEffect,
-    EditEffect,
-    FieldEffect,
-    FlowPropertyEffect,
-    FormEffect,
-    OrderEffect,
-    ReadEffect,
-    ReadKey,
-    StructureEffect,
-    edit_effect,
-    order_matches_moves,
-)
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
 )
@@ -46,6 +33,19 @@ from eneo.flows.application.flow_authoring_snapshot import current_flow_authorin
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshot
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, StepSpec
+from tests.unittests.flows.ai_builder.edit_effect_test_support import (
+    DocumentBodyWriterEffect,
+    EditEffect,
+    FieldEffect,
+    FlowPropertyEffect,
+    FormEffect,
+    OrderEffect,
+    ReadEffect,
+    ReadKey,
+    StructureEffect,
+    edit_effect,
+    order_matches_moves,
+)
 
 SEEDS = Path(__file__).resolve().parents[4] / "scripts/fixtures/ai_builder_battle"
 S1, S2, S3, S4 = (f"existing_step_{order}" for order in range(1, 5))
