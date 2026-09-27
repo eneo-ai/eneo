@@ -9255,7 +9255,7 @@ def test_observation_demand_charges_only_the_calls_a_case_makes() -> None:
     assert applied_demand == plain_demand + 3
     # Runtime adds its fixed calls, one upload per file, the poll bound, and
     # the stop of a run that pauses where no checkpoint was declared.
-    assert executed_demand == applied_demand + 5 + 2 + 901 + 2
+    assert executed_demand == applied_demand + 5 + 2 + 94 + 2
     reviewed = replace(
         executed,
         execution=replace(
@@ -9274,9 +9274,37 @@ def test_runtime_poll_bound_counts_the_first_poll_before_any_sleep() -> None:
     harness = _battle_harness()
 
     # The loop polls, checks the deadline, then sleeps, so a zero-second
-    # deadline still spends one request.
+    # deadline still spends one request. Polls at 0, 1, 3 and 7 s for 5 s.
     assert harness.runtime_poll_requests(timeout_seconds=0) == 1
-    assert harness.runtime_poll_requests(timeout_seconds=5) == 6
+    assert harness.runtime_poll_requests(timeout_seconds=1) == 2
+    assert harness.runtime_poll_requests(timeout_seconds=5) == 4
+
+
+def test_runtime_polls_back_off_to_a_capped_interval() -> None:
+    # A run takes about two minutes, but its deadline is fifteen: at a fixed
+    # 1 s the deadline, not the run, set the budget (901 polls per executed
+    # observation). The waits double to a 10 s cap, so a deadline D costs
+    # O(log + D/10) polls.
+    harness = _battle_harness()
+
+    waits = [harness.runtime_poll_interval(poll) for poll in range(7)]
+
+    assert waits == [1, 2, 4, 8, 10, 10, 10]
+    assert harness.RUNTIME_POLL_MAX_INTERVAL_SECONDS == 10
+    # Waits 1+2+4+8 end at 15 s; 89 more 10 s waits start before 900 s
+    # (the last at 895 s); plus the immediate first poll: 4 + 89 + 1.
+    assert harness.runtime_poll_requests(timeout_seconds=900) == 94
+    # Far past the cap the schedule neither overflows nor stops advancing.
+    assert harness.runtime_poll_interval(10_000) == 10
+    # The capped tail is counted, not walked, so a huge deadline costs
+    # nothing to plan: 4 ramp waits, then ceil((10**12 - 15) / 10) capped ones.
+    assert harness.runtime_poll_requests(timeout_seconds=10**12) == (
+        1 + 4 + 99_999_999_999
+    )
+    # Integer arithmetic: a float quotient would round 10**17 + 0.1 down.
+    assert harness.runtime_poll_requests(timeout_seconds=10**18 + 16) == (
+        1 + 4 + 10**17 + 1
+    )
 
 
 def test_suite_demand_counts_each_fixture_once_across_cases() -> None:
@@ -9298,7 +9326,7 @@ def test_suite_demand_counts_each_fixture_once_across_cases() -> None:
     assert demand["total"] == 1 + 1 + 2 + 6 * 17
 
 
-def test_suite_demand_for_the_frozen_corpus_exceeds_the_default_ceilings() -> None:
+def test_suite_demand_for_the_frozen_corpus_exceeds_the_space_default_ceiling() -> None:
     # The number this gate exists to produce. If it ever drops below the
     # tenant default, the dedicated measurement key stops being a requirement
     # and this test should be the thing that says so.
@@ -9317,8 +9345,14 @@ def test_suite_demand_for_the_frozen_corpus_exceeds_the_default_ceilings() -> No
     # 2026-09-26 (eneo-e7h6): each edit observation reads its seeded flow back
     # before the first turn and again after the last one (the flow and one
     # assistant per step): 2 x (1 + steps) = 22 + 22 + 62, x 3 reps.
-    assert demand["total"] == 12_370
-    assert demand["total"] > 10_000
+    # 2026-09-27: run polls back off 1, 2, 4, 8, then 10 s, so the one
+    # executed case budgets 94 polls for its 900 s run deadline instead of
+    # 901: 12,370 - 3 x (901 - 94) = 9,949 (one rep: 4,132 - 807 = 3,325).
+    assert demand["total"] == 9_949
+    # The measurement key is space-scoped (the preflight refuses any other),
+    # so the space default is the ceiling that binds; the tenant default of
+    # 10,000 no longer does.
+    assert demand["total"] > 5_000
 
 
 _SPACE_ID = "00000000-0000-0000-0000-000000000020"
@@ -9759,6 +9793,23 @@ def test_capacity_preflight_holds_the_exact_finite_budget_boundary() -> None:
     verdict = harness.capacity_preflight_verdict(**short)
     assert verdict["verdict"] == "fail"
     assert "insufficient_request_budget" in verdict["refusals"]
+
+
+def test_the_frozen_suite_is_refused_by_a_space_default_measurement_key() -> None:
+    # Cheaper polling must not let the preflight wave a suite through that the
+    # space default (5,000 requests an hour) cannot carry.
+    harness = _battle_harness()
+    cases = harness._read_cases_file(harness.DEFAULT_CASES_FILE)
+    inputs = _passing_capacity_inputs(harness)
+    inputs["demand"] = harness.suite_request_demand(
+        cases=cases, repetitions=3, timeout_seconds=900
+    )
+    inputs["request_capacity"].update(limit=5_000, current_count=0, remaining=5_000)
+
+    verdict = harness.capacity_preflight_verdict(**inputs)
+
+    assert verdict["verdict"] == "fail"
+    assert verdict["refusals"] == ["insufficient_request_budget"]
 
 
 def test_a_truncated_capacity_response_refuses_instead_of_unwinding(
@@ -10313,7 +10364,10 @@ def test_failure_class_reads_the_typed_provider_detail_before_the_code(
 ) -> None:
     harness = _battle_harness()
     failure_class = harness.failure_class_from_summary(
-        {"error_details": [detail]}, runtime_run_status=None, where="test"
+        {"error_details": [detail]},
+        runtime_run_status=None,
+        runtime_outcome=None,
+        where="test",
     )
     assert failure_class == expected_class
 
@@ -10340,7 +10394,7 @@ def test_failure_class_accepts_only_the_producer_disposition_vocabulary() -> Non
     }
     assert (
         receipts.failure_class_from_summary(
-            drifted, runtime_run_status=None, where="test"
+            drifted, runtime_run_status=None, runtime_outcome=None, where="test"
         )
         == "builder_semantic"
     )
@@ -10359,22 +10413,40 @@ def test_failure_class_prefers_an_acquisition_fault_anywhere_in_the_turn() -> No
     }
     assert (
         harness.failure_class_from_summary(
-            summary, runtime_run_status=None, where="test"
+            summary, runtime_run_status=None, runtime_outcome=None, where="test"
         )
         == "provider_request"
     )
     assert (
         harness.failure_class_from_summary(
-            {"error_details": []}, runtime_run_status="failed", where="test"
+            {"error_details": []},
+            runtime_run_status="failed",
+            runtime_outcome="failed",
+            where="test",
         )
         == "runtime"
     )
     assert (
         harness.failure_class_from_summary(
-            {"error_details": []}, runtime_run_status="completed", where="test"
+            {"error_details": []},
+            runtime_run_status="completed",
+            runtime_outcome="completed",
+            where="test",
         )
         is None
     )
+    # The harness gave up on the run: a runtime failure whatever the server
+    # says now (finished late, or still running after a failed cancel).
+    for status in ("completed", "running"):
+        assert (
+            harness.failure_class_from_summary(
+                {"error_details": []},
+                runtime_run_status=status,
+                runtime_outcome="timed_out",
+                where="test",
+            )
+            == "runtime"
+        )
 
 
 def test_failure_class_error_code_sets_name_only_builder_error_codes() -> None:
@@ -10536,6 +10608,7 @@ def test_an_unrenderable_server_question_stays_a_builder_error(tmp_path: Path) -
         harness.failure_class_from_summary(
             harness._interaction_event_summary(interactions),
             runtime_run_status=None,
+            runtime_outcome=None,
             where="test",
         )
         == "builder_semantic"
@@ -11116,7 +11189,8 @@ class _RuntimeApi:
         monkeypatch.setattr(harness, "_request_json", self.request)
         monkeypatch.setattr(harness, "_request_json_or_null", self.request)
         monkeypatch.setattr(harness, "_request_no_content", self.request)
-        monkeypatch.setattr(harness, "RUNTIME_POLL_INTERVAL_SECONDS", 0)
+        # Waits move a fake clock instead of the test's wall clock.
+        _fake_run_clock(harness, monkeypatch)
 
     def paths(self, method: str) -> list[str]:
         return [call["path"] for call in self.calls if call["method"] == method]
@@ -11786,6 +11860,150 @@ def test_a_paused_run_past_its_deadline_is_cancelled_untouched(
     assert f"{_RUN_PATH}/cancel/" in api.paths("POST")
 
 
+def _fake_run_clock(harness: ModuleType, monkeypatch: MonkeyPatch) -> list[float]:
+    """A clock that only the poll loop's sleeps (and the caller) move.
+
+    The rest of the time module stays real: bundles still name themselves by
+    wall-clock time.
+    """
+
+    clock = [0.0]
+
+    def sleep(seconds: float) -> None:
+        clock[0] += seconds
+
+    monkeypatch.setattr(
+        harness,
+        "time",
+        SimpleNamespace(
+            **{**vars(time), "monotonic": lambda: clock[0], "sleep": sleep}
+        ),
+    )
+    return clock
+
+
+def _drive(harness: ModuleType, *, timeout_seconds: int) -> dict[str, Any]:
+    record: dict[str, Any] = {}
+    harness._drive_run(
+        config=object(),
+        flow_id="flow-1",
+        run_id="run-1",
+        checkpoints=(),
+        timeout_seconds=timeout_seconds,
+        record=record,
+    )
+    return record
+
+
+@mark.parametrize("deadline_seconds", [0, 1, 5, 15, 16, 120, 900])
+@mark.parametrize("request_seconds", [0.0, 0.4])
+def test_the_poll_demand_is_what_a_run_that_never_ends_spends(
+    monkeypatch: MonkeyPatch, deadline_seconds: int, request_seconds: float
+) -> None:
+    # The demand walks the loop's own schedule, so a run that outlives its
+    # deadline spends exactly the budgeted polls when requests are instant,
+    # and never more when they take time.
+    harness = _battle_harness()
+    api = _RuntimeApi(runs=[{"id": "run-1", "status": "running"}])
+    clock = _fake_run_clock(harness, monkeypatch)
+
+    def timed_request(**kwargs: Any) -> object:
+        clock[0] += request_seconds
+        return api.request(**kwargs)
+
+    monkeypatch.setattr(harness, "_request_json", timed_request)
+
+    record = _drive(harness, timeout_seconds=deadline_seconds)
+
+    assert record["outcome"] == "timed_out"
+    polls = len(api.paths("GET"))
+    demand = harness.runtime_poll_requests(timeout_seconds=deadline_seconds)
+    assert polls == demand if request_seconds == 0 else polls <= demand
+    assert api.paths("POST") == [f"{_RUN_PATH}/cancel/"]
+
+
+@mark.parametrize("finishes_at", [0.0, 0.5, 7.2, 15.0, 118.3, 899.9])
+def test_a_finished_run_is_seen_within_one_capped_poll_interval(
+    monkeypatch: MonkeyPatch, finishes_at: float
+) -> None:
+    # Backoff trades detection delay for requests: a run that ends just after
+    # a poll is seen at the next one, at most one capped interval later.
+    harness = _battle_harness()
+    clock = _fake_run_clock(harness, monkeypatch)
+    polled_at: list[float] = []
+
+    def request(**_kwargs: Any) -> object:
+        polled_at.append(clock[0])
+        done = clock[0] >= finishes_at
+        return {"id": "run-1", "status": "completed" if done else "running"}
+
+    monkeypatch.setattr(harness, "_request_json", request)
+
+    record = _drive(harness, timeout_seconds=900)
+
+    assert record["outcome"] == "completed"
+    assert polled_at[-1] >= finishes_at
+    assert polled_at[-1] - finishes_at <= harness.RUNTIME_POLL_MAX_INTERVAL_SECONDS
+
+
+def test_the_last_wait_ends_at_the_deadline_and_polls_there(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    # Unbounded, the wait after the 15 s poll would run to 25 s. It stops at
+    # the 16 s deadline instead, and a run finished by then is seen finished.
+    harness = _battle_harness()
+    clock = _fake_run_clock(harness, monkeypatch)
+    polled_at: list[float] = []
+
+    def request(**_kwargs: Any) -> object:
+        polled_at.append(clock[0])
+        done = clock[0] >= 16
+        return {"id": "run-1", "status": "completed" if done else "running"}
+
+    monkeypatch.setattr(harness, "_request_json", request)
+
+    record = _drive(harness, timeout_seconds=16)
+
+    assert polled_at == [0, 1, 3, 7, 15, 16]
+    assert record["outcome"] == "completed"
+
+
+@mark.parametrize(
+    ("finishes_at", "request_seconds"),
+    [
+        # Finished after the deadline: the old full wait saw it at 25 s and
+        # recorded `completed`.
+        (17.0, 0.0),
+        # Maybe finished in time, but the answer arrived after the deadline
+        # and nothing the harness can trust dates the finish: fail closed.
+        (15.5, 0.3),
+    ],
+)
+def test_a_run_seen_finished_only_after_its_deadline_is_timed_out(
+    monkeypatch: MonkeyPatch, finishes_at: float, request_seconds: float
+) -> None:
+    harness = _battle_harness()
+    clock = _fake_run_clock(harness, monkeypatch)
+    calls: list[tuple[str, str]] = []
+
+    def request(*, method: str, path: str, **_kwargs: Any) -> object:
+        calls.append((method, path))
+        if method == "POST":
+            return {"id": "run-1", "status": "cancelled"}
+        done = clock[0] >= finishes_at
+        clock[0] += request_seconds
+        return {"id": "run-1", "status": "completed" if done else "running"}
+
+    monkeypatch.setattr(harness, "_request_json", request)
+
+    record = _drive(harness, timeout_seconds=16)
+
+    assert record["outcome"] == "timed_out"
+    # Every timed-out run gets the cancel; the server keeps a finished one as
+    # it is.
+    assert calls[-1] == ("POST", f"{_RUN_PATH}/cancel/")
+
+
 def test_an_unmeasured_output_is_a_re_measurable_slot_not_a_verdict(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -11894,6 +12112,59 @@ def test_a_source_starved_run_fails_output_success_while_the_plan_stays_accepted
     reanalyzed = json.loads(next(output_dir.iterdir()).read_text())
     assert reanalyzed["quality_report"]["output_checks"] == report["output_checks"]
     assert reanalyzed["observation"]["output_success"] is False
+
+
+def test_a_run_seen_finished_after_its_deadline_seals_as_a_runtime_failure(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    # The run is seen finished only after its deadline, so it is timed out,
+    # and the cancel comes back `completed` (the server keeps a finished run).
+    # The server status alone would leave that runtime failure unattributed.
+    harness = _battle_harness()
+    finished = _completed_text_run("Förskolan i Kvissleby avvecklas.")
+    api = _RuntimeApi(runs=[{"id": "run-1", "status": "running"}, finished])
+    api.install(harness, monkeypatch)
+    clock = _fake_run_clock(harness, monkeypatch)
+
+    def slow(*, method: str, path: str, **kwargs: Any) -> object:
+        if path == f"{_RUN_PATH}/cancel/":
+            api.calls.append({"method": method, "path": path})
+            return finished
+        answer = api.request(method=method, path=path, **kwargs)
+        clock[0] += 0.5
+        return answer
+
+    monkeypatch.setattr(harness, "_request_json", slow)
+    execution = _execution(harness, required_facts=("Kvissleby",))
+    case = harness.BattleCase(
+        case_id="late-finish",
+        prompt="Build and run the Flow.",
+        apply_plan=True,
+        execution=execution,
+    )
+    plan_check = {"name": "plan_created", "passed": True, "actual": True}
+    bundle = _complete_live_case_bundle(
+        harness, case, quality_checks=[{**plan_check, "expected": True}]
+    )
+    evidence, report = _execute(
+        harness, execution, tmp_path=tmp_path, timeout_seconds=1
+    )
+    assert evidence["execution"]["outcome"] == "timed_out"
+    assert evidence["run"]["status"] == "completed"
+    assert f"{_RUN_PATH}/cancel/" in api.paths("POST")
+    bundle["journey"] = {"outcome_class": "plan_first_pass"}
+    bundle["runtime_evidence"] = evidence
+    bundle["quality_report"].update(
+        output_checks=report["output_checks"], output_success=report["output_success"]
+    )
+    bundle_path = tmp_path / "late-finish.json"
+    bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
+
+    result = harness._suite_result(harness.seal_observation(bundle), bundle_path)
+
+    assert result["output_success"] is False
+    assert "run_completed" in result["output_failed_checks"]
+    assert result["failure_class"] == "runtime"
 
 
 def test_a_maximal_run_stays_within_its_request_demand(

@@ -13,7 +13,6 @@ import hashlib
 import io
 import itertools
 import json
-import math
 import mimetypes
 import os
 import re
@@ -95,9 +94,12 @@ SUPPORTED_FIXTURE_MANIFEST_VERSION = 1
 # a change request the Builder reads as one, so the harness sends none.
 CONFIRM_MESSAGE = ""
 MAX_INTERACTIONS_PER_CASE = 6
-# Both the runtime poll loop and the request-demand arithmetic read this. A
-# literal in either place lets the planner agree with a stale formula.
-RUNTIME_POLL_INTERVAL_SECONDS = 1
+# Run status polls back off from the first wait to the cap. The poll loop and
+# the request-demand arithmetic both read runtime_poll_interval, so the
+# planner cannot agree with a stale formula. The cap is also the worst-case
+# delay between a run finishing and the harness seeing it.
+RUNTIME_POLL_INITIAL_INTERVAL_SECONDS = 1
+RUNTIME_POLL_MAX_INTERVAL_SECONDS = 10
 # v9: `execution` replaces `execute_flow` and `runtime_files`.
 SUPPORTED_CASES_FILE_VERSION = 9
 # The edit capability corpus: its own cases file, so the release corpus and
@@ -860,15 +862,37 @@ _RUNTIME_CHECKPOINT_REQUESTS = 3
 _RUNTIME_ABORT_REQUESTS = 2
 
 
-def runtime_poll_requests(*, timeout_seconds: int) -> int:
-    """Worst-case status polls for one executed Flow.
+def runtime_poll_interval(poll: int) -> int:
+    """Seconds the poll loop waits after its `poll`-th status poll (0-based).
 
-    The loop polls immediately, then sleeps between attempts, so the bound is
-    one more than the number of sleeps the deadline allows.
+    Doubles from the initial wait to the cap: 1, 2, 4, 8, then 10. The loop
+    cuts the last wait short at the deadline.
+    """
+    return min(
+        RUNTIME_POLL_MAX_INTERVAL_SECONDS,
+        RUNTIME_POLL_INITIAL_INTERVAL_SECONDS * 2**poll,
+    )
+
+
+def runtime_poll_requests(*, timeout_seconds: int) -> int:
+    """Worst-case status polls for one executed Flow whose run never ends.
+
+    The first poll is immediate, and each poll made before the deadline is
+    followed by one more: after the wait, or at the deadline when the wait
+    would pass it. Request time only moves the clock further, so it can only
+    lower the count. The doubling waits are walked; the capped tail is counted.
     """
     if timeout_seconds < 0:
         raise ValueError("timeout_seconds must not be negative.")
-    return math.ceil(timeout_seconds / RUNTIME_POLL_INTERVAL_SECONDS) + 1
+    polls, elapsed = 1, 0
+    while elapsed < timeout_seconds:
+        wait = runtime_poll_interval(polls - 1)
+        if wait >= RUNTIME_POLL_MAX_INTERVAL_SECONDS:
+            # Integer ceiling division: a float quotient loses precision.
+            return polls + -(-(timeout_seconds - elapsed) // wait)
+        elapsed += wait
+        polls += 1
+    return polls
 
 
 _SEED_FLOW_FIXED_REQUESTS = 3
@@ -967,7 +991,8 @@ def suite_request_demand(
             timeout_seconds=timeout_seconds
         ),
         "timeout_seconds": timeout_seconds,
-        "poll_interval_seconds": RUNTIME_POLL_INTERVAL_SECONDS,
+        "poll_initial_interval_seconds": RUNTIME_POLL_INITIAL_INTERVAL_SECONDS,
+        "poll_max_interval_seconds": RUNTIME_POLL_MAX_INTERVAL_SECONDS,
         "max_interactions_per_case": MAX_INTERACTIONS_PER_CASE,
         "total": preflight_requests + observation_requests,
     }
@@ -5263,6 +5288,7 @@ def _drive_run(
     failures: list[JsonObject] = []
     record.update(failures=failures, checkpoints=handled, cleanup_failures=[])
     deadline = time.monotonic() + timeout_seconds
+    waits = 0
     while True:
         run = _request_json(
             config=config,
@@ -5271,7 +5297,10 @@ def _drive_run(
         )
         status = _optional_string(run, "status")
         if status in TERMINAL_FLOW_RUN_STATUSES:
-            outcome = status
+            # The run API dates a finish only from server clocks the harness
+            # cannot align with its own deadline, so a finish first seen after
+            # the deadline fails closed.
+            outcome = "timed_out" if time.monotonic() > deadline else status
             break
         # Checked before a pause is acted on: nothing is changed on a run
         # whose time is up.
@@ -5292,7 +5321,10 @@ def _drive_run(
             timed_out = failure["kind"] == "deadline_reached"
             outcome = "timed_out" if timed_out else "checkpoint_failure"
             break
-        time.sleep(RUNTIME_POLL_INTERVAL_SECONDS)
+        # The last wait ends at the deadline, where the run is polled once more.
+        remaining = deadline - time.monotonic()
+        time.sleep(max(0.0, min(runtime_poll_interval(waits), remaining)))
+        waits += 1
     if outcome in {"checkpoint_failure", "timed_out"}:
         run = (
             _cancel_run(config=config, flow_id=flow_id, run_id=run_id, record=record)
@@ -7551,11 +7583,22 @@ def _observation_failure_class(bundle: JsonObject) -> FailureClass | None:
     runtime_evidence = bundle.get("runtime_evidence")
     run = runtime_evidence.get("run") if isinstance(runtime_evidence, Mapping) else None
     run_status = run.get("status") if isinstance(run, Mapping) else None
+    execution = (
+        cast(Mapping[str, Any], runtime_evidence).get("execution")
+        if isinstance(runtime_evidence, Mapping)
+        else None
+    )
+    outcome = (
+        _optional_string(cast(Mapping[str, Any], execution), "outcome")
+        if isinstance(execution, Mapping)
+        else None
+    )
     return failure_class_from_summary(
         cast(Mapping[str, Any], failure_summary)
         if isinstance(failure_summary, Mapping)
         else {},
         runtime_run_status=run_status if isinstance(run_status, str) else None,
+        runtime_outcome=outcome,
         where="failure_summary",
     )
 
@@ -9148,7 +9191,10 @@ def _journey_summary(
     )
     error_codes = _string_list(event_summary.get("error_codes"))
     failure_class = failure_class_from_summary(
-        event_summary, runtime_run_status=None, where="journey"
+        event_summary,
+        runtime_run_status=None,
+        runtime_outcome=None,
+        where="journey",
     )
     if not has_plan:
         plan_outcome_kind = "terminal_failure"

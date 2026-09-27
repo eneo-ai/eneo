@@ -199,6 +199,7 @@ def failure_class_from_summary(
     failure_summary: Mapping[str, Any],
     *,
     runtime_run_status: str | None,
+    runtime_outcome: str | None,
     where: str,
 ) -> FailureClass | None:
     """Which layer failed in a completed journey; None when nothing did.
@@ -209,7 +210,9 @@ def failure_class_from_summary(
     acquisition fault. Route codes are the server's own closed vocabulary, and
     harness codes name requests the harness itself sent wrongly. Any
     acquisition-class error in the turn wins, because that observation was
-    never measured cleanly.
+    never measured cleanly. A run the harness timed out is a runtime failure
+    whatever the server status: a run first seen finished after its deadline
+    stays `completed`, and one whose cancel failed keeps its last status.
     """
 
     classes = [
@@ -229,7 +232,7 @@ def failure_class_from_summary(
             return failure_class
     if classes:
         return "builder_semantic"
-    if runtime_run_status in {"failed", "cancelled"}:
+    if runtime_run_status in {"failed", "cancelled"} or runtime_outcome == "timed_out":
         return "runtime"
     return None
 
