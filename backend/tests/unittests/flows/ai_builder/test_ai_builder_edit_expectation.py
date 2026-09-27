@@ -194,6 +194,22 @@ def test_a_requested_instruction_change_and_nothing_else_passes() -> None:
     assert report["verdict"] == "pass", _failed(report)
 
 
+def test_the_observations_seed_name_suffix_does_not_change_the_score() -> None:
+    """Each observation seeds under its own name; the flow name is judged from its baseline."""
+
+    plan = _plan(3, {3: {"instructions": E02_TEXT}})
+    baseline, applied = _snapshot(A), _e02_applied()
+    for snapshot in (baseline, applied):
+        snapshot["flow"]["name"] += " (1a2b3c4d)"
+    suffixed = _evidence(
+        A, applied, plan, baseline=baseline, after_turn=copy.deepcopy(baseline)
+    )
+
+    assert _judge(E02, A, suffixed) == _judge(
+        E02, A, _evidence(A, _e02_applied(), plan)
+    )
+
+
 def test_an_empty_or_unreadable_diff_fails_closed() -> None:
     empty = _plan(3, {3: {"instructions": E02_TEXT}})
     empty["proposal"]["edit"]["diff"]["step_changes"] = []

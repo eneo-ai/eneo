@@ -4270,9 +4270,12 @@ def _seeded_flow(
     A refused assistant, a rejected steps response, a seed that did not
     round-trip, a failed turn and an interrupt all reach the DELETE. A failure
     inside is re-raised carrying the flow's lifecycle (and the record of any
-    run on it); a failed DELETE is never hidden behind it.
+    run on it); a failed DELETE is never hidden behind it. A space allows one
+    active flow per name and observations run side by side, so each seeds
+    under its own name; the edit judge reads the name from the baseline.
     """
 
+    fixture = {**fixture, "name": f"{fixture['name']} ({uuid4().hex[:8]})"}
     flow_id = _create_seed_flow(config=config, space_id=space_id, fixture=fixture)
     primary_error: Exception | None = None
     cleanup_error: Exception | None = None

@@ -11119,6 +11119,54 @@ def test_a_seeding_failure_whose_cleanup_also_fails_keeps_both_in_the_receipt(
     }
 
 
+def test_two_observations_of_one_edit_case_seed_distinct_flow_names(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A space allows one active flow per name, and concurrent observations share seeds."""
+
+    harness = _battle_harness()
+    names: dict[str, list[str]] = {}
+    flow_ids = iter(("flow-1", "flow-2"))
+
+    def fake_request_json(
+        *, config: object, method: str, path: str, payload: Any = None
+    ) -> dict[str, Any]:
+        if method == "POST" and path == "/flows/":
+            flow_id = next(flow_ids)
+            names[flow_id] = [payload["name"]]
+            return {"id": flow_id}
+        if method == "POST":
+            return {"id": "asst-1"}
+        if "/assistants/" in path:
+            return {}
+        names[path.split("/")[2]].append(payload["name"])
+        return {
+            "steps": [
+                {"id": f"step-{step['step_order']}", "step_order": step["step_order"]}
+                for step in payload["steps"]
+            ]
+        }
+
+    monkeypatch.setattr(harness, "_request_json", fake_request_json)
+    monkeypatch.setattr(harness, "_request_no_content", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        harness, "_verify_seed_round_trip", lambda *, seeded, **_kwargs: seeded
+    )
+    fixture = harness._load_seed_flow_fixture("edit_chain_10.json")
+
+    for _ in range(2):
+        with harness._seeded_flow(
+            config=object(), space_id="space-1", fixture=fixture, target_order=3
+        ):
+            pass
+
+    # The step update keeps the name the flow was created with.
+    assert [len(set(written)) for written in names.values()] == [1, 1]
+    first, second = (written[0] for written in names.values())
+    assert first != second
+    assert first.startswith(fixture["name"]) and second.startswith(fixture["name"])
+
+
 @mark.parametrize(
     ("permission", "expected_refusals"),
     [("admin", []), ("write", ["measurement_key_cannot_delete_flows"])],
