@@ -97,10 +97,9 @@ def test_assistant_update_command_reports_each_security_field(
     [
         AssistantUpdatePublic(name="Assistant"),
         AssistantUpdatePublic(name="Assistant", completion_model=None),
-        AssistantUpdatePublic(name="Assistant", completion_model=ModelId(id=uuid4())),
     ],
 )
-def test_standalone_mapper_ignores_deprecated_completion_model(
+def test_standalone_mapper_keeps_model_when_none_is_chosen(
     assistant_update: AssistantUpdatePublic,
 ) -> None:
     update = to_standalone_assistant_update_command(assistant_update)
@@ -108,6 +107,17 @@ def test_standalone_mapper_ignores_deprecated_completion_model(
     assert update.name == "Assistant"
     assert update.completion_model_id is NOT_PROVIDED
     assert not update.is_set("completion_model_id")
+
+
+def test_standalone_mapper_carries_the_chosen_model() -> None:
+    model_id = uuid4()
+
+    update = to_standalone_assistant_update_command(
+        AssistantUpdatePublic(name="Assistant", completion_model=ModelId(id=model_id))
+    )
+
+    assert update.completion_model_id == model_id
+    assert update.is_set("completion_model_id")
 
 
 def test_standalone_mapper_preserves_knowledge_delivery_fields() -> None:

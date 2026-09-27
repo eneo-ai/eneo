@@ -11,6 +11,9 @@ def to_standalone_assistant_update_command(
     assistant: AssistantUpdatePublic,
 ) -> AssistantUpdateCommand:
     _, command_fields = _extract_common_update_fields(assistant)
+    # A null model keeps the current one; only Flow steps may clear their model.
+    if assistant.completion_model is not None:
+        command_fields["completion_model_id"] = assistant.completion_model.id
     return AssistantUpdateCommand.model_validate(command_fields)
 
 

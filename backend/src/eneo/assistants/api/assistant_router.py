@@ -279,7 +279,6 @@ def _build_assistant_update_changes(
     assistant: AssistantUpdatePublic,
     old_assistant: "Assistant",
     updated_assistant: "Assistant",
-    completion_model_id: "UUID | None",
     description: "str | NotProvided | None",
     old_mcp_tool_overrides: "dict[str, bool] | None",
 ) -> tuple[dict[str, object], list[str]]:
@@ -319,18 +318,12 @@ def _build_assistant_update_changes(
             }
 
     # Model change
-    if (
-        completion_model_id
-        and old_assistant.completion_model
-        and completion_model_id != old_assistant.completion_model.id
-    ):
+    old_model = old_assistant.completion_model
+    new_model = updated_assistant.completion_model
+    if (old_model.id if old_model else None) != (new_model.id if new_model else None):
         changes["model"] = {
-            "old": old_assistant.completion_model.nickname
-            if old_assistant.completion_model
-            else None,
-            "new": updated_assistant.completion_model.nickname
-            if updated_assistant.completion_model
-            else None,
+            "old": old_model.nickname if old_model else None,
+            "new": new_model.nickname if new_model else None,
         }
 
     # Temperature/Top-p changes
@@ -657,7 +650,6 @@ async def update_assistant(
         assistant=assistant,
         old_assistant=old_assistant,
         updated_assistant=updated_assistant,
-        completion_model_id=None,
         description=update.description,
         old_mcp_tool_overrides=old_mcp_tool_overrides,
     )
