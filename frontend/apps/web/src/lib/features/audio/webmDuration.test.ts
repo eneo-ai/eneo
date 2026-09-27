@@ -157,6 +157,12 @@ describe("withRecordedDuration", () => {
     expect(patched.subarray(patched.length - audio.length)).toEqual(audio);
   });
 
+  it("reads the type whatever its case", async () => {
+    const chunk = new Blob([chromeWebm()]);
+    const patched = await withRecordedDuration(chunk, 5_000, "Audio/WebM");
+    expect(readDurationMs(new Uint8Array(await patched.arrayBuffer()))).toBe(5_000);
+  });
+
   it("leaves other formats unread", async () => {
     const chunk = new Blob([hex("0000001c6674797069736f6d")], { type: "audio/mp4" });
     const read = vi.spyOn(Blob.prototype, "arrayBuffer");

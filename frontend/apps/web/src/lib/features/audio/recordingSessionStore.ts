@@ -3,6 +3,7 @@
 
 import type { RecordingStopReason } from "./recordedAudioFile";
 import { withRecordedDuration } from "./webmDuration";
+import { withinTime } from "./withinTime";
 
 const DB_NAME = "eneo-recording-sessions";
 // Version 2 adds the journal a running recording writes as it goes.
@@ -82,10 +83,11 @@ async function readsBack(blob: Blob): Promise<boolean> {
 // The whole check, the read of the record and of its bytes, has one time bound.
 // Null when it had no answer by then: slow is not the same as gone.
 function withinVerifyTime(check: Promise<boolean>): Promise<boolean | null> {
-  return Promise.race([
+  return withinTime(
     check.catch(() => false),
-    new Promise<null>((resolve) => setTimeout(() => resolve(null), ROUND_TRIP_VERIFY_TIMEOUT_MS))
-  ]);
+    ROUND_TRIP_VERIFY_TIMEOUT_MS,
+    null
+  );
 }
 
 class RecordingSessionStoreImpl {

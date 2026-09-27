@@ -13,6 +13,8 @@
  * another scale.
  */
 
+import { withinTime } from "./withinTime";
+
 const EBML_HEADER = 0x1a45dfa3;
 const SEGMENT = 0x18538067;
 const SEEK_HEAD = 0x114d9b74;
@@ -158,15 +160,16 @@ export async function withRecordedDuration(
   durationMs: number,
   mimeType: string = firstChunk.type
 ): Promise<Blob> {
-  if (!/^(audio|video)\/webm\b/.test(mimeType)) return firstChunk;
+  if (!/^(audio|video)\/webm\b/i.test(mimeType)) return firstChunk;
   const head = firstChunk.slice(0, HEADER_BYTES);
-  const bytes = await Promise.race([
+  const bytes = await withinTime(
     head
       .arrayBuffer()
       .then((buffer) => new Uint8Array(buffer))
       .catch(() => null),
-    new Promise<null>((resolve) => setTimeout(() => resolve(null), HEADER_READ_MS))
-  ]);
+    HEADER_READ_MS,
+    null
+  );
   const patched = bytes && withWebmDuration(bytes, durationMs);
   return patched
     ? new Blob([patched, firstChunk.slice(head.size)], { type: firstChunk.type })
