@@ -163,3 +163,41 @@ async def test_watchdog_cancels_body_when_ownership_unconfirmed_for_ttl():
             await task
 
     release.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_exit_stops_watchdog_whose_refresh_finishes_as_it_is_cancelled():
+    """The exit's cancel and a refresh that completes in the same loop turn.
+
+    Python 3.11's asyncio.wait_for returns the finished result when its own
+    cancellation arrives after the inner call completed, so a watchdog built
+    on it kept renewing the lock and the exit waited on it forever.
+    """
+    redis_mock = _redis(set_result=True)
+    in_refresh = asyncio.Event()
+    finish_refresh = asyncio.Event()
+    refreshes = 0
+
+    async def refresh(*_args):
+        nonlocal refreshes
+        refreshes += 1
+        in_refresh.set()
+        await finish_refresh.wait()
+        return True
+
+    with (
+        patch(_REFRESH, new=refresh),
+        patch(_RELEASE, new=AsyncMock(return_value=True)) as release,
+    ):
+        async with asyncio.timeout(5):
+            async with redis_lease(
+                redis_mock, "lock:k", ttl_seconds=300, renew_interval_seconds=0.001
+            ) as acquired:
+                assert acquired is True
+                await in_refresh.wait()
+                # The refresh resumes first, then the exit cancels the
+                # watchdog before it sees the refresh result.
+                finish_refresh.set()
+
+    assert refreshes == 1
+    release.assert_awaited_once()

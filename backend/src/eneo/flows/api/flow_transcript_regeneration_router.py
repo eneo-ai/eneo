@@ -210,3 +210,6 @@ async def regenerate_flow_run_transcript(
     else:
         response.status_code = 200
     return public
+
+
+__all__ = ["router"]

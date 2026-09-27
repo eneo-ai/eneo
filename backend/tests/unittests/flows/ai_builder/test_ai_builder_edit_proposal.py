@@ -38,7 +38,10 @@ from eneo.flows.ai_builder.ai_builder_edit_proposal import process_edit_argument
 from eneo.flows.ai_builder.ai_builder_edit_tool_schema import (
     build_edit_flow_tool_schema,
 )
-from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+)
 from eneo.flows.ai_builder.ai_builder_flow_review import (
     ReviewEditScope,
     validate_review_edit_effect,
@@ -3389,8 +3392,9 @@ def test_saved_step_revision_sequence_is_checked_before_fragment_expansion():
         }
     )
     with pytest.raises(
-        BadRequestException, match="revision must preserve the saved step sequence"
-    ):
+        AIBuilderBadRequestException,
+        match="revision must preserve the saved step sequence",
+    ) as exc_info:
         compile_edit_proposal(
             proposal,
             current_steps=flow.steps,
@@ -3399,6 +3403,7 @@ def test_saved_step_revision_sequence_is_checked_before_fragment_expansion():
             resource_catalog=catalog,
             revision_spec=stale_sequence,
         )
+    assert exc_info.value.code is AIBuilderErrorCode.BAD_REQUEST
 
 
 async def test_saved_step_repair_replays_fragment_and_names_target():

@@ -238,7 +238,10 @@ class ChunkGrouping:
     relevance_score: float = 0.0
 
 
-@dataclass(frozen=True)
+# Not frozen: contextlib assigns __traceback__ when an exception leaves a
+# generator context manager, which a frozen dataclass refuses. eq=False keeps
+# Exception's identity equality and hashing.
+@dataclass(eq=False)
 class ContextWindowExceededError(Exception):
     estimated_tokens: int
     max_tokens: int

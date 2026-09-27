@@ -19,7 +19,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
-from testcontainers.postgres import PostgresContainer
+from testcontainers.community.postgres import PostgresContainer
 
 from alembic import command
 from tests.integration.migrations import test_file_icon_staged_backfill_expand as expand

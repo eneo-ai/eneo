@@ -27,7 +27,11 @@ from eneo.main.config import get_settings
 from eneo.main.exceptions import FileTooLargeException
 from eneo.object_content.content import StorageKind
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
-from tests.unittests.files.test_pdf_extraction_limits import _hanging_child, _write_pdf
+from tests.unittests.files.test_pdf_extraction_limits import (
+    _hanging_child,
+    _write_pdf,
+    record_spawned_pids,
+)
 
 # ── Fake settings ────────────────────────────────────────────────────────
 
@@ -159,6 +163,7 @@ async def test_pdf_wait_keeps_request_loop_responsive(protocol, tmp_path, monkey
         headers={"content-type": "application/pdf"},
     )
     protocol.file_size_service.get_file_size.return_value = len(payload)
+    spawned_pids = record_spawned_pids(monkeypatch)
     ticks = 0
     finished = asyncio.Event()
 
@@ -185,8 +190,11 @@ async def test_pdf_wait_keeps_request_loop_responsive(protocol, tmp_path, monkey
     assert 2 <= time.monotonic() - started < 3.5
     assert ticks >= 20
     assert not (tmp_path / "uploaded").exists()
+    # The pid comes from the parent: under load the parser may not reach a
+    # page before the 2 s deadline, so it never writes one itself.
+    [pid] = spawned_pids
     with pytest.raises(ProcessLookupError):
-        os.kill(int((tmp_path / "uploaded.pid").read_text()), 0)
+        os.kill(pid, 0)
 
 
 @pytest.mark.asyncio
@@ -204,13 +212,15 @@ async def test_cancelled_pdf_upload_kills_child_and_cleans_up(
         headers={"content-type": "application/pdf"},
     )
     protocol.file_size_service.get_file_size.return_value = len(payload)
+    spawned_pids = record_spawned_pids(monkeypatch)
+    # Cancel once the parser is started, well before its deadline: a spawned
+    # parser needs seconds to start under load and may never reach a page.
     task = asyncio.create_task(
-        _prepare(protocol, upload, pdf_limits=PdfExtractionLimits(10, 1024, 2))
+        _prepare(protocol, upload, pdf_limits=PdfExtractionLimits(10, 1024, 60))
     )
-    pid_path = tmp_path / "uploaded.pid"
     try:
-        async with asyncio.timeout(3):
-            while not pid_path.exists():
+        async with asyncio.timeout(30):
+            while not spawned_pids:
                 await asyncio.sleep(0.01)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -221,8 +231,9 @@ async def test_cancelled_pdf_upload_kills_child_and_cleans_up(
             await asyncio.gather(task, return_exceptions=True)
 
     assert not (tmp_path / "uploaded").exists()
+    [pid] = spawned_pids
     with pytest.raises(ProcessLookupError):
-        os.kill(int(pid_path.read_text()), 0)
+        os.kill(pid, 0)
 
 
 @pytest.mark.asyncio
