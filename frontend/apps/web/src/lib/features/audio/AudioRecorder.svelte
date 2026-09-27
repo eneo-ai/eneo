@@ -193,9 +193,14 @@
   const MIC_ACTIVITY_THRESHOLD = 0.035;
   const MIC_SILENCE_HINT_MS = 6000;
 
-  // "384" or "12,5" in the page's language: whole or one decimal, never "384.00".
+  // "384", "12,5" or, below a megabyte, "0,04" in the page's language: a recording's
+  // first minutes grow its file visibly, never "384.00".
   const megabytes = new Intl.NumberFormat(getLocale(), { maximumFractionDigits: 1 });
-  const formatMegabytes = (bytes: number) => megabytes.format(bytes / (1024 * 1024));
+  const underAMegabyte = new Intl.NumberFormat(getLocale(), { maximumFractionDigits: 2 });
+  const formatMegabytes = (bytes: number) => {
+    const value = bytes / (1024 * 1024);
+    return (value < 1 ? underAMegabyte : megabytes).format(value);
+  };
   let maxSizeLabel: string | null = null;
   $: maxSizeLabel =
     typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0

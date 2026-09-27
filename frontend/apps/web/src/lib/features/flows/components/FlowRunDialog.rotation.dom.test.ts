@@ -564,6 +564,15 @@ describe("FlowRunDialog recording rotation", () => {
     expect(warn).not.toHaveBeenCalledWith("MediaRecorder was paused unexpectedly");
   });
 
+  it("shows a new recording's file growing below a megabyte", async () => {
+    await openDialogAndStartRecording(vi.fn(() => new Promise<UploadedFile>(() => undefined)));
+    media.recorders[0]?.deliver(42_000);
+    await flush();
+
+    // 100 MB per file in this step; 42 000 bytes are 0,04 MB.
+    expect(screen.getByText(m.mb({ value: "0,04 / 95,4" }))).toBeTruthy();
+  });
+
   it("stops at the step's last file slot and refuses another start, saying why", async () => {
     const upload = vi.fn(() => new Promise<UploadedFile>(() => undefined));
     await openDialogAndStartRecording(upload, { steps: [{ ...audioStep, max_files: 2 }] });
