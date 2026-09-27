@@ -394,6 +394,11 @@
     activeTab = urlTab;
   });
 
+  // Stages 1, 2, 3 and 5 share this scroll padding, so their content starts at the same
+  // height (stage 4 is its own workspace); stages 2 and 3, single forms, share a width.
+  const STAGE_SCROLL = "flex-1 overflow-y-auto px-4 py-5 sm:px-6 md:px-8 md:py-8";
+  const STAGE_FORM_MEASURE = "max-w-3xl";
+
   const FLOW_BUILDER_STAGES: { id: BuilderStageId; labelKey: () => string }[] = [
     { id: 1, labelKey: () => m.flow_stage_basic_settings() },
     { id: 2, labelKey: () => m.flow_stage_transcription() },
@@ -873,7 +878,7 @@
 
       <div class="flex flex-1 flex-col overflow-hidden p-4 pt-3">
         {#if builderStage === 1}
-          <div class="flex-1 overflow-y-auto px-4 py-5 sm:px-6 md:px-8 md:py-8">
+          <div class={STAGE_SCROLL}>
             <div class="mx-auto w-full max-w-6xl">
               <div
                 class="grid gap-5 md:gap-6 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_400px]"
@@ -1051,8 +1056,8 @@
             </div>
           </div>
         {:else if builderStage === 2}
-          <div class="flex-1 overflow-y-auto px-4 py-5 sm:px-6 md:px-8">
-            <div class="mx-auto w-full max-w-2xl space-y-4">
+          <div class={STAGE_SCROLL}>
+            <div class="mx-auto w-full {STAGE_FORM_MEASURE} space-y-4">
               <!-- Main transcription card — single unified card for all states -->
               <Card.Root
                 class={[
@@ -1144,7 +1149,10 @@
                                 flowEditor.setWizardMetadata({ transcription_language: value });
                             }}
                           >
-                            <Select.Trigger id="flow-transcription-language" class="h-10 w-full">
+                            <Select.Trigger
+                              id="flow-transcription-language"
+                              class="min-h-10 w-full"
+                            >
                               {languageLabel}
                             </Select.Trigger>
                             <Select.Content>
@@ -1225,8 +1233,8 @@
             </div>
           </div>
         {:else if builderStage === 3}
-          <div class="flex-1 overflow-y-auto p-4 md:p-6">
-            <div class="mx-auto w-full max-w-3xl pt-2">
+          <div class={STAGE_SCROLL}>
+            <div class="mx-auto w-full {STAGE_FORM_MEASURE}">
               <FlowFormSchemaEditor
                 isPublished={$isPublished}
                 onStatsChanged={(detail) => {
@@ -1329,7 +1337,7 @@
             onNodeClick={(stepId) => flowEditor.selectStep(stepId)}
           />
         {:else}
-          <div class="flex-1 overflow-y-auto p-4 sm:p-5 md:p-8">
+          <div class={STAGE_SCROLL}>
             <div class="mx-auto w-full max-w-6xl space-y-5 md:space-y-6">
               <!-- Pipeline summary -->
               <section
