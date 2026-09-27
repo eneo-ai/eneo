@@ -1632,7 +1632,7 @@ async def test_adding_a_leaf_and_changing_a_type_at_once_keeps_both_on_record() 
 
 
 @pytest.mark.asyncio
-async def test_binding_change_between_question_and_sources_names_both() -> None:
+async def test_binding_change_names_the_sources_read_before_and_after() -> None:
     flow = _flow(
         _flow_step(
             step_order=1,
@@ -1648,19 +1648,31 @@ async def test_binding_change_between_question_and_sources_names_both() -> None:
             user_description="Review case",
             input_source="previous_step",
             input_type="json",
-            input_bindings={"question": "Bedöm ärendet: {{ step_1.output.text }}"},
+            # As the compiler writes a form read beside the predecessor.
+            input_bindings={
+                "question": "arende: {{ flow_input.arende }}",
+                "source_refs": [{"step_ref": "step_1", "output": "structured"}],
+            },
         ),
+        metadata_json={
+            "form_schema": {
+                "fields": [{"name": "arende", "type": "text", "label": "Ärende"}]
+            }
+        },
     )
 
     result = await _process(
         flow=flow,
         arguments={
             "plan_rationale": "Feed the review only the summary.",
+            "form_fields": [],
             "steps": [
                 {"kind": "modify", "existing_step_ref": "existing_step_1"},
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_2",
+                    # Both lists said: the form read goes, the field read comes.
+                    "uses_form_fields": [],
                     "uses_previous_fields": [{"from_step": 1, "field_path": "summary"}],
                 },
             ],
@@ -1674,9 +1686,8 @@ async def test_binding_change_between_question_and_sources_names_both() -> None:
         for c in result.compiled.content.edit.diff.step_changes[1].field_changes
     }
     previous, current = fields["input_bindings"]
-    assert previous is not None and previous.startswith("Bedöm ärendet:")
+    assert previous == "Extract case"
     assert current == "Extract case.summary"
-    assert "source_refs" not in current and "question template" not in previous
 
 
 @pytest.mark.asyncio
@@ -2989,6 +3000,102 @@ async def test_ordered_audio_repair_inserts_transcript_and_rewires_consumer() ->
     )
     assert result.compiled.content.edit.warnings
     assert result.compiled.content.edit.confidence == "needs_review"
+
+
+def _audio_flow_reading_the_meeting_form_field() -> SimpleNamespace:
+    flow = _audio_document_flow()
+    flow.steps[0].input_bindings = {
+        # As the compiler writes a flow-input step's form reads.
+        "question": "{{ step_input.text }}\n\nmote: {{ flow_input.mote }}"
+    }
+    flow.metadata_json = {
+        "form_schema": {
+            "fields": [{"name": "mote", "type": "text", "label": "Möte", "order": 1}]
+        }
+    }
+    return flow
+
+
+@pytest.mark.asyncio
+async def test_ordered_audio_repair_keeps_the_rewired_steps_form_reads() -> None:
+    result = await _process(
+        flow=_audio_flow_reading_the_meeting_form_field(),
+        arguments={
+            "plan_rationale": "Keep the flow shape.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": f"existing_step_{order}"}
+                for order in range(1, 5)
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady), result
+    rewired = result.compiled.content.spec.steps[1]
+    assert rewired.existing_step_ref == "existing_step_1"
+    assert rewired.input_bindings is not None
+    assert "{{ flow_input.mote }}" in rewired.input_bindings["question"]
+    assert "step_input" not in rewired.input_bindings["question"]
+
+
+@pytest.mark.asyncio
+async def test_ordered_audio_repair_of_a_hand_written_first_step_asks_the_user() -> (
+    None
+):
+    # The repair would rewire the first step to read the transcript, which
+    # drops its hand-written question; the model cannot fix that (it did not
+    # author the rewire), so the turn answers with the step to change by hand.
+    flow = _audio_document_flow()
+    flow.steps[0].input_bindings = {"question": "Möteskontext: {{ step_input.text }}"}
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Keep the flow shape.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": f"existing_step_{order}"}
+                for order in range(1, 5)
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalAnswer), result
+    assert result.outcome is not None
+    assert (result.outcome.kind, result.outcome.required_action) == (
+        "edit_blocked_by_custom_underlag",
+        "edit_in_step_editor",
+    )
+    assert result.outcome.affected == ("Etablera gemensam möteskontext",)
+    assert "Etablera gemensam möteskontext" in result.answer
+
+
+@pytest.mark.asyncio
+async def test_ordered_audio_repair_keeps_an_authored_form_list() -> None:
+    result = await _process(
+        flow=_audio_flow_reading_the_meeting_form_field(),
+        arguments={
+            "plan_rationale": "Läs också platsen.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "uses_form_fields": ["mote", "plats"],
+                },
+                *(
+                    {"kind": "modify", "existing_step_ref": f"existing_step_{order}"}
+                    for order in range(2, 5)
+                ),
+            ],
+            "form_fields": [
+                {"name": "mote", "type": "text", "label": "Möte"},
+                {"name": "plats", "type": "text", "label": "Plats"},
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady), result
+    question = result.compiled.content.spec.steps[1].input_bindings["question"]
+    assert "{{ flow_input.mote }}" in question
+    assert "{{ flow_input.plats }}" in question
 
 
 @pytest.mark.asyncio

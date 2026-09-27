@@ -1,9 +1,15 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal
+import json
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
@@ -25,6 +31,7 @@ from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
     NewStepDraft,
+    PreviousFieldRef,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     AddStep as IntentAddStep,
@@ -34,6 +41,15 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     ModifyExistingStep,
     OrderedEditProposal,
     SemanticStepIntent,
+)
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    BoundedListing,
+    display_value,
+)
+from eneo.flows.ai_builder.ai_builder_step_reads import (
+    ReadSite,
+    spec_step_refs,
+    step_reads,
 )
 from eneo.flows.application.flow_draft_materialization import (
     validate_existing_step_ref_coverage,
@@ -51,6 +67,18 @@ from eneo.flows.flow_authoring_spec import (
     strip_inapplicable_completion_model,
 )
 from eneo.flows.flow_capability_manifest import supports_step_io_tuple
+from eneo.flows.input_binding_contract_rules import (
+    SOURCE_REFS_BINDING_KEY,
+    InputBindingContractError,
+    SourceRefBinding,
+    question_binding,
+    source_ref_bindings,
+)
+from eneo.flows.template_reference_analyzer import (
+    analyze_template,
+    referenced_form_fields,
+)
+from eneo.main.exceptions import BadRequestException
 
 
 class MaterializedAddStep(BaseModel):
@@ -182,6 +210,18 @@ def compile_ordered_edit_proposal(
         for step in base_spec.steps
         if step.existing_step_ref is not None
     }
+    form_fields = (
+        proposal.form_fields
+        if "form_fields" in proposal.model_fields_set
+        else base_spec.form_fields
+    )
+    saved = _SavedFlow(
+        steps=base_spec.steps,
+        order_by_name=spec_step_refs(base_spec.steps),
+        form_field_names=[field.name for field in form_fields or []],
+        saved_form_field_names=[field.name for field in base_spec.form_fields or []],
+        removed_refs=proposal.removed_existing_step_refs,
+    )
     preserved_refs: list[str] = []
     compiled_steps: list[StepSpec] = []
 
@@ -208,6 +248,7 @@ def compile_ordered_edit_proposal(
             base_step,
             item,
             prior_steps=compiled_steps,
+            saved=saved,
             ui_language=ui_language,
         )
         compiled_steps.append(compiled.model_copy(update={"plan_step_ref": plan_ref}))
@@ -222,11 +263,7 @@ def compile_ordered_edit_proposal(
         flow_name=_resolve_flow_name(base_spec, proposal),
         flow_description=_resolve_flow_description(base_spec, proposal),
         steps=compiled_steps,
-        form_fields=(
-            proposal.form_fields
-            if "form_fields" in proposal.model_fields_set
-            else base_spec.form_fields
-        ),
+        form_fields=form_fields,
         document_body_writer_step_refs=_document_body_writer_step_refs(
             base_spec=base_spec,
             compiled_steps=compiled_steps,
@@ -280,6 +317,7 @@ def _compile_existing_step_modification(
     patch: ModifyExistingStep,
     *,
     prior_steps: list[StepSpec],
+    saved: _SavedFlow,
     ui_language: str | None,
 ) -> StepSpec:
     fields = patch.authored_fields
@@ -289,12 +327,15 @@ def _compile_existing_step_modification(
         return existing
     step = apply_existing_step_patch(existing, patch)
 
-    if fields & {
-        "input_source",
-        "input_type",
-        "uses_previous_fields",
-        "uses_form_fields",
-    }:
+    # A restated input_source or input_type that equals the saved one, with
+    # neither list said, changes nothing: the saved input stays as it is.
+    if fields & {"uses_form_fields", "uses_previous_fields"} or (
+        step.input_source,
+        step.input_type,
+    ) != (existing.input_source, existing.input_type):
+        _refuse_a_rebuild_that_drops_reads(
+            existing, patch, prior_steps=prior_steps, saved=saved
+        )
         uses_form_fields = patch.uses_form_fields or []
         uses_previous_fields = patch.uses_previous_fields or []
         input_bindings = compile_step_input_bindings(
@@ -359,6 +400,237 @@ def _compile_existing_step_modification(
             step = step.model_copy(update={"output_mode": output_mode})
 
     return strip_inapplicable_completion_model(step)
+
+
+_KEEP_AS_SAVED = "leave input_source, input_type and both lists null"
+
+
+@dataclass(frozen=True, slots=True)
+class _SavedFlow:
+    """The saved flow a modify is judged against, and what the edit drops."""
+
+    steps: Sequence[StepSpec]
+    order_by_name: Mapping[str, int]
+    form_field_names: Sequence[str]
+    saved_form_field_names: Sequence[str]
+    removed_refs: frozenset[str]
+
+    def by_order(self, bindings: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Well-formed bindings with each source ref's step named by its saved
+        order, so a compiled ref and a saved alias of one step compare equal."""
+
+        refs: list[Any] = (bindings or {}).get(SOURCE_REFS_BINDING_KEY) or []
+        return bindings and {
+            **bindings,
+            SOURCE_REFS_BINDING_KEY: [
+                {**ref, "step_ref": self.order_by_name.get(ref["step_ref"])}
+                for ref in refs
+            ],
+        }
+
+
+def _restated_lists(
+    step: StepSpec, saved: _SavedFlow, own_order: int
+) -> tuple[list[str], list[PreviousFieldRef]] | None:
+    """The lists that compile back to the step's saved input exactly, or None:
+    anything else in it (literal text, a runtime, indexed, whole or templated
+    read) a rebuild would lose, so the compiler is the judge."""
+
+    try:
+        forms = question_form_reads(step.input_bindings, saved.saved_form_field_names)
+        fields = [
+            PreviousFieldRef(
+                from_step=saved.order_by_name[ref.step_ref],
+                field_path=".".join(ref.field_path),
+                label=ref.label,
+            )
+            for ref in source_ref_bindings(step.input_bindings)
+            if ref.field_path and ref.step_ref in saved.order_by_name
+        ]
+        compiled = compile_step_input_bindings(
+            input_source=step.input_source,
+            input_type=step.input_type,
+            uses_form_fields=forms,
+            uses_previous_fields=fields,
+            uses_previous_outputs=[],
+            prior_steps=list(saved.steps[: own_order - 1]),
+            require_declared_previous_fields=True,
+        )
+    except (
+        AIBuilderArchitectureError,
+        BadRequestException,
+        InputBindingContractError,
+        ValidationError,
+    ):
+        return None
+    exact = saved.by_order(compiled) == saved.by_order(step.input_bindings)
+    return (forms, fields) if exact else None
+
+
+def _refuse_a_rebuild_that_drops_reads(
+    existing: StepSpec,
+    patch: ModifyExistingStep,
+    *,
+    prior_steps: list[StepSpec],
+    saved: _SavedFlow,
+) -> None:
+    """Refuse a rebuild of the step's input (compiled from the lists, a null
+    list as empty) that would drop a saved read nobody named, offering only a
+    repair that can pass. A read of a removed step is replaced only by reads
+    the model names, and an inexact input can only be kept as saved."""
+
+    own_order = saved.order_by_name.get(existing.existing_step_ref or "")
+    if existing.input_bindings is None or own_order is None:
+        return
+    position = len(prior_steps) + 1
+    before = {
+        step.existing_step_ref: order
+        for order, step in enumerate(prior_steps, 1)
+        if step.existing_step_ref is not None
+    }
+    shown = BoundedListing()
+    lists = _restated_lists(existing, saved, own_order)
+    # Removed or moved-after producers come first, one entry each, since
+    # every repair must name them: the step name, how often, and one read.
+    gone: dict[str, tuple[StepSpec, int, str]] = {}
+    for read in step_reads(
+        existing,
+        order=own_order,
+        step_refs=dict(saved.order_by_name),
+        form_field_names=set(saved.form_field_names),
+    ):
+        order = read.producer_order
+        producer = saved.steps[order - 1] if order and order <= own_order else None
+        if read.site not in (ReadSite.SOURCE_REF, ReadSite.QUESTION) or (
+            producer is None or producer.existing_step_ref in before
+        ):
+            continue
+        origin = read.origin
+        expression = (
+            origin.template_expression()
+            if isinstance(origin, SourceRefBinding)
+            else str(origin)
+        )
+        _, count, first = gone.get(
+            producer.existing_step_ref or "", (producer, 0, expression)
+        )
+        gone[producer.existing_step_ref or ""] = (producer, count + 1, first)
+    for producer, count, expression in gone.values():
+        fate = (
+            "is removed by this edit"
+            if producer.existing_step_ref in saved.removed_refs
+            else "is moved after it"
+        )
+        shown.add(
+            lambda producer=producer, fate=fate, count=count, expression=expression: (
+                f'saved step "{display_value(producer.name)}" {fate}; read {count} '
+                f"time{'' if count == 1 else 's'}, e.g. {display_value(expression)}"
+            )
+        )
+    # Then the step's reads as the model restates them, one per entry,
+    # formatted only when shown; field reads in this edit's step order.
+    for form in lists[0] if lists else ():
+        if form in saved.form_field_names:
+            shown.add(
+                lambda form=form: f"uses_form_fields: {json.dumps(display_value(form), ensure_ascii=False)}"
+            )
+    for ref in lists[1] if lists else ():
+        producer_ref = saved.steps[ref.from_step - 1].existing_step_ref
+        if producer_ref in before:
+            field_read = {
+                "from_step": before[producer_ref],
+                "field_path": display_value(ref.field_path),
+                "label": display_value(ref.label or ""),
+            }
+            shown.add(
+                lambda field_read=field_read: (
+                    "uses_previous_fields: "
+                    f"{json.dumps(field_read, ensure_ascii=False)}"
+                )
+            )
+    step = f'Step {position} "{display_value(existing.name)}"'
+    unsaid = [
+        name
+        for name, reads in zip(
+            ("uses_form_fields", "uses_previous_fields"), lists or ()
+        )
+        if reads and name not in patch.authored_fields
+    ]
+    # Leaving the input null keeps every saved read, so each step read that the
+    # edit removes or moves must stay before it too. Stated in full, by count,
+    # so the repair never depends on names the listing may cut.
+    keep = (
+        f"keep every step it reads before it ({len(gone)} of them this edit "
+        f"removes or moves after it) and {_KEEP_AS_SAVED}"
+        if gone
+        else _KEEP_AS_SAVED
+    )
+    if lists is None:
+        heading = (
+            f"{step} has an input the edit tool cannot restate exactly, so a new "
+            f"input would drop part of it. To keep it, {keep}."
+        )
+    elif gone and not (patch.uses_form_fields or patch.uses_previous_fields):
+        heading = (
+            f"{step} reads steps this edit removes or moves after it. Name what "
+            f"step {position} reads instead in uses_form_fields and "
+            f"uses_previous_fields, or {keep}."
+        )
+    elif unsaid:
+        heading = (
+            f"{step} changes its input, but {' and '.join(unsaid)} "
+            f"{'is' if len(unsaid) == 1 else 'are'} null, so its current reads "
+            f"would be dropped. To keep them, give both lists complete, or {keep}."
+        )
+    else:
+        return
+    raise AIBuilderBadRequestException(
+        shown.render(heading + (" Its reads:" if shown.total else "")),
+        code=AIBuilderErrorCode.INVALID_PLAN_STEP_REF,
+        context={"refused_read_count": shown.total},
+    )
+
+
+def input_restates_exactly(
+    step: StepSpec,
+    *,
+    prior_steps: Sequence[StepSpec],
+    form_field_names: Sequence[str],
+) -> bool:
+    """Whether a saved step's input compiles back exactly from its lists."""
+
+    steps = [*prior_steps, step]
+    saved = _SavedFlow(
+        steps=steps,
+        order_by_name=spec_step_refs(steps),
+        form_field_names=form_field_names,
+        saved_form_field_names=form_field_names,
+        removed_refs=frozenset(),
+    )
+    return (
+        step.input_bindings is None
+        or _restated_lists(step, saved, len(steps)) is not None
+    )
+
+
+def question_form_reads(
+    input_bindings: object, form_field_names: Sequence[str]
+) -> list[str]:
+    """The form fields a saved question reads, in the order it reads them."""
+
+    question = question_binding(input_bindings)
+    if question is None:
+        return []
+    references = analyze_template(
+        question, step_refs={}, form_field_names=set(form_field_names)
+    )
+    return list(
+        dict.fromkeys(
+            name
+            for reference in references
+            for name in sorted(referenced_form_fields([reference]))
+        )
+    )
 
 
 def _derive_existing_step_output_mode(

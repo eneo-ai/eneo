@@ -12,9 +12,12 @@ def build_previous_field_refs_schema() -> dict[str, Any]:
     return {
         "type": ["array", "null"],
         "description": (
-            "Optional field-level reuse intent for earlier JSON-producing steps. "
-            "The backend compiles these into explicit underlag bindings. Null "
-            "keeps the current bindings; an empty list clears them."
+            "Fields of earlier JSON-producing steps this step reads. The backend "
+            "compiles these into explicit underlag bindings. Null keeps the step's "
+            "current reads when its input is otherwise unchanged. If you set "
+            "input_source, input_type or either list, give both lists complete. "
+            "An empty list means no explicit field reads; the step can still read "
+            "its input source."
         ),
         "items": {
             "type": "object",

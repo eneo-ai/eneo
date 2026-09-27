@@ -396,6 +396,7 @@ NonPlanKind: TypeAlias = Literal[
     "template_placeholder_too_long",
     "template_has_too_many_placeholders",
     "form_field_conflicts_with_run_input",
+    "edit_blocked_by_custom_underlag",
 ]
 RequiredAction: TypeAlias = Literal[
     "none",
@@ -404,6 +405,7 @@ RequiredAction: TypeAlias = Literal[
     "edit_template_placeholders",
     "simplify_template",
     "rename_form_field",
+    "edit_in_step_editor",
 ]
 # How many names a diagnostic or an answer lists, and how much of each: a
 # template can carry a thousand placeholders, and neither should.

@@ -279,8 +279,11 @@ def _build_modify_step_schema(
                 "type": ["array", "null"],
                 "items": {"type": "string"},
                 "description": (
-                    "Form fields this step should consider. Null keeps the current "
-                    "bindings; an empty list clears them."
+                    "Form fields this step reads. Null keeps the step's current "
+                    "reads when its input is otherwise unchanged. If you set "
+                    "input_source, input_type or either list, give both lists "
+                    "complete. An empty list means no explicit form reads; the "
+                    "step can still read its input source."
                 ),
             },
             "uses_previous_fields": build_previous_field_refs_schema(),

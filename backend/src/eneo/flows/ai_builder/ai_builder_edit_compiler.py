@@ -21,7 +21,9 @@ from eneo.flows.ai_builder.ai_builder_authoring_projection import (
     MaterializedOrderedEditProposal,
     MaterializedOrderedEditStep,
     compile_ordered_edit_proposal,
+    input_restates_exactly,
     materialize_ordered_edit_proposal,
+    question_form_reads,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import FlowBuilderEditApproval
 from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
@@ -77,7 +79,10 @@ from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
 from eneo.flows.application.flow_authoring_description_semantics import (
     FlowSemanticSignature,
 )
-from eneo.flows.application.flow_authoring_snapshot import current_flow_authoring_spec
+from eneo.flows.application.flow_authoring_snapshot import (
+    current_flow_authoring_spec,
+    flow_step_to_authoring_spec,
+)
 from eneo.flows.application.flow_draft_materialization import (
     validate_existing_step_ref_coverage,
 )
@@ -528,6 +533,20 @@ def _prepare_ordered_edit_proposal(
         prepared = _repair_leading_audio_shape(
             proposal=prepared,
             current_steps=current_steps,
+            form_field_names=[
+                field.name
+                for field in (
+                    prepared.form_fields
+                    if "form_fields" in prepared.model_fields_set
+                    else extract_form_fields_from_metadata(current_metadata_json)
+                )
+                or []
+            ],
+            saved_form_field_names=[
+                field.name
+                for field in extract_form_fields_from_metadata(current_metadata_json)
+                or []
+            ],
             warnings=warnings,
         )
     return _PreparedOrderedEditProposal(
@@ -642,6 +661,8 @@ def _repair_leading_audio_shape(
     *,
     proposal: MaterializedOrderedEditProposal,
     current_steps: list[FlowStep],
+    form_field_names: list[str],
+    saved_form_field_names: list[str],
     warnings: list[str],
 ) -> MaterializedOrderedEditProposal:
     if len(proposal.steps) < 2 or not current_steps:
@@ -664,6 +685,21 @@ def _repair_leading_audio_shape(
     ):
         return proposal
 
+    # The rewired step reads the transcript through its lists, which must
+    # restate its saved input exactly; a hand-written one only the user can
+    # rewrite, and the model cannot undo a rewire it did not author.
+    if not input_restates_exactly(
+        flow_step_to_authoring_spec(first_step, first_item.existing_step_ref),
+        prior_steps=[],
+        form_field_names=saved_form_field_names,
+    ):
+        raise AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            repair_disposition="user_action",
+            detail="The first step's own input cannot be rewired to the transcript.",
+            log_context={"failure_code": "audio_repair_first_step_input_inexact"},
+            affected=(first_step.user_description or first_item.existing_step_ref,),
+        )
     transcript_step = MaterializedAddStep(
         step=NewStepDraft(
             name="Transkribera ljud",
@@ -675,8 +711,14 @@ def _repair_leading_audio_shape(
             runtime_max_files=_runtime_input_max_files(first_step.input_config),
         )
     )
+    # The rewired step reads the transcript instead of the upload; its form
+    # reads stay, as authored or else as saved, and it reads no earlier step.
     rewired_first = ModifyExistingStep.model_validate(
         {
+            "uses_form_fields": question_form_reads(
+                first_step.input_bindings, form_field_names
+            ),
+            "uses_previous_fields": [],
             **first_item.model_dump(mode="python", exclude_unset=True),
             "input_source": InputSource.PREVIOUS_STEP,
             "input_type": InputType.TEXT,

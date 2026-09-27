@@ -228,6 +228,10 @@ _USER_ACTION_OUTCOMES: Final[dict[str, tuple[NonPlanKind, RequiredAction]]] = {
         "form_field_conflicts_with_run_input",
         "rename_form_field",
     ),
+    "audio_repair_first_step_input_inexact": (
+        "edit_blocked_by_custom_underlag",
+        "edit_in_step_editor",
+    ),
 }
 
 _USER_ACTION_MESSAGES: Final[dict[NonPlanKind, dict[str, str]]] = {
@@ -274,6 +278,18 @@ _USER_ACTION_MESSAGES: Final[dict[NonPlanKind, dict[str, str]]] = {
             "The form field {names} has the same name as what the flow receives "
             "when it runs. Rename the field or remove it and try again. Reserved "
             "names: {reserved}."
+        ),
+    },
+    "edit_blocked_by_custom_underlag": {
+        "sv": (
+            "Steget {names} har ett eget skrivet underlag som ändringen inte kan "
+            "skriva om automatiskt. Ändra stegets underlag i stegredigeraren och "
+            "försök igen."
+        ),
+        "en": (
+            "The step {names} has a hand-written input that this edit cannot "
+            "rewrite automatically. Change the step's input in the step editor "
+            "and try again."
         ),
     },
 }

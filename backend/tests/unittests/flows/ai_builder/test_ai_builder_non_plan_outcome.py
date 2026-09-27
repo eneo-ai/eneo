@@ -343,6 +343,14 @@ def _user_action_error(
             "rename_form_field",
             "Formulärfältet `transkribering`",
         ),
+        (
+            "audio_repair_first_step_input_inexact",
+            ("Analysera samtalet",),
+            {},
+            "edit_blocked_by_custom_underlag",
+            "edit_in_step_editor",
+            "Steget `Analysera samtalet`",
+        ),
     ],
 )
 def test_a_user_action_error_answers_with_its_remedy(

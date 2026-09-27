@@ -27,6 +27,9 @@ from eneo.flows.ai_builder.ai_builder_edit_effect import (
     edit_effect,
     order_matches_moves,
 )
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+)
 from eneo.flows.ai_builder.ai_builder_form_fields import (
     extract_form_fields_from_metadata,
 )
@@ -148,16 +151,6 @@ def _with_source_ref(
     return spec.model_copy(update={"steps": steps})
 
 
-def _s3_loses_its_saved_step_reads_in_a() -> set[ReadEffect]:
-    return {
-        _read(S3, "-", S1, ReadChannel.TEXT, label="Källfakta"),
-        *(
-            _read(S3, "-", S2, ReadChannel.STRUCTURED, (field,), label=label)
-            for field, label in FIELD_READS_OF_S2_IN_A
-        ),
-    }
-
-
 def test_an_edit_that_changes_nothing_has_no_effect() -> None:
     saved, final = _edit("edit_seed_a.json", *_keep(1, 2, 3))
 
@@ -192,11 +185,46 @@ def test_a_changed_flow_property_is_a_flow_property_effect(
     assert edit_effect(saved, final) == EditEffect(frozenset({effect}), None)
 
 
-def test_e10_a_producer_turned_text_drops_its_field_reads_for_one_text_read() -> None:
-    saved, final = _edit(
+def _refused(seed: str | dict[str, Any], *steps: Any, **proposal: Any) -> str:
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        _edit(seed, *steps, **proposal)
+    return str(exc_info.value)
+
+
+def _seed_a_as_its_lists_compile_it() -> dict[str, Any]:
+    """Seed A with s3's input as the edit tool's lists compile it: no whole
+    read of s1 ("Källfakta") and no hand-written question text."""
+
+    raw = _seed("edit_seed_a.json")
+    bindings = raw["steps"][2]["input_bindings"]
+    bindings["question"] = (
+        "sokande: {{ flow_input.sokande }}\nsokt_belopp: {{ flow_input.sokt_belopp }}"
+    )
+    bindings["source_refs"] = [
+        ref for ref in bindings["source_refs"] if ref.get("field_path")
+    ]
+    return raw
+
+
+def _s3_reads_of_s2_in_a() -> list[dict[str, Any]]:
+    return [
+        {"from_step": 2, "field_path": field, "label": label}
+        for field, label in FIELD_READS_OF_S2_IN_A
+    ]
+
+
+E10_S2_TURNED_TEXT = ModifyExistingStep(
+    existing_step_ref=S2, output_type="text", output_fields=[]
+)
+
+
+def test_e10_a_rebuild_that_would_drop_the_source_facts_is_refused() -> None:
+    # Today's wire cannot restate s3's input (its whole read of s1 and its
+    # hand-written question), so the edit is refused: it can only stay as saved.
+    message = _refused(
         "edit_seed_a.json",
         *_keep(1),
-        ModifyExistingStep(existing_step_ref=S2, output_type="text", output_fields=[]),
+        E10_S2_TURNED_TEXT,
         ModifyExistingStep(
             existing_step_ref=S3,
             input_source="previous_step",
@@ -205,14 +233,34 @@ def test_e10_a_producer_turned_text_drops_its_field_reads_for_one_text_read() ->
         ),
     )
 
-    # Today's wire cannot keep the source facts: their loss is reported.
+    assert "cannot restate exactly" in message
+
+
+def test_e10_a_producer_turned_text_drops_its_field_reads_for_one_text_read() -> None:
+    saved, final = _edit(
+        _seed_a_as_its_lists_compile_it(),
+        *_keep(1),
+        E10_S2_TURNED_TEXT,
+        ModifyExistingStep(
+            existing_step_ref=S3,
+            input_source="previous_step",
+            input_type="text",
+            uses_form_fields=["sokande", "sokt_belopp"],
+            uses_previous_fields=[],
+        ),
+    )
+
+    # Both lists said: the field reads go, and s3 reads s2's text.
     assert edit_effect(saved, final) == EditEffect(
         frozenset(
             {
                 FieldEffect(S2, "output_type"),
                 FieldEffect(S2, "output_contract"),
                 FieldEffect(S3, "input_bindings"),
-                *_s3_loses_its_saved_step_reads_in_a(),
+                *(
+                    _read(S3, "-", S2, ReadChannel.STRUCTURED, (field,), label=label)
+                    for field, label in FIELD_READS_OF_S2_IN_A
+                ),
                 _read(S3, "+", S2, ReadChannel.TEXT),
             }
         ),
@@ -220,8 +268,28 @@ def test_e10_a_producer_turned_text_drops_its_field_reads_for_one_text_read() ->
     )
 
 
-def test_e12_an_added_form_field_and_its_read_are_effects() -> None:
-    saved, final = _edit(
+def _form_fields_of_a_and(*added: FlowInputFieldIntent) -> list[FlowInputFieldIntent]:
+    # The saved fields restated as saved; the seed also records an order.
+    return [
+        *(
+            FlowInputFieldIntent.model_validate(
+                {key: value for key, value in field.items() if key != "order"}
+            )
+            for field in _seed("edit_seed_a.json")["metadata_json"]["form_schema"][
+                "fields"
+            ]
+        ),
+        *added,
+    ]
+
+
+HANDLAGGARE = FlowInputFieldIntent(
+    name="handlaggare", label="Handläggare", required=True
+)
+
+
+def test_e12_a_form_read_added_beside_an_unrestatable_read_is_refused() -> None:
+    message = _refused(
         "edit_seed_a.json",
         *_keep(1, 2),
         ModifyExistingStep(
@@ -230,22 +298,27 @@ def test_e12_an_added_form_field_and_its_read_are_effects() -> None:
             input_type="text",
             uses_form_fields=["sokande", "sokt_belopp", "handlaggare"],
         ),
-        form_fields=[
-            # The saved fields restated as saved; the seed also records an order.
-            *(
-                FlowInputFieldIntent.model_validate(
-                    {key: value for key, value in field.items() if key != "order"}
-                )
-                for field in _seed("edit_seed_a.json")["metadata_json"]["form_schema"][
-                    "fields"
-                ]
-            ),
-            FlowInputFieldIntent(
-                name="handlaggare", label="Handläggare", required=True
-            ),
-        ],
+        form_fields=_form_fields_of_a_and(HANDLAGGARE),
     )
 
+    assert "cannot restate exactly" in message
+
+
+def test_e12_an_added_form_field_and_its_read_are_effects() -> None:
+    saved, final = _edit(
+        _seed_a_as_its_lists_compile_it(),
+        *_keep(1, 2),
+        ModifyExistingStep(
+            existing_step_ref=S3,
+            input_source="previous_step",
+            input_type="text",
+            uses_form_fields=["sokande", "sokt_belopp", "handlaggare"],
+            uses_previous_fields=_s3_reads_of_s2_in_a(),
+        ),
+        form_fields=_form_fields_of_a_and(HANDLAGGARE),
+    )
+
+    # Both lists complete: the one new read is the only read effect.
     assert edit_effect(saved, final) == EditEffect(
         frozenset(
             {
@@ -259,17 +332,14 @@ def test_e12_an_added_form_field_and_its_read_are_effects() -> None:
                     ("handlaggare",),
                     ReadSite.QUESTION,
                 ),
-                # The saved field reads became one read of the whole output.
-                *_s3_loses_its_saved_step_reads_in_a(),
-                _read(S3, "+", S2, ReadChannel.STRUCTURED),
             }
         ),
         None,
     )
 
 
-def test_e16_a_removed_step_and_field_reads_replaced_by_a_whole_read() -> None:
-    saved, final = _edit(
+def test_e16_a_step_whose_producer_is_removed_must_name_its_new_reads() -> None:
+    message = _refused(
         "edit_seed_g.json",
         *_keep(1, 3),
         ModifyExistingStep(
@@ -278,53 +348,8 @@ def test_e16_a_removed_step_and_field_reads_replaced_by_a_whole_read() -> None:
         removed_existing_step_refs=frozenset({S2}),
     )
 
-    # A JSON consumer's implicit read is the reader's STRUCTURED_ELSE_TEXT.
-    assert edit_effect(saved, final) == EditEffect(
-        frozenset(
-            {
-                StructureEffect("removed", S2),
-                _read(S2, "-", S1, ReadChannel.TEXT, site=ReadSite.IMPLICIT),
-                FieldEffect(S4, "input_type"),
-                FieldEffect(S4, "input_bindings"),
-                FieldEffect(S4, "input_contract"),
-                _read(
-                    S4,
-                    "-",
-                    S1,
-                    ReadChannel.STRUCTURED,
-                    ("diarienummer",),
-                    label="Diarienummer",
-                ),
-                _read(
-                    S4, "-", S2, ReadChannel.STRUCTURED, ("belopp_kr",), label="Belopp"
-                ),
-                _read(
-                    S4,
-                    "-",
-                    S2,
-                    ReadChannel.STRUCTURED,
-                    ("inom_bidragstak",),
-                    label="Inom bidragstaket",
-                ),
-                _read(
-                    S4,
-                    "-",
-                    S3,
-                    ReadChannel.STRUCTURED,
-                    ("sista_datum",),
-                    label="Sista datum",
-                ),
-                _read(
-                    S4,
-                    "+",
-                    S3,
-                    ReadChannel.STRUCTURED_ELSE_TEXT,
-                    site=ReadSite.IMPLICIT,
-                ),
-            }
-        ),
-        None,
-    )
+    assert "is removed by this edit" in message
+    assert "uses_form_fields and uses_previous_fields" in message
 
 
 def test_an_inserted_step_is_named_by_its_plan_ref_and_displaces_a_positional_read() -> (
