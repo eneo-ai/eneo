@@ -363,10 +363,7 @@ class TestBuildEditFlowToolSchema:
             "multiselect",
             "list",
         ]
-        assert properties["options"] == {
-            "type": ["array", "null"],
-            "items": {"type": "string"},
-        }
+        assert properties["options"] == {"type": "array", "items": {"type": "string"}}
         description = form_fields["description"]
         assert "Null keeps the current fields" in description
         assert "an empty list clears them" in description
