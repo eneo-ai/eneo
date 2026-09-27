@@ -1,7 +1,19 @@
 <script lang="ts" module>
+  import type { RecordingEndReason, RecordingStopReason } from "./recordedAudioFile";
+
   // How long a recording waits for a listener preparing on its audio graph
   // (the live preview tapping it) before it starts anyway.
   export const AUDIO_GRAPH_PREPARATION_MS = 2_000;
+
+  // What the dialog's recording session calls on the recorder.
+  export type RecorderHandle = {
+    startExternal: () => Promise<void>;
+    stopExternal: (reason?: RecordingEndReason) => Promise<void>;
+    rotate: () => boolean;
+    // Replaced parts still finishing their files: each takes a file slot and an
+    // upload place before the caller has it.
+    pendingHandovers: () => number;
+  };
 </script>
 
 <script lang="ts">
@@ -26,7 +38,6 @@
     selectAudioRecordingOptions
   } from "./audioRecordingOptions";
   import { buildRecordedAudioFile } from "./recordedAudioFile";
-  import type { RecordingStopReason } from "./recordedAudioFile";
   import { downloadRecordedAudioFile } from "./downloadRecordedAudioFile";
   import type { RecorderJournal } from "./recordingJournal";
   import { generateSessionId, ROTATION_OVERLAP_MS } from "./recordingSession";
@@ -72,8 +83,16 @@
 
   type RecordingStartOrigin = "user" | "external";
   export let maxBytes: number | null = null;
-  // Eneo's longest recording for the step, said before recording starts.
-  export let maxRecordingMs: number | null = null;
+  // What a recording started now may still hold, said before it starts; and
+  // whether it continues one that already has parts.
+  export let recordingRoomMs: number | null = null;
+  export let continuesRecording = false;
+  // How long the running recording has before it stops by itself (the caller's
+  // session knows its limits); read on every tick of the clock.
+  export let timeLeftMs: () => number = () => Infinity;
+  // The segment's file nears its size limit: the caller starts a new part, or
+  // stops at its last file slot. At the limit itself the recording stops.
+  export let onFileNearlyFull: () => void = () => {};
   export let resetToken: unknown = 0;
   // False while the caller cannot take another recording; stopping stays possible.
   export let canStart = true;
@@ -84,7 +103,7 @@
 
   // A recording reports to the callbacks it started with: its last segment
   // arrives after the stop, when the caller may have moved on.
-  let reportTo = { onRecordingDone, onRecordingStateChange, journal };
+  let reportTo = { onRecordingDone, onRecordingStateChange, journal, onFileNearlyFull };
 
   let isRecording: boolean = false;
   let startedRecordingAt = dayjs();
@@ -116,6 +135,7 @@
   let discardRecordingOnStop = false;
   // Recorders a rotation replaced; each still finishes its own segment.
   const replacedRecorders = new WeakSet<MediaRecorder>();
+  let handoversPending = 0;
   // Settles once a recorder's stop has been handled.
   const recorderStops = new WeakMap<MediaRecorder, Promise<void>>();
   // The replaced recorder still capturing the rotation overlap.
@@ -202,16 +222,10 @@
       ? formatDurationEstimate(estimateRecordingDurationSeconds(maxBytes, activeAudioBitsPerSecond))
       : null;
 
-  let estimatedRemainingLabel: string | null = null;
-  $: estimatedRemainingLabel =
-    typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0
-      ? formatDurationEstimate(
-          estimateRecordingDurationSeconds(
-            Math.max(maxBytes - visibleRecordingBytes, 0),
-            activeAudioBitsPerSecond
-          )
-        )
-      : null;
+  // Rounded up to the minute, as a countdown: "1 min kvar" until it is over.
+  let timeLeftLabel: string | null = null;
+  // Read again on every tick of the elapsed time.
+  $: timeLeftLabel = isRecording && elapsedSeconds >= 0 ? formatTimeLeft(timeLeftMs()) : null;
 
   let recordingRateLabel = "";
   $: recordingRateLabel = formatMegabytes(estimateRecordingBytes(3600, activeAudioBitsPerSecond));
@@ -536,7 +550,7 @@
   }
 
   async function doStartRecording(origin: RecordingStartOrigin): Promise<void> {
-    reportTo = { onRecordingDone, onRecordingStateChange, journal };
+    reportTo = { onRecordingDone, onRecordingStateChange, journal, onFileNearlyFull };
     try {
       recordedBlob = null;
       recordedMimeType = "";
@@ -630,6 +644,7 @@
     const segmentStartedAt = monotonicNow();
     const handOver = reportTo.onRecordingDone;
     const partJournal = reportTo.journal;
+    const fileNearlyFull = reportTo.onFileNearlyFull;
     const partId = generateSessionId();
     const isReplaced = () => replacedRecorders.has(recorder);
     let stopHandled = () => {};
@@ -679,6 +694,12 @@
           recordingStats.firstChunkSeenAt = now;
         }
 
+        // Two more chunks of this size would reach the limit: time for a new part
+        // (the replaced recorder adds up to one more during the handover). Asked on
+        // every chunk until it happens: a rotation that could not start tries again.
+        if (maxBytesValue && nextTotalBytes + 2 * event.data.size >= maxBytesValue) {
+          fileNearlyFull();
+        }
         if (maxBytesValue && nextTotalBytes >= maxBytesValue) {
           recordingStats.errors.push(
             "Recording stopped after reaching size limit at " + new Date().toISOString()
@@ -718,6 +739,7 @@
 
     function finishStop() {
       if (isReplaced()) {
+        handoversPending -= 1;
         // Rotation replaced this recorder: hand its file over and leave the
         // stream, the meter and the live recorder alone. The segment is
         // complete, so not even an unmount drops it.
@@ -796,9 +818,10 @@
   // the current one ROTATION_OVERLAP_MS later, while the microphone,
   // AudioContext and meter keep running. The replaced recorder hands its file
   // over with the "rotation" reason once it stops.
-  function rotateSegment() {
+  // False when the running part goes on: nothing records, or the next part could not start.
+  function rotateSegment(): boolean {
     const replaced = mediaRecorder;
-    if (!isRecording || !mediaStream || !replaced || replaced.state === "inactive") return;
+    if (!isRecording || !mediaStream || !replaced || replaced.state === "inactive") return false;
     void stopOverlappingRecorder();
     try {
       mediaRecorder = startSegmentRecorder(mediaStream);
@@ -806,9 +829,10 @@
       // Keep recording into the current file; the next rotation tries again.
       console.warn("Segment rotation failed", error);
       recordingStats.errors.push("Segment rotation failed: " + formatMediaError(error));
-      return;
+      return false;
     }
     replacedRecorders.add(replaced);
+    handoversPending += 1;
     overlappingRecorder = replaced;
     overlapTimer = setTimeout(() => void stopOverlappingRecorder(), ROTATION_OVERLAP_MS);
     // The new file starts empty: the size limit and the stall watchdog
@@ -817,6 +841,7 @@
     recordingStats.lastChunkTime = performance.now();
     firstChunkSeen = false;
     requestDataPendingAt = null;
+    return true;
   }
 
   // Ends the rotation overlap now; settles once the replaced recorder has
@@ -895,16 +920,20 @@
     }
   }
 
-  // "rotation" finishes the current segment and records on; any other reason
-  // stops and labels the finished recording with it, and settles once every
-  // segment has been handed over.
-  export function stopExternal(reason: RecordingStopReason = "manual"): Promise<void> {
-    if (reason === "rotation") {
-      rotateSegment();
-      return Promise.resolve();
-    }
+  // Stops and labels the finished recording with the reason, and settles once every
+  // segment has been handed over. A rotation is rotate(), which records on.
+  export function stopExternal(reason: RecordingEndReason = "manual"): Promise<void> {
     setStopReason(reason);
     return stopRecording();
+  }
+
+  // The next part starts on the live stream; false when the running part goes on.
+  export function rotate(): boolean {
+    return rotateSegment();
+  }
+
+  export function pendingHandovers(): number {
+    return handoversPending;
   }
 
   const onAnimationFrame = () => {
@@ -1085,6 +1114,11 @@
     return `${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
+  function formatTimeLeft(ms: number): string | null {
+    if (!Number.isFinite(ms)) return null;
+    return formatRecordingLength(Math.ceil(Math.max(ms, 0) / 60_000) * 60_000);
+  }
+
   function formatDurationEstimate(seconds: number): string {
     if (!Number.isFinite(seconds) || seconds <= 0) return "0 min";
     const totalMinutes = Math.max(1, Math.round(seconds / 60));
@@ -1238,11 +1272,9 @@
             </span>
             <span class="size-rate">{m.recording_size_rate({ size: recordingRateLabel })}</span>
           </div>
-          {#if estimatedRemainingLabel}
-            <div class="recording-estimate">
-              {m.recording_remaining_estimate({ duration: estimatedRemainingLabel })}
-            </div>
-          {/if}
+        {/if}
+        {#if timeLeftLabel}
+          <div class="recording-estimate">{m.recording_time_left({ duration: timeLeftLabel })}</div>
         {/if}
       </div>
     {:else if recordingState === "preparing"}
@@ -1288,6 +1320,11 @@
         <div class="recording-complete-header">
           <span class="recording-complete-title">{m.recording_last_clip_ready()}</span>
           <span class="recording-complete-copy">{m.recording_ready_hint()}</span>
+          {#if continuesRecording && recordingRoomMs}
+            <span class="recording-complete-copy"
+              >{m.recording_room_hint({ duration: formatRecordingLength(recordingRoomMs) })}</span
+            >
+          {/if}
         </div>
         <div class="recording-complete-actions">
           <audio
@@ -1319,9 +1356,14 @@
       </div>
     {:else}
       <div class="idle-recording-copy">
-        {#if maxRecordingMs}
-          <span>{m.recording_length_hint({ duration: formatRecordingLength(maxRecordingMs) })}</span
-          >
+        {#if recordingRoomMs !== null}
+          {#if recordingRoomMs > 0}
+            <span
+              >{(continuesRecording ? m.recording_room_hint : m.recording_length_hint)({
+                duration: formatRecordingLength(recordingRoomMs)
+              })}</span
+            >
+          {/if}
         {:else if estimatedLimitLabel && maxSizeLabel}
           <span
             >{m.recording_estimated_limit({

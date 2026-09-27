@@ -25,7 +25,7 @@
     getUploadErrorHint,
     friendlyMimeNames
   } from "$lib/features/flows/flowRuntimeErrorMapping";
-  import AudioRecorder from "$lib/features/audio/AudioRecorder.svelte";
+  import AudioRecorder, { type RecorderHandle } from "$lib/features/audio/AudioRecorder.svelte";
   import LiveTranscriptPanel from "$lib/features/audio/live/LiveTranscriptPanel.svelte";
   import type {
     LiveTranscriptPreview,
@@ -38,7 +38,6 @@
   import type { FlowRunDialogLabels } from "./flowRunDialogLabels";
   import type { FlowRunLaunchInputState } from "./FlowRunLaunchInputState.svelte";
   import FlowRunResumePrompt from "./FlowRunResumePrompt.svelte";
-  import { recordingLimitsForStep } from "$lib/features/audio/recordingLimits";
   import FlowRunStorageDegradedNotice from "./FlowRunStorageDegradedNotice.svelte";
 
   let {
@@ -84,6 +83,9 @@
     onDismissResumePrompt,
     onRecordingDone,
     recordingJournal = null,
+    recordingTimeLeftMs = () => Infinity,
+    recordingRoom = { ms: null, continues: false },
+    onFileNearlyFull = () => {},
     onRecordingStateChange,
     onRecorderRef,
     onSessionRetry,
@@ -151,16 +153,16 @@
       partId: string;
     }) => void;
     recordingJournal?: RecorderJournal | null;
+    // The running recording's time left and its file nearing its size limit: the
+    // dialog's recording session answers both.
+    recordingTimeLeftMs?: () => number;
+    // What a recording started now may still hold, and whether it continues one.
+    recordingRoom?: { ms: number | null; continues: boolean };
+    onFileNearlyFull?: () => void;
     onRecordingStateChange?: (isRecording: boolean, meta?: { origin: "user" | "external" }) => void;
     // Lets the dialog grab an imperative handle on the recorder so the
     // session controller can call startExternal/stopExternal during retries.
-    onRecorderRef?: (
-      stepId: string,
-      ref: {
-        startExternal: () => Promise<void>;
-        stopExternal: (reason?: RecordingStopReason) => Promise<void>;
-      } | null
-    ) => void;
+    onRecorderRef?: (stepId: string, ref: RecorderHandle | null) => void;
     onSessionRetry?: () => void;
     onSessionDismissFailure?: () => void;
     onDrop: (event: DragEvent) => void;
@@ -187,10 +189,7 @@
   const supportsAudioRecording = $derived(step.input_format === "audio");
   const acceptedMimetypes = $derived(step.accepted_mimetypes ?? []);
 
-  let recorderRef = $state<{
-    startExternal: () => Promise<void>;
-    stopExternal: (reason?: RecordingStopReason) => Promise<void>;
-  } | null>(null);
+  let recorderRef = $state<RecorderHandle | null>(null);
 
   // Push the live ref up to the dialog every time it changes so the
   // session controller (which lives in the dialog) can call back into
@@ -571,7 +570,10 @@
         <AudioRecorder
           bind:this={recorderRef}
           maxBytes={step.max_file_size_bytes ?? null}
-          maxRecordingMs={recordingLimitsForStep(step).maxRecordingMs}
+          recordingRoomMs={recordingRoom.ms}
+          continuesRecording={recordingRoom.continues}
+          timeLeftMs={recordingTimeLeftMs}
+          {onFileNearlyFull}
           resetToken={recorderResetToken}
           canStart={canStartRecording}
           {onRecordingDone}

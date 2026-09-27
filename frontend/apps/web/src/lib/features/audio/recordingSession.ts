@@ -1,8 +1,16 @@
 // Owns rotation and retry around the single-clip recorder.
 
 import type { ContractSnapshot } from "./recordingSessionStore";
-import type { RecordingStopReason } from "./recordedAudioFile";
+import type { RecordingEndReason } from "./recordedAudioFile";
 import { monotonicNow, recordingTimeLeftMs, type RecordingLimits } from "./recordingLimits";
+
+// What the session times a recording by: the part length and longest recording,
+// the recording so far and the step's free file slots.
+type SessionLimits = Pick<RecordingLimits, "partMs" | "maxRecordingMs"> & {
+  recordedMs: number;
+  parts: number;
+  filesLeft: number;
+};
 
 // Chromium's MediaRecorder drops the last 9-71 ms before stop() (measured
 // 2026-09-23: the audio still waiting for its next Opus packet), so a rotated
@@ -12,6 +20,11 @@ export const ROTATION_OVERLAP_MS = 150;
 // Rotation records on only while fewer finished segments than this wait for
 // upload; the rotation that would reach it stops the recording instead.
 export const MAX_SEGMENTS_AWAITING_UPLOAD = 3;
+// A rotation that could not start the next part tries again after this long.
+export const ROTATION_RETRY_MS = 5_000;
+// After this many tries the part ends as an error: its audio is handed over and
+// the session's reconnect (and then the user's Retry) takes it from there.
+export const MAX_ROTATION_ATTEMPTS = 3;
 export const RETRY_BACKOFF_MS = [1_000, 2_000, 4_000] as const;
 export const MAX_RETRY_ATTEMPTS = 3;
 export const RETRY_WALL_CLOCK_CAP_MS = 30_000;
@@ -29,13 +42,16 @@ export type SegmentStartOutcome = { ok: true } | { ok: false; error: unknown };
 
 export type RecordingSessionDeps = {
   startSegment: () => Promise<SegmentStartOutcome>;
-  stopSegment: (reason: RecordingStopReason) => void;
+  stopSegment: (reason: RecordingEndReason) => void;
+  // The next part starts on the live stream; false when the running part goes on
+  // (the next could not start).
+  rotateSegment: () => boolean;
   // Finished segments of this recording's step that are not uploaded yet.
   segmentsAwaitingUpload: () => number;
   // Eneo's part length and longest recording for the step, what the recording
   // already holds from before this session began, and the file slots its
   // uploaded and waiting files leave (the running part included).
-  recordingLimits: () => RecordingLimits & { recordedMs: number; parts: number; filesLeft: number };
+  recordingLimits: () => SessionLimits;
   // Whether a new segment may start now: the dialog's one admission rule.
   canStartSegment: () => boolean;
 };
@@ -226,6 +242,7 @@ export class RecordingSession {
   // Read as recording begins; the session then counts the parts it rotates.
   private _limits: ReturnType<RecordingSessionDeps["recordingLimits"]> | null = null;
   private _segmentStartedAt = 0;
+  private _rotationAttempts = 0;
 
   constructor(
     private deps: RecordingSessionDeps,
@@ -300,7 +317,8 @@ export class RecordingSession {
     this.armRotationTimer();
   }
 
-  private timeLeftMs(): number {
+  // Recorded time before Eneo's longest recording; Infinity without one.
+  private lengthLeftMs(): number {
     const limits = this._limits;
     if (!limits) return Infinity;
     return recordingTimeLeftMs(
@@ -310,6 +328,20 @@ export class RecordingSession {
     );
   }
 
+  // How long the running recording has before it stops by itself: at Eneo's
+  // longest recording, or when the part in the step's last file slot ends.
+  // Infinity while not recording, or without either limit.
+  timeLeftMs(): number {
+    const limits = this._limits;
+    if (this._state !== "recording" || !limits) return Infinity;
+    // Read now: a file chosen meanwhile takes a slot too.
+    const { filesLeft } = this.deps.recordingLimits();
+    const inPart = this._now() - this._segmentStartedAt;
+    const filesHold =
+      limits.partMs && Number.isFinite(filesLeft) ? filesLeft * limits.partMs - inPart : Infinity;
+    return Math.max(0, Math.min(this.lengthLeftMs(), filesHold));
+  }
+
   // The recorder rotates on the live stream and starts the next segment at
   // once, so the session keeps recording and only re-arms. The timer also
   // ends the recording before Eneo's longest recording.
@@ -317,7 +349,7 @@ export class RecordingSession {
     this.cancelRotationTimer();
     this._segmentStartedAt = this._now();
     const partMs = this._limits?.partMs ?? Infinity;
-    const leftMs = this.timeLeftMs();
+    const leftMs = this.lengthLeftMs();
     // Decided now, not when the timer fires: a timer never fires early, and
     // the recording's end must not depend on reading the clock twice.
     const endsRecording = leftMs <= partMs;
@@ -326,37 +358,67 @@ export class RecordingSession {
     this._rotationTimer = setTimeout(
       () => {
         this._rotationTimer = null;
-        if (this._state !== "recording" || !this._limits) return;
-        // A late timer (a throttled tab) may find the time already spent.
-        if (endsRecording || this.timeLeftMs() <= 0) {
-          this.deps.stopSegment("length");
-          return;
-        }
-        // The finishing part takes its file slot; a new one needs another. Read
-        // now: a file uploaded during the recording takes a slot too.
-        if (this.deps.recordingLimits().filesLeft < 2) {
-          this.deps.stopSegment("files");
-          return;
-        }
-        // The finished segment joins those waiting for upload. When that fills
-        // the backlog, stop visibly rather than keep piling up audio the server
-        // has not received.
-        if (this.deps.segmentsAwaitingUpload() + 1 >= MAX_SEGMENTS_AWAITING_UPLOAD) {
-          this.deps.stopSegment("backlog");
-          return;
-        }
-        this.deps.stopSegment("rotation");
-        // Counted here: the dialog has the finished segment only once it is
-        // handed over. It lasted at least its delay: a timer never fires early.
-        this._limits = {
-          ...this._limits,
-          recordedMs: this._limits.recordedMs + Math.max(this._now() - this._segmentStartedAt, due),
-          parts: this._limits.parts + 1
-        };
-        this.armRotationTimer();
+        // It lasted at least its delay: a timer never fires early.
+        this.endPart(endsRecording, due);
       },
       Math.max(0, Math.ceil(due))
     );
+  }
+
+  // The recorder's file nears the size one file may hold before the part's time is
+  // up: the part ends now, as it would at its time.
+  rotateEarly(): void {
+    if (this._state !== "recording" || !this._limits) return;
+    this.cancelRotationTimer();
+    this.endPart(false, 0);
+  }
+
+  // Ends the running part: the recording goes on in a new one, or stops where Eneo's
+  // longest recording, the step's last file slot or the upload backlog says so.
+  private endPart(endsRecording: boolean, lastedAtLeastMs: number): void {
+    if (this._state !== "recording" || !this._limits) return;
+    // A late timer (a throttled tab) may find the time already spent.
+    if (endsRecording || this.lengthLeftMs() <= 0) {
+      this.deps.stopSegment("length");
+      return;
+    }
+    // The finishing part takes its file slot; a new one needs another. Read
+    // now: a file uploaded during the recording takes a slot too.
+    if (this.deps.recordingLimits().filesLeft < 2) {
+      this.deps.stopSegment("files");
+      return;
+    }
+    // The finished segment joins those waiting for upload. When that fills
+    // the backlog, stop visibly rather than keep piling up audio the server
+    // has not received.
+    if (this.deps.segmentsAwaitingUpload() + 1 >= MAX_SEGMENTS_AWAITING_UPLOAD) {
+      this.deps.stopSegment("backlog");
+      return;
+    }
+    if (!this.deps.rotateSegment()) {
+      // The recorder kept the running part: it tries again shortly, and nothing is counted.
+      this._rotationAttempts += 1;
+      if (this._rotationAttempts >= MAX_ROTATION_ATTEMPTS) {
+        this._rotationAttempts = 0;
+        this.deps.stopSegment("error");
+        return;
+      }
+      this._rotationTimer = setTimeout(() => {
+        this._rotationTimer = null;
+        this.endPart(false, lastedAtLeastMs);
+      }, ROTATION_RETRY_MS);
+      return;
+    }
+    this._rotationAttempts = 0;
+    // Counted here: the dialog has the finished segment's length only once it is
+    // handed over (its slot and upload place it counts from the rotation on).
+    this._limits = {
+      ...this._limits,
+      recordedMs:
+        this._limits.recordedMs + Math.max(this._now() - this._segmentStartedAt, lastedAtLeastMs),
+      parts: this._limits.parts + 1
+    };
+    this.armRotationTimer();
   }
 
   private cancelRotationTimer(): void {

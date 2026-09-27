@@ -4,6 +4,8 @@ import {
   MAX_SEGMENTS_AWAITING_UPLOAD,
   RETRY_BACKOFF_MS,
   RETRY_WALL_CLOCK_CAP_MS,
+  ROTATION_RETRY_MS,
+  MAX_ROTATION_ATTEMPTS,
   RecordingSession,
   canStartRecording,
   buildSegmentFilenameBase,
@@ -30,6 +32,11 @@ function makeDeps(overrides: Partial<RecordingSessionDeps> = {}): RecordingSessi
   const deps = {
     startSegment: vi.fn(async () => ({ ok: true })) as RecordingSessionDeps["startSegment"],
     stopSegment: vi.fn() as RecordingSessionDeps["stopSegment"],
+    // The tests read rotations and stops as one sequence, in stopSegment's calls.
+    rotateSegment: () => {
+      (deps.stopSegment as (reason: string) => void)("rotation");
+      return true;
+    },
     segmentsAwaitingUpload: () => 0,
     recordingLimits: () => ({
       partMs: SEGMENT_ROTATION_MS,
@@ -208,6 +215,111 @@ describe("RecordingSession lifecycle", () => {
     expect(stopSegment).toHaveBeenLastCalledWith("length");
     vi.advanceTimersByTime(60 * MINUTE);
     expect(stopSegment).toHaveBeenCalledTimes(2);
+    session.dispose();
+  });
+
+  it("says how long the recording has left: to Eneo's longest recording, or what its file slots hold", () => {
+    vi.useFakeTimers({ toFake: [...FAKED_CLOCK] });
+    const MINUTE = 60_000;
+    let filesLeft = Infinity;
+    const session = new RecordingSession(
+      makeDeps({
+        recordingLimits: () => ({
+          partMs: 30 * MINUTE,
+          maxRecordingMs: 60 * MINUTE,
+          recordedMs: 0,
+          parts: 0,
+          filesLeft
+        })
+      }),
+      {}
+    );
+    expect(session.timeLeftMs()).toBe(Infinity);
+
+    session.beginRecordingExternal();
+    expect(session.timeLeftMs()).toBe(59 * MINUTE);
+    vi.advanceTimersByTime(10 * MINUTE);
+    expect(session.timeLeftMs()).toBe(49 * MINUTE);
+
+    // A file chosen meanwhile leaves the running part the last slot.
+    filesLeft = 1;
+    expect(session.timeLeftMs()).toBe(20 * MINUTE);
+    session.dispose();
+  });
+
+  it("starts a new part when the file nears its size limit early, and stops at the last slot", () => {
+    vi.useFakeTimers({ toFake: [...FAKED_CLOCK] });
+    const MINUTE = 60_000;
+    const stopSegment = vi.fn();
+    let filesLeft = 2;
+    const session = new RecordingSession(
+      makeDeps({
+        stopSegment,
+        recordingLimits: () => ({
+          partMs: 30 * MINUTE,
+          maxRecordingMs: null,
+          recordedMs: 0,
+          parts: 0,
+          filesLeft
+        })
+      }),
+      {}
+    );
+
+    session.beginRecordingExternal();
+    vi.advanceTimersByTime(10 * MINUTE);
+    session.rotateEarly();
+    expect(stopSegment.mock.calls).toEqual([["rotation"]]);
+    // The new part has its full time again.
+    vi.advanceTimersByTime(30 * MINUTE - 1);
+    expect(stopSegment).toHaveBeenCalledTimes(1);
+
+    filesLeft = 1;
+    session.rotateEarly();
+    expect(stopSegment).toHaveBeenLastCalledWith("files");
+    session.dispose();
+  });
+
+  it("ends the part as an error when the next part keeps failing to start", () => {
+    vi.useFakeTimers({ toFake: [...FAKED_CLOCK] });
+    const stopSegment = vi.fn();
+    const rotateSegment = vi.fn(() => false);
+    const session = new RecordingSession(makeDeps({ stopSegment, rotateSegment }), {});
+
+    session.beginRecordingExternal();
+    vi.advanceTimersByTime(SEGMENT_ROTATION_MS + (MAX_ROTATION_ATTEMPTS - 1) * ROTATION_RETRY_MS);
+
+    expect(rotateSegment).toHaveBeenCalledTimes(MAX_ROTATION_ATTEMPTS);
+    expect(stopSegment.mock.calls).toEqual([["error"]]);
+    session.dispose();
+  });
+
+  it("keeps the part and its count when the next part cannot start, and tries again", () => {
+    vi.useFakeTimers({ toFake: [...FAKED_CLOCK] });
+    const MINUTE = 60_000;
+    const rotateSegment = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+    const session = new RecordingSession(
+      makeDeps({
+        rotateSegment,
+        recordingLimits: () => ({
+          partMs: 30 * MINUTE,
+          maxRecordingMs: null,
+          recordedMs: 0,
+          parts: 0,
+          filesLeft: 3
+        })
+      }),
+      {}
+    );
+
+    session.beginRecordingExternal();
+    vi.advanceTimersByTime(30 * MINUTE);
+    expect(rotateSegment).toHaveBeenCalledTimes(1);
+    // Still one part: three slots hold 90 minutes, 30 of them recorded.
+    expect(session.timeLeftMs()).toBe(60 * MINUTE);
+
+    vi.advanceTimersByTime(ROTATION_RETRY_MS);
+    expect(rotateSegment).toHaveBeenCalledTimes(2);
     session.dispose();
   });
 

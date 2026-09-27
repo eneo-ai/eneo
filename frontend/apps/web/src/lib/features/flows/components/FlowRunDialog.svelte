@@ -31,6 +31,7 @@
   import {
     formatRecordingLength,
     recordingLimitsForStep,
+    recordingRoomMs,
     recordingTimeLeftMs
   } from "$lib/features/audio/recordingLimits";
   import {
@@ -39,6 +40,7 @@
     type SessionRecoveryHint
   } from "$lib/features/audio/recordingSessionStore";
   import { RecordingJournal, type RecorderJournal } from "$lib/features/audio/recordingJournal";
+  import type { RecorderHandle } from "$lib/features/audio/AudioRecorder.svelte";
   import { LiveTranscriptPreview } from "$lib/features/audio/live/LiveTranscriptPreview.svelte";
   import { ConnectionState } from "$lib/features/audio/connection.svelte";
   import {
@@ -145,12 +147,8 @@
   // retries when the browser ends a track mid-recording. The dialog still
   // owns persistence and upload — the session only coordinates state and
   // drives the recorder via the imperative startExternal/stopExternal API.
-  type RecorderImperativeRef = {
-    startExternal: () => Promise<void>;
-    stopExternal: (reason: RecordingStopReason) => Promise<void>;
-  };
   const recordingSessionsByStepId: Record<string, RecordingSession | null> = {};
-  const recorderRefsByStepId: Record<string, RecorderImperativeRef | null> = {};
+  const recorderRefsByStepId: Record<string, RecorderHandle | null> = {};
   let dialogGeneration = 0;
   function isStale(operationGeneration: number, operationFlowId: string) {
     return operationGeneration !== dialogGeneration || flow.id !== operationFlowId;
@@ -897,13 +895,22 @@
     ensureRecordingSessionForStep(stepId);
   }
 
+  // Recorded parts not uploaded yet: those handed over, and those the recorder is
+  // still finishing after a rotation (they hold a file slot and an upload place too).
+  function segmentsAwaitingUpload(stepId: string): number {
+    return (
+      fileInputState.segmentsAwaitingUpload(stepId) +
+      (recorderRefsByStepId[stepId]?.pendingHandovers() ?? 0)
+    );
+  }
+
   // File slots a chosen file may take: the uploaded ones, the recorded segments
   // waiting for upload and a running recording's part hold theirs.
   function slotsForNewFiles(step: FlowRunContractStepInput): number {
     if (step.max_files == null) return Infinity;
     const held =
       fileInputState.getUploadedFiles(step.step_id).length +
-      fileInputState.segmentsAwaitingUpload(step.step_id) +
+      segmentsAwaitingUpload(step.step_id) +
       fileInputState.reservedSlots(step.step_id) +
       (fileInputState.isStepRecording(step.step_id) ? 1 : 0);
     return step.max_files - held;
@@ -914,7 +921,7 @@
   function recordingLimitsFor(step: FlowRunContractStepInput) {
     const files =
       fileInputState.getUploadedFiles(step.step_id).length +
-      fileInputState.segmentsAwaitingUpload(step.step_id) +
+      segmentsAwaitingUpload(step.step_id) +
       fileInputState.reservedSlots(step.step_id);
     return {
       ...recordingLimitsForStep(step),
@@ -923,10 +930,15 @@
     };
   }
 
+  function recordingRoomFor(step: FlowRunContractStepInput) {
+    const limits = recordingLimitsFor(step);
+    return { ms: recordingRoomMs(limits), continues: limits.recordedMs > 0 };
+  }
+
   // Why a new segment may not start now, or null: one rule for the record
   // button, the session's retries and a manual retry.
   function recordingRefusal(step: FlowRunContractStepInput): string | null {
-    if (!canStartRecording(fileInputState.segmentsAwaitingUpload(step.step_id))) {
+    if (!canStartRecording(segmentsAwaitingUpload(step.step_id))) {
       return m.recording_stopped_upload_backlog();
     }
     const limits = recordingLimitsFor(step);
@@ -965,7 +977,8 @@
       stopSegment: (reason) => {
         void recorderRefsByStepId[stepId]?.stopExternal(reason);
       },
-      segmentsAwaitingUpload: () => fileInputState.segmentsAwaitingUpload(stepId),
+      rotateSegment: () => recorderRefsByStepId[stepId]?.rotate() ?? false,
+      segmentsAwaitingUpload: () => segmentsAwaitingUpload(stepId),
       recordingLimits: () => {
         const step = stepsRequiringInput.find((s) => s.step_id === stepId);
         return step
@@ -1035,7 +1048,7 @@
     fileInputState.forgetSessionPhase(stepId);
   }
 
-  function handleRecorderRefChange(stepId: string, ref: RecorderImperativeRef | null) {
+  function handleRecorderRefChange(stepId: string, ref: RecorderHandle | null) {
     recorderRefsByStepId[stepId] = ref;
   }
 
@@ -1067,6 +1080,11 @@
       leave: (partId) => void recordingJournal.leave(partId),
       discard: (partId) => void recordingJournal.discard(partId)
     };
+  }
+
+  // Bound to its step: a recorder reports to the callbacks its recording began with.
+  function fileNearlyFullHandler(stepId: string) {
+    return () => recordingSessionsByStepId[stepId]?.rotateEarly();
   }
 
   function recordingStateHandler(stepId: string) {
@@ -1714,6 +1732,10 @@
             sessionPhase={fileInputState.getSessionPhase(currentRuntimeStep.step_id)}
             onRecordingDone={recordedAudioHandler(currentRuntimeStep)}
             recordingJournal={recordingJournalFor(currentRuntimeStep)}
+            recordingRoom={recordingRoomFor(currentRuntimeStep)}
+            recordingTimeLeftMs={() =>
+              recordingSessionsByStepId[currentRuntimeStep.step_id]?.timeLeftMs() ?? Infinity}
+            onFileNearlyFull={fileNearlyFullHandler(currentRuntimeStep.step_id)}
             onRecordingStateChange={recordingStateHandler(currentRuntimeStep.step_id)}
             onRecorderRef={handleRecorderRefChange}
             onSessionRetry={() => retryRecordingSession(currentRuntimeStep.step_id)}

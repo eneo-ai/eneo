@@ -345,6 +345,94 @@ describe("FlowRunDialog recording rotation", () => {
     expect(media.recorders).toHaveLength(2);
   });
 
+  it("says how long the recording has left by Eneo's limits, not what one file holds", async () => {
+    await openDialog(vi.fn(() => new Promise<UploadedFile>(() => undefined)));
+    // Ten files of 20 minutes hold 3 h 20 min of Eneo's 5 h.
+    expect(screen.getByText(m.recording_length_hint({ duration: "3 h 20 min" }))).toBeTruthy();
+
+    await fireEvent.click(screen.getByLabelText(m.start_recording()));
+    await flush();
+    expect(screen.getByText(m.recording_time_left({ duration: "3 h 20 min" }))).toBeTruthy();
+
+    vi.advanceTimersByTime(10 * 60_000);
+    await flush();
+    expect(screen.getByText(m.recording_time_left({ duration: "3 h 10 min" }))).toBeTruthy();
+  });
+
+  it("starts a new part when the file nears its size limit before the part's time is up", async () => {
+    const upload = vi.fn(() => new Promise<UploadedFile>(() => undefined));
+    await openDialogAndStartRecording(upload, {
+      steps: [{ ...audioStep, max_file_size_bytes: 10_000_000 }]
+    });
+
+    media.recorders[0]?.deliver(4_000_000);
+    await flush();
+
+    expect(media.recorders).toHaveLength(2);
+    await endOverlap();
+    media.recorders[0]?.finish();
+    await flush();
+    expect(persistedSegments()).toEqual([{ segmentIndex: 0, reason: "rotation" }]);
+  });
+
+  it("says how much more a continued recording can hold", async () => {
+    await openDialogAndStartRecording(vi.fn(() => new Promise<UploadedFile>(() => undefined)));
+    vi.advanceTimersByTime(10 * 60_000);
+    await fireEvent.click(screen.getByLabelText(m.stop_recording()));
+    media.recorders[0]?.finish();
+    await flush();
+
+    // 10 min recorded in one of ten slots: nine slots of 20 min hold 3 h of the 4 h 50 min left.
+    expect(screen.getByText(m.recording_room_hint({ duration: "3 h" }))).toBeTruthy();
+  });
+
+  it("counts a part still being handed over: a second early part may not take the last slot", async () => {
+    await openDialogAndStartRecording(
+      vi.fn(() => new Promise<UploadedFile>(() => undefined)),
+      { steps: [{ ...audioStep, max_files: 2, max_file_size_bytes: 10_000_000 }] }
+    );
+    media.recorders[0]?.deliver(4_000_000);
+    await flush();
+    // The first part has not been handed over yet when the second nears its limit.
+    media.recorders[1]?.deliver(4_000_000);
+    await flush();
+
+    expect(media.recorders).toHaveLength(2);
+    expect(media.recorders[1]?.state).toBe("inactive");
+  });
+
+  it("counts parts still being handed over toward the upload backlog", async () => {
+    await openDialogAndStartRecording(
+      vi.fn(() => new Promise<UploadedFile>(() => undefined)),
+      { steps: [{ ...audioStep, max_file_size_bytes: 10_000_000 }] }
+    );
+    for (const index of [0, 1, 2]) {
+      media.recorders[index]?.deliver(4_000_000);
+      await flush();
+    }
+
+    // Two parts finishing and the third running fill the backlog of three.
+    expect(media.recorders).toHaveLength(3);
+    expect(media.recorders[2]?.state).toBe("inactive");
+  });
+
+  it("does not upload a replaced part that ran past the file size limit, and says it failed", async () => {
+    const upload = vi.fn(() => new Promise<UploadedFile>(() => undefined));
+    await openDialogAndStartRecording(upload, {
+      steps: [{ ...audioStep, max_file_size_bytes: 10_000_000 }]
+    });
+    media.recorders[0]?.deliver(4_000_000);
+    await flush();
+    // The replaced recorder's last chunk is far larger than the ones before it.
+    media.recorders[0]?.deliver(7_000_000);
+    await endOverlap();
+    media.recorders[0]?.finish();
+    await flush();
+
+    expect(upload).not.toHaveBeenCalled();
+    expect(requireFailedRecordingAlert()).toBeTruthy();
+  });
+
   it("stops at the step's last file slot and refuses another start, saying why", async () => {
     const upload = vi.fn(() => new Promise<UploadedFile>(() => undefined));
     await openDialogAndStartRecording(upload, { steps: [{ ...audioStep, max_files: 2 }] });
@@ -1645,6 +1733,15 @@ function installFakeMedia() {
 
     requestData() {}
 
+    // A chunk the recorder hands over while it records: that many bytes, or these.
+    deliver(bytes: number | Uint8Array<ArrayBuffer>) {
+      const data = typeof bytes === "number" ? new Uint8Array(bytes) : bytes;
+      const chunk = Object.assign(new Event("dataavailable"), {
+        data: new Blob([data], { type: this.mimeType })
+      });
+      this.dispatchEvent(chunk);
+    }
+
     // What a browser does shortly after stop(): hand over the last chunk (none
     // when nothing was captured), then report that the recorder stopped.
     finish({ withAudio = true }: { withAudio?: boolean } = {}) {
@@ -1725,7 +1822,7 @@ const audioStep: FlowRunContractStepInput = {
   input_format: "audio",
   accepted_mimetypes: ["audio/webm"],
   max_files: 10,
-  max_file_size_bytes: 1_000_000,
+  max_file_size_bytes: 100_000_000,
   max_recording_seconds: 5 * 60 * 60,
   recording_part_seconds: SEGMENT_ROTATION_MS / 1000
 };

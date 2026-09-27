@@ -19,6 +19,9 @@ export type RecordingStopReason =
   | "backlog"
   | "interrupted";
 
+// Why a recording ends: every reason but a rotation, which records on.
+export type RecordingEndReason = Exclude<RecordingStopReason, "rotation">;
+
 function inferRecordedAudioExtension(mimeType: string): string {
   const normalized = mimeType.split(";")[0]?.trim().toLowerCase() ?? "";
   switch (normalized) {

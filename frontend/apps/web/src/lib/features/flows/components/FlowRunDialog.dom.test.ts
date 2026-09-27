@@ -89,6 +89,13 @@ vi.mock("$lib/features/audio/AudioRecorder.svelte", () => ({
     });
     addButton("Finish test recording", () => finish("manual"));
     addButton("Finish stalled test recording", () => finish("stall"));
+    // The handle the dialog's recording session calls.
+    return {
+      startExternal: async () => undefined,
+      stopExternal: async () => undefined,
+      rotate: () => false,
+      pendingHandovers: () => 0
+    };
   }
 }));
 
@@ -1097,7 +1104,7 @@ const runtimeStep: FlowRunContractStepInput = {
   input_format: "audio",
   accepted_mimetypes: ["audio/webm"],
   max_files: 3,
-  max_file_size_bytes: 1_000_000
+  max_file_size_bytes: 100_000_000
 };
 
 const documentRuntimeStep: FlowRunContractStepInput = {

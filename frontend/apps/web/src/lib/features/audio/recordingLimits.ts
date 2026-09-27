@@ -4,30 +4,51 @@
 
 import type { FlowRunContractStepInput } from "@eneo/eneo-js";
 
+import { selectAudioRecordingOptions } from "./audioRecordingOptions";
+
 export type RecordingLimits = {
   partMs: number | null;
   maxRecordingMs: number | null;
 };
 
+// Opus and AAC swing around their bit rate and the container adds a little, so a
+// part aims at nine tenths of a file's size limit.
+const FILE_SIZE_SHARE = 0.9;
+
 // Recorded time is measured on a monotonic clock: a system clock set back or
 // forward during a meeting must not change how long the recording is.
 export const monotonicNow = (): number => performance.now();
 
+// As Eneo's contract asks, a part starts at recording_part_seconds, or earlier where
+// it nears the time or size one file may hold (at this browser's bit rate).
 export function recordingLimitsForStep(
   step: Pick<
     FlowRunContractStepInput,
-    "max_files" | "max_duration_seconds" | "max_recording_seconds" | "recording_part_seconds"
-  >
+    | "max_files"
+    | "max_duration_seconds"
+    | "max_file_size_bytes"
+    | "max_recording_seconds"
+    | "recording_part_seconds"
+  >,
+  audioBitsPerSecond: number = selectAudioRecordingOptions().audioBitsPerSecond
 ): RecordingLimits {
   // An Eneo without the recording fields decodes a recording under its time per file.
-  const whole = step.max_recording_seconds ?? step.max_duration_seconds ?? null;
-  const part =
-    step.recording_part_seconds ??
-    (whole && step.max_files ? Math.ceil(whole / step.max_files) : whole);
-  return {
-    partMs: part ? part * 1000 : null,
-    maxRecordingMs: whole ? whole * 1000 : null
-  };
+  const whole = step.max_recording_seconds ? step.max_recording_seconds * 1000 : null;
+  const perFile = step.max_duration_seconds ? step.max_duration_seconds * 1000 : null;
+  const maxRecordingMs = whole ?? perFile;
+  const contractPart = step.recording_part_seconds
+    ? step.recording_part_seconds * 1000
+    : maxRecordingMs && step.max_files
+      ? Math.ceil(maxRecordingMs / step.max_files / 1000) * 1000
+      : maxRecordingMs;
+  const partMs = Math.min(
+    contractPart ?? Infinity,
+    whole && perFile ? perFile - limitRoomMs(perFile) : Infinity,
+    step.max_file_size_bytes
+      ? ((step.max_file_size_bytes * 8 * FILE_SIZE_SHARE) / audioBitsPerSecond) * 1000
+      : Infinity
+  );
+  return { partMs: Number.isFinite(partMs) ? partMs : null, maxRecordingMs };
 }
 
 // Room per handover: the parts overlap, by up to about a second in a hidden tab.
@@ -53,6 +74,26 @@ export function recordingTimeLeftMs(
     Math.max(0, parts - 1) * HANDOVER_ROOM_MS -
     recordedMs
   );
+}
+
+// Recorded time a recording started now may still hold, within what the free file
+// slots hold at the part length: a new recording is said by Eneo's own limit, a
+// continued one by the time it may still record (as the recording stops by it).
+// Null without either limit.
+export function recordingRoomMs(limits: {
+  partMs: number | null;
+  maxRecordingMs: number | null;
+  recordedMs: number;
+  parts: number;
+  filesLeft: number;
+}): number | null {
+  const room = Math.min(
+    limits.parts === 0
+      ? (limits.maxRecordingMs ?? Infinity)
+      : recordingTimeLeftMs(limits.maxRecordingMs, limits.parts + 1, limits.recordedMs),
+    limits.partMs === null ? Infinity : Math.max(0, limits.filesLeft) * limits.partMs
+  );
+  return Number.isFinite(room) ? Math.max(0, room) : null;
 }
 
 // "5 h", "4 h 30 min" or "45 min": a recording limit as the dialog says it.
