@@ -1,0 +1,45 @@
+{
+  "file": "ctl_upptag_utredning_upptagningsomrade.docx",
+  "format": "docx",
+  "source": {
+    "catalogue_id": "INT-12",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/547"
+  },
+  "description": "Barn- och utbildningsförvaltningens utredning om ändrat upptagningsområde mellan två grundskolor, underlag till tjänsteskrivelse; nämner inte att en paviljong har tidsbegränsat bygglov.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Barn- och utbildningsförvaltningen"
+  },
+  "date": "2026-09-30",
+  "diarienummer": "BUN-2026-00219",
+  "title": "Utredning – ändrat upptagningsområde för Ljustaskolan och Björneborgsskolan",
+  "blocks": [
+    {
+      "heading": "Bakgrund"
+    },
+    {
+      "paragraph": "Ljustaskolan (F–6) har fler elever än lokalerna rymmer, medan Björneborgsskolan (F–6) har lediga platser. Förvaltningen har fått i uppdrag att utreda om upptagningsområdet kan justeras från läsåret 2027/28."
+    },
+    {
+      "heading": "Förslag"
+    },
+    {
+      "paragraph": "Adresserna i bostadsområdet Tallåsen förs över från Ljustaskolans till Björneborgsskolans upptagningsområde. Ändringen gäller elever som börjar förskoleklass från och med läsåret 2027/28; elever som redan går på Ljustaskolan får gå kvar."
+    },
+    {
+      "heading": "Konsekvenser"
+    },
+    {
+      "paragraph": "Förändringen berör på sikt omkring 46 elever. Skolvägen från Tallåsen till Björneborgsskolan korsar väg 562. Trafikavdelningen har bedömt att en gångtunnel eller signalreglerad passage behövs innan överflyttningen. Någon kostnad för passagen har inte beräknats."
+    },
+    {
+      "paragraph": "Vårdnadshavare i Tallåsen informerades vid ett öppet möte 2026-09-10. Flera uttryckte oro för skolvägen och för att syskon kan hamna på olika skolor."
+    },
+    {
+      "signature": {
+        "name": "Jonas Pettersson",
+        "role": "Utredare"
+      }
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "file": "ctl_upptag_elevprognos.xlsx",
+  "format": "xlsx",
+  "source": {
+    "catalogue_id": "INT-12",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/547"
+  },
+  "description": "Elevprognos och lokalkapacitet per skola för de kommande läsåren, bilaga till utredningen om upptagningsområde; kapacitetsfliken anger när en paviljong måste avvecklas.",
+  "sheets": [
+    {
+      "name": "Prognos",
+      "columns": [
+        "Skola",
+        "2026/27",
+        "2027/28",
+        "2028/29",
+        "2029/30"
+      ],
+      "rows": [
+        [
+          "Ljustaskolan",
+          452,
+          468,
+          471,
+          463
+        ],
+        [
+          "Björneborgsskolan",
+          298,
+          311,
+          322,
+          330
+        ]
+      ]
+    },
+    {
+      "name": "Kapacitet",
+      "columns": [
+        "Skola",
+        "Platser i permanenta lokaler",
+        "Tillfälliga lokaler",
+        "Platser i tillfälliga lokaler",
+        "Anmärkning"
+      ],
+      "rows": [
+        [
+          "Ljustaskolan",
+          400,
+          "Paviljong Ljusta B",
+          72,
+          "Tidsbegränsat bygglov till 2027-06-30"
+        ],
+        [
+          "Björneborgsskolan",
+          360,
+          "–",
+          0,
+          "–"
+        ]
+      ]
+    }
+  ]
+}

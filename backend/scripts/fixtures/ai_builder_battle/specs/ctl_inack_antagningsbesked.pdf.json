@@ -1,0 +1,23 @@
+{
+  "file": "ctl_inack_antagningsbesked.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "UTB-05", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/773"},
+  "description": "Antagningsbesked efter slutantagningen till gymnasieskolan, bilaga till en ansökan om inackorderingstillägg; anger ett annat program än ansökan.",
+  "letterhead": {"organisation": "Gymnasieantagningen Jämtland Härjedalen", "unit": "Antagningsenheten", "address": "Box 612, 831 27 Östersund"},
+  "date": "2026-07-01",
+  "title": "Antagningsbesked – slutantagning 2026",
+  "blocks": [
+    {"table": {"columns": ["Uppgift", "Värde"], "rows": [["Sökande", "Oskar Lindmark"], ["Personnummer", "20100827-2393"], ["Hemkommun", "Sundsvall"]]}},
+    {"heading": "Du är antagen till"},
+    {
+      "table": {
+        "columns": ["Skola", "Studieort", "Program", "Inriktning", "Studiestart"],
+        "rows": [["Hammarviks gymnasium", "Krokom", "Fordons- och transportprogrammet", "Transport", "2026-08-17"]]
+      }
+    },
+    {"paragraph": "Antagningen gäller ditt valalternativ 3. Du är reserv på valalternativ 1 och 2 till och med 2026-09-15."},
+    {"heading": "Så svarar du"},
+    {"paragraph": "Du behöver inte svara på beskedet. Om du inte vill ha platsen ska du lämna återbud till skolan senast 2026-08-10."},
+    {"paragraph": "Frågor om antagningen besvaras av Gymnasieantagningen Jämtland Härjedalen, telefon 063-14 30 00."}
+  ]
+}

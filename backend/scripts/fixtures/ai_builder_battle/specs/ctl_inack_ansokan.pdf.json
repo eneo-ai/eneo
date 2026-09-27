@@ -1,0 +1,143 @@
+{
+  "file": "ctl_inack_ansokan.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "UTB-05",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/773"
+  },
+  "description": "Utskrift av en ansökan om inackorderingstillägg från e-tjänsten; programmet och boendeadressen stämmer inte med antagningsbeskedet och hyreskontraktet.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "E-tjänst: Skolskjuts, elevresor, resetillägg och inackorderingstillägg"
+  },
+  "date": "2026-08-24",
+  "title": "Ansökan om inackorderingstillägg för gymnasieelev",
+  "blocks": [
+    {
+      "paragraph": "Ärendenummer i e-tjänsten: 773-2026-003187. Inskickad: 2026-08-24 kl. 20:05. Signerad med BankID av vårdnadshavare."
+    },
+    {
+      "heading": "Elev"
+    },
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Svar"
+        ],
+        "rows": [
+          [
+            "Namn",
+            "Oskar Lindmark"
+          ],
+          [
+            "Personnummer",
+            "20100827-2393"
+          ],
+          [
+            "Folkbokföringsadress",
+            "Byvägen 14, 860 13 Stöde"
+          ],
+          [
+            "Mobil",
+            "073-902 17 44"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Vårdnadshavare"
+    },
+    {
+      "paragraph": "Camilla Lindmark, Byvägen 14, 860 13 Stöde, telefon 070-845 63 20, e-post camilla.lindmark@example.com."
+    },
+    {
+      "heading": "Skola och utbildning"
+    },
+    {
+      "table": {
+        "columns": [
+          "Fält",
+          "Svar"
+        ],
+        "rows": [
+          [
+            "Skola",
+            "Hammarviks gymnasium"
+          ],
+          [
+            "Studieort",
+            "Krokom"
+          ],
+          [
+            "Utbildning",
+            "Naturbruksprogrammet"
+          ],
+          [
+            "Årskurs",
+            "1"
+          ],
+          [
+            "Läsår",
+            "2026/2027"
+          ],
+          [
+            "Studieperiod",
+            "2026-08-17 – 2027-06-11"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Boende under studietiden"
+    },
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Svar"
+        ],
+        "rows": [
+          [
+            "Boendeform",
+            "Hyr möblerat rum hos privatperson"
+          ],
+          [
+            "Adress",
+            "Skolvägen 7 B, 835 31 Krokom"
+          ],
+          [
+            "Inflyttning",
+            "2026-08-15"
+          ],
+          [
+            "Uppgivet avstånd bostad–skola hemma",
+            "Cirka 190 km"
+          ],
+          [
+            "Uppgiven restid med allmänna kommunikationer",
+            "3 timmar och 20 minuter enkel resa"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Motivering"
+    },
+    {
+      "paragraph": "Oskar kom inte in på sitt förstahandsval i Sundsvall och går därför på Hammarviks gymnasium. Det går inte att dagpendla. Han åker hem varannan helg."
+    },
+    {
+      "heading": "Bilagor"
+    },
+    {
+      "list": [
+        "Antagningsbesked",
+        "Hyreskontrakt"
+      ]
+    },
+    {
+      "paragraph": "Utbetalning sker till elevens konto. Jag intygar att uppgifterna är riktiga och att jag anmäler ändrade förhållanden."
+    }
+  ]
+}

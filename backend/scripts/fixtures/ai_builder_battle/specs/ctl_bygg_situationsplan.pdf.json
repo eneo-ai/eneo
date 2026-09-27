@@ -1,0 +1,92 @@
+{
+  "file": "ctl_bygg_situationsplan.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "BYG-01",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/443"
+  },
+  "description": "Situationsplan i textform (ritningshuvud, måttsatta avstånd och beteckningar) för tillbyggnaden på Bredsand 5:32; benämner tillbyggnaden inglasad altan och anger en annan area än ansökan.",
+  "letterhead": {
+    "organisation": "Ritkontoret Norrljus AB",
+    "unit": "Situationsplan",
+    "address": "Storgatan 3, 852 30 Sundsvall"
+  },
+  "date": "2026-04-12",
+  "title": "Situationsplan – Sundsvall Bredsand 5:32",
+  "blocks": [
+    {
+      "table": {
+        "columns": [
+          "Ritningshuvud",
+          "Uppgift"
+        ],
+        "rows": [
+          [
+            "Ritningsnummer",
+            "A-10.1-01"
+          ],
+          [
+            "Datum",
+            "2026-04-12"
+          ],
+          [
+            "Skala",
+            "1:400 (A3)"
+          ],
+          [
+            "Ritad av",
+            "Emma Åström"
+          ],
+          [
+            "Beställare",
+            "Jonas Håkansson"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Beteckningar på ritningen"
+    },
+    {
+      "list": [
+        "Befintligt bostadshus, 112 m²",
+        "Ny tillbyggnad: inglasad altan 21,0 m² (skrafferad)",
+        "Befintligt garage",
+        "Norrpil i ritningens övre högra hörn",
+        "Tomtgräns mot Bredsand 5:31 och Bredsand 5:33"
+      ]
+    },
+    {
+      "heading": "Måttsatta avstånd"
+    },
+    {
+      "table": {
+        "columns": [
+          "Från",
+          "Till",
+          "Avstånd"
+        ],
+        "rows": [
+          [
+            "Tillbyggnad, södra hörnet",
+            "Tomtgräns mot Bredsand 5:33",
+            "4,2 m"
+          ],
+          [
+            "Tillbyggnad, västra fasaden",
+            "Tomtgräns mot gata",
+            "11,5 m"
+          ],
+          [
+            "Befintligt bostadshus",
+            "Tomtgräns mot Bredsand 5:31",
+            "6,0 m"
+          ]
+        ]
+      }
+    },
+    {
+      "paragraph": "Ingen höjdsättning av mark är redovisad på ritningen."
+    }
+  ]
+}

@@ -1,0 +1,112 @@
+{
+  "file": "ctl_bygg_ansokan.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "BYG-01",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/443"
+  },
+  "description": "Utskrift av en e-tjänsteansökan om bygglov för tillbyggnad av enbostadshus med uterum, med sökande, fastighet, åtgärdsbeskrivning, area och bilageförteckning.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "E-tjänst: Bygglov – tillbyggnad",
+    "address": "Stadsbyggnadskontoret, 851 85 Sundsvall"
+  },
+  "date": "2026-05-06",
+  "diarienummer": "BN 2026-000731",
+  "title": "Ansökan om bygglov – tillbyggnad",
+  "blocks": [
+    {
+      "paragraph": "Ärendenummer i e-tjänsten: 443-2026-003318. Inskickad 2026-05-06 kl. 19:12, signerad med BankID."
+    },
+    {
+      "heading": "Sökande"
+    },
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Värde"
+        ],
+        "rows": [
+          [
+            "Namn",
+            "Jonas Håkansson"
+          ],
+          [
+            "Personnummer",
+            "19820124-2396"
+          ],
+          [
+            "Adress",
+            "Bredsandsvägen 22, 862 41 Njurunda"
+          ],
+          [
+            "Telefon",
+            "070-381 22 47"
+          ],
+          [
+            "E-post",
+            "jonas.hakansson@example.com"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Fastighet"
+    },
+    {
+      "paragraph": "Fastighetsbeteckning: Sundsvall Bredsand 5:32. Fastighetsägare: Jonas Håkansson och Maria Håkansson."
+    },
+    {
+      "heading": "Åtgärd"
+    },
+    {
+      "paragraph": "Tillbyggnad av enbostadshus med ett uterum mot söder. Uterummet får glasade väggar, isolerat tak och golvvärme och ska användas året runt."
+    },
+    {
+      "table": {
+        "columns": [
+          "Fält",
+          "Värde"
+        ],
+        "rows": [
+          [
+            "Byggnadsarea tillbyggnad",
+            "18,5 m²"
+          ],
+          [
+            "Bruttoarea tillbyggnad",
+            "18,5 m²"
+          ],
+          [
+            "Byggnadsarea befintligt bostadshus",
+            "112 m²"
+          ],
+          [
+            "Fasadmaterial",
+            "Stående träpanel, kulör som befintligt hus (NCS S 1002-Y)"
+          ],
+          [
+            "Takmaterial",
+            "Plåt, svart"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Bilagor enligt sökanden"
+    },
+    {
+      "list": [
+        "Situationsplan",
+        "Planritning",
+        "Fasadritningar",
+        "Sektionsritning",
+        "Följebrev"
+      ]
+    },
+    {
+      "paragraph": "Kontrollansvarig: Behövs inte enligt sökanden."
+    }
+  ]
+}

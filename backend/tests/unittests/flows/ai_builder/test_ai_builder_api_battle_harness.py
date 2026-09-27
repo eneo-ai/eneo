@@ -9534,7 +9534,11 @@ def test_suite_demand_for_the_frozen_corpus_exceeds_the_space_default_ceiling() 
     # 2026-09-27: run polls back off 1, 2, 4, 8, then 10 s, so the one
     # executed case budgets 94 polls for its 900 s run deadline instead of
     # 901: 12,370 - 3 x (901 - 94) = 9,949 (one rep: 4,132 - 807 = 3,325).
-    assert demand["total"] == 9_949
+    # 2026-09-27: 9 control cases execute. Each run adds its 94 polls plus
+    # its own run, upload and checkpoint requests (104-108 per observation,
+    # 954 per rep) and their 15 new fixtures add 15 uploads:
+    # 9,949 + 15 + 3 x 954 = 12,826.
+    assert demand["total"] == 12_826
     # The measurement key is space-scoped (the preflight refuses any other),
     # so the space default is the ceiling that binds; the tenant default of
     # 10,000 no longer does.

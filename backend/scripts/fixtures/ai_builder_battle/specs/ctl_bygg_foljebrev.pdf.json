@@ -1,0 +1,36 @@
+{
+  "file": "ctl_bygg_foljebrev.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "BYG-01",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/443"
+  },
+  "description": "Sökandens följebrev till bygglovsansökan; hänvisar till en sektionsritning som inte finns bland handlingarna och till en kontrollplan som ska skickas senare.",
+  "letterhead": {
+    "organisation": "Jonas Håkansson",
+    "unit": "Följebrev",
+    "address": "Bredsandsvägen 22, 862 41 Njurunda"
+  },
+  "date": "2026-05-06",
+  "title": "Följebrev till ansökan om bygglov för uterum",
+  "blocks": [
+    {
+      "paragraph": "Hej! Här kommer vår ansökan om bygglov för ett uterum på Bredsand 5:32. Vi har tagit hjälp av Ritkontoret Norrljus med ritningarna."
+    },
+    {
+      "paragraph": "Bifogat finns situationsplan, planritning, fasadritningar och sektionsritning. Kontrollplanen skickar vi när vi har valt byggfirma, troligen i juni."
+    },
+    {
+      "paragraph": "Grannarna på Bredsand 5:33 har sett ritningarna och tycker att det ser bra ut, men vi har inget skriftligt från dem."
+    },
+    {
+      "paragraph": "Vi hoppas kunna börja bygga i augusti. Hör av er om något saknas."
+    },
+    {
+      "signature": {
+        "name": "Jonas och Maria Håkansson",
+        "role": "Sökande"
+      }
+    }
+  ]
+}

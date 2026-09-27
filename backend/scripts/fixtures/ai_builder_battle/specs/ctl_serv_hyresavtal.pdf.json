@@ -1,0 +1,75 @@
+{
+  "file": "ctl_serv_hyresavtal.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "NAR-01",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/145"
+  },
+  "description": "Hyresavtal för restauranglokal som bilaga till ansökan om serveringstillstånd; hyresgästen är ett annat bolag än sökanden och avtalet begränsar öppettiden.",
+  "letterhead": {
+    "organisation": "Fastighets AB Esplanaden",
+    "unit": "Hyresavtal för lokal",
+    "address": "Box 516, 851 20 Sundsvall"
+  },
+  "date": "2026-07-15",
+  "title": "Hyresavtal för lokal – Esplanaden 17",
+  "blocks": [
+    {
+      "table": {
+        "columns": [
+          "Part",
+          "Uppgift"
+        ],
+        "rows": [
+          [
+            "Hyresvärd",
+            "Fastighets AB Esplanaden, org.nr 556702-3318"
+          ],
+          [
+            "Hyresgäst",
+            "Salt & Sill Restauranger AB, org.nr 559288-1042"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "§ 1 Lokal"
+    },
+    {
+      "paragraph": "Lokal i bottenvåningen på Esplanaden 17, fastigheten Sundsvall Stadsön 1:9, om 186 m² samt uteserveringsyta om 40 m² på förgården."
+    },
+    {
+      "heading": "§ 2 Ändamål"
+    },
+    {
+      "paragraph": "Lokalen ska användas för restaurang med servering av alkoholdrycker. Med hänsyn till bostäderna i huset får lokalen hålla öppet för gäster längst till klockan 00.00 alla dagar."
+    },
+    {
+      "heading": "§ 3 Hyrestid"
+    },
+    {
+      "paragraph": "Avtalet gäller 2026-10-01 – 2029-09-30 med nio månaders uppsägningstid."
+    },
+    {
+      "heading": "§ 4 Hyra"
+    },
+    {
+      "paragraph": "Hyran betalas kvartalsvis i förskott enligt särskild bilaga."
+    },
+    {
+      "paragraph": "Detta avtal har upprättats i två likalydande exemplar."
+    },
+    {
+      "signature": {
+        "name": "Per Engström",
+        "role": "För hyresvärden"
+      }
+    },
+    {
+      "signature": {
+        "name": "Johan Lindgren",
+        "role": "För hyresgästen"
+      }
+    }
+  ]
+}

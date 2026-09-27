@@ -1,0 +1,107 @@
+{
+  "file": "ctl_bygg_plan_fasadritningar.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "BYG-01",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/443"
+  },
+  "description": "Planritning och fasadritningar i textform för samma tillbyggnad, med ritningshuvuden, rumsbenämningar, höjdmått och en revidering med annat datum än situationsplanen.",
+  "letterhead": {
+    "organisation": "Ritkontoret Norrljus AB",
+    "unit": "Plan- och fasadritningar",
+    "address": "Storgatan 3, 852 30 Sundsvall"
+  },
+  "date": "2026-05-03",
+  "title": "Tillbyggnad uterum – plan och fasader, Sundsvall Bredsand 5:32",
+  "blocks": [
+    {
+      "heading": "Planritning"
+    },
+    {
+      "table": {
+        "columns": [
+          "Ritningshuvud",
+          "Uppgift"
+        ],
+        "rows": [
+          [
+            "Ritningsnummer",
+            "A-40.1-01"
+          ],
+          [
+            "Datum",
+            "2026-04-12"
+          ],
+          [
+            "Skala",
+            "1:100"
+          ]
+        ]
+      }
+    },
+    {
+      "table": {
+        "columns": [
+          "Rum",
+          "Area"
+        ],
+        "rows": [
+          [
+            "Uterum",
+            "16,9 m²"
+          ],
+          [
+            "Befintligt vardagsrum (ny dörröppning mot uterum)",
+            "31,4 m²"
+          ]
+        ]
+      }
+    },
+    {
+      "paragraph": "Byggnadsarea tillbyggnad enligt areaberäkning på ritningen: 18,5 m²."
+    },
+    {
+      "page_break": true
+    },
+    {
+      "heading": "Fasadritningar"
+    },
+    {
+      "table": {
+        "columns": [
+          "Ritningshuvud",
+          "Uppgift"
+        ],
+        "rows": [
+          [
+            "Ritningsnummer",
+            "A-40.3-01"
+          ],
+          [
+            "Datum",
+            "2026-05-03"
+          ],
+          [
+            "Revidering",
+            "A, 2026-05-03: takfot sänkt 0,2 m"
+          ],
+          [
+            "Skala",
+            "1:100"
+          ]
+        ]
+      }
+    },
+    {
+      "list": [
+        "Fasad mot söder: glaspartier i tre fack, skjutdörr",
+        "Fasad mot öster: glasparti och stående träpanel",
+        "Fasad mot väster: stående träpanel utan fönster",
+        "Nockhöjd tillbyggnad: 3,4 m över färdigt golv"
+      ]
+    },
+    {
+      "paragraph": "Fasad mot norr redovisas inte eftersom tillbyggnaden ansluter mot befintlig fasad."
+    }
+  ]
+}

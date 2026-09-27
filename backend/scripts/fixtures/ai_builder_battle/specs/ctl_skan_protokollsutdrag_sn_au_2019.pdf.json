@@ -1,0 +1,61 @@
+{
+  "file": "ctl_skan_protokollsutdrag_sn_au_2019.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "INT-07",
+    "url": "https://riksarkivet.se/fgs-earkiv"
+  },
+  "description": "Inskannat och arkivstämplat protokollsutdrag från socialnämndens arbetsutskott 2019, återgivet som den dåliga OCR-texten: svenska tecken saknas, ett ord är avbrutet och stämpeln har fallit isär i lösa bokstäver.",
+  "letterhead": {
+    "organisation": "Sundsvalls kommun",
+    "unit": "Socialnamndens arbetsutskott"
+  },
+  "title": "Protokollsutdrag - Socialnamndens arbetsutskott",
+  "blocks": [
+    {
+      "paragraph": "Diarienummer: SN-2019-00241"
+    },
+    {
+      "paragraph": "Sammantradesdatum: 2019-03-06"
+    },
+    {
+      "paragraph": "Paragraf 23: Hemtjanst i Matfors - forandrad planering"
+    },
+    {
+      "paragraph": "Arbetsutskottet foreslar att hemtjansten i Matfors samordnas med hemtjansten i Stode fran och med 2019-05-01."
+    },
+    {
+      "paragraph": "Forslaget motiveras av okad restid mellan brukarna och svarigheter att rekrytera personal till helgpassen."
+    },
+    {
+      "paragraph": "Samordningen ska foljas upp av enhets chefen och redovisas for arbetsutskottet i oktober 2019."
+    },
+    {
+      "paragraph": "Arkiveringsstampel:"
+    },
+    {
+      "paragraph": "A"
+    },
+    {
+      "paragraph": "R"
+    },
+    {
+      "paragraph": "K"
+    },
+    {
+      "paragraph": "I"
+    },
+    {
+      "paragraph": "V"
+    },
+    {
+      "paragraph": "E"
+    },
+    {
+      "paragraph": "X"
+    },
+    {
+      "paragraph": "Justerat 2019-03-11 ...... sign"
+    }
+  ]
+}

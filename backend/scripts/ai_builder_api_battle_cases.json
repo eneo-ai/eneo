@@ -4060,13 +4060,13 @@
       },
       "question_answer_overrides": {
         "document_material_scope": {
-          "selected_option_id": "single_document_case"
+          "selected_option_id": "multiple_documents_case"
         },
         "post_processing_goal": {
-          "selected_option_id": "extract_key_information"
+          "selected_option_id": "compare_or_validate"
         },
         "terminal_output": {
-          "selected_option_id": "structured_json"
+          "selected_option_id": "pdf_document"
         }
       },
       "cohorts": [
@@ -7578,6 +7578,7 @@
       "id": "text_terminal_etjanst_svar_med_granskning",
       "complexity": "medium",
       "domain": "municipality_e_services",
+      "apply_plan": true,
       "required": false,
       "prompt": "Jag är handläggare i kundcenter och svarar på ärenden som kommer in via e-tjänsten. Vid körning klistrar jag in medborgarens text tillsammans med mina egna noteringar. Först vill jag ha en sammanställning av vad medborgaren frågar om, vilka uppgifter vi redan kan svara på, vad som saknas och vilken enhet som äger frågan. Den sammanställningen ska jag läsa och godkänna precis som den är innan flödet går vidare; jag ska inte behöva ändra i den. Därefter skriver flödet svaret till medborgaren som vanlig text som jag klistrar in i e-tjänsten.",
       "expected": {
@@ -7643,17 +7644,52 @@
         },
         "runtime_metadata_fields": {
           "selected_option_id": "no_extra_metadata"
+        },
+        "report_disposition": {
+          "selected_option_id": "synthesized_overview"
+        },
+        "comparison_scope": {
+          "selected_option_id": "no_direct_compare"
+        },
+        "structured_io_contract": {
+          "selected_option_id": "extract_or_compute_fields"
+        },
+        "mapped_file_limit": {
+          "selected_option_id": "organization_limit"
         }
       },
       "cohorts": [
         "foundation",
         "human_review"
-      ]
+      ],
+      "execution": {
+        "inputs": {
+          "text": "--- Ärende från e-tjänsten Kontakta oss ---\nÄrendenummer: KC-2026-118734\nInkommet: 2026-10-06 kl. 07:52\nFrån: Ragnhild Söderqvist, Björkvägen 31, 862 40 Njurunda, ragnhild.soderqvist@example.com\n\nHej. Jag har fått en faktura för slamtömning av vår trekammarbrunn, fakturanummer 2026-0931-445, men ingen har varit här och tömt den. Jag har varit hemma nästan hela september och har inte sett någon slambil. Varför ska jag betala för något som inte gjorts? Jag vill också veta när sopkärlet för matavfall töms nästa gång, det har stått fullt sedan förra veckan och det börjar lukta. Och får man ha ett större kärl? Vi är fem personer i hushållet.\n\n--- Mina anteckningar (handläggare kundcenter) ---\n- Kollat i verksamhetssystemet: slamtömning registrerad som utförd 2026-09-12 kl. 10.40 enligt chaufförens rapport. Brunnslocket var inte låst. Kund ej hemma enligt rapporten.\n- Frågan om fakturan och eventuell kreditering kan jag inte avgöra. Den ägs av Kundservice avfall på Teknikförvaltningen, de måste få foton eller annat underlag från kunden.\n- Matavfallskärlet: tömning i området sker varannan vecka, nästa tömning är vecka 42. Tömningen vecka 40 missades på Björkvägen på grund av en trasig bil, extra tömning är inte planerad.\n- Större kärl: det finns 190 liter för matavfall, byte beställs i e-tjänsten Ändra avfallsabonnemang. Avgiften ändras enligt taxan, jag vet inte beloppet.\n- Saknas: vi vet inte om kunden har tömningsschema för slam uppsatt, oklart om hon menar september 2026.\n"
+        },
+        "checkpoints": [
+          {
+            "review_mode": "view",
+            "output_type": "json",
+            "action": "approve"
+          }
+        ],
+        "expect": {
+          "output_kind": "text",
+          "required_facts": [
+            "vecka 42",
+            "Kundservice avfall",
+            "190 liter",
+            "Ändra avfallsabonnemang"
+          ],
+          "forbidden": []
+        }
+      }
     },
     {
       "id": "text_terminal_intranatsnyhet_namndbeslut",
       "complexity": "medium",
       "domain": "municipality_meetings",
+      "apply_plan": true,
       "required": false,
       "prompt": "Jag arbetar med intern kommunikation i Sundsvalls kommun. Efter varje nämndsammanträde laddar jag upp protokollsutdraget och behöver en kort nyhet till intranätet på fem till sju meningar: vad nämnden beslutade, vad beslutet innebär för medarbetarna och var underlaget finns. Det bifogade utdraget från barn- och utbildningsnämnden är ett typiskt exempel på det jag laddar upp vid körning. Nyheten ska vara vanlig text, och beslut som inte står i protokollet får inte hittas på.",
       "expected": {
@@ -7716,12 +7752,42 @@
         },
         "terminal_output": {
           "selected_option_id": "structured_text"
+        },
+        "comparison_scope": {
+          "selected_option_id": "no_direct_compare"
+        },
+        "report_disposition": {
+          "selected_option_id": "synthesized_overview"
+        },
+        "mapped_file_limit": {
+          "selected_option_id": "organization_limit"
         }
       },
       "cohorts": [
         "foundation",
         "attachment_or_template"
-      ]
+      ],
+      "execution": {
+        "inputs": {
+          "files": [
+            "ctl_intra_protokoll_kfn_2026_09_17.pdf"
+          ]
+        },
+        "expect": {
+          "output_kind": "text",
+          "required_facts": [
+            "Västhallen",
+            "badvärd",
+            "Insidan"
+          ],
+          "forbidden": [
+            "Klockarberget",
+            "Njurunda",
+            "Petter Ådahl",
+            "BUN-2026-00037-1"
+          ]
+        }
+      }
     },
     {
       "id": "text_terminal_kallelse_samverkansgrupp",
@@ -9374,6 +9440,7 @@
       "id": "attachment_json_degraderat_tidigare_beslut_kvalitet",
       "complexity": "medium",
       "domain": "municipality_archives",
+      "apply_plan": true,
       "prompt": "Vi digitaliserar äldre protokollsutdrag och en del blir dåliga i inskanningen: svenska tecken faller bort och stämplar hamnar som lösa bokstäver på varsin rad. Den bifogade filen från arbetsutskottet är ett sådant utdrag. Flödet ska ge JSON med diarienummer, sammanträdesdatum, paragraf, beslut, motivering, extraktionskvalitet och textproblem som beskriver vad som ser trasigt ut i texten. Återge texten som den står; rätta inte stavning, återställ inte tecken som fattas och tolka inte lösa bokstäver som ord. Är ett fält oläsligt ska det synas i extraktionskvalitet och textproblem i stället för att fyllas i på känn.",
       "expected": {
         "min_steps": 1,
@@ -9452,6 +9519,38 @@
         },
         "document_material_scope": {
           "selected_option_id": "single_document_case"
+        },
+        "comparison_scope": {
+          "selected_option_id": "no_direct_compare"
+        },
+        "structured_io_contract": {
+          "selected_option_id": "extract_or_compute_fields"
+        },
+        "report_disposition": {
+          "selected_option_id": "synthesized_overview"
+        },
+        "mapped_file_limit": {
+          "selected_option_id": "organization_limit"
+        }
+      },
+      "execution": {
+        "inputs": {
+          "files": [
+            "ctl_skan_protokollsutdrag_sn_au_2019.pdf"
+          ]
+        },
+        "expect": {
+          "output_kind": "json",
+          "required_facts": [
+            "SN-2019-00241",
+            "2019-03-06",
+            "Hemtjanst i Matfors",
+            "Stode",
+            "forandrad planering"
+          ],
+          "forbidden": [
+            "ARKIVEX"
+          ]
         }
       }
     },
@@ -9459,8 +9558,35 @@
       "id": "file_role_discrimination_example_output_text_terminal",
       "complexity": "easy",
       "domain": "municipality_environmental_health",
+      "apply_plan": true,
       "required": false,
       "prompt": "Efter varje tillsynsbesök klistrar jag in mina fältanteckningar direkt i chatten och vill få tillbaka en färdig genomgång som löpande text. Inga filer laddas upp vid körning, bara den inklistrade texten. Den bifogade rapporten är enbart ett formatexempel som visar hur en genomgång ser ut hos oss; den är alltså ingen källa och ingenting ur den får hamna i mina genomgångar.",
+      "question_answer_overrides": {
+        "primary_runtime_input": {
+          "selected_option_id": "text"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_text"
+        },
+        "runtime_metadata_fields": {
+          "selected_option_id": "no_extra_metadata"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "structure_key_information"
+        },
+        "document_material_scope": {
+          "selected_option_id": "single_document_case"
+        },
+        "report_disposition": {
+          "selected_option_id": "synthesized_overview"
+        },
+        "comparison_scope": {
+          "selected_option_id": "no_direct_compare"
+        },
+        "mapped_file_limit": {
+          "selected_option_id": "organization_limit"
+        }
+      },
       "expected": {
         "min_steps": 1,
         "max_steps": 3,
@@ -9530,7 +9656,29 @@
       ],
       "attachments": [
         "example_report.docx"
-      ]
+      ],
+      "execution": {
+        "inputs": {
+          "text": "Fältanteckningar tillsyn hälsoskydd, förskola\nBesök 2026-09-22 kl 09.00-11.15, anmält. Inspektör: Josefin Rehn. Med på plats: förskolechef Linnéa Sahlén.\nVerksamhet: Förskolan Trollsländan, drivs av Trollsländan Förskola ekonomisk förening. Fastighet Sundsvall Tunadal 3:112, Tunadalsvägen 40. 4 avdelningar, 68 inskrivna barn 1-5 år.\n\nVentilation: OVK senast godkänd 2022-10-04, ombesiktning skulle ske inom 3 år (dvs okt 2025). Ingen ny OVK-protokoll kunde visas. Förskolechefen trodde fastighetsägaren (Tunadal Fastigheter AB) gjort den. Kvavt på avd Nyckelpigan vid besöket, 14 barn inne. Mätte ej CO2.\nFukt: vattenfläck i taket i entrén vid avd Humlan, ca 0,5 m². Enligt personalen läckte det i våras, fastighetsägaren ska ha lagat taket i maj. Luktar inte mögel.\nStäd: städschema finns, följs. Leksaker tvättas 1 ggr/mån. Ok.\nUtemiljö: sandlådan täcks över natten (katter). Solskydd finns vid två av tre sandlådor, saknas vid den stora vid staketet mot Tunadalsvägen.\nBuller: ljudabsorbenter i matsalen, personalen upplever ändå hög ljudnivå vid lunch. Ingen mätning.\nEgenkontroll: rutin för egenkontroll finns, senast reviderad 2021. Saknar rutin för ventilation och radon. Radonmätning från 2019: 70 Bq/m³.\nÖvrigt: förskolechefen frågade om de får ha en vattenlek med uppblåsbar pool till sommaren.\nAtt göra: begär OVK-protokoll från fastighetsägaren, skicka inspektionsrapport inom 2 veckor, kommunicera brister i egenkontrollen.\n"
+        },
+        "checkpoints": [],
+        "expect": {
+          "output_kind": "text",
+          "required_facts": [
+            "Trollsländan",
+            "Tunadal 3:112",
+            "2022-10-04",
+            "Nyckelpigan",
+            "OVK"
+          ],
+          "forbidden": [
+            "Exempel, anonymiserat",
+            "2026-01-15",
+            "Exempelrapport",
+            "Barn- och utbildningsförvaltningen"
+          ]
+        }
+      }
     },
     {
       "id": "file_role_discrimination_reference_material_criteria",
@@ -9618,6 +9766,7 @@
       "id": "file_role_discrimination_template_and_reference_split",
       "complexity": "hard",
       "domain": "municipality_tjansteskrivelse",
+      "apply_plan": true,
       "required": false,
       "prompt": "Två filer är bifogade och de har olika roller, så blanda inte ihop dem. Den första är förvaltningens tjänsteskrivelsemall och den enda fil som ska fyllas i. Den andra är en barnkonsekvensanalys som vi använder som referens för vilka konsekvenser bedömningen alltid måste väga in; den ska styra innehållet men aldrig fyllas i, renderas eller lämnas ut som resultat. Vid körning laddar handläggaren upp ärendets handlingar och fyller i diarienummer, handläggare, förvaltning, nämnd och beslutsdatum. Handlingarnas innehåll är primärmaterial och ska inte bli formulärfält. Slutresultatet är den ifyllda tjänsteskrivelsen som DOCX.",
       "question_answer_overrides": {
@@ -9632,6 +9781,33 @@
             {"value": {"name": "namnd", "label": "Nämnd", "type": "text", "required": true, "options": []}, "purpose": "shape_result"},
             {"value": {"name": "beslutsdatum", "label": "Beslutsdatum", "type": "date", "required": true, "options": []}, "purpose": "shape_result"}
           ]
+        },
+        "primary_runtime_input": {
+          "selected_option_id": "documents"
+        },
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "structure_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "docx_document"
+        },
+        "docx_output_mode": {
+          "selected_option_id": "template_fill_docx"
+        },
+        "comparison_scope": {
+          "selected_option_id": "no_direct_compare"
+        },
+        "report_disposition": {
+          "selected_option_id": "synthesized_overview"
+        },
+        "structured_io_contract": {
+          "selected_option_id": "extract_or_compute_fields"
+        },
+        "mapped_file_limit": {
+          "selected_option_id": "organization_limit"
         }
       },
       "expected": {
@@ -9740,7 +9916,36 @@
       "attachments": [
         "tjansteskrivelse_template.docx",
         "03_barnkonsekvensanalys.docx"
-      ]
+      ],
+      "execution": {
+        "inputs": {
+          "files": [
+            "ctl_upptag_utredning_upptagningsomrade.docx",
+            "ctl_upptag_elevprognos.xlsx"
+          ],
+          "form_fields": {
+            "diarienummer": "BUN-2026-00219",
+            "handlaggare": "Anna Karlberg",
+            "forvaltning": "Barn- och utbildningsförvaltningen",
+            "namnd": "Barn- och utbildningsnämnden",
+            "beslutsdatum": "2026-11-25"
+          }
+        },
+        "expect": {
+          "output_kind": "docx",
+          "required_facts": [
+            "Tallåsen",
+            "Ljustaskolan",
+            "väg 562",
+            "BUN-2026-00219"
+          ],
+          "forbidden": [
+            "Klockarberget",
+            "{{",
+            "}}"
+          ]
+        }
+      }
     },
     {
       "id": "file_role_discrimination_exemplar_not_docx_template",
@@ -9838,8 +10043,38 @@
       "id": "file_role_discrimination_runtime_input_sample_protokoll",
       "complexity": "medium",
       "domain": "municipality_meetings",
+      "apply_plan": true,
       "required": false,
       "prompt": "Nämndsekretariatet vill ha ett flöde som plockar ut beslutspunkterna ur våra protokollsutdrag. Den bifogade PDF:en är bara ett exempel på hur de protokollsutdrag som handläggaren laddar upp vid körning brukar se ut: den ska inte kopplas till flödet, inte fyllas i och inte användas som facit eller regelkälla. Vid körning laddas ett eller flera protokollsutdrag upp och deras innehåll ska inte bli formulärfält. Ge tillbaka JSON med paragraf, diarienummer, beslutspunkter och protokollsanteckningar.",
+      "question_answer_overrides": {
+        "primary_runtime_input": {
+          "selected_option_id": "documents"
+        },
+        "runtime_metadata_fields": {
+          "selected_option_id": "no_extra_metadata"
+        },
+        "document_material_scope": {
+          "selected_option_id": "flexible_document_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        },
+        "structured_io_contract": {
+          "selected_option_id": "extract_or_compute_fields"
+        },
+        "comparison_scope": {
+          "selected_option_id": "no_direct_compare"
+        },
+        "report_disposition": {
+          "selected_option_id": "per_source_sections"
+        },
+        "mapped_file_limit": {
+          "selected_option_id": "organization_limit"
+        }
+      },
       "expected": {
         "min_steps": 1,
         "max_steps": 3,
@@ -9920,7 +10155,29 @@
       ],
       "attachments": [
         "01_protokoll_bun_2026_02_25.pdf"
-      ]
+      ],
+      "execution": {
+        "inputs": {
+          "files": [
+            "ctl_prot_protokoll_sbn_2026_08_20.pdf"
+          ]
+        },
+        "expect": {
+          "output_kind": "json",
+          "required_facts": [
+            "SBN-2026-00318",
+            "SBN-2026-00402",
+            "Linnea Hård",
+            "Ljustadalen 1:5",
+            "Nolby 2:44"
+          ],
+          "forbidden": [
+            "BUN-2026-00037-1",
+            "Wictor Strand",
+            "Klockarberget"
+          ]
+        }
+      }
     },
     {
       "id": "declared_terminal_everyday_fardtjanst_json",
@@ -10860,10 +11117,32 @@
       "id": "long_context_bygglov_pdf_to_docx",
       "complexity": "hard",
       "domain": "municipality_building_permits",
+      "apply_plan": true,
       "prompt_file": "02_bygglov_pdf_till_docx.md",
       "synthetic_user_profile": "document_source",
       "question_answer_overrides": {
-        "report_disposition": {"selected_option_id": "synthesized_overview"}
+        "report_disposition": {"selected_option_id": "synthesized_overview"},
+        "terminal_output": {
+          "selected_option_id": "docx_document"
+        },
+        "docx_output_mode": {
+          "selected_option_id": "generated_docx"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "compare_or_validate"
+        },
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "comparison_scope": {
+          "selected_option_id": "same_run_compare"
+        },
+        "mapped_file_limit": {
+          "selected_option_id": "organization_limit"
+        },
+        "structured_io_contract": {
+          "selected_option_id": "extract_or_compute_fields"
+        }
       },
       "expected": {
         "min_steps": 3,
@@ -10883,9 +11162,47 @@
           ["conflicts", "avvikelser", "motstridiga_uppgifter"],
           ["missing_information", "oklarheter", "saknade_uppgifter"],
           ["supplement_request", "kompletteringsbegaran", "requested_completions"]
+        ],
+        "forbidden_question_event_ids": [
+          "terminal_output",
+          "post_processing_goal",
+          "comparison_scope"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "runtime_metadata_fields",
+          "report_disposition",
+          "docx_output_mode",
+          "document_material_scope",
+          "mapped_file_limit",
+          "structured_io_contract"
         ]
       },
-      "cohorts": ["document", "docx", "long_context"]
+      "cohorts": ["document", "docx", "long_context"],
+      "execution": {
+        "inputs": {
+          "files": [
+            "ctl_bygg_ansokan.pdf",
+            "ctl_bygg_situationsplan.pdf",
+            "ctl_bygg_plan_fasadritningar.pdf",
+            "ctl_bygg_foljebrev.pdf"
+          ]
+        },
+        "expect": {
+          "output_kind": "docx",
+          "required_facts": [
+            "Bredsand 5:32",
+            "BN 2026-000731",
+            "A-10.1-01",
+            "A-40.3-01",
+            "18,5",
+            "inglasad altan"
+          ],
+          "forbidden": [
+            "9 kap"
+          ]
+        }
+      }
     },
     {
       "id": "long_context_grannehornande_text_to_docx",
@@ -11009,8 +11326,38 @@
       "id": "long_context_serveringstillstand_json_pdf_to_docx",
       "complexity": "hard",
       "domain": "municipality_alcohol_permits",
+      "apply_plan": true,
       "prompt_file": "07_serveringstillstand_json_pdf_till_docx.md",
       "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "terminal_output": {
+          "selected_option_id": "docx_document"
+        },
+        "docx_output_mode": {
+          "selected_option_id": "generated_docx"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "compare_or_validate"
+        },
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "comparison_scope": {
+          "selected_option_id": "same_run_compare"
+        },
+        "report_disposition": {
+          "selected_option_id": "synthesized_overview"
+        },
+        "mapped_file_limit": {
+          "selected_option_id": "organization_limit"
+        },
+        "structured_io_contract": {
+          "selected_option_id": "extract_or_compute_fields"
+        },
+        "primary_runtime_input": {
+          "selected_option_id": "text_and_documents"
+        }
+      },
       "expected": {
         "min_steps": 3,
         "max_steps": 5,
@@ -11031,9 +11378,42 @@
           ["checklist", "checklistekontroll"],
           ["deviations", "avvikelser"],
           ["missing_information", "saknade_uppgifter", "oklarheter"]
+        ],
+        "forbidden_question_event_ids": [
+          "terminal_output",
+          "post_processing_goal",
+          "document_material_scope",
+          "comparison_scope"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "runtime_metadata_fields",
+          "docx_output_mode",
+          "report_disposition",
+          "mapped_file_limit",
+          "structured_io_contract"
         ]
       },
-      "cohorts": ["document", "docx", "long_context"]
+      "cohorts": ["document", "docx", "long_context"],
+      "execution": {
+        "inputs": {
+          "files": [
+            "ctl_serv_ansokan.json",
+            "ctl_serv_registreringsbevis.pdf",
+            "ctl_serv_hyresavtal.pdf"
+          ]
+        },
+        "expect": {
+          "output_kind": "docx",
+          "required_facts": [
+            "NAR-2026-00391",
+            "559401-7736",
+            "559288-1042",
+            "Salt & Sill Restauranger AB",
+            "Johan Lindgren"
+          ]
+        }
+      }
     },
     {
       "id": "long_context_synpunkt_text_to_json",
@@ -11095,11 +11475,30 @@
       "id": "long_context_inackorderingstillagg_pdf_to_pdf",
       "complexity": "hard",
       "domain": "municipality_education",
+      "apply_plan": true,
       "prompt_file": "10_inackorderingstillagg_pdf_till_pdf.md",
       "synthetic_user_profile": "document_source",
       "question_answer_overrides": {
         "terminal_output": {"selected_option_id": "pdf_document"},
-        "pdf_generation_mode": {"selected_option_id": "generated_pdf"}
+        "pdf_generation_mode": {"selected_option_id": "generated_pdf"},
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "compare_or_validate"
+        },
+        "comparison_scope": {
+          "selected_option_id": "same_run_compare"
+        },
+        "report_disposition": {
+          "selected_option_id": "both"
+        },
+        "structured_io_contract": {
+          "selected_option_id": "extract_or_compute_fields"
+        },
+        "mapped_file_limit": {
+          "selected_option_id": "organization_limit"
+        }
       },
       "expected": {
         "min_steps": 3,
@@ -11121,9 +11520,45 @@
           ["comparison", "jamforelse"],
           ["deviations", "avvikelser"],
           ["missing_information", "saknade_uppgifter", "oklarheter"]
+        ],
+        "forbidden_question_event_ids": [
+          "post_processing_goal",
+          "comparison_scope"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "runtime_metadata_fields",
+          "terminal_output",
+          "pdf_generation_mode",
+          "document_material_scope",
+          "report_disposition",
+          "structured_io_contract",
+          "mapped_file_limit"
         ]
       },
-      "cohorts": ["document", "long_context", "pdf"]
+      "cohorts": ["document", "long_context", "pdf"],
+      "execution": {
+        "inputs": {
+          "files": [
+            "ctl_inack_ansokan.pdf",
+            "ctl_inack_antagningsbesked.pdf",
+            "ctl_inack_hyreskontrakt.pdf"
+          ]
+        },
+        "checkpoints": [],
+        "expect": {
+          "output_kind": "pdf",
+          "required_facts": [
+            "Oskar Lindmark",
+            "Naturbruksprogrammet",
+            "Fordons- och transportprogrammet",
+            "Skolvägen 7 B",
+            "Skolvägen 9 B",
+            "2026-09-01"
+          ],
+          "forbidden": []
+        }
+      }
     },
     {
       "id": "edit_chain_10_instruction",

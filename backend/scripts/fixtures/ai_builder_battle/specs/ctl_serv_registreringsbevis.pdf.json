@@ -1,0 +1,85 @@
+{
+  "file": "ctl_serv_registreringsbevis.pdf",
+  "format": "pdf",
+  "source": {
+    "catalogue_id": "NAR-01",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/145"
+  },
+  "description": "Registreringsbevis för aktiebolag som bilaga till ansökan om serveringstillstånd: firma, organisationsnummer, styrelse och firmateckning.",
+  "letterhead": {
+    "organisation": "Bolagsverket",
+    "unit": "Registreringsbevis",
+    "address": "851 81 Sundsvall"
+  },
+  "date": "2026-08-27",
+  "title": "Registreringsbevis – Salt & Sill Krog AB",
+  "blocks": [
+    {
+      "table": {
+        "columns": [
+          "Uppgift",
+          "Värde"
+        ],
+        "rows": [
+          [
+            "Organisationsnummer",
+            "559401-7736"
+          ],
+          [
+            "Firma",
+            "Salt & Sill Krog AB"
+          ],
+          [
+            "Registreringsdatum",
+            "2026-03-19"
+          ],
+          [
+            "Säte",
+            "Sundsvall"
+          ],
+          [
+            "Aktiekapital",
+            "25 000 kr"
+          ],
+          [
+            "Verksamhet",
+            "Bolaget ska bedriva restaurangverksamhet och därmed förenlig verksamhet."
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Styrelse och verkställande direktör"
+    },
+    {
+      "table": {
+        "columns": [
+          "Namn",
+          "Personnummer",
+          "Funktion"
+        ],
+        "rows": [
+          [
+            "Lindgren, Johan",
+            "19750806-9163",
+            "Styrelseledamot, verkställande direktör"
+          ],
+          [
+            "Lindgren, Sara",
+            "19751023-9242",
+            "Styrelsesuppleant"
+          ]
+        ]
+      }
+    },
+    {
+      "heading": "Firmateckning"
+    },
+    {
+      "paragraph": "Firman tecknas av styrelsen. Verkställande direktören har rätt att teckna firman beträffande löpande förvaltningsåtgärder."
+    },
+    {
+      "paragraph": "Uppgifterna är hämtade ur aktiebolagsregistret 2026-08-27."
+    }
+  ]
+}

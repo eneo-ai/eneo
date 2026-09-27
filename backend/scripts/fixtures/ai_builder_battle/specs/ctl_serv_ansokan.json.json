@@ -1,0 +1,74 @@
+{
+  "file": "ctl_serv_ansokan.json",
+  "format": "json",
+  "source": {
+    "catalogue_id": "NAR-01",
+    "url": "https://e-tjanster.sundsvall.se/oversikt/overview/145"
+  },
+  "description": "JSON-export ur e-tjänsten Ansökan om serveringstillstånd: sökande bolag, verksamhetsställe, tillståndstyp, serveringstider, företrädare och bilageförteckning.",
+  "data": {
+    "arende": {
+      "arendenummer": "NAR-2026-00391",
+      "etjanst": "Ansökan om serveringstillstånd",
+      "inskickad": "2026-09-02T16:48:11+02:00",
+      "signerad_med": "BankID"
+    },
+    "sokande": {
+      "foretagsnamn": "Salt & Sill Krog AB",
+      "organisationsnummer": "559401-7736",
+      "postadress": "Esplanaden 17, 852 30 Sundsvall",
+      "kontaktperson": {
+        "namn": "Johan Lindgren",
+        "telefon": "070-622 18 90",
+        "epost": "johan@saltsill.example"
+      }
+    },
+    "verksamhetsstalle": {
+      "namn": "Krogen Salt & Sill",
+      "besoksadress": "Esplanaden 17, 852 30 Sundsvall",
+      "sittplatser_inne": 64,
+      "uteservering": true,
+      "sittplatser_ute": 30
+    },
+    "tillstand": {
+      "typ": "Stadigvarande tillstånd till allmänheten",
+      "drycker": [
+        "Spritdrycker",
+        "Vin",
+        "Starköl",
+        "Andra jästa alkoholdrycker"
+      ],
+      "serveringstid_inne": "11:00–01:00",
+      "serveringstid_ute": "11:00–22:00",
+      "catering": false
+    },
+    "foretradare": [
+      {
+        "namn": "Johan Lindgren",
+        "roll": "Verkställande direktör och styrelseledamot"
+      },
+      {
+        "namn": "Sara Lindgren",
+        "roll": "Styrelsesuppleant"
+      }
+    ],
+    "kunskapsprov": {
+      "avlagt_av": "Johan Lindgren",
+      "datum": "2026-06-11"
+    },
+    "bilagor": [
+      {
+        "filnamn": "registreringsbevis.pdf"
+      },
+      {
+        "filnamn": "hyresavtal_esplanaden17.pdf"
+      },
+      {
+        "filnamn": "meny.pdf"
+      },
+      {
+        "filnamn": "planritning.pdf"
+      }
+    ]
+  }
+}

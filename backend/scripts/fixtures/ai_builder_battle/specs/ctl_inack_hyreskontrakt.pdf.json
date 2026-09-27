@@ -1,0 +1,23 @@
+{
+  "file": "ctl_inack_hyreskontrakt.pdf",
+  "format": "pdf",
+  "source": {"catalogue_id": "UTB-05", "url": "https://e-tjanster.sundsvall.se/oversikt/overview/773"},
+  "description": "Andrahandskontrakt för ett möblerat rum, bilaga till en ansökan om inackorderingstillägg; adress och period skiljer sig från ansökan.",
+  "letterhead": {"organisation": "Hyreskontrakt", "unit": "Uthyrning av möblerat rum i egen bostad"},
+  "date": "2026-08-12",
+  "title": "Hyreskontrakt för möblerat rum",
+  "blocks": [
+    {"heading": "Parter"},
+    {"table": {"columns": ["Roll", "Namn", "Adress"], "rows": [["Hyresvärd", "Gunilla Persson", "Skolvägen 9 B, 835 31 Krokom"], ["Hyresgäst", "Oskar Lindmark", "Byvägen 14, 860 13 Stöde"], ["Borgensman", "Camilla Lindmark", "Byvägen 14, 860 13 Stöde"]]}},
+    {"heading": "Objekt"},
+    {"paragraph": "Möblerat rum om 12 m² med tillgång till kök, badrum och tvättstuga i hyresvärdens villa på Skolvägen 9 B, 835 31 Krokom."},
+    {"heading": "Hyrestid"},
+    {"paragraph": "Kontraktet gäller från och med 2026-09-01 till och med 2027-05-31 och upphör utan uppsägning. Under jul- och sportlovet får rummet inte användas av hyresgästen."},
+    {"heading": "Hyra"},
+    {"paragraph": "Hyran är 3 200 kronor per månad inklusive el, värme, internet och tvätt. Hyran betalas i förskott senast den sista dagen i månaden före hyresmånaden."},
+    {"heading": "Övrigt"},
+    {"list": ["Rökning och husdjur är inte tillåtna.", "Hyresgästen får inte ha övernattande gäster."]},
+    {"signature": {"name": "Gunilla Persson", "role": "Hyresvärd"}},
+    {"signature": {"name": "Oskar Lindmark", "role": "Hyresgäst"}}
+  ]
+}
