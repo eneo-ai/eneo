@@ -4,7 +4,8 @@ import {
   PCM16_FLUSHED,
   PCM16_PAUSE,
   PCM16_PROCESSOR,
-  PCM16_RESUME
+  PCM16_RESUME,
+  PCM16_RESUMED
 } from "./pcm16-worklet.js";
 // A file of its own: Vite would inline a file this small as a data: URL, and
 // the app's `script-src 'self'` refuses worklet modules from data: URLs.
@@ -86,6 +87,8 @@ export class LiveTranscriptPreview {
   // with nothing lost on the way. Once lost, never whole again.
   #produced = 0;
   #paused = $state(false);
+  // Resumes the worklet has not answered yet (see PCM16_RESUMED).
+  #resumesUnanswered = 0;
   #whole = false;
   #transcriptId: string | null = null;
   #finishingTimer: ReturnType<typeof setTimeout> | undefined;
@@ -147,9 +150,17 @@ export class LiveTranscriptPreview {
   // does, so the text no longer matches the recording exactly: it stays a preview.
   pause(paused: boolean): void {
     this.#paused = paused;
-    // The worklet drops the frame it was filling, so none of it follows the pause.
-    this.#node?.port.postMessage(paused ? PCM16_PAUSE : PCM16_RESUME);
-    if (paused) this.lose();
+    const node = this.#node;
+    if (paused) {
+      // The worklet drops the frame it was filling, so none of it follows the pause.
+      node?.port.postMessage(PCM16_PAUSE);
+      this.lose();
+    } else if (node) {
+      // Frames stay closed out until the worklet answers: until then they may
+      // hold what it heard before it handled the pause.
+      this.#resumesUnanswered += 1;
+      node.port.postMessage(PCM16_RESUME);
+    }
   }
 
   // Some of the recording never reaches this session's transcript (it rotated
@@ -195,6 +206,7 @@ export class LiveTranscriptPreview {
     this.#recordingId = generateSessionId();
     this.#produced = 0;
     this.#paused = false;
+    this.#resumesUnanswered = 0;
     this.#whole = true;
     this.#transcriptId = null;
     this.#fileId = null;
@@ -309,7 +321,9 @@ export class LiveTranscriptPreview {
       channelInterpretation: "speakers"
     });
     node.port.onmessage = (event: MessageEvent<ArrayBuffer | string>) => {
-      if (event.data !== PCM16_FLUSHED) {
+      if (event.data === PCM16_RESUMED) {
+        this.#resumesUnanswered -= 1;
+      } else if (event.data !== PCM16_FLUSHED) {
         this.#takeFrame(event.data as ArrayBuffer);
       } else if (this.#socket) {
         this.#sendStop(this.#socket);
@@ -325,7 +339,7 @@ export class LiveTranscriptPreview {
 
   #takeFrame(frame: ArrayBuffer) {
     // The recording holds none of it: nor does its text.
-    if (this.#paused) return;
+    if (this.#paused || this.#resumesUnanswered > 0) return;
     this.#produced += frame.byteLength / 2;
     const socket = this.#socket;
     if (socket?.readyState === WebSocket.OPEN) {

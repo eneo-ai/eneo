@@ -15,7 +15,7 @@ import {
   installLiveTranscriptFakes,
   liveSession
 } from "./liveTranscriptTestFakes";
-import { PCM16_FLUSH, PCM16_FLUSHED } from "./pcm16-worklet.js";
+import { PCM16_FLUSH, PCM16_FLUSHED, PCM16_RESUMED } from "./pcm16-worklet.js";
 
 beforeEach(() => {
   installLiveTranscriptFakes();
@@ -412,10 +412,15 @@ describe("LiveTranscriptPreview reuse of the final text", () => {
     socket.open();
     socket.receive({ type: "ready", sample_rate: 16000, max_seconds: 18000 });
     const node = FakeWorkletNode.instances[0];
+    // The worklet's answer to the resume is posted by hand, in order with its frames.
+    node.answersResume = false;
     node.frame(1);
     harness.preview.pause(true);
     node.frame(2);
     harness.preview.pause(false);
+    // Posted before the worklet handled the pause: it may hold paused audio.
+    node.frame(4);
+    node.post(PCM16_RESUMED);
     node.frame(3);
 
     harness.preview.stop();

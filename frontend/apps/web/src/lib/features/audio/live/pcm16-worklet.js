@@ -9,9 +9,12 @@ export const PCM16_PROCESSOR = "pcm16-frames";
 export const PCM16_FLUSH = "flush";
 export const PCM16_FLUSHED = "flushed";
 // The recording paused: the processor drops the frame in progress and hears
-// nothing until PCM16_RESUME, so no paused audio reaches a later frame.
+// nothing until PCM16_RESUME, so no paused audio reaches a later frame. It answers
+// each PCM16_RESUME with PCM16_RESUMED: every frame it posted before that answer
+// was heard before the resume.
 export const PCM16_PAUSE = "pause";
 export const PCM16_RESUME = "resume";
+export const PCM16_RESUMED = "resumed";
 const TARGET_RATE = 16_000;
 export const FRAME_SAMPLES = 1_600;
 
@@ -90,6 +93,7 @@ export function createPcm16Processor(inputRate, port) {
       writer.discard();
     } else if (event.data === PCM16_RESUME) {
       paused = false;
+      port.postMessage(PCM16_RESUMED);
     } else if (event.data === PCM16_FLUSH) {
       writer.flush();
       port.postMessage(PCM16_FLUSHED);

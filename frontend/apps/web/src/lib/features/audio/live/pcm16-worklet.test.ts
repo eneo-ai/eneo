@@ -7,6 +7,7 @@ import {
   PCM16_FLUSH,
   PCM16_PAUSE,
   PCM16_RESUME,
+  PCM16_RESUMED,
   PCM16_FLUSHED
 } from "./pcm16-worklet.js";
 
@@ -96,6 +97,7 @@ describe("createPcm16Processor", () => {
     port.onmessage?.({ data: PCM16_PAUSE });
     renderQuanta(16_000, 0.2, 0.5, (block) => process([[block]]));
     port.onmessage?.({ data: PCM16_RESUME });
+    expect(posted.at(-1)).toBe(PCM16_RESUMED);
     renderQuanta(16_000, 0.03, 0.5, (block) => process([[block]]));
     port.onmessage?.({ data: PCM16_FLUSH });
 

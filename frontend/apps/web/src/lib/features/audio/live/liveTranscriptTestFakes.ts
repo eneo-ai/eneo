@@ -1,7 +1,7 @@
 import { vi } from "vitest";
 
 import type { FlowLiveTranscriptionSession } from "@eneo/eneo-js";
-import { PCM16_FLUSH, PCM16_FLUSHED } from "./pcm16-worklet.js";
+import { PCM16_FLUSH, PCM16_FLUSHED, PCM16_RESUME, PCM16_RESUMED } from "./pcm16-worklet.js";
 
 // Test doubles for the live transcript preview's browser APIs.
 
@@ -74,11 +74,15 @@ export class FakeWorkletNode {
   static instances: FakeWorkletNode[] = [];
 
   answersFlush = true;
+  answersResume = true;
   port = {
     onmessage: null as ((event: { data: unknown }) => void) | null,
     postMessage: vi.fn((message: unknown) => {
       if (message === PCM16_FLUSH && this.answersFlush) {
         queueMicrotask(() => this.post(PCM16_FLUSHED));
+      }
+      if (message === PCM16_RESUME && this.answersResume) {
+        queueMicrotask(() => this.post(PCM16_RESUMED));
       }
     }),
     close: vi.fn()
