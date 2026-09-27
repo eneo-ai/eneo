@@ -114,11 +114,17 @@ def _parse(raw: dict[str, Any]) -> Any:
 def _tree(
     tmp_path: Path, specs: dict[str, dict[str, Any]] | None = None
 ) -> tuple[Path, Path, Path]:
-    """A fixture directory rendered from its specs (one per format by default), pinned in its own manifest."""
+    """A fixture directory rendered from its specs (one per format by default), pinned in its own manifest.
+
+    It also holds the checked-in binaries, which every fixture directory must pin.
+    """
 
     spec_dir = tmp_path / "specs"
     spec_dir.mkdir()
     pinned: dict[str, str] = {}
+    for name, expected_sha256, _ in generator.PINNED_BINARIES:
+        (tmp_path / name).write_bytes((FIXTURE_DIR / name).read_bytes())
+        pinned[name] = expected_sha256
     for name, raw in (specs or _specs()).items():
         (spec_dir / f"{name}.json").write_text(
             json.dumps(raw, ensure_ascii=False), encoding="utf-8"
@@ -411,6 +417,55 @@ def test_bytes_that_no_longer_match_the_manifest_are_reported(tmp_path: Path) ->
     )
     assert "ansokan.json: extracted JSON differs from the spec data" in problems
     assert len(problems) == 5
+
+
+@mark.parametrize(
+    ("name", "expected_sha256", "what"),
+    generator.PINNED_BINARIES,
+    ids=[name for name, _, _ in generator.PINNED_BINARIES],
+)
+def test_a_checked_in_binary_re_pinned_in_the_manifest_to_other_bytes_is_reported(
+    tmp_path: Path, name: str, expected_sha256: str, what: str
+) -> None:
+    # The manifest alone cannot hold these bytes: rewriting the file and its manifest entry together still fails.
+    fixture_dir, spec_dir, manifest = _tree(tmp_path)
+    changed = (FIXTURE_DIR / name).read_bytes() + b"\x00"
+    (fixture_dir / name).write_bytes(changed)
+    actual_sha256 = hashlib.sha256(changed).hexdigest()
+    pinned = json.loads(manifest.read_text(encoding="utf-8"))
+    pinned["fixtures"][name] = actual_sha256
+    manifest.write_text(json.dumps(pinned), encoding="utf-8")
+
+    assert _check((fixture_dir, spec_dir, manifest)) == [
+        f"{name}: {what} SHA-256 mismatch: expected {expected_sha256}, "
+        f"got {actual_sha256} for {fixture_dir / name}"
+    ]
+
+    (fixture_dir / name).write_bytes((FIXTURE_DIR / name).read_bytes())
+    pinned["fixtures"][name] = expected_sha256
+    manifest.write_text(json.dumps(pinned), encoding="utf-8")
+
+    assert _check((fixture_dir, spec_dir, manifest)) == []
+
+
+@mark.parametrize(
+    ("name", "what"),
+    [(name, what) for name, _, what in generator.PINNED_BINARIES],
+    ids=[name for name, _, _ in generator.PINNED_BINARIES],
+)
+def test_a_checked_in_binary_deleted_with_its_manifest_entry_is_reported(
+    tmp_path: Path, name: str, what: str
+) -> None:
+    fixture_dir, spec_dir, manifest = _tree(tmp_path)
+    (fixture_dir / name).unlink()
+    pinned = json.loads(manifest.read_text(encoding="utf-8"))
+    del pinned["fixtures"][name]
+    manifest.write_text(json.dumps(pinned), encoding="utf-8")
+
+    assert _check((fixture_dir, spec_dir, manifest)) == [
+        f"{name}: {what} is not pinned in manifest.json",
+        f"{name}: missing from the fixture directory",
+    ]
 
 
 def test_a_manifest_entry_without_a_spec_or_a_legacy_generator_is_an_orphan(

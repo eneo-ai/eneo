@@ -534,6 +534,7 @@
       "id": "medium_audio_to_protocol_pdf_with_metadata",
       "complexity": "medium",
       "domain": "municipality_meetings",
+      "apply_plan": true,
       "prompt": "Jag vill skapa ett flöde för arbetsmöten. Vid körning laddar jag upp en ljudfil och fyller i mötesdatum, nämnd eller arbetsgrupp och ordförande. Flödet ska transkribera, ta fram beslut, åtgärder, ansvariga och öppna frågor och skapa en protokollsliknande PDF.",
       "question_answer_overrides": {
         "runtime_metadata_fields": {
@@ -631,7 +632,34 @@
         "form_fields",
         "foundation",
         "pdf"
-      ]
+      ],
+      "execution": {
+        "inputs": {
+          "files": [
+            "mote_uppfoljning.mp3"
+          ],
+          "form_fields": {
+            "motesdatum": "2026-10-06",
+            "namnd_eller_arbetsgrupp": "Arbetsgruppen för lokalförsörjning",
+            "ordforande": "Lena Berg"
+          }
+        },
+        "checkpoints": [],
+        "expect": {
+          "output_kind": "pdf",
+          "required_facts": [
+            "Arbetsgruppen för lokalförsörjning",
+            "Lena Berg",
+            "Granbacka",
+            "paviljong",
+            "Johan Nilsson",
+            "hyresavtal",
+            "Karin Lindström",
+            "förhandl",
+            "tillgänglighet"
+          ]
+        }
+      }
     },
     {
       "id": "medium_public_records_redaction_package",

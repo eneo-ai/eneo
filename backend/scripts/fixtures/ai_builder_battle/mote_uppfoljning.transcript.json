@@ -1,0 +1,7 @@
+{
+  "description": "One offline speech-to-text reading of the checked-in recording, kept as evidence that the audio case's required facts survive transcription. It is not a fixture: no case uploads it. A unit test ties it to the recording's pinned SHA-256 and checks every required fact against it.",
+  "recording": "mote_uppfoljning.mp3",
+  "recording_sha256": "06c145f7be021ac7e819a39ad903d0a4302667310bf184953fa0dc10b9198356",
+  "transcriber": "faster-whisper 1.2.1 (CTranslate2 4.8.2), model large-v3-turbo, CPU int8, language sv, default decoding; segment texts stripped and joined with one space",
+  "text": "Välkomna till dagens möte i arbetsgruppen för lokalförsörjning. Det är tisdag den 6 oktober. Jag heter Lena Berg och är oerförande. Vi har tre punkter på dag och nen. Punkt 1 gäller lokalbehovet på Granbacka skolan. Johan varsågod. Elevantalet ökar med 60 elever nästa läsår. Skolan behöver fyra nya klassrummen och det snabbaste alternativet är att hyra paviljonger i tre år. Då beslutar arbetsgruppen att föreslå att Granbacka skolan hyr paviljonger. Johan Nilsson tar fram en offer senast den 23 oktober. Punkt 2 gäller hyresavtalet för fritidsgående på Kvarnvätan. Karin. Avtalet löper ut vid årsskiftet och hyresvägen vill höja hyran med 8%. Karin Lindström förhandlar med hyresvägen och återkommer senast den 13 november. Punkt 3 är övriga frågor. En öppen fråga är vem som betalar tillgänglighetsanpassningen av paviljonger. Den tar vi upp på nästa möte och jag kallar till det senast den 20 oktober. Tack mötet är avslutat."
+}

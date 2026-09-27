@@ -22,9 +22,16 @@ The checked-in ``01_protokoll_bun_2026_02_25.pdf`` is the canonical authentic
 below. ``--source`` may initialize or replace that file only when the supplied
 bytes match the pinned hash.
 
+The checked-in ``mote_uppfoljning.mp3`` is a one-off speech rendering of the ``mote_uppfoljning_manus.txt`` script
+(piper, voice sv_SE-nst-medium, then ffmpeg to mono 16 kHz, 32 kbps). No TTS is a dependency: speech synthesis does
+not reproduce bytes across machines, so the recording is never regenerated and its SHA-256 is pinned below.
+``mote_uppfoljning.transcript.json`` beside it is one offline transcription of those bytes, kept as evidence that the
+audio case's required facts survive speech-to-text; it names the recording's SHA-256 and is not itself a fixture.
+
 ``--check`` changes nothing in the repository. It prints one line per problem and exits 1 when the committed bytes,
 the manifest and the specs disagree: a manifest the harness would refuse, a pinned file that is missing or has other
-bytes, a pinned file with neither a spec nor a legacy generator, an entry of the fixture directory the manifest does
+bytes, a checked-in binary (``PINNED_BINARIES``) that is not pinned, is missing, or whose bytes differ from the hash
+pinned here even when the manifest agrees with them, a pinned file with neither a spec nor a legacy generator, an entry of the fixture directory the manifest does
 not pin (other than ``UNPINNED_FIXTURE_ENTRIES`` and the seed flows), a spec that is invalid or whose file is not pinned, a committed
 file whose text, read through the product's own extractor, either lacks a piece of its spec's content or reads
 differently from the spec rendered now, or a DOCX template whose content controls (every field the product's
@@ -102,6 +109,11 @@ MANIFEST_VERSION = 1
 AUTHENTIC_PROTOCOL_SHA256 = (
     "cdab0e4471ca518fa5c7334a185a0c77da1c5743a49468e54d3ff094f824c6d8"
 )
+MEETING_RECORDING_NAME = "mote_uppfoljning.mp3"
+MEETING_RECORDING_SHA256 = (
+    "06c145f7be021ac7e819a39ad903d0a4302667310bf184953fa0dc10b9198356"
+)
+MEETING_TRANSCRIPT_NAME = "mote_uppfoljning.transcript.json"
 _LEGACY_LETTERHEAD = Letterhead(
     "Sundsvalls kommun", "Barn- och utbildningsförvaltningen"
 )
@@ -116,9 +128,18 @@ MATTER_FIXTURE_NAMES = (
     "06_tidigare_beslut.pdf",
 )
 
-# What a fixture directory may hold without a manifest entry: the manifest, the prompts and the specs, and the seed
-# flows and edit chains, which the harness hashes itself and names with these prefixes.
-UNPINNED_FIXTURE_ENTRIES = frozenset({"manifest.json", "prompts", "specs"})
+# The checked-in binaries no spec or generator can reproduce: their bytes are pinned here, not only in the manifest.
+PINNED_BINARIES = (
+    (MATTER_FIXTURE_NAMES[0], AUTHENTIC_PROTOCOL_SHA256, "Authentic protocol"),
+    (MEETING_RECORDING_NAME, MEETING_RECORDING_SHA256, "Meeting recording"),
+)
+
+# What a fixture directory may hold without a manifest entry: the manifest, the prompts and the specs, the recording's
+# transcript (evidence, never uploaded), and the seed flows and edit chains, which the harness hashes itself and
+# names with these prefixes.
+UNPINNED_FIXTURE_ENTRIES = frozenset(
+    {"manifest.json", "prompts", "specs", MEETING_TRANSCRIPT_NAME}
+)
 SEED_FIXTURE_PREFIXES = ("edit_seed_", "edit_chain_")
 
 GENERATED_FIXTURE_NAMES = (
@@ -127,6 +148,7 @@ GENERATED_FIXTURE_NAMES = (
     "example_report.docx",
     "generic_case_template.docx",
     "tjansteskrivelse_template.docx",
+    MEETING_RECORDING_NAME,
 )
 
 
@@ -347,15 +369,19 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _verify_authentic_protocol(path: Path) -> None:
+def _verify_pinned(path: Path, expected_sha256: str, what: str) -> None:
     if not path.is_file():
-        raise FileNotFoundError(f"Authentic protocol fixture is missing: {path}")
+        raise FileNotFoundError(f"{what} fixture is missing: {path}")
     actual_sha256 = _sha256(path)
-    if actual_sha256 != AUTHENTIC_PROTOCOL_SHA256:
+    if actual_sha256 != expected_sha256:
         raise ValueError(
-            "Authentic protocol SHA-256 mismatch: "
-            f"expected {AUTHENTIC_PROTOCOL_SHA256}, got {actual_sha256} for {path}"
+            f"{what} SHA-256 mismatch: "
+            f"expected {expected_sha256}, got {actual_sha256} for {path}"
         )
+
+
+def _verify_authentic_protocol(path: Path) -> None:
+    _verify_pinned(path, AUTHENTIC_PROTOCOL_SHA256, "Authentic protocol")
 
 
 def _harness() -> ModuleType:
@@ -429,6 +455,11 @@ def _write_fixtures(*, source_path: Path | None = None) -> dict[str, str]:
         if source_path.resolve() != canonical_protocol.resolve():
             shutil.copyfile(source_path, canonical_protocol)
     _verify_authentic_protocol(canonical_protocol)
+    _verify_pinned(
+        FIXTURE_DIR / MEETING_RECORDING_NAME,
+        MEETING_RECORDING_SHA256,
+        "Meeting recording",
+    )
     _write_docx(FIXTURE_DIR / "decision_letter_template.docx", _build_decision_letter)
     _write_docx(FIXTURE_DIR / "example_report.docx", _build_example_report)
     _write_docx(FIXTURE_DIR / "generic_case_template.docx", _build_generic_template)
@@ -782,6 +813,19 @@ def check(
             problems.append(
                 f"{name}: sha256 {actual} does not match {manifest_path.name}"
             )
+    for name, expected_sha256, what in PINNED_BINARIES:
+        # Every pinned binary must be pinned and present: deleting the file together with its manifest entry, or
+        # re-pinning the manifest to other bytes, is caught only here. A pinned file that is missing is reported above.
+        path = fixture_dir / name
+        if name not in pinned:
+            problems.append(f"{name}: {what} is not pinned in {manifest_path.name}")
+            if not path.is_file():
+                problems.append(f"{name}: missing from the fixture directory")
+        if path.is_file():
+            try:
+                _verify_pinned(path, expected_sha256, what)
+            except ValueError as error:
+                problems.append(f"{name}: {error}")
     problems += [
         f"{path.name}: in the fixture directory but not pinned in {manifest_path.name}"
         for path in sorted(fixture_dir.iterdir())

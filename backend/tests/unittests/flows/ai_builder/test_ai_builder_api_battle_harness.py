@@ -9538,7 +9538,9 @@ def test_suite_demand_for_the_frozen_corpus_exceeds_the_space_default_ceiling() 
     # its own run, upload and checkpoint requests (104-108 per observation,
     # 954 per rep) and their 15 new fixtures add 15 uploads:
     # 9,949 + 15 + 3 x 954 = 12,826.
-    assert demand["total"] == 12_826
+    # 2026-09-27: the audio meeting case executes. Its run adds 105 requests
+    # per observation and its recording one upload: 12,826 + 1 + 3 x 105 = 13,142.
+    assert demand["total"] == 13_142
     # The measurement key is space-scoped (the preflight refuses any other),
     # so the space default is the ceiling that binds; the tenant default of
     # 10,000 no longer does.

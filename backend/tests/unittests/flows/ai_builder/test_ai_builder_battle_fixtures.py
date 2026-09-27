@@ -56,6 +56,14 @@ def test_generator_is_deterministic_and_portable_with_pinned_protocol(
 
     expected_protocol_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
     assert generator.AUTHENTIC_PROTOCOL_SHA256 == expected_protocol_sha256
+    # The recording is checked in, never synthesized: a fresh fixture directory starts with its pinned bytes.
+    recording = FIXTURE_DIR / generator.MEETING_RECORDING_NAME
+    assert (
+        hashlib.sha256(recording.read_bytes()).hexdigest()
+        == generator.MEETING_RECORDING_SHA256
+    )
+    fixture_dir.mkdir()
+    shutil.copyfile(recording, fixture_dir / recording.name)
 
     first_content_hashes = generator._write_fixtures(source_path=source_path)
     generator._write_manifest(first_content_hashes)
@@ -139,6 +147,52 @@ def test_battle_cases_and_fixture_manifest_cannot_drift_apart() -> None:
     # receipt claims it did.
     on_disk = _fixture_hashes(FIXTURE_DIR)
     assert {name: on_disk.get(name) for name in pinned} == pinned
+
+
+AUDIO_CASE_ID = "medium_audio_to_protocol_pdf_with_metadata"
+
+
+def test_every_audio_fact_is_in_the_script_and_in_the_recording_s_transcript() -> None:
+    # The script is the gold; the checked-in transcript is the evidence that each fact survives speech-to-text.
+    # Both are read here, offline: no model runs.
+    harness = _load_module(
+        "ai_builder_api_battle_test_audio_transcript",
+        GENERATOR_PATH.with_name("ai_builder_api_battle_test.py"),
+    )
+    generator = _load_module(
+        "generate_battle_fixtures_audio_transcript", GENERATOR_PATH
+    )
+    (case,) = [
+        case
+        for case in harness._read_cases_file(CASES_PATH)
+        if case.case_id == AUDIO_CASE_ID
+    ]
+    assert case.execution is not None
+    assert case.execution.inputs.files == (generator.MEETING_RECORDING_NAME,)
+    transcript = json.loads(
+        (FIXTURE_DIR / generator.MEETING_TRANSCRIPT_NAME).read_text(encoding="utf-8")
+    )
+    pinned = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))["fixtures"]
+    recording = FIXTURE_DIR / generator.MEETING_RECORDING_NAME
+
+    assert transcript["recording"] == generator.MEETING_RECORDING_NAME
+    assert (
+        transcript["recording_sha256"]
+        == generator.MEETING_RECORDING_SHA256
+        == pinned[generator.MEETING_RECORDING_NAME]
+        == hashlib.sha256(recording.read_bytes()).hexdigest()
+    )
+    script = (FIXTURE_DIR / "mote_uppfoljning_manus.txt").read_text(encoding="utf-8")
+    heard = harness._normalized_output_text(transcript["text"])
+    written = harness._normalized_output_text(script)
+    # Normalized as the harness matches a fact against the delivered text.
+    facts = [
+        harness._normalized_output_text(fact)
+        for fact in case.execution.expect.required_facts
+    ]
+    assert facts
+    assert [fact for fact in facts if fact not in written] == []
+    assert [fact for fact in facts if fact not in heard] == []
 
 
 def test_long_context_cohort_covers_large_municipal_format_journeys() -> None:
