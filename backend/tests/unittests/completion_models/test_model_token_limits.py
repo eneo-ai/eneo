@@ -87,7 +87,7 @@ def test_two_limit_hydration_and_public_projection() -> None:
 
 
 @pytest.mark.parametrize("dimension", ["max_input_tokens", "max_output_tokens"])
-async def test_admin_capacity_create_read_declare_keep_clear_and_route_move(
+async def test_admin_capacity_create_read_declare_keep_and_route_move(
     dimension,
 ) -> None:
     from unittest.mock import AsyncMock, MagicMock
@@ -155,10 +155,9 @@ async def test_admin_capacity_create_read_declare_keep_clear_and_route_move(
         for payload, expected in (
             (TenantCompletionModelUpdate(**{dimension: 140}), 140),
             (TenantCompletionModelUpdate(description="Updated"), 140),
-            (TenantCompletionModelUpdate(**{dimension: None}), None),
             (TenantCompletionModelUpdate(**{dimension: 120}), 120),
-            (TenantCompletionModelUpdate(name="renamed"), None),
-            (TenantCompletionModelUpdate(name="custom"), None),
+            (TenantCompletionModelUpdate(name="renamed"), 120),
+            (TenantCompletionModelUpdate(name="custom"), 120),
             (TenantCompletionModelUpdate(name="redeclared", **{dimension: 160}), 160),
             (TenantCompletionModelUpdate(name="redeclared"), 160),
         ):
@@ -167,7 +166,7 @@ async def test_admin_capacity_create_read_declare_keep_clear_and_route_move(
 
 
 @pytest.mark.parametrize("redeclare", [False, True])
-async def test_metadata_route_update_withdraws_only_omitted_declarations(
+async def test_metadata_route_update_keeps_limits_and_explicit_declarations(
     redeclare,
 ) -> None:
     from unittest.mock import AsyncMock, MagicMock
@@ -187,7 +186,12 @@ async def test_metadata_route_update_withdraws_only_omitted_declarations(
         "openai",
     )
     session = MagicMock()
-    session.execute = AsyncMock(return_value=result)
+    stored_limits = MagicMock()
+    stored_limits.one_or_none.return_value = (100, 80)
+    # The stored limits the partial save keeps, then the stored route.
+    session.execute = AsyncMock(
+        side_effect=[result] if redeclare else [stored_limits, result]
+    )
     repo = CompletionModelsRepository(session)
     repo.delegate = MagicMock()
     repo.delegate.update = AsyncMock()
@@ -206,8 +210,9 @@ async def test_metadata_route_update_withdraws_only_omitted_declarations(
     )
     await repo.update_model(payload)
     written = repo.delegate.update.call_args.args[0].model_dump(exclude_unset=True)
-    assert written["max_input_tokens"] == (100 if redeclare else None)
-    assert written["max_output_tokens"] == (80 if redeclare else None)
+    assert written.get("max_input_tokens") == (100 if redeclare else None)
+    assert written.get("max_output_tokens") == (80 if redeclare else None)
+    assert ("max_input_tokens" in written) == redeclare
     assert written["supports_strict_tool_schema"] is True
 
 
@@ -242,9 +247,7 @@ def test_sysadmin_capacity_declarations_must_be_positive(request_type, value) ->
 
 
 @pytest.mark.parametrize("request_type", ["create", "update"])
-@pytest.mark.parametrize(
-    "declaration", [{}, {"max_output_tokens": None}, {"max_output_tokens": 120}]
-)
+@pytest.mark.parametrize("declaration", [{}, {"max_output_tokens": 120}])
 def test_sysadmin_capacity_preserves_optional_declarations(
     request_type, declaration
 ) -> None:
@@ -264,11 +267,13 @@ def test_sysadmin_capacity_preserves_optional_declarations(
             "vision": False,
             "reasoning": False,
             "is_deprecated": False,
-            **({"max_output_tokens": None} if request_type == "create" else {}),
+            **({"max_output_tokens": 80} if request_type == "create" else {}),
             **declaration,
         }
     )
-    assert payload.max_output_tokens == declaration.get("max_output_tokens")
+    assert payload.max_output_tokens == declaration.get(
+        "max_output_tokens", 80 if request_type == "create" else None
+    )
     assert ("max_output_tokens" in payload.model_fields_set) == (
         request_type == "create" or "max_output_tokens" in declaration
     )
@@ -428,7 +433,7 @@ async def test_reads_preserve_tenant_and_soft_deletion_boundaries(
         )
 
 
-async def test_update_cannot_clear_another_tenants_capacity():
+async def test_update_cannot_change_another_tenants_capacity():
     from unittest.mock import AsyncMock, MagicMock
 
     import sqlalchemy as sa
@@ -467,7 +472,7 @@ async def test_update_cannot_clear_another_tenants_capacity():
         service = TenantCompletionModelService(session, MagicMock(tenant_id=uuid4()))
         with pytest.raises(NotFoundException):
             await service.update(
-                model_id, TenantCompletionModelUpdate(max_input_tokens=None)
+                model_id, TenantCompletionModelUpdate(max_input_tokens=50)
             )
         assert (
             connection.execute(sa.select(stored.c.max_input_tokens)).scalar_one() == 100

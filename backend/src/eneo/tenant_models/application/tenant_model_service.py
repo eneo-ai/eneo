@@ -24,6 +24,7 @@ import sqlalchemy as sa
 
 from eneo.ai_models.completion_models.completion_model import (
     moves_completion_model_route,
+    require_token_limits,
 )
 from eneo.ai_models.display_name_validation import (
     validate_unique_display_name as _validate_unique_display_name,
@@ -355,9 +356,10 @@ class TenantCompletionModelService:
         if payload.name is not None:
             model.name = payload.name
         if renames_route:
+            # The strict tool-schema declaration was assessed against the old
+            # route. The token limits stay: a model without them cannot serve
+            # any request, so only an explicit new value replaces them.
             model.supports_strict_tool_schema = False
-            model.max_input_tokens = None
-            model.max_output_tokens = None
         if payload.display_name is not None:
             await _validate_unique_display_name(
                 self.session,
@@ -374,6 +376,10 @@ class TenantCompletionModelService:
             model.max_input_tokens = payload.max_input_tokens
         if "max_output_tokens" in provided:
             model.max_output_tokens = payload.max_output_tokens
+        require_token_limits(
+            max_input_tokens=model.max_input_tokens,
+            max_output_tokens=model.max_output_tokens,
+        )
         if payload.vision is not None:
             model.vision = payload.vision
         if payload.reasoning is not None:

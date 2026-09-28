@@ -170,9 +170,9 @@ export function hasValidCompletionTokenBudgets(draft: ModelDraftState): boolean 
   );
 }
 
-/** Every capacity field a draft states must be a positive whole number. A
- *  blank field states nothing: the model's capacity in that dimension is
- *  simply not declared, which an edit may leave alone or withdraw. */
+/** Every capacity field a draft states must be a positive whole number.
+ *  Saving a completion model also needs both fields filled in
+ *  (hasValidCompletionTokenBudgets). */
 export function hasValidDeclaredCapacity(draft: ModelDraftState): boolean {
   const declared = [draft.maxInputTokensStr, draft.maxOutputTokensStr];
   return declared.every(
@@ -220,17 +220,9 @@ export function submittedModelName(draft: ModelDraftState): string {
   return draft.name.trim();
 }
 
+/** Changing the identifier keeps both token limits: a completion model needs
+ *  them to serve any request, so only an explicit new value replaces them. */
 export function setDraftModelName(draft: ModelDraftState, name: string): void {
-  if (submittedModelName(draft) !== name.trim()) {
-    // The declaration belonged to the route being left, so the form clears it.
-    // That cleared field is a pending change, not an untouched one: a save
-    // submits the clear, including when the identifier is changed back, so the
-    // stored capacity can never differ from the blank field the admin sees.
-    draft.maxInputTokensStr = "";
-    draft.maxInputTokensTouched = true;
-    draft.maxOutputTokensStr = "";
-    draft.maxOutputTokensTouched = true;
-  }
   draft.name = name;
 }
 
@@ -304,7 +296,7 @@ export function transcriptionUpdateCapabilities(
  *
  *  A dimension the catalogue does not state is not a declaration: that field
  *  keeps whatever the admin left there and stays untouched, so a later save
- *  says nothing about it and cannot restore a ceiling a route change withdrew.
+ *  leaves the stored limit as it is.
  */
 export function applyCatalogueCeilings(
   draft: ModelDraftState,
@@ -320,22 +312,18 @@ export function applyCatalogueCeilings(
   }
 }
 
-/** The ceilings a save states. An untouched field is omitted so an unrelated
- *  edit never redeclares a number for a route it was not measured on; a
- *  cleared field is submitted as null, which withdraws the declaration. */
+/** The ceilings a save states. An untouched or blank field is omitted, so the
+ *  server keeps its stored value; the API refuses null, and the save guard
+ *  (hasValidCompletionTokenBudgets) refuses a blank field before this runs. */
 export function completionUpdateCeilings(
   draft: ModelDraftState
 ): Pick<TenantCompletionModelUpdate, "max_input_tokens" | "max_output_tokens"> {
   return {
-    ...(draft.maxInputTokensTouched
-      ? {
-          max_input_tokens: draft.maxInputTokensStr ? Number(draft.maxInputTokensStr) : null
-        }
+    ...(draft.maxInputTokensTouched && draft.maxInputTokensStr
+      ? { max_input_tokens: Number(draft.maxInputTokensStr) }
       : {}),
-    ...(draft.maxOutputTokensTouched
-      ? {
-          max_output_tokens: draft.maxOutputTokensStr ? Number(draft.maxOutputTokensStr) : null
-        }
+    ...(draft.maxOutputTokensTouched && draft.maxOutputTokensStr
+      ? { max_output_tokens: Number(draft.maxOutputTokensStr) }
       : {})
   } satisfies Pick<TenantCompletionModelUpdate, "max_input_tokens" | "max_output_tokens">;
 }
@@ -466,7 +454,9 @@ export function applyCatalogModelToDraft(
   setDraftModelName(next, info.name);
   if (modelType === "completion") {
     next.maxInputTokensStr = info.max_input_tokens != null ? String(info.max_input_tokens) : "";
+    next.maxInputTokensTouched = true;
     next.maxOutputTokensStr = info.max_output_tokens != null ? String(info.max_output_tokens) : "";
+    next.maxOutputTokensTouched = true;
     next.vision = info.supports_vision ?? false;
     next.reasoning = info.supports_reasoning ?? false;
     next.supportsToolCalling = info.supports_function_calling ?? false;

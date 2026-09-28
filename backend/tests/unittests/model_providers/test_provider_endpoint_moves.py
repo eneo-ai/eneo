@@ -166,9 +166,7 @@ async def test_a_provider_without_any_endpoint_keeps_declarations():
 
 
 @pytest.mark.parametrize("move", [False, True])
-async def test_provider_endpoint_change_withdraws_capacity_even_without_strict_schema(
-    move,
-):
+async def test_provider_endpoint_change_keeps_token_limits(move):
     import sqlalchemy as sa
     from sqlalchemy.orm import Session
 
@@ -206,7 +204,7 @@ async def test_provider_endpoint_change_withdraws_capacity_even_without_strict_s
                 id=uuid4(),
                 tenant_id=tenant_id,
                 provider_id=provider_id,
-                supports_strict_tool_schema=False,
+                supports_strict_tool_schema=True,
                 max_input_tokens=100,
                 max_output_tokens=80,
             ),
@@ -258,13 +256,16 @@ async def test_provider_endpoint_change_withdraws_capacity_even_without_strict_s
                 else "https://old.invalid/v1"
             },
         )
-        limits = db.execute(
+        # A move withdraws the strict declaration but never the token limits:
+        # a model without them cannot serve any request.
+        moved = db.execute(
             sa.select(
+                metadata.tables[table.name].c.supports_strict_tool_schema,
                 metadata.tables[table.name].c.max_input_tokens,
                 metadata.tables[table.name].c.max_output_tokens,
             ).where(metadata.tables[table.name].c.id == rows[0].id)
         ).one()
-        assert limits == ((None, None) if move else (100, 80))
+        assert tuple(moved) == (not move, 100, 80)
 
         for row, expected in zip(rows[1:], [(110, 90), (130, 100)]):
             assert (

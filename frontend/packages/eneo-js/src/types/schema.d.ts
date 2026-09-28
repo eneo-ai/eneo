@@ -14044,12 +14044,12 @@ export interface components {
       litellm_model_name?: string | null;
       /**
        * Max Input Tokens
-       * @description Max input tokens; null means not declared for this route.
+       * @description Max input tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
        */
       max_input_tokens: number | null;
       /**
        * Max Output Tokens
-       * @description Max output tokens; null means not declared for this route.
+       * @description Max output tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
        */
       max_output_tokens: number | null;
       /** Migrated To Model Id */
@@ -14121,14 +14121,14 @@ export interface components {
       litellm_model_name?: string | null;
       /**
        * Max Input Tokens
-       * @description Max input tokens; null means not declared for this route.
+       * @description Max input tokens. Required, a positive whole number; null is refused.
        */
-      max_input_tokens: number | null;
+      max_input_tokens: number;
       /**
        * Max Output Tokens
-       * @description Max output tokens; null means not declared for this route.
+       * @description Max output tokens. Required, a positive whole number; null is refused.
        */
-      max_output_tokens: number | null;
+      max_output_tokens: number;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /** Name */
       name: string;
@@ -14215,12 +14215,12 @@ export interface components {
       lock_reason?: string | null;
       /**
        * Max Input Tokens
-       * @description Max input tokens; null means not declared for this route.
+       * @description Max input tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
        */
       max_input_tokens: number | null;
       /**
        * Max Output Tokens
-       * @description Max output tokens; null means not declared for this route.
+       * @description Max output tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
        */
       max_output_tokens: number | null;
       /** Migrated To Model Id */
@@ -14344,12 +14344,12 @@ export interface components {
       lock_reason?: string | null;
       /**
        * Max Input Tokens
-       * @description Max input tokens; null means not declared for this route.
+       * @description Max input tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
        */
       max_input_tokens: number | null;
       /**
        * Max Output Tokens
-       * @description Max output tokens; null means not declared for this route.
+       * @description Max output tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
        */
       max_output_tokens: number | null;
       /** Meets Security Classification */
@@ -14433,12 +14433,12 @@ export interface components {
       litellm_model_name?: string | null;
       /**
        * Max Input Tokens
-       * @description Max input tokens; null means not declared for this route.
+       * @description Max input tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
        */
       max_input_tokens: number | null;
       /**
        * Max Output Tokens
-       * @description Max output tokens; null means not declared for this route.
+       * @description Max output tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
        */
       max_output_tokens: number | null;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
@@ -29558,14 +29558,14 @@ export interface components {
       litellm_model_name?: string | null;
       /**
        * Max Input Tokens
-       * @description Max input tokens; null means not declared for this route.
+       * @description Max input tokens. A positive whole number. Omit to keep the stored value; null is refused.
        */
-      max_input_tokens?: number | null;
+      max_input_tokens?: number;
       /**
        * Max Output Tokens
-       * @description Max output tokens; null means not declared for this route.
+       * @description Max output tokens. A positive whole number. Omit to keep the stored value; null is refused.
        */
-      max_output_tokens?: number | null;
+      max_output_tokens?: number;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /** Name */
       name?: string | null;
@@ -34419,10 +34419,16 @@ export interface components {
       input_cost_per_token?: number | string | null;
       /** Is Default */
       is_default?: boolean | null;
-      /** Max Input Tokens */
-      max_input_tokens?: number | null;
-      /** Max Output Tokens */
-      max_output_tokens?: number | null;
+      /**
+       * Max Input Tokens
+       * @description Max input tokens. A positive whole number. Omit to keep the stored value; null is refused.
+       */
+      max_input_tokens?: number;
+      /**
+       * Max Output Tokens
+       * @description Max output tokens. A positive whole number. Omit to keep the stored value; null is refused.
+       */
+      max_output_tokens?: number;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /** Name */
       name?: string | null;
@@ -47417,12 +47423,12 @@ export interface operations {
                 lock_reason?: string | null;
                 /**
                  * Max Input Tokens
-                 * @description Max input tokens; null means not declared for this route.
+                 * @description Max input tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
                  */
                 max_input_tokens: number | null;
                 /**
                  * Max Output Tokens
-                 * @description Max output tokens; null means not declared for this route.
+                 * @description Max output tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
                  */
                 max_output_tokens: number | null;
                 /** Migrated To Model Id */
@@ -47855,12 +47861,12 @@ export interface operations {
                 lock_reason?: string | null;
                 /**
                  * Max Input Tokens
-                 * @description Max input tokens; null means not declared for this route.
+                 * @description Max input tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
                  */
                 max_input_tokens: number | null;
                 /**
                  * Max Output Tokens
-                 * @description Max output tokens; null means not declared for this route.
+                 * @description Max output tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
                  */
                 max_output_tokens: number | null;
                 /** Migrated To Model Id */
@@ -50156,12 +50162,12 @@ export interface operations {
                     lock_reason?: string | null;
                     /**
                      * Max Input Tokens
-                     * @description Max input tokens; null means not declared for this route.
+                     * @description Max input tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
                      */
                     max_input_tokens: number | null;
                     /**
                      * Max Output Tokens
-                     * @description Max output tokens; null means not declared for this route.
+                     * @description Max output tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
                      */
                     max_output_tokens: number | null;
                     /** Migrated To Model Id */

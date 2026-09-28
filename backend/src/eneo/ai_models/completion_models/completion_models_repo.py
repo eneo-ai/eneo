@@ -5,10 +5,12 @@ from sqlalchemy.exc import IntegrityError
 
 from eneo.ai_models.completion_models.completion_model import (
     COMPLETION_MODEL_ROUTE_FIELDS,
+    COMPLETION_MODEL_TOKEN_LIMITS,
     CompletionModel,
     CompletionModelCreate,
     CompletionModelUpdate,
     moves_completion_model_route,
+    require_token_limits,
 )
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     persist_explicit_model_kwargs_capabilities,
@@ -109,6 +111,7 @@ class CompletionModelsRepository:
     async def update_model(
         self, model: CompletionModelUpdate
     ) -> CompletionModel | None:
+        await self._require_resulting_token_limits(model)
         model = await self._withdraw_declarations_on_route_change(model)
         if "model_kwargs_capabilities" in model.model_fields_set:
             persisted_capabilities = (
@@ -129,13 +132,48 @@ class CompletionModelsRepository:
             model, exclude=COMPLETION_MODEL_DB_WRITE_EXCLUDE
         )
 
+    async def _require_resulting_token_limits(
+        self, model: CompletionModelUpdate
+    ) -> None:
+        """Refuse a save that leaves the model without a token limit.
+
+        A partial save keeps the stored limits it omits, and a model damaged by
+        an earlier release can hold an empty one; the save must enter it."""
+        written = model.model_fields_set
+        if set(COMPLETION_MODEL_TOKEN_LIMITS) <= written:
+            return  # Both stated; the request schema refuses null.
+        stored = (
+            await self.session.execute(
+                sa.select(
+                    CompletionModels.max_input_tokens,
+                    CompletionModels.max_output_tokens,
+                ).where(CompletionModels.id == model.id)
+            )
+        ).one_or_none()
+        if stored is None:
+            return  # No such model; the update answers not found.
+        stored_input, stored_output = stored
+        require_token_limits(
+            max_input_tokens=(
+                model.max_input_tokens
+                if "max_input_tokens" in written
+                else stored_input
+            ),
+            max_output_tokens=(
+                model.max_output_tokens
+                if "max_output_tokens" in written
+                else stored_output
+            ),
+        )
+
     async def _withdraw_declarations_on_route_change(
         self, model: CompletionModelUpdate
     ) -> CompletionModelUpdate:
-        """Drop route declarations this write invalidates.
+        """Drop the strict tool-schema declaration this write invalidates.
 
         The declaration belongs to one provider route, so moving the route
         withdraws it. The same request may declare the new route explicitly.
+        Token limits are not route declarations and stay as stored.
         """
         written = model.model_fields_set
         provided = {
@@ -143,15 +181,7 @@ class CompletionModelsRepository:
             for field in COMPLETION_MODEL_ROUTE_FIELDS
             if field in written
         }
-        if (
-            not provided
-            or {
-                "supports_strict_tool_schema",
-                "max_input_tokens",
-                "max_output_tokens",
-            }
-            <= written
-        ):
+        if not provided or "supports_strict_tool_schema" in written:
             return model
 
         current = (
@@ -179,13 +209,9 @@ class CompletionModelsRepository:
             provider_type=provider_type,
         ):
             return model
-        withdrawn: dict[str, object] = {}
-        if "supports_strict_tool_schema" not in written:
-            withdrawn["supports_strict_tool_schema"] = False
-        for dimension in ("max_input_tokens", "max_output_tokens"):
-            if dimension not in written:
-                withdrawn[dimension] = None
-        return model.model_copy(update=withdrawn)
+        # The token limits are kept: a model without them cannot serve any
+        # request, so only an explicit new value replaces them.
+        return model.model_copy(update={"supports_strict_tool_schema": False})
 
     async def delete_model(self, id: UUID) -> None:
         # Spaces are containers — a model "enabled" on a space without any

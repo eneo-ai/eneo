@@ -41,10 +41,7 @@ beforeEach(() => {
   setLocale("sv", { reload: false });
 });
 
-it.each([
-  ["", null],
-  ["500000", 500000]
-] as const)("saves a changed input limit %s as %s", async (raw, expected) => {
+it("saves a changed input limit", async () => {
   render(EditModelDialog, {
     openController: writable(true),
     model: model(),
@@ -52,29 +49,49 @@ it.each([
   });
   const input = page.getByRole("spinbutton", { name: new RegExp(m.max_input_tokens()) });
   await expect.element(input).toBeVisible();
-  await input.fill(raw);
+  await input.fill("500000");
   await page.getByRole("button", { name: m.save(), exact: true }).click();
   await expect.poll(() => updateCompletion.mock.calls.length).toBe(1);
   expect(updateCompletion).toHaveBeenCalledWith(
     { id: "m1" },
-    expect.objectContaining({ max_input_tokens: expected })
+    expect.objectContaining({ max_input_tokens: 500000 })
   );
 });
 
-it("withdraws the input limit when saving a renamed model, matching the emptied field", async () => {
+it.each(["input", "output"] as const)(
+  "refuses to save a blank %s limit, as develop does",
+  async (dimension) => {
+    render(EditModelDialog, {
+      openController: writable(true),
+      model: model(),
+      type: "completionModel"
+    });
+    const label = dimension === "input" ? m.max_input_tokens() : m.max_output_tokens();
+    await page.getByRole("spinbutton", { name: new RegExp(label) }).fill("");
+    await page.getByRole("button", { name: m.save(), exact: true }).click();
+    await expect.element(page.getByText(m.completion_token_budgets_required())).toBeVisible();
+    expect(updateCompletion).not.toHaveBeenCalled();
+  }
+);
+
+it("keeps both limits when the model is renamed", async () => {
   render(EditModelDialog, {
     openController: writable(true),
     model: model(),
     type: "completionModel"
   });
   const input = page.getByRole("spinbutton", { name: new RegExp(m.max_input_tokens()) });
+  const output = page.getByRole("spinbutton", { name: new RegExp(m.max_output_tokens()) });
   await page.getByRole("textbox", { name: new RegExp(m.model_identifier()) }).fill("renamed");
-  // The declaration belonged to the old route, so the field empties and the
-  // save says so rather than leaving the stored number to the server's rule.
-  await expect.element(input).toHaveValue(null);
+  await expect.element(input).toHaveValue(272000);
+  await expect.element(output).toHaveValue(128000);
   await page.getByRole("button", { name: m.save(), exact: true }).click();
   await expect.poll(() => updateCompletion.mock.calls.length).toBe(1);
-  expect(updateCompletion.mock.calls[0][1]).toHaveProperty("max_input_tokens", null);
+  const patch = updateCompletion.mock.calls[0][1];
+  expect(patch).toMatchObject({ name: "renamed" });
+  // Untouched limits are omitted, and the server keeps them.
+  expect(patch).not.toHaveProperty("max_input_tokens");
+  expect(patch).not.toHaveProperty("max_output_tokens");
 });
 
 it("omits the input limit when nothing touched it and the route stayed", async () => {
@@ -89,30 +106,25 @@ it("omits the input limit when nothing touched it and the route stayed", async (
   expect(updateCompletion.mock.calls[0][1]).not.toHaveProperty("max_input_tokens");
 });
 
-it.each([false, true])(
-  "clears a touched declaration on manual rename; redeclare=%s",
-  async (redeclare) => {
-    render(EditModelDialog, {
-      openController: writable(true),
-      model: model(),
-      type: "completionModel"
-    });
-    const input = page.getByRole("spinbutton", { name: new RegExp(m.max_input_tokens()) });
-    await input.fill("500000");
-    await page.getByRole("textbox", { name: new RegExp(m.model_identifier()) }).fill("route-b");
-    await expect.element(input).toHaveValue(null);
-    if (redeclare) await input.fill("600000");
-    await page.getByRole("button", { name: m.save(), exact: true }).click();
-    await expect.poll(() => updateCompletion.mock.calls.length).toBe(1);
-    expect(updateCompletion.mock.calls[0][1]).toMatchObject({ name: "route-b" });
-    expect(updateCompletion.mock.calls[0][1]).toHaveProperty(
-      "max_input_tokens",
-      redeclare ? 600000 : null
-    );
-  }
-);
+it("sends a limit changed together with a rename", async () => {
+  render(EditModelDialog, {
+    openController: writable(true),
+    model: model(),
+    type: "completionModel"
+  });
+  const input = page.getByRole("spinbutton", { name: new RegExp(m.max_input_tokens()) });
+  await input.fill("500000");
+  await page.getByRole("textbox", { name: new RegExp(m.model_identifier()) }).fill("route-b");
+  await expect.element(input).toHaveValue(500000);
+  await page.getByRole("button", { name: m.save(), exact: true }).click();
+  await expect.poll(() => updateCompletion.mock.calls.length).toBe(1);
+  expect(updateCompletion.mock.calls[0][1]).toMatchObject({
+    name: "route-b",
+    max_input_tokens: 500000
+  });
+});
 
-it("saves an ordinary edit of a model whose capacity is undeclared", async () => {
+it("asks for the limits before saving a model that has none stored", async () => {
   render(EditModelDialog, {
     openController: writable(true),
     model: model({ input: null, output: null }),
@@ -120,27 +132,17 @@ it("saves an ordinary edit of a model whose capacity is undeclared", async () =>
   });
   await page.getByRole("textbox", { name: new RegExp(m.display_name()) }).fill("Nytt visningsnamn");
   await page.getByRole("button", { name: m.save(), exact: true }).click();
-  await expect.poll(() => updateCompletion.mock.calls.length).toBe(1);
-  // Nothing about capacity is stated, so an undeclared model stays undeclared.
-  const patch = updateCompletion.mock.calls[0][1];
-  expect(patch).not.toHaveProperty("max_input_tokens");
-  expect(patch).not.toHaveProperty("max_output_tokens");
-  expect(patch).toMatchObject({ display_name: "Nytt visningsnamn" });
-});
+  await expect.element(page.getByText(m.completion_token_budgets_required())).toBeVisible();
+  expect(updateCompletion).not.toHaveBeenCalled();
 
-it("withdraws both ceilings when the model identifier changes", async () => {
-  render(EditModelDialog, {
-    openController: writable(true),
-    model: model(),
-    type: "completionModel"
-  });
-  await page.getByRole("textbox", { name: new RegExp(m.model_identifier()) }).fill("route-b");
+  await page.getByRole("spinbutton", { name: new RegExp(m.max_input_tokens()) }).fill("100000");
+  await page.getByRole("spinbutton", { name: new RegExp(m.max_output_tokens()) }).fill("8000");
   await page.getByRole("button", { name: m.save(), exact: true }).click();
   await expect.poll(() => updateCompletion.mock.calls.length).toBe(1);
   expect(updateCompletion.mock.calls[0][1]).toMatchObject({
-    name: "route-b",
-    max_input_tokens: null,
-    max_output_tokens: null
+    display_name: "Nytt visningsnamn",
+    max_input_tokens: 100000,
+    max_output_tokens: 8000
   });
 });
 
@@ -162,32 +164,6 @@ it("renders only the two deployment limits in the editor and detail", async () =
   await expect
     .element(page.getByRole("cell", { name: "Kontextfönster (tokens)", exact: true }))
     .not.toBeInTheDocument();
-});
-
-it("keeps both clears after changing back and retrying a failed save", async () => {
-  updateCompletion.mockRejectedValueOnce(new Error("Save failed"));
-  render(EditModelDialog, {
-    openController: writable(true),
-    model: model(),
-    type: "completionModel"
-  });
-  const identifier = page.getByRole("textbox", { name: new RegExp(m.model_identifier()) });
-  await identifier.fill("route-b");
-  await identifier.fill("custom");
-  const save = page.getByRole("button", { name: m.save(), exact: true });
-  await save.click();
-  await expect.poll(() => updateCompletion.mock.calls.length).toBe(1);
-  await expect.element(save).toBeEnabled();
-  await save.click();
-  await expect.poll(() => updateCompletion.mock.calls.length).toBe(2);
-  for (const [, payload] of updateCompletion.mock.calls) {
-    expect(payload).toMatchObject({
-      name: "custom",
-      max_input_tokens: null,
-      max_output_tokens: null
-    });
-    expect(payload).not.toHaveProperty("context_window_tokens");
-  }
 });
 
 it.each([

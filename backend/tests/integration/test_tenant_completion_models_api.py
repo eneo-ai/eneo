@@ -228,6 +228,11 @@ async def test_moving_a_provider_endpoint_withdraws_its_strict_declarations(
         assert moved_model is not None and untouched_model is not None
         assert moved_model.supports_strict_tool_schema is False
         assert untouched_model.supports_strict_tool_schema is True
+        # The move never withdraws the token limits.
+        assert (moved_model.max_input_tokens, moved_model.max_output_tokens) == (
+            272000,
+            128000,
+        )
 
 
 @pytest.mark.integration
@@ -292,13 +297,27 @@ async def test_update_tenant_completion_model_keeps_token_limit_as_api_alias(
         assert created_model.max_input_tokens == 300000
         assert created_model.max_output_tokens == 120000
 
+    # A blank limit is refused and leaves the stored limits alone; a rename or
+    # an unrelated edit keeps them.
+    for patch in (
+        {"max_input_tokens": None, "max_output_tokens": None},
+        {"max_input_tokens": None},
+        {"max_output_tokens": None, "description": "Clears the output"},
+    ):
+        response = await client.put(
+            f"/api/v1/admin/tenant-models/completion/{model_id}/",
+            headers={"Authorization": f"Bearer {admin_bearer_token}"},
+            json=patch,
+        )
+        assert response.status_code == 422, response.text
+        assert "token_limit_required" in response.text
+
     for patch, expected in [
-        ({"max_input_tokens": None, "max_output_tokens": None}, (None, None)),
-        ({"description": "Unrelated edit"}, (None, None)),
+        ({"description": "Unrelated edit"}, (300000, 120000)),
         ({"max_input_tokens": 100, "max_output_tokens": 120}, (100, 120)),
-        ({"name": "another-route"}, (None, None)),
-        ({"name": "gpt-5.4-mini"}, (None, None)),
-        ({"name": "gpt-5.4-mini"}, (None, None)),
+        ({"name": "another-route"}, (100, 120)),
+        ({"name": "gpt-5.4-mini", "display_name": "Renamed"}, (100, 120)),
+        ({"name": "gpt-5.4-mini"}, (100, 120)),
     ]:
         response = await client.put(
             f"/api/v1/admin/tenant-models/completion/{model_id}/",
@@ -309,3 +328,69 @@ async def test_update_tenant_completion_model_keeps_token_limit_as_api_alias(
         payload = response.json()
         assert (payload["max_input_tokens"], payload["max_output_tokens"]) == expected
         assert "context_window_tokens" not in payload
+
+    async with db_container() as container:
+        session = container.session()
+        stored = await session.scalar(
+            select(CompletionModels).where(CompletionModels.id == model_id)
+        )
+        assert stored is not None
+        assert (stored.max_input_tokens, stored.max_output_tokens) == (100, 120)
+
+
+@pytest.mark.integration
+async def test_saving_a_model_whose_stored_limits_are_missing_is_refused(
+    client,
+    db_container,
+    admin_user,
+    admin_bearer_token,
+):
+    async with db_container() as container:
+        session = container.session()
+        provider = ModelProviders(
+            tenant_id=admin_user.tenant_id,
+            name=f"openai-provider-{uuid4()}",
+            provider_type="openai",
+            credentials={"api_key": "test-openai-key"},
+            config={},
+            is_active=True,
+        )
+        session.add(provider)
+        await session.flush()
+        model = CompletionModels(
+            tenant_id=admin_user.tenant_id,
+            provider_id=provider.id,
+            name="legacy-blank-limits",
+            nickname=f"Legacy {uuid4()}",
+            max_input_tokens=None,
+            max_output_tokens=None,
+            family="openai",
+            stability="stable",
+            hosting="usa",
+            is_deprecated=False,
+            vision=False,
+            reasoning=False,
+        )
+        session.add(model)
+        await session.flush()
+        model_id = model.id
+        await session.commit()
+
+    refused = await client.put(
+        f"/api/v1/admin/tenant-models/completion/{model_id}/",
+        headers={"Authorization": f"Bearer {admin_bearer_token}"},
+        json={"description": "Unrelated edit", "max_input_tokens": 1000},
+    )
+    assert refused.status_code == 422, refused.text
+    assert "max_output_tokens must be set" in refused.text
+
+    accepted = await client.put(
+        f"/api/v1/admin/tenant-models/completion/{model_id}/",
+        headers={"Authorization": f"Bearer {admin_bearer_token}"},
+        json={"max_input_tokens": 1000, "max_output_tokens": 500},
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert (
+        accepted.json()["max_input_tokens"],
+        accepted.json()["max_output_tokens"],
+    ) == (1000, 500)

@@ -5,8 +5,12 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from eneo.ai_models.completion_models.completion_model import (
+    TOKEN_LIMIT_UPDATE_SCHEMA,
+    refuse_blank_token_limit,
+)
 from eneo.authentication.auth_dependencies import get_current_active_user
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     SupportedModelKwargs,
@@ -50,6 +54,8 @@ class TenantCompletionModelCreate(BaseModel):
 
 
 class TenantCompletionModelUpdate(BaseModel):
+    model_config = ConfigDict(json_schema_extra=TOKEN_LIMIT_UPDATE_SCHEMA)
+
     name: str | None = None
     display_name: str | None = None
     description: str | None = None
@@ -73,6 +79,13 @@ class TenantCompletionModelUpdate(BaseModel):
     # the caller's tenant.
     is_default: bool | None = None
     security_classification: ModelId | None = None
+
+    @field_validator("max_input_tokens", "max_output_tokens")
+    @classmethod
+    def _refuse_blank_token_limit(cls, value: int | None) -> int | None:
+        # Omitting a limit keeps it; null would leave the model unable to
+        # serve any request, so it is refused rather than stored.
+        return refuse_blank_token_limit(value)
 
 
 def _service(
