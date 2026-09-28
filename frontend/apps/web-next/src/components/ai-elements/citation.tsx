@@ -1,5 +1,6 @@
 "use client";
 
+import { FileText, Globe2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import {
   createContext,
@@ -147,7 +148,7 @@ export function citationNumber(
 }
 
 const CHIP_CLASS =
-  "bg-ax-accent-muted text-ax-text-accent hover:bg-ax-hover focus-visible:outline-ring mx-0.5 inline-flex h-[1.125rem] min-w-[1.125rem] cursor-pointer items-center justify-center rounded-ax-inner px-1 align-[0.15em] font-sans text-[11px] leading-none font-bold focus-visible:outline-2 focus-visible:outline-offset-2";
+  "border-ax-border bg-ax-accent-muted text-ax-text-accent hover:bg-ax-accent hover:text-ax-on-accent focus-visible:outline-ring mx-0.5 inline-flex min-h-6 min-w-6 cursor-pointer items-center justify-center gap-1 rounded-full border px-1.5 align-middle font-sans text-xs leading-none font-bold tabular-nums transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11";
 
 function CitationChip({
   number,
@@ -163,6 +164,7 @@ function CitationChip({
   const t = useTranslations();
   const ref = useRef<HTMLButtonElement>(null);
   const host = hostOf(source.url);
+  const Icon = source.url ? Globe2 : FileText;
   return (
     <>
       <button
@@ -172,6 +174,7 @@ function CitationChip({
         onClick={(event) => onOpen(number - 1, event.currentTarget)}
         className={CHIP_CLASS}
       >
+        <Icon aria-hidden="true" className="size-3.5 shrink-0" />
         {children}
       </button>
       {/* Sibling mode: the tooltip portals out, so nothing block-level lands
@@ -179,9 +182,9 @@ function CitationChip({
       <Tooltip
         anchorRef={ref}
         content={
-          <span className="flex max-w-xs flex-col">
+          <span className="flex max-w-xs flex-col gap-0.5">
             <span className="font-medium">{source.title}</span>
-            {host && <span>{host}</span>}
+            {host && <span className="text-ax-text-secondary text-xs">{host}</span>}
           </span>
         }
       />

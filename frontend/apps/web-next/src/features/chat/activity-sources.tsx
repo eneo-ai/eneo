@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, FileText, Globe2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
@@ -53,9 +53,10 @@ export function SourceList({
   }
 
   return (
-    <ol className="flex flex-col gap-1">
+    <ol className="flex flex-col gap-2">
       {sources.map((source, index) => {
         const number = index + 1;
+        const Icon = source.url ? Globe2 : FileText;
         const meta = [
           source.origin,
           source.pageRange ? t("mcp_resource_page_range", { pageRange: source.pageRange }) : null
@@ -73,39 +74,42 @@ export function SourceList({
               else itemRefs.current.delete(index);
             }}
             tabIndex={-1}
-            className="focus-visible:outline-ring rounded-ax-element focus:bg-ax-selected flex gap-2.5 p-2 focus-visible:outline-2 focus-visible:outline-offset-2"
+            className="bg-ax-card border-ax-border focus-visible:outline-ring rounded-ax-container focus:bg-ax-selected flex gap-3 border p-3 focus-visible:outline-2 focus-visible:outline-offset-2"
           >
             <span
               aria-hidden="true"
-              className="bg-ax-muted rounded-ax-inner mt-px flex size-5 shrink-0 items-center justify-center text-[11px] font-bold"
+              className="bg-ax-accent-muted text-ax-text-accent rounded-ax-element flex size-8 shrink-0 items-center justify-center text-xs font-bold tabular-nums"
             >
               {number}
             </span>
-            <span className="flex min-w-0 flex-col gap-0.5">
+            <span className="flex min-w-0 flex-1 flex-col gap-1">
               <span className="sr-only">{t("chat_source_number", { number })}</span>
-              {source.url ? (
-                <a
-                  href={source.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={cn(titleClass, "hover:underline")}
-                >
-                  {source.title}
-                  <ExternalLink aria-hidden="true" className="ms-1 inline size-3 align-[-1px]" />
-                  <span className="sr-only"> {t("chat_opens_in_new_tab")}</span>
-                </a>
-              ) : source.mcpSnippet ? (
-                <McpSnippetButton
-                  source={source}
-                  snippet={source.mcpSnippet}
-                  className={cn(titleClass, "hover:underline")}
-                />
-              ) : (
-                <span className="text-[13px] leading-snug font-medium break-words">
-                  {source.title}
-                </span>
-              )}
-              {meta && <span className="text-ax-text-secondary text-xs">{meta}</span>}
+              <span className="flex min-w-0 items-start gap-1.5">
+                <Icon aria-hidden="true" className="text-ax-text-secondary mt-px size-4 shrink-0" />
+                {source.url ? (
+                  <a
+                    href={source.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={cn(titleClass, "hover:underline")}
+                  >
+                    {source.title}
+                    <ExternalLink aria-hidden="true" className="ms-1 inline size-3 align-[-1px]" />
+                    <span className="sr-only"> {t("chat_opens_in_new_tab")}</span>
+                  </a>
+                ) : source.mcpSnippet ? (
+                  <McpSnippetButton
+                    source={source}
+                    snippet={source.mcpSnippet}
+                    className={cn(titleClass, "hover:underline")}
+                  />
+                ) : (
+                  <span className="text-[13px] leading-snug font-medium break-words">
+                    {source.title}
+                  </span>
+                )}
+              </span>
+              {meta && <span className="text-ax-text-secondary ps-[22px] text-xs">{meta}</span>}
             </span>
           </li>
         );
