@@ -59,6 +59,42 @@ The email claim is checked against the tenant's `allowed_domains`, then the user
 
 ## Security Mechanisms
 
+### Eneo Session Identity
+
+Eneo-issued browser, internal MCP and module tokens share one identity contract:
+
+| Claim | Meaning |
+|-------|---------|
+| `token_version` | Required value `2`; older session formats are rejected |
+| `user_id` | Immutable UUID of the authenticated Eneo account |
+| `tenant_id` | UUID of the account's organization when the token was issued |
+| `credential_version` | Required integer matching the account's current credential version |
+| `iss`, `aud`, `iat`, `exp` | Required issuer, audience, issue time and expiry |
+| `sub`, `username` | Email and optional display name; never used to select the account |
+
+After signature, issuer, audience and time validation, the backend resolves the
+account by **both** `user_id` and `tenant_id`. Deleted accounts and mismatched
+identity claims cannot authenticate. Account and tenant state checks and normal
+resource permissions still apply. A name or email change cannot transfer an
+existing session to another account, including one with the same username.
+
+The identity contract belongs to Eneo session tokens. Identity-provider tokens
+are validated separately during OIDC login and exchanged for an Eneo session.
+
+#### Deploying the identity contract
+
+The transition requires users to sign in again. Pre-upgrade Eneo and module
+tokens, and pending module login tickets, are rejected; there is no fallback to
+username or email authentication. Module applications must restart the login
+handoff on an authentication failure.
+
+Update all API instances and workers together, draining old instances before
+serving traffic with the new deployment. Old instances still resolve sessions
+by username and must not remain in a rolling deployment. No account rename,
+account merge or database migration is needed for this change. A recovery build
+must retain the identity validation; rolling back to username-based
+authentication reintroduces the vulnerability.
+
 ### State Token (CSRF Protection)
 
 The `state` parameter is a JWT signed with HS256:
