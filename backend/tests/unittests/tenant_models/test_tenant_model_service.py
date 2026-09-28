@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -426,7 +427,19 @@ def test_declared_reasoning_does_not_widen_provider_discovery() -> None:
     )
 
 
-def test_missing_reasoning_metadata_persists_no_reasoning_control() -> None:
+@pytest.mark.parametrize(
+    ("model_info", "unknown"),
+    [
+        pytest.param(RuntimeError("model not mapped"), True, id="metadata-missing"),
+        pytest.param({"supports_reasoning": False}, False, id="known-without-levels"),
+        pytest.param({}, False, id="known-without-a-reasoning-flag"),
+    ],
+)
+def test_missing_reasoning_metadata_records_unknown_levels(
+    model_info: dict[str, object] | Exception, unknown: bool
+) -> None:
+    # LiteLLM forwarding reasoning_effort for the route proves nothing about
+    # the levels the endpoint accepts: no levels are inferred from it.
     with (
         patch(
             "eneo.tenant_models.application.tenant_model_service."
@@ -435,17 +448,37 @@ def test_missing_reasoning_metadata_persists_no_reasoning_control() -> None:
         ),
         patch(
             "eneo.tenant_models.application.tenant_model_service.get_model_info",
-            side_effect=RuntimeError("value metadata unavailable"),
+            side_effect=model_info if isinstance(model_info, Exception) else None,
+            return_value=model_info,
         ),
     ):
         persisted = _snapshot_completion_capabilities("openai", "reasoning-model")
 
     assert persisted is not None
     assert persisted["_evidence"] == "provider_discovered"
-    assert (
-        resolve_supported_model_kwargs(
-            model_kwargs_capabilities=persisted,
-            reasoning=True,
-        ).reasoning_effort.supported
-        is False
-    )
+    effort = resolve_supported_model_kwargs(
+        model_kwargs_capabilities=persisted,
+        reasoning=True,
+    ).reasoning_effort
+    assert (effort.supported, effort.options, effort.unknown) == (False, None, unknown)
+
+
+@pytest.mark.skipif(
+    os.environ.get("LITELLM_LOCAL_MODEL_COST_MAP") != "True",
+    reason="the probe reads the installed LiteLLM registry only, never the remote one",
+)
+def test_probe_installed_litellm_does_not_know_the_measured_route() -> None:
+    """An observation of the installed LiteLLM registry, not a behaviour test.
+
+    The measured route (gemma4-31b-it on an OpenAI-compatible endpoint) is
+    recorded as unknown because the installed registry forwards
+    reasoning_effort for it but has no model info; gpt-4o has model info
+    without reasoning levels. A LiteLLM upgrade that maps these changes the
+    discovered record and should be noticed here.
+    """
+    gemma = _snapshot_completion_capabilities("openai", "gemma4-31b-it")
+    gpt_4o = _snapshot_completion_capabilities("openai", "gpt-4o")
+
+    assert gemma is not None and gpt_4o is not None
+    assert SupportedModelKwargs.model_validate(gemma).reasoning_effort.unknown
+    assert not SupportedModelKwargs.model_validate(gpt_4o).reasoning_effort.unknown

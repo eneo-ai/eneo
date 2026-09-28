@@ -24,6 +24,18 @@ class ModelKwargCapability(BaseModel):
     maximum: FiniteFloat | None = None
     step: FiniteFloat | None = None
     options: list[str] | None = None
+    # The route's metadata could not tell which values it accepts (LiteLLM
+    # forwards the parameter but does not know the model). Not offered, so a
+    # request sends what it sends for an unsupported setting, but recorded
+    # apart from "unsupported" until rediscovery or an admin declaration
+    # settles it.
+    unknown: bool = False
+
+    @model_validator(mode="after")
+    def _unknown_values_are_not_offered(self) -> ModelKwargCapability:
+        if self.unknown and self.supported:
+            raise ValueError("a capability with unknown values cannot be offered")
+        return self
 
     @model_validator(mode="after")
     def _range_admits_a_value(self) -> ModelKwargCapability:

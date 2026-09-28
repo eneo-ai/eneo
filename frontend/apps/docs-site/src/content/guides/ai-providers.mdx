@@ -137,6 +137,14 @@ The system will query your server's `/v1/models` endpoint to discover available 
 
 ---
 
+## Model settings a completion model offers
+
+When a completion model is added, Eneo records which model settings its route offers (temperature, top p, reasoning effort, verbosity and so on) from LiteLLM's metadata for the provider type and model name. Assistants, apps and flow steps offer only those settings, and a stored value the model no longer offers is left out of requests. Leaving a setting out does not always mean the provider's default applies: on an `openai` provider whose route accepts `reasoning_effort`, Eneo may add a reasoning effort of its own to a request that sets none.
+
+**Unknown reasoning levels.** For an OpenAI-compatible endpoint serving a model LiteLLM does not know, LiteLLM forwards `reasoning_effort` but cannot say which levels the endpoint accepts. Eneo records the reasoning levels as *unknown* (`"unknown": true` on the setting in the model's `supported_model_kwargs`) rather than guessing them. An unknown setting is not offered, exactly like an unsupported one, so requests are built as they would be for an unsupported setting. A model LiteLLM knows without reasoning levels is recorded as unsupported.
+
+---
+
 ## Live transcription
 
 An app that records audio for a flow can show the text while someone speaks. The live text is a preview. When the recording ends, the app uploads it to the flow run as usual, and the flow's transcription model transcribes the whole recording. The run uses that transcript, not the preview. To build the app side, see [Show live text while recording](/guides/flows/integrating-flows#show-live-text-while-recording).

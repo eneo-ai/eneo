@@ -27781,6 +27781,11 @@ export interface components {
        * @default false
        */
       supported?: boolean;
+      /**
+       * Unknown
+       * @default false
+       */
+      unknown?: boolean;
     };
     /** ModelKwargs */
     ModelKwargs: {
@@ -47902,6 +47907,11 @@ export interface operations {
                  * @default false
                  */
                 supported?: boolean;
+                /**
+                 * Unknown
+                 * @default false
+                 */
+                unknown?: boolean;
               };
               /**
                * SecurityClassificationPublic
@@ -48340,6 +48350,11 @@ export interface operations {
                  * @default false
                  */
                 supported?: boolean;
+                /**
+                 * Unknown
+                 * @default false
+                 */
+                unknown?: boolean;
               };
               /**
                * SecurityClassificationPublic
@@ -50642,6 +50657,11 @@ export interface operations {
                      * @default false
                      */
                     supported?: boolean;
+                    /**
+                     * Unknown
+                     * @default false
+                     */
+                    unknown?: boolean;
                   };
                   /**
                    * SecurityClassificationPublic

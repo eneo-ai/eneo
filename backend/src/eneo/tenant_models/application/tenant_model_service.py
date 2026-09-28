@@ -36,6 +36,7 @@ from eneo.completion_models.domain.completion_model_repo import (
     CompletionModelRepository,
 )
 from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
     persist_discovered_model_kwargs_capabilities,
     persist_explicit_model_kwargs_capabilities,
     reasoning_effort_options_from_model_info,
@@ -163,25 +164,32 @@ def _snapshot_completion_capabilities(
     if supported_params is None:
         return None
     reasoning_effort_options: list[str] | None = None
+    levels_unknown = False
     if "reasoning_effort" in supported_params:
         try:
             reasoning_effort_options = reasoning_effort_options_from_model_info(
                 get_model_info(model_route)
             )
         except Exception:
+            # LiteLLM forwards the parameter but does not know the model:
+            # that proves nothing about the levels the endpoint accepts.
             logger.warning(
-                "Could not discover model reasoning levels; omitting the control",
+                "Could not discover model reasoning levels; recording them as unknown",
                 extra={"model_route": model_route},
                 exc_info=True,
             )
             reasoning_effort_options = []
-    return persist_discovered_model_kwargs_capabilities(
-        snapshot_supported_model_kwargs(
-            supported_params,
-            reasoning=False,
-            reasoning_effort_options=reasoning_effort_options,
-        )
+            levels_unknown = True
+    snapshot = snapshot_supported_model_kwargs(
+        supported_params,
+        reasoning=False,
+        reasoning_effort_options=reasoning_effort_options,
     )
+    if levels_unknown:
+        snapshot = snapshot.model_copy(
+            update={"reasoning_effort": ModelKwargCapability(unknown=True)}
+        )
+    return persist_discovered_model_kwargs_capabilities(snapshot)
 
 
 def _ensure_tenant_owned(model: Any) -> None:

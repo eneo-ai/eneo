@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -229,6 +230,99 @@ def test_an_invalid_snapshot_fails_closed(stored: object):
     assert model.supported_model_kwargs == SupportedModelKwargs()
     assert stored_kwargs.filter_unsupported(model.supported_model_kwargs) == (
         ModelKwargs()
+    )
+
+
+def test_an_invalid_snapshot_is_not_an_unknown_one():
+    model = CompletionModelSparse.model_validate(
+        _stored_row({**_UNTAGGED_DEVELOP_SNAPSHOT, "_evidence": "not-a-tag"})
+    )
+
+    assert model.supported_model_kwargs.reasoning_effort.unknown is False
+
+
+_SLIDER = ModelKwargCapability(
+    supported=True, control="slider", minimum=0, maximum=2, step=0.01
+)
+
+
+def test_unknown_reasoning_levels_survive_persistence():
+    persisted = model_kwargs_capabilities.persist_discovered_model_kwargs_capabilities(
+        SupportedModelKwargs(
+            temperature=_SLIDER,
+            reasoning_effort=ModelKwargCapability(unknown=True),
+        )
+    )
+    # The JSONB column round trip.
+    stored = json.loads(json.dumps(persisted))
+
+    model = CompletionModelSparse.model_validate(_stored_row(stored))
+
+    assert stored["reasoning_effort"]["unknown"] is True
+    assert model.model_kwargs_capabilities is not None
+    assert model.model_kwargs_capabilities.reasoning_effort.unknown is True
+    assert model.supported_model_kwargs.reasoning_effort.unknown is True
+    # The admin's reasoning flag still turns the levels off: a model that
+    # does not reason has no unknown levels.
+    assert (
+        model_kwargs_capabilities.resolve_supported_model_kwargs(
+            model_kwargs_capabilities=stored, reasoning=False
+        ).reasoning_effort
+        == ModelKwargCapability()
+    )
+
+
+def test_unknown_levels_cannot_be_offered():
+    with pytest.raises(ValidationError, match="unknown"):
+        ModelKwargCapability(
+            supported=True, control="select", options=["low"], unknown=True
+        )
+
+
+@pytest.mark.parametrize("reasoning", [True, False])
+def test_unknown_reasoning_levels_send_what_unsupported_ones_send(reasoning: bool):
+    """Slice 2 records what is known; what a request sends is unchanged."""
+    from eneo.completion_models.infrastructure.completion_service import (
+        ResolvedCompletionModelRoute,
+    )
+    from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+        filter_request_model_kwargs,
+        selectable_reasoning_effort_options,
+        stored_request_model_kwargs,
+    )
+
+    stored = ModelKwargs(reasoning_effort="low", temperature=0.3)
+
+    def outbound(effort: ModelKwargCapability) -> tuple[object, ...]:
+        supported = model_kwargs_capabilities.resolve_supported_model_kwargs(
+            model_kwargs_capabilities=(
+                model_kwargs_capabilities.persist_discovered_model_kwargs_capabilities(
+                    SupportedModelKwargs(temperature=_SLIDER, reasoning_effort=effort)
+                )
+            ),
+            reasoning=reasoning,
+        )
+        route = ResolvedCompletionModelRoute(
+            litellm_model="openai/gemma4-31b-it",
+            provider_type="openai",
+            litellm_kwargs={},
+            supported_model_kwargs=supported,
+        )
+        return (
+            stored_request_model_kwargs(stored, supported, completion_model_id=None),
+            filter_request_model_kwargs(
+                ModelKwargs(reasoning_effort="high"), supported
+            ),
+            selectable_reasoning_effort_options(
+                supported.reasoning_effort, max_length=32
+            ),
+            supported.reasoning_effort.accepts("low"),
+            route.prepare_provider_kwargs(ModelKwargs()),
+            route.prepare_provider_kwargs(ModelKwargs(reasoning_effort="medium")),
+        )
+
+    assert outbound(ModelKwargCapability(unknown=True)) == outbound(
+        ModelKwargCapability()
     )
 
 
