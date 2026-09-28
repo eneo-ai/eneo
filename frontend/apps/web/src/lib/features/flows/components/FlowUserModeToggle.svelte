@@ -22,7 +22,8 @@
     class="inline-flex"
     aria-label={m.flow_user_mode_aria_label()}
   >
-    <Tabs.List class="h-9">
+    <!-- The height of the buttons beside it in the page header. -->
+    <Tabs.List class="h-8">
       <Tabs.Trigger value="user" title={m.flow_user_mode_tooltip()} class="px-3 py-1 text-xs">
         {m.flow_user_mode()}
       </Tabs.Trigger>

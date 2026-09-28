@@ -11,6 +11,19 @@ export function outputModeUsesCompletionModel(mode: OutputMode): boolean {
   return mode === "pass_through" || mode === "http_post" || mode === "speaker_mapping";
 }
 
+/** Whether the step editor shows the underlag section (own text or chosen results).
+ *  A transcription and a template fill do not, though an underlag set elsewhere, for
+ *  example by the AI builder, still applies to a transcription at run time. */
+export function outputModeShowsUnderlagSection(mode: OutputMode): boolean {
+  return mode !== "transcribe_only" && mode !== "template_fill";
+}
+
+/** Whether an underlag replaces the step's source at run time. A template fill reads
+ *  its placeholders' own bindings instead, so a leftover underlag does nothing there. */
+export function outputModeHonoursUnderlag(mode: OutputMode): boolean {
+  return mode !== "template_fill";
+}
+
 type OutputOption<TValue extends string> = {
   value: TValue;
   readonly label: string;

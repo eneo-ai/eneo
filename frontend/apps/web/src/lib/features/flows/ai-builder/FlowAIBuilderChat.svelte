@@ -153,17 +153,20 @@
 
   {#if service.hasSession}
     <div class="border-default bg-primary shrink-0 border-t px-3 pt-3 pb-3">
-      <FlowAIBuilderInput
-        bind:this={inputRef}
-        editContext={activeEditContext}
-        editContextLabel={savedFlowStepScopeLabel}
-        editContextLocked={!pendingEditContext && service.activeStepScopeLocked}
-        oncleareditcontext={clearActiveEditContext}
-        refinement={service.currentPlan !== null}
-        placeholder={service.currentPlan === null && service.messages.length > 0
-          ? m.ai_builder_conversation_placeholder()
-          : null}
-      />
+      <!-- The chat dock keeps the composer at a reading measure. -->
+      <div class="mx-auto w-full max-w-[71ch]">
+        <FlowAIBuilderInput
+          bind:this={inputRef}
+          editContext={activeEditContext}
+          editContextLabel={savedFlowStepScopeLabel}
+          editContextLocked={!pendingEditContext && service.activeStepScopeLocked}
+          oncleareditcontext={clearActiveEditContext}
+          refinement={service.currentPlan !== null}
+          placeholder={service.currentPlan === null && service.messages.length > 0
+            ? m.ai_builder_conversation_placeholder()
+            : null}
+        />
+      </div>
     </div>
   {/if}
 </div>
