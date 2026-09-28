@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -204,3 +205,81 @@ async def test_invite_user_creates_user_and_settings(service: UserService):
 async def test_authenticate_fails_if_no_token_and_no_api_key(service: UserService):
     with pytest.raises(AuthenticationException, match="No authenticated user."):
         await service.authenticate(None, None)
+
+
+async def test_token_resolves_user_by_id_and_tenant(service: UserService):
+    """Sessions are bound to the immutable account id and tenant; email and
+    username in the token are descriptive only."""
+    service.auth_service.get_jwt_payload = MagicMock(
+        return_value=SimpleNamespace(
+            sub="someone-else@example.com",
+            username="other",
+            user_id=TEST_USER.id,
+            tenant_id=TEST_USER.tenant_id,
+        )
+    )
+    service.repo.get_user_by_id_and_tenant_id.return_value = TEST_USER
+
+    user = await service._get_user_from_token("token")
+
+    assert user is TEST_USER
+    service.repo.get_user_by_id_and_tenant_id.assert_awaited_once_with(
+        TEST_USER.id, tenant_id=TEST_USER.tenant_id
+    )
+    service.repo.get_user_by_email.assert_not_awaited()
+    service.repo.get_user_by_username.assert_not_awaited()
+
+
+async def test_token_with_mismatched_tenant_does_not_authenticate(
+    service: UserService,
+):
+    service.auth_service.get_jwt_payload = MagicMock(
+        return_value=SimpleNamespace(
+            sub=TEST_USER.email,
+            username=TEST_USER.username,
+            user_id=TEST_USER.id,
+            tenant_id=uuid4(),
+        )
+    )
+    service.repo.get_user_by_id_and_tenant_id.return_value = None
+
+    with pytest.raises(AuthenticationException):
+        await service.authenticate(token="token")
+
+
+async def test_legacy_token_resolves_by_email_only_while_it_still_matches(
+    service: UserService,
+):
+    """A token minted before the identity claims existed is accepted only
+    while its signed email and username both describe the same account."""
+    service.auth_service.get_jwt_payload = MagicMock(
+        return_value=SimpleNamespace(
+            sub=TEST_USER.email.upper(),
+            username=TEST_USER.username,
+            user_id=None,
+            tenant_id=None,
+        )
+    )
+    service.repo.get_user_by_email.return_value = TEST_USER
+
+    assert await service._get_user_from_token("token") is TEST_USER
+    service.repo.get_user_by_username.assert_not_awaited()
+
+    # The email has since moved to another account with a different username.
+    replacement = TEST_USER.model_copy(update={"id": uuid4(), "username": "other"})
+    service.repo.get_user_by_email.return_value = replacement
+    assert await service._get_user_from_token("token") is None
+
+
+async def test_legacy_token_for_unknown_email_does_not_authenticate(
+    service: UserService,
+):
+    service.auth_service.get_jwt_payload = MagicMock(
+        return_value=SimpleNamespace(
+            sub="gone@example.com", username="gone", user_id=None, tenant_id=None
+        )
+    )
+    service.repo.get_user_by_email.return_value = None
+
+    with pytest.raises(AuthenticationException):
+        await service.authenticate(token="token")
