@@ -22,7 +22,9 @@ class CrawlSpider(scrapy.spiders.CrawlSpider):  # type: ignore[attr-defined]
     ) -> None:
         parsed_uri = urlparse(url)
 
-        self.allowed_domains = [parsed_uri.netloc]
+        # Host only: Scrapy ignores allowed_domains entries with a port, which
+        # would leave the offsite filter unconfigured for such sites.
+        self.allowed_domains = [parsed_uri.hostname or parsed_uri.netloc]
         self.start_urls = [url]
 
         self.rules = [

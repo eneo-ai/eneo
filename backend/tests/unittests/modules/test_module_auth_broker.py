@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import parse_qs, quote_plus, urlparse
 from uuid import uuid4
 
+import jwt
 import pytest
 from pydantic import ValidationError
 
@@ -34,8 +35,6 @@ from eneo.modules.module import (
 )
 from eneo.modules.module_auth import (
     MODULE_HANDOFF_AT_CLAIM,
-    MODULE_TENANT_ID_CLAIM,
-    MODULE_USER_ID_CLAIM,
     ModuleAuthBroker,
     ModuleRequestPrincipal,
     ModuleTicketRequest,
@@ -304,8 +303,8 @@ class TestExchangeTicket:
             key=str(get_settings().jwt_secret),
             aud=module_audience("tal-till-text"),
         )
-        assert claims[MODULE_USER_ID_CLAIM] == str(USER_ID)
-        assert claims[MODULE_TENANT_ID_CLAIM] == str(TENANT_ID)
+        assert claims["user_id"] == str(USER_ID)
+        assert claims["tenant_id"] == str(TENANT_ID)
         # ...and validate_module_user_token rejects it for another module.
         with pytest.raises(AuthenticationException):
             broker.validate_module_user_token(
@@ -338,17 +337,17 @@ class TestExchangeTicket:
         with pytest.raises(AuthenticationException):
             await broker.exchange_ticket(api_key=make_api_key(), ticket=ticket)
 
-    async def test_legacy_ticket_without_version_uses_version_zero_baseline(self):
+    @pytest.mark.parametrize("missing_claim", ["token_version", "credential_version"])
+    async def test_legacy_ticket_cannot_mint_a_new_session(self, missing_claim):
         broker = make_broker(user=make_user(credential_version=0))
         ticket = issued_ticket(await issue(broker))
         ticket_key = next(iter(broker.redis_client.store))
         payload = json.loads(broker.redis_client.store[ticket_key])
-        payload.pop("credential_version")
+        payload.pop(missing_claim)
         broker.redis_client.store[ticket_key] = json.dumps(payload)
 
-        result = await broker.exchange_ticket(api_key=make_api_key(), ticket=ticket)
-
-        assert result.user.id == USER_ID
+        with pytest.raises(AuthenticationException):
+            await broker.exchange_ticket(api_key=make_api_key(), ticket=ticket)
 
     async def test_unknown_ticket_rejected(self):
         broker = make_broker()
@@ -434,15 +433,24 @@ class TestExchangeTicket:
 
 class TestModuleResourceAuthentication:
     async def module_token(self, broker, *, module_name=MODULE_KEY, claims=None):
+        token = broker.auth_service.create_access_token_for_user(
+            make_user(), audience=module_audience(module_name)
+        )
         if claims is None:
-            claims = {
-                MODULE_USER_ID_CLAIM: str(USER_ID),
-                MODULE_TENANT_ID_CLAIM: str(TENANT_ID),
-            }
-        return broker.auth_service.create_access_token_for_user(
-            make_user(),
+            return token
+        # Test malformed but correctly signed tokens, without weakening the issuer.
+        settings = get_settings()
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret,
+            algorithms=[settings.jwt_algorithm],
             audience=module_audience(module_name),
-            extra_claims=claims or None,
+        )
+        payload.pop("user_id")
+        payload.pop("tenant_id")
+        payload.update(claims)
+        return jwt.encode(
+            payload, settings.jwt_secret, algorithm=settings.jwt_algorithm
         )
 
     async def test_validates_both_credentials_and_live_state(self):
@@ -489,10 +497,6 @@ class TestModuleResourceAuthentication:
         token = broker.auth_service.create_access_token_for_user(
             make_user(credential_version=1),
             audience=module_audience(MODULE_KEY),
-            extra_claims={
-                MODULE_USER_ID_CLAIM: str(USER_ID),
-                MODULE_TENANT_ID_CLAIM: str(TENANT_ID),
-            },
         )
 
         with pytest.raises(AuthenticationException):
@@ -528,8 +532,8 @@ class TestModuleResourceAuthentication:
         token = await self.module_token(
             broker,
             claims={
-                MODULE_USER_ID_CLAIM: str(USER_ID),
-                MODULE_TENANT_ID_CLAIM: str(uuid4()),
+                "user_id": str(USER_ID),
+                "tenant_id": str(uuid4()),
             },
         )
 
@@ -555,6 +559,26 @@ class TestModuleResourceAuthentication:
 
         broker.user_repo.get_user_by_id_and_tenant_id.assert_not_awaited()
         broker.user_repo.get_user_by_email.assert_not_called()
+
+    async def test_pre_upgrade_module_token_is_rejected_even_with_identity_claims(self):
+        broker = make_broker()
+        token = await self.module_token(broker)
+        settings = get_settings()
+        claims = jwt.decode(
+            token,
+            settings.jwt_secret,
+            algorithms=[settings.jwt_algorithm],
+            audience=module_audience(MODULE_KEY),
+        )
+        del claims["token_version"]
+        legacy_token = jwt.encode(
+            claims, settings.jwt_secret, algorithm=settings.jwt_algorithm
+        )
+
+        with pytest.raises(AuthenticationException):
+            await broker.authenticate_resource_request(
+                module_key=MODULE_KEY, access_token=legacy_token, api_key=make_api_key()
+            )
 
     async def test_stale_token_never_rebinds_to_replacement_account_with_same_email(
         self,
@@ -601,8 +625,6 @@ class TestRefreshToken:
             expires_in=get_settings().module_auth_token_expiry_minutes,
             extra_claims={
                 MODULE_HANDOFF_AT_CLAIM: handoff_at,
-                MODULE_USER_ID_CLAIM: str(USER_ID),
-                MODULE_TENANT_ID_CLAIM: str(TENANT_ID),
             },
         )
 
@@ -635,8 +657,8 @@ class TestRefreshToken:
         original = self.claims_of(broker, exchanged.access_token)
         renewed = self.claims_of(broker, refreshed.access_token)
         assert renewed[MODULE_HANDOFF_AT_CLAIM] == original[MODULE_HANDOFF_AT_CLAIM]
-        assert renewed[MODULE_USER_ID_CLAIM] == original[MODULE_USER_ID_CLAIM]
-        assert renewed[MODULE_TENANT_ID_CLAIM] == original[MODULE_TENANT_ID_CLAIM]
+        assert renewed["user_id"] == original["user_id"]
+        assert renewed["tenant_id"] == original["tenant_id"]
         assert refreshed.session_expires_at == exchanged.session_expires_at
         assert refreshed.module_key == MODULE_KEY
         assert refreshed.user.id == USER_ID

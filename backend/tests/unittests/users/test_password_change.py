@@ -15,7 +15,7 @@ from eneo.audit.infrastructure.rate_limiting import (
     RateLimitServiceUnavailableError,
 )
 from eneo.authentication.auth_dependencies import require_session_auth
-from eneo.authentication.auth_service import JWT_ISSUER, AuthService
+from eneo.authentication.auth_service import AuthService
 from eneo.main.exceptions import AuthenticationException, ErrorCodes
 from eneo.server.exception_handlers import DOMAIN_EXCEPTION_MAP
 from eneo.users import user_router
@@ -264,22 +264,6 @@ async def test_password_lock_forces_fresh_state_from_the_database():
     assert "FOR UPDATE" in compiled
 
 
-async def test_token_lookup_preserves_raw_claim_presence(service: UserService):
-    user = local_user(version=3)
-    provider_claims = {"iss": "https://identity.example.test"}
-    service.auth_service.get_jwt_payload_with_claims.return_value = (
-        SimpleNamespace(username=user.username),
-        provider_claims,
-    )
-    service.repo.get_user_by_username.return_value = user
-
-    assert await service._get_user_from_token("verified-token") == user
-
-    service.auth_service.validate_credential_version.assert_called_once_with(
-        provider_claims, user
-    )
-
-
 def test_password_failures_have_stable_error_codes_and_statuses():
     assert DOMAIN_EXCEPTION_MAP[CurrentPasswordIncorrectError] == (
         400,
@@ -448,38 +432,18 @@ def test_password_mutation_routes_require_session_auth():
         assert require_session_auth in dependency_calls
 
 
-def test_credential_version_enforcement_respects_token_issuer():
-    service = AuthService()
+def test_local_credential_version_enforcement():
     user = local_user(version=2)
-
-    service.validate_credential_version(
-        {"iss": JWT_ISSUER, "credential_version": 2}, user
-    )
+    AuthService.validate_local_credential_version(2, user)
     with pytest.raises(AuthenticationException):
-        service.validate_credential_version(
-            {"iss": JWT_ISSUER, "credential_version": 1},
-            user,
-        )
-
-    legacy_user = local_user(version=0)
-    service.validate_credential_version({"iss": JWT_ISSUER}, legacy_user)
-    with pytest.raises(AuthenticationException):
-        service.validate_credential_version({"iss": JWT_ISSUER}, user)
-
-    # Provider-owned sessions without Eneo's claim remain usable after the
-    # Eneo counter advances; otherwise every future Zitadel login locks out.
-    service.validate_credential_version({"iss": "https://identity.example.test"}, user)
+        AuthService.validate_local_credential_version(1, user)
 
 
 @pytest.mark.parametrize("invalid_version", [True, "2", None, 2.0])
-def test_present_credential_version_claim_requires_a_strict_integer(invalid_version):
+def test_credential_version_requires_a_strict_integer(invalid_version):
     with pytest.raises(AuthenticationException):
-        AuthService.validate_credential_version(
-            {
-                "iss": "https://identity.example.test",
-                "credential_version": invalid_version,
-            },
-            local_user(version=2),
+        AuthService.validate_local_credential_version(
+            invalid_version, local_user(version=2)
         )
 
 

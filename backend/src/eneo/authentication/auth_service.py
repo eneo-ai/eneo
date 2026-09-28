@@ -1,5 +1,4 @@
 import base64
-from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
@@ -27,7 +26,6 @@ logger = get_logger(__name__)
 JWT_ALGORITHM = get_settings().jwt_algorithm
 JWT_AUDIENCE = get_settings().jwt_audience
 JWT_EXPIRY_TIME_MINUTES = get_settings().jwt_expiry_time
-JWT_ISSUER = get_settings().jwt_issuer
 JWT_SECRET = get_settings().jwt_secret
 OIDC_CLOCK_LEEWAY_SECONDS = get_settings().oidc_clock_leeway_seconds
 
@@ -71,11 +69,11 @@ class AuthService:
         secret_key: str | None = None,
         audience: str = JWT_AUDIENCE,
         expires_in: float = JWT_EXPIRY_TIME_MINUTES,
-        extra_claims: dict[str, Any] | None = None,
+        extra_claims: dict[str, object] | None = None,
     ) -> str:
         """Mint an access token; ``expires_in`` is in minutes.
 
-        ``extra_claims`` follows the same contract as the MCP token above:
+        ``extra_claims`` is shared by module and scoped MCP tokens:
         unknown claims ride through ``JWTPayload`` on decode and are read out
         separately via :meth:`get_verified_claims`. Reserved JWT claims cannot
         be overridden through it.
@@ -86,6 +84,7 @@ class AuthService:
         secret_key = secret_key or str(JWT_SECRET)
 
         jwt_meta = JWTMeta(
+            iss=get_settings().jwt_issuer,
             aud=audience,
             iat=datetime.timestamp(
                 datetime.now(timezone.utc) - timedelta(seconds=2)
@@ -95,15 +94,18 @@ class AuthService:
             ),
         )
         jwt_creds = JWTCreds(
+            token_version=2,
+            user_id=user.id,
+            tenant_id=user.tenant_id,
             sub=user.email,
             username=user.username,
-            credential_version=getattr(user, "credential_version", 0),
+            credential_version=user.credential_version,
         )
         token_payload = JWTPayload(
             **jwt_meta.model_dump(),
             **jwt_creds.model_dump(),
         )
-        payload = token_payload.model_dump()
+        payload = token_payload.model_dump(mode="json")
         if extra_claims:
             reserved = set(extra_claims) & set(payload)
             if reserved:
@@ -139,55 +141,11 @@ class AuthService:
         reads its configuration from that ``mcp_servers`` row, so the row
         cannot be chosen by the caller.
         """
-        secret_key = str(JWT_SECRET)
-
-        jwt_meta = JWTMeta(
-            aud=JWT_AUDIENCE,
-            iat=datetime.timestamp(datetime.now(timezone.utc) - timedelta(seconds=2)),
-            exp=datetime.timestamp(
-                datetime.now(timezone.utc) + timedelta(minutes=expires_in)
-            ),
-        )
-        jwt_creds = JWTCreds(
-            sub=user.email,
-            username=user.username,
-            credential_version=getattr(user, "credential_version", 0),
-        )
-        payload = {
-            **JWTPayload(
-                **jwt_meta.model_dump(),
-                **jwt_creds.model_dump(),
-            ).model_dump(),
-            "assistant_id": str(assistant_id),
-        }
+        claims: dict[str, object] = {"assistant_id": str(assistant_id)}
         if mcp_server_id is not None:
-            payload["mcp_server_id"] = str(mcp_server_id)
-        return jwt.encode(payload, secret_key, algorithm=JWT_ALGORITHM)
-
-    @staticmethod
-    def validate_credential_version(
-        claims: Mapping[str, object], user: UserInDB
-    ) -> None:
-        """Reject an Eneo JWT minted before the user's latest credential change.
-
-        Version 0 is the compatibility baseline for tokens created before the
-        claim was introduced. Provider-issued identity tokens have a different
-        issuer and remain owned by that provider; applying Eneo's counter to
-        them would make every future provider login fail once the counter moved
-        past zero. Every Eneo JWT consumer that resolves a live user must call
-        this after signature verification and user lookup.
-        """
-
-        # New tokens are unambiguous: possession of the private Eneo claim
-        # opts into version enforcement regardless of issuer text. For legacy
-        # tokens without the claim, only the exact local issuer represents
-        # Eneo's version-zero compatibility baseline. A different verified
-        # issuer is provider-owned and outside Eneo session invalidation.
-        if "credential_version" not in claims and claims.get("iss") != JWT_ISSUER:
-            return
-
-        AuthService.validate_local_credential_version(
-            claims.get("credential_version", 0), user
+            claims["mcp_server_id"] = str(mcp_server_id)
+        return self.create_access_token_for_user(
+            user, expires_in=expires_in, extra_claims=claims
         )
 
     @staticmethod
@@ -197,7 +155,7 @@ class AuthService:
         if isinstance(raw_version, bool) or not isinstance(raw_version, int):
             raise AuthenticationException("Could not validate token credentials.")
 
-        if raw_version != getattr(user, "credential_version", 0):
+        if raw_version != user.credential_version:
             raise AuthenticationException("Could not validate token credentials.")
 
     def get_verified_claims(
@@ -206,11 +164,24 @@ class AuthService:
         key: str,
         aud: str = JWT_AUDIENCE,
         algs: list[str] | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """Verified raw claims, including ones ``JWTPayload`` does not model."""
         algs = algs or [JWT_ALGORITHM]
         try:
-            return jwt.decode(token, key=key, audience=aud, algorithms=algs)
+            return jwt.decode(
+                token,
+                key=key,
+                audience=aud,
+                issuer=get_settings().jwt_issuer,
+                algorithms=algs,
+                options={
+                    "require": [
+                        name
+                        for name, field in JWTPayload.model_fields.items()
+                        if field.is_required()
+                    ]
+                },
+            )
         except jwt.PyJWTError:
             raise AuthenticationException("Could not validate token credentials.")
 
@@ -232,17 +203,12 @@ class AuthService:
         key: str,
         aud: str = JWT_AUDIENCE,
         algs: list[str] | None = None,
-    ) -> tuple[JWTPayload, dict[str, Any]]:
-        """Return both the typed payload and untouched verified claims.
-
-        The raw mapping preserves whether optional private claims were absent;
-        applying Pydantic defaults before credential-version routing would turn
-        provider tokens into apparent legacy Eneo tokens.
-        """
+    ) -> tuple[JWTPayload, dict[str, object]]:
+        """Validate the session contract and retain extra module/MCP claims."""
 
         claims = self.get_verified_claims(token, key=key, aud=aud, algs=algs)
         try:
-            payload = JWTPayload(**claims)
+            payload = JWTPayload.model_validate(claims)
         except ValidationError:
             raise AuthenticationException("Could not validate token credentials.")
 

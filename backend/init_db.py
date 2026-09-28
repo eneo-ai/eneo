@@ -106,6 +106,24 @@ def add_tenant_user(
         user = cur.fetchone()
 
         if user is None:
+            # A different account already using DEFAULT_USER_NAME (typically a
+            # changed DEFAULT_USER_EMAIL) is a configuration error: never
+            # create a second user with that name, and never pick the existing
+            # one by name.
+            cur.execute(
+                sql.SQL(
+                    "SELECT email FROM users WHERE username = %s AND tenant_id = %s"
+                ),
+                (user_name, tenant_id),
+            )
+            clash = cur.fetchone()
+            if clash is not None:
+                raise SystemExit(
+                    f"Refusing to create default user {user_email}: username "
+                    f"'{user_name}' is already used by {clash[0]} in tenant "
+                    f"{tenant_name}. Set DEFAULT_USER_EMAIL to that address or "
+                    "choose another DEFAULT_USER_NAME."
+                )
             salt, hashed_pass = create_salt_and_hashed_password(user_password)
             add_user_query = sql.SQL(
                 "INSERT INTO users (username, email, password, salt, tenant_id, used_tokens, state) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id"

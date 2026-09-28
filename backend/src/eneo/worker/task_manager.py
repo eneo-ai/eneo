@@ -42,6 +42,7 @@ class TaskManager:
         self.resource_id = resource_id
 
         self.success: bool | None = None
+        self.error_message: str | None = None
         self._result_location: str | None = None
         self._cleanup_func: Callable[[], None] | None = None
         self.additional_data: dict[str, Any] | None = None
@@ -155,6 +156,7 @@ class TaskManager:
     async def fail_job(self, message: str | None = None):
         if self._job_already_handled:
             return
+        self.error_message = message
         await self.publish_status(status=Status.FAILED)
 
         if message:
