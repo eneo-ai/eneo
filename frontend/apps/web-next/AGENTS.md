@@ -133,6 +133,18 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
   or duplicated code, tests for behaviour (including keyboard and axe), and
   `bun run check && bun run lint && bun run test` green.
 
+## Long settings editors
+
+Use `src/components/composites/sectioned-settings.tsx` for editors with several
+settings sections inside a space. Put the title, back link and save state in its
+sticky header, and provide one ordered section list for both the horizontal
+anchor navigation and the single-column content. Keep conditional sections in
+that list so a link never points to hidden or unavailable settings. Use
+`SettingsGroup` for each card's heading and rows. Do not add another sidebar
+inside the space navigation. Keep anchors and focused controls clear of the
+sticky header, and check keyboard navigation and narrow widths when changing
+the shared layout.
+
 ## How it is wired
 
 - **Packages** (beta, pinned exactly; upgrade together, then run

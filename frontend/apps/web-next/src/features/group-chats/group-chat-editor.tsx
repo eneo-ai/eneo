@@ -1,13 +1,17 @@
 "use client";
 
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { ChevronLeft } from "lucide-react";
+import { Bot, ChevronLeft, Send, SlidersHorizontal, Wrench } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { IconField } from "@/components/composites/icon-field";
 import { PageHeader } from "@/components/composites/page-header";
 import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
+import {
+  SectionedSettings,
+  type SettingsSection
+} from "@/components/composites/sectioned-settings";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosave, useAutosaveField } from "@/components/composites/use-autosave";
 import { Badge } from "@/components/ui/badge";
@@ -241,33 +245,63 @@ export function GroupChatEditor({ groupChatId }: { groupChatId: string }) {
   const t = useTranslations();
   const { routeId } = useSpace();
   const { data: groupChat } = useSuspenseQuery(groupChatQueryOptions(browserApi, groupChatId));
+  const permissions = groupChat.permissions ?? [];
+  const sections: SettingsSection[] = [
+    {
+      id: "general",
+      label: t("general"),
+      icon: SlidersHorizontal,
+      node: <GeneralSection groupChat={groupChat} />
+    },
+    {
+      id: "assistants",
+      label: t("assistants"),
+      icon: Bot,
+      node: <AssistantsSection groupChat={groupChat} />
+    },
+    {
+      id: "advanced",
+      label: t("advanced_settings"),
+      icon: Wrench,
+      node: <AdvancedSection groupChat={groupChat} />
+    },
+    ...(permissions.includes("publish") || permissions.includes("insight_toggle")
+      ? [
+          {
+            id: "publishing",
+            label: t("publishing"),
+            icon: Send,
+            node: <PublishingSection groupChat={groupChat} />
+          }
+        ]
+      : [])
+  ];
 
   return (
     <SaveStatusProvider>
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-        <div className="flex flex-col gap-1">
-          <Link
-            href={`/spaces/${routeId}/assistants`}
-            className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-sm"
-          >
-            <ChevronLeft className="size-4" />
-            {t("assistants")}
-          </Link>
-          <PageHeader title={groupChat.name}>
-            <SaveStatusIndicator />
-            <Button asChild variant="outline">
-              <Link href={chatPartnerHref(routeId, { type: "group-chat", id: groupChat.id })}>
-                {t("done")}
-              </Link>
-            </Button>
-          </PageHeader>
-        </div>
-        <GeneralSection groupChat={groupChat} />
-        <AssistantsSection groupChat={groupChat} />
-        <AdvancedSection groupChat={groupChat} />
-        <PublishingSection groupChat={groupChat} />
-        <div className="min-h-12" />
-      </div>
+      <SectionedSettings
+        navigationLabel={t("settings")}
+        sections={sections}
+        header={
+          <div className="flex flex-col gap-1 py-3">
+            <Link
+              href={`/spaces/${routeId}/assistants`}
+              className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-sm"
+            >
+              <ChevronLeft className="size-4" />
+              {t("assistants")}
+            </Link>
+            <PageHeader title={groupChat.name}>
+              <SaveStatusIndicator />
+              <Button asChild variant="outline">
+                <Link href={chatPartnerHref(routeId, { type: "group-chat", id: groupChat.id })}>
+                  {t("done")}
+                </Link>
+              </Button>
+            </PageHeader>
+          </div>
+        }
+      />
     </SaveStatusProvider>
   );
 }
