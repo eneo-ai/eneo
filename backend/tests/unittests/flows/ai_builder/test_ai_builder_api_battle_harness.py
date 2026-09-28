@@ -12708,6 +12708,94 @@ def test_a_case_that_edits_its_review_target_must_declare_the_target(
         harness._read_cases_file(cases_path)
 
 
+@mark.parametrize("terminal", ["docx", "json"])
+def test_int08_is_scored_on_its_closing_json_and_only_that(terminal: str) -> None:
+    # int08 asks for a Word report and "sist en JSON-lista"; one flow delivers
+    # one terminal, and the run is judged on the JSON. A Word terminal fails
+    # the oracle; a JSON terminal passes it without document-only checks.
+    harness = _battle_harness()
+    cases = harness._read_cases_file(
+        harness.DEFAULT_CASES_FILE.with_name("ai_builder_api_municipal_cases.json")
+    )
+    case = {case.case_id: case for case in cases}["mc_int08_samradsredogorelse"]
+    assert case.expected is not None and case.execution is not None
+    document = terminal == "docx"
+
+    quality = {
+        check["name"]: check
+        for check in harness._quality_report(
+            plan={},
+            summary={
+                "terminal_output_type": terminal,
+                **({"terminal_output_mode": "render_verbatim"} if document else {}),
+            },
+            expected=case.expected,
+        )["checks"]
+    }
+    facts = list(case.execution.expect.required_facts)
+    result = (
+        {
+            "kind": "artifact",
+            "files": [
+                {
+                    "mimetype": "application/vnd.openxmlformats-officedocument"
+                    ".wordprocessingml.document"
+                }
+            ],
+        }
+        if document
+        else {"kind": "structured", "value": {"sakagare": facts}}
+    )
+    report = harness._output_report(
+        case.execution.expect,
+        {
+            "execution": {"outcome": "completed", "failures": []},
+            "run": {"id": "run-1", "status": "completed", "result": result},
+            "run_contract": {"final_output": {"output_type": terminal}},
+            "final_artifact": {"text": " ".join(facts)} if document else {},
+        },
+        runtime_checks=[],
+    )
+    output = {check["name"]: check for check in report["output_checks"]}
+
+    assert quality["terminal_output_type"]["passed"] is not document
+    assert output["output_kind"]["passed"] is not document
+    document_only = {
+        "terminal_document_output_mode",
+        "renderer_previous_step_bound",
+    } & set(quality) | {"output_file_count"} & set(output)
+    assert bool(document_only) is document
+    if not document:
+        assert report["output_success"] is True
+        assert sorted(
+            check["fact"]
+            for check in report["output_checks"]
+            if check["name"] == "required_fact" and check["passed"] is True
+        ) == sorted(facts)
+
+
+def test_a_case_note_describes_the_report_and_seals_nothing() -> None:
+    # int08 measures only its closing JSON; the note says so in each report,
+    # and a receipt carrying it still validates: identity and contract stay
+    # exactly what evidence validation reconstructs.
+    harness = _battle_harness()
+    cases = harness._read_cases_file(
+        harness.DEFAULT_CASES_FILE.with_name("ai_builder_api_municipal_cases.json")
+    )
+    case = {case.case_id: case for case in cases}["mc_int08_samradsredogorelse"]
+    assert case.note is not None and "not measured" in case.note
+    noted = harness.BattleCase(case_id="noted", prompt="Build it.", note=case.note)
+    assert harness._case_identity(noted) == harness._case_identity(
+        harness.BattleCase(case_id="noted", prompt="Build it.")
+    )
+
+    bundle = _complete_live_case_bundle(harness, noted)
+    bundle["case_note"] = noted.note
+
+    report = harness._observation_evidence_report(bundle)
+    assert report["valid"] is True, report["failed_checks"]
+
+
 def test_every_executed_edit_review_case_edits_its_review_target() -> None:
     harness = _battle_harness()
     cases_path = (

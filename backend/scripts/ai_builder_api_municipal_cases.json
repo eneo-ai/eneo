@@ -1615,6 +1615,10 @@
           "selected_option_id": "generated_docx"
         }
       },
+      "note": "Measures only the closing JSON list of property owners whose comments were not met: a flow delivers one terminal output, and the request names this one last. The Word consultation report the request also asks for is not measured.",
+      "expected": {
+        "terminal_output_type": "json"
+      },
       "apply_plan": true,
       "execution": {
         "inputs": {

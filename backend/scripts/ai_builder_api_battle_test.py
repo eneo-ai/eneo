@@ -487,6 +487,10 @@ class BattleCase:
     execution: CaseExecution | None = None
     source: CaseSource | None = None
     script: CaseScript | None = None
+    # What the case measures when the request asks for more than one run
+    # can deliver. Descriptive only: each observation report carries it as
+    # case_note, outside the sealed case identity and contract.
+    note: str | None = None
 
     @property
     def executes(self) -> bool:
@@ -1704,6 +1708,7 @@ _CASE_KEYS = frozenset(
         "edit",
         "source",
         "script",
+        "note",
     }
 )
 _EXPECTATION_KEYS = frozenset(
@@ -2035,6 +2040,9 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
                     f"{path} case {case_id} requires configured answers for: "
                     + ", ".join(sorted(missing_answer_ids))
                 )
+        note = raw_case.get("note")
+        if note is not None and not (isinstance(note, str) and note.strip()):
+            raise ValueError(f"{path} case {case_id}.note must be non-empty text.")
         case = BattleCase(
             case_id=case_id,
             prompt=prompt,
@@ -2060,6 +2068,7 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
                 path=path,
                 case_id=case_id,
             ),
+            note=note,
         )
         if "expected_removals" in (case.expected or {}) and (
             case.script is None or case.script.kind != "correction"
@@ -5179,6 +5188,7 @@ def _run_case_session(
     bundle: JsonObject = {
         "artifact_mode": "live_execution",
         "case_identity": _case_identity(case),
+        **({"case_note": case.note} if case.note else {}),
         "live_execution_provenance": live_execution_provenance,
         "observation_input_identity": observation_input_identity,
         "created_at": started_at,
