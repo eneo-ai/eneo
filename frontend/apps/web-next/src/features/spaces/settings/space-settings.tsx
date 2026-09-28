@@ -5,9 +5,22 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
+import {
+  Bot,
+  KeyRound,
+  Plug,
+  ShieldCheck,
+  SlidersHorizontal,
+  Sparkles,
+  TriangleAlert
+} from "lucide-react";
 import { ConfirmDialog } from "@/components/composites/confirm-dialog";
 import { IconField } from "@/components/composites/icon-field";
 import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
+import {
+  SectionedSettings,
+  type SettingsSection
+} from "@/components/composites/sectioned-settings";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosave, useAutosaveField } from "@/components/composites/use-autosave";
 import {
@@ -114,7 +127,7 @@ function GeneralSection() {
   });
 
   return (
-    <SettingsGroup id="general" title={t("general")}>
+    <SettingsGroup title={t("general")}>
       <SettingsRow title={t("name")} description={t("space_name_description")} htmlFor="space-name">
         <Input
           id="space-name"
@@ -248,7 +261,7 @@ function SecuritySection() {
   const pendingImpactTotal = pendingImpact ? securityImpactTotal(pendingImpact.impact) : 0;
 
   return (
-    <SettingsGroup id="security" title={t("security_and_privacy")}>
+    <SettingsGroup title={t("security_and_privacy")}>
       {security?.security_enabled && (
         <SettingsRow
           title={t("security_classification")}
@@ -379,7 +392,6 @@ function ModelsSection() {
 
   return (
     <SettingsGroup
-      id="models"
       title={t("space_settings_models_title")}
       description={t("space_settings_models_description")}
     >
@@ -417,7 +429,7 @@ function ModelsSection() {
 function ToolsSection() {
   const t = useTranslations();
   return (
-    <SettingsGroup id="tools" title={t("space_settings_tools_title")}>
+    <SettingsGroup title={t("space_settings_tools_title")}>
       <McpServersSection />
     </SettingsGroup>
   );
@@ -536,7 +548,7 @@ function DangerSection() {
   });
 
   return (
-    <SettingsGroup id="danger" title={t("danger_zone")}>
+    <SettingsGroup title={t("danger_zone")}>
       <SettingsRow title={t("delete_space")} description={t("delete_space_description")}>
         <div>
           <ConfirmDialog
@@ -568,11 +580,7 @@ function SpaceCapabilitiesSection() {
   const selected = space.enabled_capabilities ?? [];
 
   return (
-    <SettingsGroup
-      id="capabilities"
-      title={t("capabilities")}
-      description={t("space_capabilities_description")}
-    >
+    <SettingsGroup title={t("capabilities")} description={t("space_capabilities_description")}>
       {CAPABILITIES.map((capability) => {
         const availability = space.available_capabilities?.find(
           (item) => item.purpose === capability.purpose
@@ -627,55 +635,50 @@ export function SpaceSettings() {
   const { space, can } = useSpace();
   const isOrgSpace = space.organization;
   const showDanger = !isOrgSpace && can("delete", "space");
-  const sections = [
+  const sections: SettingsSection[] = [
     ...(!isOrgSpace
       ? [
-          { id: "general", label: t("general") },
-          { id: "security", label: t("security_and_privacy") }
+          { id: "general", label: t("general"), icon: SlidersHorizontal, node: <GeneralSection /> },
+          {
+            id: "security",
+            label: t("security_and_privacy"),
+            icon: ShieldCheck,
+            node: <SecuritySection />
+          }
         ]
       : []),
-    { id: "models", label: t("space_settings_models_title") },
-    { id: "tools", label: t("space_settings_tools_title") },
-    ...(!isOrgSpace ? [{ id: "capabilities", label: t("capabilities") }] : []),
-    { id: "api-keys", label: t("api_keys") },
-    ...(showDanger ? [{ id: "danger", label: t("danger_zone") }] : [])
+    { id: "models", label: t("space_settings_models_title"), icon: Bot, node: <ModelsSection /> },
+    { id: "tools", label: t("space_settings_tools_title"), icon: Plug, node: <ToolsSection /> },
+    ...(!isOrgSpace
+      ? [
+          {
+            id: "capabilities",
+            label: t("capabilities"),
+            icon: Sparkles,
+            node: <SpaceCapabilitiesSection />
+          }
+        ]
+      : []),
+    { id: "api-keys", label: t("api_keys"), icon: KeyRound, node: <SpaceApiKeysSection /> },
+    ...(showDanger
+      ? [{ id: "danger", label: t("danger_zone"), icon: TriangleAlert, node: <DangerSection /> }]
+      : [])
   ];
 
   return (
     <SaveStatusProvider>
-      <div className="w-full max-w-6xl">
-        <PageHeader headingLevel={2} title={t("settings")} actions={<SaveStatusIndicator />} />
-        <div className="mt-6 grid items-start gap-6 xl:grid-cols-[12rem_minmax(0,1fr)]">
-          <nav aria-label={t("space_settings_navigation")} className="xl:sticky xl:top-6">
-            <p className="text-muted-foreground px-3 text-xs font-semibold tracking-wide uppercase">
-              {t("space_settings_navigation")}
-            </p>
-            <ul className="mt-2 flex flex-wrap gap-1 xl:flex-col">
-              {sections.map((section) => (
-                <li key={section.id}>
-                  <Link
-                    href={`#${section.id}`}
-                    className="text-foreground hover:bg-muted focus-visible:outline-ring inline-flex min-h-9 items-center rounded-md px-3 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
-                  >
-                    {section.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </nav>
-          <div className="flex min-w-0 flex-col gap-6">
-            {!isOrgSpace && <GeneralSection />}
-            {!isOrgSpace && <SecuritySection />}
-            <ModelsSection />
-            <ToolsSection />
-            {!isOrgSpace && <SpaceCapabilitiesSection />}
-            <div id="api-keys" className="scroll-mt-32">
-              <SpaceApiKeysSection />
-            </div>
-            {showDanger && <DangerSection />}
-          </div>
-        </div>
-      </div>
+      <SectionedSettings
+        navigationLabel={t("settings")}
+        sections={sections}
+        header={
+          <PageHeader
+            headingLevel={2}
+            title={t("settings")}
+            actions={<SaveStatusIndicator />}
+            className="py-3"
+          />
+        }
+      />
     </SaveStatusProvider>
   );
 }

@@ -47,7 +47,7 @@ describe("SpaceSettings", () => {
   it("offers section links and keeps each model type separate from tools", () => {
     show(makeSpace());
 
-    const navigation = screen.getByRole("navigation", { name: "På den här sidan" });
+    const navigation = screen.getByRole("navigation", { name: "Inställningar" });
     for (const name of [
       "Allmänt",
       "Säkerhet & Integritet",
@@ -75,7 +75,7 @@ describe("SpaceSettings", () => {
   it("shows organization settings without personal space sections", () => {
     show(makeSpace({ overrides: { organization: true } }));
 
-    const navigation = screen.getByRole("navigation", { name: "På den här sidan" });
+    const navigation = screen.getByRole("navigation", { name: "Inställningar" });
     expect(within(navigation).queryByRole("link", { name: "Allmänt" })).toBeNull();
     expect(within(navigation).queryByRole("link", { name: "Säkerhet & Integritet" })).toBeNull();
     expect(within(navigation).queryByRole("link", { name: "Funktioner" })).toBeNull();
