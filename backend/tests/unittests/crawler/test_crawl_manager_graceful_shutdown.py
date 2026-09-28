@@ -189,6 +189,7 @@ class TestRunCrawlWithTimeoutGracefulShutdown:
             def __init__(self):
                 self._crawler = None
                 self._completion_event = threading.Event()
+                self.download_error_count = 0
 
             def start_crawl(self, *args, **kwargs):
                 # Return a mock EventualResult that will timeout
@@ -228,6 +229,7 @@ class TestRunCrawlWithTimeoutGracefulShutdown:
             def __init__(self):
                 self._crawler = None
                 self._completion_event = threading.Event()
+                self.download_error_count = 0
 
             def start_crawl(self, *args, **kwargs):
                 mock_result = MagicMock()
@@ -270,6 +272,7 @@ class TestHeartbeatDuringCrawl:
             def __init__(self):
                 self._crawler = None
                 self._completion_event = threading.Event()
+                self.download_error_count = 0
 
             def start_crawl(self, *args, **kwargs):
                 # Simulate a 0.5 second crawl
@@ -317,6 +320,7 @@ class TestHeartbeatDuringCrawl:
             def __init__(self):
                 self._crawler = None
                 self._completion_event = threading.Event()
+                self.download_error_count = 0
 
             def start_crawl(self, *args, **kwargs):
                 nonlocal crawl_start
@@ -364,6 +368,7 @@ class TestHeartbeatDuringCrawl:
             def __init__(self):
                 self._crawler = None
                 self._completion_event = threading.Event()
+                self.download_error_count = 0
 
             def start_crawl(self, *args, **kwargs):
                 mock_result = MagicMock()
@@ -485,6 +490,7 @@ class TestSitemapCrawlGracefulShutdown:
             def __init__(self):
                 self._crawler = None
                 self._completion_event = threading.Event()
+                self.download_error_count = 0
 
             def start_crawl(self, *args, **kwargs):
                 mock_result = MagicMock()
@@ -529,6 +535,7 @@ class TestNoResourceLeakOnTimeout:
             def __init__(self):
                 self._crawler = None
                 self._completion_event = threading.Event()
+                self.download_error_count = 0
 
             def start_crawl(self, *args, **kwargs):
                 mock_result = MagicMock()
