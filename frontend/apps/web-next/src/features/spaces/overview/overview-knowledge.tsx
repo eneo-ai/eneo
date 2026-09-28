@@ -2,9 +2,6 @@
 
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { useCollator } from "@astryxdesign/core/i18n";
-import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
-import { Table } from "@/components/astryx/table";
-import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { BookOpen, FolderClosed, Globe, Plug, Upload, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
@@ -18,7 +15,6 @@ import type { Collection } from "@/features/knowledge/knowledge";
 import { KnowledgeNameCell } from "@/features/knowledge/table-controls-ui";
 import { UploadBlobsDialog } from "@/features/knowledge/upload-dialog";
 import { WebsiteActions } from "@/features/knowledge/websites";
-import { SpaceTableFrame } from "../table-frame";
 import { useSpace } from "../use-space";
 import {
   overviewKnowledgeRows,
@@ -29,7 +25,6 @@ import {
 import { OverviewLink, OverviewSection } from "./overview-section";
 
 const VISIBLE_ROWS = 5;
-/** The section heading's id; it also names the table. */
 const HEADING_ID = "overview-knowledge";
 
 const TYPE_KEYS: Record<KnowledgeKind, string> = {
@@ -117,81 +112,60 @@ function RowActions({ row }: { row: KnowledgeRow }) {
   }
 }
 
-function KnowledgeTable({ rows }: { rows: KnowledgeRow[] }) {
+/** A short overview list; the full knowledge page owns the sortable table. */
+function KnowledgeList({ rows }: { rows: KnowledgeRow[] }) {
   const t = useTranslations();
-  const columns: TableColumn<KnowledgeRow>[] = [
-    {
-      key: "name",
-      header: t("name"),
-      width: proportional(3),
-      renderCell: (row) => (
-        <KnowledgeNameCell icon={TYPE_ICONS[row.kind]} href={row.href}>
-          {row.name}
-        </KnowledgeNameCell>
-      )
-    },
-    {
-      key: "type",
-      header: t("type"),
-      width: proportional(1),
-      renderCell: (row) => t(TYPE_KEYS[row.kind])
-    },
-    {
-      key: "content",
-      header: t("content"),
-      width: proportional(1),
-      renderCell: (row) => (row.content ? t(row.content.key, row.content.values) : "—")
-    },
-    {
-      key: "status",
-      header: t("status"),
-      width: proportional(1),
-      renderCell: (row) => (
-        <span className="inline-flex flex-wrap items-center gap-x-2">
-          <StatusLabel
-            status={row.status.tone}
-            label={t(row.status.labelKey)}
-            isPulsing={row.status.isPulsing}
-            className={row.status.tone === "error" ? "text-ax-error" : undefined}
-          />
-          {row.status.fixHref ? (
-            <Link
-              href={row.status.fixHref}
-              aria-label={t("space_fix_named", { name: row.name })}
-              className="text-ax-text-accent focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 items-center text-sm font-semibold underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
-            >
-              {t("space_fix")}
-            </Link>
-          ) : null}
-        </span>
-      )
-    },
-    {
-      key: "updated",
-      header: t("space_updated_column"),
-      width: proportional(1),
-      renderCell: (row) =>
-        row.updatedAt ? <ClientTime value={row.updatedAt} format="date" /> : "—"
-    },
-    {
-      key: "actions",
-      header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
-      width: pixel(64),
-      align: "end",
-      renderCell: (row) => <RowActions row={row} />
-    }
-  ];
 
   return (
-    <SpaceTableFrame>
-      <Table data={rows} columns={columns} idKey="key" aria-labelledby={HEADING_ID} />
-    </SpaceTableFrame>
+    <ul className="border-ax-border bg-ax-card rounded-ax-container divide-ax-border divide-y overflow-hidden border">
+      {rows.map((row) => (
+        <li
+          key={row.key}
+          className="flex min-w-0 flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center"
+        >
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <KnowledgeNameCell icon={TYPE_ICONS[row.kind]} href={row.href}>
+              {row.name}
+            </KnowledgeNameCell>
+            <div className="text-ax-text-secondary flex flex-wrap gap-x-3 gap-y-0.5 ps-9 text-xs">
+              <span className="font-medium">{t(TYPE_KEYS[row.kind])}</span>
+              {row.content ? <span>{t(row.content.key, row.content.values)}</span> : null}
+              {row.updatedAt ? (
+                <span>
+                  {t("space_updated_column")}: <ClientTime value={row.updatedAt} format="date" />
+                </span>
+              ) : null}
+            </div>
+          </div>
+          <div className="flex min-w-0 items-center justify-between gap-3 ps-9 sm:justify-end sm:ps-0">
+            <span className="inline-flex flex-wrap items-center gap-x-2">
+              <StatusLabel
+                status={row.status.tone}
+                label={t(row.status.labelKey)}
+                isPulsing={row.status.isPulsing}
+                className={row.status.tone === "error" ? "text-ax-error" : undefined}
+              />
+              {row.status.fixHref ? (
+                <Link
+                  href={row.status.fixHref}
+                  aria-label={t("space_fix_named", { name: row.name })}
+                  className="text-ax-text-accent focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 items-center text-sm font-semibold underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
+                >
+                  {t("space_fix")}
+                </Link>
+              ) : null}
+            </span>
+            <RowActions row={row} />
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }
 
 /**
- * The space's collections, websites and integrations in one table, most
- * recently updated first, with their sync status and a fix link on errors.
+ * The space's collections, websites and integrations in one compact list,
+ * most recently updated first, with sync status and a fix link on errors.
  */
 export function OverviewKnowledge() {
   const t = useTranslations();
@@ -217,6 +191,7 @@ export function OverviewKnowledge() {
         </>
       }
     >
+      <p className="text-ax-text-secondary text-sm">{t("space_knowledge_description")}</p>
       {rows.length === 0 ? (
         <EmptyState
           icon={<BookOpen />}
@@ -227,7 +202,7 @@ export function OverviewKnowledge() {
           actions={can("create", "collection") ? <CreateCollectionButton /> : undefined}
         />
       ) : (
-        <KnowledgeTable rows={rows.slice(0, VISIBLE_ROWS)} />
+        <KnowledgeList rows={rows.slice(0, VISIBLE_ROWS)} />
       )}
     </OverviewSection>
   );

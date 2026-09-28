@@ -40,13 +40,13 @@ export function recentChatItems(space: Space, compare: Compare): ChatAppItem[] {
 
 export type KnowledgeKind = "collection" | "website" | "integration";
 
-/** One row of the overview's knowledge table. */
+/** One item in the overview's knowledge list. */
 export type KnowledgeRow = {
   key: string;
   kind: KnowledgeKind;
   name: string;
   href: string;
-  /** Translation key and values for the Innehåll column; null when unknown. */
+  /** Translation key and values for the content summary; null when unknown. */
   content: { key: string; values: Record<string, string | number> } | null;
   status: KnowledgeStatus;
   updatedAt: string | null;

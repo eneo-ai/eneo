@@ -147,7 +147,7 @@ const busySpace = () =>
   });
 
 describe("SpaceOverview", () => {
-  it("shows the newest assistants, the knowledge table and the space facts", async () => {
+  it("shows the newest assistants, a compact knowledge list and the space facts", async () => {
     const { container } = show(busySpace());
 
     const assistants = screen.getByRole("region", { name: "Assistenter" });
@@ -166,15 +166,10 @@ describe("SpaceOverview", () => {
     expect(within(assistants).queryByRole("link", { name: "Äldst" })).toBeNull();
 
     const knowledge = screen.getByRole("region", { name: "Kunskap" });
-    // Named by the section heading, like the tables on the knowledge page.
-    const table = within(knowledge).getByRole("table", { name: "Kunskap" });
-    expect(
-      within(table)
-        .getAllByRole("columnheader")
-        .map((header) => header.textContent)
-    ).toEqual(["Namn", "Typ", "Innehåll", "Status", "Uppdaterad", "Åtgärder"]);
-    const website = within(table).getByRole("link", { name: "www.upphandlingsmyndigheten.se" });
-    const websiteRow = website.closest("tr")!;
+    expect(within(knowledge).queryByRole("table")).toBeNull();
+    expect(within(knowledge).getByText(/Samlingar, webbplatser och integrationer/)).toBeTruthy();
+    const website = within(knowledge).getByRole("link", { name: "www.upphandlingsmyndigheten.se" });
+    const websiteRow = website.closest("li")!;
     expect(within(websiteRow).getByText("Synkfel")).toBeTruthy();
     expect(within(websiteRow).getByText("318 sidor")).toBeTruthy();
     expect(
@@ -182,9 +177,9 @@ describe("SpaceOverview", () => {
         .getByRole("link", { name: "Åtgärda www.upphandlingsmyndigheten.se" })
         .getAttribute("href")
     ).toBe("/spaces/space-1/knowledge/websites/website-1");
-    const collectionRow = within(table)
+    const collectionRow = within(knowledge)
       .getByRole("link", { name: "Upphandlingspolicy" })
-      .closest("tr")!;
+      .closest("li")!;
     expect(within(collectionRow).getByText("42 filer")).toBeTruthy();
     expect(within(collectionRow).getByText("Indexerad")).toBeTruthy();
     expect(

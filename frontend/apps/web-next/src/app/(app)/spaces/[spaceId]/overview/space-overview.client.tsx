@@ -7,9 +7,8 @@ import { OverviewKnowledge } from "@/features/spaces/overview/overview-knowledge
 
 /**
  * The space overview: things to act on instead of count tiles. The newest
- * assistants and the knowledge sources (with sync problems surfaced), and
- * beside them what the space is set up with and who is in it. The space
- * header above carries the name, description and primary actions.
+ * assistants and space facts share the top row; knowledge sources get the
+ * full width below so names, sync status and actions stay readable.
  */
 export function SpaceOverview() {
   const { space, can } = useSpace();
@@ -18,11 +17,15 @@ export function SpaceOverview() {
 
   return (
     <div className="grid w-full items-start gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
-      <div className="flex min-w-0 flex-col gap-7">
-        {showAssistants ? <OverviewAssistants /> : null}
-        {showKnowledge ? <OverviewKnowledge /> : null}
+      {showAssistants ? <OverviewAssistants /> : null}
+      <div className={showAssistants ? "min-w-0" : "min-w-0 xl:col-span-2 xl:max-w-md"}>
+        <OverviewAside />
       </div>
-      <OverviewAside />
+      {showKnowledge ? (
+        <div className="min-w-0 xl:col-span-2">
+          <OverviewKnowledge />
+        </div>
+      ) : null}
     </div>
   );
 }
