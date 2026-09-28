@@ -121,7 +121,7 @@ function KnowledgeList({ rows }: { rows: KnowledgeRow[] }) {
       {rows.map((row) => (
         <li
           key={row.key}
-          className="flex min-w-0 flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center"
+          className="flex min-w-0 flex-col gap-3 px-4 py-3 2xl:flex-row 2xl:items-center"
         >
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <KnowledgeNameCell icon={TYPE_ICONS[row.kind]} href={row.href}>
@@ -137,7 +137,7 @@ function KnowledgeList({ rows }: { rows: KnowledgeRow[] }) {
               ) : null}
             </div>
           </div>
-          <div className="flex min-w-0 items-center justify-between gap-3 ps-9 sm:justify-end sm:ps-0">
+          <div className="flex min-w-0 items-center justify-between gap-3 ps-9 2xl:justify-end 2xl:ps-0">
             <span className="inline-flex flex-wrap items-center gap-x-2">
               <StatusLabel
                 status={row.status.tone}

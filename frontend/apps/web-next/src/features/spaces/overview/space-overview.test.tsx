@@ -166,6 +166,8 @@ describe("SpaceOverview", () => {
     expect(within(assistants).queryByRole("link", { name: "Äldst" })).toBeNull();
 
     const knowledge = screen.getByRole("region", { name: "Kunskap" });
+    // Keep the content in one column so a taller aside cannot leave a gap before knowledge.
+    expect(knowledge.parentElement).toBe(assistants.parentElement);
     expect(within(knowledge).queryByRole("table")).toBeNull();
     expect(within(knowledge).getByText(/Samlingar, webbplatser och integrationer/)).toBeTruthy();
     const website = within(knowledge).getByRole("link", { name: "www.upphandlingsmyndigheten.se" });
