@@ -4,7 +4,10 @@
   import { m } from "$lib/paraglide/messages";
   import FlowAIBuilderQuestion from "./FlowAIBuilderQuestion.svelte";
   import type { ChatMessage } from "./protocol";
-  import type { StructuredQuestionAnswerPayload } from "./structuredQuestionAnswer";
+  import type {
+    StructuredQuestion,
+    StructuredQuestionAnswerPayload
+  } from "./structuredQuestionAnswer";
 
   interface AnsweredQuestion {
     questionId: string;
@@ -33,7 +36,7 @@
     sendBlockedReason?: string | null;
     onanswer: (payload: StructuredQuestionAnswerPayload) => void;
     /** Hand this question back to Eneo; only offered with a recommendation. */
-    ondelegate?: (questionId: string) => void;
+    ondelegate?: (question: StructuredQuestion) => void;
     isEdit?: boolean;
     onedit: (questionId: string) => void;
     oncanceledit?: () => void;
@@ -135,7 +138,7 @@
           {sendBlockedReason}
           {onanswer}
           {isEdit}
-          ondelegate={editingQuestionId ? undefined : () => ondelegate?.(question.question_id)}
+          ondelegate={editingQuestionId ? undefined : () => ondelegate?.(question)}
         />
       {/key}
     </div>

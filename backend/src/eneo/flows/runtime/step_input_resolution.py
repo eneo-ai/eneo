@@ -97,6 +97,7 @@ from eneo.flows.runtime.transcription_runtime import (
     resolve_transcribe_and_attach_audio_input,
 )
 from eneo.flows.source_identity import RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD
+from eneo.flows.step_lineage import selected_source_step_order
 from eneo.flows.template_reference_analyzer import (
     TemplateReference,
     analyze_template,
@@ -1376,14 +1377,10 @@ async def _resolve_step_materials(
         for reference in references:
             if reference.head == FLOW_INPUT_TRANSCRIPTION_KEY and not reference.tail:
                 selected_transcript = True
-            order = reference.step_order
-            if reference.head == "föregående_steg" and not reference.tail:
-                order = step.step_order - 1
-            if reference.tail not in {"", "output", "output.text"} and not (
-                processing and reference.tail.startswith("output.")
-            ):
-                continue
-            if order is not None and order < step.step_order and order in results:
+            order = selected_source_step_order(
+                reference, step_order=step.step_order, section_processing=processing
+            )
+            if order is not None and order in results:
                 selected.append(results[order])
     if (
         step_input_override is None

@@ -23,6 +23,8 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     assistant_question_index_from_metadata,
     file_ids_from_metadata,
     metadata_has_question_answer,
+    question_answer_from_metadata,
+    question_answer_question_id,
     question_response_from_metadata,
     requirements_confirmation_from_metadata,
     structured_question_payload_from_tool_arguments,
@@ -121,18 +123,41 @@ def last_answered_question(
     classification can bias toward that question's slot. Returns ``None`` when no
     question was asked, the latest turn is still the question, or the reply
     carried no free text.
+
+    Text after a question that carries an instance token counts only when it
+    names that question (a recorded question response): unbound text there is
+    a request of its own, never guessed to be the answer.
     """
     last_question_id: str | None = None
+    last_question_bound = False
     latest_answer: str | None = None
     for message in conversation:
         question_id = assistant_question_id(message)
         if question_id is not None:
             last_question_id = question_id
+            last_question_bound = shows_instance_token(message)
             latest_answer = None
             continue
         response = question_response_from_metadata(_message_metadata(message))
         if response is not None:
             last_question_id = response.question_id
+            content = (
+                message.content
+                if isinstance(message, ConversationMessage)
+                else message.get("content")
+            )
+            latest_answer = (
+                content.strip()
+                if isinstance(content, str) and content.strip()
+                else None
+            )
+            continue
+        # An explicit answer names its own question: re-answering an earlier
+        # question while another is open answers the earlier one.
+        answer = question_answer_from_metadata(_message_metadata(message))
+        answered_id = question_answer_question_id(answer) if answer else None
+        if answered_id is not None:
+            last_question_id = canonical_question_id(answered_id)
             content = (
                 message.content
                 if isinstance(message, ConversationMessage)
@@ -151,6 +176,15 @@ def last_answered_question(
             if isinstance(message, ConversationMessage)
             else message.get("content")
         )
+        if (
+            last_question_bound
+            and isinstance(content, str)
+            and content.strip()
+            and question_answer_from_metadata(_message_metadata(message)) is None
+        ):
+            last_question_id = None
+            latest_answer = None
+            continue
         if isinstance(content, str) and content.strip():
             latest_answer = content.strip()
     if last_question_id is None or latest_answer is None:
@@ -228,6 +262,46 @@ def pending_user_requirement_question(
     return payload
 
 
+def shows_instance_token(message: ConversationMessage | Mapping[str, Any]) -> bool:
+    """Whether this message shows a question with an instance token.
+
+    Such a question is answered only by what names it; text arriving while it
+    is open is not read as its answer unless the text says so.
+    """
+
+    arguments = _structured_question_arguments(message)
+    return arguments is not None and arguments.get("instance_token") is not None
+
+
+def latest_shown_question(
+    conversation: Sequence[ConversationMessage],
+    *,
+    question_id: str,
+) -> StructuredQuestionPayload | None:
+    """The newest showing of one question, open or answered, as it was shown.
+
+    Showing a question again replaces its earlier showing: an answer given to
+    the earlier one answers something no longer on offer. None when the
+    question was never shown, or when its newest showing can no longer be
+    validated as the payload it was.
+    """
+
+    wanted = canonical_question_id(question_id)
+    latest: Mapping[str, Any] | None = None
+    for message in conversation:
+        if assistant_question_id(message) == wanted:
+            latest = _structured_question_arguments(message)
+    if latest is None:
+        return None
+    try:
+        payload = StructuredQuestionPayload.model_validate(latest)
+    except ValidationError:
+        return None
+    if canonical_question_id(payload.question_id) != wanted:
+        return None
+    return payload
+
+
 def _pending_user_requirement_question(
     conversation: Sequence[ConversationMessage],
 ) -> tuple[str, Mapping[str, Any] | None] | None:
@@ -262,7 +336,9 @@ def _structured_question_arguments(
 __all__ = [
     "assistant_question_id",
     "last_answered_question",
+    "latest_shown_question",
     "pending_user_requirement_question",
     "pending_user_requirement_question_id",
     "question_ordinal_in_session",
+    "shows_instance_token",
 ]

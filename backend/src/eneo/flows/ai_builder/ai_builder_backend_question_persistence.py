@@ -56,9 +56,17 @@ async def persist_backend_question(
     follow-up response changes derived slots, so skipping the refresh
     would leave the persisted state stale relative to the persisted
     conversation.
+
+    Each persisted question is a new showing, so it gets its own instance
+    token here, the one place a question is both persisted and emitted: the
+    event and the stored payload carry the same token, and answers are
+    checked against the stored one.
     """
+    question_data = question.question_data.model_copy(
+        update={"instance_token": uuid4()}
+    )
     tool_call_id = f"discovery_{uuid4().hex[:12]}"
-    question_metadata = metadata_for_assistant_question(question.question_data)
+    question_metadata = metadata_for_assistant_question(question_data)
     metadata = {
         **(assistant_metadata or {}),
         **(question_metadata or {}),
@@ -66,7 +74,7 @@ async def persist_backend_question(
     tool_call = make_persisted_assistant_tool_call(
         tool_call_id=tool_call_id,
         tool_name=ASK_STRUCTURED_QUESTION_TOOL_NAME,
-        arguments=_persisted_question_arguments(question.question_data),
+        arguments=_persisted_question_arguments(question_data),
     )
 
     conversation.append(
@@ -95,7 +103,7 @@ async def persist_backend_question(
     return BackendQuestionPersistenceResult(
         events=(
             build_text_event(question.assistant_text),
-            build_question_event(question.question_data),
+            build_question_event(question_data),
         ),
         new_planning_state_version=new_version,
     )

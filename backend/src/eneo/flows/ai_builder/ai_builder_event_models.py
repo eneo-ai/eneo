@@ -147,6 +147,19 @@ class StructuredQuestionPayload(BaseModel):
     # behind it: the schema-direction and runtime-field questions, and every
     # question asked by an owner that does not rank the interview.
     questions_planned_remaining: int | None = Field(default=None, ge=0)
+    # This one showing of the question, minted when it is persisted and shown,
+    # and never recomputed. An answer names it back, so an answer to a question
+    # the user is no longer looking at is refused rather than applied to the
+    # one that replaced it. Null on questions shown before the token existed:
+    # answers to those are still judged by the older rules.
+    instance_token: UUID | None = Field(
+        default=None,
+        description=(
+            "This showing of the question, minted when it was shown. Send it "
+            "back as instance_token with the answer. Null on a question shown "
+            "before tokens existed."
+        ),
+    )
 
     @model_validator(mode="after")
     def _named_options_are_offered_and_agree(self) -> "StructuredQuestionPayload":
@@ -540,6 +553,20 @@ class RequirementsSummaryPayload(RequirementsDisclosureContent):
     runtime_input_fields: list[RuntimeInputFieldPayload] = Field(
         default_factory=list[RuntimeInputFieldPayload],
         exclude_if=_runtime_input_fields_are_empty,
+    )
+    # This one showing of the card, minted when it is persisted and shown. A
+    # confirmation, an edit or a reopen names it back, and one naming another
+    # showing is refused. Outside the hashed content: the same disclosure shown
+    # twice is the same requirements version but two different showings. Null
+    # on cards shown before the token existed.
+    instance_token: UUID | None = Field(
+        default=None,
+        description=(
+            "This showing of the summary, minted when it was shown and outside "
+            "requirements_version. Send it back as instance_token with a "
+            "confirmation, an edit or a reopen. Null on a summary shown before "
+            "tokens existed."
+        ),
     )
 
 

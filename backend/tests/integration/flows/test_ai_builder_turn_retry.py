@@ -505,6 +505,7 @@ async def _progress_session_to_plan(
                 "kind": "requirements_confirmation",
                 "requirements_confirmed": True,
                 "requirements_version": requirements_data["requirements_version"],
+                "instance_token": requirements_data.get("instance_token"),
                 "ui_language": "sv",
             }
             continue
@@ -536,6 +537,7 @@ async def _progress_session_to_plan(
             "question_id": question_id,
             "selected_option_ids": [selected_option_id],
             "selected_values": [selected_option_id],
+            "instance_token": question_data.get("instance_token"),
             "ui_language": "sv",
         }
 

@@ -14,7 +14,11 @@ function scopeKey(context: AIBuilderEditContext): string {
 import { m } from "$lib/paraglide/messages";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
 import type { Eneo } from "@eneo/eneo-js";
-import type { StructuredQuestionAnswerMetadata } from "./structuredQuestionAnswer";
+import {
+  resendsAsNewTurn,
+  type RequirementsSummaryShowing,
+  type StructuredQuestionAnswerMetadata
+} from "./structuredQuestionAnswer";
 import {
   FlowAIBuilderDriver,
   type AIBuilderClientTransport,
@@ -651,7 +655,7 @@ export class FlowAIBuilderService {
   failureRecoveryCapabilities: FailureRecoveryCapabilities = $derived({
     replay: this.turnRecoveryState,
     canResend:
-      this.latestTurn?.retry_request != null &&
+      resendsAsNewTurn(this.latestTurn?.retry_request) &&
       (this.latestTurnState === "committed" || this.latestTurnState === null),
     canStartNewTurn:
       this.#canStartNewTurn &&
@@ -697,15 +701,11 @@ export class FlowAIBuilderService {
   }
 
   async editNamedContentFields(
-    requirementsVersion: string,
+    summary: RequirementsSummaryShowing,
     fieldNames: string[],
     addedFieldPlacements?: Record<string, string>
   ): Promise<void> {
-    await this.#driver.editNamedContentFields(
-      requirementsVersion,
-      fieldNames,
-      addedFieldPlacements
-    );
+    await this.#driver.editNamedContentFields(summary, fieldNames, addedFieldPlacements);
   }
 
   async changeRequirements(feedback?: string, topic?: string | null): Promise<void> {

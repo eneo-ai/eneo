@@ -45,7 +45,6 @@ _DECODE_CHANNELS = 1
 _DECODE_SAMPLE_WIDTH = 2
 _DECODE_BYTES_PER_SECOND = _DECODE_SAMPLE_RATE * _DECODE_CHANNELS * _DECODE_SAMPLE_WIDTH
 _DECODE_BLOCK_BYTES = 64 * 1024
-_DECODER_TERMINATE_GRACE_SECONDS = 0.5
 
 # Concrete numpy array type used throughout this module.
 # soundfile.blocks() yields float64 arrays; we use this alias for clarity.
@@ -172,27 +171,17 @@ async def _read_decoded_audio(
 
 async def _terminate_decoder(process: asyncio.subprocess.Process) -> None:
     if process.returncode is None:
+        # Its output is discarded, so there is nothing for the decoder to finish.
+        # FFmpeg acts on SIGTERM only at its next status tick (0.5 s) and keeps
+        # decoding while its output is read; with a full pipe it never exits.
         with suppress(ProcessLookupError):
-            process.terminate()
-
-    async def drain_and_wait() -> None:
-        # A paused stdout transport can prevent wait() from completing even
-        # after the child exits. Discard its remaining output in bounded reads.
-        if process.stdout is not None:
-            while await process.stdout.read(_DECODE_BLOCK_BYTES):
-                pass
-        await process.wait()
-
-    waiter = asyncio.create_task(drain_and_wait())
-    try:
-        await asyncio.wait_for(
-            asyncio.shield(waiter), timeout=_DECODER_TERMINATE_GRACE_SECONDS
-        )
-    except TimeoutError:
-        if process.returncode is None:
-            with suppress(ProcessLookupError):
-                process.kill()
-        await waiter
+            process.kill()
+    # A paused stdout transport can prevent wait() from completing even after
+    # the child exits. Discard what it had already written in bounded reads.
+    if process.stdout is not None:
+        while await process.stdout.read(_DECODE_BLOCK_BYTES):
+            pass
+    await process.wait()
 
 
 async def _decode_audio(

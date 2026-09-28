@@ -438,6 +438,123 @@ describe("FlowAIBuilderDriver", () => {
     });
   });
 
+  it("binds a confirmation and a content-field edit to the card showing they answer", async () => {
+    const token = "6f1c2a54-6f0e-4d8e-9d55-0e5f8f3b7a10";
+    const shown = {
+      summary: "Bygg ett dokumentflöde",
+      key_decisions: [],
+      input_description: "PDF-filer",
+      output_description: "DOCX-rapport",
+      requirements_version: "req-persisted",
+      instance_token: token
+    };
+    const sent: unknown[] = [];
+    for (const act of [
+      (driver: ReturnType<typeof makeDriver>["driver"]) => driver.confirmRequirements(),
+      (driver: ReturnType<typeof makeDriver>["driver"]) =>
+        driver.editNamedContentFields(shown, ["beslut"])
+    ]) {
+      const { driver } = makeDriver({
+        streamImpl: vi.fn(async (_path, init, handlers) => {
+          sent.push(init.requestBody["application/json"].question_answer);
+          completeStream(handlers);
+        })
+      });
+      driver.seedState({
+        session: makeSession(),
+        messages: [{ role: "assistant", content: "", requirementsSummary: shown, timestamp: 1 }]
+      });
+      await act(driver);
+    }
+
+    expect(sent).toEqual([
+      expect.objectContaining({
+        kind: "requirements_confirmation",
+        requirements_version: "req-persisted",
+        instance_token: token
+      }),
+      expect.objectContaining({
+        kind: "named_content_fields_edit",
+        requirements_version: "req-persisted",
+        instance_token: token
+      })
+    ]);
+  });
+
+  it("sends words typed under an open question as a reply to that showing", async () => {
+    const token = "6f1c2a54-6f0e-4d8e-9d55-0e5f8f3b7a10";
+    const question = {
+      question_id: "terminal_output",
+      question: "Which output?",
+      selection_mode: "single" as const,
+      allow_custom: false,
+      options: [{ id: "pdf_document", label: "PDF", value: "pdf_document" }]
+    };
+    const sent: unknown[] = [];
+    for (const shown of [{ ...question, instance_token: token }, question]) {
+      // Words, and files alone, each sent while the question is open.
+      for (const [text, fileIds] of [
+        ["A PDF, one per case", undefined],
+        ["", ["file-1"]]
+      ] as const) {
+        const { driver } = makeDriver({
+          streamImpl: vi.fn(async (_path, init, handlers) => {
+            sent.push(init.requestBody["application/json"].question_answer);
+            completeStream(handlers);
+          })
+        });
+        driver.seedState({
+          session: makeSession(),
+          messages: [{ role: "assistant", content: "", question: shown, timestamp: 1 }]
+        });
+        await driver.sendMessage(text, undefined, fileIds ? [...fileIds] : undefined);
+      }
+    }
+
+    // Files alone are bound the same way as words. A question from before
+    // tokens carries none to name; its reply is sent as it always was.
+    const reply = { kind: "question_reply", question_id: "terminal_output", instance_token: token };
+    expect(sent).toEqual([reply, reply, undefined, undefined]);
+  });
+
+  it("declares a review turn sent under an open question a request of its own", async () => {
+    const token = "6f1c2a54-6f0e-4d8e-9d55-0e5f8f3b7a10";
+    const sent: unknown[] = [];
+    const { driver } = makeDriver({
+      streamImpl: vi.fn(async (_path, init, handlers) => {
+        sent.push(init.requestBody["application/json"].question_answer);
+        completeStream(handlers);
+      })
+    });
+    driver.seedState({
+      session: makeSession(),
+      messages: [
+        {
+          role: "assistant",
+          content: "",
+          question: {
+            question_id: "terminal_output",
+            question: "Which output?",
+            selection_mode: "single",
+            allow_custom: false,
+            options: [{ id: "pdf_document", label: "PDF", value: "pdf_document" }],
+            instance_token: token
+          },
+          timestamp: 1
+        }
+      ]
+    });
+
+    await driver.sendMessage("Fix the finding", undefined, undefined, null, {
+      kind: "flow_review",
+      flow_version: 4,
+      definition_checksum: "sum-4",
+      finding_ids: ["aaaaaaaaaaaaaaaa"]
+    });
+
+    expect(sent).toEqual([{ kind: "new_request" }]);
+  });
+
   it("initializes create mode by waiting for an explicit choice when a matching draft exists", async () => {
     const draft = makeDraft({ target_kind: "create", flow_id: null });
     const fetch = vi.fn().mockResolvedValueOnce({ sessions: [draft] });
@@ -1735,6 +1852,35 @@ describe("FlowAIBuilderDriver", () => {
     const body = stream.mock.calls[0]?.[1].requestBody["application/json"];
     // The user's current choice, exactly as a fresh message would carry it.
     expect(body).toMatchObject({ model_id: "new-model", reasoning_effort: "high" });
+  });
+
+  it("never resends a committed reply to a question as a new turn", async () => {
+    // The reply's own recorded words closed the question it named, so the
+    // same reply again could only be refused; recovery offers rewording.
+    const session = makeRecoverableSession("failed_before_provider");
+    const latestTurn = session.latest_turn;
+    if (!latestTurn?.retry_request) throw new Error("Expected retained latest turn");
+    const { driver, stream } = makeDriver();
+    driver.seedState({
+      session: {
+        ...session,
+        latest_turn: {
+          ...latestTurn,
+          state: "committed",
+          retry_request: {
+            ...latestTurn.retry_request,
+            question_answer: {
+              kind: "question_reply",
+              question_id: "terminal_output",
+              instance_token: "6f1c2a54-6f0e-4d8e-9d55-0e5f8f3b7a10"
+            }
+          }
+        }
+      }
+    });
+
+    expect(await driver.resendLatestTurn()).toBe("not_started");
+    expect(stream).not.toHaveBeenCalled();
   });
 
   it("refuses to resend while an unknown outcome fences the session", async () => {

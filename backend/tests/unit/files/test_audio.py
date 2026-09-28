@@ -199,7 +199,7 @@ async def test_decode_keeps_duration_and_cleans_up_after_consumer_cancellation(
 
 @pytest.mark.parametrize("emit_header", [False, True])
 async def test_cancel_stalled_decoder_kills_and_reaps_before_file_cleanup(
-    recording, decoder_process, emit_header
+    recording, decoder_process, emit_header, monkeypatch
 ):
     asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=1))
     source, _, temp_dir = recording
@@ -214,6 +214,16 @@ async def test_cancel_stalled_decoder_kills_and_reaps_before_file_cleanup(
         )
         + "time.sleep(60)\n"
     )
+    # Hold the decoder cleanup in its wait(), so the second cancellation lands
+    # while cleanup is still in flight.
+    reap = asyncio.Event()
+    wait = asyncio.subprocess.Process.wait
+
+    async def held_wait(process):
+        await reap.wait()
+        return await wait(process)
+
+    monkeypatch.setattr(asyncio.subprocess.Process, "wait", held_wait)
 
     async def consume():
         async with audio.to_wav(str(source)):
@@ -230,6 +240,10 @@ async def test_cancel_stalled_decoder_kills_and_reaps_before_file_cleanup(
         await asyncio.sleep(0.05)
         assert list(temp_dir.iterdir())
         task.cancel()
+        await asyncio.sleep(0.05)
+        assert not task.done()
+        assert list(temp_dir.iterdir())
+        reap.set()
         with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(asyncio.shield(task), timeout=2)
         assert time.monotonic() - started < 2
@@ -238,6 +252,7 @@ async def test_cancel_stalled_decoder_kills_and_reaps_before_file_cleanup(
             os.kill(processes[0].pid, 0)
         assert list(temp_dir.iterdir()) == []
     finally:
+        reap.set()
         for process in processes:
             if process.poll() is None:
                 process.kill()
@@ -296,7 +311,7 @@ async def test_cancel_decoder_does_not_wait_for_unrelated_executor_work(
             await asyncio.wait_for(asyncio.shield(task), timeout=0.5)
         assert not unrelated.done()
         assert not release.is_set()
-        assert processes[0].returncode == -signal.SIGTERM
+        assert processes[0].returncode == -signal.SIGKILL
         with pytest.raises(ProcessLookupError):
             os.kill(processes[0].pid, 0)
         assert list(temp_dir.iterdir()) == []
@@ -370,7 +385,9 @@ async def test_compressed_audio_stops_before_eof_with_bounded_reads(
 
     assert error.value.limit == "decoded_bytes"
     assert 0 < sum(written) <= 65536
-    assert sum(bytes_read) < 600 * 16000 * 2
+    # Past the limit only output already buffered is read (pipe and reader buffers,
+    # well under 1 MiB), never the rest of the 19.2 MB decode.
+    assert sum(bytes_read) < 1024 * 1024
     assert read_sizes and max(read_sizes) <= 65536
     assert len(processes) == 1
     assert processes[0].returncode is not None

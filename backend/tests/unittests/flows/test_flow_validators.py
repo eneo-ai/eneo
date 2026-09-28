@@ -2608,3 +2608,244 @@ def test_validate_steps_accepts_reference_repair_fixtures(
         ],
         require_complete_template_fill_config=publish_strict,
     )
+
+
+_SECTION_RECORDS = {
+    "type": "object",
+    "properties": {
+        "records": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"note": {"type": "string"}},
+                "required": ["note"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["records"],
+    "additionalProperties": False,
+}
+
+
+def _sectioned(step_order: int, **updates) -> FlowStep:
+    return _step(
+        step_order,
+        input_config={"text_processing": {"mode": "process_each_section"}},
+        output_contract=_SECTION_RECORDS,
+        **updates,
+    )
+
+
+def _transcript(step_order: int = 1) -> FlowStep:
+    return _step(
+        step_order,
+        input_type="audio",
+        output_mode="transcribe_only",
+        output_type="text",
+    )
+
+
+def _speaker_mapping(step_order: int) -> FlowStep:
+    return _step(
+        step_order,
+        output_mode="speaker_mapping",
+        output_config={"speaker_mapping": {"infer_names": True}},
+        review_policy=FlowStepReviewPolicy(mode=FlowStepReviewMode.EDIT),
+    )
+
+
+def _question(template: str) -> dict:
+    return {"input_bindings": {"question": template}}
+
+
+@pytest.mark.parametrize(
+    ("steps", "field", "reference", "source_step_order"),
+    [
+        pytest.param(
+            [_step(1), _sectioned(2, **_question("{{ step_1.output.text }}"))],
+            "input_bindings.question",
+            "step_1.output.text",
+            1,
+            id="json-step-text",
+        ),
+        pytest.param(
+            [_step(1), _sectioned(2)],
+            "input_source",
+            "previous_step",
+            1,
+            id="implicit-previous-json-step",
+        ),
+        pytest.param(
+            [_step(1), _sectioned(2, **_question("{{ föregående_steg }}"))],
+            "input_bindings.question",
+            "föregående_steg",
+            1,
+            id="previous-step-alias",
+        ),
+        pytest.param(
+            [
+                _step(1),
+                _sectioned(
+                    2,
+                    input_bindings={
+                        "source_refs": [{"step_ref": "step_1", "output": "text"}]
+                    },
+                ),
+            ],
+            "input_bindings.source_refs[0].step_ref",
+            "step_1",
+            1,
+            id="source-ref",
+        ),
+        pytest.param(
+            [
+                _transcript(1),
+                _speaker_mapping(2),
+                _sectioned(3, **_question("{{ step_2.output.text }}")),
+            ],
+            "input_bindings.question",
+            "step_2.output.text",
+            2,
+            id="speaker-mapped-transcript",
+        ),
+    ],
+)
+def test_publish_refuses_section_step_reading_structured_output(
+    steps: list[FlowStep], field: str, reference: str, source_step_order: int
+) -> None:
+    section_step_order = steps[-1].step_order
+    exc = _assert_validate_steps_rejects(
+        steps,
+        expected_type=FlowStepValidationError,
+        match=f"step {source_step_order}",
+        code=FlowGraphIssueCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
+        step_order=section_step_order,
+        metadata_json=_audio_metadata(),
+        require_complete_template_fill_config=True,
+    )
+    assert reference in str(exc)
+    assert exc.context is not None
+    assert exc.context["field"] == field
+    assert exc.context["reference"] == reference
+    assert exc.context["source_step_order"] == source_step_order
+
+
+@pytest.mark.parametrize(
+    ("prompt", "reference"),
+    [
+        pytest.param(
+            "Notera {{ step_1.output.text }}", "step_1.output.text", id="step"
+        ),
+        pytest.param("Notera {{ föregående_steg }}", "föregående_steg", id="alias"),
+    ],
+)
+def test_publish_refuses_section_step_whose_prompt_reads_structured_output(
+    prompt: str, reference: str
+) -> None:
+    # The question reads text; the assistant prompt selects the JSON step too.
+    steps = [
+        _step(1),
+        _sectioned(2, **_question("{{ flow_input.text }}")),
+    ]
+
+    with pytest.raises(FlowStepValidationError) as caught:
+        validate_steps(
+            steps,
+            metadata_json=_audio_metadata(),
+            require_complete_template_fill_config=True,
+            prompt_templates={2: prompt},
+        )
+
+    assert caught.value.code == (
+        FlowGraphIssueCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value
+    )
+    assert caught.value.step_order == 2
+    assert caught.value.context is not None
+    assert caught.value.context["field"] == "prompt"
+    assert caught.value.context["reference"] == reference
+    assert caught.value.context["source_step_order"] == 1
+
+
+def test_publish_accepts_section_step_whose_prompt_reads_text() -> None:
+    validate_steps(
+        [
+            _step(1),
+            _step(2, output_type="text"),
+            _sectioned(3, **_question("{{ step_2.output.text }}")),
+        ],
+        metadata_json=_audio_metadata(),
+        require_complete_template_fill_config=True,
+        prompt_templates={
+            1: "{{ flow_input.text }}",
+            3: "Kontext: {{ föregående_steg }}",
+        },
+    )
+
+
+def test_draft_save_keeps_section_step_reading_structured_output() -> None:
+    # Reference-path checks are publish rules; drafts stay saveable mid-edit.
+    validate_steps([_step(1), _sectioned(2, **_question("{{ step_1.output.text }}"))])
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        pytest.param(
+            [
+                _step(1, output_type="text"),
+                _sectioned(2, **_question("{{ step_1.output.text }}")),
+            ],
+            id="section-reads-text-step",
+        ),
+        pytest.param(
+            [_step(1, output_type="text"), _sectioned(2)],
+            id="section-reads-implicit-text-step",
+        ),
+        pytest.param(
+            [_transcript(1), _sectioned(2, **_question("{{ step_1.output.text }}"))],
+            id="section-reads-transcript",
+        ),
+        pytest.param(
+            [
+                _step(1),
+                _step(2, output_type="text"),
+                _sectioned(3, **_question("{{ step_2.output.text }}")),
+            ],
+            id="section-reads-text-after-json-step",
+        ),
+        pytest.param(
+            [
+                _step(
+                    1,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"title": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    2,
+                    output_type="text",
+                    **_question(
+                        "{{ step_1.output.structured.title }} {{ step_1.output.text }}"
+                    ),
+                ),
+            ],
+            id="json-step-field-and-text",
+        ),
+        pytest.param(
+            [
+                _step(1, output_type="text"),
+                _sectioned(2),
+                _step(3, **_question("{{ step_2.output.structured.records }}")),
+            ],
+            id="section-output-records",
+        ),
+    ],
+)
+def test_publish_accepts_reads_the_source_step_produces(steps: list[FlowStep]) -> None:
+    validate_steps(
+        steps,
+        metadata_json=_audio_metadata(),
+        require_complete_template_fill_config=True,
+    )

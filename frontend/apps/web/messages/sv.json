@@ -6424,6 +6424,8 @@
   "ai_builder_requirements_field_add_placeholder": "Vad ska finnas med?",
   "ai_builder_requirements_field_add_confirm": "Lägg till",
   "ai_builder_content_field_edit_stale": "Kraven hann ändras medan du redigerade. Läs sammanfattningen igen och gör ändringen där.",
+  "ai_builder_decision_stale_title": "Det du svarade på har ändrats",
+  "ai_builder_requirements_summary_stale": "Sammanfattningen har ersatts av en nyare. Läs den igen innan du bekräftar eller ändrar den.",
   "ai_builder_content_field_edit_invalid": "Det namnet går inte att använda. Skriv om det och försök igen.",
   "ai_builder_content_field_edit_invalid_named": "”{field}” går inte att använda som fält. Skriv om namnet och försök igen.",
   "module_admin_title": "Moduler",

@@ -8459,6 +8459,52 @@ def test_configured_answer_uses_exact_option_id_and_never_falls_back() -> None:
         )
 
 
+def test_configured_answers_echo_the_showing_they_answer() -> None:
+    # The server refuses an answer that does not name the showing of a
+    # question or card that carries a token, so the harness echoes it the way
+    # the web client does, and sends none for a showing from before tokens.
+    harness = _battle_harness()
+    token = "6f1c2a54-6f0e-4d8e-9d55-0e5f8f3b7a10"
+    question = {
+        "question_id": "primary_runtime_input",
+        "allow_custom": True,
+        "instance_token": token,
+        "options": [{"id": "documents", "value": "documents", "label": "Documents"}],
+    }
+
+    for configured in (
+        {"selected_option_id": "documents"},
+        {"custom_value": "Something else"},
+    ):
+        answer = harness._configured_question_answer(
+            question=question,
+            configured_answers={"primary_runtime_input": configured},
+            answer_sources={"primary_runtime_input": "profile"},
+        )
+        assert answer["question_answer"]["instance_token"] == token
+        tokenless = harness._configured_question_answer(
+            question={**question, "instance_token": None},
+            configured_answers={"primary_runtime_input": configured},
+            answer_sources={"primary_runtime_input": "profile"},
+        )
+        assert "instance_token" not in tokenless["question_answer"]
+
+    confirmation = harness._requirements_confirmation_payload(
+        requirements_summary={
+            "requirements_version": "a" * 64,
+            "instance_token": token,
+        },
+        ui_language="sv",
+    )
+    assert confirmation == {
+        "kind": "requirements_confirmation",
+        "requirements_confirmed": True,
+        "ui_language": "sv",
+        "requirements_version": "a" * 64,
+        "instance_token": token,
+    }
+
+
 def test_configured_runtime_input_fields_require_collection_question() -> None:
     harness = _battle_harness()
     answer_config = {

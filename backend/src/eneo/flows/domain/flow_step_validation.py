@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal
@@ -105,10 +105,15 @@ class FlowStepValidationView:
     input_config: FlowPersistedJsonObject | None
     output_config: FlowPersistedJsonObject | None
     review_policy: FlowStepReviewPolicy | None
+    # The step assistant's prompt, a second input channel. Only publish
+    # supplies it (a flow step holds its assistant by id).
+    prompt_template: str | None = None
 
 
 def flow_step_validation_view_from_flow_step(
     step: FlowStep,
+    *,
+    prompt_template: str | None = None,
 ) -> FlowStepValidationView:
     return FlowStepValidationView(
         step_order=step.step_order,
@@ -124,10 +129,19 @@ def flow_step_validation_view_from_flow_step(
         input_config=step.input_config,
         output_config=step.output_config,
         review_policy=step.review_policy,
+        prompt_template=prompt_template,
     )
 
 
 def flow_step_validation_views_from_flow_steps(
     steps: Sequence[FlowStep],
+    *,
+    prompt_templates: Mapping[int, str] | None = None,
 ) -> list[FlowStepValidationView]:
-    return [flow_step_validation_view_from_flow_step(step) for step in steps]
+    return [
+        flow_step_validation_view_from_flow_step(
+            step,
+            prompt_template=(prompt_templates or {}).get(step.step_order),
+        )
+        for step in steps
+    ]

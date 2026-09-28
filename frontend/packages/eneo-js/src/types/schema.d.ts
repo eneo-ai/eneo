@@ -15467,6 +15467,11 @@ export interface components {
      */
     DelegatedQuestionAnswerRequest: {
       /**
+       * Instance Token
+       * @description The instance_token of the question or requirements summary this answer was given to, sent back exactly as received. An answer naming a showing that is no longer the one on offer is refused with reason stale_decision, and one naming none when the showing carries a token with reason client_outdated. Omit it only for a question or summary that carries no token. Never stored with the answer.
+       */
+      instance_token?: string | null;
+      /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
@@ -28404,6 +28409,11 @@ export interface components {
       /** Field Names */
       field_names: string[];
       /**
+       * Instance Token
+       * @description The instance_token of the question or requirements summary this answer was given to, sent back exactly as received. An answer naming a showing that is no longer the one on offer is refused with reason stale_decision, and one naming none when the showing carries a token with reason client_outdated. Omit it only for a question or summary that carries no token. Never stored with the answer.
+       */
+      instance_token?: string | null;
+      /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
@@ -28416,6 +28426,26 @@ export interface components {
        * @constant
        */
       schema_version?: 1;
+      /** Ui Language */
+      ui_language?: string | null;
+    };
+    /**
+     * NewRequestDeclaration
+     * @description The user's words, sent past an open question as a request of their own.
+     *
+     *     While a question with an instance token is open, text or files have to
+     *     say what they are: a `question_reply` to that showing, or this. A turn
+     *     that says neither is refused rather than guessed at. Accepted only with
+     *     no question open or with one that carries a token: a question shown
+     *     before tokens has no record that could keep the declaration apart from
+     *     an answer.
+     */
+    NewRequestDeclaration: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "new_request";
       /** Ui Language */
       ui_language?: string | null;
     };
@@ -30947,6 +30977,32 @@ export interface components {
        */
       session_id: string;
     };
+    /**
+     * QuestionReplyRequest
+     * @description The user's own words, typed while a question was open, as a reply to it.
+     *
+     *     Text is only read as a reply to a question when it names the showing it
+     *     was typed under. Text that names none is a request of its own: once
+     *     questions carry tokens, which question a sentence answers is never
+     *     guessed from what happens to be open when it arrives.
+     */
+    QuestionReplyRequest: {
+      /**
+       * Instance Token
+       * Format: uuid
+       * @description The instance_token of the open question this text was typed under. A reply naming a showing that is no longer the one on offer is refused with reason stale_decision. Text for a question that carries no token is sent without a question_answer.
+       */
+      instance_token: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "question_reply";
+      /** Question Id */
+      question_id: string;
+      /** Ui Language */
+      ui_language?: string | null;
+    };
     /** ReasoningPolicyInput */
     ReasoningPolicyInput: {
       /**
@@ -30968,6 +31024,11 @@ export interface components {
     };
     /** ReopenQuestionRequest */
     ReopenQuestionRequest: {
+      /**
+       * Instance Token
+       * @description The instance_token of the question or requirements summary this answer was given to, sent back exactly as received. An answer naming a showing that is no longer the one on offer is refused with reason stale_decision, and one naming none when the showing carries a token with reason client_outdated. Omit it only for a question or summary that carries no token. Never stored with the answer.
+       */
+      instance_token?: string | null;
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
@@ -31050,6 +31111,11 @@ export interface components {
     /** RequirementsConfirmationMetadata */
     RequirementsConfirmationMetadata: {
       /**
+       * Instance Token
+       * @description The instance_token of the question or requirements summary this answer was given to, sent back exactly as received. An answer naming a showing that is no longer the one on offer is refused with reason stale_decision, and one naming none when the showing carries a token with reason client_outdated. Omit it only for a question or summary that carries no token. Never stored with the answer.
+       */
+      instance_token?: string | null;
+      /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
@@ -31078,6 +31144,11 @@ export interface components {
       attachment_rows?: components["schemas"]["AttachmentRowPayload"][];
       /** Input Description */
       input_description: string;
+      /**
+       * Instance Token
+       * @description This showing of the summary, minted when it was shown and outside requirements_version. Send it back as instance_token with a confirmation, an edit or a reopen. Null on a summary shown before tokens existed.
+       */
+      instance_token?: string | null;
       /** Key Decisions */
       key_decisions: components["schemas"]["KeyDecisionPayload"][];
       /** Manual Setup Notes */
@@ -31999,6 +32070,8 @@ export interface components {
         | (
             | components["schemas"]["StructuredQuestionAnswerRequest"]
             | components["schemas"]["DelegatedQuestionAnswerRequest"]
+            | components["schemas"]["QuestionReplyRequest"]
+            | components["schemas"]["NewRequestDeclaration"]
             | components["schemas"]["RequirementsConfirmationMetadata"]
             | components["schemas"]["ReopenQuestionRequest"]
             | components["schemas"]["NamedContentFieldsEditRequest"]
@@ -34104,6 +34177,11 @@ export interface components {
       /** Input Fields */
       input_fields?: components["schemas"]["RuntimeMetadataFieldAnswer"][] | null;
       /**
+       * Instance Token
+       * @description The instance_token of the question or requirements summary this answer was given to, sent back exactly as received. An answer naming a showing that is no longer the one on offer is refused with reason stale_decision, and one naming none when the showing carries a token with reason client_outdated. Omit it only for a question or summary that carries no token. Never stored with the answer.
+       */
+      instance_token?: string | null;
+      /**
        * Kind
        * @default structured_question_answer
        * @constant
@@ -34133,6 +34211,11 @@ export interface components {
       custom_value?: string | null;
       /** Input Fields */
       input_fields?: components["schemas"]["RuntimeMetadataFieldAnswer"][] | null;
+      /**
+       * Instance Token
+       * @description The instance_token of the question or requirements summary this answer was given to, sent back exactly as received. An answer naming a showing that is no longer the one on offer is refused with reason stale_decision, and one naming none when the showing carries a token with reason client_outdated. Omit it only for a question or summary that carries no token. Never stored with the answer.
+       */
+      instance_token?: string | null;
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
@@ -34175,6 +34258,11 @@ export interface components {
        * @default false
        */
       input_field_collection?: boolean;
+      /**
+       * Instance Token
+       * @description This showing of the question, minted when it was shown. Send it back as instance_token with the answer. Null on a question shown before tokens existed.
+       */
+      instance_token?: string | null;
       /** Options */
       options: components["schemas"]["StructuredQuestionOptionPayload"][];
       /** Question */

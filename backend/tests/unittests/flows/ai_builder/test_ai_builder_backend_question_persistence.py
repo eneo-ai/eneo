@@ -13,7 +13,10 @@ from eneo.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from eneo.flows.ai_builder.ai_builder_event_models import StructuredQuestionPayload
+from eneo.flows.ai_builder.ai_builder_event_models import (
+    AIBuilderQuestionEvent,
+    StructuredQuestionPayload,
+)
 from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
@@ -118,7 +121,14 @@ async def test_persist_backend_question_commits_turn_with_flow_and_lease() -> No
     assert assistant_msg.content == "Vilka fält behöver vi?"
     assert assistant_msg.tool_calls is not None
     assert assistant_msg.tool_calls[0]["name"] == "ask_structured_question"
-    assert assistant_msg.tool_calls[0]["arguments"] == _expected_question_arguments()
+    arguments = dict(assistant_msg.tool_calls[0]["arguments"])
+    # Each showing carries the token minted for it, the same one its event
+    # carries; the rest of the payload is persisted exactly as dispatched.
+    shown_token = arguments.pop("instance_token")
+    assert arguments == _expected_question_arguments()
+    question_event = result.events[1]
+    assert isinstance(question_event, AIBuilderQuestionEvent)
+    assert shown_token == str(question_event.data.instance_token)
     assert tool_msg.role == "tool"
     assert tool_msg.tool_call_id == assistant_msg.tool_calls[0]["id"]
     repo.commit_turn.assert_awaited_once()
@@ -154,7 +164,9 @@ async def test_persist_backend_question_preserves_explicit_id_and_confirm_flag()
 
     assistant_msg = conversation[1]
     assert assistant_msg.tool_calls is not None
-    assert assistant_msg.tool_calls[0]["arguments"] == expected_arguments
+    arguments = dict(assistant_msg.tool_calls[0]["arguments"])
+    assert arguments.pop("instance_token")
+    assert arguments == expected_arguments
 
 
 @pytest.mark.asyncio

@@ -2247,9 +2247,16 @@ def _make_answered_card_conversation(
 def _card_confirmation(conversation: list[ConversationMessage]) -> dict[str, object]:
     summary = requirements_summary_from_metadata(conversation[-1].metadata)
     assert summary is not None
+    # A card the server showed carries its showing's token, and the client
+    # confirms by echoing it.
     return {
         "requirements_confirmed": True,
         "requirements_version": summary.requirements_version,
+        **(
+            {"instance_token": str(summary.instance_token)}
+            if summary.instance_token is not None
+            else {}
+        ),
     }
 
 

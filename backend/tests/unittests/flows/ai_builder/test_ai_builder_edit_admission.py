@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import uuid4
 
 import jsonschema
@@ -17,6 +18,9 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     validate_review_edit_proposal,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
+from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
+    EditOperationPermissions,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     AddStep,
     ModifyExistingStep,
@@ -357,3 +361,130 @@ def test_a_scoped_strict_payload_lowers_to_what_the_findings_allow() -> None:
         )
         is None
     )
+
+
+# Every value the edit tool schema admits as null must be admitted by the
+# canonical proposal too: a schema-following provider otherwise gets a parse
+# error for doing what the schema said. The walk covers each scope's schema;
+# a recursive field tree is checked at its first level.
+def _edit_schemas() -> dict[str, dict[str, Any]]:
+    steps = [_step(1), _step(2)]
+    scope = ReviewEditScope(
+        step_refs=frozenset({"existing_step_2"}),
+        removable_step_refs=frozenset({"existing_step_2"}),
+        may_add=True,
+    )
+    permissions = EditOperationPermissions(
+        step_refs=frozenset({"existing_step_2"}),
+        removable_step_refs=frozenset(),
+        may_add=False,
+    )
+    common: dict[str, Any] = {
+        "resource_catalog": _catalog(),
+        "tool_name": PROPOSE_FLOW_TOOL_NAME,
+    }
+    return {
+        "flow": build_edit_flow_tool_schema(steps, **common),
+        "review": build_edit_flow_tool_schema(steps, review_scope=scope, **common),
+        "step": build_edit_flow_tool_schema(steps, permissions=permissions, **common),
+    }
+
+
+def _types(node: dict[str, Any]) -> list[object]:
+    kind = node.get("type")
+    return list(kind) if isinstance(kind, list) else [kind]
+
+
+def _nullable_paths(
+    node: dict[str, Any], path: tuple[object, ...] = ()
+) -> list[tuple[object, ...]]:
+    found: list[tuple[object, ...]] = [path] if "null" in _types(node) else []
+    for name, child in node.get("properties", {}).items():
+        if name not in path:
+            found += _nullable_paths(child, (*path, name))
+    if isinstance(node.get("items"), dict):
+        found += _nullable_paths(node["items"], (*path, "[]"))
+    for index, branch in enumerate(node.get("anyOf", [])):
+        found += _nullable_paths(branch, (*path, index))
+    return found
+
+
+def _instance(node: dict[str, Any], target: tuple[object, ...] | None) -> object:
+    """Null at the target, the smallest valid value elsewhere (null if allowed)."""
+
+    if target == ():
+        return None
+    head, rest = (target[0], target[1:]) if target else (None, None)
+    if isinstance(head, int):
+        return _instance(node["anyOf"][head], rest)
+    types = _types(node)
+    if head is None and "null" in types:
+        return None
+    if "object" in types:
+        return {
+            name: _instance(child, rest if name == head else None)
+            for name, child in node["properties"].items()
+        }
+    if "array" in types:
+        return [_instance(node["items"], rest)] if head == "[]" else []
+    if "enum" in node:
+        return next(value for value in node["enum"] if value is not None)
+    if "boolean" in types:
+        return node.get("default", False)
+    if "integer" in types:
+        return node.get("minimum", 1)
+    return "x"
+
+
+@pytest.mark.parametrize(
+    ("scope", "path"),
+    [
+        (scope, path)
+        for scope, schema in _edit_schemas().items()
+        for path in _nullable_paths(
+            build_native_strict_tool_schema(schema)["function"]["parameters"]  # type: ignore[arg-type]
+        )
+    ],
+    ids=lambda value: value if isinstance(value, str) else ".".join(map(str, value)),
+)
+def test_every_null_the_edit_schema_admits_passes_admission(
+    scope: str, path: tuple[object, ...]
+) -> None:
+    schema = _edit_schemas()[scope]
+    strict = build_native_strict_tool_schema(schema)  # type: ignore[arg-type]
+    arguments = _instance(strict["function"]["parameters"], path)
+    assert isinstance(arguments, dict)
+    jsonschema.validate(arguments, strict["function"]["parameters"])
+    validate_propose_flow_tool_arguments(
+        arguments=arguments,  # type: ignore[arg-type]
+        tool_schema=schema,  # type: ignore[arg-type]
+    )
+
+    OrderedEditProposal.model_validate(lower_edit_tool_arguments(arguments))  # type: ignore[arg-type]
+
+
+def test_a_schema_following_form_field_passes_admission() -> None:
+    # A strict provider must send every property; a field with no choices
+    # sends an empty list, and null is never on the wire.
+    schema = _edit_schema(1)
+    strict = build_native_strict_tool_schema(schema)  # type: ignore[arg-type]
+    field = {"name": "case_id", "type": "text", "label": "Ärende", "required": True}
+    arguments = _strict_arguments(
+        _strict_modify("existing_step_1"), form_fields=[{**field, "options": []}]
+    )
+    jsonschema.validate(arguments, strict["function"]["parameters"])
+    with pytest.raises(ProposalToolArgumentsError, match="options"):
+        validate_propose_flow_tool_arguments(
+            arguments=_strict_arguments(
+                _strict_modify("existing_step_1"),
+                form_fields=[{**field, "options": None}],
+            ),  # type: ignore[arg-type]
+            tool_schema=schema,  # type: ignore[arg-type]
+        )
+
+    proposal = OrderedEditProposal.model_validate(lower_edit_tool_arguments(arguments))
+
+    assert proposal.form_fields is not None
+    assert [(f.variable_name, f.options) for f in proposal.form_fields] == [
+        ("case_id", [])
+    ]

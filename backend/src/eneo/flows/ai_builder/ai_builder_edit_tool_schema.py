@@ -314,10 +314,7 @@ def _build_form_field_spec_schema() -> dict[str, Any]:
             },
             "label": {"type": "string", "minLength": 1},
             "required": {"type": "boolean", "default": False},
-            "options": {
-                "type": ["array", "null"],
-                "items": {"type": "string"},
-            },
+            "options": {"type": "array", "items": {"type": "string"}},
         },
     }
 

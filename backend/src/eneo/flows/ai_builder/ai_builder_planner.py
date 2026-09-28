@@ -28,6 +28,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     unsettled_user_text,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
+    BuilderTurnState,
     ConversationMessage,
     SessionStatus,
     TargetKind,
@@ -375,11 +376,25 @@ class AIBuilderPlanner:
         except ValidationError as exc:
             raise_persisted_flow_mcp_plan_error(exc)
             raise
+        # Retrying a turn that never committed resends its own request under
+        # the same turn id; its user message is already recorded but answered
+        # nothing yet.
+        retried = (
+            turn_preflight.baseline.latest_turn_id == client_turn_id
+            and turn_preflight.baseline.latest_turn_state
+            is not BuilderTurnState.COMMITTED
+        )
         prepared_metadata = prepare_user_question_metadata(
             conversation=conversation,
             message=message,
             question_answer=question_answer,
             ui_language=ui_language,
+            retried_turn_message_id=(
+                str(session.latest_turn.user_message_id)
+                if retried and session.latest_turn is not None
+                else None
+            ),
+            sends_files=bool(file_ids),
         )
         # The part of the step this turn is about: what the request named, or,
         # for a turn that answers the Builder, what the turn it answers named -

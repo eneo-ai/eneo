@@ -29,13 +29,20 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderQuestionEvent,
+    AIBuilderRequirementsSummaryEvent,
     AIBuilderStatus,
     StructuredQuestionOptionPayload,
     StructuredQuestionPayload,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
+from eneo.flows.ai_builder.ai_builder_question_state import (
+    pending_user_requirement_question,
+)
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
     build_requirements_disclosure,
+)
+from eneo.flows.ai_builder.ai_builder_requirements_state import (
+    resolve_requirements_state,
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     DeclaredSchemaCandidate,
@@ -62,6 +69,9 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     RefuseArchitectureCommit,
     ReviseArchitecture,
     resolve_turn_control,
+)
+from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
+    prepare_user_question_metadata,
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
@@ -1384,3 +1394,167 @@ async def test_a_classifier_then_ask_turn_persists_the_classifier_call() -> None
     assert [(record.call_kind, record.attempt) for record in read.records] == [
         ("slot_classification", 1)
     ]
+
+
+def _persisted_after(
+    conversation: list[ConversationMessage], repo: AsyncMock
+) -> list[ConversationMessage]:
+    return [*conversation, *repo.commit_turn.await_args.kwargs["new_messages"]]
+
+
+@pytest.mark.asyncio
+async def test_a_shown_question_stores_the_token_its_event_carries() -> None:
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    conversation = [ConversationMessage(role="user", content="Build a flow")]
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(slot_name="primary_runtime_input"),
+            conversation=list(conversation),
+        )
+    )
+
+    question = next(
+        event.data
+        for event in result.events
+        if isinstance(event, AIBuilderQuestionEvent)
+    )
+    assert question.instance_token is not None
+    stored = pending_user_requirement_question(_persisted_after(conversation, repo))
+    assert stored is not None
+    assert stored.instance_token == question.instance_token
+    # The commit moved the planning-state version; the stored token did not
+    # move with it, so an answer naming the shown question still binds.
+    assert result.new_planning_state_version == 5
+    prepared = prepare_user_question_metadata(
+        conversation=_persisted_after(conversation, repo),
+        message="",
+        question_answer={
+            "kind": "structured_question_answer",
+            "question_id": question.question_id,
+            "selected_values": [question.options[0].value],
+            "instance_token": str(question.instance_token),
+        },
+    )
+    assert prepared.metadata is not None
+
+
+@pytest.mark.asyncio
+async def test_every_showing_of_a_question_mints_its_own_token() -> None:
+    tokens: list[UUID | None] = []
+    for _ in range(2):
+        repo = AsyncMock()
+        repo.commit_turn.return_value = 5
+        result = await dispatch_server_decision(
+            _request(
+                repo=repo,
+                decision=AskCanonicalQuestion(slot_name="primary_runtime_input"),
+                conversation=[ConversationMessage(role="user", content="Build")],
+            )
+        )
+        tokens.extend(
+            event.data.instance_token
+            for event in result.events
+            if isinstance(event, AIBuilderQuestionEvent)
+        )
+
+    assert len(tokens) == 2
+    assert None not in tokens
+    assert tokens[0] != tokens[1]
+
+
+@pytest.mark.asyncio
+async def test_showing_the_open_question_again_keeps_its_stored_token() -> None:
+    repo = AsyncMock()
+    token = uuid4()
+    pending = StructuredQuestionPayload(
+        question_id="document_material_scope",
+        question="How many documents can each run receive?",
+        options=[
+            StructuredQuestionOptionPayload(
+                id="single_document_case",
+                label="One document",
+                value="single_document_case",
+            )
+        ],
+        selection_mode="single",
+        allow_custom=False,
+        question_index=2,
+        instance_token=token,
+    )
+    conversation = [
+        ConversationMessage(
+            role="assistant",
+            content=pending.question,
+            metadata={"question_id": pending.question_id, "question_index": 2},
+            tool_calls=[
+                {
+                    "id": "pending-question",
+                    "name": "ask_structured_question",
+                    "arguments": pending.model_dump(mode="json"),
+                }
+            ],
+        ),
+        ConversationMessage(
+            role="user",
+            content="",
+            metadata={
+                "reopen_question": {
+                    "question_id": "document_material_scope",
+                    "requirements_version": "a" * 64,
+                }
+            },
+        ),
+    ]
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(
+                slot_name="document_material_scope",
+                reopen=True,
+            ),
+            conversation=conversation,
+        )
+    )
+
+    assert result.events == (AIBuilderQuestionEvent(data=pending),)
+    repo.commit_turn.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_shown_card_stores_the_token_its_event_carries_outside_its_version() -> (
+    None
+):
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    disclosure = build_requirements_disclosure(_confirmed_state(), ui_language="en")
+    assert disclosure is not None
+    conversation = [ConversationMessage(role="user", content="Build")]
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=ConfirmRequirements(payload=disclosure),
+            conversation=list(conversation),
+        )
+    )
+
+    card = next(
+        event.data
+        for event in result.events
+        if isinstance(event, AIBuilderRequirementsSummaryEvent)
+    )
+    assert card.instance_token is not None
+    assert card.requirements_version == disclosure.requirements_version
+    assert card.model_dump(exclude={"instance_token"}) == disclosure.model_dump(
+        exclude={"instance_token"}
+    )
+    stored = resolve_requirements_state(
+        _persisted_after(conversation, repo)
+    ).latest_summary
+    assert stored is not None
+    assert stored.instance_token == card.instance_token
+    assert stored.requirements_version == disclosure.requirements_version

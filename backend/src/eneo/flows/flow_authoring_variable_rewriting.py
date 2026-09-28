@@ -88,6 +88,7 @@ def flow_step_validation_views_from_draft_spec(
             input_config=step.input_config,
             output_config=step.output_config,
             review_policy=step.review_policy,
+            prompt_template=step.assistant_spec.instructions,
         )
         for index, step in enumerate(rewritten_steps)
     ]

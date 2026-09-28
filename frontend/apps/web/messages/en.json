@@ -6424,6 +6424,8 @@
   "ai_builder_requirements_field_add_placeholder": "What should be included?",
   "ai_builder_requirements_field_add_confirm": "Add",
   "ai_builder_content_field_edit_stale": "The requirements changed while you were editing. Read the summary again and make the change there.",
+  "ai_builder_decision_stale_title": "What you answered has changed",
+  "ai_builder_requirements_summary_stale": "The summary has been replaced by a newer one. Read it again before you confirm or change it.",
   "ai_builder_content_field_edit_invalid": "That name cannot be used. Rewrite it and try again.",
   "ai_builder_content_field_edit_invalid_named": "“{field}” cannot be used as a field. Rewrite the name and try again.",
   "module_admin_title": "Modules",

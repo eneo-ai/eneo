@@ -472,6 +472,26 @@ def test_build_graph_mixed_underlag_keeps_root_and_step_edges() -> None:
     assert incoming == [(0, "flow_input"), (1, "input_bindings.question")]
 
 
+def test_build_graph_previous_step_shorthand_reads_the_previous_step() -> None:
+    steps = [
+        _step(step_order=1, input_source="flow_input"),
+        _step(step_order=2, input_source="previous_step"),
+        {
+            **_step(step_order=3, input_source="flow_input"),
+            "input_bindings": {"question": "Samtal: {{ föregående_steg }}"},
+        },
+    ]
+
+    _, edges = build_graph_from_steps(steps)
+    incoming = [
+        (edge.source_step_order, edge.kind)
+        for edge in edges
+        if edge.target == str(steps[2]["step_id"])
+    ]
+
+    assert incoming == [(2, "input_bindings.question")]
+
+
 def test_build_graph_includes_display_label_dependency() -> None:
     steps = [
         {

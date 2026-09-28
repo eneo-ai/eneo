@@ -6630,6 +6630,7 @@ def _configured_question_answer(
             "question_answer": {
                 "kind": typed_answer.kind,
                 "question_id": typed_answer.question_id,
+                **_shown_instance(question),
                 "input_fields": input_fields,
             },
         }
@@ -6645,6 +6646,7 @@ def _configured_question_answer(
             "question_answer": {
                 "kind": "structured_question_answer",
                 "question_id": question_id,
+                **_shown_instance(question),
                 "custom_value": custom_text,
             },
         }
@@ -6674,6 +6676,7 @@ def _configured_question_answer(
         "question_answer": {
             "kind": "structured_question_answer",
             "question_id": question_id,
+            **_shown_instance(question),
             "selected_option_ids": selected_ids,
             "selected_values": selected_values,
         },
@@ -6721,7 +6724,16 @@ def _requirements_confirmation_payload(
     version = requirements_summary.get("requirements_version")
     if isinstance(version, str) and version:
         payload["requirements_version"] = version
+    payload.update(_shown_instance(requirements_summary))
     return payload
+
+
+def _shown_instance(shown: Mapping[str, Any]) -> JsonObject:
+    """The showing a question or card carried, echoed with its answer the way
+    the web client echoes it; a showing from before tokens carries none."""
+
+    token = shown.get("instance_token")
+    return {"instance_token": token} if isinstance(token, str) and token else {}
 
 
 def _optional_request_json(*, config: ApiConfig, path: str) -> JsonObject | None:

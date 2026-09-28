@@ -11,6 +11,7 @@ from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStepResultAnnota
 from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.step_lineage import (
     build_step_ref_mapping,
+    referenced_step_order,
     resolve_reference_step_orders,
 )
 from eneo.flows.template_reference_analyzer import (
@@ -232,8 +233,9 @@ def _binding_upstream(
 ) -> _BindingUpstream | None:
     """What explicit underlag reads, or None when the step has none.
 
-    Step references become step edges; any other reference (form field,
-    runtime upload) reads the flow input. Fixed text reads nothing.
+    Step references (and ``föregående_steg``) become step edges; any other
+    reference (form field, runtime upload) reads the flow input. Fixed text
+    reads nothing.
     """
     bindings = step.get("input_bindings")
     if not isinstance(bindings, dict):
@@ -252,10 +254,13 @@ def _binding_upstream(
     return _BindingUpstream(
         step_orders=resolve_reference_step_orders(
             references=references,
+            step_order=step_order,
             max_prior_step_order=step_order - 1,
         ),
         reads_root_input=any(
-            reference.kind is not TemplateReferenceKind.STEP for reference in references
+            reference.kind is not TemplateReferenceKind.STEP
+            and referenced_step_order(reference, step_order=step_order) is None
+            for reference in references
         ),
     )
 
