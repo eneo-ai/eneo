@@ -1,7 +1,7 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Literal, Optional, TypeVar, Union
 from uuid import UUID
 
 from eneo.main.datetime_utils import datetime_or_utc_min
@@ -40,6 +40,18 @@ if TYPE_CHECKING:
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.services.service import Service
     from eneo.websites.domain.website import Website
+
+_M = TypeVar("_M", bound="AIModel")
+ModelKind = Literal["completion", "embedding", "transcription"]
+MODEL_KINDS: tuple[ModelKind, ...] = ("completion", "embedding", "transcription")
+
+
+def _security_level(
+    classification: Optional[SecurityClassification],
+) -> int | None:
+    """The level model eligibility depends on; None when unclassified."""
+    return classification.security_level if classification is not None else None
+
 
 UNAUTHORIZED_EXCEPTION_MESSAGE = "Unauthorized. User has no permissions to access."
 SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE = (
@@ -122,23 +134,21 @@ class Space:
         # A stored model list can outlive a reclassification of the space or of
         # a model. The space's classification is the one owner of which models
         # it may use, so a hydrated list is held to it here, once, instead of
-        # every chooser asking again.
-        if security_classification is not None:
-            self._completion_models = [
-                model
-                for model in self._completion_models
-                if self.allows_model_security_classification(model)
-            ]
-            self._embedding_models = [
-                model
-                for model in self._embedding_models
-                if self.allows_model_security_classification(model)
-            ]
-            self._transcription_models = [
-                model
-                for model in self._transcription_models
-                if self.allows_model_security_classification(model)
-            ]
+        # every chooser asking again. A linked model below the classification
+        # is not usable here, but it stays linked: an unrelated save must not
+        # remove it, and an admin decides whether to raise the model's
+        # classification, change the space's, or remove it.
+        self._completion_models_below_classification: list["CompletionModel"] = []
+        self._embedding_models_below_classification: list["EmbeddingModel"] = []
+        self._transcription_models_below_classification: list[TranscriptionModel] = []
+        self._split_models_by_classification()
+        # The links as loaded. A save writes only the difference (see
+        # link_changes), so a stored link this space never loaded, such as
+        # one to a deprecated model, is left exactly as it is.
+        self._loaded_link_ids: dict[ModelKind, frozenset[UUID]] = {
+            kind: frozenset(model.id for model in self._linked(kind))
+            for kind in MODEL_KINDS
+        }
         self.data_retention_days = data_retention_days
         self.enabled_capabilities: list[CapabilityPurpose] = list(
             enabled_capabilities or []
@@ -331,41 +341,135 @@ class Space:
 
     @property
     def embedding_models(self):
+        """The embedding models usable in this space."""
         return self._embedding_models
 
     @embedding_models.setter
     def embedding_models(self, embedding_models: list["EmbeddingModel"]):
-        for model in embedding_models:
-            if not model.can_access:
-                raise UnauthorizedException(UNAUTHORIZED_EXCEPTION_MESSAGE)
-            self.validate_model_security_compatibility(model)
-
-        self._embedding_models = embedding_models
+        self._embedding_models, self._embedding_models_below_classification = (
+            self._assign_models(embedding_models, self.linked_embedding_models)
+        )
 
     @property
     def completion_models(self) -> list["CompletionModel"]:
+        """The completion models usable in this space."""
         return self._completion_models
 
     @completion_models.setter
     def completion_models(self, completion_models: list["CompletionModel"]):
-        for model in completion_models:
-            if not model.can_access:
-                raise UnauthorizedException(UNAUTHORIZED_EXCEPTION_MESSAGE)
-            self.validate_model_security_compatibility(model)
-        self._completion_models = completion_models
+        self._completion_models, self._completion_models_below_classification = (
+            self._assign_models(completion_models, self.linked_completion_models)
+        )
 
     @property
     def transcription_models(self) -> list[TranscriptionModel]:
+        """The transcription models usable in this space."""
         return self._transcription_models
 
     @transcription_models.setter
     def transcription_models(self, transcription_models: list[TranscriptionModel]):
-        for model in transcription_models:
-            if not model.can_access:
-                raise UnauthorizedException(UNAUTHORIZED_EXCEPTION_MESSAGE)
-            self.validate_model_security_compatibility(model)
+        (
+            self._transcription_models,
+            self._transcription_models_below_classification,
+        ) = self._assign_models(transcription_models, self.linked_transcription_models)
 
-        self._transcription_models = transcription_models
+    @property
+    def completion_models_below_classification(self) -> list["CompletionModel"]:
+        """Linked completion models below this space's classification.
+
+        They stay linked but are not usable here; see __init__."""
+        return list(self._completion_models_below_classification)
+
+    @property
+    def embedding_models_below_classification(self) -> list["EmbeddingModel"]:
+        return list(self._embedding_models_below_classification)
+
+    @property
+    def transcription_models_below_classification(self) -> list[TranscriptionModel]:
+        return list(self._transcription_models_below_classification)
+
+    @property
+    def linked_completion_models(self) -> list["CompletionModel"]:
+        """Every completion model linked to this space, usable or not.
+
+        A write of the space's links persists this list, so a model below the
+        classification is removed only when a request leaves it out."""
+        return [
+            *self._completion_models,
+            *self._completion_models_below_classification,
+        ]
+
+    @property
+    def linked_embedding_models(self) -> list["EmbeddingModel"]:
+        return [*self._embedding_models, *self._embedding_models_below_classification]
+
+    @property
+    def linked_transcription_models(self) -> list[TranscriptionModel]:
+        return [
+            *self._transcription_models,
+            *self._transcription_models_below_classification,
+        ]
+
+    def _linked(self, kind: "ModelKind") -> Sequence["AIModel"]:
+        return {
+            "completion": self.linked_completion_models,
+            "embedding": self.linked_embedding_models,
+            "transcription": self.linked_transcription_models,
+        }[kind]
+
+    def link_changes(self, kind: "ModelKind") -> tuple[set[UUID], set[UUID]]:
+        """The links of one model kind this space added and removed.
+
+        Only an explicit model-list edit, adding a model, or a change of the
+        space's classification level changes links. A write persists exactly
+        these changes and never touches a stored link it did not load."""
+        loaded = self._loaded_link_ids[kind]
+        current = {model.id for model in self._linked(kind)}
+        return current - loaded, set(loaded - current)
+
+    def _split_models_by_classification(self) -> None:
+        """Sort every linked model into usable and below-classification."""
+        self._completion_models, self._completion_models_below_classification = (
+            self._split_by_classification(self.linked_completion_models)
+        )
+        self._embedding_models, self._embedding_models_below_classification = (
+            self._split_by_classification(self.linked_embedding_models)
+        )
+        (
+            self._transcription_models,
+            self._transcription_models_below_classification,
+        ) = self._split_by_classification(self.linked_transcription_models)
+
+    def _split_by_classification(
+        self, models: Sequence[_M]
+    ) -> tuple[list[_M], list[_M]]:
+        usable = [m for m in models if self.allows_model_security_classification(m)]
+        below = [m for m in models if not self.allows_model_security_classification(m)]
+        return usable, below
+
+    def _assign_models(
+        self, models: Sequence[_M], linked: Sequence[_M]
+    ) -> tuple[list[_M], list[_M]]:
+        """Validate an explicit model list and split it into usable and below.
+
+        The list replaces the space's links, so a model it leaves out is
+        unlinked. A model that is already linked may stay whatever its state:
+        keeping a link grants no use, so neither the tenant disabling it nor
+        its classification falling below the space's removes it here. A new
+        link must be accessible and meet the classification, as before.
+        """
+        linked_ids = {model.id for model in linked}
+        usable: list[_M] = []
+        below: list[_M] = []
+        for model in models:
+            allowed = self.allows_model_security_classification(model)
+            if model.id not in linked_ids:
+                if not model.can_access:
+                    raise UnauthorizedException(UNAUTHORIZED_EXCEPTION_MESSAGE)
+                if not allowed:
+                    raise BadRequestException(SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE)
+            (usable if allowed else below).append(model)
+        return usable, below
 
     @property
     def mcp_servers(self) -> list["MCPServer"]:
@@ -410,23 +514,22 @@ class Space:
                 raise BadRequestException(
                     "Can not change security classification of personal space"
                 )
+            # Only a change of level may remove links: eligibility depends on
+            # the level alone, so a PATCH that resends the classification, or
+            # names another one at the same level, leaves every link as it is.
+            changes_classification = _security_level(
+                self.security_classification
+            ) != _security_level(security_classification)
             self.security_classification = security_classification
-            if self.security_classification is not None:
-                self.completion_models = [
-                    model
-                    for model in self.completion_models
-                    if self.allows_model_security_classification(model)
-                ]
-                self.embedding_models = [
-                    model
-                    for model in self.embedding_models
-                    if self.allows_model_security_classification(model)
-                ]
-                self.transcription_models = [
-                    model
-                    for model in self.transcription_models
-                    if self.allows_model_security_classification(model)
-                ]
+            # A linked model the new classification allows is usable again.
+            self._split_models_by_classification()
+            if changes_classification and self.security_classification is not None:
+                # Changing the space's classification is the admin's explicit,
+                # previewed decision; as on develop, it removes the models the
+                # new classification does not allow.
+                self._completion_models_below_classification = []
+                self._embedding_models_below_classification = []
+                self._transcription_models_below_classification = []
                 # Capability markers stay: the provider resolved at ask time
                 # is what gets checked, not the marker's own classification.
                 self._mcp_servers = [

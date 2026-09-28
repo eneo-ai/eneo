@@ -124,8 +124,8 @@ class ModelProviderRepository:
 
         A declaration is made against the route a model resolved to. When the
         provider's endpoint moves, that route is a different one, so the models
-        return to permissive schemas and unknown capacity
-        until an admin declares them again.
+        return to permissive schemas until an admin declares them again. Token
+        limits stay as stored: a model without them cannot serve any request.
         """
         from eneo.database.tables.ai_models_table import CompletionModels
 
@@ -134,17 +134,9 @@ class ModelProviderRepository:
             .where(
                 CompletionModels.provider_id == provider_id,
                 CompletionModels.tenant_id == self.tenant_id,
-                sa.or_(
-                    CompletionModels.supports_strict_tool_schema.is_(True),
-                    CompletionModels.max_input_tokens.is_not(None),
-                    CompletionModels.max_output_tokens.is_not(None),
-                ),
+                CompletionModels.supports_strict_tool_schema.is_(True),
             )
-            .values(
-                supports_strict_tool_schema=False,
-                max_input_tokens=None,
-                max_output_tokens=None,
-            )
+            .values(supports_strict_tool_schema=False)
         )
         result = await self.session.execute(stmt)
         return affected_row_count(result)

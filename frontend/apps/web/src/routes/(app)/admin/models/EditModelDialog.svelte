@@ -41,7 +41,7 @@
     completionUpdateCapabilities,
     createEmptyDraft,
     findDraftCostOverflow,
-    hasValidDeclaredCapacity,
+    hasValidCompletionTokenBudgets,
     completionUpdateCeilings,
     modelToDraft,
     rawCostToNumber,
@@ -191,10 +191,9 @@
       error = m.display_name_required();
       return;
     }
-    // An edit may leave a capacity undeclared or withdraw one, so it is only
-    // held to the values it actually states; creating a model still requires
-    // both ceilings (the AddWizard guard).
-    if (modelType === "completion" && !hasValidDeclaredCapacity(draft)) {
+    // Mirror the AddWizard guard: a completion model cannot serve any request
+    // without both token limits, so a save with a blank one is refused.
+    if (modelType === "completion" && !hasValidCompletionTokenBudgets(draft)) {
       error = m.completion_token_budgets_required();
       return;
     }

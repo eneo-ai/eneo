@@ -596,7 +596,15 @@ def _build_assistant_update_changes(
     "/{id}/",
     response_model=AssistantPublic,
     responses=responses.get_responses([400, 403, 404]),
-    description="Update an assistant. Omitted fields are left unchanged.",
+    description=(
+        "Update an assistant. Omitting a field leaves it unchanged, and so "
+        "does null for every field except these: Null clears description, "
+        "metadata_json, icon_id and data_retention_days. Null "
+        "completion_model_kwargs resets the model settings to their defaults. "
+        "An empty list clears a list field (groups, websites, attachments, "
+        "integration_knowledge_list, mcp_servers, mcp_tools, "
+        "enabled_capabilities, skill_bindings)."
+    ),
 )
 async def update_assistant(
     id: UUID,
@@ -604,7 +612,7 @@ async def update_assistant(
     request: Request,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    """Omitted fields are not updated"""
+    """Omitted and null fields are not updated; see the route description."""
     if (
         assistant.skill_bindings is not None
         and getattr(request.state, "api_key", None) is not None

@@ -2874,7 +2874,7 @@ export interface paths {
     put?: never;
     /**
      * Update Assistant
-     * @description Update an assistant. Omitted fields are left unchanged.
+     * @description Update an assistant. Omitting a field leaves it unchanged, and so does null for every field except these: Null clears description, metadata_json, icon_id and data_retention_days. Null completion_model_kwargs resets the model settings to their defaults. An empty list clears a list field (groups, websites, attachments, integration_knowledge_list, mcp_servers, mcp_tools, enabled_capabilities, skill_bindings).
      */
     post: operations["update_assistant_api_v1_assistants__id___post"];
     /**
@@ -14181,12 +14181,12 @@ export interface components {
       litellm_model_name?: string | null;
       /**
        * Max Input Tokens
-       * @description Max input tokens; null means not declared for this route.
+       * @description Max input tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
        */
       max_input_tokens: number | null;
       /**
        * Max Output Tokens
-       * @description Max output tokens; null means not declared for this route.
+       * @description Max output tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
        */
       max_output_tokens: number | null;
       /** Migrated To Model Id */
@@ -14258,14 +14258,14 @@ export interface components {
       litellm_model_name?: string | null;
       /**
        * Max Input Tokens
-       * @description Max input tokens; null means not declared for this route.
+       * @description Max input tokens. Required, a positive whole number; null is refused.
        */
-      max_input_tokens: number | null;
+      max_input_tokens: number;
       /**
        * Max Output Tokens
-       * @description Max output tokens; null means not declared for this route.
+       * @description Max output tokens. Required, a positive whole number; null is refused.
        */
-      max_output_tokens: number | null;
+      max_output_tokens: number;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /** Name */
       name: string;
@@ -14352,12 +14352,12 @@ export interface components {
       lock_reason?: string | null;
       /**
        * Max Input Tokens
-       * @description Max input tokens; null means not declared for this route.
+       * @description Max input tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
        */
       max_input_tokens: number | null;
       /**
        * Max Output Tokens
-       * @description Max output tokens; null means not declared for this route.
+       * @description Max output tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
        */
       max_output_tokens: number | null;
       /** Migrated To Model Id */
@@ -14481,12 +14481,12 @@ export interface components {
       lock_reason?: string | null;
       /**
        * Max Input Tokens
-       * @description Max input tokens; null means not declared for this route.
+       * @description Max input tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
        */
       max_input_tokens: number | null;
       /**
        * Max Output Tokens
-       * @description Max output tokens; null means not declared for this route.
+       * @description Max output tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
        */
       max_output_tokens: number | null;
       /** Meets Security Classification */
@@ -14570,12 +14570,12 @@ export interface components {
       litellm_model_name?: string | null;
       /**
        * Max Input Tokens
-       * @description Max input tokens; null means not declared for this route.
+       * @description Max input tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
        */
       max_input_tokens: number | null;
       /**
        * Max Output Tokens
-       * @description Max output tokens; null means not declared for this route.
+       * @description Max output tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
        */
       max_output_tokens: number | null;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
@@ -29702,14 +29702,14 @@ export interface components {
       litellm_model_name?: string | null;
       /**
        * Max Input Tokens
-       * @description Max input tokens; null means not declared for this route.
+       * @description Max input tokens. A positive whole number. Omit to keep the stored value; null is refused.
        */
-      max_input_tokens?: number | null;
+      max_input_tokens?: number;
       /**
        * Max Output Tokens
-       * @description Max output tokens; null means not declared for this route.
+       * @description Max output tokens. A positive whole number. Omit to keep the stored value; null is refused.
        */
-      max_output_tokens?: number | null;
+      max_output_tokens?: number;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /** Name */
       name?: string | null;
@@ -33789,6 +33789,23 @@ export interface components {
        */
       user_count?: number;
     };
+    /**
+     * SpaceLinkedModels
+     * @description Every model linked to a space that the space loads, usable or not.
+     *
+     *     A model list sent to update the space adds the models it names that are
+     *     not linked yet and removes the listed kind's links it leaves out, so a
+     *     client builds it from these IDs. A link to a retired (deprecated or
+     *     deleted) model is not listed and no edit changes it.
+     */
+    SpaceLinkedModels: {
+      /** Completion Models */
+      completion_models: components["schemas"]["SpaceModelLink"][];
+      /** Embedding Models */
+      embedding_models: components["schemas"]["SpaceModelLink"][];
+      /** Transcription Models */
+      transcription_models: components["schemas"]["SpaceModelLink"][];
+    };
     /** SpaceMember */
     SpaceMember: {
       /** Created At */
@@ -33808,6 +33825,34 @@ export interface components {
       updated_at?: string | null;
       /** Username */
       username?: string | null;
+    };
+    /**
+     * SpaceModelLink
+     * @description One model linked to a space, with the state of that link.
+     *
+     *     A link is usable only when both flags are true; the usable lists hold
+     *     exactly those. Keeping any other link grants no use.
+     */
+    SpaceModelLink: {
+      /**
+       * Available
+       * @description False when the tenant has disabled or retired the model.
+       */
+      available: boolean;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Meets Security Classification
+       * @description False when the model's security classification is below the space's.
+       */
+      meets_security_classification: boolean;
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname?: string | null;
     };
     /** SpacePublic */
     SpacePublic: {
@@ -33844,6 +33889,8 @@ export interface components {
        */
       id: string;
       knowledge: components["schemas"]["Knowledge"];
+      /** @description Every model linked to this space, each marked with whether it meets the space's security classification and whether the tenant has it available. Only links with both are in the usable model lists. A model list sent to update the space adds the models it names and removes the listed links it leaves out, so build it from these IDs. Links to retired models are not listed and are never changed. */
+      linked_models: components["schemas"]["SpaceLinkedModels"];
       /** Mcp Servers */
       mcp_servers?: components["schemas"]["MCPServerPublicDict"][];
       members: components["schemas"]["PaginatedPermissions_SpaceMember_"];
@@ -34645,10 +34692,16 @@ export interface components {
       input_cost_per_token?: number | string | null;
       /** Is Default */
       is_default?: boolean | null;
-      /** Max Input Tokens */
-      max_input_tokens?: number | null;
-      /** Max Output Tokens */
-      max_output_tokens?: number | null;
+      /**
+       * Max Input Tokens
+       * @description Max input tokens. A positive whole number. Omit to keep the stored value; null is refused.
+       */
+      max_input_tokens?: number;
+      /**
+       * Max Output Tokens
+       * @description Max output tokens. A positive whole number. Omit to keep the stored value; null is refused.
+       */
+      max_output_tokens?: number;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /** Name */
       name?: string | null;
@@ -47670,12 +47723,12 @@ export interface operations {
                 lock_reason?: string | null;
                 /**
                  * Max Input Tokens
-                 * @description Max input tokens; null means not declared for this route.
+                 * @description Max input tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
                  */
                 max_input_tokens: number | null;
                 /**
                  * Max Output Tokens
-                 * @description Max output tokens; null means not declared for this route.
+                 * @description Max output tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
                  */
                 max_output_tokens: number | null;
                 /** Migrated To Model Id */
@@ -48108,12 +48161,12 @@ export interface operations {
                 lock_reason?: string | null;
                 /**
                  * Max Input Tokens
-                 * @description Max input tokens; null means not declared for this route.
+                 * @description Max input tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
                  */
                 max_input_tokens: number | null;
                 /**
                  * Max Output Tokens
-                 * @description Max output tokens; null means not declared for this route.
+                 * @description Max output tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
                  */
                 max_output_tokens: number | null;
                 /** Migrated To Model Id */
@@ -50409,12 +50462,12 @@ export interface operations {
                     lock_reason?: string | null;
                     /**
                      * Max Input Tokens
-                     * @description Max input tokens; null means not declared for this route.
+                     * @description Max input tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
                      */
                     max_input_tokens: number | null;
                     /**
                      * Max Output Tokens
-                     * @description Max output tokens; null means not declared for this route.
+                     * @description Max output tokens. Null only on a stored model whose limit is missing; it cannot serve requests until an admin enters it.
                      */
                     max_output_tokens: number | null;
                     /** Migrated To Model Id */

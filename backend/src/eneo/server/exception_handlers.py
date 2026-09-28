@@ -207,6 +207,11 @@ _PUBLIC_VALIDATION_MESSAGES: dict[str, str] = {
     "missing": "Field required",
     "string_type": "Input should be a valid string",
     "json_invalid": "Invalid JSON",
+    # Raised for a blank completion-model token limit (completion_model.py).
+    "token_limit_required": (
+        "A completion model needs both max_input_tokens and max_output_tokens, "
+        "so a token limit cannot be blank"
+    ),
 }
 
 

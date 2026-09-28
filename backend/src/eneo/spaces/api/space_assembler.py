@@ -1,5 +1,6 @@
+from collections.abc import Callable, Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypeVar, cast
 from uuid import UUID
 
 from eneo.assistants.api.assistant_models import (
@@ -9,6 +10,7 @@ from eneo.assistants.api.assistant_models import (
 )
 from eneo.authentication.auth_models import ResourcePermissions
 from eneo.collections.presentation.collection_models import CollectionPublic
+from eneo.completion_models.presentation import CompletionModelPublic
 from eneo.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelPublic,
 )
@@ -32,7 +34,9 @@ from eneo.spaces.api.space_models import (
     Knowledge,
     SpaceDashboard,
     SpaceGroupMember,
+    SpaceLinkedModels,
     SpaceMember,
+    SpaceModelLink,
     SpacePublic,
     SpaceRole,
     SpaceRoleValue,
@@ -54,10 +58,18 @@ from eneo.websites.presentation.website_models import WebsitePublic
 
 if TYPE_CHECKING:
     from eneo.actors import ActorManager, SpaceActor
+    from eneo.ai_models.ai_model import AIModel
     from eneo.assistants.api.assistant_assembler import AssistantAssembler
     from eneo.assistants.assistant import Assistant
+    from eneo.completion_models.domain import CompletionModel
     from eneo.completion_models.presentation import CompletionModelAssembler
+    from eneo.embedding_models.domain.embedding_model import EmbeddingModel
     from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
+    from eneo.transcription_models.domain.transcription_model import (
+        TranscriptionModel,
+    )
+
+_M = TypeVar("_M", bound="AIModel")
 
 
 class SpaceAssembler:
@@ -649,6 +661,61 @@ class SpaceAssembler:
             ),
         )
 
+    def _embedding_models_public(
+        self, models: Sequence["EmbeddingModel"]
+    ) -> list[EmbeddingModelPublic]:
+        return [
+            EmbeddingModelPublic.from_domain(model)
+            for model in models
+            if model.is_org_enabled
+        ]
+
+    def _completion_models_public(
+        self, models: Sequence["CompletionModel"]
+    ) -> list[CompletionModelPublic]:
+        return [
+            self.completion_model_assembler.from_completion_model_to_model(
+                completion_model=model,
+                show_pricing=self.user.can_view_model_pricing,
+            )
+            for model in models
+            if self._completion_model_available(model)
+        ]
+
+    @staticmethod
+    def _completion_model_available(model: "CompletionModel") -> bool:
+        return (
+            model.is_org_enabled
+            and model.migrated_to_model_id is None
+            and model.deleted_at is None
+        )
+
+    @staticmethod
+    def _links(
+        space: Space, models: Sequence[_M], available: Callable[[_M], bool]
+    ) -> list[SpaceModelLink]:
+        return [
+            SpaceModelLink(
+                id=model.id,
+                name=model.name,
+                nickname=model.nickname,
+                meets_security_classification=(
+                    space.allows_model_security_classification(model)
+                ),
+                available=available(model),
+            )
+            for model in models
+        ]
+
+    def _transcription_models_public(
+        self, models: Sequence["TranscriptionModel"]
+    ) -> list[TranscriptionModelPublic]:
+        return [
+            TranscriptionModelPublic.from_domain(model)
+            for model in models
+            if model.is_org_enabled
+        ]
+
     def _get_security_classification_model(
         self, space: Space
     ) -> SecurityClassificationPublic | None:
@@ -682,29 +749,30 @@ class SpaceAssembler:
                 self._get_group_member_permissions(space)
             ),
         )
-        embedding_models = [
-            EmbeddingModelPublic.from_domain(model)
-            for model in space.embedding_models
-            if model.is_org_enabled
-        ]
-        completion_models = [
-            self.completion_model_assembler.from_completion_model_to_model(
-                completion_model=model,
-                show_pricing=self.user.can_view_model_pricing,
-            )
-            for model in space.completion_models
-            if (
-                model.is_org_enabled
-                and model.migrated_to_model_id is None
-                and model.deleted_at is None
-            )
-        ]
-
-        transcription_models = [
-            TranscriptionModelPublic.from_domain(model)
-            for model in space.transcription_models
-            if model.is_org_enabled
-        ]
+        embedding_models = self._embedding_models_public(space.embedding_models)
+        completion_models = self._completion_models_public(space.completion_models)
+        transcription_models = self._transcription_models_public(
+            space.transcription_models
+        )
+        # Every link, marked, so an edit of the model lists can resubmit
+        # the ones the usable lists hide.
+        linked_models = SpaceLinkedModels(
+            completion_models=self._links(
+                space,
+                space.linked_completion_models,
+                self._completion_model_available,
+            ),
+            embedding_models=self._links(
+                space,
+                space.linked_embedding_models,
+                lambda model: model.is_org_enabled,
+            ),
+            transcription_models=self._links(
+                space,
+                space.linked_transcription_models,
+                lambda model: model.is_org_enabled,
+            ),
+        )
 
         default_assistant = None
         if space.default_assistant is not None:
@@ -745,6 +813,7 @@ class SpaceAssembler:
             embedding_models=embedding_models,
             completion_models=completion_models,
             transcription_models=transcription_models,
+            linked_models=linked_models,
             mcp_servers=mcp_servers,
             enabled_capabilities=space.enabled_capabilities,
             available_capabilities=space.available_capabilities,

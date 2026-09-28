@@ -6,11 +6,25 @@ from eneo.skills.presentation.skill_assembler import (
     assistant_skill_binding_intents_from_input,
 )
 
+# Nullable values that a standalone update may clear by sending null. Every
+# other field treats null like omission and keeps what is stored, as on
+# develop; a list is cleared only by an explicit []. One more exception is
+# made before this mapper runs, as on develop: the request model turns a null
+# completion_model_kwargs into the default settings, which are then stored.
+_STANDALONE_NULL_CLEARS = frozenset(
+    {"description", "metadata_json", "icon_id", "data_retention_days"}
+)
+
 
 def to_standalone_assistant_update_command(
     assistant: AssistantUpdatePublic,
 ) -> AssistantUpdateCommand:
-    _, command_fields = _extract_common_update_fields(assistant)
+    payload: dict[str, object] = {
+        field: value
+        for field, value in assistant.model_dump(exclude_unset=True).items()
+        if value is not None or field in _STANDALONE_NULL_CLEARS
+    }
+    _, command_fields = _extract_common_update_fields(assistant, payload)
     # A null model keeps the current one; only Flow steps may clear their model.
     if assistant.completion_model is not None:
         command_fields["completion_model_id"] = assistant.completion_model.id
@@ -20,7 +34,9 @@ def to_standalone_assistant_update_command(
 def to_flow_assistant_update_command(
     assistant: AssistantUpdatePublic,
 ) -> AssistantUpdateCommand:
-    payload, command_fields = _extract_common_update_fields(assistant)
+    payload, command_fields = _extract_common_update_fields(
+        assistant, assistant.model_dump(exclude_unset=True)
+    )
     command_fields["data_retention_days"] = assistant.data_retention_days
     if "completion_model" in payload:
         command_fields["completion_model_id"] = (
@@ -34,8 +50,9 @@ def to_flow_assistant_update_command(
 
 def _extract_common_update_fields(
     assistant: AssistantUpdatePublic,
+    payload: dict[str, object],
 ) -> tuple[dict[str, object], dict[str, object]]:
-    payload: dict[str, object] = assistant.model_dump(exclude_unset=True)
+    """Map the fields present in ``payload`` onto the update command."""
     command_fields: dict[str, object] = {}
 
     if "groups" in payload:

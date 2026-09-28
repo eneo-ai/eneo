@@ -5,7 +5,11 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from eneo.spaces.space import UNAUTHORIZED_EXCEPTION_MESSAGE, Space, SpaceRoleValue
 
 
@@ -412,3 +416,242 @@ def test_adding_a_model_below_the_spaces_classification_is_refused():
     at_level = _model(3)
     space.add_completion_model(at_level)
     assert [model.id for model in space.completion_models] == [at_level.id]
+
+
+def _space_with_models(
+    classification, *, completion=(), embedding=(), transcription=()
+):
+    return Space(
+        id=None,
+        tenant_id=None,
+        tenant_space_id=None,
+        user_id=None,
+        name=MagicMock(),
+        description=None,
+        embedding_models=list(embedding),
+        completion_models=list(completion),
+        transcription_models=list(transcription),
+        mcp_servers=[],
+        default_assistant=MagicMock(),
+        assistants=[],
+        apps=[],
+        services=[],
+        websites=[],
+        collections=[],
+        integration_knowledge_list=[],
+        members={},
+        security_classification=classification,
+    )
+
+
+_KINDS = ("completion", "embedding", "transcription")
+
+
+def _usable(space, kind):
+    return [model.id for model in getattr(space, f"{kind}_models")]
+
+
+def _linked(space, kind):
+    return [model.id for model in getattr(space, f"linked_{kind}_models")]
+
+
+def _below(space, kind):
+    return [model.id for model in getattr(space, f"{kind}_models_below_classification")]
+
+
+@pytest.mark.parametrize("kind", _KINDS)
+def test_a_model_below_the_spaces_classification_stays_linked_but_unusable(kind):
+    # Lowering a model's classification must not drop it from the space as a
+    # side effect of the next save; it stays linked, is not usable here, and is
+    # reported so an admin can decide.
+    allowed, below = _model(3), _model(1)
+    space = _space_with_models(_classification(3), **{kind: [allowed, below]})
+
+    assert _usable(space, kind) == [allowed.id]
+    assert _linked(space, kind) == [allowed.id, below.id]
+    assert _below(space, kind) == [below.id]
+
+
+@pytest.mark.parametrize("kind", _KINDS)
+def test_resubmitting_the_linked_list_keeps_a_model_below_the_classification(kind):
+    allowed, below, other = _model(3), _model(1), _model(4)
+    space = _space_with_models(_classification(3), **{kind: [allowed, below]})
+
+    space.update(**{f"{kind}_models": [allowed, below, other]})
+
+    assert _usable(space, kind) == [allowed.id, other.id]
+    assert _linked(space, kind) == [allowed.id, other.id, below.id]
+    assert _below(space, kind) == [below.id]
+
+
+@pytest.mark.parametrize("kind", _KINDS)
+def test_leaving_a_model_below_the_classification_out_removes_it(kind):
+    allowed, below = _model(3), _model(1)
+    space = _space_with_models(_classification(3), **{kind: [allowed, below]})
+
+    space.update(**{f"{kind}_models": [allowed]})
+
+    assert _linked(space, kind) == [allowed.id]
+    assert _below(space, kind) == []
+
+
+@pytest.mark.parametrize("kind", _KINDS)
+def test_a_new_link_to_a_model_below_the_classification_is_refused(kind):
+    allowed, below = _model(3), _model(1)
+    space = _space_with_models(_classification(3), **{kind: [allowed]})
+
+    with pytest.raises(BadRequestException):
+        space.update(**{f"{kind}_models": [allowed, below]})
+    assert _linked(space, kind) == [allowed.id]
+
+
+def test_adding_a_linked_model_below_the_classification_stays_refused():
+    below = _model(1)
+    space = _space_with_models(_classification(3), completion=[below])
+
+    with pytest.raises(BadRequestException):
+        space.add_completion_model(below)
+    assert space.completion_models == []
+    assert _below(space, "completion") == [below.id]
+
+
+def test_a_linked_model_below_the_classification_cannot_be_used():
+    from eneo.main.exceptions import ModelNotAvailableException
+
+    below = _model(1)
+    space = _space_with_models(_classification(3), completion=[below])
+    assistant = SimpleNamespace(
+        completion_model=below,
+        collections=[],
+        websites=[],
+        integration_knowledge_list=[],
+    )
+
+    assert not space.is_completion_model_in_space(below.id)
+    assert not space.is_completion_model_available(below.id)
+    with pytest.raises(ModelNotAvailableException):
+        space.can_ask_assistant(assistant)
+    with pytest.raises(NotFoundException):
+        space.get_completion_model(below.id)
+
+
+@pytest.mark.parametrize("kind", _KINDS)
+def test_lowering_the_spaces_classification_makes_a_linked_model_usable_again(
+    kind,
+):
+    allowed, below = _model(3), _model(1)
+    space = _space_with_models(_classification(3), **{kind: [allowed, below]})
+
+    space.update(security_classification=_classification(1))
+
+    assert _usable(space, kind) == [allowed.id, below.id]
+    assert _below(space, kind) == []
+
+
+@pytest.mark.parametrize("kind", _KINDS)
+def test_raising_the_spaces_classification_removes_models_below_it_as_on_develop(
+    kind,
+):
+    # Changing the space's classification is the admin's explicit, previewed
+    # decision; develop removes the models it no longer allows.
+    low, below, high = _model(2), _model(1), _model(5)
+    space = _space_with_models(_classification(2), **{kind: [low, below, high]})
+
+    space.update(security_classification=_classification(3))
+
+    assert _linked(space, kind) == [high.id]
+    assert _below(space, kind) == []
+
+
+@pytest.mark.parametrize("kind", _KINDS)
+def test_restating_the_same_classification_keeps_a_linked_model_below_it(kind):
+    # An idempotent PATCH that resends the space's classification is not a
+    # change, so it must not remove anything.
+    level = _classification(3)
+    allowed, below = _model(3), _model(1)
+    space = _space_with_models(level, **{kind: [allowed, below]})
+
+    space.update(security_classification=level)
+
+    assert _linked(space, kind) == [allowed.id, below.id]
+    assert _below(space, kind) == [below.id]
+
+
+@pytest.mark.parametrize("kind", _KINDS)
+def test_a_linked_model_below_the_classification_stays_even_if_disabled(kind):
+    # Keeping an existing link grants nothing, so a model the tenant has
+    # also disabled can still be resubmitted with the linked list.
+    allowed, below = _model(3), _model(1)
+    below.can_access = False
+    space = _space_with_models(_classification(3), **{kind: [allowed, below]})
+
+    space.update(**{f"{kind}_models": [allowed, below]})
+
+    assert _linked(space, kind) == [allowed.id, below.id]
+    assert _below(space, kind) == [below.id]
+
+
+@pytest.mark.parametrize("kind", _KINDS)
+def test_another_classification_at_the_same_level_removes_nothing(kind):
+    # Eligibility depends on the level alone, so a classification with the
+    # same level is not a change that may remove links.
+    allowed, below = _model(3), _model(1)
+    space = _space_with_models(_classification(3), **{kind: [allowed, below]})
+
+    space.update(security_classification=_classification(3))
+
+    assert _linked(space, kind) == [allowed.id, below.id]
+    assert _below(space, kind) == [below.id]
+
+
+@pytest.mark.parametrize("kind", _KINDS)
+def test_a_linked_compatible_model_the_tenant_disabled_stays_linked(kind):
+    # Keeping an existing link grants no use, so a model the tenant disabled
+    # can be resubmitted with the linked list; it stays unusable.
+    allowed, disabled = _model(3), _model(4)
+    disabled.can_access = False
+    space = _space_with_models(_classification(3), **{kind: [allowed, disabled]})
+
+    space.update(**{f"{kind}_models": [allowed, disabled]})
+
+    assert _linked(space, kind) == [allowed.id, disabled.id]
+
+
+@pytest.mark.parametrize("kind", _KINDS)
+def test_a_new_link_to_a_disabled_model_is_still_refused(kind):
+    allowed, disabled = _model(3), _model(4)
+    disabled.can_access = False
+    space = _space_with_models(_classification(3), **{kind: [allowed]})
+
+    with pytest.raises(UnauthorizedException):
+        space.update(**{f"{kind}_models": [allowed, disabled]})
+
+
+@pytest.mark.parametrize("kind", _KINDS)
+def test_an_unrelated_save_changes_no_links(kind):
+    allowed, below = _model(3), _model(1)
+    space = _space_with_models(_classification(3), **{kind: [allowed, below]})
+
+    space.update(name="Renamed")
+
+    assert space.link_changes(kind) == (set(), set())
+
+
+@pytest.mark.parametrize("kind", _KINDS)
+def test_a_model_list_edit_records_only_what_it_added_and_removed(kind):
+    kept, dropped, added = _model(3), _model(1), _model(4)
+    space = _space_with_models(_classification(3), **{kind: [kept, dropped]})
+
+    space.update(**{f"{kind}_models": [kept, added]})
+
+    assert space.link_changes(kind) == ({added.id}, {dropped.id})
+
+
+@pytest.mark.parametrize("kind", _KINDS)
+def test_a_level_change_records_the_links_it_removes(kind):
+    low, high = _model(2), _model(5)
+    space = _space_with_models(_classification(2), **{kind: [low, high]})
+
+    space.update(security_classification=_classification(3))
+
+    assert space.link_changes(kind) == (set(), {low.id})

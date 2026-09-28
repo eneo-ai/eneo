@@ -417,11 +417,10 @@ async def test_sysadmin_strict_tool_schema_declaration_survives_partial_updates(
         assert db_model.supports_strict_tool_schema is False
 
     for patch, expected in [
-        ({"name": "strict-tool-schema-round-trip"}, (None, None)),
-        ({"name": "strict-tool-schema-round-trip"}, (None, None)),
+        ({"name": "strict-tool-schema-round-trip"}, (8000, 4096)),
+        ({"name": "strict-tool-schema-round-trip"}, (8000, 4096)),
         ({"max_input_tokens": 100, "max_output_tokens": 120}, (100, 120)),
         ({"description": "Unrelated edit"}, (100, 120)),
-        ({"max_input_tokens": None, "max_output_tokens": None}, (None, None)),
     ]:
         response = await client.put(
             f"/api/v1/sysadmin/completion-models/{model_id}/metadata",
@@ -432,6 +431,37 @@ async def test_sysadmin_strict_tool_schema_declaration_survives_partial_updates(
         payload = response.json()
         assert (payload["max_input_tokens"], payload["max_output_tokens"]) == expected
         assert "context_window_tokens" not in payload
+
+    blank = await client.put(
+        f"/api/v1/sysadmin/completion-models/{model_id}/metadata",
+        headers={"X-API-Key": super_admin_token},
+        json={"max_input_tokens": None},
+    )
+    assert blank.status_code == 422, blank.text
+    assert "token_limit_required" in blank.text
+
+    # A model an earlier release left without a limit: an unrelated save is
+    # refused with a repairable error, and entering the limit repairs it.
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(CompletionModels)
+            .where(CompletionModels.id == model_id)
+            .values(max_output_tokens=None)
+        )
+    damaged = await client.put(
+        f"/api/v1/sysadmin/completion-models/{model_id}/metadata",
+        headers={"X-API-Key": super_admin_token},
+        json={"description": "Unrelated edit on a damaged model"},
+    )
+    assert damaged.status_code == 422, damaged.text
+    assert "max_output_tokens must be set" in damaged.text
+    repaired = await client.put(
+        f"/api/v1/sysadmin/completion-models/{model_id}/metadata",
+        headers={"X-API-Key": super_admin_token},
+        json={"max_output_tokens": 4096},
+    )
+    assert repaired.status_code == 200, repaired.text
+    assert repaired.json()["max_output_tokens"] == 4096
 
 
 @pytest.mark.integration

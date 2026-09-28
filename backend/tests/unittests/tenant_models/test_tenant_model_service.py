@@ -31,6 +31,8 @@ async def test_completion_model_route_changes_refresh_discovered_capabilities() 
         provider_id=provider_id,
         name="old-model",
         nickname="Old model",
+        max_input_tokens=4096,
+        max_output_tokens=1024,
         reasoning=False,
         model_kwargs_capabilities={"temperature": {"supported": True}},
     )
@@ -122,6 +124,8 @@ async def test_strict_tool_schema_declaration_follows_the_model_route(
         provider_id=uuid4(),
         name="declared-model",
         nickname="Declared model",
+        max_input_tokens=4096,
+        max_output_tokens=1024,
         reasoning=False,
         model_kwargs_capabilities=None,
         supports_strict_tool_schema=True,
@@ -165,6 +169,8 @@ async def test_completion_model_update_tags_explicit_admin_capabilities() -> Non
         provider_id=uuid4(),
         name="model",
         nickname="Model",
+        max_input_tokens=4096,
+        max_output_tokens=1024,
         reasoning=False,
         model_kwargs_capabilities=None,
     )
@@ -234,6 +240,7 @@ async def test_completion_model_update_distinguishes_omission_from_explicit_null
         nickname="Model",
         reasoning=False,
         max_input_tokens=4096,
+        max_output_tokens=1024,
         model_kwargs_capabilities=persisted_capabilities,
     )
     result = MagicMock()

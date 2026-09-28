@@ -7,7 +7,15 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional, Protocol, Union, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
+from pydantic_core import PydanticCustomError
 
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     SupportedModelKwargs,
@@ -16,6 +24,7 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
 )
 from eneo.files.file_models import File
 from eneo.logging.logging import LoggingDetails
+from eneo.main.exceptions import ValidationException
 from eneo.main.models import NOT_PROVIDED, InDB, ModelId, NotProvided, partial_model
 from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.security_classifications.presentation.security_classification_models import (
@@ -245,10 +254,18 @@ class CompletionModelBase(BaseModel):
     nickname: Optional[str] = None
     family: Optional[str] = None
     max_input_tokens: int | None = Field(
-        gt=0, description="Max input tokens; null means not declared for this route."
+        gt=0,
+        description=(
+            "Max input tokens. Null only on a stored model whose limit is "
+            "missing; it cannot serve requests until an admin enters it."
+        ),
     )
     max_output_tokens: int | None = Field(
-        gt=0, description="Max output tokens; null means not declared for this route."
+        gt=0,
+        description=(
+            "Max output tokens. Null only on a stored model whose limit is "
+            "missing; it cannot serve requests until an admin enters it."
+        ),
     )
     is_deprecated: bool
     nr_billion_parameters: Optional[int] = None
@@ -336,13 +353,108 @@ class CompletionModelBase(BaseModel):
         )
 
 
+TOKEN_LIMIT_REQUIRED = "token_limit_required"
+TOKEN_LIMIT_REQUIRED_MESSAGE = (
+    "A completion model needs both max_input_tokens and max_output_tokens, "
+    "so a token limit cannot be blank"
+)
+COMPLETION_MODEL_TOKEN_LIMITS = ("max_input_tokens", "max_output_tokens")
+
+
+def refuse_blank_token_limit(value: int | None) -> int | None:
+    """Refuse a write that states a token limit as blank.
+
+    A completion model needs both limits to serve any request, so a create or
+    update may set a limit to a positive number or leave it out (an update
+    then keeps the stored value), but never clear it.
+    """
+    if value is None:
+        raise PydanticCustomError(TOKEN_LIMIT_REQUIRED, TOKEN_LIMIT_REQUIRED_MESSAGE)
+    return value
+
+
+def require_token_limits(
+    *, max_input_tokens: int | None, max_output_tokens: int | None
+) -> None:
+    """Refuse to save a completion model whose resulting limits are missing.
+
+    A stored limit can be empty on a model an earlier release damaged; the
+    save that touches it must enter the limit, and the error says which.
+    """
+    missing = [
+        field
+        for field, value in (
+            ("max_input_tokens", max_input_tokens),
+            ("max_output_tokens", max_output_tokens),
+        )
+        if value is None
+    ]
+    if missing:
+        raise ValidationException(
+            f"{' and '.join(missing)} must be set before this model can be "
+            "saved: a completion model needs both token limits"
+        )
+
+
+def _token_limit_write_schema(description: str, *, required: bool):
+    """Publish the token limits of a write request as they are validated.
+
+    The fields are typed ``int | None`` because they are shared with the
+    stored-model projections, where a damaged row can hold null; a write never
+    accepts null, so its schema drops the null option.
+    """
+
+    def rewrite(schema: dict[str, Any]) -> None:
+        properties = cast(dict[str, dict[str, Any]], schema.get("properties", {}))
+        for field_name, label in zip(
+            COMPLETION_MODEL_TOKEN_LIMITS, ("Max input tokens", "Max output tokens")
+        ):
+            prop = properties.get(field_name)
+            if prop is None:
+                continue
+            options = cast(list[dict[str, Any]], prop.pop("anyOf", []))
+            for option in options:
+                if option.get("type") != "null":
+                    prop.update(option)
+            prop.pop("default", None)
+            prop["description"] = f"{label}. {description}"
+        if required:
+            schema["required"] = sorted(
+                {*schema.get("required", []), *COMPLETION_MODEL_TOKEN_LIMITS}
+            )
+
+    return rewrite
+
+
+TOKEN_LIMIT_UPDATE_SCHEMA = _token_limit_write_schema(
+    "A positive whole number. Omit to keep the stored value; null is refused.",
+    required=False,
+)
+
+
 class CompletionModelCreate(CompletionModelBase):
-    pass
+    model_config = ConfigDict(
+        json_schema_extra=_token_limit_write_schema(
+            "Required, a positive whole number; null is refused.", required=True
+        )
+    )
+
+    @field_validator("max_input_tokens", "max_output_tokens")
+    @classmethod
+    def _refuse_blank_token_limit(cls, value: int | None) -> int | None:
+        return refuse_blank_token_limit(value)
 
 
 @partial_model
 class CompletionModelUpdate(CompletionModelBase):
+    model_config = ConfigDict(json_schema_extra=TOKEN_LIMIT_UPDATE_SCHEMA)
+
     id: UUID
+
+    @field_validator("max_input_tokens", "max_output_tokens")
+    @classmethod
+    def _refuse_blank_token_limit(cls, value: int | None) -> int | None:
+        return refuse_blank_token_limit(value)
 
 
 class CompletionModelUpdateFlags(BaseModel):
