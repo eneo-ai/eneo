@@ -224,6 +224,14 @@ async def _jit_provision_user(
         )
 
     username = email.split("@")[0].lower()
+    # Usernames are not unique across accounts and identity never depends on
+    # them. Avoid creating another account with a taken username: fall back to
+    # the full email (the convention for admin-created users), and to no
+    # username at all (as for invited users) if even that is taken.
+    if await user_repo.get_user_by_username(username, with_deleted=True) is not None:
+        username = email
+        if await user_repo.get_user_by_username(username, with_deleted=True):
+            username = None
 
     new_user = UserAdd(
         email=email,
