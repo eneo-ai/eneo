@@ -30,10 +30,17 @@ class JWTMeta(BaseModel):
 
 
 class JWTCreds(BaseModel):
-    """How we'll identify users"""
+    """How we'll identify users.
+
+    ``user_id`` and ``tenant_id`` are the immutable identity; ``sub`` (email)
+    and ``username`` are descriptive. They are optional only so that tokens
+    minted before the identity claims existed can still be decoded.
+    """
 
     sub: EmailStr
     username: Optional[str] = None
+    user_id: Optional[UUID] = None
+    tenant_id: Optional[UUID] = None
 
 
 class JWTPayload(JWTMeta, JWTCreds):
