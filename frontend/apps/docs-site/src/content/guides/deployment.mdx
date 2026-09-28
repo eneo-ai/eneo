@@ -380,6 +380,11 @@ value and a comment.
     | `CRAWL_FEEDER_ENABLED` | `true` | Meters the crawl enqueue rate (keep `true`) |
     | `CRAWL_MAX_LENGTH` | `36000` | Max crawl duration in seconds (10 hours) |
     | `CLOSESPIDER_ITEMCOUNT` | `20000` | Max pages per crawl |
+    | `CRAWLER_BLOCK_PRIVATE_NETWORKS` | `false` | Also refuse private (intranet) ranges; loopback, link-local and metadata addresses are always refused |
+
+    <Callout type="warning">
+      **Crawler network access.** The crawler only fetches `http(s)` URLs. Loopback, link-local (including the cloud metadata address), unspecified and multicast destinations are always refused at connection time, including after redirects. Private (intranet) ranges are allowed by default so intranet sites can be indexed; set `CRAWLER_BLOCK_PRIVATE_NETWORKS=true` on backend and worker to refuse them as well. The worker's `HTTP_PROXY`/`HTTPS_PROXY` are not used for crawling.
+    </Callout>
     | `DOWNLOAD_MAX_SIZE` | `10485760` | Max file the crawler downloads (bytes) |
     | `OBEY_ROBOTS` | `true` | Respect `robots.txt` |
     | `AUTOTHROTTLE_ENABLED` | `true` | Slow down automatically on busy sites |

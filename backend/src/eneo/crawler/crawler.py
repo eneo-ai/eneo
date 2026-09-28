@@ -1,24 +1,37 @@
 import asyncio
+import ipaddress
 import json
 import logging
 import os
+import socket
 import threading
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from typing import Any, Callable, Coroutine, Iterable, Optional
+from urllib.parse import urlparse
 
 import crochet
 from scrapy.crawler import Crawler as ScrapyCrawler
 from scrapy.crawler import CrawlerRunner
 from scrapy.spiders import Spider
+from twisted.internet import reactor
 from twisted.python.failure import Failure
 
+from eneo.crawler.destination_middleware import (
+    REFUSED_STAT,
+    DestinationRefusedMiddleware,
+)
+from eneo.crawler.destination_policy import (
+    DestinationPolicy,
+    install_destination_guard,
+)
 from eneo.crawler.parse_html import CrawledPage
 from eneo.crawler.pipelines import FileNamePipeline
 from eneo.crawler.spiders.crawl_spider import CrawlSpider
 from eneo.crawler.spiders.sitemap_spider import SitemapSpider
+from eneo.main.config import get_settings
 from eneo.main.exceptions import CrawlerException, CrawlTimeoutError
 from eneo.tenants.crawler_settings_helper import get_crawler_setting
 from eneo.websites.domain.crawl_run import CrawlType
@@ -75,6 +88,10 @@ class CrawlManager:
         self._runner: CrawlerRunner | None = None
         # Note: _stop_event removed - was unused (set but never waited on)
         self._completion_event = threading.Event()
+        # Downloader exceptions seen by the crawl (DNS failures including
+        # denied destinations, timeouts, refused connections). Read from the
+        # crawler stats on the reactor thread when the crawl finishes.
+        self.download_error_count: int = 0
 
     @crochet.run_in_reactor
     def start_crawl(
@@ -111,16 +128,44 @@ class CrawlManager:
         # Add callback to signal completion
         def on_complete(_: Any) -> None:
             logger.debug("Crawl deferred completed")
+            self._record_download_errors()
             self._completion_event.set()
 
         def on_error(failure: Failure) -> None:
             logger.warning(f"Crawl deferred errored: {failure}")
+            self._record_download_errors()
             self._completion_event.set()
 
         self._crawl_deferred.addCallback(on_complete)
         self._crawl_deferred.addErrback(on_error)
 
         return self._crawl_deferred
+
+    def _record_download_errors(self) -> None:
+        """Snapshot the downloader failure count; runs on the reactor thread.
+
+        IgnoreRequest is excluded: Scrapy counts it as an exception, but it is
+        a deliberate skip (offsite filter, robots.txt disallow), not a failed
+        fetch, and must not block stale cleanup. Destinations refused by the
+        crawler policy are skipped the same way but counted back in: a page
+        that could not be fetched is not proof that it is gone.
+        """
+        stats = getattr(self._crawler, "stats", None)
+        if stats is None:
+            return
+        try:
+            total = int(stats.get_value("downloader/exception_count", 0) or 0)
+            ignored = int(
+                stats.get_value(
+                    "downloader/exception_type_count/scrapy.exceptions.IgnoreRequest",
+                    0,
+                )
+                or 0
+            )
+            refused = int(stats.get_value(REFUSED_STAT, 0) or 0)
+            self.download_error_count = max(total - ignored, 0) + refused
+        except Exception:  # pragma: no cover - stats are best effort
+            self.download_error_count = 0
 
     @crochet.run_in_reactor
     def stop_crawl(self, reason: str = "timeout") -> None:
@@ -181,6 +226,9 @@ class Crawl:
         is_partial: True if crawl was terminated early (timeout, etc.)
         termination_reason: Why crawl ended ("completed", "timeout", "error")
         pages_count: Number of pages collected (for partial results reporting)
+        download_error_count: Downloader exceptions during the crawl (DNS
+            failures including denied destinations, timeouts, refused
+            connections). Non-zero means missing pages are not proof of removal.
     """
 
     pages: Iterable[CrawledPage]
@@ -188,6 +236,7 @@ class Crawl:
     is_partial: bool = False
     termination_reason: str = "completed"
     pages_count: int = 0
+    download_error_count: int = 0
 
 
 def create_runner(
@@ -233,17 +282,75 @@ def create_runner(
         "DNS_TIMEOUT": get_crawler_setting("dns_timeout", tenant_crawler_settings),
         "RETRY_TIMES": get_crawler_setting("retry_times", tenant_crawler_settings),
         "RETRY_ENABLED": True,
+        # Only http(s). The file, data, ftp and s3 handlers would read local or
+        # unintended resources with the worker's privileges.
+        "DOWNLOAD_HANDLERS": {"file": None, "data": None, "ftp": None, "s3": None},
+        # Crawl directly. An ambient HTTP(S)_PROXY would let the proxy, not the
+        # destination policy, decide where requests go.
+        "HTTPPROXY_ENABLED": False,
+        # Refused destinations surface as DNS failures; turn them into quiet,
+        # unretried skips (must sit above RetryMiddleware's 550).
+        "DOWNLOADER_MIDDLEWARES": {DestinationRefusedMiddleware: 900},
     }
 
     if files_dir is not None:
         settings["ITEM_PIPELINES"] = {FileNamePipeline: 300}
         settings["FILES_STORE"] = str(files_dir)
 
+    # Enforce the destination policy in the reactor's name resolver, which
+    # every connection (start URL, redirects, links, sitemap entries, robots.txt,
+    # file downloads) goes through. The guard is installed once per process;
+    # the policy is derived from settings, so changing it needs a worker restart.
+    install_destination_guard(reactor, current_destination_policy())
+
     return CrawlerRunner(settings=settings)
 
 
+def current_destination_policy() -> DestinationPolicy:
+    return DestinationPolicy(
+        block_private_networks=get_settings().crawler_block_private_networks
+    )
+
+
+async def _check_start_url(url: str) -> None:
+    """Fail fast when the start URL cannot be an allowed destination.
+
+    Only the start URL is checked here; redirects, links and sitemap entries
+    are enforced by the resolver guard during the crawl. An unresolvable
+    host is left to the crawler, which reports it as a normal DNS failure.
+    """
+    parsed = urlparse(url)
+    host = parsed.hostname
+    if parsed.scheme.lower() not in ("http", "https") or not host:
+        raise CrawlerException(
+            f"Crawl refused for {url}: only http(s) URLs with a host name are crawled"
+        )
+    addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+    try:
+        addresses.append(ipaddress.ip_address(host))
+    except ValueError:
+        try:
+            infos = await asyncio.to_thread(
+                socket.getaddrinfo, host, None, type=socket.SOCK_STREAM
+            )
+        except socket.gaierror:
+            return
+        for info in infos:
+            try:
+                addresses.append(ipaddress.ip_address(str(info[4][0])))
+            except ValueError:
+                continue
+    policy = current_destination_policy()
+    refused = [str(a) for a in addresses if not policy.allows(a)]
+    if refused:
+        raise CrawlerException(
+            f"Crawl refused for {url}: {host} resolves to {', '.join(refused)}, "
+            "which is not an allowed destination"
+        )
+
+
 # Type alias for the async crawl functions used by _crawl()
-_CrawlFunc = Callable[..., Coroutine[Any, Any, None]]
+_CrawlFunc = Callable[..., Coroutine[Any, Any, int]]
 
 
 class Crawler:
@@ -329,8 +436,10 @@ class Crawler:
         max_length: int,
         heartbeat_callback: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
         heartbeat_interval: float = 60.0,
-    ) -> None:
+    ) -> int:
         """Async wrapper with tenant-aware timeout, graceful shutdown, and heartbeat.
+
+        Returns the number of downloader exceptions seen by the crawl.
 
         Uses CrawlManager to properly handle timeout scenarios:
         1. Start crawl with manager (keeps crawler reference)
@@ -428,6 +537,8 @@ class Crawler:
                 timeout_seconds=max_length,
             )
 
+        return manager.download_error_count
+
     @staticmethod
     async def _run_sitemap_crawl_with_timeout(
         sitemap_url: str,
@@ -440,8 +551,10 @@ class Crawler:
         max_length: int,
         heartbeat_callback: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
         heartbeat_interval: float = 60.0,
-    ) -> None:
+    ) -> int:
         """Async wrapper with tenant-aware timeout, graceful shutdown, and heartbeat for sitemap.
+
+        Returns the number of downloader exceptions seen by the crawl.
 
         Uses CrawlManager to properly handle timeout scenarios:
         1. Start crawl with manager (keeps crawler reference)
@@ -533,6 +646,8 @@ class Crawler:
                 timeout_seconds=max_length,
             )
 
+        return manager.download_error_count
+
     @asynccontextmanager
     async def _crawl(
         self,
@@ -565,10 +680,11 @@ class Crawler:
 
         is_partial = False
         termination_reason = "completed"
+        download_error_count = 0
         url: str = kwargs.get("url") or kwargs.get("sitemap_url") or "unknown"
 
         try:
-            await func(
+            download_error_count = await func(
                 filepath=tmp_file_path,
                 files_dir=tmp_dir,
                 max_length=max_length,
@@ -639,6 +755,7 @@ class Crawler:
                 is_partial=is_partial,
                 termination_reason=termination_reason,
                 pages_count=pages_count,
+                download_error_count=download_error_count,
             )
 
         finally:
@@ -683,6 +800,10 @@ class Crawler:
             crawl_max_length is now tenant-aware. The timeout is resolved at runtime
             from tenant settings (if provided) or falls back to environment default.
         """
+        # Refuse a disallowed start URL up front, with a clear reason, instead
+        # of letting the crawler retry a destination that can never be reached.
+        await _check_start_url(url)
+
         # Get tenant-aware max crawl length (resolved at runtime, not import time).
         max_length = get_crawler_setting("crawl_max_length", tenant_crawler_settings)
 
