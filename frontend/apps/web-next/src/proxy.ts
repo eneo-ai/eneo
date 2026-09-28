@@ -48,11 +48,16 @@ export function buildContentSecurityPolicy(
     "img-src 'self' blob: data:",
     "font-src 'self' data:",
     "media-src 'self' blob: data:",
+    // Signed file previews are fetched through our API proxy and framed from
+    // an in-memory blob. Other frame origins remain blocked.
+    "frame-src blob:",
     `connect-src 'self'${isDevelopment ? " ws: http: https:" : ""}`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
-    "frame-ancestors 'none'",
+    // Blob documents inherit this policy. Same-origin ancestors let the PDF
+    // viewer render, while cross-origin sites still cannot frame the app.
+    "frame-ancestors 'self'",
     "script-src-attr 'none'",
     ...(isDevelopment ? [] : ["upgrade-insecure-requests"])
   ];

@@ -1,6 +1,5 @@
 "use client";
 
-import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
 import { Spinner } from "@astryxdesign/core/Spinner";
@@ -24,28 +23,131 @@ export function FileKindIcon({ mimetype, className }: { mimetype: string; classN
   return <File aria-hidden className={className} />;
 }
 
+/**
+ * The backend signs its own absolute URL, which can name a Docker-only host.
+ * Keep the signed token but serve the file through the browser's same-origin
+ * API proxy, where the existing session and CSP apply.
+ */
+export function proxiedFileDownloadUrl(signedUrl: string, fileId: string): string {
+  const parsed = new URL(signedUrl);
+  if (
+    parsed.pathname !== `/api/v1/files/${encodeURIComponent(fileId)}/download/` ||
+    !parsed.searchParams.has("token")
+  ) {
+    throw new Error("Unexpected signed file URL");
+  }
+  return `/api/eneo${parsed.pathname}${parsed.search}`;
+}
+
+/** The signed file URL is always consumed through the browser's own origin. */
+export async function signedFileUrl(
+  fileId: string,
+  disposition: "inline" | "attachment"
+): Promise<string> {
+  const signed = await unwrap(
+    browserApi.POST("/api/v1/files/{id}/signed-url/", {
+      params: { path: { id: fileId } },
+      body: { expires_in: 3600, content_disposition: disposition }
+    })
+  );
+  return proxiedFileDownloadUrl(signed.url, fileId);
+}
+
 /** Resolves a short-lived inline signed URL for a backend file on mount. */
 export function useSignedUrl(fileId: string) {
-  const [url, setUrl] = useState<string | null>(null);
+  const [result, setResult] = useState<{
+    fileId: string;
+    url: string | null;
+    error: boolean;
+  } | null>(null);
 
   useEffect(() => {
     let active = true;
-    unwrap(
-      browserApi.POST("/api/v1/files/{id}/signed-url/", {
-        params: { path: { id: fileId } },
-        body: { expires_in: 3600, content_disposition: "inline" }
+    signedFileUrl(fileId, "inline")
+      .then((url) => {
+        if (active) setResult({ fileId, url, error: false });
       })
-    )
-      .then((signed) => {
-        if (active) setUrl(signed.url);
-      })
-      .catch(() => undefined);
+      .catch(() => {
+        if (active) setResult({ fileId, url: null, error: true });
+      });
     return () => {
       active = false;
     };
   }, [fileId]);
 
-  return url;
+  return result?.fileId === fileId ? result : { fileId, url: null, error: false };
+}
+
+/** Native link preserves the backend's slash-sensitive download path. */
+function DownloadPreviewLink({ url }: { url: string }) {
+  const t = useTranslations();
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className="bg-primary text-primary-foreground hover:bg-primary/90 focus-visible:outline-ring inline-flex min-h-9 items-center gap-2 rounded-md px-4 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
+    >
+      <Download aria-hidden="true" className="size-4" />
+      {t("download")}
+    </a>
+  );
+}
+
+/** PDF bytes stay in a local blob frame, never an external backend frame. */
+function PdfPreview({ url, name }: { url: string; name: string }) {
+  const t = useTranslations();
+  const [preview, setPreview] = useState<
+    { source: string; blobUrl: string } | { source: string; error: true } | null
+  >(null);
+
+  useEffect(() => {
+    if (url.startsWith("blob:")) return;
+    const controller = new AbortController();
+    let blobUrl: string | null = null;
+    fetch(url, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Unable to load PDF preview");
+        return response.blob();
+      })
+      .then((blob) => {
+        if (controller.signal.aborted) return;
+        blobUrl = URL.createObjectURL(blob);
+        setPreview({ source: url, blobUrl });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setPreview({ source: url, error: true });
+      });
+    return () => {
+      controller.abort();
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  }, [url]);
+
+  if (!url.startsWith("blob:") && (!preview || preview.source !== url)) {
+    return <Spinner size="lg" aria-label={t("loading")} />;
+  }
+  if (preview && "error" in preview && preview.source === url) {
+    return (
+      <div className="flex flex-col items-center gap-3">
+        <p className="text-muted-foreground text-sm">{t("attachment_error_loading_content")}</p>
+        <DownloadPreviewLink url={url} />
+      </div>
+    );
+  }
+  return (
+    <iframe
+      src={
+        url.startsWith("blob:")
+          ? url
+          : preview && "blobUrl" in preview
+            ? preview.blobUrl
+            : undefined
+      }
+      title={name}
+      className="border-ax-border rounded-ax-element h-[70dvh] w-full border"
+    />
+  );
 }
 
 /**
@@ -58,13 +160,15 @@ export function AttachmentPreviewDialog({
   onOpenChange,
   name,
   mimetype,
-  url
+  url,
+  error = false
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   name: string;
   mimetype: string;
   url: string | null;
+  error?: boolean;
 }) {
   const t = useTranslations();
   const noTrigger = useRef<HTMLElement>(null);
@@ -80,7 +184,11 @@ export function AttachmentPreviewDialog({
         content={
           <LayoutContent>
             <div className="flex min-h-40 items-center justify-center">
-              {!url ? (
+              {error ? (
+                <p className="text-muted-foreground text-sm">
+                  {t("attachment_error_loading_content")}
+                </p>
+              ) : !url ? (
                 <Spinner size="lg" aria-label={t("loading")} />
               ) : isImage ? (
                 // eslint-disable-next-line @next/next/no-img-element -- signed/object URL
@@ -90,20 +198,9 @@ export function AttachmentPreviewDialog({
                   className="rounded-ax-element max-h-[70dvh] max-w-full object-contain"
                 />
               ) : isPdf ? (
-                <iframe
-                  src={url}
-                  title={name}
-                  className="border-ax-border rounded-ax-element h-[70dvh] w-full border"
-                />
+                <PdfPreview url={url} name={name} />
               ) : (
-                <Button
-                  label={t("download")}
-                  variant="primary"
-                  icon={<Download className="size-4" aria-hidden="true" />}
-                  href={url}
-                  target="_blank"
-                  rel="noreferrer"
-                />
+                <DownloadPreviewLink url={url} />
               )}
             </div>
           </LayoutContent>

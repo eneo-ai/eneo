@@ -29,7 +29,7 @@ import { SettingsGroup, SettingsRow } from "@/components/composites/settings-row
 import { useAutosave } from "@/components/composites/use-autosave";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { AttachmentPreviewDialog, useSignedUrl } from "@/features/chat/attachments";
+import { AttachmentPreviewDialog, signedFileUrl, useSignedUrl } from "@/features/chat/attachments";
 import { FileFormatDetails } from "@/features/files/file-format-details";
 import { collectDroppedFiles } from "@/features/files/collect-dropped-files";
 import { toastUploadRejection } from "@/features/files/upload-rejection-toast";
@@ -218,7 +218,7 @@ function ResourceAttachmentIcon({ file }: { file: Attachment }) {
 }
 
 function AttachmentPreview({ file, onClose }: { file: Attachment; onClose: () => void }) {
-  const url = useSignedUrl(file.id);
+  const { url, error } = useSignedUrl(file.id);
   return (
     <AttachmentPreviewDialog
       open
@@ -226,6 +226,7 @@ function AttachmentPreview({ file, onClose }: { file: Attachment; onClose: () =>
       name={file.name}
       mimetype={file.mimetype}
       url={url}
+      error={error}
     />
   );
 }
@@ -333,12 +334,7 @@ export function ResourceAttachmentsSection({
   async function downloadFile(file: Attachment) {
     setDownloadingId(file.id);
     try {
-      const { url } = await unwrap(
-        browserApi.POST("/api/v1/files/{id}/signed-url/", {
-          params: { path: { id: file.id } },
-          body: { expires_in: 3600, content_disposition: "attachment" }
-        })
-      );
+      const url = await signedFileUrl(file.id, "attachment");
       const anchor = document.createElement("a");
       anchor.href = url;
       anchor.download = file.name;
