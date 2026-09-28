@@ -119,7 +119,12 @@ class AuthService:
                 datetime.now(timezone.utc) + timedelta(minutes=expires_in)
             ),
         )
-        jwt_creds = JWTCreds(sub=user.email, username=user.username)
+        jwt_creds = JWTCreds(
+            sub=user.email,
+            username=user.username,
+            user_id=user.id,
+            tenant_id=user.tenant_id,
+        )
         token_payload = JWTPayload(
             **jwt_meta.model_dump(),
             **jwt_creds.model_dump(),
@@ -127,7 +132,7 @@ class AuthService:
         # NOTE - previous versions of pyjwt ("<2.0") returned the token as bytes insted of a string.
         # That is no longer the case and the `.decode("utf-8")` has been removed.
         access_token = jwt.encode(
-            token_payload.model_dump(), secret_key, algorithm=JWT_ALGORITHM
+            token_payload.model_dump(mode="json"), secret_key, algorithm=JWT_ALGORITHM
         )
         return access_token
 
