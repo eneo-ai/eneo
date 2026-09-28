@@ -24,6 +24,7 @@ from eneo.database.tables.user_groups_table import UserGroups
 from eneo.database.tables.users_table import usergroups_users_table
 from eneo.database.tables.websites_spaces_table import WebsitesSpaces
 from eneo.database.tables.websites_table import Websites
+from eneo.info_blobs import info_blob_protocol
 from eneo.main.exceptions import UnauthorizedException
 from eneo.users.user import UserInDB
 from eneo.websites.domain.crawl_run import CrawlType
@@ -147,6 +148,23 @@ async def test_user_can_preview_inherited_organization_knowledge(
             await container.space_service().get_space(knowledge.org_id)
         with pytest.raises(UnauthorizedException):
             await container.info_blob_service().delete(knowledge.blob_id)
+
+
+@pytest.mark.parametrize("knowledge", ["website"], indirect=True)
+async def test_website_listing_projects_indexed_pages(db_container, knowledge):
+    async with db_container() as container:
+        # A fresh session has no cached Website to mask an accidental lazy load.
+        blobs = await container.info_blob_repo().get_by_website(knowledge.source_id)
+
+        assert [blob.id for blob in blobs] == [knowledge.blob_id]
+        assert blobs[0].website is not None
+        assert blobs[0].website.id == knowledge.source_id
+
+    async with db_container() as container:
+        blobs = await container.info_blob_service().get_by_website(knowledge.source_id)
+        assert info_blob_protocol.to_info_blob_public_no_text(blobs[0]).id == (
+            knowledge.blob_id
+        )
 
 
 @pytest.mark.parametrize(
