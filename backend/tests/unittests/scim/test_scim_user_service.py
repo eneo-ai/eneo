@@ -4,7 +4,11 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.scim.constants import SCIM_FILTER_MAX_RESULTS
+from eneo.scim.constants import (
+    SCIM_CORE_USER_URN,
+    SCIM_ENTERPRISE_USER_URN,
+    SCIM_FILTER_MAX_RESULTS,
+)
 from eneo.scim.domain.errors import (
     ScimUserConflictError,
     ScimUserNotFoundError,
@@ -19,6 +23,7 @@ def _make_db_user(user_name: str = "jane@example.com", active: bool = True):
     m = MagicMock()
     m.id = uuid4()
     m.external_id = None
+    m.scim_extensions = None
     m.username = user_name
     m.email = user_name
     m.state = ScimUserState.ACTIVE if active else ScimUserState.DELETED
@@ -806,6 +811,145 @@ class TestPatchUser:
             )
 
         repo.update.assert_not_called()
+
+
+class TestEnterpriseExtension:
+    async def test_create_stores_only_the_enterprise_extension(self):
+        repo = AsyncMock()
+        repo.get_by_username.return_value = None
+        repo.get_by_email.return_value = None
+        repo.email_exists_in_other_tenant.return_value = False
+        repo.create.side_effect = lambda model: model
+
+        service = _make_service(repo)
+        await service.create_user(
+            ScimUserRequest.model_validate(
+                {
+                    "userName": "jane@example.com",
+                    SCIM_ENTERPRISE_USER_URN: {
+                        "department": "HR",
+                        "manager": {"value": "m-1", "displayName": "Boss"},
+                    },
+                    "urn:example:custom:1.0:User": {"badge": "7"},
+                }
+            )
+        )
+
+        created = repo.create.call_args.args[0]
+        assert created.scim_extensions == {
+            SCIM_ENTERPRISE_USER_URN: {"department": "HR", "manager": {"value": "m-1"}}
+        }
+
+    async def test_invalid_extension_is_rejected_before_any_lookup(self):
+        repo = AsyncMock()
+        service = _make_service(repo)
+
+        with pytest.raises(ScimValidationError, match="costCenter"):
+            await service.create_user(
+                ScimUserRequest.model_validate(
+                    {
+                        "userName": "jane@example.com",
+                        SCIM_ENTERPRISE_USER_URN: {"costCenter": 4130},
+                    }
+                )
+            )
+
+        repo.get_by_username.assert_not_called()
+        repo.create.assert_not_called()
+
+    async def test_response_echoes_stored_extension_and_lists_its_urn(self):
+        repo = AsyncMock()
+        db_user = _make_db_user()
+        db_user.scim_extensions = {SCIM_ENTERPRISE_USER_URN: {"division": "North"}}
+        repo.get_by_id.return_value = db_user
+
+        result = (await _make_service(repo).get_user(db_user.id)).model_dump(
+            mode="json"
+        )
+
+        assert result["schemas"] == [SCIM_CORE_USER_URN, SCIM_ENTERPRISE_USER_URN]
+        assert result[SCIM_ENTERPRISE_USER_URN] == {"division": "North"}
+
+    async def test_response_without_extension_is_unchanged(self):
+        repo = AsyncMock()
+        db_user = _make_db_user()
+        repo.get_by_id.return_value = db_user
+
+        result = (await _make_service(repo).get_user(db_user.id)).model_dump(
+            mode="json"
+        )
+
+        assert result["schemas"] == [SCIM_CORE_USER_URN]
+        assert set(result) == {
+            "schemas",
+            "id",
+            "externalId",
+            "userName",
+            "emails",
+            "active",
+            "meta",
+        }
+
+    async def test_put_without_extension_clears_it(self):
+        repo = AsyncMock()
+        db_user = _make_db_user()
+        db_user.scim_extensions = {SCIM_ENTERPRISE_USER_URN: {"department": "HR"}}
+        repo.get_by_id.return_value = db_user
+        repo.update.return_value = db_user
+
+        await _make_service(repo).replace_user(db_user.id, CREATE_REQUEST)
+
+        assert db_user.scim_extensions is None
+
+    async def test_patch_is_atomic_when_a_later_operation_is_invalid(self):
+        repo = AsyncMock()
+        db_user = _make_db_user("jane@example.com")
+        db_user.scim_extensions = {SCIM_ENTERPRISE_USER_URN: {"department": "HR"}}
+        repo.get_by_id.return_value = db_user
+
+        with pytest.raises(ScimValidationError):
+            await _make_service(repo).patch_user(
+                db_user.id,
+                [
+                    PatchOperation(
+                        op="Replace", path="userName", value="new@example.com"
+                    ),
+                    PatchOperation(
+                        op="Replace",
+                        path=f"{SCIM_ENTERPRISE_USER_URN}:costCenter",
+                        value={"nested": "object"},
+                    ),
+                ],
+            )
+
+        assert db_user.username == "jane@example.com"
+        assert db_user.scim_extensions == {
+            SCIM_ENTERPRISE_USER_URN: {"department": "HR"}
+        }
+        repo.update.assert_not_called()
+
+    async def test_patch_applies_core_and_extension_operations_together(self):
+        repo = AsyncMock()
+        db_user = _make_db_user()
+        repo.get_by_id.return_value = db_user
+        repo.update.return_value = db_user
+
+        await _make_service(repo).patch_user(
+            db_user.id,
+            [
+                PatchOperation(op="Replace", path="active", value="False"),
+                PatchOperation(
+                    op="Add",
+                    path=f"{SCIM_ENTERPRISE_USER_URN}:department",
+                    value="HR",
+                ),
+            ],
+        )
+
+        assert db_user.state == ScimUserState.DELETED
+        assert db_user.scim_extensions == {
+            SCIM_ENTERPRISE_USER_URN: {"department": "HR"}
+        }
 
 
 class TestDeleteUser:
