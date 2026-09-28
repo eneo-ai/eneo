@@ -378,11 +378,15 @@ function ModelsSection() {
   const toIds = (modelIds: string[]) => modelIds.map((id) => ({ id }));
 
   return (
-    <SettingsGroup id="models" title={t("advanced_settings")}>
+    <SettingsGroup
+      id="models"
+      title={t("space_settings_models_title")}
+      description={t("space_settings_models_description")}
+    >
       <SpaceModelSelect
         kind="completion"
-        title={t("completion_models")}
-        description={t("completion_models_description")}
+        title={t("space_settings_chat_models")}
+        description={t("space_settings_chat_models_description")}
         models={completionModels}
         selectedIds={space.completion_models.map((model) => model.id)}
         pending={update.isPending}
@@ -390,8 +394,8 @@ function ModelsSection() {
       />
       <SpaceModelSelect
         kind="embedding"
-        title={t("embedding_models")}
-        description={t("embedding_models_description")}
+        title={t("space_settings_embedding_models")}
+        description={t("space_settings_embedding_models_description")}
         models={embeddingModels}
         selectedIds={space.embedding_models.map((model) => model.id)}
         pending={update.isPending}
@@ -399,13 +403,21 @@ function ModelsSection() {
       />
       <SpaceModelSelect
         kind="transcription"
-        title={t("transcription_models")}
-        description={t("transcription_models_description")}
+        title={t("space_settings_transcription_models")}
+        description={t("space_settings_transcription_models_description")}
         models={transcriptionModels}
         selectedIds={space.transcription_models.map((model) => model.id)}
         pending={update.isPending}
         onChange={(ids) => autosave(() => update.mutateAsync({ transcription_models: toIds(ids) }))}
       />
+    </SettingsGroup>
+  );
+}
+
+function ToolsSection() {
+  const t = useTranslations();
+  return (
+    <SettingsGroup id="tools" title={t("space_settings_tools_title")}>
       <McpServersSection />
     </SettingsGroup>
   );
@@ -524,7 +536,7 @@ function DangerSection() {
   });
 
   return (
-    <SettingsGroup title={t("danger_zone")}>
+    <SettingsGroup id="danger" title={t("danger_zone")}>
       <SettingsRow title={t("delete_space")} description={t("delete_space_description")}>
         <div>
           <ConfirmDialog
@@ -614,17 +626,55 @@ export function SpaceSettings() {
   const t = useTranslations();
   const { space, can } = useSpace();
   const isOrgSpace = space.organization;
+  const showDanger = !isOrgSpace && can("delete", "space");
+  const sections = [
+    ...(!isOrgSpace
+      ? [
+          { id: "general", label: t("general") },
+          { id: "security", label: t("security_and_privacy") }
+        ]
+      : []),
+    { id: "models", label: t("space_settings_models_title") },
+    { id: "tools", label: t("space_settings_tools_title") },
+    ...(!isOrgSpace ? [{ id: "capabilities", label: t("capabilities") }] : []),
+    { id: "api-keys", label: t("api_keys") },
+    ...(showDanger ? [{ id: "danger", label: t("danger_zone") }] : [])
+  ];
 
   return (
     <SaveStatusProvider>
-      <div className="flex w-full max-w-5xl flex-col gap-10">
+      <div className="w-full max-w-6xl">
         <PageHeader headingLevel={2} title={t("settings")} actions={<SaveStatusIndicator />} />
-        {!isOrgSpace && <GeneralSection />}
-        {!isOrgSpace && <SecuritySection />}
-        <ModelsSection />
-        {!isOrgSpace && <SpaceCapabilitiesSection />}
-        <SpaceApiKeysSection />
-        {!isOrgSpace && can("delete", "space") && <DangerSection />}
+        <div className="mt-6 grid items-start gap-6 xl:grid-cols-[12rem_minmax(0,1fr)]">
+          <nav aria-label={t("space_settings_navigation")} className="xl:sticky xl:top-6">
+            <p className="text-muted-foreground px-3 text-xs font-semibold tracking-wide uppercase">
+              {t("space_settings_navigation")}
+            </p>
+            <ul className="mt-2 flex flex-wrap gap-1 xl:flex-col">
+              {sections.map((section) => (
+                <li key={section.id}>
+                  <Link
+                    href={`#${section.id}`}
+                    className="text-foreground hover:bg-muted focus-visible:outline-ring inline-flex min-h-9 items-center rounded-md px-3 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
+                  >
+                    {section.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+          <div className="flex min-w-0 flex-col gap-6">
+            {!isOrgSpace && <GeneralSection />}
+            {!isOrgSpace && <SecuritySection />}
+            <ModelsSection />
+            <ToolsSection />
+            {!isOrgSpace && <SpaceCapabilitiesSection />}
+            <div id="api-keys" className="scroll-mt-32">
+              <SpaceApiKeysSection />
+            </div>
+            {showDanger && <DangerSection />}
+          </div>
+        </div>
       </div>
     </SaveStatusProvider>
   );
