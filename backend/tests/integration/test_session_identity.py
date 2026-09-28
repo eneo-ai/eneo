@@ -91,7 +91,9 @@ async def test_colliding_usernames_keep_identity_and_private_resources_isolated(
         assert response.json()["email"] == owner.email
         tenant_response = await client.get("/api/v1/users/tenant/", headers=headers)
         assert tenant_response.status_code == 200, tenant_response.text
-        assert tenant_response.json()["id"] == str(owner.tenant_id)
+        # This release line does not expose the tenant id on /users/tenant/,
+        # so the tenant is matched by name (unique per test tenant).
+        assert tenant_response.json()["name"] == owner.tenant.name
         denied = await client.get(
             f"/api/v1/spaces/{private_spaces[1 - index]}/", headers=headers
         )
