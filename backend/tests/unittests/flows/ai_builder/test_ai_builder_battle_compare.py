@@ -750,6 +750,409 @@ def test_executed_output_success_is_reported_beside_conformance(
     assert "Executed output" in module._render_markdown(report, only_changed=True)
 
 
+def _delivering(
+    case_id: str, repetition: int, facts: dict[str, bool]
+) -> dict[str, Any]:
+    return {
+        **_row(case_id, "plan_first_pass", repetition=repetition),
+        "output_executed": True,
+        "output_success": all(facts.values()),
+        "output_failed_checks": [] if all(facts.values()) else ["required_fact"],
+        "output_required_facts": facts,
+    }
+
+
+_FOUR = ("A", "B", "C", "D")
+_TARGET_ROWS = [
+    # Half of four in r1 and all in r3: two of three repetitions hold.
+    _delivering("case-a", 1, dict(zip(_FOUR, (True, True, False, False)))),
+    _delivering("case-a", 2, dict(zip(_FOUR, (True, False, False, False)))),
+    _delivering("case-a", 3, dict.fromkeys(_FOUR, True)),
+    # Half of two in r1 only: one of three is not enough.
+    _delivering("case-b", 1, {"X": True, "Y": False}),
+    _delivering("case-b", 2, {"X": False, "Y": False}),
+    _delivering("case-b", 3, {"X": False, "Y": False}),
+]
+
+
+def test_target_literals_pass_at_half_the_targets_in_two_of_three_reps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = _compare_module()
+    baseline = _write(tmp_path, "base.json", _TARGET_ROWS)
+    current = _write(tmp_path, "cur.json", _TARGET_ROWS)
+    targets = {"case-a": list(_FOUR), "case-b": ["X", "Y"]}
+
+    report = module.compare(baseline, current, target_literals=targets)
+
+    assert report["target_literals"] == {
+        "model": "model-under-test",
+        "declared_repetitions": {"baseline": 3, "current": 3},
+        "not_a_gate_result": [],
+        "not_a_gate_cases": {},
+        "cases": {
+            "case-a": {"targets": 4, "baseline": [2, 1, 4], "current": [2, 1, 4]},
+            "case-b": {"targets": 2, "baseline": [1, 0, 0], "current": [1, 0, 0]},
+        },
+        "failed_cases": {
+            "case-b": [
+                "1 of 3 current repetition(s) delivered at least half the targets "
+                "in a valid output; 2 must"
+            ]
+        },
+    }
+    assert module.compare(baseline, current)["target_literals"] is None
+    targets_path = tmp_path / "targets.json"
+    targets_path.write_text(json.dumps(targets), encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["compare", "compare", str(baseline), str(current), "--target-literals"]
+        + [str(targets_path)],
+    )
+    with pytest.raises(SystemExit) as exited:
+        module.main()
+    assert exited.value.code == 1
+    assert (
+        "## Target literals (model model-under-test): FAIL" in capsys.readouterr().out
+    )
+
+
+def test_a_target_repetition_with_an_invalid_output_does_not_count(
+    tmp_path: Path,
+) -> None:
+    module = _compare_module()
+    # Every target delivered, but another output check (a forbidden literal,
+    # a wrong kind) failed, or the run was never scored.
+    rows = [
+        {**_delivering("case-a", 1, {"A": True}), "output_failed_checks": ["x"]},
+        {
+            **_delivering("case-a", 2, {"A": True}),
+            "output_success": None,
+            "output_required_facts": None,
+        },
+        {
+            **_delivering("case-a", 3, {"A": True}),
+            "output_executed": False,
+            "output_success": None,
+        },
+    ]
+    baseline = _write(tmp_path, "base.json", rows)
+    current = _write(tmp_path, "cur.json", rows)
+
+    report = module.compare(baseline, current, target_literals={"case-a": ["A"]})
+
+    assert report["target_literals"]["cases"]["case-a"]["current"] == [None] * 3
+    assert report["target_literals"]["failed_cases"] == {
+        "case-a": [
+            "0 of 3 current repetition(s) delivered at least half the targets "
+            "in a valid output; 2 must"
+        ]
+    }
+
+
+@pytest.mark.parametrize(
+    ("baseline_rows", "current_rows", "failures"),
+    [
+        (
+            _TARGET_ROWS[:3],
+            _TARGET_ROWS[:1],
+            [
+                "incomplete evidence: the current holds repetition(s) [1] of the "
+                "3 the gate needs",
+                "1 of 3 current repetition(s) delivered at least half the targets "
+                "in a valid output; 2 must",
+            ],
+        ),
+        (
+            _TARGET_ROWS[3:],
+            _TARGET_ROWS[:3],
+            [
+                "incomplete evidence: the baseline holds repetition(s) [] of the "
+                "3 the gate needs"
+            ],
+        ),
+    ],
+    ids=["one_current_run", "no_baseline"],
+)
+def test_a_target_case_needs_every_declared_repetition_on_both_sides(
+    tmp_path: Path,
+    baseline_rows: list[dict[str, Any]],
+    current_rows: list[dict[str, Any]],
+    failures: list[str],
+) -> None:
+    module = _compare_module()
+    baseline = _write(tmp_path, "base.json", baseline_rows)
+    current = _write(tmp_path, "cur.json", current_rows)
+
+    report = module.compare(baseline, current, target_literals={"case-a": list(_FOUR)})
+
+    assert report["target_literals"]["failed_cases"] == {"case-a": failures}
+
+
+@pytest.mark.parametrize(
+    ("baseline_repetitions", "current_repetitions"),
+    [(1, 1), (3, 1)],
+    ids=["one_run_screen", "unequal_declarations"],
+)
+def test_a_screen_not_declaring_three_paired_repetitions_is_not_a_gate_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    baseline_repetitions: int,
+    current_repetitions: int,
+) -> None:
+    module = _compare_module()
+    delivered = [_delivering("case-a", 1, dict.fromkeys(_FOUR, True))]
+    paths: list[Path] = []
+    for name, repetitions in (
+        ("base.json", baseline_repetitions),
+        ("cur.json", current_repetitions),
+    ):
+        summary = _summary(delivered)
+        summary["repetitions"] = repetitions
+        summary["evaluator_identity"]["run_context"]["repetitions"] = repetitions
+        paths.append(tmp_path / name)
+        paths[-1].write_text(json.dumps(summary), encoding="utf-8")
+
+    report = module.compare(*paths, target_literals={"case-a": list(_FOUR)})
+
+    targets = report["target_literals"]
+    # The counts still show; the verdict is withheld and cannot pass.
+    assert targets["cases"]["case-a"]["current"] == [4]
+    assert targets["not_a_gate_result"] == [
+        f"the receipts declare {baseline_repetitions} and {current_repetitions} "
+        "repetition(s); the target gate needs 3 on both"
+    ]
+    targets_path = tmp_path / "targets.json"
+    targets_path.write_text(json.dumps({"case-a": list(_FOUR)}), encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["compare", "compare", *map(str, paths), "--target-literals"]
+        + [str(targets_path)],
+    )
+    with pytest.raises(SystemExit) as exited:
+        module.main()
+    assert exited.value.code == 1
+    assert "): NOT A GATE RESULT" in capsys.readouterr().out
+
+
+def _target_receipts(
+    tmp_path: Path, *, current_identity: dict[str, Any], current_contract: str
+) -> tuple[Path, Path]:
+    paths: list[Path] = []
+    for name, identity, contract in (
+        ("base.json", {}, "c" * 64),
+        ("cur.json", current_identity, current_contract),
+    ):
+        summary = _summary(
+            [
+                {**row, "case_contract_sha256": contract}
+                if row["case_id"] == "case-a"
+                else row
+                for row in _TARGET_ROWS
+            ]
+        )
+        summary["evaluator_identity"].update(identity)
+        paths.append(tmp_path / name)
+        paths[-1].write_text(json.dumps(summary), encoding="utf-8")
+    return paths[0], paths[1]
+
+
+def test_a_target_case_whose_contract_changed_is_not_a_gate_result(
+    tmp_path: Path,
+) -> None:
+    module = _compare_module()
+    baseline, current = _target_receipts(
+        tmp_path,
+        current_identity={"case_contract_sha256_by_id": {"case-a": "d" * 64}},
+        current_contract="d" * 64,
+    )
+    targets = {"case-a": list(_FOUR), "case-b": ["X", "Y"]}
+
+    full = module.compare(baseline, current, target_literals=targets)
+    report = full["target_literals"]
+
+    # case-a delivered, but under another contract; the unrelated case-b is
+    # still judged.
+    assert "- case-a is not a gate result" in module._render_markdown(
+        full, only_changed=True
+    )
+    assert report["not_a_gate_result"] == []
+    assert report["not_a_gate_cases"] == {
+        "case-a": "the case contract differs between or within the receipts"
+    }
+    assert list(report["failed_cases"]) == ["case-b"]
+
+
+def test_a_harness_change_is_not_a_gate_result_even_when_waived(
+    tmp_path: Path,
+) -> None:
+    module = _compare_module()
+    baseline, current = _target_receipts(
+        tmp_path,
+        current_identity={"harness_sha256": "9" * 64},
+        current_contract="c" * 64,
+    )
+
+    report = module.compare(
+        baseline,
+        current,
+        allow_harness_change=True,
+        target_literals={"case-a": list(_FOUR)},
+    )["target_literals"]
+
+    assert report["failed_cases"] == {}
+    assert report["not_a_gate_result"] == [
+        "the receipts were measured with different harnesses; the target gate "
+        "needs the same harness on both"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("repetitions", True, "repetitions must be a positive integer"),
+        ("repetitions", 3.0, "repetitions must be a positive integer"),
+        ("repetitions", [3], "repetitions must be a positive integer"),
+        ("harness_sha256", ["h"], "harness_sha256 must be a SHA-256 digest"),
+        ("harness_sha256", 7, "harness_sha256 must be a SHA-256 digest"),
+        ("harness_sha256", "A" * 64, "harness_sha256 must be a SHA-256 digest"),
+    ],
+    ids=[
+        "bool_count",
+        "float_count",
+        "list_count",
+        "list_harness",
+        "number_harness",
+        "non_hex_harness",
+    ],
+)
+def test_a_malformed_target_gate_identity_is_an_invalid_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    field: str,
+    value: object,
+    error: str,
+) -> None:
+    # Both receipts carry the same malformed value, so no identity check
+    # refuses the pair before the target gate reads it.
+    module = _compare_module()
+    paths: list[Path] = []
+    for name in ("base.json", "cur.json"):
+        summary = _summary(_TARGET_ROWS)
+        identity = summary["evaluator_identity"]
+        (identity["run_context"] if field == "repetitions" else identity)[field] = value
+        paths.append(tmp_path / name)
+        paths[-1].write_text(json.dumps(summary), encoding="utf-8")
+    targets_path = tmp_path / "targets.json"
+    targets_path.write_text(json.dumps({"case-a": list(_FOUR)}), encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["compare", "compare", *map(str, paths), "--target-literals"]
+        + [str(targets_path)],
+    )
+
+    with pytest.raises(SystemExit) as exited:
+        module.main()
+
+    assert exited.value.code == 2
+    assert error in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("waiver", [[], ["--allow-harness-change"]], ids=["", "waived"])
+def test_a_malformed_harness_beside_a_valid_one_is_an_invalid_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    waiver: list[str],
+) -> None:
+    # The receipts differ, so the general identity check would refuse them as
+    # incomparable; a malformed digest is an invalid receipt first.
+    module = _compare_module()
+    baseline = _write(tmp_path, "base.json", _TARGET_ROWS)
+    current = _with_identity(tmp_path, "cur.json", "harness_sha256", "A" * 64)
+    targets_path = tmp_path / "targets.json"
+    targets_path.write_text(json.dumps({"case-a": list(_FOUR)}), encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["compare", "compare", str(baseline), str(current), *waiver]
+        + ["--target-literals", str(targets_path)],
+    )
+
+    with pytest.raises(SystemExit) as exited:
+        module.main()
+
+    assert exited.value.code == 2
+    assert (
+        "the current receipt's harness_sha256 must be a SHA-256 digest"
+        in capsys.readouterr().err
+    )
+
+
+@pytest.mark.parametrize(
+    "targets",
+    [{}, {"case-a": []}, {"case-a": ["A", " a "]}, {"case-a": ["A", ""]}],
+    ids=["empty_registry", "empty_case", "duplicate_target", "empty_literal"],
+)
+def test_a_target_registry_that_cannot_gate_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    targets: dict[str, list[str]],
+) -> None:
+    module = _compare_module()
+    baseline = _write(tmp_path, "base.json", _TARGET_ROWS)
+    current = _write(tmp_path, "cur.json", _TARGET_ROWS)
+    targets_path = tmp_path / "targets.json"
+    targets_path.write_text(json.dumps(targets), encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["compare", "compare", str(baseline), str(current), "--target-literals"]
+        + [str(targets_path)],
+    )
+
+    with pytest.raises(SystemExit) as exited:
+        module.main()
+
+    assert exited.value.code == 2
+    assert "distinct, non-empty literals" in capsys.readouterr().err
+
+
+def test_the_registered_target_literals_are_required_facts_of_their_cases() -> None:
+    # The comparator judges targets from each row's required facts, so a
+    # target outside them could never be delivered.
+    scripts = _SCRIPT.parent
+    targets = json.loads(
+        (scripts / "ai_builder_s1c_target_literals.json").read_text(encoding="utf-8")
+    )
+    cases = json.loads(
+        (scripts / "ai_builder_api_municipal_cases.json").read_text(encoding="utf-8")
+    )["cases"]
+    required = {
+        case["id"]: case["execution"]["expect"]["required_facts"]
+        for case in cases
+        if case["id"] in targets
+    }
+
+    assert (
+        sorted(required)
+        == sorted(targets)
+        == [
+            "mc_byg08_eldstad",
+            "mc_int13_delegationsbeslut",
+            "mc_tra01_parkeringstillstand",
+            "mc_utb01_specialkost",
+        ]
+    )
+    assert all(set(targets[case]) <= set(required[case]) for case in targets)
+
+
 def test_mixed_repetition_design_gets_no_margin_verdict(tmp_path: Path) -> None:
     # The margin is calibrated on same-design repetition movement. A repeated
     # baseline against a single-run candidate measures a different quantity,

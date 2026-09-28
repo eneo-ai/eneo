@@ -114,9 +114,12 @@ class _Observer:
         runs: bool = True,
         edit: Callable[[dict[str, Any]], None] | None = None,
         required_facts: tuple[str, ...] = _FACTS,
+        forbidden: tuple[str, ...] = (),
     ) -> dict[str, Any]:
         harness = self.harness
-        execution = _execution(harness, required_facts=required_facts)
+        execution = _execution(
+            harness, required_facts=required_facts, forbidden=forbidden
+        )
         case = harness.BattleCase(
             case_id=case_id,
             prompt="Build and run the Flow.",
@@ -468,6 +471,99 @@ def test_a_required_literal_survives_where_the_parent_delivered_partly(
     }
     # A literal the parent never delivered does not bind the candidate.
     assert _compare(tmp_path, candidate, candidate)["runtime_cost_failed_cases"] == {}
+
+
+@mark.parametrize(
+    ("parent_delivers", "candidate_delivers", "failures"),
+    [
+        (
+            3,
+            2,
+            [
+                "current r3 misses required literal(s) the baseline delivered: ['Njurunda']"
+            ],
+        ),
+        (
+            2,
+            0,
+            [
+                "no current run delivers required literal(s) a baseline run "
+                "delivered: ['Njurunda']"
+            ],
+        ),
+        (2, 1, []),
+    ],
+    ids=["unanimous_fact_lost_in_one_rep", "intermittent_fact_vanishes", "rarer"],
+)
+def test_an_intermittent_literal_may_become_rarer_but_never_vanishes(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    parent_delivers: int,
+    candidate_delivers: int,
+    failures: list[str],
+) -> None:
+    observer = _Observer(monkeypatch, tmp_path)
+
+    def reps(delivering: int) -> list[dict[str, Any]]:
+        # A pdf-declared text never delivers successfully, so only the
+        # literals bind; the first `delivering` repetitions hold Njurunda.
+        return [
+            observer.row(
+                repetition=repetition,
+                declared_output="pdf",
+                text=(
+                    _FULL_TEXT
+                    if repetition <= delivering
+                    else "Förskolan i Kvissleby avvecklas."
+                ),
+            )
+            for repetition in (1, 2, 3)
+        ]
+
+    report = _compare(tmp_path, reps(parent_delivers), reps(candidate_delivers))
+
+    assert _failures(report) == ({"case-a": failures} if failures else {})
+
+
+def test_a_source_dump_does_not_count_toward_the_delivery_targets(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    # The int13 decision list, delivered as is, holds three of the case's
+    # five targets, and the client names its forbidden literals exclude.
+    scripts = Path(_compare_module().__file__).parent
+    case = next(
+        case
+        for case in json.loads(
+            (scripts / "ai_builder_api_municipal_cases.json").read_text(
+                encoding="utf-8"
+            )
+        )["cases"]
+        if case["id"] == "mc_int13_delegationsbeslut"
+    )
+    expect = case["execution"]["expect"]
+    targets = json.loads(
+        (scripts / "ai_builder_s1c_target_literals.json").read_text(encoding="utf-8")
+    )[case["id"]]
+    dump = (
+        scripts / "fixtures/ai_builder_battle/int13_beslutslista_augusti_2026.csv"
+    ).read_text(encoding="utf-8")
+    observer = _Observer(monkeypatch, tmp_path)
+    rows = [
+        observer.row(
+            case_id=case["id"],
+            repetition=repetition,
+            text=dump,
+            required_facts=tuple(expect["required_facts"]),
+            forbidden=tuple(expect["forbidden"]),
+        )
+        for repetition in (1, 2, 3)
+    ]
+    assert sum(rows[0]["output_required_facts"][target] for target in targets) == 3
+
+    report = _compare(tmp_path, rows, rows, target_literals={case["id"]: targets})
+
+    assert report["target_literals"]["cases"][case["id"]]["current"] == [None] * 3
+    assert list(report["target_literals"]["failed_cases"]) == [case["id"]]
 
 
 def test_a_receipt_without_runtime_cost_is_refused(

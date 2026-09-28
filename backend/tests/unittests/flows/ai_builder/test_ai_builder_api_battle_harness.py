@@ -13515,6 +13515,28 @@ def test_cases_file_reads_an_execution_block() -> None:
             {"inputs": {"text": "Skriv beslutet."}, "expect": {"forbidden": ["{{"]}},
             "required_facts or an output_kind",
         ),
+        (
+            {
+                "inputs": {"text": "Skriv beslutet."},
+                "expect": {
+                    "output_kind": "docx",
+                    "associations": [
+                        {"fact": "A", "with": "B", "not_with": "C"},
+                    ],
+                },
+            },
+            "associations need text output",
+        ),
+        (
+            {
+                "inputs": {"text": "Skriv beslutet."},
+                "expect": {
+                    "output_kind": "text",
+                    "associations": [{"fact": "A", "with": "B"}],
+                },
+            },
+            "needs non-empty fact, with and not_with",
+        ),
     ],
 )
 def test_cases_file_rejects_an_execution_block_it_cannot_measure(
@@ -13541,6 +13563,119 @@ def test_cases_file_rejects_an_execution_block_it_cannot_measure(
 
     with raises(ValueError, match=error):
         harness._read_cases_file(cases_path)
+
+
+_UTB01_REGISTER = (
+    "Specialkost vecka 41 för Ella Nordin, Kvarnbäckens skola\n"
+    "Onsdag: kycklingwoken har jordnötssås, servera utan sås\n"
+    "Fredag: äppelkakan har mandelbotten, servera frukt"
+)
+_INT13_REGISTER = (
+    "Anmälan BIS-2026-04417, 8 kap. 4 §. Avvikelser: 3 st\n"
+    "VON 2026/00588 fattat av Tobias Grahn, enhetschef\n"
+    "VON 2026/00612 fattat av Frida Sundin, kvalitetsstrateg"
+)
+
+
+def _municipal_expect(harness: ModuleType, case_id: str) -> Any:
+    cases = harness._read_cases_file(
+        harness.DEFAULT_CASES_FILE.with_name("ai_builder_api_municipal_cases.json")
+    )
+    case = {case.case_id: case for case in cases}[case_id]
+    assert case.execution is not None
+    return case.execution.expect
+
+
+def _text_output_report(harness: ModuleType, expect: Any, text: str) -> dict[str, Any]:
+    return harness._output_report(
+        expect,
+        {
+            "execution": {"outcome": "completed", "failures": []},
+            "run": _completed_text_run(text),
+            "run_contract": {"final_output": {"output_type": "text"}},
+        },
+        runtime_checks=[],
+    )
+
+
+def _failed_checks(report: dict[str, Any]) -> list[tuple[str, str]]:
+    return [
+        (check["name"], check.get("fact") or check.get("literal"))
+        for check in report["output_checks"]
+        if check["passed"] is not True
+    ]
+
+
+@mark.parametrize(
+    ("case_id", "text", "failed"),
+    [
+        ("mc_utb01_specialkost", _UTB01_REGISTER, []),
+        (
+            "mc_utb01_specialkost",
+            _UTB01_REGISTER.replace("Onsdag", "Tisdag").replace("Fredag", "Onsdag"),
+            [
+                ("output_association", "jordnötssås"),
+                ("output_association", "mandelbotten"),
+            ],
+        ),
+        (
+            "mc_utb01_specialkost",
+            "Onsdag och fredag: jordnötssås, mandelbotten\nElla Nordin, Kvarnbäckens skola",
+            [
+                ("output_association", "jordnötssås"),
+                ("output_association", "mandelbotten"),
+            ],
+        ),
+        ("mc_int13_delegationsbeslut", _INT13_REGISTER, []),
+        (
+            "mc_int13_delegationsbeslut",
+            _INT13_REGISTER.replace("Tobias Grahn", "X")
+            .replace("Frida Sundin", "Tobias Grahn")
+            .replace("X", "Frida Sundin"),
+            [
+                ("output_association", "VON 2026/00588"),
+                ("output_association", "VON 2026/00612"),
+            ],
+        ),
+    ],
+    ids=[
+        "utb01_register",
+        "utb01_swapped_days",
+        "utb01_both_days_on_one_line",
+        "int13_register",
+        "int13_swapped_deciders",
+    ],
+)
+def test_a_text_register_delivers_each_fact_beside_its_own_context(
+    case_id: str, text: str, failed: list[tuple[str, str]]
+) -> None:
+    harness = _battle_harness()
+
+    report = _text_output_report(harness, _municipal_expect(harness, case_id), text)
+
+    assert _failed_checks(report) == failed
+    assert report["output_success"] is (not failed)
+
+
+def test_a_source_dump_fails_through_the_forbidden_literals() -> None:
+    # The decision list itself holds every fact beside its decider, and the
+    # client names a register leaves out.
+    harness = _battle_harness()
+    dump = (
+        harness.DEFAULT_CASES_FILE.parent
+        / "fixtures/ai_builder_battle/int13_beslutslista_augusti_2026.csv"
+    ).read_text(encoding="utf-8")
+    expect = _municipal_expect(harness, "mc_int13_delegationsbeslut")
+
+    report = _text_output_report(harness, expect, dump)
+
+    assert all(
+        check["passed"]
+        for check in report["output_checks"]
+        if check["name"] == "output_association"
+    )
+    assert ("forbidden_literal", "Astrid Wikman") in _failed_checks(report)
+    assert report["output_success"] is False
 
 
 # --- Edit capability lifecycle (eneo-e7h6) --------------------------------

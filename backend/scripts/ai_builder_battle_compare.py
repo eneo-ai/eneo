@@ -34,6 +34,7 @@ import math
 import statistics
 import subprocess
 import sys
+import unicodedata
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -51,6 +52,7 @@ from ai_builder_receipt import (  # noqa: E402
     ACQUISITION_FAILURE_CLASSES,
     ReceiptError,
     executed_output_report,
+    is_sha256,
     load_release_receipt,
     load_summary_receipt,
     receipt_membership_report,
@@ -462,7 +464,8 @@ def _runtime_cost_delta(
     up to its most plus the allowance, tokens up to its most times the
     tolerance, and no more length finishes. It must deliver successfully
     where every baseline run did, and always every required literal they all
-    delivered. A case no baseline observation ran is newly executable: its
+    delivered; a literal only some baseline runs delivered must reach at
+    least one current run. A case no baseline observation ran is newly executable: its
     runs are held to the absolute budget, must deliver, and must hold every
     required literal. A current observation that does not run where the
     baseline ran fails; missing evidence of a run always fails, and so does
@@ -590,8 +593,31 @@ def _runtime_cost_delta(
                 + ("" if newly_executable else " the baseline delivered")
                 + f": {missing}"
             )
+    # An intermittent fact may become rarer, never vanish: one baseline run
+    # delivering it binds at least one current run.
+    vanished = sorted(
+        {fact for facts in baseline_facts for fact in facts if facts[fact] is True}
+        - delivered
+        - {
+            fact
+            for row in ran_after
+            for fact, held in _facts(row).items()
+            if held is True
+        }
+    )
+    if vanished and ran_after:
+        failures.append(
+            "no current run delivers required literal(s) a baseline run "
+            f"delivered: {vanished}"
+        )
     report["failures"] = failures
     return report
+
+
+def _facts(row: dict[str, Any]) -> dict[str, Any]:
+    """Each required literal of the row's case, and whether its output held it."""
+
+    return cast(dict[str, Any], row.get("output_required_facts") or {})
 
 
 def _runtime_row_error(row: dict[str, Any]) -> str | None:
@@ -796,11 +822,20 @@ def compare(
     runtime_token_tolerance: float = DEFAULT_RUNTIME_TOKEN_TOLERANCE,
     new_case_max_runtime_calls: int = DEFAULT_NEW_CASE_MAX_RUNTIME_CALLS,
     new_case_max_runtime_tokens: int = DEFAULT_NEW_CASE_MAX_RUNTIME_TOKENS,
+    target_literals: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
+    targets = None if target_literals is None else _validated_targets(target_literals)
     baseline_rows, baseline_summary, baseline_executed_output = _load_rows(
         baseline_path
     )
     current_rows, current_summary, current_executed_output = _load_rows(current_path)
+    # Typed first: a malformed identity is an invalid receipt, whatever its
+    # peer holds, before any pair of receipts is judged comparable.
+    target_identity = (
+        None
+        if targets is None
+        else _target_gate_identity(baseline_summary, current_summary)
+    )
     incompatible = _incompatible_identity_fields(
         baseline_summary,
         current_summary,
@@ -973,7 +1008,178 @@ def compare(
                 "failures"
             )
         },
+        "target_literals": None
+        if targets is None or target_identity is None
+        else _target_literals(
+            targets,
+            baseline_rows,
+            current_rows,
+            **target_identity,
+            rescored=set(rescored_cases),
+            model=_evaluator_identity(current_summary).get("requested_model_id"),
+        ),
         "cases": deltas,
+    }
+
+
+# The registered plan's pairing: three repetitions on each side, two of which
+# must deliver. A receipt declaring another count is a screen, not the gate.
+_TARGET_REPETITIONS = 3
+_TARGET_PASSING_REPETITIONS = 2
+
+
+def _validated_targets(targets: Mapping[str, object]) -> dict[str, list[str]]:
+    """A registry that can gate: at least one case, each with distinct literals.
+
+    Distinct as required facts are compared (NFKC, casefolded, whitespace
+    collapsed), so a repeated easy fact cannot count twice.
+    """
+
+    def distinct(literals: object) -> bool:
+        if not isinstance(literals, list):
+            return False
+        keys = [
+            " ".join(unicodedata.normalize("NFKC", item).casefold().split())
+            if isinstance(item, str)
+            else ""
+            for item in cast(list[object], literals)
+        ]
+        return bool(keys) and all(keys) and len(set(keys)) == len(keys)
+
+    if not (targets and all(distinct(literals) for literals in targets.values())):
+        raise ReceiptError(
+            "target literals must map at least one case to a list of distinct, "
+            "non-empty literals."
+        )
+    return cast(dict[str, list[str]], dict(targets))
+
+
+def _target_count(row: dict[str, Any], literals: list[str]) -> int | None:
+    """Targets one repetition delivered, or None when its output is not valid:
+    not executed, not scored, or failing any output check besides a missing
+    required fact (a forbidden literal, the wrong kind, a runtime check)."""
+
+    failed = row.get("output_failed_checks")
+    if not (
+        _ran(row)
+        and isinstance(row.get("output_required_facts"), dict)
+        and isinstance(failed, list)
+        and all(name == "required_fact" for name in cast(list[Any], failed))
+    ):
+        return None
+    return sum(_facts(row).get(literal) is True for literal in literals)
+
+
+def _target_gate_identity(
+    baseline_summary: dict[str, Any], current_summary: dict[str, Any]
+) -> dict[str, Any]:
+    """Each receipt's declared repetitions and harness, refused unless typed:
+    a JSON 3.0 or true is no count of three, and a number no harness."""
+
+    declared: dict[str, int] = {}
+    harnesses: dict[str, str] = {}
+    for side, summary in (("baseline", baseline_summary), ("current", current_summary)):
+        repetitions = _run_context(summary).get("repetitions")
+        harness = _evaluator_identity(summary).get("harness_sha256")
+        if not (type(repetitions) is int and repetitions >= 1):
+            raise ReceiptError(
+                f"the {side} receipt's run_context.repetitions must be a positive "
+                f"integer, got {repetitions!r}."
+            )
+        if not is_sha256(harness):
+            raise ReceiptError(
+                f"the {side} receipt's harness_sha256 must be a SHA-256 digest, "
+                f"got {harness!r}."
+            )
+        declared[side], harnesses[side] = repetitions, cast(str, harness)
+    return {"declared": declared, "harnesses": harnesses}
+
+
+def _target_literals(
+    targets: dict[str, list[str]],
+    baseline_rows: dict[str, list[dict[str, Any]]],
+    current_rows: dict[str, list[dict[str, Any]]],
+    *,
+    declared: dict[str, int],
+    harnesses: dict[str, str],
+    rescored: set[str],
+    model: object,
+) -> dict[str, Any]:
+    """How many pre-registered targets each repetition delivered, per case.
+
+    Both receipts must declare three repetitions and hold all three for each
+    target case, and at least half the targets must be delivered in a valid
+    output in two of the three current repetitions. Both receipts must come
+    from one harness (the harness waiver does not reach this gate), and each
+    target case from one case contract. Otherwise the counts still show, but
+    the result is not a gate result and does not pass.
+    """
+
+    repetitions, needed = _TARGET_REPETITIONS, _TARGET_PASSING_REPETITIONS
+    cases: dict[str, dict[str, Any]] = {}
+    failed: dict[str, list[str]] = {}
+    not_gated: dict[str, str] = {}
+    for case_id, literals in sorted(targets.items()):
+        sides = {"baseline": baseline_rows, "current": current_rows}
+        contracts = {
+            row.get("case_contract_sha256")
+            for rows in sides.values()
+            for row in rows.get(case_id, [])
+        }
+        if case_id in rescored or len(contracts) > 1:
+            not_gated[case_id] = (
+                "the case contract differs between or within the receipts"
+            )
+        cases[case_id] = {
+            "targets": len(literals),
+            **{
+                side: [_target_count(row, literals) for row in rows.get(case_id, [])]
+                for side, rows in sides.items()
+            },
+        }
+        failures = [
+            f"incomplete evidence: the {side} holds repetition(s) {held} of the "
+            f"{repetitions} the gate needs"
+            for side, rows in sides.items()
+            if (held := [row.get("repetition") for row in rows.get(case_id, [])])
+            != list(range(1, repetitions + 1))
+        ]
+        passing = sum(
+            count is not None and 2 * count >= len(literals)
+            for count in cases[case_id]["current"]
+        )
+        if passing < needed:
+            failures.append(
+                f"{passing} of {repetitions} current repetition(s) delivered at "
+                f"least half the targets in a valid output; {needed} must"
+            )
+        if failures:
+            failed[case_id] = failures
+    return {
+        "model": model,
+        "declared_repetitions": declared,
+        "not_a_gate_result": [
+            *(
+                []
+                if declared["baseline"] == declared["current"] == repetitions
+                else [
+                    f"the receipts declare {declared['baseline']} and "
+                    f"{declared['current']} repetition(s); the target gate "
+                    f"needs {repetitions} on both"
+                ]
+            ),
+            *(
+                []
+                if harnesses["baseline"] == harnesses["current"]
+                else [
+                    "the receipts were measured with different harnesses; the "
+                    "target gate needs the same harness on both"
+                ]
+            ),
+        ],
+        "not_a_gate_cases": not_gated,
+        "cases": cases,
+        "failed_cases": failed,
     }
 
 
@@ -1249,6 +1455,36 @@ def _render_markdown(report: dict[str, Any], *, only_changed: bool) -> str:
         )
         for case_id, reasons in decision_failed.items():
             lines.extend(f"- {case_id}: {reason}" for reason in reasons)
+        lines.append("")
+    targets = cast(dict[str, Any] | None, report.get("target_literals"))
+    if targets:
+        lines.append(
+            f"## Target literals (model {targets['model']}): "
+            + (
+                "NOT A GATE RESULT"
+                if targets["not_a_gate_result"] or targets["not_a_gate_cases"]
+                else "FAIL"
+                if targets["failed_cases"]
+                else "pass"
+            )
+        )
+        lines.extend(f"  {reason}" for reason in targets["not_a_gate_result"])
+        lines.extend(
+            f"- {case_id} is not a gate result: {reason}"
+            for case_id, reason in targets["not_a_gate_cases"].items()
+        )
+        lines.extend(
+            f"- {case_id}: of {case['targets']}, current delivered {case['current']}, "
+            f"baseline {case['baseline']} (null: no valid output)"
+            for case_id, case in cast(dict[str, Any], targets["cases"]).items()
+        )
+        lines.extend(
+            f"- {case_id} FAILS: {reason}"
+            for case_id, reasons in cast(
+                dict[str, list[str]], targets["failed_cases"]
+            ).items()
+            for reason in reasons
+        )
         lines.append("")
     by_cohort = cast(dict[str, dict[str, int]], report["direction_counts_by_cohort"])
     if by_cohort:
@@ -2006,6 +2242,17 @@ def main() -> None:
             "observation ran (default %(default)s)."
         ),
     )
+    compare_mode.add_argument(
+        "--target-literals",
+        type=Path,
+        default=None,
+        help=(
+            "A JSON object of case id -> literals, registered before the run. A "
+            "case passes when at least half its literals are delivered in two of "
+            "the three current repetitions; both receipts must declare and hold "
+            "three repetitions of each target case."
+        ),
+    )
 
     release_mode = modes.add_parser(
         "release-verdict", help="Judge one receipt against the release gate."
@@ -2102,6 +2349,11 @@ def main() -> None:
             runtime_token_tolerance=args.runtime_token_tolerance,
             new_case_max_runtime_calls=args.new_case_max_runtime_calls,
             new_case_max_runtime_tokens=args.new_case_max_runtime_tokens,
+            target_literals=(
+                load_json_object(args.target_literals, what="target literals")
+                if args.target_literals is not None
+                else None
+            ),
         )
     except ReceiptError as error:
         print(f"Refusing to compare these receipts: {error}", file=sys.stderr)
@@ -2112,7 +2364,14 @@ def main() -> None:
     else:
         sys.stdout.write(_render_markdown(report, only_changed=args.only_changed))
         sys.stdout.write("\n")
-    if report["runtime_cost_failed_cases"] or report.get("decision_floor_failed_cases"):
+    if (
+        report["runtime_cost_failed_cases"]
+        or report.get("decision_floor_failed_cases")
+        or any(
+            cast(dict[str, Any], report["target_literals"] or {}).get(key)
+            for key in ("failed_cases", "not_a_gate_result", "not_a_gate_cases")
+        )
+    ):
         raise SystemExit(1)
 
 

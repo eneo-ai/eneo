@@ -413,12 +413,22 @@ class ExpectedCheckpoint:
 
 
 @dataclass(frozen=True, slots=True)
+class OutputAssociation:
+    """Some output line holding `fact` holds `with_`; none holds `not_with`."""
+
+    fact: str
+    with_: str
+    not_with: str
+
+
+@dataclass(frozen=True, slots=True)
 class OutputExpectation:
     """Oracles for the final output of a run over the case's own fixtures."""
 
     output_kind: str | None
     required_facts: tuple[str, ...] = ()
     forbidden: tuple[str, ...] = ()
+    associations: tuple[OutputAssociation, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -528,7 +538,20 @@ def _execution_contract(execution: CaseExecution) -> JsonObject:
             "output_kind": execution.expect.output_kind,
             "required_facts": list(execution.expect.required_facts),
             "forbidden": list(execution.expect.forbidden),
+            **(
+                {"associations": [_association_contract(item) for item in associations]}
+                if (associations := execution.expect.associations)
+                else {}
+            ),
         },
+    }
+
+
+def _association_contract(association: OutputAssociation) -> JsonObject:
+    return {
+        "fact": association.fact,
+        "with": association.with_,
+        "not_with": association.not_with,
     }
 
 
@@ -2234,6 +2257,16 @@ def _output_expectation(value: object, *, owner: str) -> OutputExpectation:
             f"{owner} needs required_facts or an output_kind: forbidden literals "
             "alone assert nothing the run must produce."
         )
+    raw_associations = raw.get("associations", [])
+    if not isinstance(raw_associations, list):
+        raise ValueError(f"{owner}.associations must be a list.")
+    associations = tuple(
+        _output_association(item, owner=f"{owner}.associations[{index}]")
+        for index, item in enumerate(cast(list[object], raw_associations))
+    )
+    if associations and output_kind != FlowOutputType.TEXT.value:
+        # A DOCX or PDF reader does not keep a table row on one line.
+        raise ValueError(f"{owner}.associations need text output.")
     return OutputExpectation(
         output_kind=output_kind,
         required_facts=required_facts,
@@ -2242,7 +2275,16 @@ def _output_expectation(value: object, *, owner: str) -> OutputExpectation:
             owner=f"{owner}.forbidden",
             normalize=_normalized_output_text,
         ),
+        associations=associations,
     )
+
+
+def _output_association(value: object, *, owner: str) -> OutputAssociation:
+    raw = closed_object(value, frozenset({"fact", "with", "not_with"}), owner=owner)
+    literals = [raw.get(key) for key in ("fact", "with", "not_with")]
+    if not all(isinstance(item, str) and item.strip() for item in literals):
+        raise ValueError(f"{owner} needs non-empty fact, with and not_with literals.")
+    return OutputAssociation(*cast(list[str], literals))
 
 
 def _synthetic_user_profiles(
@@ -6455,6 +6497,26 @@ def _output_report(
             normalize=_normalized_output_text,
         )
     )
+    lines = [
+        _normalized_output_text(line)
+        for line in (raw_text if isinstance(raw_text, str) else "").splitlines()
+    ]
+    for association in expect.associations:
+        fact, with_, not_with = (
+            _normalized_output_text(literal)
+            for literal in (association.fact, association.with_, association.not_with)
+        )
+        holding = [line for line in lines if fact in line]
+        checks.append(
+            {
+                "name": "output_association",
+                "fact": association.fact,
+                "passed": any(with_ in line for line in holding)
+                and not any(not_with in line for line in holding),
+                "reason": f"{len(holding)} line(s) hold {association.fact!r}; one "
+                f"must hold {association.with_!r} and none {association.not_with!r}",
+            }
+        )
     checks.extend(
         check
         for check in runtime_checks

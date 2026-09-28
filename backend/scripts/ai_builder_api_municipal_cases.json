@@ -2309,6 +2309,18 @@
             "anafylaxi",
             "adrenalin",
             "autoinjektor"
+          ],
+          "associations": [
+            {
+              "fact": "jordnötssås",
+              "with": "Onsdag",
+              "not_with": "Fredag"
+            },
+            {
+              "fact": "mandelbotten",
+              "with": "Fredag",
+              "not_with": "Onsdag"
+            }
           ]
         }
       }
@@ -4788,6 +4800,18 @@
             "270917-9226",
             "192709179226",
             "4 kap. 1 §"
+          ],
+          "associations": [
+            {
+              "fact": "VON 2026/00588",
+              "with": "Tobias Grahn",
+              "not_with": "Frida Sundin"
+            },
+            {
+              "fact": "VON 2026/00612",
+              "with": "Frida Sundin",
+              "not_with": "Tobias Grahn"
+            }
           ]
         }
       }
