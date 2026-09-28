@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from sqlalchemy import (
@@ -12,6 +12,7 @@ from sqlalchemy import (
     false,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.database.tables.base_class import Base, BasePublic
@@ -24,6 +25,9 @@ class Users(BasePublic):
     username: Mapped[Optional[str]] = mapped_column()
     email: Mapped[str] = mapped_column(index=True)
     external_id: Mapped[Optional[str]] = mapped_column(index=True)
+    # SCIM schema extensions keyed by URN. Only the Enterprise User extension is
+    # written (eneo.scim.domain.enterprise_user); NULL when none is stored.
+    scim_extensions: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
     email_verified: Mapped[bool] = mapped_column(server_default="False")
     salt: Mapped[Optional[str]] = mapped_column()
     password: Mapped[Optional[str]] = mapped_column()
