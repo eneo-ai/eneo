@@ -24,8 +24,6 @@ from eneo.database.database import get_session_with_transaction
 from eneo.modules.module import ModuleCreate
 from eneo.modules.module_auth import (
     MODULE_HANDOFF_AT_CLAIM,
-    MODULE_TENANT_ID_CLAIM,
-    MODULE_USER_ID_CLAIM,
     module_audience,
 )
 from eneo.tenants.tenant import TenantBase
@@ -809,14 +807,12 @@ async def test_a_module_token_for_a_user_of_another_tenant_is_unauthenticated(
                 tenant_id=other_tenant.id,
             )
         )
-        # everything the broker mints into a module token, for the other tenant
+        # the identity claims come from the user; the broker adds only the handoff time
         stranger_token = container.auth_service().create_access_token_for_user(
             stranger,
             audience=module_audience(enabled_module.name),
             extra_claims={
                 MODULE_HANDOFF_AT_CLAIM: int(time.time()),
-                MODULE_USER_ID_CLAIM: str(stranger.id),
-                MODULE_TENANT_ID_CLAIM: str(stranger.tenant_id),
             },
         )
 
