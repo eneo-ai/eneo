@@ -13,6 +13,11 @@ from eneo.authentication.auth_dependencies import (
     get_scope_filter,
     require_user_for_creation,
 )
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.collections.presentation.collection_models import (
     CollectionPublic,
     CollectionUpdate,
@@ -51,6 +56,11 @@ router = APIRouter()
     ),
     responses=responses.get_responses([]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Collection services enforce collection permissions and space membership.",
+)
 async def get_groups(
     request: Request,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -68,6 +78,11 @@ async def get_groups(
     "/{id}/",
     response_model=CollectionPublic,
     responses=responses.get_responses([404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Collection services enforce collection permissions and space membership.",
 )
 async def get_group_by_id(
     id: UUID,
@@ -87,6 +102,11 @@ async def get_group_by_id(
         "Legacy groups endpoint. Use collections/spaces instead for new integrations."
     ),
     responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Collection services enforce collection permissions and space membership.",
 )
 async def create_group(
     group: CreateGroupRequest,
@@ -108,6 +128,11 @@ async def create_group(
     response_model=CollectionPublic,
     description="Update a collection (legacy group) by id.",
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Collection services enforce collection permissions and space membership.",
 )
 async def update_group(
     id: UUID,
@@ -171,6 +196,11 @@ async def update_group(
     description="Delete a collection (legacy group) by id.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Collection services enforce collection permissions and space membership.",
+)
 async def delete_group_by_id(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -231,6 +261,11 @@ async def delete_group_by_id(
     response_model=PaginatedResponse[InfoBlobPublic],
     description="Add info-blobs to a collection (legacy group) and embed them.",
     responses=responses.get_responses([400, 404, 403, 503]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Collection services enforce collection permissions and space membership.",
 )
 async def add_info_blobs(
     id: UUID,
@@ -317,6 +352,11 @@ async def add_info_blobs(
     response_model=PaginatedResponse[InfoBlobPublicNoText],
     responses=responses.get_responses([400, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Collection services enforce collection permissions and space membership.",
+)
 async def get_info_blobs(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -338,6 +378,11 @@ async def get_info_blobs(
     status_code=202,
     description="Upload a file to a collection (legacy group); starts a processing job.",
     responses=responses.get_responses([400, 403, 413, 415, 503]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Collection services enforce collection permissions and space membership.",
 )
 async def upload_file(
     id: UUID,
@@ -411,6 +456,11 @@ async def upload_file(
     description="Run a semantic search within a collection (legacy group).",
     responses=responses.get_responses([404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Collection services enforce collection permissions and space membership.",
+)
 async def run_semantic_search(
     id: UUID,
     search_parameters: SemanticSearchRequest,
@@ -437,6 +487,11 @@ async def run_semantic_search(
     status_code=204,
     description="Transfer a collection (legacy group) to another space.",
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Collection services enforce collection permissions and space membership.",
 )
 async def transfer_group_to_space(
     id: UUID,

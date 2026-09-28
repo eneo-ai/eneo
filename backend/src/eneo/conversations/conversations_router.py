@@ -16,9 +16,12 @@ from eneo.audit.infrastructure.rate_limiting import (
     enforce_rate_limit,
 )
 from eneo.authentication.auth_dependencies import (
-    require_permission,
     require_resource_permission_for_method,
-    require_session_auth,
+)
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
 )
 from eneo.conversations.conversation_models import (
     ChatTurnDiagnostics,
@@ -276,6 +279,11 @@ async def _authorize_session_access(container: Container, session: SessionInDB) 
         ],
     ),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Conversation services enforce access to the requested conversation.",
+)
 async def chat(
     request: ConversationRequest,
     http_request: Request,
@@ -372,10 +380,11 @@ async def chat(
     response_model=ChatTurnDiagnostics,
     description="Get body-free Skill activation diagnostics for one chat turn.",
     responses=responses.get_responses([403, 404]),
-    dependencies=[
-        Depends(require_session_auth),
-        Depends(require_permission(Permission.ASSISTANT_DEBUG)),
-    ],
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.ASSISTANT_DEBUG,
+    reason="Chat diagnostics require assistant debug permission and conversation ownership.",
 )
 async def get_chat_turn_diagnostics(
     session_id: UUID,
@@ -419,6 +428,11 @@ async def get_chat_turn_diagnostics(
     response_model=PreflightResponse,
     description="Returns an estimated token cost for the next chat request (excludes knowledge/RAG and web-search content).",
     responses=responses.get_responses([400, 403, 404, 429]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Conversation services enforce access to the requested conversation.",
 )
 async def preflight_tokens(
     request: PreflightRequest,
@@ -497,6 +511,11 @@ async def preflight_tokens(
     response_model=CursorPaginatedResponse[SessionMetadataPublic],
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Conversation services enforce access to the requested conversation.",
 )
 async def list_conversations(
     http_request: Request,
@@ -584,6 +603,11 @@ async def list_conversations(
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Conversation services enforce access to the requested conversation.",
+)
 async def get_conversation(
     session_id: Annotated[
         UUID, Path(description="The UUID of the conversation/session")
@@ -605,6 +629,11 @@ async def get_conversation(
     response_model=ToolCallResultPublic,
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Conversation services enforce access to the requested conversation.",
 )
 async def get_tool_call_result(
     session_id: Annotated[
@@ -638,6 +667,11 @@ async def get_tool_call_result(
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Conversation services enforce access to the requested conversation.",
+)
 async def delete_conversation(
     session_id: Annotated[
         UUID, Path(description="The UUID of the conversation/session")
@@ -668,6 +702,11 @@ async def delete_conversation(
     description="Leave feedback for a conversation.",
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Conversation services enforce access to the requested conversation.",
 )
 async def leave_feedback(
     feedback: SessionFeedback,
@@ -707,6 +746,11 @@ async def leave_feedback(
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Conversation services enforce access to the requested conversation.",
+)
 async def set_title_of_conversation(
     session_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -731,6 +775,11 @@ async def set_title_of_conversation(
     response_model=ToolApprovalResponse,
     description="Submit approval decisions for pending tool calls from a tool_approval_required event.",
     responses=responses.get_responses([400, 403, 404, 409, 429]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Conversation services enforce access to the requested conversation.",
 )
 async def approve_tools(
     http_request: Request,
@@ -908,6 +957,11 @@ async def approve_tools(
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
     description="Rename a conversation (session).",
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Conversation services enforce access to the requested conversation.",
 )
 async def rename_conversation(
     payload: ConversationRenameRequest,

@@ -30,8 +30,6 @@ from eneo.authentication.api_key_router_helpers import (
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.auth_dependencies import (
     require_api_key_permission,
-    require_permission,
-    require_session_auth,
     require_user_for_creation,
 )
 from eneo.authentication.auth_models import (
@@ -60,6 +58,11 @@ from eneo.authentication.auth_models import (
     ApiKeyV2InDB,
     ExpiringKeysSummary,
     ExpiringKeySummaryItem,
+)
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
 )
 from eneo.database.tables.settings_table import Settings
 from eneo.main.config import get_settings
@@ -455,6 +458,11 @@ async def _collect_manageable_keys_for_page(
         **error_responses([401, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="API key policy authorizes ownership, scope and the requested key operation.",
+)
 async def get_policy_constraints(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ApiKeyCreationConstraints:
@@ -482,6 +490,11 @@ async def get_policy_constraints(
         **error_responses([401, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="API key policy authorizes ownership, scope and the requested key operation.",
+)
 async def get_notification_preferences(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ApiKeyNotificationPreferencesResponse:
@@ -507,13 +520,17 @@ async def get_notification_preferences(
         **error_responses([400, 401, 403, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="API key policy authorizes ownership, scope and the requested key operation.",
+)
 async def update_notification_preferences(
     request: Annotated[
         ApiKeyNotificationPreferencesUpdate,
         Body(examples=[{"enabled": True, "days_before_expiry": [30, 14, 7, 3, 1]}]),
     ],
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.WRITE)),
 ) -> ApiKeyNotificationPreferencesResponse:
     user: UserInDB = container.user()
@@ -566,6 +583,11 @@ async def update_notification_preferences(
         **error_responses([401, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="API key policy authorizes ownership, scope and the requested key operation.",
+)
 async def list_notification_subscriptions(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ApiKeyNotificationSubscriptionListResponse:
@@ -591,11 +613,15 @@ async def list_notification_subscriptions(
         **error_responses([400, 401, 403, 404, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="API key policy authorizes ownership, scope and the requested key operation.",
+)
 async def upsert_notification_subscription(
     target_type: ApiKeyNotificationTargetType,
     target_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.WRITE)),
 ) -> ApiKeyNotificationSubscriptionListResponse:
     user: UserInDB = container.user()
@@ -656,11 +682,15 @@ async def upsert_notification_subscription(
         **error_responses([401, 403, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="API key policy authorizes ownership, scope and the requested key operation.",
+)
 async def delete_notification_subscription(
     target_type: ApiKeyNotificationTargetType,
     target_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.WRITE)),
 ) -> ApiKeyNotificationSubscriptionListResponse:
     user: UserInDB = container.user()
@@ -754,6 +784,11 @@ def _build_expiring_summary(
         200: {"description": "Expiring key summary."},
         **error_responses([401, 429]),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="API key policy authorizes ownership, scope and the requested key operation.",
 )
 async def get_expiring_keys(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -852,6 +887,11 @@ async def get_expiring_keys(
         **error_responses([401, 403, 404, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="API key policy authorizes ownership, scope and the requested key operation.",
+)
 async def get_api_key_usage(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -910,12 +950,15 @@ async def get_api_key_usage(
         **error_responses([400, 401, 403, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.API_KEYS,
+    reason="Creating API keys requires API_KEYS permission; key policy restricts the granted scope.",
+)
 async def create_api_key(
     payload: Annotated[ApiKeyCreateRequest, Body(examples=[_CREATE_API_KEY_EXAMPLE])],
     container: ApiKeyMutationContainer,
-    _session_guard: None = Depends(require_session_auth),
-    _perm_guard: None = Depends(require_permission(Permission.API_KEYS)),
-    # Defense-in-depth: require_session_auth rejects API-key callers first, so
+    # Defense-in-depth: The SESSION policy rejects API-key callers first, so
     # these never fire for legitimate traffic. Kept so the route-coverage gate
     # (tests/unit/test_api_key_route_coverage.py) stays green and so a future
     # regression of the session guard cannot silently re-open the path.
@@ -944,6 +987,11 @@ async def create_api_key(
         },
         **error_responses([400, 401, 429]),
     },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="API key policy authorizes ownership, scope and the requested key operation.",
 )
 async def list_api_keys(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1064,6 +1112,11 @@ async def list_api_keys(
         **error_responses([401, 403, 404, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="API key policy authorizes ownership, scope and the requested key operation.",
+)
 async def get_api_key(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1100,6 +1153,11 @@ async def get_api_key(
         **error_responses([400, 401, 403, 404, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="API key policy authorizes ownership, scope and the requested key operation.",
+)
 async def update_api_key(
     id: UUID,
     payload: Annotated[
@@ -1111,7 +1169,6 @@ async def update_api_key(
         ),
     ],
     container: ApiKeyMutationContainer,
-    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
@@ -1138,10 +1195,14 @@ async def update_api_key(
     deprecated=True,
     description="Deprecated. Use POST /api/v1/api-keys/{id}/revoke with reason body.",
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="API key policy authorizes ownership, scope and the requested key operation.",
+)
 async def revoke_api_key_deprecated(
     id: UUID,
     container: ApiKeyMutationContainer,
-    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> Response:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
@@ -1170,10 +1231,14 @@ async def revoke_api_key_deprecated(
         **error_responses([400, 401, 403, 404, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="API key policy authorizes ownership, scope and the requested key operation.",
+)
 async def revoke_api_key(
     id: UUID,
     container: ApiKeyMutationContainer,
-    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[
         ApiKeyStateChangeRequest | None,
@@ -1204,10 +1269,14 @@ async def revoke_api_key(
         **error_responses([400, 401, 403, 404, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="API key policy authorizes ownership, scope and the requested key operation.",
+)
 async def rotate_api_key(
     id: UUID,
     container: ApiKeyMutationContainer,
-    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[ApiKeyRotateRequest | None, Body()] = None,
 ) -> ApiKeyCreatedResponse:
@@ -1238,6 +1307,11 @@ async def rotate_api_key(
         **error_responses([400, 401, 403, 404, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="API key policy authorizes ownership, scope and the requested key operation.",
+)
 async def extend_api_key_expiration(
     id: UUID,
     payload: Annotated[
@@ -1245,7 +1319,6 @@ async def extend_api_key_expiration(
         Body(examples=[{"expires_at": "2030-01-01T00:00:00Z"}]),
     ],
     container: ApiKeyMutationContainer,
-    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
@@ -1274,10 +1347,14 @@ async def extend_api_key_expiration(
         **error_responses([400, 401, 403, 404, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="API key policy authorizes ownership, scope and the requested key operation.",
+)
 async def purge_api_key(
     id: UUID,
     container: ApiKeyMutationContainer,
-    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> Response:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
@@ -1308,10 +1385,14 @@ async def purge_api_key(
         **error_responses([400, 401, 403, 404, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="API key policy authorizes ownership, scope and the requested key operation.",
+)
 async def suspend_api_key(
     id: UUID,
     container: ApiKeyMutationContainer,
-    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[
         ApiKeyStateChangeRequest | None,
@@ -1342,10 +1423,14 @@ async def suspend_api_key(
         **error_responses([400, 401, 403, 404, 429]),
     },
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="API key policy authorizes ownership, scope and the requested key operation.",
+)
 async def reactivate_api_key(
     id: UUID,
     container: ApiKeyMutationContainer,
-    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()

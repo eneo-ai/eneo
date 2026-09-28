@@ -33,7 +33,19 @@ The specification includes the Server-Sent Event payload models described below 
 
 ## Authentication
 
-Every endpoint under `/api/v1` accepts either an API key or a session token. Some operations are restricted to one of them; see [Session-only and user-only operations](#session-only-and-user-only-operations).
+Most protected endpoints under `/api/v1` accept either an API key or a session token. Each endpoint explicitly declares its accepted identity and access rule. Some operations require a session, a particular key type or a signed URL; login and other intentionally public entry points declare public access. See [Session-only and user-only operations](#session-only-and-user-only-operations).
+
+Authentication does not grant permission to every operation. Role permissions,
+API-key restrictions, tenant boundaries and resource membership or ownership
+are checked separately. The model-provider administration probes
+(`/{provider_id}/models/`, `/{provider_id}/test/` and
+`/{provider_id}/validate-model/` under `/api/v1/admin/model-providers`) require
+the `admin` permission because they use stored provider credentials. Updating
+the tenant's favorite provider types also requires `admin`. The shared model
+catalogue at `/api/v1/ai-models/` remains available to authenticated users.
+
+Contributors must [declare and test endpoint access](/contributing/security#declare-access-on-every-endpoint)
+when adding or changing an endpoint.
 
 ### API keys
 

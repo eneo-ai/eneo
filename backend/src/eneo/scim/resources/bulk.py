@@ -7,6 +7,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.database.database import get_session_with_transaction
 from eneo.main.logging import get_logger
 from eneo.scim.auth import require_scim_auth
@@ -96,6 +101,11 @@ def _scim_error_response(
     description="Process multiple SCIM provisioning operations in one request.",
     responses=scim_responses(400, 401, 413, 500),
     response_model=BulkResponse,
+)
+@endpoint_access(
+    authentication=Authentication.SCIM,
+    authorization=Authorization.SCIM,
+    reason="The SCIM token authorizes provisioning only within its bound tenant.",
 )
 async def bulk_operations(
     request: Request,

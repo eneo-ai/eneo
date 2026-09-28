@@ -5,6 +5,10 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from fastapi.dependencies.models import Dependant
+from fastapi.routing import RouteContext
+from starlette.routing import BaseRoute
+
 from eneo.authentication.auth_models import (
     ApiKeyHashVersion,
     ApiKeyPermission,
@@ -13,6 +17,8 @@ from eneo.authentication.auth_models import (
     ApiKeyType,
     ApiKeyV2InDB,
 )
+from eneo.authentication.endpoint_access import Authentication, access_for
+from eneo.server.endpoint_routes import endpoint_routes
 
 
 def make_api_key(
@@ -96,112 +102,42 @@ class RouteInfo:
     has_scope_check_dep: bool
     has_api_key_permission_dep: bool
     has_file_delete_scope_guard_dep: bool
-    has_session_auth_dep: bool
+    has_session_policy: bool
     resource_perm_config: ResourcePermConfig | None
     scope_check_config: ScopeCheckConfig | None
 
 
 @dataclass(frozen=True)
 class RouteContractView:
-    """A flattened view of a route plus dependencies inherited from includes."""
+    """Contract tests share production's effective route and dependency view."""
 
-    route: Any
+    route: BaseRoute
     path: str
-    dependencies: list[Any]
-    tags: list[str]
+    context: RouteContext
+    dependant: Dependant | None
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self.route, name)
+    def __getattr__(self, name: str) -> object:
+        return getattr(self.context, name)
 
     @property
-    def endpoint(self) -> Any:
-        return getattr(self.route, "endpoint", None)
+    def endpoint(self) -> object:
+        return self.context.endpoint
 
     @property
     def methods(self) -> set[str] | None:
-        return getattr(self.route, "methods", None)
-
-    @property
-    def dependant(self) -> Any:
-        return getattr(self.route, "dependant", None)
+        return self.context.methods
 
 
-def _join_path(prefix: str, path: str) -> str:
-    if not prefix:
-        return path
-    if not path:
-        return prefix
-    return f"{prefix.rstrip('/')}/{path.lstrip('/')}"
-
-
-def flatten_routes(
-    routes: list[Any],
-    *,
-    prefix: str = "",
-    dependencies: list[Any] | None = None,
-    tags: list[str] | None = None,
-) -> list[RouteContractView]:
-    """Flatten FastAPI/Starlette routes across lazy include and mount nodes."""
-    flattened: list[RouteContractView] = []
-    inherited_dependencies = list(dependencies or [])
-    inherited_tags = list(tags or [])
-
-    for route in routes:
-        include_context = getattr(route, "include_context", None)
-        original_router = getattr(route, "original_router", None)
-        if include_context is not None and original_router is not None:
-            flattened.extend(
-                flatten_routes(
-                    list(getattr(original_router, "routes", []) or []),
-                    prefix=_join_path(prefix, getattr(include_context, "prefix", "")),
-                    dependencies=[
-                        *inherited_dependencies,
-                        *list(getattr(include_context, "dependencies", []) or []),
-                    ],
-                    tags=[
-                        *inherited_tags,
-                        *list(getattr(include_context, "tags", []) or []),
-                    ],
-                )
-            )
-            continue
-
-        mounted_routes = getattr(getattr(route, "app", None), "routes", None)
-        if mounted_routes is not None and getattr(route, "path", None):
-            flattened.extend(
-                flatten_routes(
-                    list(mounted_routes),
-                    prefix=_join_path(prefix, getattr(route, "path", "")),
-                    dependencies=inherited_dependencies,
-                    tags=inherited_tags,
-                )
-            )
-            continue
-
-        path = getattr(route, "path", "")
-        if not path:
-            # Every recognized node kind (lazy include, mount, plain route) has
-            # a path. A pathless entry means FastAPI changed the private lazy
-            # include attributes this walker duck-types on — fail loudly so
-            # the route-contract suites can't silently lose coverage.
-            raise AssertionError(
-                "flatten_routes: unrecognized pathless route entry "
-                f"{type(route).__module__}.{type(route).__qualname__}; "
-                "update the include_context/original_router detection above"
-            )
-        flattened.append(
-            RouteContractView(
-                route=route,
-                path=_join_path(prefix, path),
-                dependencies=[
-                    *inherited_dependencies,
-                    *list(getattr(route, "dependencies", []) or []),
-                ],
-                tags=[*inherited_tags, *list(getattr(route, "tags", []) or [])],
-            )
+def flatten_routes(routes: list[BaseRoute]) -> list[RouteContractView]:
+    return [
+        RouteContractView(
+            route=route.context.original_route,
+            path=route.path,
+            context=route.context,
+            dependant=route.dependant,
         )
-
-    return flattened
+        for route in endpoint_routes(routes)
+    ]
 
 
 def runtime_router_routes() -> list[RouteContractView]:
@@ -259,13 +195,9 @@ def route_dependency_callables(route: Any) -> list[Any]:
 
 
 def route_is_session_only(route: Any) -> bool:
-    """True when the route rejects API keys outright via require_session_auth.
-
-    API-key scope/permission guards are structural no-ops on such routes, so
-    the ratchet tests treat the session dependency itself as the required
-    guard instead of maintaining per-surface allowlists.
-    """
-    return route_has_dependency_named(route, "require_session_auth")
+    """Read the same explicit credential policy enforced during authentication."""
+    policy = access_for(route.endpoint)
+    return policy is not None and policy.authentication is Authentication.SESSION
 
 
 def route_has_dependency_named(route: Any, dep_name: str) -> bool:
@@ -312,7 +244,7 @@ def walk_routes() -> list[RouteInfo]:
         has_scope_check_dep = False
         has_api_key_permission_dep = False
         has_file_delete_scope_guard_dep = False
-        has_session_auth_dep = False
+        has_session_policy = route_is_session_only(route)
 
         for fn in route_dependency_callables(route):
             dep_name = getattr(fn, "__name__", "")
@@ -335,8 +267,6 @@ def walk_routes() -> list[RouteInfo]:
                     )
             elif dep_name == "_api_key_permission_dep":
                 has_api_key_permission_dep = True
-            elif dep_name == "require_session_auth":
-                has_session_auth_dep = True
             elif dep_name == "_stash":
                 has_file_delete_scope_guard_dep = True
 
@@ -350,7 +280,7 @@ def walk_routes() -> list[RouteInfo]:
                     has_scope_check_dep=has_scope_check_dep,
                     has_api_key_permission_dep=has_api_key_permission_dep,
                     has_file_delete_scope_guard_dep=has_file_delete_scope_guard_dep,
-                    has_session_auth_dep=has_session_auth_dep,
+                    has_session_policy=has_session_policy,
                     resource_perm_config=resource_perm_config,
                     scope_check_config=scope_check_config,
                 )

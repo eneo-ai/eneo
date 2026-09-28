@@ -28,14 +28,17 @@ from eneo.authentication import auth_dependencies
 from eneo.authentication.auth_dependencies import (
     require_api_key_permission,
     require_api_key_scope_check,
-    require_permission,
-    require_session_auth,
     require_user_identity,
 )
 from eneo.authentication.auth_models import (
     AccessToken,
     ApiKeyPermission,
     OpenIdConnectLogin,
+)
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
 )
 from eneo.main import config
 from eneo.main.aiohttp_client import aiohttp_client
@@ -45,7 +48,7 @@ from eneo.main.exceptions import AuthenticationException
 from eneo.main.logging import get_logger
 from eneo.main.models import CursorPaginatedResponse
 from eneo.main.request_context import set_request_context
-from eneo.roles.permissions import Permission, validate_permission
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.tenants.tenant import TenantPublic
@@ -247,6 +250,11 @@ async def _resolve_single_tenant_redirect_uri(
     description="Authenticate with email and password (OAuth2 password flow).",
     responses=responses.get_responses([401, 500]),
 )
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Login or provisioning entry point; the authentication service validates supplied credentials before granting a session.",
+)
 async def user_login_with_email_and_password(
     request: Request,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends(OAuth2PasswordRequestForm)],
@@ -360,6 +368,11 @@ async def user_login_with_email_and_password(
     response_model=AccessToken,
     description="Authenticate via OpenID Connect (MobilityGuard / generic OIDC provider).",
     responses=responses.get_responses([400, 401, 500, 502]),
+)
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Login or provisioning entry point; the authentication service validates supplied credentials before granting a session.",
 )
 async def login_with_mobilityguard(
     request: Request,
@@ -713,6 +726,11 @@ async def login_with_mobilityguard(
         Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     ],
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may access their profile and tenant directory; identity guards restrict personal operations.",
+)
 async def get_tenant_users(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     email: Annotated[Optional[str], Query(description="Email of user")] = None,
@@ -776,6 +794,11 @@ async def get_tenant_users(
     responses=responses.get_responses([401, 403]),
     dependencies=[Depends(auth_dependencies.get_current_active_user)],
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may access their profile and tenant directory; identity guards restrict personal operations.",
+)
 async def get_local_password_policy() -> LocalPasswordPolicy:
     return LOCAL_PASSWORD_POLICY
 
@@ -785,6 +808,11 @@ async def get_local_password_policy() -> LocalPasswordPolicy:
     response_model=UserPublic,
     name="Get current user",
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may access their profile and tenant directory; identity guards restrict personal operations.",
 )
 async def get_currently_authenticated_user(
     current_user: Annotated[
@@ -854,13 +882,17 @@ async def _audit_password_change(
     ),
     responses=responses.get_responses([400, 403, 404, 409, 429, 503]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may access their profile and tenant directory; identity guards restrict personal operations.",
+)
 async def change_current_user_password(
     password_change: PasswordChangeRequest,
     container: Annotated[
         Container,
         Depends(get_container(with_user=True, transaction_scope="function")),
     ],
-    _session_guard: None = Depends(require_session_auth),
 ) -> Response:
     """Change the caller's local Eneo password and revoke older Eneo JWTs."""
 
@@ -934,12 +966,16 @@ async def change_current_user_password(
     ),
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may access their profile and tenant directory; identity guards restrict personal operations.",
+)
 async def invalidate_current_user_sessions(
     container: Annotated[
         Container,
         Depends(get_container(with_user=True, transaction_scope="function")),
     ],
-    _session_guard: None = Depends(require_session_auth),
 ) -> Response:
     """Invalidate previously issued Eneo sessions at the user's request."""
 
@@ -969,6 +1005,11 @@ async def invalidate_current_user_sessions(
     name="Get current user tenant",
     responses=responses.get_responses([404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may access their profile and tenant directory; identity guards restrict personal operations.",
+)
 async def get_current_user_tenant(
     current_user: Annotated[
         UserInDB, Depends(auth_dependencies.get_current_active_user)
@@ -984,13 +1025,16 @@ async def get_current_user_tenant(
     status_code=201,
     description="Invite a new user to the tenant (admin).",
     responses=responses.get_responses([400, 403]),
-    dependencies=[Depends(require_permission(Permission.ADMIN))],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
 )
 async def invite_user(
     user_invite: PropUserInvite,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    validate_permission(container.user(), Permission.ADMIN)
     user_service = container.user_service()
     current_user = container.user()
     session = cast(AsyncSession, container.session())
@@ -1060,14 +1104,17 @@ async def invite_user(
     response_model=UserAdminView,
     description="Update a user in the tenant (admin).",
     responses=responses.get_responses([400, 403, 404]),
-    dependencies=[Depends(require_permission(Permission.ADMIN))],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
 )
 async def update_user(
     id: UUID,
     user_update: PropUserUpdate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    validate_permission(container.user(), Permission.ADMIN)
     user_service = container.user_service()
     current_user = container.user()
 
@@ -1182,13 +1229,16 @@ async def update_user(
     status_code=204,
     description="Delete a user from the tenant (admin).",
     responses=responses.get_responses([400, 403, 404]),
-    dependencies=[Depends(require_permission(Permission.ADMIN))],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
 )
 async def delete_user(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    validate_permission(container.user(), Permission.ADMIN)
     user_service = container.user_service()
     current_user = container.user()
 
@@ -1254,6 +1304,11 @@ async def delete_user(
     description="Provision a user from a Zitadel access token.",
     response_model=None,
     responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Login or provisioning entry point; the authentication service validates supplied credentials before granting a session.",
 )
 async def provision_user(
     user_provision: UserProvision,

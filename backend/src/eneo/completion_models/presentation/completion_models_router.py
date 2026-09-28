@@ -12,6 +12,7 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import get_current_active_user
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.completion_models.presentation import (
     CompletionModelPublic,
     CompletionModelUpdateFlags,
@@ -31,7 +32,7 @@ from eneo.database.database import AsyncSession
 from eneo.main.container.container import Container
 from eneo.main.exceptions import ValidationException
 from eneo.main.models import PaginatedResponse, is_provided
-from eneo.roles.permissions import Permission, validate_permission
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.users.user import UserInDB
@@ -74,12 +75,15 @@ def get_pagination_query(request: Request) -> PaginationQuery:
     response_model=PaginatedResponse[CompletionModelPublic],
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_completion_models(
     user: Annotated[UserInDB, Depends(get_current_active_user)],
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    validate_permission(user, Permission.ADMIN)
-
     service = container.completion_model_crud_service()
     assembler = container.completion_model_assembler()
 
@@ -94,6 +98,11 @@ async def get_completion_models(
     response_model=CompletionModelPublic,
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def update_completion_model(
     id: UUID,
     update_flags: CompletionModelUpdateFlags,
@@ -102,9 +111,6 @@ async def update_completion_model(
     service = container.completion_model_crud_service()
     assembler = container.completion_model_assembler()
     user = container.user()
-
-    # Validate admin permissions first
-    validate_permission(user, Permission.ADMIN)
 
     # Get old state for change tracking (bypass access check since admin is already validated)
     completion_model_repo = container.completion_model_repo2()
@@ -180,13 +186,17 @@ async def update_completion_model(
     response_model=ModelUsageStatistics,
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_model_usage(
     model_id: UUID,
     user: Annotated[UserInDB, Depends(get_current_active_user)],
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ModelUsageStatistics:
     """Get usage statistics for a specific model (pre-aggregated for performance)"""
-    validate_permission(user, Permission.ADMIN)
     service = container.completion_model_usage_service()
     return await service.get_model_usage_statistics(model_id, user.tenant_id)
 
@@ -196,6 +206,11 @@ async def get_model_usage(
     response_model=ModelUsagePaginatedResponse,
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_model_usage_details(
     model_id: UUID,
     query: Annotated[ModelUsageDetailsQuery, Depends(get_model_usage_details_query)],
@@ -203,7 +218,6 @@ async def get_model_usage_details(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ModelUsagePaginatedResponse | None:
     """Get detailed list of entities using this model with cursor pagination."""
-    validate_permission(user, Permission.ADMIN)
     service = container.completion_model_usage_service()
     return await service.get_model_usage_details(
         model_id, user.tenant_id, query.entity_type, query.cursor, query.limit
@@ -215,6 +229,11 @@ async def get_model_usage_details(
     response_model=ValidationResult,
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def validate_migration(
     model_id: UUID,
     to_model_id: UUID = Query(..., description="Target model ID"),
@@ -222,7 +241,6 @@ async def validate_migration(
     container: Container = Depends(get_container(with_user=True)),
 ) -> ValidationResult:
     """Validate migration compatibility without executing. Used for preflight checks."""
-    validate_permission(user, Permission.ADMIN)
     migration_service = container.completion_model_migration_service()
     return await migration_service.validate_migration(
         from_model_id=model_id,
@@ -236,6 +254,11 @@ async def validate_migration(
     description="Migrate all usage from one completion model to another.",
     response_model=MigrationResult,
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
 )
 async def migrate_model_usage(
     model_id: UUID,
@@ -252,7 +275,6 @@ async def migrate_model_usage(
     `CompletionModelMigrationService.migrate_model_usage` — the router
     only enforces admin permission and persists the audit log on success.
     """
-    validate_permission(user, Permission.ADMIN)
 
     session = cast(AsyncSession, container.session())
     migration_service = container.completion_model_migration_service()
@@ -331,12 +353,16 @@ async def migrate_model_usage(
     response_model=list[ModelUsageSummary],
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_all_models_usage_summary(
     user: Annotated[UserInDB, Depends(get_current_active_user)],
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> list[ModelUsageSummary]:
     """Get usage summary for all models (optimized with pre-aggregation)."""
-    validate_permission(user, Permission.ADMIN)
     service = container.completion_model_usage_service()
     return await service.get_all_models_usage_summary(user.tenant_id)
 
@@ -346,6 +372,11 @@ async def get_all_models_usage_summary(
     response_model=list[ModelMigrationHistory],
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_model_migration_history(
     model_id: UUID,
     query: Annotated[PaginationQuery, Depends(get_pagination_query)],
@@ -353,7 +384,6 @@ async def get_model_migration_history(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> list[ModelMigrationHistory]:
     """Get migration history for a specific live model (from or to this model)"""
-    validate_permission(user, Permission.ADMIN)
     service = container.completion_model_migration_history_service()
     return await service.get_migration_history_for_model(
         model_id, user.tenant_id, query.limit, query.offset
@@ -366,13 +396,17 @@ async def get_model_migration_history(
     response_model=list[ModelMigrationHistory],
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_all_migration_history(
     query: Annotated[PaginationQuery, Depends(get_pagination_query)],
     user: Annotated[UserInDB, Depends(get_current_active_user)],
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> list[ModelMigrationHistory]:
     """Get all migration history for the tenant"""
-    validate_permission(user, Permission.ADMIN)
     service = container.completion_model_migration_history_service()
     return await service.get_migration_history_for_tenant(
         user.tenant_id, query.limit, query.offset
@@ -384,13 +418,17 @@ async def get_all_migration_history(
     response_model=ModelMigrationHistory,
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_migration_history_by_id(
     migration_id: UUID,
     user: Annotated[UserInDB, Depends(get_current_active_user)],
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ModelMigrationHistory:
     """Get a specific migration history record by ID"""
-    validate_permission(user, Permission.ADMIN)
     service = container.completion_model_migration_history_service()
     history = await service.get_migration_history_by_id(migration_id, user.tenant_id)
 

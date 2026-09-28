@@ -6,7 +6,11 @@ from fastapi import APIRouter, Depends, Query, Response
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
-from eneo.authentication.auth_dependencies import require_session_auth
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
 from eneo.main.models import CursorPaginatedResponse
@@ -36,7 +40,6 @@ from eneo.skills.presentation.skill_models import (
 router = APIRouter(
     prefix="/spaces",
     tags=["skills"],
-    dependencies=[Depends(require_session_auth)],
 )
 
 _ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))]
@@ -48,6 +51,11 @@ _MAX_REVISION_PAGE_LIMIT = 100
     "/{space_id}/skills/",
     response_model=CursorPaginatedResponse[SkillSparse],
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Skill service enforces actor permissions and space or assistant membership.",
 )
 async def list_skills(
     space_id: UUID,
@@ -91,6 +99,11 @@ async def list_skills(
     description="Create a Space-owned Skill with its first immutable revision.",
     responses=responses.get_responses([400, 403, 404, 409]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Skill service enforces actor permissions and space or assistant membership.",
+)
 async def create_skill(
     space_id: UUID,
     payload: SkillCreateRequest,
@@ -112,6 +125,11 @@ async def create_skill(
     response_model=SkillPublic,
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Skill service enforces actor permissions and space or assistant membership.",
+)
 async def get_skill(
     space_id: UUID,
     skill_id: UUID,
@@ -128,6 +146,11 @@ async def get_skill(
     response_model=CursorPaginatedResponse[SkillRevisionSummaryPublic],
     description="List immutable Skill revision summaries using a stable cursor.",
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Skill service enforces actor permissions and space or assistant membership.",
 )
 async def list_skill_revisions(
     space_id: UUID,
@@ -163,6 +186,11 @@ async def list_skill_revisions(
     description="Get one immutable Skill revision for review.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Skill service enforces actor permissions and space or assistant membership.",
+)
 async def get_skill_revision(
     space_id: UUID,
     skill_id: UUID,
@@ -192,6 +220,11 @@ async def get_skill_revision(
         },
         **responses.get_responses([400, 403, 404]),
     },
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Skill service enforces actor permissions and space or assistant membership.",
 )
 async def create_skill_revision(
     space_id: UUID,
@@ -250,6 +283,11 @@ async def create_skill_revision(
         "revision-pinned bindings are unchanged."
     ),
     responses=responses.get_responses([403, 404, 409]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Skill service enforces actor permissions and space or assistant membership.",
 )
 async def restore_skill_revision(
     space_id: UUID,
@@ -315,6 +353,11 @@ async def restore_skill_revision(
     ),
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Skill service enforces actor permissions and space or assistant membership.",
+)
 async def set_skill_active(
     space_id: UUID,
     skill_id: UUID,
@@ -358,6 +401,11 @@ async def set_skill_active(
     description="Delete an unbound Skill and all of its revisions.",
     responses=responses.get_responses([403, 404, 409]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Skill service enforces actor permissions and space or assistant membership.",
+)
 async def delete_skill(
     space_id: UUID, skill_id: UUID, container: _ContainerWithUser
 ) -> None:
@@ -386,6 +434,11 @@ async def delete_skill(
     response_model=list[SkillBindingSummary],
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Skill service enforces actor permissions and space or assistant membership.",
+)
 async def list_assistant_skill_bindings(
     space_id: UUID,
     assistant_id: UUID,
@@ -403,6 +456,11 @@ async def list_assistant_skill_bindings(
     response_model=AssistantSkillConfigurationPublic,
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Skill service enforces actor permissions and space or assistant membership.",
+)
 async def get_assistant_skill_configuration(
     space_id: UUID,
     assistant_id: UUID,
@@ -419,6 +477,11 @@ async def get_assistant_skill_configuration(
     "/{space_id}/apps/{app_id}/skills/",
     response_model=list[SkillBindingSummary],
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Skill service enforces actor permissions and space or assistant membership.",
 )
 async def list_app_skill_bindings(
     space_id: UUID, app_id: UUID, container: _ContainerWithUser

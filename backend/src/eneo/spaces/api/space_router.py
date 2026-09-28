@@ -13,8 +13,12 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import (
     get_scope_filter,
-    require_permission,
     require_user_for_creation,
+)
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
 )
 from eneo.collections.presentation.collection_models import CollectionPublic
 from eneo.group_chat.presentation.models import GroupChatCreate, GroupChatPublic
@@ -25,7 +29,7 @@ from eneo.integration.presentation.models import IntegrationKnowledgePublic
 from eneo.jobs.job_models import JobPublic
 from eneo.main.container.container import Container
 from eneo.main.models import NOT_PROVIDED, ModelId, PaginatedResponse, is_provided
-from eneo.roles.permissions import Permission, validate_permission
+from eneo.roles.permissions import Permission
 from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
@@ -120,6 +124,11 @@ async def forbid_org_space(
     description="Create a new shared space.",
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.SHARED_SPACES,
+    reason="This operation requires Permission.SHARED_SPACES before accessing tenant resources.",
+)
 async def create_space(
     create_space_req: CreateSpaceRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -128,8 +137,6 @@ async def create_space(
     space_creation_service = container.space_init_service()
     space_assembler = container.space_assembler()
     current_user = container.user()
-
-    validate_permission(current_user, Permission.SHARED_SPACES)
 
     # Create space
     space = await space_creation_service.create_space(name=create_space_req.name)
@@ -158,6 +165,11 @@ async def create_space(
     status_code=200,
     responses=responses.get_responses([404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
+)
 async def get_space(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -178,6 +190,11 @@ async def get_space(
         "security classification, data retention)."
     ),
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
 )
 async def update_space(
     id: UUID,
@@ -347,6 +364,11 @@ async def update_space(
     description="Get a preview of the impact of changing the security classification of a space.",
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
+)
 async def get_security_classification_impact_analysis(
     id: UUID,
     security_classification_id: UUID,
@@ -369,6 +391,11 @@ async def get_security_classification_impact_analysis(
     description="Delete a space. Organization spaces cannot be deleted.",
     responses=responses.get_responses([403, 404]),
     dependencies=[Depends(forbid_org_space)],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
 )
 async def delete_space(
     id: UUID,
@@ -401,6 +428,11 @@ async def delete_space(
     status_code=200,
     description="List spaces the current user can access.",
     responses=responses.get_responses([]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
 )
 async def get_spaces(
     request: Request,
@@ -440,6 +472,11 @@ async def get_spaces(
     response_model=Applications,
     responses=responses.get_responses([404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
+)
 async def get_space_applications(
     id: UUID, container: Annotated[Container, Depends(get_container(with_user=True))]
 ):
@@ -457,6 +494,11 @@ async def get_space_applications(
     description="Create an assistant in a space, optionally from a template.",
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
 )
 async def create_space_assistant(
     id: UUID,
@@ -510,6 +552,11 @@ async def create_space_assistant(
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
+)
 async def create_group_chat(
     id: UUID,
     group_chat_in: GroupChatCreate,
@@ -553,6 +600,11 @@ async def create_group_chat(
     description="Create an app in a space, optionally from a template.",
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
 )
 async def create_app(
     id: UUID,
@@ -599,6 +651,11 @@ async def create_app(
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
+)
 async def create_space_services(
     id: UUID,
     service_in: CreateSpaceServiceRequest,
@@ -622,6 +679,11 @@ async def create_space_services(
     response_model=Knowledge,
     responses=responses.get_responses([404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
+)
 async def get_space_knowledge(
     id: UUID, container: Annotated[Container, Depends(get_container(with_user=True))]
 ):
@@ -644,6 +706,11 @@ async def get_space_knowledge(
     status_code=201,
     description="Create a knowledge collection in a space.",
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
 )
 async def create_space_groups(
     id: UUID,
@@ -726,6 +793,11 @@ async def create_space_groups(
     The crawl will start immediately upon creation.
     """,
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
+)
 async def create_space_websites(
     id: UUID,
     website: WebsiteCreate,
@@ -796,6 +868,11 @@ async def create_space_websites(
     description="Add integration knowledge to a space. Returns a job to track import progress.",
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
+)
 async def create_space_integration_knowledge(
     id: UUID,
     user_integration_id: UUID,
@@ -861,6 +938,11 @@ async def create_space_integration_knowledge(
     status_code=202,
     description="Add multiple integration knowledge items to a space in a single batch.",
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
 )
 async def create_space_integration_knowledge_batch(
     id: UUID,
@@ -974,6 +1056,11 @@ async def create_space_integration_knowledge_batch(
     description="Remove integration knowledge from a space.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
+)
 async def delete_space_integration_knowledge(
     id: UUID,
     integration_knowledge_id: UUID,
@@ -1020,6 +1107,11 @@ async def delete_space_integration_knowledge(
     description="Rename an integration knowledge wrapper in a space.",
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
+)
 async def update_integration_knowledge_wrapper(
     id: UUID,
     wrapper_id: UUID,
@@ -1044,6 +1136,11 @@ async def update_integration_knowledge_wrapper(
     description="Remove an integration knowledge wrapper and its items from a space.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
+)
 async def delete_integration_knowledge_wrapper(
     id: UUID,
     wrapper_id: UUID,
@@ -1061,6 +1158,11 @@ async def delete_integration_knowledge_wrapper(
     response_model=IntegrationKnowledgePublic,
     description="Rename integration knowledge in a space.",
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
 )
 async def update_integration_knowledge(
     id: UUID,
@@ -1083,6 +1185,11 @@ async def update_integration_knowledge(
     status_code=202,
     description="Trigger a full re-sync of integration knowledge. Returns a job to track progress.",
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
 )
 async def trigger_integration_full_sync(
     id: UUID,
@@ -1124,6 +1231,11 @@ async def trigger_integration_full_sync(
     description="Add a user as a member of a space with a given role.",
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
 )
 async def add_space_member(
     id: UUID,
@@ -1192,6 +1304,11 @@ async def add_space_member(
     description="Change a space member's role.",
     responses=responses.get_responses([403, 404, 400]),
     dependencies=[Depends(forbid_org_space)],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
 )
 async def change_role_of_member(
     id: UUID,
@@ -1274,6 +1391,11 @@ async def change_role_of_member(
     responses=responses.get_responses([403, 404, 400]),
     dependencies=[Depends(forbid_org_space)],
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
+)
 async def remove_space_member(
     id: UUID,
     user_id: UUID,
@@ -1343,6 +1465,11 @@ async def remove_space_member(
     responses=responses.get_responses([403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
+)
 async def get_space_group_members(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1363,6 +1490,11 @@ async def get_space_group_members(
     description="Attach a user group to a space. Groups cannot be attached to personal spaces.",
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
 )
 async def add_space_group_member(
     id: UUID,
@@ -1419,6 +1551,11 @@ async def add_space_group_member(
     description="Change the role of a user group in a space.",
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
 )
 async def change_group_member_role(
     id: UUID,
@@ -1491,6 +1628,11 @@ async def change_group_member_role(
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
+)
 async def remove_space_group_member(
     id: UUID,
     group_id: UUID,
@@ -1552,6 +1694,11 @@ async def remove_space_group_member(
     description="Get the current user's personal space.",
     responses=responses.get_responses([]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="SpaceService enforces membership and the requested space operation.",
+)
 async def get_personal_space(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
@@ -1567,7 +1714,11 @@ async def get_personal_space(
     response_model=SpacePublic,
     description="Get the organization (tenant) space. Requires admin permission.",
     responses=responses.get_responses([403]),
-    dependencies=[Depends(require_permission(Permission.ADMIN))],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Only tenant administrators may manage the organization space.",
 )
 async def get_organization_space(
     container: Annotated[Container, Depends(get_container(with_user=True))],

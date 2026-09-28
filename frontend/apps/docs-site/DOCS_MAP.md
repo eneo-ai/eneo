@@ -27,17 +27,18 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths ar
 
 ## Authentication and identity
 
-| Code                                                                                                                                                  | Pages                                                                              |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `backend/src/eneo/authentication/federation_router.py`, `authentication/auth_service.py`, `settings/credential_resolver.py` (OIDC, tenant federation) | `docs/authentication-architecture.mdx`, `guides/oidc-federation/*.mdx`             |
-| `backend/src/eneo/tenants/presentation/tenant_federation_router.py`                                                                                   | `guides/oidc-federation/multi-tenant.mdx`, `docs/authentication-architecture.mdx`  |
-| `frontend/apps/web/src/routes/(public)/login/**` (tenant selection, login UI)                                                                         | `docs/authentication-architecture.mdx`, `guides/oidc-federation/multi-tenant.mdx`  |
-| `backend/src/eneo/users/user_router.py` (login token, /users/me)                                                                                      | `docs/api.mdx`                                                                     |
-| `backend/src/eneo/authentication/api_key_*.py`, `authentication/auth_models.py`, `authentication/auth_dependencies.py`, `authentication/auth.py`      | `docs/api-key-management.mdx`, `docs/api.mdx`                                      |
-| `frontend/apps/web/src/routes/(app)/account/**`, `routes/(app)/admin/api-keys/**`                                                                     | `docs/api-key-management.mdx`                                                      |
-| `backend/src/eneo/scim/**`, sysadmin scim-token endpoints in `backend/src/eneo/sysadmin/sysadmin_router.py`                                           | `guides/scim-provisioning.mdx`                                                     |
-| `backend/src/eneo/modules/**`, `frontend/apps/web/src/routes/(public)/module-login/**`                                                                | `docs/module-authentication.mdx`                                                   |
-| `backend/src/eneo/settings/encryption_service.py`, `backend/src/eneo/cli/generate_encryption_key.py`                                                  | `guides/ai-providers.mdx`, `guides/oidc-federation/*.mdx`, `guides/deployment.mdx` |
+| Code                                                                                                                                                      | Pages                                                                              |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `backend/src/eneo/authentication/federation_router.py`, `authentication/auth_service.py`, `settings/credential_resolver.py` (OIDC, tenant federation)     | `docs/authentication-architecture.mdx`, `guides/oidc-federation/*.mdx`             |
+| `backend/src/eneo/tenants/presentation/tenant_federation_router.py`                                                                                       | `guides/oidc-federation/multi-tenant.mdx`, `docs/authentication-architecture.mdx`  |
+| `frontend/apps/web/src/routes/(public)/login/**` (tenant selection, login UI)                                                                             | `docs/authentication-architecture.mdx`, `guides/oidc-federation/multi-tenant.mdx`  |
+| `backend/src/eneo/users/user_router.py` (login token, /users/me)                                                                                          | `docs/api.mdx`                                                                     |
+| `backend/src/eneo/authentication/api_key_*.py`, `authentication/auth_models.py`, `authentication/auth_dependencies.py`, `authentication/auth.py`          | `docs/api-key-management.mdx`, `docs/api.mdx`                                      |
+| `backend/src/eneo/authentication/endpoint_access.py`, `server/endpoint_routes.py`, `scripts/check_route_metadata.py` (explicit endpoint access contracts) | `contributing/security.mdx`, `docs/api.mdx`                                        |
+| `frontend/apps/web/src/routes/(app)/account/**`, `routes/(app)/admin/api-keys/**`                                                                         | `docs/api-key-management.mdx`                                                      |
+| `backend/src/eneo/scim/**`, sysadmin scim-token endpoints in `backend/src/eneo/sysadmin/sysadmin_router.py`                                               | `guides/scim-provisioning.mdx`                                                     |
+| `backend/src/eneo/modules/**`, `frontend/apps/web/src/routes/(public)/module-login/**`                                                                    | `docs/module-authentication.mdx`                                                   |
+| `backend/src/eneo/settings/encryption_service.py`, `backend/src/eneo/cli/generate_encryption_key.py`                                                      | `guides/ai-providers.mdx`, `guides/oidc-federation/*.mdx`, `guides/deployment.mdx` |
 
 ## AI models and providers
 

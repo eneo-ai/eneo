@@ -21,6 +21,11 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import get_settings, validate_redirect_uri
 from eneo.main.container.container import Container
@@ -413,6 +418,11 @@ class FederationStatusResponse(BaseModel):
     ),
     responses=responses.get_responses([]),
 )
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Federation discovery and login handshake precede an Eneo session; AuthService validates exchanged credentials and state.",
+)
 async def get_federation_status(
     container: Annotated[Container, Depends(get_container())],
 ) -> FederationStatusResponse:
@@ -496,6 +506,11 @@ async def get_federation_status(
     ),
     responses=responses.get_responses([]),
 )
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Federation discovery and login handshake precede an Eneo session; AuthService validates exchanged credentials and state.",
+)
 async def list_tenants(
     container: Annotated[Container, Depends(get_container())],
 ) -> TenantListResponse:
@@ -545,6 +560,11 @@ async def list_tenants(
         404: {"description": "Tenant not found or not configured"},
         500: {"description": "Federation or redirect configuration missing"},
     },
+)
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Federation discovery and login handshake precede an Eneo session; AuthService validates exchanged credentials and state.",
 )
 async def initiate_auth(
     container: Annotated[Container, Depends(get_container())],
@@ -924,6 +944,11 @@ async def initiate_auth(
         403: {"description": "Domain not allowed, inactive tenant, or user missing"},
         404: {"description": "Tenant or user not found"},
     },
+)
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Federation discovery and login handshake precede an Eneo session; AuthService validates exchanged credentials and state.",
 )
 async def auth_callback(
     callback: CallbackRequest,

@@ -3,6 +3,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
 from eneo.server.dependencies.container import get_container
@@ -15,6 +20,11 @@ logger = get_logger(__name__)
 
 @router.get(
     "/{id}/", response_model=CrawlRunPublic, responses=responses.get_responses([404])
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="CrawlRunService enforces access to the parent website and space.",
 )
 async def get_crawl_run(
     id: Annotated[

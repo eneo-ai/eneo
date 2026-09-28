@@ -19,6 +19,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from starlette.datastructures import State
+from starlette.requests import Request
 
 from eneo.authentication.api_key_resolver import (
     ApiKeyValidationError,
@@ -37,6 +38,7 @@ from eneo.users.user_service import (
 from tests.unit.api_key_test_utils import (
     make_api_key,
     route_has_dependency_named,
+    route_is_session_only,
     runtime_app_routes,
     runtime_router_routes,
 )
@@ -260,13 +262,12 @@ class TestAuthPrecedence:
         svc._check_user_and_tenant_state = AsyncMock()
         svc.info_blob_repo = AsyncMock()
 
-        request = SimpleNamespace(
-            state=SimpleNamespace(
-                _resource_perm_configs=[
-                    {"resource_type": "conversations", "read_override_endpoints": None}
-                ]
-            )
+        request = Request(
+            {"type": "http", "method": "GET", "path": "/test", "headers": []}
         )
+        request.state._resource_perm_configs = [
+            {"resource_type": "conversations", "read_override_endpoints": None}
+        ]
 
         result = await svc.authenticate(
             token="session-token",
@@ -866,19 +867,16 @@ class TestModelProvidersBearerRoleContract:
             "updated_at": datetime.now(timezone.utc),
         }
 
-    @pytest.mark.asyncio
-    async def test_non_admin_denied_on_list(self):
-        from eneo.main.exceptions import UnauthorizedException
+    def test_list_requires_admin_permission(self):
+        from eneo.authentication.endpoint_access import access_for
         from eneo.model_providers.presentation.model_provider_router import (
             list_providers,
         )
+        from eneo.roles.permissions import Permission
 
-        service = AsyncMock()
-        user = SimpleNamespace(permissions=[])
-
-        with pytest.raises(UnauthorizedException):
-            await list_providers(user=user, service=service)
-        service.get_all.assert_not_awaited()
+        # HTTP denial before dispatch is exercised for every protected route
+        # in test_endpoint_access_matrix; lock the intended grant here.
+        assert access_for(list_providers).authorization is Permission.ADMIN
 
     @pytest.mark.asyncio
     async def test_admin_allowed_on_list(self):
@@ -898,19 +896,14 @@ class TestModelProvidersBearerRoleContract:
         assert len(response) == 1
         assert response[0].name == "Provider"
 
-    @pytest.mark.asyncio
-    async def test_non_admin_denied_on_get(self):
-        from eneo.main.exceptions import UnauthorizedException
+    def test_get_requires_admin_permission(self):
+        from eneo.authentication.endpoint_access import access_for
         from eneo.model_providers.presentation.model_provider_router import (
             get_provider,
         )
+        from eneo.roles.permissions import Permission
 
-        service = AsyncMock()
-        user = SimpleNamespace(permissions=[])
-
-        with pytest.raises(UnauthorizedException):
-            await get_provider(provider_id=uuid4(), user=user, service=service)
-        service.get_by_id.assert_not_awaited()
+        assert access_for(get_provider).authorization is Permission.ADMIN
 
     @pytest.mark.asyncio
     async def test_admin_allowed_on_get(self):
@@ -956,8 +949,8 @@ class TestPrivilegedRouteAuthenticationContract:
         ]
         assert module_routes, "No /admin/modules routes found"
         for route in module_routes:
-            assert self._route_has_dependency(route, "require_session_auth"), (
-                f"{route.path} missing require_session_auth"
+            assert route_is_session_only(route), (
+                f"{route.path} missing Authentication.SESSION"
             )
             assert not self._route_has_dependency(
                 route, "authenticate_super_api_key"

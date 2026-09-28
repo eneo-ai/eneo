@@ -11,7 +11,13 @@ from fastapi import APIRouter, Depends
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.container.container import Container
+from eneo.roles.permissions import Permission
 from eneo.security_classifications.presentation.security_classification_models import (
     SecurityClassificationCreatePublic,
     SecurityClassificationLevelsUpdateRequest,
@@ -36,6 +42,11 @@ ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
     status_code=201,
     description="Create a new security classification for the current tenant.",
     responses=responses.get_responses([400, 403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Changing tenant security classifications requires the admin permission.",
 )
 async def create_security_classification(
     request: SecurityClassificationCreatePublic,
@@ -88,6 +99,11 @@ async def create_security_classification(
     response_model=SecurityClassificationResponse,
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may read classifications; service authorizes administrative mutations.",
+)
 async def list_security_classifications(
     container: ContainerDep,
 ) -> SecurityClassificationResponse:
@@ -124,6 +140,11 @@ async def list_security_classifications(
     response_model=SecurityClassificationPublic,
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may read classifications; service authorizes administrative mutations.",
+)
 async def get_security_classification(
     id: UUID,
     container: ContainerDep,
@@ -149,6 +170,11 @@ async def get_security_classification(
     response_model=SecurityClassificationsListPublic,
     description="Update the security levels (ordering) of security classifications.",
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Changing tenant security classifications requires the admin permission.",
 )
 async def update_security_classification_levels(
     request: SecurityClassificationLevelsUpdateRequest,
@@ -219,6 +245,11 @@ async def update_security_classification_levels(
     description="Delete a security classification, optionally forcing if still referenced.",
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Changing tenant security classifications requires the admin permission.",
+)
 async def delete_security_classification(
     id: UUID,
     container: ContainerDep,
@@ -275,6 +306,11 @@ async def delete_security_classification(
     response_model=SecurityClassificationPublic,
     description="Update a single security classification's name and/or description.",
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Changing tenant security classifications requires the admin permission.",
 )
 async def update_security_classification(
     id: UUID,
@@ -345,6 +381,11 @@ async def update_security_classification(
     response_model=SecurityEnableResponse,
     description="Enable or disable security classifications for the current tenant.",
     responses=responses.get_responses([400, 403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Tenant members may read classifications; service authorizes administrative mutations.",
 )
 async def toggle_security_classifications(
     request: SecurityEnableRequest,

@@ -21,6 +21,11 @@ from eneo.authentication.api_key_notification_auto_follow import (
     auto_follow_on_publish,
 )
 from eneo.authentication.auth_models import ApiKeyNotificationTargetType
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.files.file_models import File
 from eneo.main.container.container import Container
 from eneo.main.models import NOT_PROVIDED, PaginatedResponse, is_provided
@@ -55,6 +60,11 @@ class AttachmentChange(TypedDict):
     response_model=AppPublic,
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="AppService enforces app permissions and space membership.",
+)
 async def get_app(
     id: UUID,
     container: Container = USER_UPLOAD_ADMISSION_CONTAINER,
@@ -72,6 +82,11 @@ async def get_app(
     description="Update an app by id.",
     response_model=AppPublic,
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="AppService enforces app permissions and space membership.",
 )
 async def update_app(
     id: UUID,
@@ -388,6 +403,11 @@ async def update_app(
     status_code=204,
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="AppService enforces app permissions and space membership.",
+)
 async def delete_app(
     id: UUID,
     container: Container = API_KEY_REVOKING_CONTAINER,
@@ -442,6 +462,11 @@ async def delete_app(
     status_code=203,
     response_model=AppRunPublic,
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="AppService enforces app permissions and space membership.",
 )
 async def run_app(
     id: UUID,
@@ -500,6 +525,11 @@ async def run_app(
     response_model=PaginatedResponse[AppRunSparse],
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="AppService enforces app permissions and space membership.",
+)
 async def get_app_runs(
     id: UUID,
     container: Container = USER_CONTAINER,
@@ -520,6 +550,11 @@ async def get_app_runs(
     response_model=PaginatedResponse[PromptSparse],
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="AppService enforces app permissions and space membership.",
+)
 async def get_prompts(
     id: UUID,
     container: Container = USER_CONTAINER,
@@ -538,6 +573,11 @@ async def get_prompts(
     description="Publish or unpublish an app by id.",
     response_model=AppPublic,
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="AppService enforces app permissions and space membership.",
 )
 async def publish_app(
     id: UUID,

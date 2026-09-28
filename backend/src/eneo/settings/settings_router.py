@@ -4,13 +4,18 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 
 from eneo.authentication import auth_dependencies
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.files.audio import AudioMimeTypes
 from eneo.files.image import ImageMimeTypes
 from eneo.files.text import TextMimeTypes
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
 from eneo.main.models import PaginatedResponse
-from eneo.roles.permissions import Permission, validate_permission
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses, to_paginated_response
 from eneo.settings import settings_factory
@@ -41,6 +46,11 @@ settings_admin_router = APIRouter()
     summary="Get an organisation Skill execution block",
     description="Return the active tenant-scoped execution block for one organisation Skill.",
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Administering tenant settings requires the admin permission.",
+)
 async def get_skill_execution_block(
     skill_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -60,6 +70,11 @@ async def get_skill_execution_block(
         "Block every retained version of an organisation Skill from subsequent "
         "runtime composition without changing its bindings or history."
     ),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Administering tenant settings requires the admin permission.",
 )
 async def block_skill_execution(
     skill_id: UUID,
@@ -81,6 +96,11 @@ async def block_skill_execution(
     description=(
         "Release the exact active execution block reviewed by the tenant administrator."
     ),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Administering tenant settings requires the admin permission.",
 )
 async def unblock_skill_execution(
     skill_id: UUID,
@@ -106,6 +126,11 @@ async def unblock_skill_execution(
         "per-turn activation ceiling."
     ),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Administering tenant settings requires the admin permission.",
+)
 async def get_skill_runtime_policy(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     _user_identity_guard: None = Depends(auth_dependencies.require_user_identity),
@@ -123,6 +148,11 @@ async def get_skill_runtime_policy(
         "activation ceiling can be lowered but never raised past the "
         "platform bound."
     ),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Administering tenant settings requires the admin permission.",
 )
 async def update_skill_runtime_policy(
     data: SkillRuntimePolicyUpdate,
@@ -142,6 +172,11 @@ async def update_skill_runtime_policy(
         "deployment's migrated environment seed."
     ),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Administering tenant settings requires the admin permission.",
+)
 async def reset_skill_runtime_policy(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     _user_identity_guard: None = Depends(auth_dependencies.require_user_identity),
@@ -160,6 +195,11 @@ async def reset_skill_runtime_policy(
         "allowance produced by the configured context share."
     ),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Administering tenant settings requires the admin permission.",
+)
 async def get_skill_runtime_model_projections(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     _user_identity_guard: None = Depends(auth_dependencies.require_user_identity),
@@ -172,6 +212,11 @@ async def get_skill_runtime_model_projections(
     response_model=SettingsPublic,
     description="Get the current tenant settings.",
     responses=responses.get_responses([]),
+)
+@endpoint_access(
+    authentication=Authentication.ASSISTANT,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Settings services return tenant-scoped configuration to authenticated callers.",
 )
 async def get_settings(
     service: Annotated[
@@ -188,12 +233,16 @@ async def get_settings(
     description="Update tenant settings; omitted fields are not updated.",
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Administering tenant settings requires the admin permission.",
+)
 async def upsert_settings(
     settings: SettingsBase,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Omitted fields are not updated."""
-    validate_permission(container.user(), Permission.ADMIN)
     service = container.settings_service()
     return await service.update_settings(settings)
 
@@ -203,6 +252,11 @@ async def upsert_settings(
     response_model=GetModelsResponse,
     description="List available completion and embedding models.",
     responses=responses.get_responses([]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Settings services return tenant-scoped configuration to authenticated callers.",
 )
 async def get_models(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -229,6 +283,11 @@ async def get_models(
     description="List supported file format mime types.",
     responses=responses.get_responses([]),
     dependencies=[Depends(auth_dependencies.get_current_active_user)],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Settings services return tenant-scoped configuration to authenticated callers.",
 )
 def get_formats():
     return to_paginated_response(
@@ -267,6 +326,11 @@ Enable or disable the template management feature for your tenant.
 }
 ```
     """,
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Administering tenant settings requires the admin permission.",
 )
 async def update_template_setting(
     data: ToggleSettingUpdate,
@@ -316,6 +380,11 @@ Enable or disable global audit logging for your tenant.
 ```
     """,
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Administering tenant settings requires the admin permission.",
+)
 async def update_audit_logging_setting(
     data: ToggleSettingUpdate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -364,6 +433,11 @@ Enable or disable JIT (Just-In-Time) user provisioning for your tenant.
 ```
     """,
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Administering tenant settings requires the admin permission.",
+)
 async def update_provisioning_setting(
     data: ToggleSettingUpdate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -388,6 +462,11 @@ Toggle API key expiry notifications for your tenant.
 - When disabled: API key expiry notifications are suppressed
 - Change takes effect immediately
     """,
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Administering tenant settings requires the admin permission.",
 )
 async def update_api_key_expiry_notifications_setting(
     data: ToggleSettingUpdate,
@@ -414,6 +493,11 @@ Toggle the What's new page, release announcement and menu indicator for your ten
 - When disabled: the page, the one-time release announcement and the menu indicator are hidden for every user in the tenant
 - Change takes effect on the next page load
     """,
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Administering tenant settings requires the admin permission.",
 )
 async def update_whats_new_setting(
     data: ToggleSettingUpdate,

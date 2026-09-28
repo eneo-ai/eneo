@@ -37,9 +37,11 @@ from eneo.audit.infrastructure.rate_limiting import (
     build_rate_limit_key,
     enforce_rate_limit,
 )
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.database.tables.users_table import Users
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
@@ -151,7 +153,12 @@ async def _enrich_logs_with_actor_info(
     "/access-session/rate-limit",
     status_code=204,
     description="Reset the audit session rate limit for the current user (testing only).",
-    responses=responses.get_responses([404, 503]),
+    responses=responses.get_responses([403, 404, 503]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
 )
 async def reset_rate_limit(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -205,6 +212,11 @@ async def reset_rate_limit(
     description="Create an audit access session with justification, stored server-side.",
     responses=responses.get_responses([400, 403, 429, 503]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def create_access_session(
     request: AccessJustificationRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -227,13 +239,9 @@ async def create_access_session(
 
     Returns: Session creation confirmation with HTTP-only cookie set
     """
-    from eneo.roles.permissions import Permission, validate_permission
     from eneo.worker.redis import get_redis
 
     current_user = container.user()
-
-    # Validate admin permissions
-    validate_permission(current_user, Permission.ADMIN)
 
     # Input validation for security and resource protection
     if len(request.category) > 64:
@@ -347,6 +355,11 @@ async def create_access_session(
     description="List audit logs for the authenticated user's tenant.",
     responses=responses.get_responses([401, 403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def list_audit_logs(
     request: Request,
     actions: Annotated[Optional[list[ActionType]], Depends(parse_action_list)],
@@ -386,7 +399,6 @@ async def list_audit_logs(
     Requires: Admin permissions
     Requires: Active audit access session with justification
     """
-    from eneo.roles.permissions import Permission, validate_permission
 
     current_user = container.user()
     session = cast(AsyncSession, container.session())
@@ -397,8 +409,6 @@ async def list_audit_logs(
         f"Email: {current_user.email}, Permissions: {list(current_user.permissions)}"
     )
 
-    # Validate admin permissions
-    validate_permission(current_user, Permission.ADMIN)
     logger.info("✓ Permission check passed")
 
     # Get and validate audit access session (using injected service)
@@ -574,6 +584,11 @@ async def list_audit_logs(
     description="Get all audit logs where the user is actor or target (GDPR Article 15 export).",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_user_logs(
     user_id: Annotated[UUID, Path(..., description="User ID for GDPR export")],
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -593,13 +608,9 @@ async def get_user_logs(
     Requires: Admin permissions
     Security: Only returns logs for the authenticated user's tenant
     """
-    from eneo.roles.permissions import Permission, validate_permission
 
     current_user = container.user()
     session = cast(AsyncSession, container.session())
-
-    # Validate admin permissions
-    validate_permission(current_user, Permission.ADMIN)
 
     audit_service = container.audit_service()
 
@@ -681,6 +692,11 @@ async def get_user_logs(
     ),
     responses=responses.get_responses([403, 413]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def export_audit_logs(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     user_id: Annotated[
@@ -725,12 +741,8 @@ async def export_audit_logs(
     from eneo.audit.application.audit_export_service import ExportTooLargeError
     from eneo.audit.domain.constants import MAX_EXPORT_RECORDS_DEFAULT
     from eneo.audit.domain.outcome import Outcome
-    from eneo.roles.permissions import Permission, validate_permission
 
     current_user = container.user()
-
-    # Validate admin permissions
-    validate_permission(current_user, Permission.ADMIN)
 
     audit_service = container.audit_service()
     audit_export_service = container.audit_export_service()
@@ -917,6 +929,11 @@ async def export_audit_logs(
     ),
     responses=responses.get_responses([403, 429]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def request_async_export(
     request: ExportJobRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -950,13 +967,9 @@ async def request_async_export(
     from eneo.jobs.job_manager import job_manager
     from eneo.jobs.job_models import Task
     from eneo.jobs.task_models import TaskParams
-    from eneo.roles.permissions import Permission, validate_permission
 
     current_user = container.user()
     settings = get_settings()
-
-    # Validate admin permissions
-    validate_permission(current_user, Permission.ADMIN)
 
     # Get Redis client and create job manager
     redis = container.redis_client()
@@ -1034,6 +1047,11 @@ async def request_async_export(
     description="Get the status and progress of an async export job.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_export_status(
     job_id: Annotated[UUID, Path(..., description="Export job ID")],
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1048,12 +1066,8 @@ async def get_export_status(
     Requires: Admin permissions
     """
     from eneo.audit.infrastructure.export_job_manager import ExportJobManager
-    from eneo.roles.permissions import Permission, validate_permission
 
     current_user = container.user()
-
-    # Validate admin permissions
-    validate_permission(current_user, Permission.ADMIN)
 
     # Get job status from Redis
     redis = container.redis_client()
@@ -1098,6 +1112,11 @@ async def get_export_status(
     ),
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def download_export(
     job_id: Annotated[UUID, Path(..., description="Export job ID")],
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1116,12 +1135,8 @@ async def download_export(
     from fastapi.responses import FileResponse
 
     from eneo.audit.infrastructure.export_job_manager import ExportJobManager
-    from eneo.roles.permissions import Permission, validate_permission
 
     current_user = container.user()
-
-    # Validate admin permissions
-    validate_permission(current_user, Permission.ADMIN)
 
     # Get job from Redis
     redis = container.redis_client()
@@ -1172,6 +1187,11 @@ async def download_export(
     description="Cancel an in-progress async export job.",
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def cancel_export(
     job_id: Annotated[UUID, Path(..., description="Export job ID")],
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1186,12 +1206,8 @@ async def cancel_export(
     Requires: Admin permissions
     """
     from eneo.audit.infrastructure.export_job_manager import ExportJobManager
-    from eneo.roles.permissions import Permission, validate_permission
 
     current_user = container.user()
-
-    # Validate admin permissions
-    validate_permission(current_user, Permission.ADMIN)
 
     # Get job manager
     redis = container.redis_client()
@@ -1227,6 +1243,11 @@ async def cancel_export(
     description="Get the current audit log retention policy for the tenant.",
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_retention_policy(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
@@ -1239,13 +1260,9 @@ async def get_retention_policy(
     Requires: Admin permissions
     """
     from eneo.audit.application.retention_service import RetentionService
-    from eneo.roles.permissions import Permission, validate_permission
 
     current_user = container.user()
     session = cast(AsyncSession, container.session())
-
-    # Validate admin permissions
-    validate_permission(current_user, Permission.ADMIN)
 
     retention_service = RetentionService(session)
     policy = await retention_service.get_policy(current_user.tenant_id)
@@ -1259,6 +1276,11 @@ async def get_retention_policy(
     response_model=RetentionPolicyResponse,
     description="Update the audit log retention policy for the tenant.",
     responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
 )
 async def update_retention_policy(
     request: RetentionPolicyUpdateRequest,
@@ -1286,13 +1308,9 @@ async def update_retention_policy(
     from eneo.audit.application.retention_service import RetentionService
     from eneo.audit.domain.action_types import ActionType
     from eneo.audit.domain.entity_types import EntityType
-    from eneo.roles.permissions import Permission, validate_permission
 
     current_user = container.user()
     session = cast(AsyncSession, container.session())
-
-    # Validate admin permissions
-    validate_permission(current_user, Permission.ADMIN)
 
     retention_service = RetentionService(session)
 

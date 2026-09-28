@@ -2,6 +2,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.container.container import Container
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
@@ -16,6 +21,11 @@ router = APIRouter()
     description="Get which releases the current user has seen and been told about.",
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="A user session may read or change only its own release-note state.",
+)
 async def get_whats_new_state(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
@@ -27,6 +37,11 @@ async def get_whats_new_state(
     response_model=WhatsNewStatePublic,
     description="Record that the current user has opened the What's new page for a release.",
     responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="A user session may read or change only its own release-note state.",
 )
 async def mark_whats_new_seen(
     data: WhatsNewVersionUpdate,
@@ -41,6 +56,11 @@ async def mark_whats_new_seen(
     description="Record that the current user has been shown the announcement for a release.",
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="A user session may read or change only its own release-note state.",
+)
 async def mark_whats_new_announced(
     data: WhatsNewVersionUpdate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -53,6 +73,11 @@ async def mark_whats_new_announced(
     response_model=WhatsNewStatePublic,
     description="Development only: forget the current user's What's new markers so the announcement and dot return.",
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="A user session may read or change only its own release-note state.",
 )
 async def reset_whats_new_state(
     container: Annotated[Container, Depends(get_container(with_user=True))],

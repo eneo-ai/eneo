@@ -10,6 +10,7 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import get_current_active_user
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.completion_models.presentation.completion_model_models import (
     MigrationResult,
     ModelMigrationHistory,
@@ -23,7 +24,7 @@ from eneo.database.tables.users_table import Users
 from eneo.main.container.container import Container
 from eneo.main.exceptions import ValidationException
 from eneo.main.models import PaginatedResponse, is_provided
-from eneo.roles.permissions import Permission, validate_permission
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.transcription_models.presentation.transcription_model_models import (
@@ -48,12 +49,15 @@ router = APIRouter()
     responses=responses.get_responses([403]),
     description="List all transcription models for the tenant.",
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_transcription_models(
     user: CurrentUser,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    validate_permission(user, Permission.ADMIN)
-
     service = container.transcription_model_crud_service()
 
     models = await service.get_transcription_models()
@@ -69,6 +73,11 @@ async def get_transcription_models(
     responses=responses.get_responses([403, 404]),
     description="Update org settings for a transcription model.",
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def update_transcription_model(
     id: UUID,
     update_flags: TranscriptionModelUpdate,
@@ -76,9 +85,6 @@ async def update_transcription_model(
 ):
     service = container.transcription_model_crud_service()
     user = container.user()
-
-    # Validate admin permissions first
-    validate_permission(user, Permission.ADMIN)
 
     # Get old state for change tracking (bypass access check since admin is already validated)
     transcription_model_repo = container.transcription_model_repo()
@@ -155,6 +161,11 @@ async def update_transcription_model(
     responses=responses.get_responses([403, 404]),
     description="Count apps and spaces that would be moved by migrating this model.",
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_transcription_model_usage(
     model_id: UUID,
     user: CurrentUser,
@@ -162,7 +173,6 @@ async def get_transcription_model_usage(
 ) -> TranscriptionModelUsageStats:
     """Live impact counts for the migrate dialog (transcription has no
     pre-aggregated usage-stats table, so these are computed on demand)."""
-    validate_permission(user, Permission.ADMIN)
     service = container.transcription_model_migration_service()
     counts = await service.count_affected_per_type(model_id, user.tenant_id)
     return TranscriptionModelUsageStats(
@@ -179,6 +189,11 @@ async def get_transcription_model_usage(
     responses=responses.get_responses([403, 404]),
     description="List apps using this transcription model (for the migrate dialog).",
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_transcription_model_usage_details(
     model_id: UUID,
     user: CurrentUser,
@@ -188,7 +203,6 @@ async def get_transcription_model_usage_details(
     """Per-entity usage so the migrate dialog can use the same impact table as
     completion. Transcription's only direct reference is apps; spaces are a
     many-to-many shown via the aggregate /usage count."""
-    validate_permission(user, Permission.ADMIN)
     session = cast(AsyncSession, container.session())
 
     where = sa.and_(
@@ -233,6 +247,11 @@ async def get_transcription_model_usage_details(
     responses=responses.get_responses([403, 404]),
     description="Validate transcription migration compatibility without executing.",
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def validate_transcription_migration(
     model_id: UUID,
     user: CurrentUser,
@@ -240,7 +259,6 @@ async def validate_transcription_migration(
     to_model_id: UUID = Query(..., description="Target model ID"),
 ) -> ValidationResult:
     """Validate transcription migration compatibility without executing."""
-    validate_permission(user, Permission.ADMIN)
     migration_service = container.transcription_model_migration_service()
     return await migration_service.validate_migration(
         model_id, to_model_id, user.tenant_id
@@ -252,6 +270,11 @@ async def validate_transcription_migration(
     response_model=MigrationResult,
     responses=responses.get_responses([403, 404]),
     description="Migrate all usage from one transcription model to another.",
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
 )
 async def migrate_transcription_model_usage(
     model_id: UUID,
@@ -267,7 +290,6 @@ async def migrate_transcription_model_usage(
     whitelisting all live in the shared migration engine; the router only
     enforces admin permission and writes the audit log on success.
     """
-    validate_permission(user, Permission.ADMIN)
 
     session = cast(AsyncSession, container.session())
     migration_service = container.transcription_model_migration_service()
@@ -341,6 +363,11 @@ async def migrate_transcription_model_usage(
     responses=responses.get_responses([400, 403]),
     description="List all transcription migration history for the tenant.",
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_all_transcription_migration_history(
     user: CurrentUser,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -348,7 +375,6 @@ async def get_all_transcription_migration_history(
     offset: int = Query(0, ge=0),
 ) -> list[ModelMigrationHistory]:
     """Get all transcription migration history for the tenant."""
-    validate_permission(user, Permission.ADMIN)
     service = container.transcription_model_migration_history_service()
     return await service.get_migration_history_for_tenant(user.tenant_id, limit, offset)
 
@@ -359,13 +385,17 @@ async def get_all_transcription_migration_history(
     responses=responses.get_responses([403, 404]),
     description="Get a specific transcription migration history record by ID.",
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_transcription_migration_history_by_id(
     migration_id: UUID,
     user: CurrentUser,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ModelMigrationHistory:
     """Get a specific transcription migration history record by ID."""
-    validate_permission(user, Permission.ADMIN)
     service = container.transcription_model_migration_history_service()
     history = await service.get_migration_history_by_id(migration_id, user.tenant_id)
     if not history:
@@ -379,6 +409,11 @@ async def get_transcription_migration_history_by_id(
     responses=responses.get_responses([403, 404]),
     description="Get migration history for a specific transcription model.",
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+)
 async def get_transcription_model_migration_history(
     model_id: UUID,
     user: CurrentUser,
@@ -387,7 +422,6 @@ async def get_transcription_model_migration_history(
     offset: int = Query(0, ge=0),
 ) -> list[ModelMigrationHistory]:
     """Get migration history for a specific transcription model (from or to)."""
-    validate_permission(user, Permission.ADMIN)
     service = container.transcription_model_migration_history_service()
     return await service.get_migration_history_for_model(
         model_id, user.tenant_id, limit, offset
