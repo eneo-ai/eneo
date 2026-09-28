@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../src/config";
-import { createHandler } from "../src/server";
+import { createHandler, parseOrigin } from "../src/server";
 import { computeConfigSchema } from "../src/tools/compute/config";
 import { runJavaScript } from "../src/tools/compute/engine/quickjs";
 import type { ComputeJob } from "../src/tools/compute/ports";
@@ -76,12 +76,12 @@ describe("authentication", () => {
   test("the runtime refuses to start with a short token", () => {
     expect(() => loadConfig({ TOOL_RUNTIME_TOKEN: "short" })).toThrow();
     expect(loadConfig({ TOOL_RUNTIME_TOKEN: TOKEN }).port).toBe(3010);
-    expect(loadConfig({ TOOL_RUNTIME_TOKEN: TOKEN }).tabular).toBeUndefined();
+    expect(loadConfig({ TOOL_RUNTIME_TOKEN: TOKEN }).tabular.allowedFileOrigins).toEqual([]);
     expect(
       loadConfig({
         TOOL_RUNTIME_TOKEN: TOKEN,
         TOOL_RUNTIME_FILE_ORIGINS: "http://localhost:8123, http://host.docker.internal:8123/",
-      }).tabular?.fileOrigins,
+      }).tabular.allowedFileOrigins,
     ).toEqual(["http://localhost:8123", "http://host.docker.internal:8123"]);
     expect(() =>
       loadConfig({
@@ -135,5 +135,14 @@ describe("MCP endpoint", () => {
       }),
     );
     expect(response.status).toBe(413);
+  });
+});
+
+describe("file origin header", () => {
+  test("accepts only exact HTTP(S) origins", () => {
+    expect(parseOrigin("http://backend:8000")).toBe("http://backend:8000");
+    expect(parseOrigin("https://eneo.example/")).toBe("https://eneo.example");
+    for (const bad of [null, "", "http://backend:8000/api", "ftp://x", "http://u:p@x", "junk"])
+      expect(parseOrigin(bad)).toBeUndefined();
   });
 });

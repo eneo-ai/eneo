@@ -22,39 +22,31 @@ const endpoints: Endpoint[] = [
     ),
   },
 ];
-if (config.tabular) {
-  const { config: tabular, fileOrigins, concurrency } = config.tabular;
-  const slot = concurrencyLimit(concurrency);
-  // Budgets keep one call (downloads, a parse, a query) inside Eneo's 60 s tool-call timeout.
-  const ingestTimeoutMs = 25_000;
-  const queryJobTimeoutMs = Math.min(tabular.query_timeout_ms + 10_000, 30_000);
-  endpoints.push({
-    slug: "tabular",
-    requiresIdentity: true,
-    toolTimeoutMs: 55_000,
-    tools: tabularTools({
-      config: tabular,
-      fileOrigins,
-      cache: new SheetCache(defaultCacheRoot(), tabular.cache_ttl_ms, tabular.cache_max_bytes),
-      executor: {
-        ingest: (job) =>
-          slot(
-            async () =>
-              (await runIsolated({ job }, ingestTimeoutMs)) as { sheets: SheetMetadata[] },
-          ),
-        query: (job) =>
-          slot(
-            async () =>
-              (await runIsolated({ job }, queryJobTimeoutMs)) as unknown as QueryJobResult,
-          ),
-      },
-    }),
-  });
-} else {
-  console.log(
-    JSON.stringify({ event: "tabular_disabled", reason: "TOOL_RUNTIME_FILE_ORIGINS is not set" }),
-  );
-}
+const tabular = config.tabular.config;
+const slot = concurrencyLimit(config.tabular.concurrency);
+// Budgets keep one call (downloads, a parse, a query) inside Eneo's 60 s tool-call timeout.
+const ingestTimeoutMs = 25_000;
+const queryJobTimeoutMs = Math.min(tabular.query_timeout_ms + 10_000, 30_000);
+endpoints.push({
+  slug: "tabular",
+  requiresIdentity: true,
+  toolTimeoutMs: 55_000,
+  tools: tabularTools({
+    config: tabular,
+    allowedFileOrigins: config.tabular.allowedFileOrigins,
+    cache: new SheetCache(defaultCacheRoot(), tabular.cache_ttl_ms, tabular.cache_max_bytes),
+    executor: {
+      ingest: (job) =>
+        slot(
+          async () => (await runIsolated({ job }, ingestTimeoutMs)) as { sheets: SheetMetadata[] },
+        ),
+      query: (job) =>
+        slot(
+          async () => (await runIsolated({ job }, queryJobTimeoutMs)) as unknown as QueryJobResult,
+        ),
+    },
+  }),
+});
 
 const fetch = createHandler({
   token: config.token,

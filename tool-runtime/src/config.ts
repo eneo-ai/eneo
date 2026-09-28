@@ -12,8 +12,8 @@ const environmentSchema = z.object({
   MAX_CONCURRENCY: z.coerce.number().int().min(1).max(256).default(16),
   COMPUTE_TIMEOUT_MS: z.coerce.number().int().optional(),
   COMPUTE_MEMORY_MB: z.coerce.number().int().optional(),
-  // Origins of Eneo's signed file links (its FILE_REFERENCE_BASE_URL), comma-separated.
-  // Without one the tabular endpoint is not served: attachments could not be fetched.
+  // Optional hard limit on where tabular tools may fetch files. Eneo sends its file origin
+  // with every call; when this comma-separated list is set, that origin must be on it.
   TOOL_RUNTIME_FILE_ORIGINS: z
     .string()
     .optional()
@@ -46,8 +46,7 @@ export type RuntimeConfig = {
   port: number;
   maxConcurrency: number;
   compute: ComputeConfig;
-  /** Unset when no file origin is configured: the tabular endpoint is then disabled. */
-  tabular?: { config: TabularConfig; fileOrigins: string[]; concurrency: number };
+  tabular: { config: TabularConfig; allowedFileOrigins: string[]; concurrency: number };
 };
 
 export function loadConfig(environment: Record<string, string | undefined>): RuntimeConfig {
@@ -60,21 +59,17 @@ export function loadConfig(environment: Record<string, string | undefined>): Run
       ...(parsed.COMPUTE_TIMEOUT_MS !== undefined ? { timeout_ms: parsed.COMPUTE_TIMEOUT_MS } : {}),
       ...(parsed.COMPUTE_MEMORY_MB !== undefined ? { memory_mb: parsed.COMPUTE_MEMORY_MB } : {}),
     }),
-    ...(parsed.TOOL_RUNTIME_FILE_ORIGINS.length
-      ? {
-          tabular: {
-            fileOrigins: parsed.TOOL_RUNTIME_FILE_ORIGINS,
-            concurrency: parsed.TABULAR_CONCURRENCY,
-            config: tabularConfigSchema.parse({
-              ...(parsed.TABULAR_MAX_UPLOAD_MB !== undefined
-                ? { max_upload_bytes: parsed.TABULAR_MAX_UPLOAD_MB * 1024 * 1024 }
-                : {}),
-              ...(parsed.TABULAR_CACHE_MB !== undefined
-                ? { cache_max_bytes: parsed.TABULAR_CACHE_MB * 1024 * 1024 }
-                : {}),
-            }),
-          },
-        }
-      : {}),
+    tabular: {
+      allowedFileOrigins: parsed.TOOL_RUNTIME_FILE_ORIGINS,
+      concurrency: parsed.TABULAR_CONCURRENCY,
+      config: tabularConfigSchema.parse({
+        ...(parsed.TABULAR_MAX_UPLOAD_MB !== undefined
+          ? { max_upload_bytes: parsed.TABULAR_MAX_UPLOAD_MB * 1024 * 1024 }
+          : {}),
+        ...(parsed.TABULAR_CACHE_MB !== undefined
+          ? { cache_max_bytes: parsed.TABULAR_CACHE_MB * 1024 * 1024 }
+          : {}),
+      }),
+    },
   };
 }

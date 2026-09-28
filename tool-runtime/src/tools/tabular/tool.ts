@@ -17,8 +17,11 @@ export type TabularExecutor = {
 
 export type TabularDeps = {
   config: TabularConfig;
-  /** The only origins file URLs may point at: Eneo's FILE_REFERENCE_BASE_URL. */
-  fileOrigins: string[];
+  /**
+   * Optional operator limit (TOOL_RUNTIME_FILE_ORIGINS). Each call's origin comes from Eneo
+   * (X-Eneo-File-Origin); when this list is non-empty that origin must also be on it.
+   */
+  allowedFileOrigins: string[];
   cache: SheetCache;
   executor: TabularExecutor;
   /** Replaceable in tests; production downloads through the pinned, bounded client. */
@@ -74,11 +77,6 @@ const selectSql = z
   );
 
 export function tabularTools(deps: TabularDeps): ToolDefinition[] {
-  const policy: DownloadPolicy = {
-    max_upload_bytes: deps.config.max_upload_bytes,
-    download_timeout_ms: deps.config.download_timeout_ms,
-    allowed_origins: deps.fileOrigins.map((origin) => ({ origin, allow_private: true })),
-  };
   const download = deps.download ?? downloadFile;
 
   /**
@@ -92,15 +90,27 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
     } catch {
       throw new ToolError("INVALID_URL", "Pass the attachment's signed URL unchanged.");
     }
-    if (
-      !deps.fileOrigins.includes(url.origin) ||
-      !FILE_PATH.test(url.pathname) ||
-      !url.searchParams.get("token")
-    )
+    const origin = ctx.fileOrigin;
+    if (!origin)
+      throw new ToolError(
+        "FILE_ORIGIN_UNKNOWN",
+        "Eneo did not say where its file links point. Set FILE_REFERENCE_BASE_URL (or PUBLIC_ORIGIN) on the Eneo backend.",
+      );
+    if (deps.allowedFileOrigins.length && !deps.allowedFileOrigins.includes(origin))
+      throw new ToolError(
+        "FILE_ORIGIN_NOT_ALLOWED",
+        "Eneo's file origin is not in this runtime's TOOL_RUNTIME_FILE_ORIGINS. Align the two settings.",
+      );
+    if (url.origin !== origin || !FILE_PATH.test(url.pathname) || !url.searchParams.get("token"))
       throw new ToolError(
         "INVALID_URL",
         "Only signed Eneo attachment URLs are accepted. Pass the url from the attachment reference unchanged.",
       );
+    const policy: DownloadPolicy = {
+      max_upload_bytes: deps.config.max_upload_bytes,
+      download_timeout_ms: deps.config.download_timeout_ms,
+      allowed_origins: [{ origin, allow_private: true }],
+    };
     const file = await download(ref.url, policy);
     const isXlsx = ref.filename.toLowerCase().endsWith(".xlsx");
     const key = SheetCache.key({

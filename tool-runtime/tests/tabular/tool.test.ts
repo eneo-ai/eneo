@@ -19,6 +19,7 @@ const FILE_B = "22222222-2222-4222-8222-222222222222";
 const alice: CallContext = {
   tenantId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   userId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  fileOrigin: ORIGIN,
 };
 const bob: CallContext = { ...alice, userId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" };
 const config = tabularConfigSchema.parse({});
@@ -44,7 +45,7 @@ beforeAll(async () => {
 afterAll(() => rm(root, { recursive: true, force: true }));
 
 type Downloads = { calls: string[]; denied: Set<string> };
-function setup(dir: string) {
+function setup(dir: string, allowedFileOrigins: string[] = []) {
   const downloads: Downloads = { calls: [], denied: new Set() };
   const ingests: string[] = [];
   const download = (async (raw: string) => {
@@ -69,7 +70,7 @@ function setup(dir: string) {
   };
   const tools = tabularTools({
     config,
-    fileOrigins: [ORIGIN],
+    allowedFileOrigins,
     cache: new SheetCache(join(root, dir), config.cache_ttl_ms, config.cache_max_bytes),
     executor,
     download,
@@ -91,6 +92,30 @@ describe("file references", () => {
       await expect(
         tool("inspect_table").execute({ files: [{ url: bad, filename: "a.csv" }] }, alice),
       ).rejects.toMatchObject({ code: "INVALID_URL" });
+    expect(downloads.calls).toEqual([]);
+  });
+
+  test("fetches only from the file origin Eneo sent", async () => {
+    const { tool, downloads } = setup("origin");
+    const inspect = (ctx: CallContext) =>
+      tool("inspect_table").execute({ files: [{ url: url(FILE_A), filename: "a.csv" }] }, ctx);
+    await expect(inspect({ ...alice, fileOrigin: undefined })).rejects.toMatchObject({
+      code: "FILE_ORIGIN_UNKNOWN",
+    });
+    // The model's URL must match Eneo's origin, not merely look like an Eneo link.
+    await expect(inspect({ ...alice, fileOrigin: "http://other:8000" })).rejects.toMatchObject({
+      code: "INVALID_URL",
+    });
+    expect(downloads.calls).toEqual([]);
+    await inspect(alice);
+    expect(downloads.calls).toHaveLength(1);
+  });
+
+  test("an operator allowlist also bounds Eneo's origin", async () => {
+    const { tool, downloads } = setup("allowlist", ["http://backend:9000"]);
+    await expect(
+      tool("inspect_table").execute({ files: [{ url: url(FILE_A), filename: "a.csv" }] }, alice),
+    ).rejects.toMatchObject({ code: "FILE_ORIGIN_NOT_ALLOWED" });
     expect(downloads.calls).toEqual([]);
   });
 

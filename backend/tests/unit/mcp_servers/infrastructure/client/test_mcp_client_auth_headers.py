@@ -45,9 +45,14 @@ class TestAuthHeaderConstruction:
 
         assert headers == {}
 
-    async def test_bundled_server_uses_the_deployment_token(self, monkeypatch):
+    async def test_bundled_server_uses_the_deployment_token_and_file_origin(
+        self, monkeypatch
+    ):
         settings = get_settings().model_copy(
-            update={"tool_runtime_token": "runtime-secret"}
+            update={
+                "tool_runtime_token": "runtime-secret",
+                "file_reference_base_url": "http://backend:8000/",
+            }
         )
         monkeypatch.setattr(client_module, "get_settings", lambda: settings)
         server = _make_server()
@@ -57,4 +62,16 @@ class TestAuthHeaderConstruction:
 
         headers = await client._build_auth_headers()
 
-        assert headers == {"Authorization": "Bearer runtime-secret"}
+        assert headers == {
+            "Authorization": "Bearer runtime-secret",
+            "X-Eneo-File-Origin": "http://backend:8000",
+        }
+
+    async def test_external_servers_never_get_the_file_origin(self):
+        server = _make_server()
+        server.http_auth_type = "bearer"
+        client = MCPClient(server, {"token": "sk-secret"})
+
+        headers = await client._build_auth_headers()
+
+        assert "X-Eneo-File-Origin" not in headers

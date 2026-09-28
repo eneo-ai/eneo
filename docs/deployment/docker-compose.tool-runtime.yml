@@ -23,10 +23,10 @@ services:
     environment:
       TOOL_RUNTIME_TOKEN: ${TOOL_RUNTIME_TOKEN:?Set TOOL_RUNTIME_TOKEN in .env (openssl rand -hex 32)}
       MAX_CONCURRENCY: ${TOOL_RUNTIME_MAX_CONCURRENCY:-16}
-      # Tabular analysis fetches attachments through Eneo's signed file links;
-      # this must be the origin of FILE_REFERENCE_BASE_URL (the backend on
-      # the shared network). Leave it empty to serve compute only.
-      TOOL_RUNTIME_FILE_ORIGINS: ${TOOL_RUNTIME_FILE_ORIGINS-http://backend:8000}
+      # Tabular analysis fetches attachments from the origin Eneo sends with
+      # each call (its FILE_REFERENCE_BASE_URL). Optionally pin it here as
+      # well; a mismatch then fails the call instead of fetching.
+      TOOL_RUNTIME_FILE_ORIGINS: ${TOOL_RUNTIME_FILE_ORIGINS:-}
       TABULAR_CONCURRENCY: ${TOOL_RUNTIME_TABULAR_CONCURRENCY:-2}
     # Only the backend can reach the runtime, and the runtime can reach nothing:
     # the network is internal, so guest code has no route out even if it

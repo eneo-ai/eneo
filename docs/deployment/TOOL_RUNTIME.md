@@ -43,9 +43,11 @@ The model passes the signed URL of an attachment, exactly as Eneo put it in the
 conversation. The runtime then works as follows:
 
 1. It accepts only URLs of the form
-   `<origin>/api/v1/files/<id>/original/download/?token=…` whose origin is
-   listed in `TOOL_RUNTIME_FILE_ORIGINS`. Any other URL is refused before a
-   request is made.
+   `<origin>/api/v1/files/<id>/original/download/?token=…`. The origin must be
+   the one Eneo sends with the call (`X-Eneo-File-Origin`, taken from
+   `FILE_REFERENCE_BASE_URL`), never one chosen by the model. Any other URL is
+   refused before a request is made. `TOOL_RUNTIME_FILE_ORIGINS` optionally
+   pins the allowed origins on the runtime side as well.
 2. It downloads the file on every call. Eneo checks the token each time, so a
    revoked or expired link stops working at once. Downloads are capped at 20
    MiB and 15 s, pin the resolved address and re-validate redirects.
@@ -85,9 +87,9 @@ spreadsheets is not part of this endpoint.
    FILE_REFERENCE_BASE_URL=http://backend:8000
    ```
 
-   The overlay sets `TOOL_RUNTIME_FILE_ORIGINS=http://backend:8000` on the
-   runtime. It must match `FILE_REFERENCE_BASE_URL`. Set it to an empty value
-   to serve compute only.
+   Eneo tells the runtime this origin on every call, so the runtime needs no
+   matching setting. To have the runtime enforce it too, set
+   `TOOL_RUNTIME_FILE_ORIGINS=http://backend:8000` in `.env`.
 
 4. Start it with the overlay and profile:
 

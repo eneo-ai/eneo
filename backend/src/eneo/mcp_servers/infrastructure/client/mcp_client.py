@@ -6,6 +6,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import TracebackType
 from typing import Any, AsyncContextManager, Callable, Optional, cast
+from urllib.parse import urlsplit
 
 import httpx
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
@@ -22,6 +23,7 @@ from mcp.types import (
     ToolListChangedNotification,
 )
 
+from eneo.files.file_reference import file_reference_base_url
 from eneo.main.config import get_settings
 from eneo.main.exceptions import MCPAuthenticationError, MCPClientError
 from eneo.main.logging import get_logger
@@ -47,6 +49,12 @@ MCP_DELETE_RESPONSE_MAX_BYTES = 64 * 1024
 RESOURCE_TEXT_MAX_BYTES = 8 * 1024
 RESOURCE_META_MAX_BYTES = 16 * 1024
 MCP_SSE_READ_TIMEOUT_SECONDS = 300.0
+
+
+def _origin(url: str) -> str:
+    """Scheme, host and port of ``url`` (no path, no trailing slash)."""
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}"
 
 
 def transport_read_timeout(tool_call_timeout: float) -> float:
@@ -711,9 +719,15 @@ class MCPClient:
             # The bundled tool runtime shares one deployment secret with the
             # backend; it is read from settings on every connect so rotating
             # it needs only a redeploy of both sides.
-            token = get_settings().tool_runtime_token
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
+            settings = get_settings()
+            if settings.tool_runtime_token:
+                headers["Authorization"] = f"Bearer {settings.tool_runtime_token}"
+            # Where Eneo's signed file links point. The runtime fetches files
+            # only from this origin, so a model-supplied URL can never steer it
+            # elsewhere, and the deployment configures the origin once.
+            base_url = file_reference_base_url(settings)
+            if base_url:
+                headers["X-Eneo-File-Origin"] = _origin(base_url)
         elif self.mcp_server.http_auth_type == "api_key_header":
             # Admin-chosen header (e.g. X-Api-Key). The name is validated at
             # configuration time against HTTP token syntax and a deny-list of

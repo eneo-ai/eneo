@@ -28,16 +28,30 @@ export type ServerOptions = {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** An exact HTTP(S) origin, or undefined for anything else (paths, credentials, junk). */
+export function parseOrigin(value: string | null): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    const origin = value.replace(/\/$/, "");
+    return ["http:", "https:"].includes(url.protocol) && url.origin === origin ? origin : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function callContext(request: Request, endpoint: Endpoint): CallContext {
   const tenantId = request.headers.get("x-eneo-tenant-id") ?? "";
   const userId = request.headers.get("x-eneo-user-id") ?? "";
-  if (UUID.test(tenantId) && UUID.test(userId)) return { tenantId, userId };
+  const fileOrigin = parseOrigin(request.headers.get("x-eneo-file-origin"));
+  const origin = fileOrigin ? { fileOrigin } : {};
+  if (UUID.test(tenantId) && UUID.test(userId)) return { tenantId, userId, ...origin };
   if (endpoint.requiresIdentity)
     throw new ToolError(
       "IDENTITY_REQUIRED",
       "This tool needs Eneo's tenant and user identity. Enable identity forwarding on the server in Eneo.",
     );
-  return { tenantId: "", userId: "" };
+  return { tenantId: "", userId: "", ...origin };
 }
 
 export function equalSecret(left: string, right: string): boolean {
