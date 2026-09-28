@@ -265,8 +265,6 @@ class TestNoDuplicatePermissionMaps:
         eneo_src = _get_eneo_src_path()
         matches = []
         for py_file in eneo_src.rglob("*.py"):
-            if "test" in str(py_file):
-                continue
             try:
                 tree = ast.parse(py_file.read_text())
             except SyntaxError:
@@ -289,7 +287,9 @@ class TestNoDuplicatePermissionMaps:
                         rel = py_file.relative_to(eneo_src)
                         matches.append(f"{rel}:{node.lineno}")
 
-        assert len(matches) == 1, (
+        assert [match.split(":")[0] for match in matches] == [
+            "authentication/auth_models.py"
+        ], (
             f"METHOD_PERMISSION_MAP must exist in exactly one place (auth_models.py). "
             f"Found in: {matches}"
         )
