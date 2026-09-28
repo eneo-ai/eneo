@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
 from sqlalchemy import CheckConstraint, ForeignKey, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
@@ -25,6 +26,7 @@ class Sessions(BasePublic):
     api_key_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(ApiKeysV2.id, ondelete="SET NULL"), nullable=True
     )
+    settings: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
     name: Mapped[str] = mapped_column()
     feedback_value: Mapped[Optional[int]] = mapped_column()
     feedback_text: Mapped[Optional[str]] = mapped_column()
