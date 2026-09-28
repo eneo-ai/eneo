@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import type { Space } from "@/features/spaces/space";
@@ -23,6 +23,34 @@ import { KnowledgePicker } from "./knowledge-picker";
 afterEach(cleanup);
 
 describe("KnowledgePicker", () => {
+  it.each([
+    {
+      kind: "shared",
+      personal: false,
+      addLabel: "Lägg till kunskap (den här ytan)",
+      emptyLabel: "Det finns inga tillgängliga källor i den här ytan."
+    },
+    {
+      kind: "personal",
+      personal: true,
+      addLabel: "Lägg till kunskap (Personlig)",
+      emptyLabel: "Inga personliga källor tillgängliga."
+    }
+  ])("names current-space knowledge in a $kind space", ({ personal, addLabel, emptyLabel }) => {
+    state.space = makeSpace({ overrides: { personal } });
+
+    renderInApp(
+      <KnowledgePicker
+        origin="personal"
+        selections={{ collections: [], websites: [], integrationKnowledge: [] }}
+        onChange={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: addLabel }));
+    expect(screen.getByText(emptyLabel)).toBeTruthy();
+  });
+
   it("counts the selected knowledge with plural forms", () => {
     const collection = makeCollection({ metadata: { num_info_blobs: 1, size: 10 } });
     const website = makeWebsite({

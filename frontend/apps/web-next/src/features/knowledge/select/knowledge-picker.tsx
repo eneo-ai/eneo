@@ -314,7 +314,7 @@ function SelectedKnowledgeRow({
 }
 
 /**
- * Selected knowledge for one origin (personal or organization) plus an
+ * Selected knowledge for the current space or organization plus an
  * add-combobox sectioned per embedding model. Ported from SelectKnowledge +
  * KnowledgeCombobox.
  */
@@ -336,6 +336,18 @@ export function KnowledgePicker({
   const orgSpaceId = useOrgSpaceId();
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
+  const addLabel =
+    origin === "organization"
+      ? t("add_knowledge_organization")
+      : space.personal
+        ? t("add_knowledge_personal")
+        : t("add_knowledge_this_space");
+  const emptyLabel =
+    origin === "organization"
+      ? t("no_organization_sources")
+      : space.personal
+        ? t("no_personal_sources")
+        : t("no_space_sources");
   const allowedKinds = {
     collections: resourceKinds?.collections ?? true,
     websites: resourceKinds?.websites ?? true,
@@ -481,7 +493,7 @@ export function KnowledgePicker({
             className="text-muted-foreground hover:text-foreground hover:bg-muted/50 flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed text-sm font-medium transition-colors disabled:opacity-50"
           >
             <Plus className="size-4" />
-            {origin === "personal" ? t("add_knowledge_personal") : t("add_knowledge_organization")}
+            {addLabel}
           </button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-(--radix-popover-trigger-width) min-w-80 p-0">
@@ -494,7 +506,7 @@ export function KnowledgePicker({
             <CommandList>
               {sections.length === 0 ? (
                 <div className="text-muted-foreground flex min-h-16 items-center justify-center px-4 py-6 text-center text-sm">
-                  {origin === "personal" ? t("no_personal_sources") : t("no_organization_sources")}
+                  {emptyLabel}
                 </div>
               ) : (
                 sections.map((section) => (

@@ -5,7 +5,7 @@ import type { Collection, IntegrationKnowledge, Website } from "../knowledge";
  * knowledgeOrigin.ts + knowledgeIntegration.ts + getAvailableKnowledge.ts.
  */
 
-// --- Origin (personal vs organization) ---
+// --- Origin (current space vs organization) ---
 
 type SpaceOwned = { space_id?: string | null };
 
@@ -25,6 +25,7 @@ export function isOrgItem(
   return Boolean(owner) && owner !== currentSpaceId;
 }
 
+// "personal" is the legacy name for current-space items, including shared spaces.
 export type KnowledgeOrigin = "personal" | "organization";
 
 export function byOrigin<T extends SpaceOwned>(
