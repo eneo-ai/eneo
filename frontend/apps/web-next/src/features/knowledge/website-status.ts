@@ -10,6 +10,11 @@ export type KnowledgeStatus = {
   fixHref?: string;
 };
 
+/** A crawl that can still change the website's indexed content. */
+export function isActiveCrawl(crawl: CrawlRun | null | undefined): boolean {
+  return crawl?.status === "queued" || crawl?.status === "in progress";
+}
+
 const SKIPPED_PREFIX = "skipped duplicate crawl";
 
 /** A failed crawl that only stood aside for an identical crawl already running. */

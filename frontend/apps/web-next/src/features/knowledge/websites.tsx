@@ -17,7 +17,7 @@ import {
 } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderInput, Globe, Pencil, RefreshCw, SearchX, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useId, useMemo, useState, type Dispatch, type SetStateAction } from "react";
@@ -33,6 +33,7 @@ import { toast } from "@/lib/toast";
 import { useJobs } from "@/features/jobs/use-jobs";
 import { ClientTime } from "@/components/composites/client-time";
 import { useRemovalMutation } from "@/features/spaces/removal";
+import { spaceQueryOptions } from "@/features/spaces/space";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
 import { embeddingModelsInUse, formatWebsiteName, type Website } from "./knowledge";
@@ -44,12 +45,16 @@ import { KnowledgeLabel, KnowledgeNameCell, KnowledgeTableControls } from "./tab
 import { WebsiteDialog } from "./website-dialog";
 import {
   crawlFailuresText,
+  isActiveCrawl,
   isSkippedCrawl,
   nextCrawlAt,
   STALE_SYNC_DAYS,
   websiteStatus,
   websiteSyncedAt
 } from "./website-status";
+
+const ACTIVE_CRAWL_REFRESH_MS = 2_000;
+const IDLE_WEBSITE_REFRESH_MS = 30_000;
 
 /** The latest crawl's state, with why it was skipped or failed, or what failed. */
 function WebsiteStatusCell({ website }: { website: Website }) {
@@ -325,6 +330,19 @@ export function WebsitesTab({ canCreate, labelledBy }: { canCreate: boolean; lab
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [showCreate, setShowCreate] = useState(false);
   const [filter, setFilter] = useState("");
+
+  // Watch the same space query used by useSpace. An active crawl gets quick
+  // updates; the slower idle poll also finds crawls started by a schedule or
+  // another user, even when this browser never registered their job.
+  useQuery({
+    ...spaceQueryOptions(browserApi, routeId),
+    refetchInterval: (query) =>
+      query.state.data?.knowledge.websites.items.some((website) =>
+        isActiveCrawl(website.latest_crawl)
+      )
+        ? ACTIVE_CRAWL_REFRESH_MS
+        : IDLE_WEBSITE_REFRESH_MS
+  });
 
   const websites = space.knowledge.websites.items.filter(
     (website) => website.space_id === space.id

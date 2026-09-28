@@ -30,7 +30,11 @@ vi.mock("@/features/spaces/use-space", async () => {
 });
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
-    GET: () => Promise.resolve({ data: { items: [] }, response: new Response("{}") }),
+    GET: (path: string) =>
+      Promise.resolve({
+        data: path === "/api/v1/spaces/{id}/" ? state.space : { items: [] },
+        response: new Response("{}")
+      }),
     POST: (path: string, { body }: { body: unknown }) => {
       state.posted.push({ path, body });
       return Promise.resolve({ data: state.bulkResult, response: new Response("{}") });
@@ -165,6 +169,23 @@ describe("KnowledgePage", () => {
     expect(within(table).getByText("Synkfel")).toBeTruthy();
     expect(within(table).getAllByRole("link", { name: /Gå till webbplats/ })).toHaveLength(2);
     await expectNoAxeViolations(container);
+  });
+
+  it("updates a running website to indexed without reloading the page", async () => {
+    const running = makeWebsite({
+      latest_crawl: { ...(makeWebsite().latest_crawl as object), status: "in progress" }
+    });
+    show(makeSpace({ websites: [running] }), "websites");
+    expect(screen.getByText("Synkroniseras")).toBeTruthy();
+
+    state.space = makeSpace({
+      websites: [
+        makeWebsite({
+          latest_crawl: { ...(makeWebsite().latest_crawl as object), status: "complete" }
+        })
+      ]
+    });
+    expect(await screen.findByText("Indexerad", undefined, { timeout: 5_000 })).toBeTruthy();
   });
 
   it("selects websites for a bulk sync", () => {

@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import type { Space } from "@/features/spaces/space";
 import { makeSpace, makeWebsite } from "@/features/spaces/testing/space-fixture";
 
-const state = vi.hoisted(() => ({ runStatus: "complete" as string }));
+const state = vi.hoisted(() => ({ runStatus: "complete" as string, blobTitle: "lou.html" }));
 const post = vi.hoisted(() => vi.fn());
 
 vi.mock("next/navigation", () => ({
@@ -44,7 +44,7 @@ vi.mock("@/lib/api/browser", () => ({
                 ]
               }
             : path === "/api/v1/websites/{id}/info-blobs/"
-              ? { items: [{ id: "blob-1", metadata: { title: "lou.html", size: 2048 } }] }
+              ? { items: [{ id: "blob-1", metadata: { title: state.blobTitle, size: 2048 } }] }
               : { items: [] };
       return Promise.resolve({ data, response: new Response("{}") });
     },
@@ -57,6 +57,7 @@ import { WebsiteDetail } from "./website-detail.client";
 afterEach(() => {
   cleanup();
   state.runStatus = "complete";
+  state.blobTitle = "lou.html";
   post.mockReset();
 });
 
@@ -97,6 +98,41 @@ describe("WebsiteDetail", () => {
     const sync = await screen.findByRole("button", { name: "Synkronisera nu" });
     expect((sync as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByText("Kan inte synkronisera medan en indexering redan pågår")).toBeNull();
+  });
+
+  it("updates indexed content and re-enables sync when an active crawl finishes", async () => {
+    state.runStatus = "in progress";
+    const { queryClient } = renderInApp(<WebsiteDetail websiteId="website-1" />);
+    const sync = await screen.findByRole("button", { name: "Synkronisera nu" });
+    expect((sync as HTMLButtonElement).disabled).toBe(true);
+
+    state.runStatus = "complete";
+    state.blobTitle = "updated.html";
+    await queryClient.invalidateQueries({ queryKey: ["websites", "website-1", "crawl-runs"] });
+
+    await waitFor(() => expect((sync as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("tab", { name: "Indexerat innehåll" }));
+    expect(await screen.findByText("updated.html")).toBeTruthy();
+  });
+
+  it("shows a newly queued crawl after starting it", async () => {
+    post.mockImplementation(() => {
+      state.runStatus = "queued";
+      return Promise.resolve({ data: {}, response: new Response("{}") });
+    });
+    renderInApp(<WebsiteDetail websiteId="website-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Synkronisera nu" }));
+    fireEvent.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Starta indexering"
+      })
+    );
+
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Synkronisera nu" }) as HTMLButtonElement).disabled
+      ).toBe(true)
+    );
   });
 
   it("keeps focus on a busy Starta indexering and starts one crawl", async () => {

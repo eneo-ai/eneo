@@ -6,7 +6,7 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import { ChevronLeft, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import {
   AlertDialog,
@@ -27,13 +27,16 @@ import {
   formatWebsiteName,
   websiteBlobsQueryOptions,
   websiteCrawlRunsQueryOptions,
-  websiteQueryOptions
+  websiteQueryOptions,
+  type CrawlRun
 } from "@/features/knowledge/knowledge";
 import { CrawlLimitationsBanner } from "@/features/knowledge/notices";
+import { isActiveCrawl } from "@/features/knowledge/website-status";
 import { useJobs } from "@/features/jobs/use-jobs";
 import { useSpace } from "@/features/spaces/use-space";
 
-const RUNS_REFRESH_MS = 30_000;
+const ACTIVE_CRAWL_REFRESH_MS = 2_000;
+const IDLE_RUNS_REFRESH_MS = 30_000;
 
 type WebsiteTab = "crawls" | "blobs";
 
@@ -60,6 +63,7 @@ function SyncNowButton({
     onSuccess: () => {
       trackJob();
       void queryClient.invalidateQueries({ queryKey: ["websites", websiteId] });
+      void queryClient.invalidateQueries({ queryKey: ["websites", websiteId, "crawl-runs"] });
       setOpen(false);
     },
     onError: (error) => toastApiError(error, t)
@@ -118,6 +122,7 @@ export function WebsiteDetail({
   integrationRequestFormUrl?: string;
 }) {
   const t = useTranslations();
+  const queryClient = useQueryClient();
   const { space, routeId } = useSpace();
   const [tab, setTab] = useState<WebsiteTab>("crawls");
   const baseId = useId();
@@ -127,12 +132,35 @@ export function WebsiteDetail({
   const { data: website } = useSuspenseQuery(websiteQueryOptions(browserApi, websiteId));
   const { data: runs } = useSuspenseQuery({
     ...websiteCrawlRunsQueryOptions(browserApi, websiteId),
-    refetchInterval: RUNS_REFRESH_MS
+    refetchInterval: (query) =>
+      query.state.data?.some(isActiveCrawl) ? ACTIVE_CRAWL_REFRESH_MS : IDLE_RUNS_REFRESH_MS
   });
   const { data: blobs } = useSuspenseQuery(websiteBlobsQueryOptions(browserApi, websiteId));
 
+  const previousLatestRun = useRef<Pick<CrawlRun, "id" | "status"> | null | undefined>(undefined);
+  useEffect(() => {
+    const latest = runs[0] ?? null;
+    const previous = previousLatestRun.current;
+    previousLatestRun.current = latest ? { id: latest.id, status: latest.status } : null;
+    if (
+      previous === undefined ||
+      (previous?.id === latest?.id && previous?.status === latest?.status)
+    ) {
+      return;
+    }
+
+    // Runs are the source of truth for crawl progress. Refresh the website and
+    // its space when the latest run changes; once it ends, refresh the indexed
+    // files too. Those queries otherwise keep showing the pre-crawl snapshot.
+    void queryClient.invalidateQueries({ queryKey: ["websites", websiteId], exact: true });
+    void queryClient.invalidateQueries({ queryKey: ["spaces", routeId], exact: true });
+    if (!isActiveCrawl(latest)) {
+      void queryClient.invalidateQueries({ queryKey: ["websites", websiteId, "info-blobs"] });
+    }
+  }, [queryClient, routeId, runs, websiteId]);
+
   const readonly = website.space_id !== space.id;
-  const crawlActive = runs.some((run) => run.status === "in progress" || run.status === "queued");
+  const crawlActive = runs.some(isActiveCrawl);
   const websiteDisplay = website.name ? `${website.name} (${website.url})` : website.url;
 
   return (
