@@ -214,6 +214,38 @@ class SpaceRole(BaseModel):
         return self.value.value.capitalize()
 
 
+class SpaceModelLink(BaseModel):
+    """One model linked to a space, with the state of that link.
+
+    A link is usable only when both flags are true; the usable lists hold
+    exactly those. Keeping any other link grants no use."""
+
+    id: UUID
+    name: str
+    nickname: Optional[str] = None
+    meets_security_classification: bool = Field(
+        description=(
+            "False when the model's security classification is below the space's."
+        )
+    )
+    available: bool = Field(
+        description="False when the tenant has disabled or retired the model."
+    )
+
+
+class SpaceLinkedModels(BaseModel):
+    """Every model linked to a space that the space loads, usable or not.
+
+    A model list sent to update the space adds the models it names that are
+    not linked yet and removes the listed kind's links it leaves out, so a
+    client builds it from these IDs. A link to a retired (deprecated or
+    deleted) model is not listed and no edit changes it."""
+
+    completion_models: list[SpaceModelLink]
+    embedding_models: list[SpaceModelLink]
+    transcription_models: list[SpaceModelLink]
+
+
 class SpacePublic(SpaceDashboard):
     enabled_capabilities: list[CapabilityPurpose] = Field(
         default_factory=list[CapabilityPurpose]
@@ -224,6 +256,16 @@ class SpacePublic(SpaceDashboard):
     embedding_models: list[EmbeddingModelPublic]
     completion_models: list[CompletionModelPublic]
     transcription_models: list[TranscriptionModelPublic]
+    linked_models: SpaceLinkedModels = Field(
+        description=(
+            "Every model linked to this space, each marked with whether it meets "
+            "the space's security classification and whether the tenant has it "
+            "available. Only links with both are in the usable model lists. A "
+            "model list sent to update the space adds the models it names and "
+            "removes the listed links it leaves out, so build it from these IDs. "
+            "Links to retired models are not listed and are never changed."
+        ),
+    )
     mcp_servers: list[MCPServerPublicDict] = Field(
         default_factory=_empty_mcp_server_public_dict_list
     )

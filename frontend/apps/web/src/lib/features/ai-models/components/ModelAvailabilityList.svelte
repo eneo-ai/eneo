@@ -4,6 +4,9 @@
   Shared enable/disable list for space model availability. The settings routes
   own persistence; this component owns the canonical presentation so completion,
   embedding and transcription models expose provider context consistently.
+  A model below the space's security classification, or one the tenant has
+  disabled, cannot be switched on, but one that is still linked can be switched
+  off (removed from the space).
 -->
 
 <script lang="ts" generics="T extends CompletionModel | EmbeddingModel | TranscriptionModel">
@@ -18,6 +21,7 @@
   import { m } from "$lib/paraglide/messages";
 
   import { groupModelsByVendor, prettifyProviderType } from "../groupModels";
+  import { isLinkedModelRow, type LinkedModelRow } from "../linkedModelRow";
   import { sortModels } from "../sortModels";
   import ModelNameAndVendor from "./ModelNameAndVendor.svelte";
   import ModelStatusIcons, { getStatusIcons } from "./ModelStatusIcons.svelte";
@@ -36,11 +40,13 @@
     mono?: boolean;
   };
 
+  type Row<TModel> = SelectableModel<TModel> | LinkedModelRow;
+
   type Props<TModel extends CompletionModel | EmbeddingModel | TranscriptionModel> = {
-    models: SelectableModel<TModel>[];
+    models: Row<TModel>[];
     selectedIds: string[];
     loadingIds?: LoadingLookup;
-    onToggle: (model: SelectableModel<TModel>) => void | Promise<void>;
+    onToggle: (model: Row<TModel>) => void | Promise<void>;
   };
 
   let { models, selectedIds, loadingIds, onToggle }: Props<T> = $props();
@@ -50,8 +56,8 @@
   const selectedIdSet = $derived(new Set(selectedIds));
   const collapsedGroups = new SvelteSet<string>();
 
-  function displayName(model: SelectableModel<T>) {
-    return model.nickname ?? model.name;
+  function displayName(model: Row<T>) {
+    return model.nickname?.trim() || model.name;
   }
 
   function normalize(label: string | null | undefined) {
@@ -70,7 +76,7 @@
     });
   }
 
-  function modelDetails(model: SelectableModel<T>, groupLabel: string) {
+  function modelDetails(model: Row<T>, groupLabel: string) {
     const providerName = model.provider_name?.trim();
     const providerType = prettifyProviderType(model.provider_type);
     const underlyingName = model.name !== displayName(model) ? model.name : null;
@@ -87,7 +93,7 @@
     );
   }
 
-  function providerForLogo(model: SelectableModel<T>) {
+  function providerForLogo(model: Row<T>) {
     return model.org ?? model.provider_type ?? model.provider_name;
   }
 
@@ -97,8 +103,13 @@
       : m.provider_model_count_other({ count });
   }
 
-  function selectedCount(models: SelectableModel<T>[]) {
+  function selectedCount(models: Row<T>[]) {
     return models.filter((model) => selectedIdSet.has(model.id)).length;
+  }
+
+  // A link-only row has no catalogue model, so it shows no status icons.
+  function catalogueModel(model: Row<T>): SelectableModel<T> | null {
+    return isLinkedModelRow(model) ? null : model;
   }
 
   function hasStatusDetails(model: SelectableModel<T>) {
@@ -160,23 +171,28 @@
             {@const meetsClassification = model.meets_security_classification ?? true}
             {@const isLoading = loadingIds?.has(model.id) ?? false}
             {@const isSelected = selectedIdSet.has(model.id)}
+            {@const canAdd = meetsClassification && model.is_org_enabled !== false}
+            {@const canToggle = (canAdd || isSelected) && !isLoading}
             {@const details = modelDetails(model, group.label)}
+            {@const catalogue = catalogueModel(model)}
             <Tooltip
-              text={meetsClassification
-                ? undefined
-                : m.model_does_not_meet_security_classification()}
+              text={!meetsClassification
+                ? m.model_does_not_meet_security_classification()
+                : model.is_org_enabled === false
+                  ? m.model_status_disabled()
+                  : undefined}
             >
               <div
-                aria-disabled={!meetsClassification || isLoading}
+                aria-disabled={!canToggle}
                 class="border-default hover:bg-hover-dimmer border-b transition-colors last:border-b-0"
-                class:opacity-60={!meetsClassification}
+                class:opacity-60={!canAdd}
                 class:opacity-80={isLoading}
               >
                 <div class="py-3 pr-4 pl-3">
                   <Input.Switch
                     value={isSelected}
                     sideEffect={() => {
-                      if (meetsClassification && !isLoading) {
+                      if (canToggle) {
                         onToggle(model);
                       }
                     }}
@@ -191,8 +207,8 @@
                       <div class="min-w-0 flex-1">
                         <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                           <ModelNameAndVendor {model} descriptionMode="non-tabbable" />
-                          {#if hasStatusDetails(model)}
-                            <ModelStatusIcons {model} showCost={false} />
+                          {#if catalogue && hasStatusDetails(catalogue)}
+                            <ModelStatusIcons model={catalogue} showCost={false} />
                           {/if}
                           {#if !meetsClassification}
                             <ShieldAlert

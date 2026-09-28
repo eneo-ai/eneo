@@ -7,6 +7,10 @@
 <script lang="ts">
   import { beforeNavigate } from "$app/navigation";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import {
+    spaceModelLinks,
+    spaceSettingsModelRows
+  } from "$lib/features/spaces/spaceModelAvailability";
   import { initSpaceSettingsEditor } from "$lib/features/spaces/SpaceSettingsEditor";
   import { Button, Dialog, Input } from "@eneo/ui";
   import SelectEmbeddingModels from "./SelectEmbeddingModels.svelte";
@@ -34,22 +38,30 @@
 
   let { data } = $props();
   let models = $state(untrack(() => data.models));
+  const spaces = getSpacesManager();
+  const currentSpace = spaces.state.currentSpace;
+
+  // Every addable model, plus every model already linked whatever its state,
+  // so each link has a row it can be switched off from. Without link state the
+  // model sections refuse to save (see Select*Models), so [] only hides rows.
   let completionModels = $derived(
-    models.completionModels.filter(
-      (model) => model.is_org_enabled && !model.is_deprecated && !model.migrated_to_model_id
+    spaceSettingsModelRows(
+      models.completionModels,
+      spaceModelLinks($currentSpace, "completion") ?? []
     )
   );
   let embeddingModels = $derived(
-    models.embeddingModels.filter((model) => model.is_org_enabled && !model.is_deprecated)
-  );
-  let transcriptionModels = $derived(
-    models.transcriptionModels.filter(
-      (model) => model.is_org_enabled && !model.is_deprecated && !model.migrated_to_model_id
+    spaceSettingsModelRows(
+      models.embeddingModels,
+      spaceModelLinks($currentSpace, "embedding") ?? []
     )
   );
-
-  const spaces = getSpacesManager();
-  const currentSpace = spaces.state.currentSpace;
+  let transcriptionModels = $derived(
+    spaceSettingsModelRows(
+      models.transcriptionModels,
+      spaceModelLinks($currentSpace, "transcription") ?? []
+    )
+  );
 
   // Initialize the Space Settings Editor for page-level save
   const {

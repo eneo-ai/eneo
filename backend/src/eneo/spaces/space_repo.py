@@ -97,7 +97,7 @@ from eneo.security_classifications.domain.entities.security_classification impor
     SecurityClassification,
 )
 from eneo.spaces.api.space_models import SpaceGroupMember, SpaceMember
-from eneo.spaces.space import Space
+from eneo.spaces.space import ModelKind, Space
 from eneo.spaces.space_applications_projection import SpaceApplicationsProjection
 from eneo.spaces.space_factory import SpaceFactory
 from eneo.spaces.space_flow_delete_blockers import space_has_flow_delete_blockers
@@ -498,6 +498,40 @@ class SpaceRepository:
                 ]
             )
             await self.session.execute(stmt)
+
+    async def _apply_link_changes(self, space_id: UUID, space: Space) -> None:
+        """Insert the links the space added and delete the ones it removed."""
+        links: tuple[tuple[ModelKind, Any, Any], ...] = (
+            (
+                "completion",
+                SpacesCompletionModels,
+                SpacesCompletionModels.completion_model_id,
+            ),
+            (
+                "embedding",
+                SpacesEmbeddingModels,
+                SpacesEmbeddingModels.embedding_model_id,
+            ),
+            (
+                "transcription",
+                SpacesTranscriptionModels,
+                SpacesTranscriptionModels.transcription_model_id,
+            ),
+        )
+        for kind, table, column in links:
+            added, removed = space.link_changes(kind)
+            if removed:
+                await self.session.execute(
+                    sa.delete(table)
+                    .where(table.space_id == space_id)
+                    .where(column.in_(removed))
+                )
+            if added:
+                await self.session.execute(
+                    pg_insert(table)
+                    .values([{"space_id": space_id, column.key: id} for id in added])
+                    .on_conflict_do_nothing()
+                )
 
     async def _set_transcription_models(
         self,
@@ -1761,9 +1795,12 @@ class SpaceRepository:
             SpaceCapabilities(purpose=p)
             for p in sorted(set(space.enabled_capabilities))
         ]
-        await self._set_completion_models(entry_in_db, space.completion_models)
-        await self._set_embedding_models(entry_in_db, space.embedding_models)
-        await self._set_transcription_models(entry_in_db, space.transcription_models)
+        # A new space has no stored links yet, so its lists are written whole.
+        await self._set_completion_models(entry_in_db, space.linked_completion_models)
+        await self._set_embedding_models(entry_in_db, space.linked_embedding_models)
+        await self._set_transcription_models(
+            entry_in_db, space.linked_transcription_models
+        )
         await self._set_mcp_servers(entry_in_db, space.mcp_servers)
         await self._set_members(entry_in_db, space.members)
         await self._set_group_members(entry_in_db, space.group_members)
@@ -1901,9 +1938,9 @@ class SpaceRepository:
             SpaceCapabilities(purpose=p)
             for p in sorted(set(space.enabled_capabilities))
         ]
-        await self._set_completion_models(entry_in_db, space.completion_models)
-        await self._set_embedding_models(entry_in_db, space.embedding_models)
-        await self._set_transcription_models(entry_in_db, space.transcription_models)
+        # Only the links this request changed: a stored link the space never
+        # loaded (to a deprecated model, say) is left exactly as it is.
+        await self._apply_link_changes(entry_in_db.id, space)
         await self._set_mcp_servers(entry_in_db, space.mcp_servers)
         if mcp_tool_settings is not None:
             await self._set_mcp_tools(

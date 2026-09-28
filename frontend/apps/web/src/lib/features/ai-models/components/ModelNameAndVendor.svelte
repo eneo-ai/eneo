@@ -59,7 +59,8 @@
   $: showDescriptionButton = descriptionMode !== "hidden";
   $: descriptionTabbable = descriptionMode === "interactive";
 
-  $: displayName = "nickname" in model ? model.nickname : model.name;
+  // A missing or blank nickname falls back to the model's name.
+  $: displayName = model.nickname?.trim() || model.name;
   // Description is only worth surfacing when it adds something the visible
   // name doesn't already say.
   $: descriptionText =

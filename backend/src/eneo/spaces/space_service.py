@@ -373,10 +373,19 @@ class SpaceService:
                     classification_id
                 )
 
+        # A model already linked is kept as the space holds it: keeping a link
+        # grants no use, so it needs no access lookup, and one the tenant has
+        # since disabled, or that fell below the classification, stays linked.
+        # Only a new link goes through the access-checked lookup.
+        linked_completion = {m.id: m for m in space.linked_completion_models}
+        linked_embedding = {m.id: m for m in space.linked_embedding_models}
+        linked_transcription = {m.id: m for m in space.linked_transcription_models}
+
         completion_models: list["CompletionModel"] | None = None
         if completion_model_ids is not None:
             completion_models = [
-                await self.completion_model_crud_service.get_completion_model(
+                linked_completion.get(model_id)
+                or await self.completion_model_crud_service.get_completion_model(
                     model_id=model_id
                 )
                 for model_id in completion_model_ids
@@ -386,7 +395,7 @@ class SpaceService:
         if embedding_model_ids is not None:
             embedding_models = []
             for model_id in embedding_model_ids:
-                model = cast(
+                model = linked_embedding.get(model_id) or cast(
                     "EmbeddingModel | None",
                     await self.embedding_model_crud_service.get_embedding_model(
                         model_id
@@ -398,7 +407,8 @@ class SpaceService:
         transcription_models: list["TranscriptionModel"] | None = None
         if transcription_model_ids is not None:
             transcription_models = [
-                await self.transcription_model_crud_service.get_transcription_model(
+                linked_transcription.get(model_id)
+                or await self.transcription_model_crud_service.get_transcription_model(
                     model_id=model_id
                 )
                 for model_id in transcription_model_ids
@@ -542,18 +552,24 @@ class SpaceService:
                 security_classification_id
             )
         )
-        current_completion_models = space.completion_models
-        current_embedding_models = space.embedding_models
-        current_transcription_models = space.transcription_models
+        # The linked lists: a model already below the classification is
+        # removed by the change too, so the preview names it.
+        current_completion_models = space.linked_completion_models
+        current_embedding_models = space.linked_embedding_models
+        current_transcription_models = space.linked_transcription_models
         current_mcp_servers = space.mcp_servers
 
         space.update(
             security_classification=security_classification,
         )
 
-        remaining_completion_model_ids = [cm.id for cm in space.completion_models]
-        remaining_embedding_model_ids = [em.id for em in space.embedding_models]
-        remaining_transcription_model_ids = [tm.id for tm in space.transcription_models]
+        remaining_completion_model_ids = [
+            cm.id for cm in space.linked_completion_models
+        ]
+        remaining_embedding_model_ids = [em.id for em in space.linked_embedding_models]
+        remaining_transcription_model_ids = [
+            tm.id for tm in space.linked_transcription_models
+        ]
         remaining_mcp_server_ids = [s.id for s in space.mcp_servers]
 
         affected_completion_models: list["CompletionModel"] = [

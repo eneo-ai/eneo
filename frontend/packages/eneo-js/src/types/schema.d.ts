@@ -33563,6 +33563,23 @@ export interface components {
        */
       user_count?: number;
     };
+    /**
+     * SpaceLinkedModels
+     * @description Every model linked to a space that the space loads, usable or not.
+     *
+     *     A model list sent to update the space adds the models it names that are
+     *     not linked yet and removes the listed kind's links it leaves out, so a
+     *     client builds it from these IDs. A link to a retired (deprecated or
+     *     deleted) model is not listed and no edit changes it.
+     */
+    SpaceLinkedModels: {
+      /** Completion Models */
+      completion_models: components["schemas"]["SpaceModelLink"][];
+      /** Embedding Models */
+      embedding_models: components["schemas"]["SpaceModelLink"][];
+      /** Transcription Models */
+      transcription_models: components["schemas"]["SpaceModelLink"][];
+    };
     /** SpaceMember */
     SpaceMember: {
       /** Created At */
@@ -33582,6 +33599,34 @@ export interface components {
       updated_at?: string | null;
       /** Username */
       username?: string | null;
+    };
+    /**
+     * SpaceModelLink
+     * @description One model linked to a space, with the state of that link.
+     *
+     *     A link is usable only when both flags are true; the usable lists hold
+     *     exactly those. Keeping any other link grants no use.
+     */
+    SpaceModelLink: {
+      /**
+       * Available
+       * @description False when the tenant has disabled or retired the model.
+       */
+      available: boolean;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Meets Security Classification
+       * @description False when the model's security classification is below the space's.
+       */
+      meets_security_classification: boolean;
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname?: string | null;
     };
     /** SpacePublic */
     SpacePublic: {
@@ -33618,6 +33663,8 @@ export interface components {
        */
       id: string;
       knowledge: components["schemas"]["Knowledge"];
+      /** @description Every model linked to this space, each marked with whether it meets the space's security classification and whether the tenant has it available. Only links with both are in the usable model lists. A model list sent to update the space adds the models it names and removes the listed links it leaves out, so build it from these IDs. Links to retired models are not listed and are never changed. */
+      linked_models: components["schemas"]["SpaceLinkedModels"];
       /** Mcp Servers */
       mcp_servers?: components["schemas"]["MCPServerPublicDict"][];
       members: components["schemas"]["PaginatedPermissions_SpaceMember_"];

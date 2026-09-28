@@ -252,59 +252,32 @@ async def update_space(
             "new": data_retention_days,
         }
 
-    # Track model changes using SET comparison (avoids false positives from ordering)
-    if "completion_models" in original_request:
-        old_model_set = {
-            (str(m.id), m.name) for m in (old_space.completion_models or [])
-        }
-        new_model_set = {(str(m.id), m.name) for m in (space.completion_models or [])}
-        if old_model_set != new_model_set:
-            changes["completion_models"] = {
-                "old": [
-                    {"id": str(m.id), "name": m.name}
-                    for m in (old_space.completion_models or [])
-                ],
-                "new": [
-                    {"id": str(m.id), "name": m.name}
-                    for m in (space.completion_models or [])
-                ],
-            }
-
-    if "embedding_models" in original_request:
-        old_model_set = {
-            (str(m.id), m.name) for m in (old_space.embedding_models or [])
-        }
-        new_model_set = {(str(m.id), m.name) for m in (space.embedding_models or [])}
-        if old_model_set != new_model_set:
-            changes["embedding_models"] = {
-                "old": [
-                    {"id": str(m.id), "name": m.name}
-                    for m in (old_space.embedding_models or [])
-                ],
-                "new": [
-                    {"id": str(m.id), "name": m.name}
-                    for m in (space.embedding_models or [])
-                ],
-            }
-
-    if "transcription_models" in original_request:
-        old_model_set = {
-            (str(m.id), m.name) for m in (old_space.transcription_models or [])
-        }
-        new_model_set = {
-            (str(m.id), m.name) for m in (space.transcription_models or [])
-        }
-        if old_model_set != new_model_set:
-            changes["transcription_models"] = {
-                "old": [
-                    {"id": str(m.id), "name": m.name}
-                    for m in (old_space.transcription_models or [])
-                ],
-                "new": [
-                    {"id": str(m.id), "name": m.name}
-                    for m in (space.transcription_models or [])
-                ],
-            }
+    # Track model-link changes as SET comparisons (avoids false positives from
+    # ordering) over every linked model, whether a model list or a
+    # classification change removed it, so each removal is audited.
+    for field, old_links, new_links in (
+        (
+            "completion_models",
+            old_space.linked_completion_models,
+            space.linked_completion_models,
+        ),
+        (
+            "embedding_models",
+            old_space.linked_embedding_models,
+            space.linked_embedding_models,
+        ),
+        (
+            "transcription_models",
+            old_space.linked_transcription_models,
+            space.linked_transcription_models,
+        ),
+    ):
+        old_entries = [{"id": str(m.id), "name": m.name} for m in old_links]
+        new_entries = [{"id": str(m.id), "name": m.name} for m in new_links]
+        if {tuple(e.values()) for e in old_entries} != {
+            tuple(e.values()) for e in new_entries
+        }:
+            changes[field] = {"old": old_entries, "new": new_entries}
 
     if old_space.enabled_capabilities != space.enabled_capabilities:
         changes["enabled_capabilities"] = {
