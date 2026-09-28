@@ -13,6 +13,9 @@ from eneo.ai_models.completion_models.completion_model import (
 )
 from eneo.apps.apps.api.app_models import InputField, InputFieldType
 from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    stored_request_model_kwargs,
+)
 from eneo.files.audio import AudioMimeTypes
 from eneo.files.file_models import File, FileInfo, FileMetadata
 from eneo.files.image import ImageMimeTypes
@@ -146,6 +149,17 @@ class App:
             return ""
 
         return self.prompt.text
+
+    def request_model_kwargs(self) -> ModelKwargs:
+        """The stored model settings a run sends (see
+        `stored_request_model_kwargs`); the stored settings stay as saved."""
+        if self.completion_model is None:
+            return self.completion_model_kwargs
+        return stored_request_model_kwargs(
+            self.completion_model_kwargs,
+            self.completion_model.supported_model_kwargs,
+            completion_model_id=self.completion_model.id,
+        )
 
     @property
     def input_fields(self) -> list[InputField]:
@@ -338,5 +352,5 @@ class App:
                 else self.get_prompt_text()
             ),
             prompt_files=self.attachments,
-            model_kwargs=self.completion_model_kwargs,
+            model_kwargs=self.request_model_kwargs(),
         )

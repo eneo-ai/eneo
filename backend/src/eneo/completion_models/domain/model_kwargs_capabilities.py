@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, FiniteFloat, ValidationError, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -18,20 +18,56 @@ logger = logging.getLogger(__name__)
 class ModelKwargCapability(BaseModel):
     supported: bool = False
     control: Literal["slider", "select"] | None = None
-    minimum: float | None = None
-    maximum: float | None = None
-    step: float | None = None
+    # Finite bounds, minimum <= maximum, and a finite positive step: a
+    # declared range must admit a value.
+    minimum: FiniteFloat | None = None
+    maximum: FiniteFloat | None = None
+    step: FiniteFloat | None = None
     options: list[str] | None = None
 
+    @model_validator(mode="after")
+    def _range_admits_a_value(self) -> ModelKwargCapability:
+        if (
+            self.minimum is not None
+            and self.maximum is not None
+            and self.minimum > self.maximum
+        ):
+            raise ValueError("minimum must not be greater than maximum")
+        if self.step is not None and self.step <= 0:
+            raise ValueError("step must be greater than zero")
+        return self
+
     def accepts(self, value: object | None) -> bool:
-        """Whether a typed model-setting value is allowed by this capability."""
+        """Whether a typed model-setting value is allowed by this capability:
+        one of a select's options, or a number within the advertised
+        minimum and maximum."""
         if value is None:
             return True
         if not self.supported:
             return False
         if self.control == "select":
             return self.options is not None and value in self.options
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if self.minimum is not None and value < self.minimum:
+                return False
+            if self.maximum is not None and value > self.maximum:
+                return False
         return True
+
+
+# How each setting may be offered, following its ModelKwargs type (a test
+# pins the two together): a number (float, or int for whole numbers only)
+# as a slider; a named level (str) as a select with options. Which levels a
+# route offers is its own declaration.
+OFFERABLE_MODEL_SETTINGS: dict[str, type[float] | type[int] | type[str]] = {
+    "temperature": float,
+    "top_p": float,
+    "presence_penalty": float,
+    "frequency_penalty": float,
+    "top_k": int,
+    "reasoning_effort": str,
+    "verbosity": str,
+}
 
 
 class SupportedModelKwargs(BaseModel):
@@ -44,6 +80,30 @@ class SupportedModelKwargs(BaseModel):
         default_factory=ModelKwargCapability
     )
     top_k: ModelKwargCapability = Field(default_factory=ModelKwargCapability)
+
+    @model_validator(mode="after")
+    def _offered_settings_fit_their_type(self) -> SupportedModelKwargs:
+        # An offered setting must be declared in a shape that can admit its
+        # values; see OFFERABLE_MODEL_SETTINGS.
+        for name, kind in OFFERABLE_MODEL_SETTINGS.items():
+            capability: ModelKwargCapability = getattr(self, name)
+            if not capability.supported:
+                continue
+            if kind is str:
+                if capability.control != "select" or not any(
+                    option.strip() for option in capability.options or ()
+                ):
+                    raise ValueError(
+                        f"{name} can be offered only as a select with a non-blank option"
+                    )
+            elif capability.control != "slider":
+                raise ValueError(f"{name} can be offered only as a slider")
+            elif kind is int and any(
+                bound is not None and not bound.is_integer()
+                for bound in (capability.minimum, capability.maximum, capability.step)
+            ):
+                raise ValueError(f"{name} bounds and step must be whole numbers")
+        return self
 
 
 def _slider_capability(
@@ -236,6 +296,27 @@ def _apply_model_capability_flags(
     )
 
 
+def _legacy_discovered_snapshot(
+    stored: object,
+) -> _PersistedSupportedModelKwargs | None:
+    """Read a snapshot stored before evidence tags existed.
+
+    Develop stores untagged snapshots, and the pre-release migration that
+    tagged them was squashed away. They are provider-discovered records:
+    dropping them hides the settings configured against them, and the next
+    save erases those. A present `_evidence` key that did not validate is a
+    malformed record, not a legacy one.
+    """
+    if not isinstance(stored, Mapping) or "_evidence" in stored:
+        return None
+    try:
+        return _PersistedSupportedModelKwargs.model_validate(
+            {**stored, "_evidence": "provider_discovered"}
+        )
+    except ValidationError:
+        return None
+
+
 def coerce_model_kwargs_capabilities(
     model_kwargs_capabilities: object | None,
     *,
@@ -255,9 +336,8 @@ def coerce_model_kwargs_capabilities(
                 model_kwargs_capabilities
             )
         except ValidationError:
-            try:
-                SupportedModelKwargs.model_validate(model_kwargs_capabilities)
-            except ValidationError:
+            persisted = _legacy_discovered_snapshot(model_kwargs_capabilities)
+            if persisted is None:
                 logger.warning(
                     "Invalid completion model kwargs capabilities; omitting optional controls",
                     extra={
@@ -267,17 +347,9 @@ def coerce_model_kwargs_capabilities(
                         "tenant_id": str(tenant_id) if tenant_id else None,
                     },
                 )
-            else:
-                logger.debug(
-                    "Untagged completion model kwargs capabilities are untrusted; omitting optional controls",
-                    extra={
-                        "completion_model_id": str(completion_model_id)
-                        if completion_model_id
-                        else None,
-                        "tenant_id": str(tenant_id) if tenant_id else None,
-                    },
-                )
-            return None
+                # Fail closed: invalid stored data is a known "no optional
+                # controls", never an absent snapshot that discovery may widen.
+                return SupportedModelKwargs()
 
     return SupportedModelKwargs.model_validate(
         persisted.model_dump(exclude={"evidence"})

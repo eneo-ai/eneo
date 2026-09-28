@@ -206,7 +206,9 @@ class HelperRunService:
             # logging or insights aggregation, regardless of the helper
             # assistant's stored ``logging_enabled`` / ``insight_enabled``.
             extended_logging=False,
-            model_kwargs=helper_assistant.completion_model_kwargs,
+            model_kwargs=helper_assistant.request_model_kwargs(
+                helper_assistant.completion_model
+            ),
             mcp_servers=list(helper_assistant.mcp_servers),
         )
 
@@ -303,7 +305,9 @@ class HelperRunService:
             stream=stream,
             # PRD §6 + Critical test #3: same hard-coded gate as run().
             extended_logging=False,
-            model_kwargs=helper_assistant.completion_model_kwargs,
+            model_kwargs=helper_assistant.request_model_kwargs(
+                helper_assistant.completion_model
+            ),
             mcp_servers=list(helper_assistant.mcp_servers),
         )
 

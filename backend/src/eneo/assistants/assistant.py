@@ -18,6 +18,9 @@ from eneo.completion_models.domain.request_preflight import (
 from eneo.completion_models.infrastructure.completion_service import (
     CompletionService,
 )
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    stored_request_model_kwargs,
+)
 from eneo.files.file_models import File, FileType
 from eneo.files.mime_support import (
     MimeSupport,
@@ -479,6 +482,32 @@ class Assistant(Entity):
 
         return ""
 
+    def request_model_kwargs(
+        self,
+        model: CompletionModel,
+        *,
+        reasoning_effort: str | None | NotProvided = NOT_PROVIDED,
+    ) -> ModelKwargs:
+        """The stored model settings a request to `model` sends (see
+        `stored_request_model_kwargs`); the stored settings stay as saved.
+
+        `model` is the model the request goes to, which a policy may have
+        chosen instead of the stored one. A `reasoning_effort` the request
+        supplies itself (a policy's) replaces the stored effort after the
+        filtering, so the stored one is neither sent nor reported.
+        """
+        stored = self.completion_model_kwargs
+        if is_provided(reasoning_effort):
+            stored = stored.model_copy(update={"reasoning_effort": None})
+        sendable = stored_request_model_kwargs(
+            stored, model.supported_model_kwargs, completion_model_id=model.id
+        )
+        if is_provided(reasoning_effort):
+            sendable = sendable.model_copy(
+                update={"reasoning_effort": reasoning_effort}
+            )
+        return sendable
+
     async def preflight_response_context(
         self,
         question: str,
@@ -680,10 +709,12 @@ class Assistant(Entity):
             session=session,
             stream=stream,
             extended_logging=self.logging_enabled,
+            # An override is request-scoped and stays strict; stored settings
+            # send what the model accepts now.
             model_kwargs=(
                 model_kwargs_override
                 if model_kwargs_override is not None
-                else self.completion_model_kwargs
+                else self.request_model_kwargs(effective_model)
             ),
             version=version,
             mcp_servers=effective_mcp_servers,

@@ -10,6 +10,7 @@ from uuid import uuid4
 import pytest
 
 from eneo.completion_models.domain.model_capacity import ModelCapacity
+from eneo.completion_models.domain.model_kwargs_capabilities import SupportedModelKwargs
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
@@ -127,6 +128,7 @@ def _route():
     return SimpleNamespace(
         litellm_model="openai/gpt-test",
         provider_type="openai",
+        supported_model_kwargs=SupportedModelKwargs(),
         prepare_provider_kwargs=lambda kwargs: {},
     )
 

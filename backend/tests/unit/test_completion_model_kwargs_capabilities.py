@@ -91,24 +91,42 @@ def test_explicit_capability_evidence_round_trips_without_public_marker():
     assert "_evidence" not in public_projection.model_dump()
 
 
-def test_untagged_persisted_capabilities_fail_closed():
-    resolved = model_kwargs_capabilities.resolve_supported_model_kwargs(
-        model_kwargs_capabilities={
-            "temperature": {
-                "supported": True,
-                "control": "slider",
-                "minimum": 0,
-                "maximum": 2,
-                "step": 0.01,
+# The catalogue backfill develop stores, without the evidence tag this branch
+# added (the migration that tagged it was squashed away).
+_UNTAGGED_DEVELOP_SNAPSHOT: dict[str, object] = {
+    "temperature": {"supported": False},
+    "top_p": {"supported": True, "control": "slider", "minimum": 0, "maximum": 1},
+    "reasoning_effort": {
+        "supported": True,
+        "control": "select",
+        "options": ["low", "medium", "high"],
+    },
+    "verbosity": {
+        "supported": True,
+        "control": "select",
+        "options": ["low", "medium", "high"],
+    },
+    "presence_penalty": {"supported": False},
+    "frequency_penalty": {"supported": False},
+    "top_k": {"supported": False},
+}
+
+
+def _stored_row(capabilities: object, *, reasoning: bool = True) -> SimpleNamespace:
+    """A completion model row as the ORM hands it to the API models."""
+    return SimpleNamespace(
+        **_completion_model_sparse(reasoning=reasoning).model_dump(
+            exclude={
+                "supported_model_kwargs",
+                "token_limit",
+                "model_kwargs_capabilities",
             }
-        },
-        reasoning=True,
+        ),
+        model_kwargs_capabilities=capabilities,
     )
 
-    assert resolved == SupportedModelKwargs()
 
-
-def test_repeated_valid_untagged_capabilities_fail_closed_without_warning_burst(
+def test_untagged_persisted_capabilities_are_read_as_legacy_discovery(
     caplog: pytest.LogCaptureFixture,
 ):
     logger_name = "eneo.completion_models.domain.model_kwargs_capabilities"
@@ -116,27 +134,102 @@ def test_repeated_valid_untagged_capabilities_fail_closed_without_warning_burst(
     was_disabled = logger.disabled
     logger.disabled = False
     try:
-        with caplog.at_level(logging.WARNING, logger=logger_name):
-            resolved = [
-                model_kwargs_capabilities.resolve_supported_model_kwargs(
-                    model_kwargs_capabilities={
-                        "temperature": {
-                            "supported": True,
-                            "control": "slider",
-                            "minimum": 0,
-                            "maximum": 2,
-                            "step": 0.01,
-                        }
-                    },
-                    reasoning=True,
-                )
-                for _ in range(5)
-            ]
+        with caplog.at_level(logging.DEBUG, logger=logger_name):
+            resolved = model_kwargs_capabilities.resolve_supported_model_kwargs(
+                model_kwargs_capabilities=_UNTAGGED_DEVELOP_SNAPSHOT,
+                reasoning=True,
+            )
+            loaded = CompletionModelSparse.model_validate(
+                _stored_row(_UNTAGGED_DEVELOP_SNAPSHOT)
+            )
     finally:
         logger.disabled = was_disabled
 
-    assert resolved == [SupportedModelKwargs()] * 5
+    expected = SupportedModelKwargs.model_validate(_UNTAGGED_DEVELOP_SNAPSHOT)
+    assert resolved == expected
+    assert loaded.model_kwargs_capabilities == expected
+    assert loaded.supported_model_kwargs == expected
+    # A valid legacy record is not an incident.
     assert caplog.records == []
+
+
+def test_untagged_capabilities_keep_the_settings_stored_against_them():
+    stored = ModelKwargs(reasoning_effort="high", verbosity="low", top_p=0.5)
+    model = CompletionModelSparse.model_validate(
+        _stored_row(_UNTAGGED_DEVELOP_SNAPSHOT)
+    )
+
+    assert stored.filter_unsupported(model.supported_model_kwargs) == stored
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        {**_UNTAGGED_DEVELOP_SNAPSHOT, "_evidence": "invalid_tag"},
+        {**_UNTAGGED_DEVELOP_SNAPSHOT, "_evidence": 123},
+        {**_UNTAGGED_DEVELOP_SNAPSHOT, "_evidence": None},
+        {"reasoning_effort": {"supported": True, "options": "high"}},
+        ["reasoning_effort"],
+        "reasoning_effort",
+        # A declared range that admits no value.
+        {
+            **_UNTAGGED_DEVELOP_SNAPSHOT,
+            "temperature": {
+                "supported": True,
+                "control": "slider",
+                "minimum": 2,
+                "maximum": 1,
+            },
+        },
+        {
+            **_UNTAGGED_DEVELOP_SNAPSHOT,
+            "_evidence": "provider_discovered",
+            "top_p": {
+                "supported": True,
+                "control": "slider",
+                "minimum": 1,
+                "maximum": 0,
+            },
+        },
+        {
+            **_UNTAGGED_DEVELOP_SNAPSHOT,
+            "top_k": {
+                "supported": True,
+                "control": "slider",
+                "minimum": 0.1,
+                "maximum": 0.9,
+            },
+        },
+        {
+            **_UNTAGGED_DEVELOP_SNAPSHOT,
+            "_evidence": "provider_discovered",
+            "temperature": {"supported": True, "control": "slider", "step": 0},
+        },
+    ],
+    ids=[
+        "unknown-tag",
+        "numeric-tag",
+        "null-tag",
+        "untagged-invalid",
+        "not-a-mapping",
+        "string",
+        "untagged-inverted-range",
+        "tagged-inverted-range",
+        "untagged-top-k-without-an-integer",
+        "tagged-zero-step",
+    ],
+)
+def test_an_invalid_snapshot_fails_closed(stored: object):
+    model = CompletionModelSparse.model_validate(_stored_row(stored))
+    stored_kwargs = ModelKwargs(reasoning_effort="high", verbosity="low", top_p=0.5)
+
+    # A known "no optional controls", not an absent snapshot that discovery
+    # may widen, and not the legacy reading a present tag would bypass.
+    assert model.model_kwargs_capabilities == SupportedModelKwargs()
+    assert model.supported_model_kwargs == SupportedModelKwargs()
+    assert stored_kwargs.filter_unsupported(model.supported_model_kwargs) == (
+        ModelKwargs()
+    )
 
 
 def test_discovered_capabilities_are_snapshotted_explicitly():
@@ -314,23 +407,14 @@ def test_filter_unsupported_strips_unadvertised_select_values():
     assert filtered.reasoning_effort is None
 
 
-def test_filter_unsupported_rejects_select_values_without_an_option_set():
-    model = _completion_model_sparse(
-        reasoning=True,
-        model_kwargs_capabilities={
-            "reasoning_effort": {
-                "supported": True,
-                "control": "select",
-                "options": None,
-            }
-        },
-    )
+def test_a_select_without_options_is_refused_and_a_stored_one_offers_nothing():
+    declaration = {"reasoning_effort": {"supported": True, "control": "select"}}
 
-    filtered = ModelKwargs(reasoning_effort="high").filter_unsupported(
-        model.supported_model_kwargs
-    )
+    with pytest.raises(ValidationError):
+        _completion_model_sparse(reasoning=True, model_kwargs_capabilities=declaration)
+    model = CompletionModelSparse.model_validate(_stored_row(declaration))
 
-    assert filtered.reasoning_effort is None
+    assert model.supported_model_kwargs == SupportedModelKwargs()
 
 
 def test_filter_unsupported_preserves_response_format():
@@ -428,7 +512,7 @@ def test_invalid_stored_capability_metadata_omits_optional_kwargs(
     finally:
         logger.disabled = was_disabled
 
-    assert model.model_kwargs_capabilities is None
+    assert model.model_kwargs_capabilities == SupportedModelKwargs()
     assert model.supported_model_kwargs.temperature.supported is False
     assert "Invalid completion model kwargs capabilities" in caplog.text
 
@@ -481,7 +565,7 @@ def test_domain_model_normalizes_invalid_capabilities_before_public_assembly():
         domain_model
     )
 
-    assert domain_model.model_kwargs_capabilities is None
+    assert domain_model.model_kwargs_capabilities == SupportedModelKwargs()
     assert public_model.supported_model_kwargs.temperature.supported is False
 
 
@@ -638,3 +722,142 @@ def test_public_completion_model_preserves_litellm_capabilities():
     assert public_model.provider_type == "mistral"
     assert public_model.supported_model_kwargs.reasoning_effort.supported is True
     assert public_model.supported_model_kwargs.top_p.supported is False
+
+
+@pytest.mark.parametrize(
+    ("value", "accepted"),
+    [
+        (0.0, True),
+        (1.3, True),
+        (2.0, True),
+        (2.01, False),
+        (-0.5, False),
+        (999.0, False),
+        (None, True),
+    ],
+)
+def test_a_slider_accepts_only_values_within_its_advertised_range(
+    value: float | None, accepted: bool
+):
+    slider = ModelKwargCapability(
+        supported=True, control="slider", minimum=0, maximum=2, step=0.01
+    )
+
+    assert slider.accepts(value) is accepted
+    stored = ModelKwargs(temperature=value)
+    assert (
+        stored.filter_unsupported(SupportedModelKwargs(temperature=slider)) == stored
+    ) is accepted
+
+
+@pytest.mark.parametrize(
+    "bounds",
+    [
+        {"minimum": 2, "maximum": 1},
+        {"minimum": float("nan")},
+        {"maximum": float("inf")},
+        {"minimum": float("-inf"), "maximum": 1},
+    ],
+    ids=["inverted", "nan-minimum", "infinite-maximum", "infinite-minimum"],
+)
+def test_a_capability_range_must_be_finite_and_ordered(bounds: dict[str, float]):
+    with pytest.raises(ValidationError):
+        ModelKwargCapability(supported=True, control="slider", **bounds)
+
+
+def test_a_capability_range_may_be_a_single_value():
+    capability = ModelKwargCapability(
+        supported=True, control="slider", minimum=1, maximum=1
+    )
+
+    assert capability.accepts(1.0) is True
+    assert capability.accepts(0.5) is False
+
+
+@pytest.mark.parametrize(
+    "step",
+    [float("inf"), float("nan"), 0.0, -0.1],
+    ids=["inf", "nan", "zero", "negative"],
+)
+def test_a_capability_step_must_be_finite_and_positive(step: float):
+    with pytest.raises(ValidationError):
+        ModelKwargCapability(supported=True, control="slider", step=step)
+
+
+_SLIDER = {"supported": True, "control": "slider", "minimum": 0, "maximum": 2}
+_NUMBER_AS_SELECT = {"supported": True, "control": "select", "options": ["1"]}
+_LEVELS_AS_SELECT = {"supported": True, "control": "select", "options": ["low"]}
+_LEVELS_AS_SLIDER = {"supported": True, "control": "slider"}
+
+
+@pytest.mark.parametrize(
+    ("setting", "declaration", "valid"),
+    [
+        # Numbers: offered only as a slider.
+        *[
+            case
+            for setting in (
+                "temperature",
+                "top_p",
+                "presence_penalty",
+                "frequency_penalty",
+                "top_k",
+            )
+            for case in (
+                (setting, _SLIDER, True),
+                (setting, _NUMBER_AS_SELECT, False),
+                (setting, {"supported": True}, False),
+            )
+        ],
+        # top_k is a whole number: its slider must admit one.
+        ("top_k", {**_SLIDER, "minimum": 0.1, "maximum": 0.9}, False),
+        ("top_k", {**_SLIDER, "step": 0.5}, False),
+        # Named levels: offered only as a select with options; which levels
+        # a route offers (even an unfamiliar one) is its own declaration.
+        *[
+            case
+            for setting in ("reasoning_effort", "verbosity")
+            for case in (
+                (setting, _LEVELS_AS_SELECT, True),
+                (setting, {**_LEVELS_AS_SELECT, "options": ["auto"]}, True),
+                (setting, _LEVELS_AS_SLIDER, False),
+                (setting, {**_LEVELS_AS_SELECT, "options": []}, False),
+                (setting, {**_LEVELS_AS_SELECT, "options": None}, False),
+                (setting, {**_LEVELS_AS_SELECT, "options": [""]}, False),
+                (setting, {**_LEVELS_AS_SELECT, "options": ["  "]}, False),
+                # A blank next to a real option is left to the route's filter.
+                (setting, {**_LEVELS_AS_SELECT, "options": ["", "high"]}, True),
+            )
+        ],
+        # A setting that is not offered may carry any shape: it offers nothing.
+        ("temperature", {**_NUMBER_AS_SELECT, "supported": False}, True),
+        ("verbosity", {**_LEVELS_AS_SLIDER, "supported": False}, True),
+    ],
+)
+def test_an_offered_setting_is_declared_in_a_shape_its_values_fit(
+    setting: str, declaration: dict[str, object], valid: bool
+):
+    stored = CompletionModelSparse.model_validate(_stored_row({setting: declaration}))
+
+    if valid:
+        offered = SupportedModelKwargs.model_validate({setting: declaration})
+        assert stored.model_kwargs_capabilities == offered
+    else:
+        # Refused as input; a stored snapshot fails closed.
+        with pytest.raises(ValidationError):
+            SupportedModelKwargs.model_validate({setting: declaration})
+        assert stored.model_kwargs_capabilities == SupportedModelKwargs()
+
+
+def test_the_declaration_rule_follows_the_model_setting_types():
+    # One rule per setting, matching what ModelKwargs stores for it.
+    rules = model_kwargs_capabilities.OFFERABLE_MODEL_SETTINGS
+    assert set(rules) == set(SupportedModelKwargs.model_fields)
+    for name, rule in rules.items():
+        annotation = str(ModelKwargs.model_fields[name].annotation)
+        if rule is str:
+            assert "str" in annotation
+        elif rule is int:
+            assert "int" in annotation
+        else:
+            assert "float" in annotation

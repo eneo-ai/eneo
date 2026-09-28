@@ -179,7 +179,9 @@ async def test_completion_model_update_tags_explicit_admin_capabilities() -> Non
     session = MagicMock()
     session.execute = AsyncMock(return_value=result)
     session.flush = AsyncMock()
-    explicit = SupportedModelKwargs(temperature=ModelKwargCapability(supported=True))
+    explicit = SupportedModelKwargs(
+        temperature=ModelKwargCapability(supported=True, control="slider")
+    )
     loaded = SimpleNamespace(id=model.id, name="renamed-model")
 
     with (
@@ -283,7 +285,9 @@ async def test_completion_model_create_tags_explicit_admin_capabilities() -> Non
     provider_id = uuid4()
     session = MagicMock()
     session.flush = AsyncMock()
-    explicit = SupportedModelKwargs(temperature=ModelKwargCapability(supported=True))
+    explicit = SupportedModelKwargs(
+        temperature=ModelKwargCapability(supported=True, control="slider")
+    )
     loaded = SimpleNamespace(id=uuid4(), name="model")
 
     with (

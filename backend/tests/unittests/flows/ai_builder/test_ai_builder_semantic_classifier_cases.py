@@ -244,7 +244,7 @@ def _route(*, strict_tool: bool = False) -> ResolvedCompletionModelRoute:
         litellm_kwargs={},
         supports_strict_tool_schema=strict_tool,
         supported_model_kwargs=SupportedModelKwargs(
-            temperature=ModelKwargCapability(supported=True)
+            temperature=ModelKwargCapability(supported=True, control="slider")
         ),
     )
 

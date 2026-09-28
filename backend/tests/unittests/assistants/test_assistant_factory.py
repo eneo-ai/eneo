@@ -128,7 +128,7 @@ def test_create_space_assistant_preserves_persisted_model_kwargs(
     completion_model = MagicMock()
     completion_model.id = uuid4()
     completion_model.get_supported_model_kwargs.return_value = SupportedModelKwargs(
-        top_p=ModelKwargCapability(supported=True)
+        top_p=ModelKwargCapability(supported=True, control="slider")
     )
     assistant_row.completion_model_id = completion_model.id
     assistant_row.completion_model_kwargs = {"top_p": 0.72}

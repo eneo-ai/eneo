@@ -132,10 +132,6 @@ class AssistantFactory:
             completion_model_kwargs = ModelKwargs.model_validate(
                 completion_model_kwargs_raw
             )
-        if completion_model is not None:
-            completion_model_kwargs = completion_model_kwargs.filter_unsupported(
-                completion_model.get_supported_model_kwargs()
-            )
 
         source_template = (
             self.assistant_template_factory.create_assistant_template(
@@ -254,11 +250,6 @@ class AssistantFactory:
             ),
             None,
         )
-        if completion_model is not None:
-            completion_model_kwargs = completion_model_kwargs.filter_unsupported(
-                completion_model.get_supported_model_kwargs()
-            )
-
         source_template = (
             self.assistant_template_factory.create_assistant_template(
                 assistant_in_db.template

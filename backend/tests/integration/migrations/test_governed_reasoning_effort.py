@@ -151,7 +151,7 @@ def _prepare_kwargs(reasoning_effort: str) -> dict[str, object]:
         )
 
 
-def test_upgrade_reconciles_legacy_and_preserves_explicit_capabilities(
+def test_upgrade_removes_unverified_none_and_keeps_legacy_settings_usable(
     reasoning_db,
 ) -> None:
     connection, config = reasoning_db
@@ -172,8 +172,12 @@ def test_upgrade_reconciles_legacy_and_preserves_explicit_capabilities(
         "high",
     ]
     assert capabilities["verbosity"]["options"] == ["low", "medium", "high"]
-    assert capabilities["_evidence"] == "catalog_backfill"
-    assert _capabilities(connection, explicit_model_id) == explicit_capabilities
+    # The migration only strips the unverified "none"; the snapshot stays
+    # untagged and is read as a legacy discovery record, not dropped.
+    assert "_evidence" not in capabilities
+    explicit_after = _capabilities(connection, explicit_model_id)
+    assert explicit_after["_evidence"] == "admin_explicit"
+    assert explicit_after["reasoning_effort"]["options"] == ["low", "medium", "high"]
 
     supported_kwargs = resolve_supported_model_kwargs(
         model_kwargs_capabilities=capabilities,
@@ -204,9 +208,3 @@ def test_upgrade_reconciles_legacy_and_preserves_explicit_capabilities(
 
     assert selected_effort == "high"
     assert _prepare_kwargs(selected_effort)["reasoning_effort"] == "high"
-    explicit_options = resolve_supported_model_kwargs(
-        model_kwargs_capabilities=explicit_capabilities,
-        reasoning=True,
-    ).reasoning_effort.options
-    assert explicit_options is not None
-    assert "none" in explicit_options

@@ -155,6 +155,73 @@ async def test_model_route_infers_reasoning_choices_from_litellm_when_admin_meta
     )
 
 
+def _stored_completion_model(capabilities: object) -> CompletionModel:
+    """A reasoning model loaded from its row, capability JSON as stored."""
+    loaded = _make_completion_model().model_dump(
+        exclude={"supported_model_kwargs", "token_limit", "model_kwargs_capabilities"}
+    )
+    return CompletionModel.model_validate(
+        SimpleNamespace(
+            **{**loaded, "reasoning": True},
+            model_kwargs_capabilities=capabilities,
+        )
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stored", "expected_options"),
+    [
+        # Untagged (develop, or before the squashed tagging migration): the
+        # stored record decides, as a discovered snapshot does.
+        (
+            {
+                "reasoning_effort": {
+                    "supported": True,
+                    "control": "select",
+                    "options": ["low", "medium", "high"],
+                }
+            },
+            ["low", "medium", "high"],
+        ),
+        # Malformed or invalid: fails closed, never widened by discovery.
+        (
+            {
+                "_evidence": "not-a-tag",
+                "reasoning_effort": {"supported": True, "options": ["high"]},
+            },
+            None,
+        ),
+        ({"reasoning_effort": {"supported": "invalid"}}, None),
+    ],
+    ids=["untagged", "malformed-tag", "invalid"],
+)
+async def test_model_route_reads_a_stored_snapshot_without_rediscovering_it(
+    stored: object, expected_options: list[str] | None
+):
+    completion_model = _stored_completion_model(stored)
+    adapter = MagicMock()
+    adapter.provider_type = "openai"
+    adapter.resolve_litellm_params.return_value = ("openai/gpt-5-mini", {})
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    with patch(
+        "eneo.completion_models.infrastructure.tenant_model_capabilities.resolve_reasoning_effort_options",
+        return_value=("minimal", "low", "medium", "high", "xhigh"),
+    ) as resolve_options:
+        route = await service.resolve_model_route(completion_model)
+
+    capability = route.supported_model_kwargs.reasoning_effort
+    assert capability.supported is (expected_options is not None)
+    assert capability.options == expected_options
+    resolve_options.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_model_route_preserves_explicit_admin_reasoning_capability():
     completion_model = _make_completion_model(
@@ -247,7 +314,7 @@ async def test_model_route_without_measured_capability_is_not_strict_capable():
 
 
 @pytest.mark.asyncio
-async def test_non_streaming_omits_temperature_for_legacy_untagged_slider():
+async def test_non_streaming_keeps_temperature_for_a_legacy_untagged_slider():
     completion_model = _make_completion_model()
     completion_model.reasoning = True
     object.__setattr__(
@@ -280,14 +347,15 @@ async def test_non_streaming_omits_temperature_for_legacy_untagged_slider():
     assert len(adapter.response_model_kwargs) == 1
     effective_kwargs = adapter.response_model_kwargs[0]
     assert effective_kwargs is not None
-    assert effective_kwargs.model_dump(exclude_none=True) == {}
+    # Read as a legacy discovered snapshot, as develop reads it.
+    assert effective_kwargs.model_dump(exclude_none=True) == {"temperature": 0.0}
 
 
 @pytest.mark.asyncio
 async def test_non_streaming_preserves_supported_kwargs_and_response_format():
     completion_model = _make_completion_model(
         supported_model_kwargs=SupportedModelKwargs(
-            temperature=ModelKwargCapability(supported=True)
+            temperature=ModelKwargCapability(supported=True, control="slider")
         )
     )
     adapter = _DummyAdapter(model=completion_model)
@@ -360,7 +428,7 @@ async def test_streaming_omits_kwargs_for_invalid_capability_evidence():
 async def test_streaming_preserves_supported_optional_kwargs():
     completion_model = _make_completion_model(
         supported_model_kwargs=SupportedModelKwargs(
-            temperature=ModelKwargCapability(supported=True)
+            temperature=ModelKwargCapability(supported=True, control="slider")
         )
     )
     adapter = _DummyAdapter(model=completion_model)

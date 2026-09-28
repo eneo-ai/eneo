@@ -175,7 +175,9 @@ def _route(
         provider_type="openai",
         litellm_kwargs=kwargs or {},
         supported_model_kwargs=supported
-        or SupportedModelKwargs(temperature=ModelKwargCapability(supported=True)),
+        or SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True, control="slider")
+        ),
     )
 
 
@@ -1140,7 +1142,7 @@ class TestPlannerContextPreparation:
                 "parallel_tool_calls": True,
             },
             supported=SupportedModelKwargs(
-                temperature=ModelKwargCapability(supported=True),
+                temperature=ModelKwargCapability(supported=True, control="slider"),
                 reasoning_effort=ModelKwargCapability(
                     supported=True,
                     control="select",

@@ -30,6 +30,7 @@ from eneo.completion_models.infrastructure.stream_collector import (
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     get_supported_openai_params,
     schema_response_format,
+    stored_request_model_kwargs,
 )
 from eneo.files.file_models import File
 from eneo.flows.citation_sidecar import (
@@ -1436,8 +1437,12 @@ def build_prepared_completion_call(
     original_kwargs = prepared.assistant.completion_model_kwargs
     completion_model = prepared.assistant.completion_model
     if completion_model is not None:
-        original_kwargs = original_kwargs.filter_unsupported(
-            completion_model.supported_model_kwargs
+        # Frozen once per step execution, so preflight and dispatch send the
+        # same settings and an omitted stored effort is logged once.
+        original_kwargs = stored_request_model_kwargs(
+            original_kwargs,
+            completion_model.supported_model_kwargs,
+            completion_model_id=completion_model.id,
         )
     preferred_kwargs = original_kwargs
     response_format_plan = resolve_json_response_format_plan(

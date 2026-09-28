@@ -394,3 +394,98 @@ async def test_saving_a_model_whose_stored_limits_are_missing_is_refused(
         accepted.json()["max_input_tokens"],
         accepted.json()["max_output_tokens"],
     ) == (1000, 500)
+
+
+_SLIDER_JSON = '"supported": true, "control": "slider"'
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("field", "capability"),
+    [
+        ("temperature", _SLIDER_JSON + ', "minimum": 2, "maximum": 1'),
+        ("temperature", _SLIDER_JSON + ', "minimum": 0, "maximum": Infinity'),
+        ("temperature", _SLIDER_JSON + ', "maximum": 2, "step": Infinity'),
+        ("temperature", _SLIDER_JSON + ', "maximum": 2, "step": 0'),
+        ("top_k", _SLIDER_JSON + ', "minimum": 0.1, "maximum": 0.9'),
+        ("top_k", _SLIDER_JSON + ', "minimum": 1, "maximum": 10, "step": 0.5'),
+        ("temperature", '"supported": true, "control": "select", "options": ["0.5"]'),
+        ("verbosity", _SLIDER_JSON),
+        ("reasoning_effort", '"supported": true, "control": "select", "options": []'),
+    ],
+    ids=[
+        "inverted-range",
+        "infinite-maximum",
+        "infinite-step",
+        "zero-step",
+        "top-k-without-an-integer",
+        "top-k-fractional-step",
+        "number-as-select",
+        "levels-as-slider",
+        "select-without-options",
+    ],
+)
+async def test_a_capability_declaration_must_admit_its_values(
+    client,
+    db_container,
+    admin_user,
+    admin_bearer_token,
+    field: str,
+    capability: str,
+):
+    async with db_container() as container:
+        session = container.session()
+        provider = ModelProviders(
+            tenant_id=admin_user.tenant_id,
+            name=f"openai-provider-{uuid4()}",
+            provider_type="openai",
+            credentials={"api_key": "test-openai-key"},
+            config={},
+            is_active=True,
+        )
+        session.add(provider)
+        await session.flush()
+        provider_id = provider.id
+        await session.commit()
+
+    create_response = await client.post(
+        "/api/v1/admin/tenant-models/completion/",
+        headers={"Authorization": f"Bearer {admin_bearer_token}"},
+        json={
+            "provider_id": str(provider_id),
+            "name": "gpt-5.4-mini",
+            "display_name": "gpt-5.4-mini",
+            "max_input_tokens": 272000,
+            "max_output_tokens": 128000,
+        },
+    )
+    assert create_response.status_code == 200, create_response.text
+    model_id = UUID(create_response.json()["id"])
+    async with db_container() as container:
+        before = await container.session().scalar(
+            select(CompletionModels.model_kwargs_capabilities).where(
+                CompletionModels.id == model_id
+            )
+        )
+
+    # Raw JSON: the parser accepts Infinity; the declaration must not.
+    update_response = await client.put(
+        f"/api/v1/admin/tenant-models/completion/{model_id}/",
+        headers={
+            "Authorization": f"Bearer {admin_bearer_token}",
+            "Content-Type": "application/json",
+        },
+        content=(
+            '{"model_kwargs_capabilities": {"' + field + '": {' + capability + "}}}"
+        ),
+    )
+
+    assert update_response.status_code == 422, update_response.text
+    assert "model_kwargs_capabilities" in update_response.text
+    async with db_container() as container:
+        after = await container.session().scalar(
+            select(CompletionModels.model_kwargs_capabilities).where(
+                CompletionModels.id == model_id
+            )
+        )
+    assert after == before

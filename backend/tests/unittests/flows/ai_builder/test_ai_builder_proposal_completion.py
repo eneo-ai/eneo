@@ -111,7 +111,9 @@ def _route(
         litellm_kwargs=kwargs or {},
         supports_strict_tool_schema=supports_strict_tool_schema,
         supported_model_kwargs=supported
-        or SupportedModelKwargs(temperature=ModelKwargCapability(supported=True)),
+        or SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True, control="slider")
+        ),
         **(
             {"resolved_model_id": resolved_model_id}
             if resolved_model_id is not None
@@ -718,7 +720,7 @@ def test_builder_selected_reasoning_effort_is_merged_with_call_parameters() -> N
     prepared = _route(
         requested=ModelKwargs(reasoning_effort="high"),
         supported=SupportedModelKwargs(
-            temperature=ModelKwargCapability(supported=True),
+            temperature=ModelKwargCapability(supported=True, control="slider"),
             reasoning_effort=ModelKwargCapability(
                 supported=True,
                 control="select",

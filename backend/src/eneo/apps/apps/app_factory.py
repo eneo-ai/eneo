@@ -161,10 +161,6 @@ class AppFactory:
             InputField.model_validate(input_field)
             for input_field in app_in_db.input_fields
         ]
-        if completion_model is not None:
-            model_kwargs = model_kwargs.filter_unsupported(
-                completion_model.supported_model_kwargs
-            )
         source_template = (
             self.app_template_factory.create_app_template(app_in_db.template)
             if app_in_db.template

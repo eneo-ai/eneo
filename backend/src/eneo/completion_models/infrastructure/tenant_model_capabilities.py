@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from typing import Literal, cast
+from uuid import UUID
 
 import litellm
 
@@ -14,7 +15,10 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
     SupportedModelKwargs,
     reasoning_effort_options_from_model_info,
 )
-from eneo.main.exceptions import ProviderRejectedRequestException
+from eneo.main.exceptions import (
+    BadRequestException,
+    ProviderRejectedRequestException,
+)
 from eneo.main.logging import get_logger
 from eneo.tenants.provider_field_config import get_canonical_provider_type
 
@@ -301,16 +305,106 @@ def selectable_reasoning_effort_options(
 def filter_request_model_kwargs(
     model_kwargs: ModelKwargs, supported: SupportedModelKwargs
 ) -> ModelKwargs:
-    """Keep explicit reasoning for route validation instead of silently filtering it."""
-    return ModelKwargs.model_validate(
-        {
-            name: value
-            for name, value in model_kwargs.model_dump(exclude_none=True).items()
-            if name == "reasoning_effort"
-            or name not in SupportedModelKwargs.model_fields
-            or getattr(supported, name).accepts(value)
-        }
-    )
+    """A request's own settings for a route.
+
+    An explicit reasoning effort is kept for route validation. A value for a
+    sampling control the model offers, but outside its advertised range or
+    options, is refused. A sampling control the model does not offer at all
+    is left out, as before. Stored settings go through
+    `stored_request_model_kwargs` first, so only values a request supplies
+    itself can be refused here.
+    """
+    kept: dict[str, object] = {}
+    for name, value in model_kwargs.model_dump(exclude_none=True).items():
+        if name == "reasoning_effort" or name not in SupportedModelKwargs.model_fields:
+            kept[name] = value
+            continue
+        capability: ModelKwargCapability = getattr(supported, name)
+        if capability.accepts(value):
+            kept[name] = value
+        elif capability.supported:
+            raise ProviderRejectedRequestException(
+                f"The selected model does not accept this {name} value.",
+                code="provider_rejected_request",
+                details={
+                    "reason": "model_setting_not_offered",
+                    "parameter": name,
+                    "retryable": False,
+                },
+            )
+    return ModelKwargs.model_validate(kept)
+
+
+def stored_request_model_kwargs(
+    stored: ModelKwargs,
+    supported: SupportedModelKwargs,
+    *,
+    completion_model_id: UUID | None,
+) -> ModelKwargs:
+    """What an assistant's, app's or flow step's stored settings send.
+
+    Stored settings are kept as saved; a request sends only what the model
+    accepts now, because the model's capability can change after a setting
+    was saved. A stored value it no longer accepts is left out instead of
+    failing the run, and logged once per request when it is a reasoning
+    effort (an option removed, the reasoning flag turned off, no capability
+    recorded) or a value outside a control the model does offer (a number
+    outside the advertised range). Values a request supplies itself use
+    `filter_request_model_kwargs`, which keeps an explicit effort for request
+    validation.
+    """
+    sendable = stored.filter_unsupported(supported)
+    omitted = {
+        name: value
+        for name, value in stored.model_dump(exclude_none=True).items()
+        if name in SupportedModelKwargs.model_fields
+        and value != ""
+        and getattr(sendable, name) is None
+        and (name == "reasoning_effort" or getattr(supported, name).supported)
+    }
+    if omitted:
+        logger.warning(
+            "Stored model settings are not offered by the model; omitting them",
+            extra={
+                "completion_model_id": str(completion_model_id)
+                if completion_model_id
+                else None,
+                "omitted_settings": omitted,
+                "offered_reasoning_efforts": list(
+                    supported.reasoning_effort.options or ()
+                ),
+            },
+        )
+    return sendable
+
+
+def validate_model_kwargs_update(
+    submitted: ModelKwargs,
+    supported: SupportedModelKwargs,
+    *,
+    stored: ModelKwargs | None,
+) -> None:
+    """Refuse an edit's model settings that the model does not offer.
+
+    `stored` is what is saved against the same model, or None when the edit
+    moves to another model. A value left as stored is the stored setting,
+    kept as saved and filtered when sent, so an editor can save other
+    settings next to one the model no longer offers; every value the edit
+    changes, and every value on another model, must be offered.
+    """
+    checked = submitted
+    if stored is not None:
+        checked = ModelKwargs.model_validate(
+            {
+                name: value
+                for name, value in submitted.model_dump().items()
+                if value != getattr(stored, name)
+            }
+        )
+    if checked.filter_unsupported(supported) != checked:
+        raise BadRequestException(
+            "Model settings contain a value unsupported by the selected model"
+        )
 
 
 def normalize_reasoning_effort(
@@ -465,6 +559,8 @@ __all__ = [
     "resolve_structured_output_capability",
     "schema_response_format",
     "selectable_reasoning_effort_options",
+    "stored_request_model_kwargs",
     "supports_response_schema",
     "unsupported_structured_output_decision",
+    "validate_model_kwargs_update",
 ]

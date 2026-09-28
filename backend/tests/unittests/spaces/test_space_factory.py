@@ -177,7 +177,7 @@ def test_create_applications_projection_preserves_sparse_response_contract(facto
     completion_model.id = completion_model_id
     completion_model.is_deprecated = True
     completion_model.get_supported_model_kwargs.return_value = SupportedModelKwargs(
-        temperature=ModelKwargCapability(supported=True)
+        temperature=ModelKwargCapability(supported=True, control="slider")
     )
 
     def assistant(
@@ -279,8 +279,9 @@ def test_create_applications_projection_preserves_sparse_response_contract(facto
         missing_model_assistant_id,
     ]
     assert projection.assistants[0].completion_model_id == completion_model_id
+    # Stored settings are shown as saved; only a request filters them.
     assert projection.assistants[0].completion_model_kwargs.temperature == 0.4
-    assert projection.assistants[0].completion_model_kwargs.top_p is None
+    assert projection.assistants[0].completion_model_kwargs.top_p == 0.8
     assert projection.assistants[1].completion_model_id is None
     assert (
         projection.assistants[1].completion_model_kwargs.model_dump(exclude_none=True)

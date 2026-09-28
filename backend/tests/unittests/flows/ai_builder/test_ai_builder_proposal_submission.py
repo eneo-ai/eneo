@@ -316,7 +316,7 @@ def _route() -> ResolvedCompletionModelRoute:
         provider_type="openai",
         litellm_kwargs={},
         supported_model_kwargs=SupportedModelKwargs(
-            temperature=ModelKwargCapability(supported=True)
+            temperature=ModelKwargCapability(supported=True, control="slider")
         ),
     )
 

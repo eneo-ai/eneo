@@ -172,10 +172,6 @@ class SpaceFactory:
                 if assistant.completion_model_id is not None
                 else None
             )
-            if completion_model is not None:
-                kwargs = kwargs.filter_unsupported(
-                    completion_model.get_supported_model_kwargs()
-                )
             return AssistantApplicationsProjection(
                 id=assistant.id,
                 created_at=assistant.created_at,

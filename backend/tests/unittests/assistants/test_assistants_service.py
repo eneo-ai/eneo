@@ -406,6 +406,76 @@ async def test_update_model_kwargs_without_model_uses_existing_model(setup: Setu
     assert assistant.update.call_args.kwargs["completion_model_kwargs"] == kwargs
 
 
+def _flow_assistant_with_stale_effort(setup: Setup) -> MagicMock:
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+    assistant.origin = AssistantOrigin.FLOW_MANAGED
+    assistant.managing_flow_id = uuid4()
+    assistant.completion_model = MagicMock(id=uuid4())
+    assistant.completion_model.get_supported_model_kwargs.return_value = (
+        SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True, control="slider"),
+            reasoning_effort=ModelKwargCapability(
+                supported=True, control="select", options=["low", "medium", "high"]
+            ),
+        )
+    )
+    # Stored before the model's options changed.
+    assistant.completion_model_kwargs = ModelKwargs(
+        reasoning_effort="none", temperature=0.2
+    )
+    return assistant
+
+
+async def test_update_keeps_a_stored_setting_the_model_no_longer_offers(
+    setup: Setup,
+):
+    # The editor sends the stored settings back with one value changed; the
+    # unchanged stored effort is kept as saved (and left out when sent).
+    assistant = _flow_assistant_with_stale_effort(setup)
+    kwargs = ModelKwargs(reasoning_effort="none", temperature=0.5)
+
+    await _update_assistant(
+        setup.service,
+        assistant_id=TEST_UUID,
+        update=AssistantUpdateCommand(completion_model_kwargs=kwargs),
+        caller=AssistantUpdateCaller.FLOW_MANAGED,
+    )
+
+    assert assistant.update.call_args.kwargs["completion_model_kwargs"] == kwargs
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "new_model"),
+    [
+        (ModelKwargs(reasoning_effort="xhigh", temperature=0.2), False),
+        # Another model: every value is validated against it.
+        (ModelKwargs(reasoning_effort="none", temperature=0.2), True),
+    ],
+    ids=["changed-value", "other-model"],
+)
+async def test_update_rejects_a_new_setting_the_model_does_not_offer(
+    setup: Setup, kwargs: ModelKwargs, new_model: bool
+):
+    assistant = _flow_assistant_with_stale_effort(setup)
+    fields: dict[str, object] = {"completion_model_kwargs": kwargs}
+    if new_model:
+        other = reasoning_model("low", "medium", "high")
+        setup.service.space_repo.get_space_by_assistant.return_value.get_completion_model.return_value = other
+        fields["completion_model_id"] = other.id
+
+    with pytest.raises(
+        BadRequestException, match="value unsupported by the selected model"
+    ):
+        await _update_assistant(
+            setup.service,
+            assistant_id=TEST_UUID,
+            update=AssistantUpdateCommand.model_validate(fields),
+            caller=AssistantUpdateCaller.FLOW_MANAGED,
+        )
+
+    assistant.update.assert_not_called()
+
+
 async def test_update_rejects_model_kwargs_when_model_is_cleared(setup: Setup):
     assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
     assistant.completion_model = MagicMock()

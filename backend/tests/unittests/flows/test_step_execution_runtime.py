@@ -6,7 +6,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import httpx
@@ -1259,7 +1259,7 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
         name="gpt-4.1",
         provider_type="openai",
         supported_model_kwargs=SupportedModelKwargs(
-            temperature=ModelKwargCapability(supported=True)
+            temperature=ModelKwargCapability(supported=True, control="slider")
         ),
     )
     assistant.completion_model_kwargs = original_kwargs
@@ -1388,7 +1388,7 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
 @pytest.mark.asyncio
 async def test_prepared_model_parameters_equal_completion_adapter_kwargs() -> None:
     supported_model_kwargs = SupportedModelKwargs(
-        temperature=ModelKwargCapability(supported=True)
+        temperature=ModelKwargCapability(supported=True, control="slider")
     )
     completion_model = _completion_model(supported_model_kwargs=supported_model_kwargs)
     assistant = MagicMock()
@@ -1467,7 +1467,7 @@ async def test_complete_step_execution_strips_known_unsupported_stored_response_
         name="claude-test",
         provider_type="anthropic",
         supported_model_kwargs=SupportedModelKwargs(
-            temperature=ModelKwargCapability(supported=True)
+            temperature=ModelKwargCapability(supported=True, control="slider")
         ),
     )
     assistant.completion_model_kwargs = original_kwargs
@@ -4194,3 +4194,62 @@ async def test_reduced_cap_terminal_reason_controls_flow_consumption(
     observer.completed.assert_awaited_once()
     observer.rejected.assert_not_awaited()
     observer.outcome_unknown.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected", "omitted"),
+    [
+        (
+            ModelKwargs(reasoning_effort="high", temperature=0.3),
+            ModelKwargs(reasoning_effort="high", temperature=0.3),
+            False,
+        ),
+        # Stored before the options changed: left out and logged, once per
+        # step execution (preflight and dispatch reuse the frozen call).
+        (
+            ModelKwargs(reasoning_effort="none", temperature=0.3),
+            ModelKwargs(temperature=0.3),
+            True,
+        ),
+    ],
+    ids=["offered", "no-longer-offered"],
+)
+def test_flow_step_sends_the_stored_settings_its_model_accepts(
+    stored: ModelKwargs, expected: ModelKwargs, omitted: bool
+) -> None:
+    assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
+    assistant.completion_model = SimpleNamespace(
+        id=uuid4(),
+        name="gpt-5-mini",
+        provider_type="openai",
+        litellm_model_name="openai/gpt-5-mini",
+        supported_model_kwargs=SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True, control="slider"),
+            reasoning_effort=ModelKwargCapability(
+                supported=True, control="select", options=["low", "medium", "high"]
+            ),
+        ),
+    )
+    assistant.completion_model_kwargs = stored
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(text="Source", source_text="Source"),
+        effective_prompt="Summarise",
+        input_payload_for_result={"text": "Source"},
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.tenant_model_capabilities.logger"
+    ) as logger:
+        call = build_prepared_completion_call(
+            step=_step(output_type="text"), state=_state(), prepared=prepared
+        )
+
+    assert call.preferred_model_kwargs == expected
+    assert logger.warning.call_count == (1 if omitted else 0)
+    # The stored settings themselves are not changed.
+    assert assistant.completion_model_kwargs == stored

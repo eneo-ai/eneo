@@ -1882,7 +1882,9 @@ class TestGetSessionModelsEndpoint:
         model.reasoning = False
         model.model_kwargs_capabilities = None
         model.get_model_route.return_value = "openai/plain-model"
-        model.supported_model_kwargs = SupportedModelKwargs(
+        # Built without validation: the capability type refuses this shape,
+        # and the route still offers no effort if one reaches it.
+        model.supported_model_kwargs = SupportedModelKwargs.model_construct(
             reasoning_effort=ModelKwargCapability(
                 supported=True,
                 control="slider",

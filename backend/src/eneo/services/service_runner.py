@@ -6,6 +6,9 @@ from eneo.assistants.references import ReferencesService
 from eneo.collections.domain.collection import Collection
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import count_tokens
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    stored_request_model_kwargs,
+)
 from eneo.files.file_models import FilePublic
 from eneo.files.file_service import FileService
 from eneo.main.exceptions import PydanticParseError
@@ -75,7 +78,12 @@ class ServiceRunner:
             files=completion_files,
             prompt=self.prompt,
             info_blob_chunks=datastore_result.chunks,
-            model_kwargs=self.service.completion_model_kwargs,
+            # Stored settings: sent as far as the model accepts them now.
+            model_kwargs=stored_request_model_kwargs(
+                self.service.completion_model_kwargs,
+                self.service.completion_model.supported_model_kwargs,
+                completion_model_id=self.service.completion_model.id,
+            ),
         )
 
         logger.debug(f"Service response: '{ai_response.completion.text}'")  # type: ignore[union-attr]

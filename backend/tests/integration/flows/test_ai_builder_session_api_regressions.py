@@ -194,7 +194,7 @@ def _route(
         provider_type="openai",
         litellm_kwargs=kwargs or {},
         supported_model_kwargs=SupportedModelKwargs(
-            temperature=ModelKwargCapability(supported=True)
+            temperature=ModelKwargCapability(supported=True, control="slider")
         ),
     )
 

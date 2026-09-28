@@ -36,6 +36,9 @@ from eneo.authentication.auth_service import AuthService
 from eneo.completion_models.infrastructure.context_builder import (
     count_tokens,
 )
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    validate_model_kwargs_update,
+)
 from eneo.files.attachment_budget import (
     assert_prompt_and_files_fit_context,
     attachment_token_ceiling,
@@ -1605,13 +1608,14 @@ class AssistantService:
                 raise BadRequestException(
                     "Select a completion model before configuring model settings"
                 )
-            filtered_kwargs = completion_model_kwargs.filter_unsupported(
-                kwargs_model.get_supported_model_kwargs()
+            stored_model = assistant.completion_model
+            validate_model_kwargs_update(
+                completion_model_kwargs,
+                kwargs_model.get_supported_model_kwargs(),
+                stored=assistant.completion_model_kwargs
+                if stored_model is not None and kwargs_model.id == stored_model.id
+                else None,
             )
-            if filtered_kwargs != completion_model_kwargs:
-                raise BadRequestException(
-                    "Model settings contain a value unsupported by the selected model"
-                )
             if is_personal_default and reasoning_effort_only_update:
                 completion_model_kwargs = assistant.completion_model_kwargs.model_copy(
                     update={
@@ -3082,10 +3086,11 @@ class AssistantService:
                         ),
                         effective_config=effective_config,
                     )
-                    model_kwargs_override = (
-                        assistant_to_ask.completion_model_kwargs.model_copy(
-                            update={"reasoning_effort": effective_reasoning_effort}
-                        )
+                    # The stored settings as sent to the selected model, with
+                    # the policy's effort.
+                    model_kwargs_override = assistant_to_ask.request_model_kwargs(
+                        selected_model,
+                        reasoning_effort=effective_reasoning_effort,
                     )
 
         # Space checks run after policy resolution so a personal default

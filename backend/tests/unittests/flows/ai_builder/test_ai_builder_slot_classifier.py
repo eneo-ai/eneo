@@ -3098,7 +3098,9 @@ def _route(
         provider_type=provider_type,
         litellm_kwargs=kwargs or {},
         supported_model_kwargs=supported
-        or SupportedModelKwargs(temperature=ModelKwargCapability(supported=True)),
+        or SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True, control="slider")
+        ),
         supports_strict_tool_schema=supports_strict_tool_schema,
     )
 
@@ -4643,7 +4645,7 @@ async def test_classification_cache_separates_effective_optional_kwargs() -> Non
         )
     )
     supported_temperature = SupportedModelKwargs(
-        temperature=ModelKwargCapability(supported=True)
+        temperature=ModelKwargCapability(supported=True, control="slider")
     )
 
     first = await classify_slots(
@@ -5478,15 +5480,7 @@ async def test_classify_slots_omits_unsupported_temperature_but_keeps_schema() -
         completion_model_route=_route(
             model="openai/gpt-test",
             supported=resolve_supported_model_kwargs(
-                model_kwargs_capabilities={
-                    "temperature": {
-                        "supported": True,
-                        "control": "slider",
-                        "minimum": 0,
-                        "maximum": 2,
-                        "step": 0.01,
-                    }
-                },
+                model_kwargs_capabilities={"temperature": {"supported": False}},
                 reasoning=True,
             ),
         ),
@@ -5500,6 +5494,68 @@ async def test_classify_slots_omits_unsupported_temperature_but_keeps_schema() -
     assert litellm_client.acompletion.await_count == 1
     assert "temperature" not in call_kwargs
     assert call_kwargs["response_format"]["type"] == "json_object"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("minimum", "sent"),
+    [(1.0, None), (0.0, 0.0)],
+    ids=["temperature-minimum-1", "temperature-minimum-0"],
+)
+async def test_classify_slots_leaves_out_a_temperature_the_route_does_not_offer(
+    minimum: float, sent: float | None
+) -> None:
+    # The classifier's temperature 0.0 is the Builder's own choice. A route
+    # whose slider starts at 1 does not offer it: it is left out (provider
+    # default) and one warning names the route and value.
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "checkpoint_updates": [],
+                "form_intake": None,
+                "secondary_obligations": [],
+            }
+        )
+    )
+    route = _route(
+        model="openai/gpt-test",
+        supported=SupportedModelKwargs(
+            temperature=ModelKwargCapability(
+                supported=True, control="slider", minimum=minimum, maximum=2
+            )
+        ),
+    )
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_error_contract.logger"
+    ) as contract_logger:
+        await classify_slots(
+            litellm_client=litellm_client,
+            completion_model_route=route,
+            classification_input=_classification_input(f"temp-range-{uuid4()}"),
+            allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
+            tenant_id=uuid4(),
+            structured_output_mode=StructuredOutputMode.JSON_OBJECT,
+        )
+
+    call_kwargs = litellm_client.acompletion.await_args.kwargs
+    assert call_kwargs.get("temperature") == sent
+    warnings = [
+        call
+        for call in contract_logger.warning.call_args_list
+        if call.args[0] == "ai_builder_sampling_value_not_offered_by_route"
+    ]
+    if sent is None:
+        assert len(warnings) == 1
+        extra = warnings[0].kwargs["extra"]
+        assert extra["litellm_model"] == "openai/gpt-test"
+        assert (extra["parameter"], extra["value"]) == ("temperature", 0.0)
+        assert extra["stage"] == "slot_classification"
+    else:
+        assert warnings == []
 
 
 @pytest.mark.asyncio

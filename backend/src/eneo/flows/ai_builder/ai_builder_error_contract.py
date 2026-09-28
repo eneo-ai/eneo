@@ -464,9 +464,39 @@ def prepare_ai_builder_provider_kwargs(
     request_id: str | None = None,
     tenant_id: UUID | str | None = None,
 ) -> dict[str, object]:
-    """Translate preparation refusals before a provider attempt is started."""
+    """Translate preparation refusals before a provider attempt is started.
+
+    `model_kwargs` are the AI Builder's own sampling choices (its fixed
+    temperatures), not a user's. When the route offers a control but not the
+    Builder's value (a temperature below the route's advertised minimum),
+    the Builder leaves it out, so the provider default applies, and logs
+    one warning naming the route and value. A user's reasoning effort, held
+    by the route, stays strict.
+    """
+    supported = route.supported_model_kwargs
+    not_offered: dict[str, None] = {}
+    for name, value in model_kwargs.model_dump(exclude_none=True).items():
+        if name not in type(supported).model_fields:
+            continue
+        capability = getattr(supported, name)
+        if capability.supported and not capability.accepts(value):
+            not_offered[name] = None
+            logger.warning(
+                "ai_builder_sampling_value_not_offered_by_route",
+                extra={
+                    "stage": stage,
+                    "request_id": request_id,
+                    "litellm_model": route.litellm_model,
+                    "parameter": name,
+                    "value": value,
+                    "minimum": capability.minimum,
+                    "maximum": capability.maximum,
+                },
+            )
     try:
-        return route.prepare_provider_kwargs(model_kwargs)
+        return route.prepare_provider_kwargs(
+            model_kwargs.model_copy(update=not_offered)
+        )
     except ProviderRejectedRequestException as error:
         failure = record_ai_builder_provider_failure(
             error,

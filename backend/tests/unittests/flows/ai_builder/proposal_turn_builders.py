@@ -124,7 +124,7 @@ def _make_context(**overrides: object) -> ProposalTurnContext:
             provider_type="openai",
             litellm_kwargs=provider_kwargs,
             supported_model_kwargs=SupportedModelKwargs(
-                temperature=ModelKwargCapability(supported=True)
+                temperature=ModelKwargCapability(supported=True, control="slider")
             ),
         ),
         "available_model_refs": None,

@@ -11,6 +11,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    FiniteFloat,
     computed_field,
     field_validator,
     model_validator,
@@ -306,19 +307,18 @@ class CompletionModelBase(BaseModel):
         if raw_capabilities is None:
             return data
 
-        capabilities = coerce_model_kwargs_capabilities(
-            raw_capabilities,
-            completion_model_id=getattr(data, "id", None),
-            tenant_id=getattr(data, "tenant_id", None),
-        )
-        if capabilities is not None:
-            return data
-
+        # The stored JSON is read once, by its owner: a legacy untagged
+        # snapshot is kept, and a malformed one fails closed instead of being
+        # validated here as if its tag did not matter.
         values: dict[str, object] = {}
         for field_name in cls.model_fields:
             if hasattr(data, field_name):
                 values[field_name] = getattr(data, field_name)
-        values["model_kwargs_capabilities"] = None
+        values["model_kwargs_capabilities"] = coerce_model_kwargs_capabilities(
+            raw_capabilities,
+            completion_model_id=getattr(data, "id", None),
+            tenant_id=getattr(data, "tenant_id", None),
+        )
         return values
 
     @computed_field  # type: ignore[prop-decorator]
@@ -624,13 +624,15 @@ class Context(BaseModel):
 
 
 class ModelKwargs(BaseModel):
-    temperature: Optional[float] = None
-    top_p: Optional[float] = None
+    # Finite numbers only: NaN and infinity compare false against every
+    # advertised range, so they are refused here, before edits or requests.
+    temperature: Optional[FiniteFloat] = None
+    top_p: Optional[FiniteFloat] = None
     reasoning_effort: Optional[str] = None
     verbosity: Optional[str] = None
     response_format: Optional[dict[str, object]] = None
-    presence_penalty: Optional[float] = None
-    frequency_penalty: Optional[float] = None
+    presence_penalty: Optional[FiniteFloat] = None
+    frequency_penalty: Optional[FiniteFloat] = None
     top_k: Optional[int] = None
 
     def filter_unsupported(self, supported: SupportedModelKwargs) -> "ModelKwargs":

@@ -162,6 +162,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     assistant.is_default = True
     assistant.completion_model = TEST_MODEL_CHATGPT
     assistant.completion_model_kwargs = ModelKwargs()
+    assistant.request_model_kwargs.side_effect = _sendable_stored_settings
     assistant.tool_assistants = []
     assistant.get_prompt_text.return_value = ""
     assistant.ask = AsyncMock(return_value=(response, datastore_result))
@@ -247,6 +248,11 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     assert (
         assistant.ask.await_args.kwargs["model_kwargs_override"].reasoning_effort
         == "high"
+    )
+    # The stored settings are filtered against the model the policy chose,
+    # and the policy's effort replaces the stored one.
+    assistant.request_model_kwargs.assert_called_once_with(
+        effective_model, reasoning_effort="high"
     )
     assert assistant.ask.await_args.kwargs["prompt_override"] is None
     assert (
@@ -421,6 +427,15 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
 
     assistant.ask.assert_awaited_once()
     assert assistant.ask.await_args.kwargs["mcp_servers_override"] == [policy_server]
+
+
+def _sendable_stored_settings(
+    model: object, *, reasoning_effort: object = NOT_PROVIDED
+) -> ModelKwargs:
+    """Stand-in for Assistant.request_model_kwargs with empty stored settings."""
+    if reasoning_effort is NOT_PROVIDED:
+        return ModelKwargs()
+    return ModelKwargs.model_validate({"reasoning_effort": reasoning_effort})
 
 
 @pytest.mark.parametrize(
@@ -1524,6 +1539,7 @@ async def test_ask_checks_space_with_policy_default_when_assistant_has_no_model(
     assistant.is_default = True
     assistant.completion_model = None
     assistant.completion_model_kwargs = ModelKwargs()
+    assistant.request_model_kwargs.side_effect = _sendable_stored_settings
     assistant.tool_assistants = []
     assistant.ask = AsyncMock(
         return_value=(
