@@ -135,11 +135,11 @@ def default_error_code_for_status(status_code: int) -> ErrorCodes:
     numeric field is not left guessing at which layer refused the request.
     Precision lives in the string `code`, which the raiser owns.
 
-    Only statuses whose meaning the category restates are mapped. A status that
-    covers several domain failures, such as 409, falls through to the coarse
-    one: the web client turns a category into a sentence for the reader, so
-    inferring `NAME_COLLISION` from any conflict would tell someone resolving
-    an approval conflict that a display name is taken.
+    Only statuses whose meaning the category restates are mapped. A 409 gets
+    the generic `CONFLICT`, never a domain category: the web client turns a
+    category into a sentence for the reader, so inferring `NAME_COLLISION` from
+    any conflict would tell someone resolving an approval conflict that a
+    display name is taken. `CONFLICT` is left to the backend's own message.
     """
     if status_code == 401:
         return ErrorCodes.AUTHENTICATION_ERROR
@@ -147,6 +147,8 @@ def default_error_code_for_status(status_code: int) -> ErrorCodes:
         return ErrorCodes.UNAUTHORIZED
     if status_code == 404:
         return ErrorCodes.NOT_FOUND
+    if status_code == 409:
+        return ErrorCodes.CONFLICT
     if status_code == 429:
         return ErrorCodes.QUOTA_EXCEEDED
     if status_code >= 500:

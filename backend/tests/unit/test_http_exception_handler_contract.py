@@ -96,6 +96,7 @@ def test_http_exception_422_uses_validation_general_error_and_preserves_headers(
         (401, ErrorCodes.AUTHENTICATION_ERROR),
         (403, ErrorCodes.UNAUTHORIZED),
         (404, ErrorCodes.NOT_FOUND),
+        (409, ErrorCodes.CONFLICT),
         (429, ErrorCodes.QUOTA_EXCEEDED),
         (503, ErrorCodes.INTERNAL_SERVER_ERROR),
     ],
@@ -164,8 +165,9 @@ def test_api_key_refusal_validates_as_the_documented_error():
 
 
 def test_conflict_does_not_borrow_a_domain_category():
-    """The real approval-conflict body: a 409 is not a name collision, and the
-    web client renders 9017 as "display name already exists"."""
+    """The real approval-conflict body: a 409 is the generic conflict, not a
+    name collision, which the web client renders as "display name already
+    exists"."""
     app = get_application()
 
     @app.post("/_test-conflict")
@@ -182,6 +184,6 @@ def test_conflict_does_not_borrow_a_domain_category():
     payload = TestClient(app).post("/_test-conflict").json()
 
     assert payload["eneo_error_code"] != ErrorCodes.NAME_COLLISION.value
-    assert payload["eneo_error_code"] == ErrorCodes.BAD_REQUEST.value
+    assert payload["eneo_error_code"] == ErrorCodes.CONFLICT.value
     assert payload["code"] == "approval_conflict"
     assert payload["existing_status"] == "approved"
