@@ -1,7 +1,7 @@
 import type { CompletionModel } from "@eneo/eneo-js";
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
-import { writable, type Writable } from "svelte/store";
+import { get, writable, type Writable } from "svelte/store";
 import { beforeEach, expect, it, vi } from "vitest";
 
 const { currentSpace, updateSpace } = vi.hoisted(() => ({
@@ -27,6 +27,15 @@ const completionProps = {
 
 const model = (id: string, nickname: string) =>
   ({ id, name: id, nickname, org: "OpenAI", is_org_enabled: true }) as unknown as CompletionModel;
+
+// The selector hands the manager a function of the space as it stands when the
+// update starts; this is the patch it builds from the current store.
+function sentPatch(call: number) {
+  const update = updateSpace.mock.calls[call][0];
+  return typeof update === "function"
+    ? update(get(currentSpace.store as Writable<unknown>))
+    : update;
+}
 
 beforeEach(() => {
   updateSpace.mockReset();
@@ -79,7 +88,7 @@ it("sends every reported link plus the toggled model", async () => {
 
   await page.getByRole("switch", { name: /Model B/ }).click();
   await expect.poll(() => updateSpace.mock.calls.length).toBe(1);
-  expect(updateSpace.mock.calls[0][0]).toEqual({
+  expect(sentPatch(0)).toEqual({
     completion_models: [{ id: "a" }, { id: "hidden" }, { id: "b" }]
   });
 });
@@ -106,7 +115,7 @@ it("names a linked model missing from the catalogue, even without a nickname", a
   await expect.element(row).toBeChecked();
   await row.click();
   await expect.poll(() => updateSpace.mock.calls.length).toBe(1);
-  expect(updateSpace.mock.calls[0][0]).toEqual({ completion_models: [] });
+  expect(sentPatch(0)).toEqual({ completion_models: [] });
 });
 
 it("holds every switch while a save is in flight, then works from the saved space", async () => {
@@ -138,7 +147,7 @@ it("holds every switch while a save is in flight, then works from the saved spac
   await expect.element(other).toBeEnabled();
   await other.click();
   await expect.poll(() => updateSpace.mock.calls.length).toBe(2);
-  expect(updateSpace.mock.calls[1][0]).toEqual({
+  expect(sentPatch(1)).toEqual({
     completion_models: [{ id: "a" }, { id: "b" }, { id: "c" }]
   });
 });

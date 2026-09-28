@@ -65,10 +65,17 @@
       if (linkedIds === null) {
         throw new Error(m.failed_to_load_models());
       }
-      const ids = selectedIds.includes(model.id)
-        ? selectedIds.filter((id) => id !== model.id)
-        : [...selectedIds, model.id];
-      await updateSpace({ [field]: ids.map((id) => ({ id })) });
+      const adding = !selectedIds.includes(model.id);
+      // Built when the update starts, from the space every earlier update
+      // (another section's too) has returned.
+      await updateSpace((latest) => {
+        const current = linkedSpaceModelIds(latest, kinds[field]);
+        if (current === null) throw new Error(m.failed_to_load_models());
+        const ids = adding
+          ? [...current.filter((id) => id !== model.id), model.id]
+          : current.filter((id) => id !== model.id);
+        return { [field]: ids.map((id) => ({ id })) };
+      });
     } catch (e) {
       toastError(e);
     } finally {

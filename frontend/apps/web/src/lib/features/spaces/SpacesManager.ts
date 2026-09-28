@@ -33,6 +33,8 @@ type SpacesManagerParams = {
   eneo: Eneo;
 };
 
+type SpaceUpdate = Parameters<Eneo["spaces"]["update"]>[0]["update"];
+
 function SpacesManager(data: SpacesManagerParams) {
   // Setup variables --------------------------------------------------------
   const { eneo } = data;
@@ -68,7 +70,15 @@ function SpacesManager(data: SpacesManagerParams) {
     }
   }
 
+  // Every full-space response replaces the current space, so an older one
+  // landing after a newer update would bring back links that update changed.
+  // Updates run one at a time (spaceUpdates) and each applied update bumps
+  // this, so a read started before it is dropped instead of installed.
+  let appliedSpaceUpdates = 0;
+  let spaceUpdates: Promise<unknown> = Promise.resolve();
+
   async function refreshCurrentSpace(type?: "applications" | "knowledge") {
+    const startedAfter = appliedSpaceUpdates;
     let $currentSpace = get(currentSpace);
     try {
       if (type) {
@@ -87,20 +97,34 @@ function SpacesManager(data: SpacesManagerParams) {
       } else {
         $currentSpace = await eneo.spaces.get($currentSpace);
       }
+      if (startedAfter !== appliedSpaceUpdates) return;
       currentSpace.set($currentSpace);
     } catch (e) {
       console.error("Error updating current space", e);
     }
   }
 
-  /** Will update a given space. If no space is specified will update the current space. */
-  async function updateSpace(
-    update: Parameters<typeof eneo.spaces.update>[0]["update"],
+  /** Will update a given space. If no space is specified will update the current space.
+   *  Updates run one at a time, each after the previous has settled. Pass a function
+   *  to build the update from the current space as it stands when the update starts. */
+  function updateSpace(
+    update: SpaceUpdate | ((current: Space) => SpaceUpdate),
     space?: { id: string } | undefined
-  ) {
+  ): Promise<Space | undefined> {
+    const run = () => applySpaceUpdate(update, space);
+    const result = spaceUpdates.then(run, run);
+    spaceUpdates = result;
+    return result;
+  }
+
+  async function applySpaceUpdate(
+    update: SpaceUpdate | ((current: Space) => SpaceUpdate),
+    space: { id: string } | undefined
+  ): Promise<Space | undefined> {
     const { id } = space ?? get(currentSpace);
     try {
-      const updatedSpace = await eneo.spaces.update({ space: { id }, update });
+      const resolvedUpdate = typeof update === "function" ? update(get(currentSpace)) : update;
+      const updatedSpace = await eneo.spaces.update({ space: { id }, update: resolvedUpdate });
       userSpaces.update((spaces) => {
         const idx = spaces.findIndex((space) => space.id === updatedSpace.id);
         if (idx > -1) {
@@ -110,6 +134,7 @@ function SpacesManager(data: SpacesManagerParams) {
       });
       // Only update current if no other space was given
       if (space === undefined) {
+        appliedSpaceUpdates += 1;
         currentSpace.set(updatedSpace);
       }
       return updatedSpace;

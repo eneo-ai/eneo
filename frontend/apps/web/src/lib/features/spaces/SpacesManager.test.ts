@@ -106,3 +106,80 @@ describe("SpacesManager.updateDefaultAssistant", () => {
     expect(get(m.state.currentSpace).default_assistant?.completion_model).toEqual(modelA);
   });
 });
+
+describe("SpacesManager.updateSpace", () => {
+  const links = (ids: string[]) => ids.map((id) => ({ id, name: id, available: true }));
+  function linkedSpace(completion: string[], embedding: string[]) {
+    return {
+      ...(space({ id: "assistant-1", completion_model: modelA }) as Record<string, unknown>),
+      completion_models: completion.map((id) => ({ id })),
+      embedding_models: embedding.map((id) => ({ id })),
+      linked_models: {
+        completion_models: links(completion),
+        embedding_models: links(embedding),
+        transcription_models: []
+      }
+    } as never;
+  }
+  function spacesManager(spaces: Record<string, unknown>) {
+    return SpacesManager({
+      spaces: [],
+      currentSpace: linkedSpace([], []),
+      eneo: { assistants: {}, spaces } as never
+    });
+  }
+  // What a model section sends: its own list, built from the space as it
+  // stands when the update starts.
+  const adding =
+    (field: "completion_models" | "embedding_models", id: string) =>
+    (current: { linked_models?: Record<string, { id: string }[]> }) => ({
+      [field]: [...(current.linked_models?.[field] ?? []).map((l) => l.id), id].map((i) => ({
+        id: i
+      }))
+    });
+
+  it("keeps both sections' links when their saves overlap", async () => {
+    const first = deferred<unknown>();
+    const second = deferred<unknown>();
+    const update = vi
+      .fn()
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise);
+    const m = spacesManager({ update });
+
+    const completionSave = m.updateSpace(adding("completion_models", "c1"));
+    const embeddingSave = m.updateSpace(adding("embedding_models", "e1"));
+    await Promise.resolve();
+    // The second update waits for the first to settle.
+    expect(update).toHaveBeenCalledTimes(1);
+
+    first.resolve(linkedSpace(["c1"], []));
+    await completionSave;
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+    expect(update.mock.calls[1][0]).toEqual({
+      space: { id: "space-1" },
+      update: { embedding_models: [{ id: "e1" }] }
+    });
+    second.resolve(linkedSpace(["c1"], ["e1"]));
+    await embeddingSave;
+
+    const shown = get(m.state.currentSpace);
+    expect(shown.completion_models.map((model) => model.id)).toEqual(["c1"]);
+    expect(shown.embedding_models.map((model) => model.id)).toEqual(["e1"]);
+  });
+
+  it("drops a read that started before an update it would overwrite", async () => {
+    const read = deferred<unknown>();
+    const m = spacesManager({
+      get: () => read.promise,
+      update: async () => linkedSpace(["c1"], [])
+    });
+
+    const refresh = m.refreshCurrentSpace();
+    await m.updateSpace({ completion_models: [{ id: "c1" }] });
+    read.resolve(linkedSpace([], []));
+    await refresh;
+
+    expect(get(m.state.currentSpace).completion_models.map((model) => model.id)).toEqual(["c1"]);
+  });
+});
