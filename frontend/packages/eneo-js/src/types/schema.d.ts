@@ -2874,7 +2874,7 @@ export interface paths {
     put?: never;
     /**
      * Update Assistant
-     * @description Update an assistant. Omitted fields are left unchanged.
+     * @description Update an assistant. Omitting a field leaves it unchanged, and so does null for every field except these: Null clears description, metadata_json, icon_id and data_retention_days. Null completion_model_kwargs resets the model settings to their defaults. An empty list clears a list field (groups, websites, attachments, integration_knowledge_list, mcp_servers, mcp_tools, enabled_capabilities, skill_bindings).
      */
     post: operations["update_assistant_api_v1_assistants__id___post"];
     /**
