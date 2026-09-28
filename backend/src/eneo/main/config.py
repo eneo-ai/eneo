@@ -499,6 +499,11 @@ class Settings(BaseSettings):
     obey_robots: bool = True  # Respect robots.txt rules
     autothrottle_enabled: bool = True  # Enable automatic request throttling
     using_crawl: bool = True  # Enable/disable crawling feature globally
+    # The website crawler never reaches loopback, link-local (cloud metadata),
+    # unspecified or multicast addresses. Private (intranet) ranges are allowed
+    # by default; set to True to refuse them too. Operator-only, never
+    # tenant-configurable.
+    crawler_block_private_networks: bool = False
 
     # Crawl retry configuration
     crawl_page_max_retries: int = 3  # Maximum retries for failed pages during crawl
