@@ -168,6 +168,61 @@ describe("SpacesManager.updateSpace", () => {
     expect(shown.embedding_models.map((model) => model.id)).toEqual(["e1"]);
   });
 
+  function otherSpace() {
+    return { ...(linkedSpace([], []) as Record<string, unknown>), id: "space-2" } as never;
+  }
+
+  it("keeps a response away from the space the user moved to", async () => {
+    const saving = deferred<unknown>();
+    const m = spacesManager({ update: () => saving.promise });
+
+    const save = m.updateSpace({ completion_models: [{ id: "c1" }] });
+    m.watchPageData({ currentSpace: otherSpace() });
+    saving.resolve(linkedSpace(["c1"], []));
+
+    expect((await save)?.id).toBe("space-1");
+    expect(get(m.state.currentSpace).id).toBe("space-2");
+  });
+
+  it("builds a queued edit from its own space after the user moved on", async () => {
+    const first = deferred<unknown>();
+    const update = vi
+      .fn()
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(async () => linkedSpace(["c1"], ["e1"]));
+    const fetched = vi.fn(async ({ id }: { id: string }) => ({
+      ...(linkedSpace(["c1"], []) as Record<string, unknown>),
+      id
+    }));
+    const m = spacesManager({ update, get: fetched });
+
+    m.updateSpace(adding("completion_models", "c1"));
+    const queued = m.updateSpace(adding("embedding_models", "e1"));
+    m.watchPageData({ currentSpace: otherSpace() });
+    first.resolve(linkedSpace(["c1"], []));
+    await queued;
+
+    // The queued edit went to space-1, built from space-1 as the server has it.
+    expect(fetched).toHaveBeenCalledWith({ id: "space-1" });
+    expect(update.mock.calls[1][0]).toEqual({
+      space: { id: "space-1" },
+      update: { embedding_models: [{ id: "e1" }] }
+    });
+    expect(get(m.state.currentSpace).id).toBe("space-2");
+  });
+
+  it("drops a read of a space the user has left", async () => {
+    const read = deferred<unknown>();
+    const m = spacesManager({ get: () => read.promise });
+
+    const refresh = m.refreshCurrentSpace();
+    m.watchPageData({ currentSpace: otherSpace() });
+    read.resolve(linkedSpace(["c1"], []));
+    await refresh;
+
+    expect(get(m.state.currentSpace).id).toBe("space-2");
+  });
+
   it("drops a read that started before an update it would overwrite", async () => {
     const read = deferred<unknown>();
     const m = spacesManager({

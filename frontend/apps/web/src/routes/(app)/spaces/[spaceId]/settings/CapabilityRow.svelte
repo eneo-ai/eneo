@@ -25,10 +25,12 @@
     saving = true;
     error = "";
     try {
-      await updateSpace({
-        enabled_capabilities: on
-          ? enabled.filter((p) => p !== capability.purpose)
-          : [...enabled, capability.purpose]
+      const adding = !on;
+      // Built when the update starts, from the space every earlier update
+      // (another row's too) has returned.
+      await updateSpace((latest) => {
+        const current = (latest.enabled_capabilities ?? []).filter((p) => p !== capability.purpose);
+        return { enabled_capabilities: adding ? [...current, capability.purpose] : current };
       });
     } catch (e) {
       error = getErrorMessage(e);

@@ -85,7 +85,7 @@
   }
 
   function getSpaceMCPServers(): SpaceMCPServer[] {
-    return ($currentSpace.mcp_servers ?? []) as unknown as SpaceMCPServer[];
+    return spaceServers($currentSpace);
   }
 
   const currentlySelectedServers = derived(currentSpace, ($currentSpace) =>
@@ -101,33 +101,38 @@
 
   const loading = new SvelteSet<string>();
 
+  function spaceServers(space: { mcp_servers?: unknown }): SpaceMCPServer[] {
+    return (space.mcp_servers ?? []) as unknown as SpaceMCPServer[];
+  }
+
+  function spaceToolSettings(space: { mcp_servers?: unknown }) {
+    return spaceServers(space).flatMap(
+      (s) => s.tools?.map((t) => ({ tool_id: t.id, is_enabled: t.is_enabled })) ?? []
+    );
+  }
+
   async function toggleServer(server: SelectableMCPServer) {
     loading.add(server.id);
+    const adding = !$currentlySelectedServers.includes(server.id);
 
     try {
-      if ($currentlySelectedServers.includes(server.id)) {
-        const newServers = $currentlySelectedServers
-          .filter((id) => id !== server.id)
-          .map((id) => ({ id }));
-        await updateSpace({ mcp_servers: newServers });
-      } else {
-        const newServers = [...$currentlySelectedServers, server.id].map((id) => ({ id }));
-
+      // Built when the update starts, from the space every earlier update has
+      // returned, so a quick second toggle keeps the first one's change.
+      await updateSpace((latest) => {
+        const selected = spaceServers(latest)
+          .map((s) => s.id)
+          .filter((id) => id !== server.id);
+        if (!adding) {
+          return { mcp_servers: selected.map((id) => ({ id })) };
+        }
         // When adding a server, enable all its tools for convenience
-        const spaceServers = getSpaceMCPServers();
-        const existingTools = spaceServers.flatMap(
-          (s) => s.tools?.map((t) => ({ tool_id: t.id, is_enabled: t.is_enabled })) ?? []
-        );
-
-        // Add all tools from the new server as enabled
         const newServerTools =
           server.tools?.map((t) => ({ tool_id: t.id, is_enabled: true })) ?? [];
-
-        await updateSpace({
-          mcp_servers: newServers,
-          mcp_tools: [...existingTools, ...newServerTools]
-        });
-      }
+        return {
+          mcp_servers: [...selected, server.id].map((id) => ({ id })),
+          mcp_tools: [...spaceToolSettings(latest), ...newServerTools]
+        };
+      });
     } catch (e) {
       console.error("Failed to toggle server:", e);
     }
@@ -137,21 +142,19 @@
 
   async function toggleTool(tool: SpaceMCPTool) {
     try {
-      // Get current tool settings from space
-      const spaceServers = getSpaceMCPServers();
-      const currentTools = spaceServers.flatMap(
-        (server) => server.tools?.map((t) => ({ tool_id: t.id, is_enabled: t.is_enabled })) ?? []
-      );
-
-      // Toggle this tool
-      const toolExists = currentTools.find((t) => t.tool_id === tool.id);
-      const newTools = toolExists
-        ? currentTools.map((t) =>
-            t.tool_id === tool.id ? { tool_id: t.tool_id, is_enabled: !t.is_enabled } : t
-          )
-        : [...currentTools, { tool_id: tool.id, is_enabled: !tool.is_enabled }];
-
-      await updateSpace({ mcp_tools: newTools });
+      // Built when the update starts, from the space every earlier update has
+      // returned, so a quick second toggle keeps the first one's change.
+      await updateSpace((latest) => {
+        const currentTools = spaceToolSettings(latest);
+        const toolExists = currentTools.some((t) => t.tool_id === tool.id);
+        return {
+          mcp_tools: toolExists
+            ? currentTools.map((t) =>
+                t.tool_id === tool.id ? { tool_id: t.tool_id, is_enabled: !t.is_enabled } : t
+              )
+            : [...currentTools, { tool_id: tool.id, is_enabled: !tool.is_enabled }]
+        };
+      });
     } catch (e) {
       console.error("Failed to toggle tool:", e);
     }
