@@ -4,7 +4,7 @@ import socket
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Any, cast
+from typing import Any, Iterable, cast
 from uuid import UUID
 
 import redis.asyncio as aioredis
@@ -41,6 +41,55 @@ logger = get_logger(__name__)
 
 SCHEDULER_LOCK_KEY = "crawl_scheduler:leader"
 SCHEDULER_LOCK_TTL_SECONDS = 1800
+
+
+async def _mark_job_failed(job_id: UUID, message: str | None) -> None:
+    """Mark a still-running job as failed with its reason; never raises."""
+    from intric.database.tables.job_table import Jobs
+    from intric.main.models import Status
+
+    try:
+        async with Container.session_scope() as session:
+            stmt = (
+                sa.update(Jobs)
+                .where(Jobs.id == job_id)
+                .where(Jobs.status.in_([Status.QUEUED.value, Status.IN_PROGRESS.value]))
+                .values(
+                    status=Status.FAILED.value,
+                    finished_at=datetime.now(timezone.utc),
+                    result_location=(message or "")[:512] or None,
+                )
+            )
+            await session.execute(stmt)
+    except Exception as exc:
+        logger.warning(
+            "Could not record crawl job failure",
+            extra={"job_id": str(job_id), "error": str(exc)},
+        )
+
+
+def select_stale_titles(
+    existing_titles: Iterable[str],
+    crawled_titles: Iterable[str],
+    failed_titles: Iterable[str],
+    *,
+    is_partial: bool,
+    download_error_count: int,
+) -> list[str]:
+    """Titles of previously indexed pages that a finished crawl proved gone.
+
+    A timed-out crawl, or one with download errors (DNS failures including
+    blocked destinations, timeouts, refused connections; deliberate skips such
+    as robots.txt disallow are not counted), cannot prove that a missing page
+    was removed, so nothing is selected and existing content is kept. A later
+    clean crawl still removes genuinely gone pages. Failed pages are excluded:
+    their original data was preserved by transaction rollback.
+    """
+    if is_partial or download_error_count > 0:
+        return []
+    crawled = set(crawled_titles)
+    failed = set(failed_titles)
+    return [t for t in existing_titles if t not in crawled and t not in failed]
 
 
 async def _get_primary_active_job_id(
@@ -1008,6 +1057,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 # Track partial completion status for logging
                 crawl_is_partial = crawl.is_partial
                 crawl_termination_reason = crawl.termination_reason
+                crawl_download_error_count = crawl.download_error_count
 
                 if crawl_is_partial:
                     logger.warning(
@@ -1205,12 +1255,22 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             # Cleanup phase: delete stale blobs (batch for performance)
             cleanup_start = time.time()
-            # Exclude failed_titles - their original data was preserved by transaction rollback
-            stale_titles = [
-                title
-                for title in existing_titles
-                if title not in crawled_titles and title not in failed_titles
-            ]
+            stale_titles = select_stale_titles(
+                existing_titles,
+                crawled_titles,
+                failed_titles,
+                is_partial=crawl_is_partial,
+                download_error_count=crawl_download_error_count,
+            )
+            if not stale_titles and (crawl_is_partial or crawl_download_error_count):
+                logger.info(
+                    "Skipping stale blob cleanup: crawl was not clean",
+                    extra={
+                        "website_id": str(params.website_id),
+                        "is_partial": crawl_is_partial,
+                        "download_error_count": crawl_download_error_count,
+                    },
+                )
 
             # Batch delete using session-per-operation pattern
             if stale_titles:
@@ -1597,6 +1657,15 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # Why: We've already completed the job with a fresh session above,
             # task_manager's job_service has stale session references
             setattr(task_manager, "_job_already_handled", True)
+
+        # An exception inside the block above is logged and swallowed by the
+        # task manager, which has no job service here. Record the failure on
+        # the job now, with its reason, instead of leaving the run "in
+        # progress" until the watchdog sweeps it.
+        if task_manager.successful() is False and not getattr(
+            task_manager, "_job_already_handled", False
+        ):
+            await _mark_job_failed(job_id, task_manager.error_message)
 
         return task_manager.successful()
     finally:

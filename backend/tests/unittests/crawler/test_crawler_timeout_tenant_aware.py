@@ -29,9 +29,15 @@ from intric.main.exceptions import CrawlTimeoutError
 class MockCrawlManager:
     """Mock for CrawlManager that simulates timeout behavior."""
 
-    def __init__(self, delay: float = 0, should_timeout: bool = False):
+    def __init__(
+        self,
+        delay: float = 0,
+        should_timeout: bool = False,
+        download_error_count: int = 0,
+    ):
         self.delay = delay
         self.should_timeout = should_timeout
+        self.download_error_count = download_error_count
         self._crawler = None
         self._completion_event = threading.Event()
 
@@ -124,6 +130,43 @@ class TestCrawlerTimeoutEnforcement:
                 max_length=60,  # 60 second timeout - plenty of time
             )
             # If we get here without exception, test passed
+
+    @pytest.mark.asyncio
+    async def test_download_error_count_is_returned(self):
+        """Downloader exceptions (denied destinations, DNS failures, timeouts)
+        reach the caller so it can avoid treating missing pages as removed."""
+
+        with patch(
+            "intric.crawler.crawler.CrawlManager",
+            side_effect=lambda: MockCrawlManager(download_error_count=3),
+        ):
+            count = await Crawler._run_crawl_with_timeout(
+                url="https://example.com",
+                filepath="/tmp/test.jsonl",
+                files_dir="/tmp/files",
+                max_length=60,
+            )
+            sitemap_count = await Crawler._run_sitemap_crawl_with_timeout(
+                sitemap_url="https://example.com/sitemap.xml",
+                filepath="/tmp/test.jsonl",
+                files_dir="/tmp/files",
+                max_length=60,
+            )
+        assert count == 3
+        assert sitemap_count == 3
+
+    @pytest.mark.asyncio
+    async def test_download_error_count_reaches_crawl_result(self, tmp_path):
+        async def fake_crawl(*, filepath, **_kwargs):
+            with open(filepath, "w") as f:
+                f.write(
+                    '{"url": "https://example.com", "title": "t", "content": "c"}\n'
+                )
+            return 2
+
+        async with Crawler()._crawl(fake_crawl, max_length=60, url="x") as crawl:
+            assert crawl.download_error_count == 2
+            assert crawl.is_partial is False
 
 
 class TestCrawlerTenantSettingsResolution:
