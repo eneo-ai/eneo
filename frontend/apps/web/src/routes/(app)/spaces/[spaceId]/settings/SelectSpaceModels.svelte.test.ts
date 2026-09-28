@@ -1,16 +1,16 @@
 import type { CompletionModel } from "@eneo/eneo-js";
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
-import { writable } from "svelte/store";
+import { writable, type Writable } from "svelte/store";
 import { beforeEach, expect, it, vi } from "vitest";
 
 const { currentSpace, updateSpace } = vi.hoisted(() => ({
-  currentSpace: { value: null as unknown },
+  currentSpace: { value: null as unknown, store: null as unknown },
   updateSpace: vi.fn(async (_patch: unknown) => {})
 }));
 vi.mock("$lib/features/spaces/SpacesManager", () => ({
   getSpacesManager: () => ({
-    state: { currentSpace: writable(currentSpace.value) },
+    state: { currentSpace: (currentSpace.store = writable(currentSpace.value)) },
     updateSpace
   })
 }));
@@ -28,7 +28,26 @@ const completionProps = {
 const model = (id: string, nickname: string) =>
   ({ id, name: id, nickname, org: "OpenAI", is_org_enabled: true }) as unknown as CompletionModel;
 
-beforeEach(() => updateSpace.mockClear());
+beforeEach(() => {
+  updateSpace.mockReset();
+  updateSpace.mockImplementation(async (_patch: unknown) => {});
+});
+
+const link = (id: string) => ({
+  id,
+  name: id,
+  meets_security_classification: true,
+  available: true
+});
+
+const spaceLinking = (ids: string[]) => ({
+  completion_models: ids.map((id) => model(id, `Model ${id.toUpperCase()}`)),
+  linked_models: {
+    completion_models: ids.map(link),
+    embedding_models: [],
+    transcription_models: []
+  }
+});
 
 it("refuses to edit the model list when the space reports no link state", async () => {
   currentSpace.value = { completion_models: [] };
@@ -88,4 +107,38 @@ it("names a linked model missing from the catalogue, even without a nickname", a
   await row.click();
   await expect.poll(() => updateSpace.mock.calls.length).toBe(1);
   expect(updateSpace.mock.calls[0][0]).toEqual({ completion_models: [] });
+});
+
+it("holds every switch while a save is in flight, then works from the saved space", async () => {
+  let finishSave = () => {};
+  updateSpace.mockImplementationOnce(
+    (_patch: unknown) =>
+      new Promise<void>((resolve) => {
+        finishSave = () => {
+          (currentSpace.store as Writable<unknown>).set(spaceLinking(["a", "b"]));
+          resolve();
+        };
+      })
+  );
+  currentSpace.value = spaceLinking(["a"]);
+  render(SelectSpaceModels, {
+    ...completionProps,
+    selectableModels: [model("a", "Model A"), model("b", "Model B"), model("c", "Model C")]
+  });
+
+  await page.getByRole("switch", { name: /Model B/ }).click();
+  await expect.poll(() => updateSpace.mock.calls.length).toBe(1);
+  const other = page.getByRole("switch", { name: /Model C/ });
+  await expect.element(other).toBeDisabled();
+  // A second toggle built from the list before the first save would drop B.
+  await other.click({ force: true });
+  expect(updateSpace).toHaveBeenCalledTimes(1);
+
+  finishSave();
+  await expect.element(other).toBeEnabled();
+  await other.click();
+  await expect.poll(() => updateSpace.mock.calls.length).toBe(2);
+  expect(updateSpace.mock.calls[1][0]).toEqual({
+    completion_models: [{ id: "a" }, { id: "b" }, { id: "c" }]
+  });
 });

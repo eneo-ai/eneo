@@ -29,6 +29,8 @@ it("lets an admin remove a linked model below the space's classification, never 
 
   const linkedBelow = page.getByRole("switch", { name: /Linked below/ });
   await expect.element(linkedBelow).toBeChecked();
+  await expect.element(linkedBelow).toBeEnabled();
+  await expect.element(page.getByRole("switch", { name: /Unlinked below/ })).toBeDisabled();
   await linkedBelow.click();
   expect(onToggle).toHaveBeenCalledTimes(1);
   expect(onToggle.mock.calls[0][0]).toMatchObject({ id: "linked-below" });
@@ -52,6 +54,8 @@ it("lets an admin remove a linked model the tenant disabled, never add one", asy
 
   const linked = page.getByRole("switch", { name: /Linked disabled/ });
   await expect.element(linked).toBeChecked();
+  await expect.element(linked).toBeEnabled();
+  await expect.element(page.getByRole("switch", { name: /Other disabled/ })).toBeDisabled();
   await linked.click();
   expect(onToggle).toHaveBeenCalledTimes(1);
 

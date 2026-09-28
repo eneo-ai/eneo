@@ -47,10 +47,12 @@
     models: Row<TModel>[];
     selectedIds: string[];
     loadingIds?: LoadingLookup;
+    /** Holds every switch while the owner saves a change to the list. */
+    disabled?: boolean;
     onToggle: (model: Row<TModel>) => void | Promise<void>;
   };
 
-  let { models, selectedIds, loadingIds, onToggle }: Props<T> = $props();
+  let { models, selectedIds, loadingIds, disabled = false, onToggle }: Props<T> = $props();
   const uid = $props.id();
 
   const sortedModels = $derived(sortModels([...models]));
@@ -174,7 +176,7 @@
             {@const isLoading = loadingIds?.has(model.id) ?? false}
             {@const isSelected = selectedIdSet.has(model.id)}
             {@const canAdd = meetsClassification && model.is_org_enabled !== false}
-            {@const canToggle = (canAdd || isSelected) && !isLoading}
+            {@const canToggle = (canAdd || isSelected) && !isLoading && !disabled}
             {@const blockedReason = !meetsClassification
               ? m.model_does_not_meet_security_classification()
               : model.is_org_enabled === false
@@ -238,6 +240,7 @@
                 </div>
                 <Switch
                   checked={isSelected}
+                  disabled={!canToggle}
                   onCheckedChange={() => {
                     if (canToggle) {
                       onToggle(model);

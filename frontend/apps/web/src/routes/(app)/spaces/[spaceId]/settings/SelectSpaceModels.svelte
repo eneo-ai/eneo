@@ -50,8 +50,14 @@
   const linkedIds = $derived(linkedSpaceModelIds($currentSpace, kinds[field]));
   const selectedIds = $derived(linkedIds ?? []);
   const loading = new SvelteSet<string>();
+  // Each save sends the whole list, so a second toggle while one is in flight
+  // would be built from the list before the first and drop its change. Every
+  // switch waits for the save, then works from the space it returned.
+  let saving = $state(false);
 
   async function toggleModel(model: { id: string }) {
+    if (saving) return;
+    saving = true;
     loading.add(model.id);
     try {
       // Without the space's link state a save would unlink every model it
@@ -65,8 +71,10 @@
       await updateSpace({ [field]: ids.map((id) => ({ id })) });
     } catch (e) {
       toastError(e);
+    } finally {
+      loading.delete(model.id);
+      saving = false;
     }
-    loading.delete(model.id);
   }
 </script>
 
@@ -87,6 +95,7 @@
       models={selectableModels}
       {selectedIds}
       loadingIds={loading}
+      disabled={saving}
       onToggle={toggleModel}
     />
   {/if}
