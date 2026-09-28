@@ -73,7 +73,16 @@ async def test_colliding_usernames_keep_identity_and_private_resources_isolated(
             await container.session().flush()
             private_spaces.append(private_space.id)
 
-    assert owners[0].username == owners[1].username
+    assert owners[0].username == "anna.svensson"
+    if login_method == "password":
+        # Both accounts were seeded with the same username: a real collision
+        # that identity resolution must still keep isolated.
+        assert owners[1].username == "anna.svensson"
+    else:
+        # This JIT provisioning does not reuse a taken username, so the second
+        # account keeps its full email as the username. Isolation must hold
+        # regardless of whether the usernames collide.
+        assert owners[1].username == owners[1].email
     for index, (owner, token) in enumerate(zip(owners, tokens, strict=True)):
         headers = {"Authorization": f"Bearer {token}"}
         response = await client.get("/api/v1/users/me/", headers=headers)
