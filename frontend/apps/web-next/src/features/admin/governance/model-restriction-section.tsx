@@ -2,6 +2,7 @@
 
 import { AlertCircle, Cpu } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
@@ -22,6 +23,7 @@ export function ModelRestrictionSection({ draft }: { draft: PolicyDraft }) {
     defaultValid,
     badgeVariant,
     providerName,
+    providerType,
     setSingleDefault,
     toggleModelSelected,
     toggleProvider
@@ -65,7 +67,7 @@ export function ModelRestrictionSection({ draft }: { draft: PolicyDraft }) {
                 <fieldset key={pid ?? "_unprovided"} className="overflow-hidden rounded-lg border">
                   <legend className="sr-only">{providerName(pid)}</legend>
                   <div className="bg-muted flex items-center justify-between gap-3 border-b px-4 py-3">
-                    <div className="flex items-center gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
                       {pid !== null ? (
                         <Switch
                           checked={isProviderSelected}
@@ -77,8 +79,14 @@ export function ModelRestrictionSection({ draft }: { draft: PolicyDraft }) {
                       ) : (
                         <div className="w-8" aria-hidden="true" />
                       )}
-                      <div>
-                        <div className="text-foreground text-sm font-semibold">
+                      <span
+                        className="bg-ax-card border-ax-border rounded-ax-inner flex size-9 shrink-0 items-center justify-center border"
+                        aria-hidden="true"
+                      >
+                        <ProviderLogo provider={providerType(pid)} className="size-5" />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="text-foreground text-sm font-semibold break-words">
                           {providerName(pid)}
                         </div>
                         <div className="text-muted-foreground text-xs">

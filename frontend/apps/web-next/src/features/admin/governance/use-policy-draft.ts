@@ -183,6 +183,10 @@ export function usePolicyDraft(input: PolicyDraftInput) {
       ? t("governance_provider_other_models")
       : (providers.find((provider) => provider.id === pid)?.name ??
         t("governance_provider_unknown"));
+  const providerType = (pid: string | null): string | null =>
+    pid === null
+      ? null
+      : (providers.find((provider) => provider.id === pid)?.provider_type ?? null);
 
   // ---- Save lifecycle ------------------------------------------------------
   const [saving, setSaving] = useState(false);
@@ -236,6 +240,7 @@ export function usePolicyDraft(input: PolicyDraftInput) {
     defaultModelId,
     modelsSummary,
     defaultValid,
+    providerType,
     toggleModelSelected: (id: string, on: boolean) => dispatch({ type: "toggleModel", id, on }),
     setSingleDefault: (id: string) => dispatch({ type: "setDefault", id }),
     toggleProvider: (pid: string, on: boolean) =>

@@ -28,7 +28,12 @@ export type CompletionModel = {
     };
   } | null;
 };
-export type ModelProviderLite = { id: string; name: string; is_active?: boolean };
+export type ModelProviderLite = {
+  id: string;
+  name: string;
+  provider_type?: string;
+  is_active?: boolean;
+};
 export type McpTool = {
   id: string;
   name: string;
