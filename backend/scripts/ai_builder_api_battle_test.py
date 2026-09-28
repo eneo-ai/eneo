@@ -126,12 +126,16 @@ QUESTION_RELEVANCE_SEMANTICS_VERSION = 3
 # ended on an acquisition-class error (rejected credential, provider capacity,
 # harness contract) is `acquisition_failure`, never `builder_error`: R19 scored
 # a credential decryption failure as a product error.
-OUTCOME_CLASSIFICATION_SEMANTICS_VERSION = 5
+# v6: a journey that ends on an unanswered question about a saved flow
+# (edit_decision_N) is `edit_question_unanswered`, not a stalled interview.
+OUTCOME_CLASSIFICATION_SEMANTICS_VERSION = 6
 _ERROR_TERMINATED_OUTCOME_CLASSES = frozenset({"builder_error"})
 # v2: raw fixture bytes and the extracted runtime content are separate input
 # identities. Runtime lineage records the content the step consumed; it must
 # not be compared to the original upload digest.
-OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION = 3
+# v4: an edit observation whose session ran no classifier takes attachment
+# identity from the session's attachment record (`attachment_evidence_source`).
+OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION = 4
 
 
 def _ensure_backend_src_importable() -> None:
@@ -343,6 +347,37 @@ def _failure_error_fields(error: Exception) -> JsonObject:
     return fields
 
 
+# A saved-flow turn may ask instead of proposing (edit slice 2,
+# ai_builder_edit_question.py in the product): each question has its own id
+# under this prefix, an instance token, a typed `edit_target` (a step, one read
+# a step makes, or a template placeholder) and 2-6 offered answers.
+EDIT_QUESTION_ID_PREFIX = "edit_decision_"
+# What a question's typed target names, by kind, as the product's tool schema
+# offers it: saved steps as `step_<order>`, a read as the saved flow index names
+# it, a placeholder by its name.
+_EDIT_TARGET_KEYS: dict[str, frozenset[str]] = {
+    "step": frozenset({"kind", "step"}),
+    "consumer": frozenset({"kind", "step", "read"}),
+    "placeholder": frozenset({"kind", "placeholder"}),
+}
+_EDIT_TARGET_STEP = re.compile(r"step_([1-9]\d*)")
+# The answer source of an edit question the case answered.
+EDIT_ANSWER_SOURCE = "case_edit_answer"
+
+
+@dataclass(frozen=True, slots=True)
+class EditAnswer:
+    """The answer the case officer gives when the Builder asks about `target`.
+
+    Matched on the question's typed target, exactly, and on one offered
+    answer's value, exactly: the harness never reads meaning into the text of
+    a question or an option.
+    """
+
+    target: Mapping[str, str]
+    value: str
+
+
 @dataclass(frozen=True, slots=True)
 class EditCase:
     """One edit of a flow the harness seeds from a frozen fixture.
@@ -362,6 +397,9 @@ class EditCase:
     gold: EditExpectation | None
     raw: JsonObject = dataclass_field(compare=False, repr=False)
     fixture: JsonObject = dataclass_field(compare=False, repr=False)
+    # Declared in the edit block, so part of the case contract; a case that
+    # declares none keeps its contract.
+    answers: tuple[EditAnswer, ...] = ()
 
     @property
     def step_count(self) -> int:
@@ -856,6 +894,17 @@ def _provision_fixtures(
             "file_id": _required_string(uploaded, "id"),
             "content_sha256": manifest[name],
             "path": str(path.relative_to(FIXTURE_DIR.parents[1])),
+            # The server's record of the file it stored (name, media type and
+            # the size of the content it serves, which for a document is its
+            # extracted text, not the uploaded bytes): what a session's record
+            # of this file must match when no classifier reads it (see
+            # `_session_attachment_sha256s`). Metadata only; the bytes were
+            # verified against the manifest above.
+            **(
+                {"upload": metadata}
+                if (metadata := _attachment_metadata(uploaded)) is not None
+                else {}
+            ),
         }
     return provisioned
 
@@ -1497,7 +1546,9 @@ def _edit_case_from_case(
     owner = f"{path} case {case_id}.edit"
     edit = closed_object(
         raw_edit,
-        frozenset({"seed_flow_fixture", "scope", "target_step_order", "expect"}),
+        frozenset(
+            {"seed_flow_fixture", "scope", "target_step_order", "expect", "answers"}
+        ),
         owner=owner,
     )
     fixture_name = edit.get("seed_flow_fixture")
@@ -1533,7 +1584,67 @@ def _edit_case_from_case(
         ),
         raw=dict(edit),
         fixture=fixture,
+        answers=(
+            _edit_answers(
+                edit["answers"],
+                step_count=len(fixture["steps"]),
+                owner=f"{owner}.answers",
+            )
+            if "answers" in edit
+            else ()
+        ),
     )
+
+
+def _edit_answers(
+    raw: object, *, step_count: int, owner: str
+) -> tuple[EditAnswer, ...]:
+    """Read `answers`: per typed target, the one offered answer the case picks."""
+
+    if not isinstance(raw, list) or not raw:
+        raise ValueError(f"{owner} must be a non-empty list.")
+    answers: list[EditAnswer] = []
+    for index, item in enumerate(cast(list[object], raw)):
+        where = f"{owner}[{index}]"
+        entry = closed_object(item, frozenset({"target", "value"}), owner=where)
+        raw_target: object = entry.get("target")
+        target: Mapping[str, object] = (
+            cast(Mapping[str, object], raw_target)
+            if isinstance(raw_target, Mapping)
+            else {}
+        )
+        kind = target.get("kind")
+        keys = _EDIT_TARGET_KEYS.get(kind) if isinstance(kind, str) else None
+        if (
+            keys is None
+            or frozenset(target) != keys
+            or not all(
+                isinstance(value, str) and value and value == value.strip()
+                for value in target.values()
+            )
+        ):
+            raise ValueError(
+                f"{where}.target must be a typed edit target: "
+                + "; ".join(
+                    f"{kind}: {', '.join(sorted(names))}"
+                    for kind, names in _EDIT_TARGET_KEYS.items()
+                )
+            )
+        step = cast(Mapping[str, str], target).get("step")
+        order = _EDIT_TARGET_STEP.fullmatch(step) if step is not None else None
+        if step is not None and (order is None or int(order[1]) > step_count):
+            raise ValueError(
+                f"{where}.target.step {step} is not a saved step (step_1..step_{step_count})."
+            )
+        value = entry.get("value")
+        if not isinstance(value, str) or not value.strip() or value != value.strip():
+            raise ValueError(f"{where}.value must be one offered answer, exactly.")
+        if any(answer.target == target for answer in answers):
+            raise ValueError(f"{where}.target is answered more than once.")
+        answers.append(
+            EditAnswer(target=dict(cast(Mapping[str, str], target)), value=value)
+        )
+    return tuple(answers)
 
 
 def _cases_from_args(args: argparse.Namespace) -> list[BattleCase]:
@@ -5037,6 +5148,10 @@ def _run_case_session(
                 configured_answers=case.configured_question_answers or {},
                 answer_sources=case.question_answer_sources or {},
             )
+            if answer is None and case.edit is not None:
+                answer = _configured_edit_question_answer(
+                    question=question, answers=case.edit.answers
+                )
             if answer is not None:
                 response = _send_and_fetch(
                     config=config,
@@ -5074,6 +5189,7 @@ def _run_case_session(
                 final_interaction=final_interaction,
                 event_summary=event_summary,
                 ui_language=args.ui_language,
+                interactions=interactions,
             ),
             "plan": plan,
             "apply": None,
@@ -5138,6 +5254,11 @@ def _run_case_session(
         classifier_diagnostics=classifier_diagnostics,
         runtime_evidence=runtime_evidence,
         provisioned_fixtures=provisioned_fixtures,
+        latest_session=(
+            final_interaction.get("latest_session")
+            if isinstance(final_interaction.get("latest_session"), Mapping)
+            else None
+        ),
     )
     quality_report = _quality_report(
         plan=plan,
@@ -5225,8 +5346,14 @@ def _edit_outcome(
     final_interaction: Mapping[str, Any],
     event_summary: Mapping[str, Any],
     ui_language: str | None,
+    interactions: Sequence[Mapping[str, Any]] = (),
 ) -> JsonObject:
-    """What the user got: a plan, questions, and the Builder's last words."""
+    """What the user got: a plan, questions, and the Builder's last words.
+
+    `questions` counts the questions the case did not expect: an edit question
+    the case answered from its declared answers is one it anticipated, so it
+    is counted under `edit_questions_answered` instead.
+    """
 
     session = final_interaction.get("latest_session")
     conversation = (
@@ -5235,9 +5362,16 @@ def _edit_outcome(
         else []
     )
     replies = [item for item in conversation if item.get("role") == "assistant"]
+    journey = _journey_summary(
+        list(interactions), expected={}, interaction_limit=MAX_INTERACTIONS_PER_CASE
+    )
+    answered = _int_value(journey.get("edit_question_answered_count")) or 0
     return {
         "plan": final_interaction.get("plan_id") is not None,
-        "questions": _int_value(event_summary.get("question_event_count")) or 0,
+        "questions": (_int_value(event_summary.get("question_event_count")) or 0)
+        - answered,
+        "edit_questions": _int_value(journey.get("edit_question_count")) or 0,
+        "edit_questions_answered": answered,
         "final_text": replies[-1].get("content") if replies else None,
         "ui_language": ui_language,
     }
@@ -6755,6 +6889,53 @@ def _configured_question_answer(
     }
 
 
+def _is_edit_question(question: Mapping[str, Any]) -> bool:
+    question_id = _optional_string(question, "question_id")
+    return question_id is not None and question_id.startswith(EDIT_QUESTION_ID_PREFIX)
+
+
+def _configured_edit_question_answer(
+    *,
+    question: Mapping[str, Any],
+    answers: Sequence[EditAnswer],
+) -> JsonObject | None:
+    """The case's answer to a question about the saved flow, or None.
+
+    The case names the question by its typed target and its choice by one
+    offered answer's value; both must match exactly, and the choice must be
+    offered exactly once. Anything else stays unanswered, and the journey
+    reports it as an unanswered edit question rather than guessing.
+    """
+
+    target = question.get("edit_target")
+    if not _is_edit_question(question) or not isinstance(target, Mapping):
+        return None
+    answer = next((item for item in answers if item.target == target), None)
+    if answer is None:
+        return None
+    chosen = [
+        option
+        for option in _mapping_list(question.get("options"))
+        if option.get("value") == answer.value
+        and isinstance(option.get("id"), str)
+        and option.get("id")
+    ]
+    if len(chosen) != 1:
+        return None
+    option = chosen[0]
+    return {
+        "message": str(option.get("label") or answer.value),
+        "answer_source": EDIT_ANSWER_SOURCE,
+        "question_answer": {
+            "kind": "structured_question_answer",
+            "question_id": question["question_id"],
+            **_shown_instance(question),
+            "selected_option_ids": [option["id"]],
+            "selected_values": [answer.value],
+        },
+    }
+
+
 def _configured_selected_option_ids(answer_config: Mapping[str, Any]) -> list[str]:
     selected_option_ids = answer_config.get("selected_option_ids")
     if isinstance(selected_option_ids, list) and all(
@@ -6948,6 +7129,139 @@ def _case_runtime_file_paths(case: BattleCase) -> tuple[Path, ...]:
     return tuple(_verified_fixture_path(name, manifest) for name in case.runtime_files)
 
 
+# Where an observation's attachment evidence came from. A classifier run reads
+# the attached file, so its digest is of the text the server extracted: content
+# evidence. An edit turn classifies nothing (edit slice 2), and the session API
+# exposes no content checksum, so its evidence is the session's record of the
+# attached file checked against the server's own upload record of the fixture
+# (name, media type, size): metadata evidence that the session holds the file
+# the harness uploaded, not a reading of its content. The session source is
+# recorded on the observation only when used, so an observation read through
+# the classifier keeps its shape.
+CLASSIFIER_ATTACHMENT_EVIDENCE_SOURCE = "classifier_extracted_text"
+SESSION_ATTACHMENT_EVIDENCE_SOURCE = "session_attachment_metadata"
+
+
+def _attachment_metadata(value: object) -> JsonObject | None:
+    """A file record's name, media type and size, when it carries all three."""
+
+    if not isinstance(value, Mapping):
+        return None
+    record = cast(Mapping[str, object], value)
+    name, mimetype, size = (
+        record.get("name"),
+        record.get("mimetype"),
+        record.get("size"),
+    )
+    if (
+        not isinstance(name, str)
+        or not name
+        or not isinstance(mimetype, str)
+        or not mimetype
+        or not isinstance(size, int)
+        or isinstance(size, bool)
+        or size < 0
+    ):
+        return None
+    return {"name": name, "mimetype": mimetype, "size": size}
+
+
+def _expected_attachment_metadata(
+    *,
+    attached_file_ids: Sequence[str],
+    direct_file_slot_count: int,
+    declared_names: Sequence[str],
+    upload_metadata: object,
+) -> list[JsonObject | None]:
+    """Per attached file, the metadata its session record must carry.
+
+    The server's upload record of the fixture the harness verified and
+    uploaded, whose name must be the fixture name the case contract seals.
+    None for a direct file slot, and for an upload record that is missing or
+    names another file: that attachment then has no evidence.
+    """
+
+    expected: list[JsonObject | None] = [None] * len(attached_file_ids)
+    if (
+        not isinstance(upload_metadata, list)
+        or len(cast(list[object], upload_metadata)) != len(attached_file_ids)
+        or len(attached_file_ids) != direct_file_slot_count + len(declared_names)
+    ):
+        return expected
+    uploads = cast(list[object], upload_metadata)
+    for offset, name in enumerate(declared_names):
+        index = direct_file_slot_count + offset
+        metadata = _attachment_metadata(uploads[index])
+        if metadata is not None and metadata["name"] == name:
+            expected[index] = metadata
+    return expected
+
+
+def _attachment_evidence(
+    *,
+    attached_file_ids: tuple[str, ...],
+    classifier_diagnostics: Mapping[str, object] | None,
+    edits_saved_flow: bool,
+    latest_session: Mapping[str, object] | None,
+    expected_metadata: Sequence[JsonObject | None],
+) -> tuple[list[str | None], str | None]:
+    """Per attached file, its evidence digest, and where the digests came from.
+
+    The classifier's source inventory when a classifier ran (the text it read);
+    otherwise, on an edit of a saved flow, the session's attachment metadata;
+    otherwise nothing was observed (source None).
+    """
+
+    if _classifier_runs(classifier_diagnostics) or not edits_saved_flow:
+        return (
+            _attachment_evidence_sha256s(
+                attached_file_ids=attached_file_ids,
+                classifier_diagnostics=classifier_diagnostics,
+            ),
+            CLASSIFIER_ATTACHMENT_EVIDENCE_SOURCE
+            if _classifier_runs(classifier_diagnostics)
+            else None,
+        )
+    return (
+        _session_attachment_sha256s(
+            attached_file_ids=attached_file_ids,
+            latest_session=latest_session,
+            expected_metadata=expected_metadata,
+        ),
+        SESSION_ATTACHMENT_EVIDENCE_SOURCE,
+    )
+
+
+def _session_attachment_sha256s(
+    *,
+    attached_file_ids: tuple[str, ...],
+    latest_session: Mapping[str, object] | None,
+    expected_metadata: Sequence[JsonObject | None],
+) -> list[str | None]:
+    """The digest of the session's one record of each attached file, when that
+    record carries exactly the metadata expected of it.
+
+    A record with another name, media type or size differs from the server's
+    record of the upload, so it is no evidence. The digest leaves out the per-run file id,
+    so one fixture digests the same in every run.
+    """
+
+    records = _mapping_list((latest_session or {}).get("attachments"))
+    digests: list[str | None] = []
+    for index, file_id in enumerate(attached_file_ids):
+        matches = [record for record in records if record.get("id") == file_id]
+        metadata = _attachment_metadata(matches[0]) if len(matches) == 1 else None
+        expected = expected_metadata[index] if index < len(expected_metadata) else None
+        digests.append(
+            _canonical_sha256(
+                {"source": SESSION_ATTACHMENT_EVIDENCE_SOURCE, **metadata}
+            )
+            if metadata is not None and metadata == expected
+            else None
+        )
+    return digests
+
+
 def _attachment_evidence_sha256s(
     *,
     attached_file_ids: tuple[str, ...],
@@ -6979,8 +7293,9 @@ def _attachment_evidence_status(
     attached_file_ids: tuple[str, ...],
     classifier_diagnostics: Mapping[str, object] | None,
     evidence_sha256s: list[str | None],
+    evidence_source: str | None = None,
 ) -> str:
-    """Distinguish an unobserved classifier from malformed attachment evidence."""
+    """Distinguish unobserved attachments from malformed attachment evidence."""
 
     if (
         not _classifier_evidence_contract_is_valid(classifier_diagnostics)
@@ -6990,7 +7305,10 @@ def _attachment_evidence_status(
         return "invalid"
     if not attached_file_ids:
         return "not_required"
-    if not _classifier_runs(classifier_diagnostics):
+    if (
+        not _classifier_runs(classifier_diagnostics)
+        and evidence_source != SESSION_ATTACHMENT_EVIDENCE_SOURCE
+    ):
         return "not_observed"
     return (
         "complete"
@@ -7007,21 +7325,44 @@ def _observation_input_identity(
     classifier_diagnostics: Mapping[str, object] | None,
     runtime_evidence: Mapping[str, object] | None,
     provisioned_fixtures: Mapping[str, object] | None = None,
+    latest_session: Mapping[str, object] | None = None,
 ) -> JsonObject:
     # What the attached bytes were is settled offline, by the manifest hash the
     # harness verified before uploading. The extracted-text digest below is an
     # observation of what the server made of those bytes: recorded per run and
     # compared across runs by the comparator, never pinned to a constant some
-    # operator captured by hand months ago.
-    observed_attachment_evidence_sha256s = _attachment_evidence_sha256s(
-        attached_file_ids=attached_file_ids,
-        classifier_diagnostics=classifier_diagnostics,
+    # operator captured by hand months ago. An edit turn has no classifier to
+    # read the file, so the session's record of it stands in (see
+    # `_attachment_evidence`).
+    provisioned = provisioned_fixtures or {}
+    upload_metadata = [None] * len(case.file_ids) + [
+        _attachment_metadata(
+            cast(Mapping[str, object], entry).get("upload")
+            if isinstance(entry := provisioned.get(name), Mapping)
+            else None
+        )
+        for name in case.attachments
+    ]
+    observed_attachment_evidence_sha256s, attachment_evidence_source = (
+        _attachment_evidence(
+            attached_file_ids=attached_file_ids,
+            classifier_diagnostics=classifier_diagnostics,
+            edits_saved_flow=case.edit is not None,
+            latest_session=latest_session,
+            expected_metadata=_expected_attachment_metadata(
+                attached_file_ids=attached_file_ids,
+                direct_file_slot_count=len(case.file_ids),
+                declared_names=case.attachments,
+                upload_metadata=upload_metadata,
+            ),
+        )
     )
     attachment_evidence_status = _attachment_evidence_status(
         expected_session_id=session_id,
         attached_file_ids=attached_file_ids,
         classifier_diagnostics=classifier_diagnostics,
         evidence_sha256s=observed_attachment_evidence_sha256s,
+        evidence_source=attachment_evidence_source,
     )
     attachment_fixture_bindings = _fixture_attachment_bindings(
         case=case,
@@ -7068,6 +7409,15 @@ def _observation_input_identity(
         "attachment_fixture_bindings": attachment_fixture_bindings,
         "attachment_fixtures": _fixture_contract(case.attachments),
         "attachment_evidence_status": attachment_evidence_status,
+        **(
+            {
+                "attachment_evidence_source": attachment_evidence_source,
+                "attachment_upload_metadata": upload_metadata,
+            }
+            if attached_file_ids
+            and attachment_evidence_source == SESSION_ATTACHMENT_EVIDENCE_SOURCE
+            else {}
+        ),
         "runtime_evidence_status": runtime_evidence_status,
         "verified": not mismatches and fingerprint_complete,
         "mismatches": mismatches,
@@ -7395,6 +7745,25 @@ def _proposal_progress_payload(progress: Mapping[str, object]) -> JsonObject:
     }
 
 
+# The capability fingerprint of a turn the slot classifier served, and of an
+# edit turn it does not serve: edit slice 2 sends a saved-flow turn straight to
+# the proposal model, so such an observation has no classifier prompt to hash
+# and its model identity is the planner's alone. Only an edit observation whose
+# session ran no classifier may carry the second.
+CLASSIFIER_CAPABILITY_SOURCE = "slot_classification_prompt_hash_composite"
+SAVED_FLOW_TURN_CAPABILITY_SOURCE = "saved_flow_turn_without_classifier"
+
+
+def _capability_source(
+    *, edits_saved_flow: bool, classifier_diagnostics: Mapping[str, object] | None
+) -> str:
+    return (
+        SAVED_FLOW_TURN_CAPABILITY_SOURCE
+        if edits_saved_flow and not _classifier_runs(classifier_diagnostics)
+        else CLASSIFIER_CAPABILITY_SOURCE
+    )
+
+
 def _live_execution_provenance(
     *,
     case: BattleCase,
@@ -7585,7 +7954,10 @@ def _live_execution_provenance(
             "classifier_hashes": classifier_prompt_hashes,
         },
         "capability": {
-            "source": "slot_classification_prompt_hash_composite",
+            "source": _capability_source(
+                edits_saved_flow=case.edit is not None,
+                classifier_diagnostics=classifier_diagnostics,
+            ),
             "classifier_prompt_hashes": classifier_prompt_hashes,
             "classifier_request_composite_fingerprint": (
                 classifier_request_composite_fingerprint
@@ -7683,10 +8055,19 @@ def _live_provenance_checks(
         and model.get("observed_matches_resolved") is True
         and _is_sha256(model.get("sha256"))
     )
+    raw_capability: object = provenance.get("capability")
+    capability: Mapping[str, object] = (
+        cast(Mapping[str, object], raw_capability)
+        if isinstance(raw_capability, Mapping)
+        else {}
+    )
     classifier_hashes = _string_list(prompt.get("classifier_hashes"))
     prompt_complete = (
         _is_sha256(prompt.get("case_sha256"))
-        and bool(classifier_hashes)
+        and (
+            bool(classifier_hashes)
+            or capability.get("source") == SAVED_FLOW_TURN_CAPABILITY_SOURCE
+        )
         and all(_is_sha256(item) for item in classifier_hashes)
     )
     usage_complete = all(
@@ -7899,22 +8280,43 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
     prompt = prompt if isinstance(prompt, Mapping) else {}
     prompt_text = _optional_string(case, "prompt")
     classifier_hashes = _classifier_prompt_hashes(classifier_diagnostics)
+    # Recomputed from the sealed contract and the kept diagnostics: an
+    # observation may lack classifier evidence only as an edit whose session
+    # ran no classifier.
+    edits_saved_flow = isinstance(
+        cast(Mapping[str, object], case_contract).get("edit"), Mapping
+    )
+    capability_source = _capability_source(
+        edits_saved_flow=edits_saved_flow,
+        classifier_diagnostics=cast(
+            Mapping[str, object] | None, classifier_diagnostics
+        ),
+    )
+    classifier_free = capability_source == SAVED_FLOW_TURN_CAPABILITY_SOURCE
     prompt_complete = (
         prompt_text is not None
         and prompt.get("case_sha256")
         == hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()
-        and bool(classifier_hashes)
+        and (bool(classifier_hashes) or classifier_free)
         and all(_is_sha256(value) for value in classifier_hashes)
         and prompt.get("classifier_hashes") == classifier_hashes
     )
 
-    capability = provenance.get("capability")
-    capability = capability if isinstance(capability, Mapping) else {}
+    raw_capability: object = provenance.get("capability")
+    capability: Mapping[str, object] = (
+        cast(Mapping[str, object], raw_capability)
+        if isinstance(raw_capability, Mapping)
+        else {}
+    )
     capability_complete = (
-        capability.get("source") == "slot_classification_prompt_hash_composite"
+        capability.get("source") == capability_source
         and capability.get("classifier_prompt_hashes") == classifier_hashes
         and capability.get("classifier_request_composite_fingerprint")
-        == _canonical_sha256({"classifier_prompt_hashes": classifier_hashes})
+        == (
+            None
+            if classifier_free
+            else _canonical_sha256({"classifier_prompt_hashes": classifier_hashes})
+        )
     )
 
     progress = provenance.get("proposal_progress")
@@ -7945,15 +8347,44 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
         attachment_fixture.get("runtime_files")
     )
     expected_runtime_digest_count = len(expected_runtime_fixtures or [])
-    recomputed_attachment_sha256s = _attachment_evidence_sha256s(
+    latest_session = bundle.get("latest_session")
+    recomputed_attachment_sha256s, recomputed_attachment_source = _attachment_evidence(
         attached_file_ids=attached_file_ids,
-        classifier_diagnostics=classifier_diagnostics,
+        classifier_diagnostics=cast(
+            Mapping[str, object] | None, classifier_diagnostics
+        ),
+        edits_saved_flow=edits_saved_flow,
+        latest_session=(
+            cast(Mapping[str, object], latest_session)
+            if isinstance(latest_session, Mapping)
+            else None
+        ),
+        # The upload records the observation kept, held to the fixture names
+        # the sealed contract declares.
+        expected_metadata=_expected_attachment_metadata(
+            attached_file_ids=attached_file_ids,
+            direct_file_slot_count=(
+                direct_file_slot_count
+                if isinstance(direct_file_slot_count, int)
+                and not isinstance(direct_file_slot_count, bool)
+                else -1
+            ),
+            declared_names=[str(entry["name"]) for entry in declared_attachments or []],
+            upload_metadata=cast(Mapping[str, object], observation_input).get(
+                "attachment_upload_metadata"
+            ),
+        ),
     )
     recomputed_attachment_status = _attachment_evidence_status(
         expected_session_id=str(bundle.get("session_id") or ""),
         attached_file_ids=attached_file_ids,
         classifier_diagnostics=classifier_diagnostics,
         evidence_sha256s=recomputed_attachment_sha256s,
+        evidence_source=recomputed_attachment_source,
+    )
+    session_attachment_evidence = (
+        bool(attached_file_ids)
+        and recomputed_attachment_source == SESSION_ATTACHMENT_EVIDENCE_SOURCE
     )
     runtime_evidence = bundle.get("runtime_evidence")
     recomputed_runtime_sha256s, recomputed_runtime_status = _runtime_lineage_sha256s(
@@ -8006,6 +8437,15 @@ def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
         and attachment_sha256s == recomputed_attachment_sha256s
         and observation_input.get("attachment_evidence_status")
         == recomputed_attachment_status
+        and cast(Mapping[str, object], observation_input).get(
+            "attachment_evidence_source"
+        )
+        == (SESSION_ATTACHMENT_EVIDENCE_SOURCE if session_attachment_evidence else None)
+        and (
+            "attachment_upload_metadata"
+            in cast(Mapping[str, object], observation_input)
+        )
+        == session_attachment_evidence
         and runtime_sha256s == recomputed_runtime_sha256s
         and observation_input.get("runtime_evidence_status")
         == recomputed_runtime_status
@@ -8534,6 +8974,7 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
         "observation_input_verified": (
             observation_input_identity.get("verified") is True
         ),
+        "attachment_evidence": _attachment_evidence_row(observation_input_identity),
         "observation_status": observation_status,
         "expectation_verdict": expectation_verdict,
         "outcome_class": outcome_class,
@@ -8586,6 +9027,39 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
         "failure_summary": bundle.get("failure_summary")
         if isinstance(bundle.get("failure_summary"), Mapping)
         else _failure_summary(event_summary),
+    }
+
+
+def _attachment_evidence_row(identity: Mapping[str, Any]) -> JsonObject | None:
+    """What a suite row carries of an observation's attachment evidence: its
+    source and, per attached fixture, the evidence digest. None when the
+    observation attached no fixture. The comparator reads only this."""
+
+    fixtures = _mapping_list(identity.get("attachment_fixtures"))
+    raw_digests = identity.get("attachment_evidence_sha256s")
+    digests = cast(list[object], raw_digests) if isinstance(raw_digests, list) else []
+    if not fixtures or len(digests) < len(fixtures):
+        return None
+    status = identity.get("attachment_evidence_status")
+    # Fixture digests follow any direct file slots.
+    fixture_digests = digests[len(digests) - len(fixtures) :]
+    # Only the session path records its source; any other digest is the text
+    # a classifier read.
+    source = identity.get("attachment_evidence_source") or (
+        CLASSIFIER_ATTACHMENT_EVIDENCE_SOURCE
+        if any(_is_sha256(digest) for digest in fixture_digests)
+        else None
+    )
+    return {
+        "source": source,
+        "status": status,
+        "fixtures": [
+            {
+                "name": fixture.get("name"),
+                "evidence_sha256": digest if _is_sha256(digest) else None,
+            }
+            for fixture, digest in zip(fixtures, fixture_digests, strict=True)
+        ],
     }
 
 
@@ -8694,6 +9168,31 @@ def _suite_outcome_summary(results: list[JsonObject]) -> JsonObject:
             for cohort, cohort_counts in sorted(by_cohort.items())
         },
         "conformance": _suite_conformance_summary(results),
+        "edit_questions": _suite_edit_question_summary(results),
+    }
+
+
+def _suite_edit_question_summary(results: list[JsonObject]) -> JsonObject:
+    """How often the Builder asked about a saved flow, apart from the outcome:
+    an ask can be legitimate whether or not the case answered it."""
+
+    journeys = [
+        cast(Mapping[str, Any], journey)
+        for result in results
+        if isinstance(journey := result.get("journey"), Mapping)
+    ]
+
+    def total(key: str) -> int:
+        return sum(_int_value(journey.get(key)) or 0 for journey in journeys)
+
+    return {
+        "observations_asking": sum(
+            (_int_value(journey.get("edit_question_count")) or 0) > 0
+            for journey in journeys
+        ),
+        "asked": total("edit_question_count"),
+        "answered": total("edit_question_answered_count"),
+        "unanswered": total("edit_question_unanswered_count"),
     }
 
 
@@ -9983,6 +10482,12 @@ def _journey_summary(
                 "turn": interaction_index + 1,
                 "question_id": question_id,
                 "question": _optional_string(question, "question"),
+                "edit_question": _is_edit_question(question),
+                "edit_target": (
+                    dict(question["edit_target"])
+                    if isinstance(question.get("edit_target"), Mapping)
+                    else None
+                ),
                 "option_ids": [
                     option_id
                     for option in _mapping_list(question.get("options"))
@@ -10079,6 +10584,11 @@ def _journey_summary(
         )
     ):
         outcome_class = "clarification_stop_intended"
+    elif termination == "unanswered_question" and questions[-1]["edit_question"]:
+        # The Builder asked about the saved flow and the case configured no
+        # answer to it. Asking can be the right move on an edit, so it is its
+        # own outcome, never a stalled interview.
+        outcome_class = "edit_question_unanswered"
     elif termination == "unanswered_question":
         outcome_class = "stalled_unanswered_question"
     elif termination == "interaction_limit":
@@ -10088,11 +10598,21 @@ def _journey_summary(
     resolved_count = sum(
         question.get("resolution") == "resolved" for question in questions
     )
+    edit_questions = [question for question in questions if question["edit_question"]]
     return {
         "termination": termination,
         "outcome_class": outcome_class,
         "turn_count": len(interactions),
         "question_event_count": len(questions),
+        # Asks about the saved flow, counted apart from discovery questions.
+        "edit_question_count": len(edit_questions),
+        "edit_question_answered_count": sum(
+            question["answer_source"] == EDIT_ANSWER_SOURCE
+            for question in edit_questions
+        ),
+        "edit_question_unanswered_count": sum(
+            question["resolution"] == "unanswered" for question in edit_questions
+        ),
         "question_event_ids": [question["question_id"] for question in questions],
         "unique_question_event_ids": list(
             dict.fromkeys(str(question["question_id"]) for question in questions)

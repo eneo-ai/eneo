@@ -82,6 +82,7 @@ KNOWN_OUTCOME_CLASSES = frozenset(
         "clarification_stop_intended",
         "clarify_ok",
         "stalled_unanswered_question",
+        "edit_question_unanswered",
         "interaction_limit_reached",
         "requirements_unconfirmed",
         "builder_error",

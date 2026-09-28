@@ -9410,8 +9410,8 @@ def test_inferred_medium_classifier_claim_does_not_violate_forbidden_commit_grad
 def test_evaluator_identity_carries_measurement_semantics_versions() -> None:
     harness = _battle_harness()
     assert harness.QUESTION_RELEVANCE_SEMANTICS_VERSION == 3
-    assert harness.OUTCOME_CLASSIFICATION_SEMANTICS_VERSION == 5
-    assert harness.OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION == 3
+    assert harness.OUTCOME_CLASSIFICATION_SEMANTICS_VERSION == 6
+    assert harness.OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION == 4
     assert harness.SUPPORTED_CASES_FILE_VERSION == 9
     identity = harness._suite_evaluator_identity(
         release_identity={},
@@ -9419,8 +9419,8 @@ def test_evaluator_identity_carries_measurement_semantics_versions() -> None:
         expected_observations=[],
     )
     assert identity["question_relevance_semantics_version"] == 3
-    assert identity["outcome_classification_semantics_version"] == 5
-    assert identity["observation_input_identity_semantics_version"] == 3
+    assert identity["outcome_classification_semantics_version"] == 6
+    assert identity["observation_input_identity_semantics_version"] == 4
 
 
 def test_planner_evidence_skips_planner_less_interactions() -> None:
@@ -14235,3 +14235,780 @@ def test_seed_fixtures_pass_the_products_draft_and_publish_validators(
     validate_steps(
         steps, metadata_json=metadata, require_complete_template_fill_config=True
     )
+
+
+# --- Edit slice 2: typed edit questions and classifier-free edit turns -------
+
+# The shape a saved-flow turn's question takes on the wire (edit slice 2,
+# ai_builder_edit_question.py): its own id, an instance token, a typed target
+# and 2-6 offered answers whose value is the answer text.
+_EDIT_TARGET = {"kind": "placeholder", "placeholder": "avgift"}
+
+
+def _edit_question(
+    *,
+    question_id: str = "edit_decision_1",
+    target: Mapping[str, object] = _EDIT_TARGET,
+    values: tuple[str, ...] = ("step_2.structured.avgift_kr", "form.avgift"),
+    token: str = "11111111-1111-1111-1111-111111111111",
+) -> dict[str, object]:
+    return {
+        "question_id": question_id,
+        "question": "Vad ska platshållaren avgift fyllas med?",
+        "options": [
+            {"id": f"option_{index}", "label": value, "value": value}
+            for index, value in enumerate(values, start=1)
+        ],
+        "selection_mode": "single",
+        "allow_custom": False,
+        "edit_target": dict(target),
+        "instance_token": token,
+    }
+
+
+def _answering_edit_case(
+    harness: ModuleType, answers: list[dict[str, object]] | None
+) -> Any:
+    edit: dict[str, object] = {
+        "seed_flow_fixture": "edit_seed_byg19.json",
+        "scope": "whole_flow",
+    }
+    if answers is not None:
+        edit["answers"] = answers
+    return harness._edit_case_from_case(
+        {"edit": edit}, path="cases.json", case_id="edit-asks"
+    )
+
+
+def test_an_edit_question_is_answered_with_the_offered_option_the_case_chose() -> None:
+    harness = _battle_harness()
+    edit = _answering_edit_case(
+        harness,
+        [{"target": _EDIT_TARGET, "value": "step_2.structured.avgift_kr"}],
+    )
+
+    answer = harness._configured_edit_question_answer(
+        question=_edit_question(), answers=edit.answers
+    )
+
+    assert answer == {
+        "message": "step_2.structured.avgift_kr",
+        "answer_source": "case_edit_answer",
+        "question_answer": {
+            "kind": "structured_question_answer",
+            "question_id": "edit_decision_1",
+            "instance_token": "11111111-1111-1111-1111-111111111111",
+            "selected_option_ids": ["option_1"],
+            "selected_values": ["step_2.structured.avgift_kr"],
+        },
+    }
+
+
+@mark.parametrize(
+    "question",
+    [
+        # Another target: the case said nothing about it.
+        _edit_question(target={"kind": "step", "step": "step_3"}),
+        # The chosen answer is not among those offered: no nearest guess.
+        _edit_question(values=("form.avgift", "sys.datum")),
+        # A discovery question is never answered from the edit answers.
+        {**_edit_question(question_id="primary_runtime_input"), "edit_target": None},
+    ],
+)
+def test_an_edit_question_without_a_matching_answer_stays_unanswered(
+    question: dict[str, object],
+) -> None:
+    harness = _battle_harness()
+    edit = _answering_edit_case(
+        harness,
+        [{"target": _EDIT_TARGET, "value": "step_2.structured.avgift_kr"}],
+    )
+
+    assert (
+        harness._configured_edit_question_answer(
+            question=question, answers=edit.answers
+        )
+        is None
+    )
+
+
+@mark.parametrize(
+    ("answers", "message"),
+    [
+        ([{"target": {"kind": "step"}, "value": "x"}], "target"),
+        ([{"target": {"kind": "step", "step": "step_9"}, "value": "x"}], "step_9"),
+        ([{"target": {"kind": "prompt", "prompt": "x"}, "value": "x"}], "target"),
+        ([{"target": _EDIT_TARGET, "value": " "}], "value"),
+        (
+            [
+                {"target": _EDIT_TARGET, "value": "a"},
+                {"target": _EDIT_TARGET, "value": "b"},
+            ],
+            "more than once",
+        ),
+        ([], "answers"),
+    ],
+)
+def test_edit_answers_must_name_a_typed_target_of_the_seed_and_one_value(
+    answers: list[dict[str, object]], message: str
+) -> None:
+    harness = _battle_harness()
+
+    with raises(ValueError, match=message):
+        _answering_edit_case(harness, answers)
+
+
+def test_edit_answers_enter_only_the_contract_of_the_case_that_declares_them() -> None:
+    harness = _battle_harness()
+    plain = _answering_edit_case(harness, None)
+    answering = _answering_edit_case(
+        harness, [{"target": _EDIT_TARGET, "value": "form.avgift"}]
+    )
+
+    assert plain.answers == ()
+    assert "answers" not in harness._edit_contract(plain)
+    assert harness._edit_contract(answering)["answers"] == [
+        {"target": _EDIT_TARGET, "value": "form.avgift"}
+    ]
+    # No me_* gold implies an ask, so no municipal edit case declares answers
+    # and every one keeps its sealed contract.
+    cases = harness._read_cases_file(
+        harness.DEFAULT_CASES_FILE.with_name("ai_builder_api_municipal_cases.json")
+    )
+    edits = [case for case in cases if case.edit is not None]
+    assert len(edits) == 20
+    assert {case.edit.gold.outcome for case in edits if case.edit.gold} <= {
+        "plan",
+        "declined",
+    }
+    assert all(case.edit.answers == () for case in edits)
+
+
+def test_an_edit_case_answers_the_edit_question_it_configured(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    harness = _battle_harness()
+    sent: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        harness, "_create_session", lambda **_kwargs: {"session_id": "session-1"}
+    )
+    monkeypatch.setattr(harness, "_request_json", lambda **_kwargs: {})
+
+    def send_and_fetch(**kwargs: Any) -> dict[str, Any]:
+        sent.append(kwargs)
+        if len(sent) == 1:
+            return {
+                "plan_id": None,
+                "events": [{"event": "question", "data": _edit_question()}],
+            }
+        raise RuntimeError("stop after the answer turn")
+
+    monkeypatch.setattr(harness, "_send_and_fetch", send_and_fetch)
+    case = harness.BattleCase(
+        case_id="edit-asks",
+        prompt="Fyll mallen.",
+        edit=_answering_edit_case(
+            harness, [{"target": _EDIT_TARGET, "value": "form.avgift"}]
+        ),
+    )
+
+    with raises(RuntimeError, match="stop after the answer turn"):
+        harness._run_case_session(
+            case=case,
+            config=object(),
+            args=SimpleNamespace(
+                space_id="space-1",
+                model_id=None,
+                ui_language="sv",
+                file_ids=None,
+                auto_confirm_requirements=True,
+            ),
+            existing_session_id=None,
+            artifact_output_dir=tmp_path,
+            cases_path=None,
+            provisioned_fixtures=None,
+            seeded_flow=harness.SeededFlow(
+                flow_id="flow-1", target_step_id=None, step_ids=("a", "b", "c")
+            ),
+        )
+
+    assert sent[1]["message"] == "form.avgift"
+    assert sent[1]["question_answer"] == {
+        "kind": "structured_question_answer",
+        "question_id": "edit_decision_1",
+        "instance_token": "11111111-1111-1111-1111-111111111111",
+        "selected_option_ids": ["option_2"],
+        "selected_values": ["form.avgift"],
+    }
+
+
+def _question_turn(question: Mapping[str, object]) -> dict[str, object]:
+    return {"plan_id": None, "events": [{"event": "question", "data": dict(question)}]}
+
+
+def test_an_unanswered_edit_question_is_its_own_outcome_and_asks_are_counted() -> None:
+    harness = _battle_harness()
+
+    unanswered = harness._journey_summary(
+        [_question_turn(_edit_question())], expected={}, interaction_limit=6
+    )
+    stalled = harness._journey_summary(
+        [
+            _question_turn(
+                {"question_id": "primary_runtime_input", "options": [{"id": "a"}]}
+            )
+        ],
+        expected={},
+        interaction_limit=6,
+    )
+    answered = harness._journey_summary(
+        [
+            _question_turn(_edit_question()),
+            {
+                "plan_id": "plan-1",
+                "events": [],
+                "question_answer": {
+                    "question_id": "edit_decision_1",
+                    "selected_option_ids": ["option_1"],
+                },
+                "configured_answer_source": "case_edit_answer",
+            },
+        ],
+        expected={},
+        interaction_limit=6,
+    )
+
+    assert unanswered["outcome_class"] == "edit_question_unanswered"
+    assert unanswered["questions"][0]["edit_target"] == _EDIT_TARGET
+    assert (
+        unanswered["edit_question_count"],
+        unanswered["edit_question_answered_count"],
+        unanswered["edit_question_unanswered_count"],
+    ) == (1, 0, 1)
+    assert stalled["outcome_class"] == "stalled_unanswered_question"
+    assert stalled["edit_question_count"] == 0
+    assert answered["outcome_class"] == "plan_first_pass"
+    assert (
+        answered["edit_question_count"],
+        answered["edit_question_answered_count"],
+        answered["edit_question_unanswered_count"],
+    ) == (1, 1, 0)
+    assert harness._suite_outcome_summary(
+        [
+            {"outcome_class": "edit_question_unanswered", "journey": unanswered},
+            {"outcome_class": "plan_first_pass", "journey": answered},
+            {"outcome_class": "stalled_unanswered_question", "journey": stalled},
+        ]
+    )["edit_questions"] == {
+        "observations_asking": 2,
+        "asked": 2,
+        "answered": 1,
+        "unanswered": 1,
+    }
+
+
+def test_an_edit_question_the_case_answered_is_not_an_unexpected_question() -> None:
+    harness = _battle_harness()
+    answer_turn = {
+        "plan_id": "plan-1",
+        "events": [],
+        "question_answer": {"question_id": "edit_decision_1"},
+        "configured_answer_source": "case_edit_answer",
+        "latest_session": {"conversation": []},
+    }
+    interactions = [_question_turn(_edit_question()), answer_turn]
+
+    outcome = harness._edit_outcome(
+        final_interaction=answer_turn,
+        event_summary=harness._interaction_event_summary(interactions),
+        ui_language="sv",
+        interactions=interactions,
+    )
+
+    assert outcome["plan"] is True
+    assert outcome["questions"] == 0
+    assert (outcome["edit_questions"], outcome["edit_questions_answered"]) == (1, 1)
+
+
+_ATTACHMENT_FIXTURE = "me_utb01_specialkostmeny_mall.docx"
+# What the product reports for this document: the size of its extracted text,
+# not of the 38,732 bytes uploaded.
+_ATTACHMENT_RECORDED_SIZE = 869
+_ATTACHMENT_FILE_ID = "00000000-0000-0000-0000-0000000000f1"
+
+
+def _session_attachment(file_id: str = "file-1") -> dict[str, object]:
+    return {
+        "id": file_id,
+        "name": _ATTACHMENT_FIXTURE,
+        "mimetype": "application/vnd.openxmlformats-officedocument"
+        ".wordprocessingml.document",
+        "size": _ATTACHMENT_RECORDED_SIZE,
+        "token_count": None,
+        "transcription": None,
+        "has_download_reference": False,
+        "created_at": "2026-09-28T12:49:21Z",
+        "updated_at": "2026-09-28T12:49:21Z",
+    }
+
+
+def _attachment_edit_case(harness: ModuleType) -> Any:
+    return harness.BattleCase(
+        case_id="edit-with-template",
+        prompt="Fyll den bifogade mallen.",
+        attachments=(_ATTACHMENT_FIXTURE,),
+        edit=_answering_edit_case(harness, None),
+    )
+
+
+def _no_classifier_diagnostics() -> dict[str, object]:
+    return {"session_id": _TEST_SESSION_ID, "classifier_runs": []}
+
+
+def _provisioned_attachment(
+    harness: ModuleType, *, file_id: str = "file-1", **upload: object
+) -> dict[str, object]:
+    """The fixture as provisioning records it, with the server's upload record."""
+
+    record = _session_attachment(file_id)
+    return {
+        _ATTACHMENT_FIXTURE: {
+            "file_id": file_id,
+            "content_sha256": harness._fixture_manifest()[_ATTACHMENT_FIXTURE],
+            "upload": {
+                "name": record["name"],
+                "mimetype": record["mimetype"],
+                "size": record["size"],
+                **upload,
+            },
+        }
+    }
+
+
+def _session_attachment_identity(
+    harness: ModuleType,
+    case: Any,
+    session_record: Mapping[str, object],
+    provisioned: Mapping[str, object],
+) -> Any:
+    return harness._observation_input_identity(
+        case=case,
+        session_id=_TEST_SESSION_ID,
+        attached_file_ids=("file-1",),
+        classifier_diagnostics=_no_classifier_diagnostics(),
+        runtime_evidence=None,
+        provisioned_fixtures=provisioned,
+        latest_session={"attachments": [dict(session_record)]},
+    )
+
+
+def test_an_edit_turn_takes_attachment_metadata_from_the_session_record() -> None:
+    harness = _battle_harness()
+    provisioned = _provisioned_attachment(harness)
+    edit_case = _attachment_edit_case(harness)
+    create_case = harness.BattleCase(
+        case_id="create-with-template",
+        prompt="Bygg från mallen.",
+        attachments=(_ATTACHMENT_FIXTURE,),
+    )
+
+    edited = _session_attachment_identity(
+        harness, edit_case, _session_attachment(), provisioned
+    )
+    created = _session_attachment_identity(
+        harness, create_case, _session_attachment(), provisioned
+    )
+    unbound = _session_attachment_identity(
+        harness, edit_case, _session_attachment("file-2"), provisioned
+    )
+
+    assert edited["attachment_evidence_status"] == "complete"
+    assert edited["attachment_evidence_source"] == "session_attachment_metadata"
+    assert edited["verified"] is True
+    (digest,) = edited["attachment_evidence_sha256s"]
+    assert harness._is_sha256(digest)
+    # Never the per-run file id: the same fixture in another run digests the same.
+    assert _session_attachment_identity(
+        harness, edit_case, _session_attachment(), provisioned
+    )["attachment_evidence_sha256s"] == [digest]
+    # A create turn still needs the classifier's reading of the file.
+    assert created["attachment_evidence_status"] == "not_observed"
+    assert "attachment_evidence_source" not in created
+    # A session that does not hold the attached file proves nothing.
+    assert unbound["attachment_evidence_status"] == "incomplete"
+    assert unbound["verified"] is False
+
+
+@mark.parametrize(
+    ("session_record", "upload"),
+    [
+        # The session holds a file of another name than the sealed fixture.
+        ({"name": "annan_mall.docx"}, {}),
+        # ...of another size than the server recorded at upload.
+        ({"size": _ATTACHMENT_RECORDED_SIZE + 1}, {}),
+        # ...of another media type.
+        ({"mimetype": "application/pdf"}, {}),
+        # The upload record itself names another file than the fixture.
+        ({"name": "annan_mall.docx"}, {"name": "annan_mall.docx"}),
+        # No upload record was kept: nothing to hold the session record to.
+        ({}, None),
+    ],
+)
+def test_a_session_record_unlike_the_uploaded_fixture_is_no_evidence(
+    session_record: dict[str, object], upload: dict[str, object] | None
+) -> None:
+    harness = _battle_harness()
+    provisioned = _provisioned_attachment(harness, **(upload or {}))
+    if upload is None:
+        entry = provisioned[_ATTACHMENT_FIXTURE]
+        assert isinstance(entry, dict)
+        entry.pop("upload")
+
+    identity = _session_attachment_identity(
+        harness,
+        _attachment_edit_case(harness),
+        {**_session_attachment(), **session_record},
+        provisioned,
+    )
+
+    assert identity["attachment_evidence_sha256s"] == [None]
+    assert identity["attachment_evidence_status"] == "incomplete"
+    assert identity["verified"] is False
+    assert identity["mismatches"] == ["attachment_evidence"]
+
+
+def _classifier_free_edit_bundle(harness: ModuleType, case: Any) -> dict[str, Any]:
+    bundle = _complete_live_case_bundle(harness, case)
+    if case.edit is not None:
+        bundle["case"]["edit"] = harness._edit_contract(case.edit)
+    bundle["classifier_diagnostics"] = _no_classifier_diagnostics()
+    provenance = bundle["live_execution_provenance"]
+    model = provenance["model"]
+    model["classifier_observed_ids"] = []
+    model["sha256"] = harness._canonical_sha256(
+        {key: value for key, value in model.items() if key != "sha256"}
+    )
+    provenance["prompt"]["classifier_hashes"] = []
+    provenance["capability"] = {
+        "source": "saved_flow_turn_without_classifier",
+        "classifier_prompt_hashes": [],
+        "classifier_request_composite_fingerprint": None,
+    }
+    provenance["usage"]["raw_reads"]["classifier_run_count"] = 0
+    return bundle
+
+
+def test_an_edit_observation_without_a_classifier_run_is_valid_evidence() -> None:
+    # Edit slice 2 classifies nothing on a saved flow: the planner alone
+    # identifies the model, and there is no classifier prompt to fingerprint.
+    harness = _battle_harness()
+    edit_case = harness.BattleCase(
+        case_id="edit-no-classifier",
+        prompt="Byt namn på steg 2.",
+        edit=_answering_edit_case(harness, None),
+    )
+    create_case = harness.BattleCase(case_id="create-no-classifier", prompt="Bygg.")
+
+    edit_bundle = _classifier_free_edit_bundle(harness, edit_case)
+    create_bundle = _classifier_free_edit_bundle(harness, create_case)
+
+    assert harness._observation_evidence_report(edit_bundle)["valid"] is True
+    assert {
+        check["name"]: check["passed"]
+        for check in harness._live_provenance_checks(
+            edit_bundle["live_execution_provenance"]
+        )
+    }["live_prompt_provenance_complete"] is True
+    # A create observation must still show its classifier.
+    failed = {
+        check["name"]
+        for check in harness._observation_evidence_report(create_bundle)[
+            "failed_checks"
+        ]
+    }
+    assert {
+        "observation_prompt_provenance_consistent",
+        "observation_capability_provenance_consistent",
+    } <= failed
+
+
+def test_an_edit_observation_revalidates_its_session_attachment_identity() -> None:
+    harness = _battle_harness()
+    case = _attachment_edit_case(harness)
+    bundle = _classifier_free_edit_bundle(harness, case)
+    bundle["case"]["file_ids"] = ["file-1"]
+    bundle["latest_session"] = {"attachments": [_session_attachment()]}
+    bundle["observation_input_identity"] = harness._observation_input_identity(
+        case=case,
+        session_id=_TEST_SESSION_ID,
+        attached_file_ids=("file-1",),
+        classifier_diagnostics=_no_classifier_diagnostics(),
+        runtime_evidence=None,
+        provisioned_fixtures=_provisioned_attachment(harness),
+        latest_session=bundle["latest_session"],
+    )
+
+    assert harness._observation_evidence_report(bundle)["valid"] is True
+
+    def inconsistent(changed: dict[str, Any]) -> bool:
+        return "observation_input_identity_consistent" in {
+            check["name"]
+            for check in harness._observation_evidence_report(changed)["failed_checks"]
+        }
+
+    # A session record that no longer matches its upload.
+    resized = json.loads(json.dumps(bundle))
+    resized["latest_session"]["attachments"][0]["size"] = _ATTACHMENT_RECORDED_SIZE + 1
+    assert inconsistent(resized)
+    # An upload record renamed together with the session record: the sealed
+    # contract's fixture name still refuses it.
+    renamed = json.loads(json.dumps(bundle))
+    renamed["latest_session"]["attachments"][0]["name"] = "annan_mall.docx"
+    renamed["observation_input_identity"]["attachment_upload_metadata"][0]["name"] = (
+        "annan_mall.docx"
+    )
+    assert inconsistent(renamed)
+
+
+def _compare_module() -> ModuleType:
+    module_path = (
+        Path(__file__).resolve().parents[4] / "scripts" / "ai_builder_battle_compare.py"
+    )
+    spec = importlib.util.spec_from_file_location("battle_compare", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _attachment_suite_receipt(
+    harness: ModuleType,
+    monkeypatch: MonkeyPatch,
+    output_dir: Path,
+    *,
+    classifier_digest: str | None,
+    mimetype: str | None = None,
+    classifier_session_id: str = _TEST_SESSION_ID,
+) -> Path:
+    """A real suite receipt of one edit case with an attachment: its row is the
+    harness's own projection of a bundle read through a classifier (with that
+    digest) or, with none, through the session's attachment record. `mimetype`
+    is how the server records the same upload; `classifier_session_id` names the
+    session the classifier diagnostics claim to describe."""
+
+    _allow_measurement_preflight(harness, monkeypatch)
+    case = _attachment_edit_case(harness)
+    recorded = {"mimetype": mimetype} if mimetype is not None else {}
+    provisioned = _provisioned_attachment(
+        harness, file_id=_ATTACHMENT_FILE_ID, **recorded
+    )
+    monkeypatch.setattr(harness, "_provision_fixtures", lambda **_: provisioned)
+    monkeypatch.setattr(
+        harness,
+        "_release_run_identity",
+        lambda **_: _release_identity_fixture(
+            harness, case_id=case.case_id, prompt=case.prompt
+        ),
+    )
+
+    def execute_case(**_kwargs: object) -> dict[str, object]:
+        if classifier_digest is None:
+            bundle = _classifier_free_edit_bundle(harness, case)
+            diagnostics: dict[str, Any] = _no_classifier_diagnostics()
+        else:
+            bundle = _complete_live_case_bundle(harness, case)
+            bundle["case"]["edit"] = harness._edit_contract(case.edit)
+            diagnostics = bundle["classifier_diagnostics"]
+            diagnostics["session_id"] = classifier_session_id
+        bundle["case"]["file_ids"] = [_ATTACHMENT_FILE_ID]
+        if classifier_digest is not None:
+            diagnostics["classifier_runs"][0]["source_inventory"] = [
+                {
+                    "source_id": f"uploaded_file:{_ATTACHMENT_FILE_ID}",
+                    "kind": "uploaded_file",
+                    "source_sha256": classifier_digest,
+                    "file_id": _ATTACHMENT_FILE_ID,
+                    "coverage": "fully_seen",
+                }
+            ]
+        bundle["classifier_diagnostics"] = diagnostics
+        bundle["latest_session"] = {
+            "attachments": [{**_session_attachment(_ATTACHMENT_FILE_ID), **recorded}]
+        }
+        bundle["observation_input_identity"] = harness._observation_input_identity(
+            case=case,
+            session_id=_TEST_SESSION_ID,
+            attached_file_ids=(_ATTACHMENT_FILE_ID,),
+            classifier_diagnostics=diagnostics,
+            runtime_evidence=None,
+            provisioned_fixtures=provisioned,
+            latest_session=bundle["latest_session"],
+        )
+        return bundle
+
+    monkeypatch.setattr(harness, "_run_case", execute_case)
+    output_dir.mkdir()
+    harness._run_suite(
+        cases=[case],
+        config=harness.ApiConfig(
+            base_url="http://localhost:8123/api/v1",
+            api_key="test-key",
+            timeout_seconds=1,
+        ),
+        args=SimpleNamespace(
+            repetitions=1, space_id="space-1", timeout_seconds=900, model_id="model-a"
+        ),
+        output_dir=output_dir,
+        acquisition_contract=harness.AcquisitionContract(required_case_ids=()),
+    )
+    return next(output_dir.glob("ai-builder-api-battle-suite-*/suite-summary.json"))
+
+
+def test_a_comparison_of_suite_receipts_reports_attachment_evidence_by_source(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    harness = _battle_harness()
+    compare = _compare_module()
+
+    def receipt(name: str, **kwargs: Any) -> Path:
+        return _attachment_suite_receipt(
+            harness, monkeypatch, tmp_path / name, **kwargs
+        )
+
+    read_c = receipt("read-c", classifier_digest="c" * 64)
+    read_e = receipt("read-e", classifier_digest="e" * 64)
+    metadata = receipt("metadata", classifier_digest=None)
+    rerecorded = receipt(
+        "rerecorded", classifier_digest=None, mimetype="application/octet-stream"
+    )
+
+    for path in (read_c, read_e, metadata, rerecorded):
+        row = json.loads(path.read_text())["results"][0]
+        assert row["evidence_valid"] is True
+        assert row["attachment_evidence"]["status"] == "complete"
+    row = json.loads(metadata.read_text())["results"][0]
+    assert row["attachment_evidence"]["source"] == "session_attachment_metadata"
+
+    changed = compare.compare(read_c, read_e)["attachment_evidence_changes"]
+    assert changed == [
+        {
+            "fixture": _ATTACHMENT_FIXTURE,
+            "source": "classifier_extracted_text",
+            "baseline": ["c" * 64],
+            "current": ["e" * 64],
+        }
+    ]
+    # The classifier's text and the session's file record are different
+    # evidence: moving from one to the other is no change.
+    assert compare.compare(read_c, metadata)["attachment_evidence_changes"] == []
+    (moved,) = compare.compare(metadata, rerecorded)["attachment_evidence_changes"]
+    assert moved["source"] == "session_attachment_metadata"
+    report = compare._render_markdown(
+        compare.compare(metadata, rerecorded), only_changed=False
+    )
+    assert "Attachment evidence changed" in report
+    assert "extracted text" not in report
+    assert "name, media type and size, not content" in report
+
+
+def test_a_comparison_ignores_attachment_evidence_of_an_invalid_observation(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    harness = _battle_harness()
+    compare = _compare_module()
+
+    def receipt(name: str, digest: str, session_id: str) -> Path:
+        return _attachment_suite_receipt(
+            harness,
+            monkeypatch,
+            tmp_path / name,
+            classifier_digest=digest,
+            classifier_session_id=session_id,
+        )
+
+    valid_c = receipt("valid-c", "c" * 64, _TEST_SESSION_ID)
+    valid_e = receipt("valid-e", "e" * 64, _TEST_SESSION_ID)
+    # Diagnostics of another session: the digest is present, the evidence is not
+    # trustworthy.
+    foreign_c = receipt("foreign-c", "c" * 64, "another-session")
+    foreign_e = receipt("foreign-e", "e" * 64, "another-session")
+
+    row = json.loads(foreign_e.read_text())["results"][0]
+    assert row["attachment_evidence"]["status"] == "invalid"
+    assert row["evidence_valid"] is False
+    assert row["attachment_evidence"]["fixtures"][0]["evidence_sha256"] == "e" * 64
+
+    assert compare.compare(valid_c, valid_e)["attachment_evidence_changes"] != []
+    assert compare.compare(foreign_c, foreign_e)["attachment_evidence_changes"] == []
+    assert compare.compare(foreign_c, valid_e)["attachment_evidence_changes"] == []
+
+
+def test_the_comparator_reads_only_complete_attachment_evidence() -> None:
+    compare = _compare_module()
+
+    def rows(status: str, valid: bool, digest: str) -> dict[str, list[dict[str, Any]]]:
+        return {
+            "case": [
+                {
+                    "evidence_valid": valid,
+                    "attachment_evidence": {
+                        "source": "classifier_extracted_text",
+                        "status": status,
+                        "fixtures": [
+                            {"name": _ATTACHMENT_FIXTURE, "evidence_sha256": digest}
+                        ],
+                    },
+                }
+            ]
+        }
+
+    baseline = rows("complete", True, "c" * 64)
+    assert compare._attachment_evidence_changes(
+        baseline, rows("complete", True, "e" * 64)
+    ) == [
+        {
+            "fixture": _ATTACHMENT_FIXTURE,
+            "source": "classifier_extracted_text",
+            "baseline": ["c" * 64],
+            "current": ["e" * 64],
+        }
+    ]
+    for status, valid in (
+        ("incomplete", True),
+        ("invalid", True),
+        ("complete", False),
+    ):
+        assert (
+            compare._attachment_evidence_changes(
+                baseline, rows(status, valid, "e" * 64)
+            )
+            == []
+        )
+
+
+def test_provisioning_keeps_the_upload_record_the_server_reports(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    fixture = harness._verified_fixture_path(
+        _ATTACHMENT_FIXTURE, harness._fixture_manifest()
+    )
+    assert fixture.stat().st_size != _ATTACHMENT_RECORDED_SIZE
+    uploaded = _session_attachment()
+    monkeypatch.setattr(harness, "_upload_file", lambda **_: uploaded)
+    config = harness.ApiConfig(
+        base_url="http://localhost:8123/api/v1", api_key="test-key", timeout_seconds=1
+    )
+
+    provisioned = harness._provision_fixtures(
+        config=config, cases=[_attachment_edit_case(harness)]
+    )
+
+    entry = provisioned[_ATTACHMENT_FIXTURE]
+    assert isinstance(entry, dict)
+    assert entry["upload"] == {
+        "name": _ATTACHMENT_FIXTURE,
+        "mimetype": uploaded["mimetype"],
+        "size": _ATTACHMENT_RECORDED_SIZE,
+    }

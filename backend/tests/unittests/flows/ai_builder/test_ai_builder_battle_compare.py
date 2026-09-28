@@ -1671,3 +1671,12 @@ def test_token_baseline_refuses_a_completed_bundle_without_diagnostics(
     root = _write_bundles(tmp_path / "suite", [bundle])
     with pytest.raises(module.ReceiptError, match="proposal_turns is missing"):
         module.token_baseline_report(root)
+
+
+def test_an_unanswered_edit_question_ranks_with_a_stalled_question() -> None:
+    module = _compare_module()
+
+    assert (
+        module._OUTCOME_RANK["edit_question_unanswered"]
+        == module._OUTCOME_RANK["stalled_unanswered_question"]
+    )

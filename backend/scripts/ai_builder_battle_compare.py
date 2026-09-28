@@ -88,6 +88,8 @@ _OUTCOME_RANK: dict[str, int] = {
     "clarify_ok": 5,
     "plan_repaired": 4,
     "stalled_unanswered_question": 3,
+    # The Builder asked about the saved flow and the case had no answer.
+    "edit_question_unanswered": 3,
     "interaction_limit_reached": 2,
     "requirements_unconfirmed": 2,
     "plan_with_error": 2,
@@ -1305,35 +1307,56 @@ def _evidence_strength(
     }
 
 
+# What each attachment evidence source digests, as the report names it.
+_ATTACHMENT_EVIDENCE_LABELS: dict[str, str] = {
+    "classifier_extracted_text": "text the classifier extracted",
+    "session_attachment_metadata": (
+        "session file record: name, media type and size, not content"
+    ),
+}
+
+
 def _attachment_evidence_changes(
     baseline_rows: dict[str, list[dict[str, Any]]],
     current_rows: dict[str, list[dict[str, Any]]],
 ) -> list[dict[str, Any]]:
-    """Fixtures whose extracted text changed between the two builds.
+    """Fixtures whose attachment evidence changed between the two builds.
 
-    Fixture bytes are pinned in git and verified before upload, so a moved
-    digest here means the product now reads the same document differently —
-    a finding, not a fixture problem, and one a hand-captured constant used to
-    turn into a stale-looking failure instead.
+    Read from each suite row's `attachment_evidence`, only when the row's
+    evidence is valid and that record is complete (an observation whose
+    evidence failed validation certifies nothing), and compared only within
+    one source: `classifier_extracted_text` digests the text the classifier
+    read (a moved digest means the product now reads the same git-pinned bytes
+    differently), `session_attachment_metadata` digests the session's record
+    of the file (name, media type, size; a moved digest means the server now
+    records the same upload differently). A digest of one source never
+    compares with the other's.
     """
 
-    def digests(rows: dict[str, list[dict[str, Any]]]) -> dict[str, set[str]]:
-        found: dict[str, set[str]] = {}
+    def digests(
+        rows: dict[str, list[dict[str, Any]]],
+    ) -> dict[tuple[str, str], set[str]]:
+        found: dict[tuple[str, str], set[str]] = {}
         for case_rows in rows.values():
             for row in case_rows:
-                identity = row.get("observation_input_identity")
-                if not isinstance(identity, dict):
+                evidence = row.get("attachment_evidence")
+                if row.get("evidence_valid") is not True or not isinstance(
+                    evidence, dict
+                ):
                     continue
-                typed = cast(dict[str, Any], identity)
-                fixtures = cast(list[Any], typed.get("attachment_fixtures") or [])
-                observed = cast(
-                    list[Any], typed.get("attachment_evidence_sha256s") or []
-                )
-                for fixture, digest in zip(fixtures, observed, strict=False):
-                    if isinstance(fixture, dict) and isinstance(digest, str):
-                        name = cast(dict[str, Any], fixture).get("name")
-                        if isinstance(name, str):
-                            found.setdefault(name, set()).add(digest)
+                typed = cast(dict[str, Any], evidence)
+                if typed.get("status") != "complete":
+                    continue
+                source = typed.get("source")
+                if not isinstance(source, str) or not source:
+                    continue
+                for fixture in cast(list[Any], typed.get("fixtures") or []):
+                    if not isinstance(fixture, dict):
+                        continue
+                    entry = cast(dict[str, Any], fixture)
+                    name, digest = entry.get("name"), entry.get("evidence_sha256")
+                    if isinstance(name, str) and isinstance(digest, str):
+                        found.setdefault((name, source), set()).add(digest)
         return found
 
     baseline_digests = digests(baseline_rows)
@@ -1341,11 +1364,12 @@ def _attachment_evidence_changes(
     return [
         {
             "fixture": name,
-            "baseline": sorted(baseline_digests[name]),
-            "current": sorted(current_digests[name]),
+            "source": source,
+            "baseline": sorted(baseline_digests[(name, source)]),
+            "current": sorted(current_digests[(name, source)]),
         }
-        for name in sorted(set(baseline_digests) & set(current_digests))
-        if baseline_digests[name] != current_digests[name]
+        for name, source in sorted(set(baseline_digests) & set(current_digests))
+        if baseline_digests[(name, source)] != current_digests[(name, source)]
     ]
 
 
@@ -1496,12 +1520,14 @@ def _render_markdown(report: dict[str, Any], *, only_changed: bool) -> str:
     fixture_changes = cast(list[dict[str, Any]], report["attachment_evidence_changes"])
     if fixture_changes:
         lines.append(
-            "## Fixture extraction changed (same git-pinned bytes, different "
-            "extracted text — a product change, not a fixture problem)"
+            "## Attachment evidence changed (same git-pinned bytes; a product "
+            "change, not a fixture problem)"
         )
         for change in fixture_changes:
             lines.append(
-                f"- {change['fixture']}: {change['baseline']} -> {change['current']}"
+                f"- {change['fixture']} "
+                f"({_ATTACHMENT_EVIDENCE_LABELS.get(change['source'], change['source'])}): "
+                f"{change['baseline']} -> {change['current']}"
             )
         lines.append("")
     unstable = cast(dict[str, list[str]], report["unstable_cases"])
