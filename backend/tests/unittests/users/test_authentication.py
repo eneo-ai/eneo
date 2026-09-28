@@ -331,9 +331,9 @@ async def test_session_rejects_missing_required_claim(session_service, claim: st
     "claim,value",
     [
         ("user_id", "not-a-uuid"),
-        ("user_id", str(uuid4())),
+        ("user_id", "00000000-0000-4000-8000-000000000001"),
         ("tenant_id", "not-a-uuid"),
-        ("tenant_id", str(uuid4())),
+        ("tenant_id", "00000000-0000-4000-8000-000000000002"),
         ("token_version", 1),
         ("token_version", 3),
         ("token_version", "2"),
