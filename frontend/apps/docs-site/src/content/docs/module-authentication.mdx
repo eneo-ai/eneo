@@ -336,3 +336,7 @@ configuration changes and organization assignment changes all produce audit even
   ticket exchange and preserved across refresh. If the account is deleted, its
   tokens stop authenticating — even when the same email is later re-assigned
   to a replacement account.
+  This is the same [session identity contract](/docs/authentication-architecture#eneo-session-identity)
+  used by the Eneo API and internal MCP tools. Tokens require `token_version: 2`;
+  pre-upgrade tokens and pending tickets cannot be exchanged or renewed after
+  the upgrade. Restart the Eneo login handoff when authentication is rejected.

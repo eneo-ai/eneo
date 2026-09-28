@@ -1,6 +1,6 @@
 import base64
 import binascii
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Literal, Optional
 from uuid import UUID
@@ -16,35 +16,33 @@ from pydantic import (
 )
 
 from eneo.audit.domain.actor_types import ActorType
-from eneo.main.config import get_settings
 
 if TYPE_CHECKING:
     from eneo.users.user import UserInDB
 
 
 class JWTMeta(BaseModel):
-    iss: str = get_settings().jwt_issuer  # who issued it
-    aud: str = get_settings().jwt_audience  # who it's intended for
-    iat: float = datetime.timestamp(datetime.now(timezone.utc))  # issued at time
-    exp: float = datetime.timestamp(
-        datetime.now(timezone.utc) + timedelta(minutes=get_settings().jwt_expiry_time)
-    )  # expiry time
+    # Received tokens must carry their own metadata; never invent missing claims.
+    iss: str
+    aud: str
+    iat: float
+    exp: float
 
 
 class JWTCreds(BaseModel):
-    """How we'll identify users"""
+    """Immutable Eneo session identity, shared by API, MCP and module tokens."""
 
+    token_version: Literal[2]
+    user_id: UUID
+    tenant_id: UUID
+    credential_version: int = Field(ge=0, strict=True)
+    # Retained as descriptive claims for clients; never used to resolve a user.
     sub: EmailStr
     username: Optional[str] = None
-    # Missing claims decode as version 0 for rolling compatibility with tokens
-    # minted before credential-version based session invalidation existed.
-    credential_version: int = Field(default=0, ge=0)
 
 
 class JWTPayload(JWTMeta, JWTCreds):
-    """
-    JWT Payload right before it's encoded - combine meta and username
-    """
+    """Verified Eneo session claims, including the required identity version."""
 
     pass
 

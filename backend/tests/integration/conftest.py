@@ -947,14 +947,10 @@ def encryption_service(test_settings):
 @pytest.fixture
 def patch_auth_service_jwt(monkeypatch, test_settings):
     """Ensure AuthService uses the runtime test settings for JWT operations."""
-    from datetime import datetime, timedelta, timezone
-
-    import jwt as jwt_lib
-
-    from eneo.authentication.auth_models import JWTCreds, JWTMeta, JWTPayload
     from eneo.authentication.auth_service import AuthService
     from eneo.users.user import UserInDB
 
+    original_create_token = AuthService.create_access_token_for_user
     original_get_jwt_payload = AuthService.get_jwt_payload
 
     def patched_create_token(
@@ -965,31 +961,16 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
         expires_in: float | None = None,
         extra_claims: dict[str, object] | None = None,
     ) -> str:
-        secret = secret_key or test_settings.jwt_secret
-        aud = audience or test_settings.jwt_audience
-        expiry_minutes = expires_in or test_settings.jwt_expiry_time
-
-        jwt_meta = JWTMeta(
-            iss=test_settings.jwt_issuer,
-            aud=aud,
-            iat=datetime.timestamp(datetime.now(timezone.utc) - timedelta(seconds=2)),
-            exp=datetime.timestamp(
-                datetime.now(timezone.utc) + timedelta(minutes=expiry_minutes)
-            ),
+        return original_create_token(
+            self,
+            user,
+            secret_key=secret_key or test_settings.jwt_secret,
+            audience=audience or test_settings.jwt_audience,
+            expires_in=expires_in
+            if expires_in is not None
+            else test_settings.jwt_expiry_time,
+            extra_claims=extra_claims,
         )
-        jwt_creds = JWTCreds(
-            sub=user.email,
-            username=user.username,
-            credential_version=getattr(user, "credential_version", 0),
-        )
-        payload = {
-            **JWTPayload(
-                **jwt_meta.model_dump(), **jwt_creds.model_dump()
-            ).model_dump(),
-            **(extra_claims or {}),
-        }
-
-        return jwt_lib.encode(payload, secret, algorithm=test_settings.jwt_algorithm)
 
     def patched_get_jwt_payload(
         self,
@@ -1143,39 +1124,20 @@ def oidc_mock(monkeypatch):
 
 
 @pytest.fixture
-async def tenant_user_token(test_tenant, test_settings):
-    """Create a JWT token for a regular (non-admin) tenant user.
+async def tenant_user_token(test_tenant, db_container, patch_auth_service_jwt):
+    """Mint a real non-admin account's session for authorization boundary tests."""
+    from eneo.users.user import UserAdd, UserState
 
-    This token represents a normal user within the tenant,
-    NOT a system administrator. Used to test authorization boundaries.
-
-    Creates the JWT directly using jwt.encode() with test_settings values,
-    matching the pattern used in patch_auth_service_jwt fixture.
-    """
-    from datetime import datetime, timedelta, timezone
-
-    import jwt
-
-    now = datetime.now(timezone.utc)
-
-    # Create JWT payload matching app's expectations
-    payload = {
-        "sub": f"user@{test_tenant.slug}.test",  # Email as subject
-        "username": "testuser",  # Username for regular user
-        "iss": test_settings.jwt_issuer,
-        "aud": test_settings.jwt_audience,
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(minutes=30)).timestamp()),
-        "tenant_id": str(test_tenant.id),
-        "email": f"user@{test_tenant.slug}.test",
-    }
-
-    # Encode using test JWT secret (HS256)
-    token = jwt.encode(
-        payload, test_settings.jwt_secret, algorithm=test_settings.jwt_algorithm
-    )
-
-    return token
+    async with db_container() as container:
+        user = await container.user_repo().add(
+            UserAdd(
+                email=f"regular-{test_tenant.id}@example.com",
+                username="testuser",
+                tenant_id=test_tenant.id,
+                state=UserState.ACTIVE,
+            )
+        )
+        return container.auth_service().create_access_token_for_user(user)
 
 
 @pytest.fixture(autouse=True)
