@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Final, Literal, Protocol, cast
+from typing import Any, Final, Literal, cast
 
 from eneo.main.exceptions import BadRequestException
 
@@ -77,50 +77,6 @@ class FlowRagEvidencePolicy:
     )
     max_recorded_passage_bytes_per_run_view: int = (
         DEFAULT_MAX_RECORDED_PASSAGE_BYTES_PER_RUN_VIEW
-    )
-
-
-class FlowRagEvidencePolicySource(Protocol):
-    async def get_rag_evidence_policy(self) -> object: ...
-
-
-async def resolve_flow_rag_evidence_policy_from_source(
-    source: FlowRagEvidencePolicySource | None,
-) -> FlowRagEvidencePolicy:
-    if source is None:
-        return FlowRagEvidencePolicy()
-    loader = getattr(source, "get_rag_evidence_policy", None)
-    if loader is None:
-        return FlowRagEvidencePolicy()
-    policy = await loader()
-    defaults = FlowRagEvidencePolicy()
-    return FlowRagEvidencePolicy(
-        version=getattr(policy, "version", RAG_EVIDENCE_STORAGE_VERSION),
-        max_sources_with_recorded_passages=getattr(
-            policy,
-            RAG_EVIDENCE_MAX_SOURCES_KEY,
-            defaults.max_sources_with_recorded_passages,
-        ),
-        max_recorded_passages_per_source=getattr(
-            policy,
-            RAG_EVIDENCE_MAX_PASSAGES_PER_SOURCE_KEY,
-            defaults.max_recorded_passages_per_source,
-        ),
-        max_recorded_passage_bytes=getattr(
-            policy,
-            RAG_EVIDENCE_MAX_PASSAGE_BYTES_KEY,
-            defaults.max_recorded_passage_bytes,
-        ),
-        max_recorded_passage_bytes_per_step=getattr(
-            policy,
-            RAG_EVIDENCE_MAX_STEP_PASSAGE_BYTES_KEY,
-            defaults.max_recorded_passage_bytes_per_step,
-        ),
-        max_recorded_passage_bytes_per_run_view=getattr(
-            policy,
-            RAG_EVIDENCE_MAX_RUN_VIEW_PASSAGE_BYTES_KEY,
-            defaults.max_recorded_passage_bytes_per_run_view,
-        ),
     )
 
 

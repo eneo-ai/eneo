@@ -66,11 +66,6 @@ EvidenceLimitIdentifier: TypeAlias = Literal[
     "aggregate_logical_json_bytes",
     "provider_call_events",
 ]
-EvidenceOmissionReason: TypeAlias = Literal[
-    "row_limit",
-    "logical_bytes",
-    "parent_section_omitted",
-]
 
 
 class RunViewEvidenceRowOmission(BaseModel):

@@ -90,18 +90,32 @@ continuing to respect audit and webhook delivery blockers.
 Space `data_retention_days` remains the separate conversation/App policy and is
 not a Flow run-history fallback.
 
-## JSONB ownership
+## JSONB columns
 
-JSONB columns always have a typed owner. The registry in
-`eneo.flows.infrastructure.flow_jsonb_ownership` records the parser, storage
-category, schema-version policy, and corruption behavior for each column.
+Flow and Builder JSONB columns are declared in
+`backend/src/eneo/database/tables/flow_tables.py`, plus `tenants.flow_settings`
+in `backend/src/eneo/database/tables/tenant_table.py`. A small test,
+`backend/tests/unittests/flows/test_flow_jsonb_columns.py`, compares the JSONB
+columns it discovers there with a reviewed list, so a new column fails it until
+someone reviews it. That is all it checks: parsing, schema versions, and
+corrupt-value behavior are decided in the modules that read and write each
+column, are not uniform, and are not enforced by the test.
+
+Several columns are parsed by a typed model in the module that reads or writes
+them: `flows.metadata_json` by `FlowMetadata`, `flow_versions.definition_json`
+by `PublishedFlowDefinition`, `flow_step_attempt_resolved_inputs` edges by
+`FlowResolvedInputEdges`, and the Builder planning state by `PlanningState`.
+Others are stored as plain dictionaries: the `flow_step_results` payload
+columns have no schema version, and `flow_step_transcript_words.words_json`
+is kept as `list[dict]`. Read the code that touches a column to see which
+applies.
 
 When adding or changing JSONB:
 
-1. define the Pydantic/domain owner first;
-2. update the ownership registry;
-3. decide whether old rows require a migration or versioned parser;
-4. test malformed, old-version, and tenant-boundary behavior;
+1. define the Pydantic/domain model first and parse the column through it;
+2. decide whether old rows require a migration or versioned parser;
+3. test malformed, old-version, and tenant-boundary behavior;
+4. add the column to the reviewed list in that test together with those tests;
 5. update this map only when ownership or lifecycle meaning changes.
 
 ## Source of truth
@@ -110,5 +124,4 @@ When adding or changing JSONB:
 - Core schema: `backend/alembic/versions/202608201000_create_final_flow_schema.py`
 - Core integration: `backend/alembic/versions/202608201100_integrate_final_flow_schema.py`
 - Builder schema: `backend/alembic/versions/202608201200_create_final_flow_ai_builder_schema.py`
-- JSONB registry: `backend/src/eneo/flows/infrastructure/flow_jsonb_ownership.py`
 - Migration behavior tests: `backend/tests/integration/migrations/test_final_flow_schema_migrations.py`

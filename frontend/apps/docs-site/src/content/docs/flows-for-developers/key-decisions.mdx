@@ -71,9 +71,13 @@ boundaries.
 ## 9. JSONB needs a typed owner
 
 JSONB is used for versioned payloads and evidence envelopes, not as a substitute
-for queryable lifecycle state. Every JSONB column is registered with a parser,
-version policy, and corruption behavior. Queryable transitions and ownership
-belong in relational columns and constraints.
+for queryable lifecycle state. A new JSONB column is parsed through a typed
+model, and its schema version and corruption behavior are decided when the
+column is added. Some older payload columns do not meet that yet (the
+`flow_step_results` payloads carry no schema version). A small test only flags
+a new JSONB column for review and does not check parsing, so reviewers check
+the rule. Queryable transitions and ownership belong in relational columns and
+constraints.
 
 ## 10. Outboxes preserve accountable effects
 

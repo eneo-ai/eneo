@@ -215,10 +215,6 @@ def build_opening_excerpt(text: str) -> list[str]:
     return lines
 
 
-def speaker_labels_in(text: str) -> list[str]:
-    return [entry["label"] for entry in build_speaker_inventory(text)]
-
-
 def apply_speaker_names(text: str, names: Mapping[str, str]) -> str:
     """Replace the ``SPEAKER_NN:`` token on matching lines; unmapped labels stay."""
     lines: list[str] = []

@@ -42,7 +42,9 @@ abstraction.
 ### Data and public contracts
 
 - Runs read immutable published definitions, never mutable draft steps.
-- Queryable state is relational; JSONB has a typed/versioned owner.
+- Queryable state is relational; a new or changed JSONB column is parsed through
+  a typed model with a decided schema version and corruption behavior, and is
+  added to the reviewed list in `test_flow_jsonb_columns.py`.
 - OpenAPI changes regenerate `frontend/packages/eneo-js/src/types/schema.d.ts`.
 - English and Swedish translation catalogs stay in parity.
 - Hand-maintained docs describe ownership and behavior rather than duplicating

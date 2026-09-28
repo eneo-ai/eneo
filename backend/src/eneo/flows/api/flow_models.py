@@ -403,14 +403,6 @@ FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE: dict[str, Any] = {
     "updated_at": "2026-03-17T10:05:31Z",
 }
 
-# The GET run endpoint answers with FlowRunDetailPublic, which is FlowRunPublic plus an
-# always-present webhook_deliveries array. Documenting the two shapes from one constant each
-# keeps the create example and the poll example from drifting apart.
-FLOW_RUN_DETAIL_PUBLIC_EXAMPLE: dict[str, Any] = {
-    **FLOW_RUN_PUBLIC_EXAMPLE,
-    "webhook_deliveries": [],
-}
-
 FLOW_RUN_QUEUED_AFTER_DISPATCH_EXAMPLE: dict[str, object] = {
     **FLOW_RUN_PUBLIC_EXAMPLE,
     "dispatch_attempt_count": 1,

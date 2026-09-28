@@ -18,11 +18,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-# On the ``forced`` alignment rung a word scored exactly 0.0 was interpolated
-# (spread evenly over its window) rather than found in the audio.
-FORCED_ALIGNMENT = "forced"
-INTERPOLATED_WORD_PROBABILITY = 0.0
-
 
 class FlowStepTranscriptWords(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -39,27 +34,6 @@ class FlowStepTranscriptWords(BaseModel):
     words_json: list[dict[str, Any]]
     created_at: datetime
     updated_at: datetime
-
-
-def is_interpolated_word(word: dict[str, Any], *, alignment: str | None) -> bool:
-    """True when the service placed ``word`` by interpolation, not alignment."""
-    return (
-        alignment == FORCED_ALIGNMENT
-        and word.get("probability") == INTERPOLATED_WORD_PROBABILITY
-    )
-
-
-def count_interpolated_words(
-    words_json: list[dict[str, Any]], *, alignment: str | None
-) -> int:
-    if alignment != FORCED_ALIGNMENT:
-        return 0
-    return sum(
-        1
-        for entry in words_json
-        for word in entry.get("words", [])
-        if is_interpolated_word(word, alignment=alignment)
-    )
 
 
 _EDGE_PUNCTUATION_RE = re.compile(r"^[^\w]+|[^\w]+$")

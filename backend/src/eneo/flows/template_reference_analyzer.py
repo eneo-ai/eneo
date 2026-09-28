@@ -75,14 +75,6 @@ def consumes_runtime_input(references: list[TemplateReference]) -> bool:
     )
 
 
-def referenced_step_refs(references: list[TemplateReference]) -> set[str]:
-    return {
-        reference.step_ref or reference.head
-        for reference in references
-        if reference.kind is TemplateReferenceKind.STEP
-    }
-
-
 def referenced_form_fields(
     references: list[TemplateReference],
     *,

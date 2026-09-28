@@ -64,7 +64,6 @@ class FlowRunRetentionContributors(BaseModel):
     flow: FlowRunRetentionPolicy | None
 
 
-FlowRunRetentionSource: TypeAlias = Literal["organization", "space", "flow", "none"]
 FlowRunRetentionConfiguredSource: TypeAlias = Literal["organization", "space", "flow"]
 
 

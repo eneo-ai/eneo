@@ -259,10 +259,6 @@ class TranscriptionCallCompletion(BaseModel):
 
 
 ProviderCallReceiptValue = ProviderCallCompletion | TranscriptionCallCompletion
-ProviderCallReceipt = Annotated[
-    ProviderCallReceiptValue,
-    Field(discriminator="call_kind"),
-]
 
 
 class ProviderCall(BaseModel):

@@ -6,7 +6,6 @@ from typing import Literal, TypeAlias
 from uuid import UUID, uuid4
 
 from eneo.audit.application.guaranteed_delivery import (
-    GuaranteedAuditDeliveryResult,
     GuaranteedAuditDeliveryService,
 )
 from eneo.audit.domain.action_types import ActionType
@@ -34,9 +33,6 @@ from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
 )
 
 FlowAuditOutboxMetadataValue: TypeAlias = str | int | None
-
-
-FlowRunAuditOutboxDeliveryResult = GuaranteedAuditDeliveryResult
 
 
 @dataclass(frozen=True, slots=True)

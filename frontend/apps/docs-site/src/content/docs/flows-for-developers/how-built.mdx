@@ -64,7 +64,8 @@ same backend draft-validation/materialization boundary as manual authoring.
 - Runtime lifecycle and evidence live in run/result/attempt/provider-call rows.
 - Files remain platform Files; Flow tables record binding and provenance.
 - Review, audit, and webhook effects have their own relational lifecycle rows.
-- JSONB payloads are parsed by registered typed owners.
+- JSONB payloads are parsed by typed models in the modules that read or write
+  them; some older payload columns are stored as plain dictionaries.
 
 See [The data schema](/docs/flows-for-developers/data-schema) for aggregate
 ownership and the final three-revision stacked migration shape.

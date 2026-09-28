@@ -1561,18 +1561,6 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     ),
 }
 
-FLOW_ERROR_CATEGORY_ORDER: tuple[FlowErrorCategory, ...] = (
-    "Flow access",
-    "Run input",
-    "Run lifecycle",
-    "Evidence and artifacts",
-    "Published definition",
-    "Step runtime",
-    "Typed input/output",
-    "Review checkpoint",
-    "Template asset",
-)
-
 
 def validate_flow_error_taxonomy(
     entries: Mapping[object, FlowErrorTaxonomyEntry] | None = None,

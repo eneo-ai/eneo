@@ -9,27 +9,18 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
-    FlowTemplateAssets,
     FlowVersionFileReferences,
     FlowVersions,
 )
-from eneo.files.file_repo import FileRepository
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowVersion
 from eneo.flows.published_definition import (
-    PublishedTemplateIdentityAuditResult,
-    PublishedTemplateIdentityAuditSnapshot,
-    PublishedTemplateIdentityLiveAsset,
     PublishedTemplateReferenceScan,
-    audit_published_template_identity_readiness,
     merge_published_template_reference_scans,
     published_definition_checksum,
     scan_published_template_references,
 )
 from eneo.main.exceptions import NotFoundException
-
-_FILE_INFO_QUERY_BATCH_SIZE = 10_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,87 +49,6 @@ async def scan_flow_version_template_references(
     definitions = (await session.execute(stmt)).scalars().all()
     return merge_published_template_reference_scans(
         scan_published_template_references(item) for item in definitions
-    )
-
-
-async def audit_flow_version_template_identity_readiness(
-    session: AsyncSession,
-    *,
-    sample_limit: int = 50,
-) -> PublishedTemplateIdentityAuditResult:
-    definition_stmt = sa.select(
-        FlowVersions.tenant_id,
-        FlowVersions.flow_id,
-        FlowVersions.version,
-        FlowVersions.definition_json,
-    ).order_by(
-        FlowVersions.tenant_id,
-        FlowVersions.flow_id,
-        FlowVersions.version,
-    )
-    definition_rows = (await session.execute(definition_stmt)).tuples().all()
-
-    asset_relationship_stmt = (
-        sa.select(
-            FlowTemplateAssets.tenant_id,
-            FlowTemplateAssets.flow_id,
-            FlowTemplateAssets.id,
-            FlowTemplateAssets.file_id,
-        )
-        .join(
-            Files,
-            sa.and_(
-                Files.id == FlowTemplateAssets.file_id,
-                Files.tenant_id == FlowTemplateAssets.tenant_id,
-            ),
-        )
-        .where(FlowTemplateAssets.deleted_at.is_(None))
-        .order_by(
-            FlowTemplateAssets.tenant_id,
-            FlowTemplateAssets.flow_id,
-            FlowTemplateAssets.file_id,
-            FlowTemplateAssets.id,
-        )
-    )
-    asset_relationships = (
-        (await session.execute(asset_relationship_stmt)).tuples().all()
-    )
-    unique_file_ids = list(
-        dict.fromkeys(
-            file_id for _tenant_id, _flow_id, _asset_id, file_id in asset_relationships
-        )
-    )
-    file_repo = FileRepository(session)
-    file_checksums: dict[UUID, str] = {}
-    for batch_start in range(0, len(unique_file_ids), _FILE_INFO_QUERY_BATCH_SIZE):
-        file_infos = await file_repo.get_infos_by_ids(
-            unique_file_ids[batch_start : batch_start + _FILE_INFO_QUERY_BATCH_SIZE]
-        )
-        file_checksums.update({file.id: file.checksum for file in file_infos})
-    live_assets = (
-        PublishedTemplateIdentityLiveAsset(
-            tenant_id=tenant_id,
-            flow_id=flow_id,
-            asset_id=asset_id,
-            file_id=file_id,
-            checksum=file_checksums[file_id],
-        )
-        for tenant_id, flow_id, asset_id, file_id in asset_relationships
-        if file_id in file_checksums
-    )
-
-    return audit_published_template_identity_readiness(
-        snapshots=(
-            PublishedTemplateIdentityAuditSnapshot(
-                tenant_id=tenant_id,
-                flow_id=flow_id,
-                version=version,
-                definition_json=definition_json,
-            )
-            for tenant_id, flow_id, version, definition_json in definition_rows
-        ),
-        live_assets=live_assets,
-        sample_limit=sample_limit,
     )
 
 
