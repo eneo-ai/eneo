@@ -79,6 +79,21 @@ describe("JobIndicator", () => {
     await expectNoAxeViolations(document.body);
   });
 
+  it("shows active jobs whose task has no dedicated section", async () => {
+    jobs.state = {
+      runningCount: 1,
+      uploads: [],
+      jobs: [job({ task: "run_app", name: "Veckorapport", status: "in progress" })]
+    };
+    renderInApp(<JobIndicator />);
+    fireEvent.click(screen.getByRole("button", { name: "Aviseringar, 1 pågår" }));
+    const panel = await screen.findByRole("dialog", { name: "Aviseringar och jobb" });
+
+    expect(within(panel).getByText("Aktivitet")).toBeTruthy();
+    expect(within(panel).getByText("Veckorapport")).toBeTruthy();
+    expect(within(panel).queryByText("Allt är uppdaterat")).toBeNull();
+  });
+
   it("shows long names in full instead of cutting them off behind a tooltip", async () => {
     const long = "Protokoll_kommunstyrelsen_2026-09-21_bilaga_4_slutlig_version.pdf";
     jobs.state = {

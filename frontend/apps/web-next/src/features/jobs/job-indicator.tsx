@@ -20,6 +20,7 @@ const TASK_SECTIONS: [Job["task"], string][] = [
   ["pull_sharepoint_content", "importing_from_sharepoint"],
   ["crawl", "crawling"]
 ];
+const SECTION_TASKS = new Set(TASK_SECTIONS.map(([task]) => task));
 
 const ROW_CLASSES =
   "border-ax-border flex items-center justify-between gap-x-3 border-b px-2 py-1.5 last-of-type:border-b-0";
@@ -131,6 +132,7 @@ export function JobIndicator({ alignment = "end" }: { alignment?: "start" | "end
     titleKey,
     jobs: jobs.filter((job) => job.task === task)
   })).filter((section) => section.jobs.length > 0);
+  const otherJobs = jobs.filter((job) => !SECTION_TASKS.has(job.task));
   const label =
     runningCount > 0 ? t("fix_notifications_running", { count: runningCount }) : t("notifications");
 
@@ -159,11 +161,21 @@ export function JobIndicator({ alignment = "end" }: { alignment?: "start" | "end
               ))}
             </Section>
           ))}
-          {runningCount === 0 && sections.length === 0 && uploads.length === 0 && (
-            <p className="text-ax-text-secondary flex min-h-24 items-center justify-center text-sm">
-              {t("everything_up_to_date")}
-            </p>
+          {otherJobs.length > 0 && (
+            <Section title={t("activity")}>
+              {otherJobs.map((job) => (
+                <JobRow key={job.id} job={job} />
+              ))}
+            </Section>
           )}
+          {runningCount === 0 &&
+            sections.length === 0 &&
+            otherJobs.length === 0 &&
+            uploads.length === 0 && (
+              <p className="text-ax-text-secondary flex min-h-24 items-center justify-center text-sm">
+                {t("everything_up_to_date")}
+              </p>
+            )}
         </div>
       }
     >

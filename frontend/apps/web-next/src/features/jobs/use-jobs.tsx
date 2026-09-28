@@ -159,12 +159,12 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const { data: jobs = NO_JOBS } = useQuery({
     queryKey: ["jobs"],
     queryFn: fetchJobs,
-    refetchInterval: (query) => {
-      // Backend keeps finished jobs visible for a few minutes; only active
-      // ones warrant polling. trackJob() restarts a stopped poll.
-      if (!query.state.data?.some(isJobActive)) return false;
-      return Date.now() < fastPollUntil.current ? FAST_POLL_MS : SLOW_POLL_MS;
-    }
+    // Jobs can be created by another tab or appear after trackJob's first
+    // fetch. Keep checking even when the latest response is empty.
+    refetchInterval: (query) =>
+      Date.now() < fastPollUntil.current || query.state.data?.some(isJobActive)
+        ? FAST_POLL_MS
+        : SLOW_POLL_MS
   });
 
   // Detect active → complete transitions (or jobs aging out of the window)

@@ -39,6 +39,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { ClientTime } from "@/components/composites/client-time";
+import { useJobs } from "@/features/jobs/use-jobs";
 import { useSpace } from "@/features/spaces/use-space";
 import { EmbeddingModelSelect } from "./embedding-model-select";
 import type { Website } from "./knowledge";
@@ -127,6 +128,7 @@ export function WebsiteDialog({
   const t = useTranslations();
   const { space, routeId } = useSpace();
   const queryClient = useQueryClient();
+  const { trackJob } = useJobs();
 
   const [url, setUrl] = useState(website?.url ?? "");
   const [name, setName] = useState(website?.name ?? "");
@@ -203,6 +205,7 @@ export function WebsiteDialog({
     },
     onSuccess: () => {
       invalidate();
+      if (!website) trackJob();
       setExistingOnOrg(null);
       clearHttpAuthPassword();
       onOpenChange(false);

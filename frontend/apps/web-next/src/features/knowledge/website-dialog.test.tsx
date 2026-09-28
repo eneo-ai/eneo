@@ -7,7 +7,9 @@ import type { Space } from "@/features/spaces/space";
 import { makeWebsite } from "@/features/spaces/testing/space-fixture";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn() }));
+const jobs = vi.hoisted(() => ({ trackJob: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+vi.mock("@/features/jobs/use-jobs", () => ({ useJobs: () => jobs }));
 vi.mock("@/features/spaces/use-space", async () => {
   const { makeSpace } = await import("@/features/spaces/testing/space-fixture");
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
@@ -33,6 +35,17 @@ const field = (dialog: HTMLElement, name: RegExp) =>
 afterEach(() => vi.clearAllMocks());
 
 describe("WebsiteDialog", () => {
+  it("tracks the initial crawl after creating a website", async () => {
+    api.GET.mockImplementation(() => ok(null));
+    api.POST.mockImplementation(() => ok({ id: "website-1" }));
+    const dialog = renderDialog();
+    fireEvent.change(field(dialog, /^URL/), { target: { value: "https://sundsvall.se" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Skapa webbplats" }));
+
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(jobs.trackJob).toHaveBeenCalledTimes(1));
+  });
+
   it("shows each problem at its field on submit, and moves focus to the first", async () => {
     const dialog = renderDialog();
     const create = within(dialog).getByRole("button", { name: "Skapa webbplats" });
