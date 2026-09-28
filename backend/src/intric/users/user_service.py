@@ -739,12 +739,25 @@ class UserService:
         return user_in_db, access_token
 
     async def _get_user_from_token(self, token: str):
-        username = self.auth_service.get_username_from_token(
-            token, get_settings().jwt_secret
+        payload = self.auth_service.get_jwt_payload(
+            token, key=str(get_settings().jwt_secret)
         )
-        if username is None:
+        # Sessions are bound to the immutable account id and its tenant.
+        if payload.user_id is not None and payload.tenant_id is not None:
+            return await self.repo.get_user_by_id_and_tenant_id(
+                payload.user_id, tenant_id=payload.tenant_id
+            )
+        # Token minted before the identity claims existed (valid for at most
+        # one token lifetime after the upgrade): accept it only while the
+        # signed email and username both still describe the same account.
+        user = await self.repo.get_user_by_email(payload.sub)
+        if (
+            user is None
+            or user.username != payload.username
+            or user.email.lower() != payload.sub.lower()
+        ):
             return None
-        return await self.repo.get_user_by_username(username)
+        return user
 
     async def _resolve_space_id_for_scope(
         self, scope_type: str, scope_id: UUID

@@ -720,6 +720,12 @@ class UserRepoStubForJIT:
             return self._created_user
         return None
 
+    async def get_user_by_username(self, username: str, with_deleted: bool = False):
+        for user in (self._user, self._created_user):
+            if user is not None and user.username == username:
+                return user
+        return None
+
     async def add(self, user_add):
         # Create a fake UserInDB from the UserAdd
         self._created_user = UserInDB(
@@ -902,6 +908,56 @@ async def test_jit_provisioning_creates_user_when_enabled(monkeypatch):
     audit_event = audit_service.logged_events[0]
     assert audit_event["metadata"]["provisioning_method"] == "jit_federation"
     assert audit_event["tenant_id"] == tenant_id
+
+
+@pytest.mark.asyncio
+async def test_jit_provisioning_does_not_reuse_a_taken_username():
+    """Two accounts must never share a username: when the email local part is
+    already in use, the new account is named by its full email instead."""
+    tenant = TenantInDB(
+        id=uuid4(),
+        name="Tenant JIT",
+        display_name="Tenant JIT",
+        slug="tenant-jit-username",
+        quota_limit=1024**3,
+        state=TenantState.ACTIVE,
+        provisioning=True,
+        default_role_id=None,
+        modules=[],
+        api_credentials={},
+        federation_config={},
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    existing = UserInDB(
+        id=uuid4(),
+        username="anna.svensson",
+        email="anna.svensson@sundsvall.se",
+        salt=None,
+        password=None,
+        used_tokens=0,
+        tenant_id=uuid4(),
+        tenant=tenant,
+        quota_limit=1024**3,
+        user_groups=[],
+        roles=[],
+        state="active",
+    )
+    container = MockContainerForJIT(
+        tenant_repo=TenantRepoStub(tenant),
+        user_repo=UserRepoStubForJIT(existing_user=existing, tenant=tenant),
+        auth_service=AuthServiceStub(),
+        redis_client=FakeRedis(),
+        encryption_service=EncryptionService(None),
+    )
+
+    created = await federation_router._jit_provision_user(
+        container, tenant.id, "anna.svensson@ange.se", "corr-jit-username"
+    )
+
+    assert created.email == "anna.svensson@ange.se"
+    assert created.username == "anna.svensson@ange.se"
+    assert created.username != existing.username
 
 
 @pytest.mark.asyncio
