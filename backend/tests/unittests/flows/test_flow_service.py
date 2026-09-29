@@ -2876,6 +2876,7 @@ async def test_publish_flow_rejects_flow_managed_assistants_not_owned_by_flow(us
 
 @pytest.mark.asyncio
 async def test_publish_flow_rejects_assistant_model_below_required_security_level(user):
+    user.tenant.security_enabled = True
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     flow_id = uuid4()
@@ -2942,6 +2943,7 @@ async def test_publish_flow_rejects_assistant_model_below_required_security_leve
     ],
 )
 async def test_publish_flow_rejects_write_down_of_a_read_previous_step(user, question):
+    user.tenant.security_enabled = True
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     flow_id = uuid4()
@@ -3016,6 +3018,7 @@ async def test_publish_flow_rejects_write_down_of_a_read_previous_step(user, que
 
 @pytest.mark.asyncio
 async def test_publish_flow_rejects_output_override_write_down(user):
+    user.tenant.security_enabled = True
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     flow_id = uuid4()
@@ -3135,6 +3138,7 @@ def _classified_chain(user, steps: list[_ClassifiedStep], *, space_level: int = 
     ``model_copy(update=...)`` would leave a bare string and hide how the
     service reads the field).
     """
+    user.tenant.security_enabled = True
     flow_id = uuid4()
     space_id = uuid4()
     assistants = []
@@ -3602,6 +3606,7 @@ async def test_save_reports_a_malformed_http_config_before_the_classification(
 
 @pytest.mark.asyncio
 async def test_save_without_changes_refuses_stored_steps_that_write_down(user):
+    user.tenant.security_enabled = True
     # A flow stored with a default-input read of a classified step is refused on
     # its next save, even a rename that touches no step.
     service, flow_repo, flow = _classified_chain(
@@ -4097,6 +4102,7 @@ async def test_update_flow_assistant_validates_explicit_security_field_set_to_no
 
 @pytest.mark.asyncio
 async def test_update_flow_assistant_prompt_edit_is_classified_like_the_writer(user):
+    user.tenant.security_enabled = True
     # A valid chain: step 1 (assistant A, classified output 3) feeds step 2
     # (assistant B, level-1 model) through literal underlag only. A prompt
     # edit on B that starts reading step 1 must be rejected before the writer

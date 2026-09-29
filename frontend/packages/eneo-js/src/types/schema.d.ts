@@ -5740,6 +5740,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/{id}/security-classification/preview": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Preview Security Classification
+     * @description Explain, step by step, what the security classification rule makes of the submitted editor state: the level each step's inputs carry, which earlier steps it reads, the level its model must clear, the models of the space that qualify, the level its output carries, the lowest output override the rule accepts, and the violation a save would be refused with. `steps` and `assistants` are the editor's unsaved state in the shape a flow update and an assistant update accept; omit them to explain the saved draft. The rule is the one a save applies, so a candidate reported without a violation is not refused for classification. This endpoint does not save the flow or any assistant and writes no audit record. It reads the flow's assistants, so it needs the same permission as reading them: editing flows in the space.
+     */
+    post: operations["preview_flow_security_classification"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/{id}/steps/{step_id}/live-transcription-sessions/": {
     parameters: {
       query?: never;
@@ -14616,6 +14636,19 @@ export interface components {
       session_id: string;
       skill_activation: components["schemas"]["SkillActivationEvidenceV1"] | null;
     };
+    /**
+     * ClassificationCause
+     * @description What sets the level a step must clear.
+     * @enum {string}
+     */
+    ClassificationCause: "reads" | "knowledge" | "space";
+    /**
+     * ClassificationViolationCode
+     * @description The refusals of the rule, as the catalog names them.
+     * @enum {string}
+     */
+    ClassificationViolationCode:
+      "flow_step_security_classification_mismatch" | "flow_step_output_classification_write_down";
     /** CollectionMetadata */
     CollectionMetadata: {
       /** Num Info Blobs */
@@ -17728,6 +17761,10 @@ export interface components {
       | "flow_assistant_snapshot_republish_required"
       | "flow_assistant_snapshot_drift"
       | "flow_input_contract_inapplicable"
+      | "flow_step_limit_exceeded"
+      | "flow_request_body_too_large"
+      | "flow_step_security_classification_mismatch"
+      | "flow_step_output_classification_write_down"
       | "flow_step_missing"
       | "flow_step_attempt_start_failed"
       | "flow_step_execution_failed"
@@ -24845,6 +24882,90 @@ export interface components {
        */
       pending_count?: number;
     };
+    /** FlowSecurityClassificationAssistantCandidate */
+    FlowSecurityClassificationAssistantCandidate: {
+      /**
+       * Assistant Id
+       * Format: uuid
+       */
+      assistant_id: string;
+      update: components["schemas"]["FlowAssistantUpdateRequest"];
+    };
+    /**
+     * FlowSecurityClassificationPreviewPublic
+     * @example {
+     *       "steps": [
+     *         {
+     *           "effective_output_level": 2,
+     *           "input_level": 2,
+     *           "knowledge_level": null,
+     *           "model_level": 1,
+     *           "output_floor": 2,
+     *           "qualifying_model_ids": [
+     *             "00000000-0000-0000-0000-000000000031"
+     *           ],
+     *           "reads": [],
+     *           "required_model_level": 2,
+     *           "step_id": "00000000-0000-0000-0000-000000000101",
+     *           "step_order": 1,
+     *           "violation": {
+     *             "cause": "space",
+     *             "code": "flow_step_security_classification_mismatch",
+     *             "current_level": 1,
+     *             "message": "Step 1: assistant model does not meet the required security classification.",
+     *             "required_level": 2,
+     *             "source_step_orders": []
+     *           }
+     *         }
+     *       ]
+     *     }
+     */
+    FlowSecurityClassificationPreviewPublic: {
+      /**
+       * Steps
+       * @description One entry per step, in step order. Every level is null and no step has a violation while security classifications are off or nothing is classified.
+       */
+      steps: components["schemas"]["FlowStepSecurityClassificationPublic"][];
+    };
+    /**
+     * FlowSecurityClassificationPreviewRequest
+     * @example {
+     *       "assistants": [
+     *         {
+     *           "assistant_id": "00000000-0000-0000-0000-000000000002",
+     *           "update": {
+     *             "completion_model": {
+     *               "id": "00000000-0000-0000-0000-000000000031"
+     *             }
+     *           }
+     *         }
+     *       ],
+     *       "steps": [
+     *         {
+     *           "assistant_id": "00000000-0000-0000-0000-000000000002",
+     *           "id": "00000000-0000-0000-0000-000000000101",
+     *           "input_source": "flow_input",
+     *           "input_type": "text",
+     *           "output_mode": "pass_through",
+     *           "output_type": "text",
+     *           "step_order": 1,
+     *           "user_description": "Summarize the case file"
+     *         }
+     *       ]
+     *     }
+     */
+    FlowSecurityClassificationPreviewRequest: {
+      /**
+       * Assistants
+       * @description Unsaved changes to the flow-managed assistants the steps use, in the shape an assistant update accepts. Only the model, the knowledge and the prompt affect the result. At most one entry per assistant, and no more entries than a flow can have steps.
+       */
+      assistants?: components["schemas"]["FlowSecurityClassificationAssistantCandidate"][];
+      /**
+       * Steps
+       * @description The editor's unsaved steps, in the shape a flow update accepts. Omit to evaluate the steps that are saved. More steps than a flow can have are refused with `flow_step_limit_exceeded`.
+       */
+      steps?: components["schemas"]["FlowStepUpdateRequest"][] | null;
+    };
     /** FlowSecurityClassificationPublic */
     FlowSecurityClassificationPublic: {
       /**
@@ -25479,6 +25600,76 @@ export interface components {
       expires_after_seconds?: number | null;
       /** @description `view` pauses the run for approval of this step output. `edit` also lets the reviewer replace the output used by downstream steps. */
       mode: components["schemas"]["FlowStepReviewMode"];
+    };
+    /** FlowStepSecurityClassificationPublic */
+    FlowStepSecurityClassificationPublic: {
+      /**
+       * Effective Output Level
+       * @description The level the step's output carries.
+       */
+      effective_output_level: number | null;
+      /**
+       * Input Level
+       * @description The level the step's inputs carry: the space's level and the output levels of the steps it reads. Null when nothing is classified.
+       */
+      input_level: number | null;
+      /**
+       * Knowledge Level
+       * @description The highest level among the step's knowledge sources.
+       */
+      knowledge_level: number | null;
+      /**
+       * Model Level
+       * @description The level of the step's current model, or null.
+       */
+      model_level: number | null;
+      /**
+       * Output Floor
+       * @description The lowest output override the rule accepts; an override can raise the output level but never lower it below this.
+       */
+      output_floor: number | null;
+      /**
+       * Qualifying Model Ids
+       * @description Completion models of the space that can be used and clear `required_model_level`, lowest level first. Every usable model qualifies when nothing is required.
+       */
+      qualifying_model_ids: string[];
+      /**
+       * Reads
+       * @description The earlier steps this step reads.
+       */
+      reads: number[];
+      /**
+       * Required Model Level
+       * @description The level the step's model must clear. Null for a step that runs no completion model, or when nothing is classified.
+       */
+      required_model_level: number | null;
+      /** Step Id */
+      step_id?: string | null;
+      /** Step Order */
+      step_order: number;
+      /** @description The rule the step breaks, or null when it clears every check. */
+      violation: components["schemas"]["FlowStepSecurityClassificationViolationPublic"] | null;
+    };
+    /** FlowStepSecurityClassificationViolationPublic */
+    FlowStepSecurityClassificationViolationPublic: {
+      /** @description What sets `required_level`: `reads` (the steps in `source_step_orders`), `knowledge` (the step's knowledge sources) or `space`. */
+      cause: components["schemas"]["ClassificationCause"];
+      /** @description `flow_step_security_classification_mismatch`: the step's model is below the level the step must clear. `flow_step_output_classification_write_down`: the step's output override is below the level its output already carries. */
+      code: components["schemas"]["ClassificationViolationCode"];
+      /**
+       * Current Level
+       * @description The model's level (null when the step has no model or an unclassified one), or the output override for a write-down.
+       */
+      current_level: number | null;
+      /** Message */
+      message: string;
+      /**
+       * Required Level
+       * @description The level the model or the output override must reach.
+       */
+      required_level: number;
+      /** Source Step Orders */
+      source_step_orders: number[];
     };
     /**
      * FlowStepUpdateRequest
@@ -59295,6 +59486,140 @@ export interface operations {
            *       "code": "flow_runtime_file_attached",
            *       "eneo_error_code": 9057,
            *       "message": "Runtime file is already attached to a flow run."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  preview_flow_security_classification: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the draft flow to explain. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowSecurityClassificationPreviewRequest"];
+      };
+    };
+    responses: {
+      /** @description One explanation per step. Levels are null and no step has a violation while security classifications are off. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "steps": [
+           *         {
+           *           "effective_output_level": 2,
+           *           "input_level": 2,
+           *           "knowledge_level": null,
+           *           "model_level": 1,
+           *           "output_floor": 2,
+           *           "qualifying_model_ids": [
+           *             "00000000-0000-0000-0000-000000000031"
+           *           ],
+           *           "reads": [],
+           *           "required_model_level": 2,
+           *           "step_id": "00000000-0000-0000-0000-000000000101",
+           *           "step_order": 1,
+           *           "violation": {
+           *             "cause": "space",
+           *             "code": "flow_step_security_classification_mismatch",
+           *             "current_level": 1,
+           *             "message": "Step 1: assistant model does not meet the required security classification.",
+           *             "required_level": 2,
+           *             "source_step_orders": []
+           *           }
+           *         }
+           *       ]
+           *     }
+           */
+          "application/json": components["schemas"]["FlowSecurityClassificationPreviewPublic"];
+        };
+      };
+      /** @description The candidate state cannot be evaluated: a step names an assistant the flow does not manage, an assistant change names an assistant no candidate step uses, or the steps, submitted or saved, are more than a flow can have (`flow_step_limit_exceeded`, with `step_count` and `max_steps` in the context). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "bad_request",
+           *       "eneo_error_code": 9007,
+           *       "message": "One or more steps reference assistants outside the selected space or tenant."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks permission to edit flows in this space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_space_permission",
+           *       "context": {
+           *         "auth_layer": "space_membership"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "You do not have permission to edit flows in this space."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The request body is larger than a preview accepts (16777216 bytes: 65536 for each of the 256 steps a flow can have). It is refused before the body is parsed. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_request_body_too_large",
+           *       "context": {
+           *         "max_bytes": 16777216
+           *       },
+           *       "eneo_error_code": 9015,
+           *       "message": "The request is larger than the 16777216 bytes a security classification preview accepts. Send fewer or shorter steps."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];

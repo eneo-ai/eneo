@@ -32,6 +32,7 @@ from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
 )
+from eneo.flows.flow_validators import validate_step_count
 from eneo.main.exceptions import BadRequestException
 
 if TYPE_CHECKING:
@@ -169,6 +170,9 @@ class FlowAuthoringCommandService:
             updated_assistant_fields=_updated_assistant_fields(command),
             default_transcription_model_id=command.default_transcription_model_id,
         )
+        # Before anything is written: the materializer creates assistants ahead
+        # of the flow, so a spec over the limit must not get that far.
+        validate_step_count(len(changeset.compiled_steps))
         changeset = policy.stamp_metadata(
             changeset=changeset,
         )

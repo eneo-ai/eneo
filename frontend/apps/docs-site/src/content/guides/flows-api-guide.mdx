@@ -157,6 +157,33 @@ the ordinary authoring journey. Flow packages do not carry Flow MCP or
 HTTP-mutation input behavior, and unsupported template assets fail before
 installation.
 
+## Step limit
+
+A flow has at most 256 steps. The flow endpoints that write or evaluate a draft (create, update, publish and the security classification preview) refuse more with `flow_step_limit_exceeded`. Its `context` carries `step_count` and `max_steps`, and its message tells the author to remove steps or split the work into several flows. The preview also caps the request body at 16 MiB (64 KiB for each of the 256 steps) and refuses a larger one with HTTP 413 and `flow_request_body_too_large`, before it parses the body; its `context.max_bytes` states the cap. The preview refuses a saved flow over the limit the same way when it is asked to explain the saved steps, and it answers a request with too many submitted steps with the same 400, not with a request-validation error. The AI Builder reports the same code in its plan validation.
+
+Package import has its own contract and applies the limit through it. Import planning and install refuse a package draft over the limit with `flow_package_flow_draft_invalid`, whose `context.reason` is `flow_step_limit_exceeded`. That response has no `step_count` or `max_steps`; its message states the limit and the number of steps in the package.
+
+## Preview security classification while authoring
+
+`POST /api/v1/flows/{id}/security-classification/preview` explains what the security classification rule makes of a draft before it is saved, so an editor can show what each step reads and which models can serve it instead of waiting for a refusal. It is a user-principal authoring endpoint. It reads the flow's assistants, so it needs the permission to edit flows in the space, and service keys are refused.
+
+The request carries the editor's unsaved state. `steps` uses the shape a flow update accepts; omit it to explain the saved steps. `assistants` is a list of `{ assistant_id, update }` entries, where `update` is the body an assistant update accepts; only a candidate model, knowledge or prompt affects the result.
+
+The response has one entry per step, in step order:
+
+| Field | Meaning |
+| --- | --- |
+| `reads` | The earlier steps the step reads, through its input source, its underlag and its prompt |
+| `input_level`, `knowledge_level` | The level the step's inputs carry and the highest level among its knowledge sources |
+| `required_model_level`, `model_level` | The level the step's model must clear and the level of its current model |
+| `qualifying_model_ids` | The space's usable completion models that clear the requirement, lowest level first |
+| `effective_output_level`, `output_floor` | The level the step's output carries and the lowest output override the rule accepts |
+| `violation` | The refusal a save would give, with its `code`, `required_level`, `current_level`, `cause` and source steps |
+
+The endpoint applies the rule a save applies, so a step reported without a violation is not refused for its classification. It writes nothing and records no audit event. While the organization has security classifications turned off, every level is `null` and no step has a violation.
+
+A save or publish that breaks the rule fails with `flow_step_security_classification_mismatch` or `flow_step_output_classification_write_down`. Its `context` carries `step_order`, `step_id` when the step is saved, `required_level`, `current_level`, `cause` (`reads`, `knowledge` or `space`), `source_step_orders` and, for the model refusal, `qualifying_model_ids`. A run that starts on a flow that no longer passes the rule still fails with `flow_definition_invalid`.
+
 ## Common application patterns
 
 For endpoint-and-capability-first design walkthroughs, start with [Designing Flows](/guides/flows/designing-flows). This reference section keeps the deeper API field context.

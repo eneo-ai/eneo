@@ -30,7 +30,6 @@ from eneo.flows.domain.flow_invariant_exceptions import (
 )
 from eneo.flows.domain.flow_step_validation import FlowStepValidationError
 from eneo.flows.domain.step_config import clean_inactive_step_config
-from eneo.flows.enums import flow_output_mode_uses_completion_model
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_metadata import (
     normalize_flow_metadata_for_write,
@@ -42,10 +41,13 @@ from eneo.flows.flow_resource_bindings import (
 )
 from eneo.flows.flow_review_policy import dump_flow_step_review_policy
 from eneo.flows.flow_security_classification import (
-    evaluate_step_security_classification,
+    FlowStepClassificationExplanation,
+    explain_flow_security_classification,
+    require_flow_security_classification,
 )
 from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
 from eneo.flows.flow_validators import (
+    validate_step_count,
     validate_steps,
     validate_variable_alias_collisions,
 )
@@ -73,10 +75,6 @@ from eneo.flows.published_definition import (
 from eneo.flows.runtime.docx_template_runtime import (
     extract_docx_template_text_preview,
     inspect_docx_template_bytes,
-)
-from eneo.flows.step_lineage import (
-    build_step_ref_mapping,
-    resolve_step_upstream_orders,
 )
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
@@ -224,6 +222,7 @@ class FlowService:
             )
 
         if steps is not None:
+            validate_step_count(len(steps))
             steps = [
                 step
                 if step.id is not None and step.id in unchanged_step_ids
@@ -631,7 +630,7 @@ class FlowService:
             return
 
         space = await self.space_service.get_space(space_id)
-        self._validate_step_security_classification_with_assistants(
+        require_flow_security_classification(
             steps=steps,
             assistants_by_id=(
                 assistants_by_id
@@ -639,6 +638,55 @@ class FlowService:
                 else await self._load_step_assistants(steps)
             ),
             space=space,
+            security_enabled=self.user.tenant.security_enabled,
+        )
+
+    async def preview_step_security_classification(
+        self,
+        *,
+        flow_id: UUID,
+        steps: list[FlowStep] | None = None,
+        assistant_updates: Mapping[UUID, AssistantUpdateCommand] | None = None,
+    ) -> list[FlowStepClassificationExplanation]:
+        """Explain the classification of the editor's unsaved state; writes nothing.
+
+        The candidate steps replace the saved ones and each assistant update is
+        applied to an in-memory copy of its assistant, then the save's own rule
+        runs over the result. Only reads reach the repositories.
+        """
+        if self.space_service is None:
+            raise RuntimeError("FlowService requires space_service to preview.")
+        flow = await self.get_flow(flow_id)
+        source_steps = steps if steps is not None else flow.steps
+        validate_step_count(len(source_steps))
+        candidate_steps = [clean_inactive_step_config(step) for step in source_steps]
+        await self._validate_assistant_scope_for_steps(
+            space_id=flow.space_id,
+            steps=candidate_steps,
+            owning_flow_id=flow.id,
+        )
+        space = await self.space_service.get_space(flow.space_id)
+        assistants_by_id: dict[UUID, Any] = dict(
+            await self._load_step_assistants(candidate_steps)
+        )
+        updates = assistant_updates or {}
+        if not updates.keys() <= assistants_by_id.keys():
+            raise BadRequestException(
+                "Assistant changes must belong to assistants that steps of the flow use."
+            )
+        for assistant_id, update in updates.items():
+            assistants_by_id[assistant_id] = (
+                self._build_candidate_flow_assistant_for_security_validation(
+                    assistant=assistants_by_id[assistant_id],
+                    space=space,
+                    update=update,
+                )
+            )
+        return explain_flow_security_classification(
+            steps=candidate_steps,
+            assistants_by_id=assistants_by_id,
+            space=space,
+            security_enabled=self.user.tenant.security_enabled,
         )
 
     async def _load_step_assistants(
@@ -646,48 +694,11 @@ class FlowService:
     ) -> dict[UUID, Assistant]:
         assistants_by_id: dict[UUID, Assistant] = {}
         for step in sorted(steps, key=lambda item: item.step_order):
+            if step.assistant_id in assistants_by_id:
+                continue
             assistant, _ = await self.assistant_service.get_assistant(step.assistant_id)
             assistants_by_id[step.assistant_id] = assistant
         return assistants_by_id
-
-    def _validate_step_security_classification_with_assistants(
-        self,
-        *,
-        steps: list[FlowStep],
-        assistants_by_id: dict[UUID, Any],
-        space: Any,
-    ) -> None:
-        prior_output_levels: dict[int, int | None] = {}
-        step_ref_mapping = build_step_ref_mapping(
-            {"step_order": item.step_order, "user_description": item.user_description}
-            for item in steps
-        )
-        for step in sorted(steps, key=lambda item: item.step_order):
-            assistant = assistants_by_id[step.assistant_id]
-            evaluation = evaluate_step_security_classification(
-                step_order=step.step_order,
-                upstream_step_orders=resolve_step_upstream_orders(
-                    input_source=step.input_source,
-                    step_order=step.step_order,
-                    input_bindings=step.input_bindings,
-                    prompt_template=(
-                        assistant.get_prompt_text()
-                        if flow_output_mode_uses_completion_model(step.output_mode)
-                        else None
-                    ),
-                    output_mode=step.output_mode,
-                    input_config=step.input_config,
-                    output_config=step.output_config,
-                    step_ref_mapping=step_ref_mapping,
-                    max_prior_step_order=step.step_order - 1,
-                ),
-                output_mode=step.output_mode,
-                output_classification_override=step.output_classification_override,
-                prior_output_levels_by_order=prior_output_levels,
-                assistant=assistant,
-                space=space,
-            )
-            prior_output_levels[step.step_order] = evaluation.effective_output_level
 
     async def _validate_flow_assistant_security_change(
         self,
@@ -724,10 +735,11 @@ class FlowService:
             )
             assistants_by_id[step.assistant_id] = current_assistant
 
-        self._validate_step_security_classification_with_assistants(
+        require_flow_security_classification(
             steps=flow.steps,
             assistants_by_id=assistants_by_id,
             space=space,
+            security_enabled=self.user.tenant.security_enabled,
         )
 
     def _build_candidate_flow_assistant_for_security_validation(

@@ -721,6 +721,51 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
             "start a new run."
         ),
     ),
+    FlowApiErrorCode.REQUEST_BODY_TOO_LARGE: _entry(
+        category="Published definition",
+        surfaced_through="API error response",
+        cause="An authoring request carried more bytes than a flow's steps may take.",
+        consumer_action="Send fewer or shorter steps, then send the request again.",
+        user_action="Shorten the longest prompts or split the work into several flows.",
+    ),
+    FlowApiErrorCode.STEP_LIMIT_EXCEEDED: _entry(
+        category="Published definition",
+        surfaced_through="API error response",
+        cause="A flow was saved, published, imported or previewed with more steps than a flow can have.",
+        consumer_action="Remove steps or split the work into several flows, then send the request again.",
+        user_action="Remove steps or split the work into several flows.",
+    ),
+    FlowApiErrorCode.STEP_SECURITY_CLASSIFICATION_MISMATCH: _entry(
+        category="Published definition",
+        surfaced_through="API error response",
+        cause=(
+            "A step's model is cleared for a lower level than the data the step "
+            "reads or the knowledge it uses."
+        ),
+        consumer_action=(
+            "Choose one of the qualifying_model_ids in the error context, or change "
+            "what the step reads, then save again."
+        ),
+        user_action=(
+            "Choose a model cleared for the required level, or change what the "
+            "step reads."
+        ),
+    ),
+    FlowApiErrorCode.STEP_OUTPUT_CLASSIFICATION_WRITE_DOWN: _entry(
+        category="Published definition",
+        surfaced_through="API error response",
+        cause=(
+            "A step's output classification override is lower than the level its "
+            "output already carries."
+        ),
+        consumer_action=(
+            "Raise the override to the required_level in the error context or "
+            "remove it, then save again."
+        ),
+        user_action=(
+            "Choose the same or a higher level for the result, or let it inherit."
+        ),
+    ),
     FlowApiErrorCode.STEP_MISSING: _entry(
         category="Step runtime",
         surfaced_through="Run error payload",

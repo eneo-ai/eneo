@@ -21,6 +21,7 @@ from eneo.flows.application.flow_draft_materialization_executor import (
 )
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.flow_authoring_spec import (
+    MAX_FLOW_AUTHORING_STEPS,
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
@@ -144,6 +145,50 @@ async def test_prepare_accepts_bound_canonical_resource_refs() -> None:
 
     assert prepared.preview.resource_bindings_count == 1
     assert prepared.preview.assistants_to_create == 1
+
+
+def _spec_with_steps(count: int) -> FlowDraftSpecCore:
+    return FlowDraftSpecCore(
+        flow_name="Flow",
+        steps=[
+            StepSpec(
+                plan_step_ref=f"step_{index}",
+                name=f"Step {index}",
+                assistant_spec=AssistantSpec(instructions="Do something."),
+                input_source=(
+                    InputSource.FLOW_INPUT if index == 1 else InputSource.PREVIOUS_STEP
+                ),
+            )
+            for index in range(1, count + 1)
+        ],
+    )
+
+
+@pytest.mark.anyio
+async def test_prepare_refuses_a_spec_over_the_step_limit_before_any_write() -> None:
+    def command(count: int) -> CreateFlowAuthoringCommand:
+        return CreateFlowAuthoringCommand(
+            space_id=uuid4(),
+            spec=_spec_with_steps(count),
+            origin=FlowPackageAuthoringOrigin(
+                package_id="se.demo.flow",
+                package_version="1.0.0",
+                content_checksum="sha256:abc",
+            ),
+        )
+
+    prepared = await FlowAuthoringCommandService().prepare(
+        command=command(MAX_FLOW_AUTHORING_STEPS), flow_service=SimpleNamespace()
+    )
+    assert prepared.preview.steps_created == MAX_FLOW_AUTHORING_STEPS
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await FlowAuthoringCommandService().prepare(
+            command=command(MAX_FLOW_AUTHORING_STEPS + 1),
+            flow_service=SimpleNamespace(),
+        )
+
+    assert exc_info.value.code == "flow_step_limit_exceeded"
 
 
 @pytest.mark.anyio

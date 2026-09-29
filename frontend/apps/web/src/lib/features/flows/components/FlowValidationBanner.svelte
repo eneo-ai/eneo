@@ -5,6 +5,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import type { FlowStep } from "@eneo/eneo-js";
+  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { IconInfo } from "@eneo/icons/info";
   import { fade, slide } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
@@ -17,13 +18,18 @@
   import type { FlowInputMaterialOption } from "$lib/features/flows/flowInputBindings";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import {
+    describeClassificationRefusal,
     getValidationIssueMessage,
     parseValidationError,
+    type ClassificationRefusal,
     type parseServerValidationIdentity,
     type ParsedValidationError
   } from "$lib/features/flows/flowStepValidationMessages";
 
   const reducedMotion = prefersReducedMotion();
+  const {
+    state: { currentSpace }
+  } = getSpacesManager();
 
   let {
     errors,
@@ -36,6 +42,7 @@
     errors: Map<string, string[]>;
     steps?: FlowStep[];
     onNavigateToStep?: (stepId: string) => void;
+    /** The latest server rejection's identity and, for a classification refusal, its facts. */
     repairIssue?: ReturnType<typeof parseServerValidationIdentity>;
     onRepairReference?: (detail: {
       stepId: string;
@@ -82,6 +89,15 @@
         const step = steps.find((s) => s.step_order === parsed.stepOrder);
         const translated = getValidationIssueMessage(parsed.code);
         const raw = parsed.detail;
+        const refusal = classificationRefusalFor(key, parsed);
+        const message = refusal
+          ? describeClassificationRefusal(refusal, {
+              stepLabel: stepLabelFor,
+              modelName: modelNameFor
+            })
+          : translated !== parsed.code
+            ? translated
+            : (raw ?? parsed.code);
         return {
           key,
           stepOrder: parsed.stepOrder,
@@ -92,8 +108,8 @@
           stepId: step?.id ?? undefined,
           // An untranslated code falls back to the raw server sentence
           // rather than showing the bare code.
-          message: translated !== parsed.code ? translated : (raw ?? parsed.code),
-          detail: raw && translated !== parsed.code && raw !== translated ? raw : undefined
+          message,
+          detail: raw && translated !== parsed.code && raw !== message ? raw : undefined
         };
       }
       case "assistant": {
@@ -126,6 +142,33 @@
         };
       }
     }
+  }
+
+  /** The facts of the latest server refusal when they belong to this very issue. */
+  function classificationRefusalFor(
+    key: string,
+    issue: Extract<ParsedValidationError, { kind: "step" }>
+  ): ClassificationRefusal | undefined {
+    if (
+      !key.startsWith("flow:server:") ||
+      repairIssue?.code !== issue.code ||
+      repairIssue.stepOrder !== issue.stepOrder
+    )
+      return undefined;
+    return repairIssue.classification;
+  }
+
+  function stepLabelFor(stepOrder: number): string {
+    return (
+      steps.find((step) => step.step_order === stepOrder)?.user_description ||
+      m.flow_step_fallback_label({ order: String(stepOrder) })
+    );
+  }
+
+  /** Names a model a refusal says would qualify, from the space the flow lives in. */
+  function modelNameFor(modelId: string): string | undefined {
+    const model = $currentSpace.completion_models?.find((candidate) => candidate.id === modelId);
+    return model ? (model.nickname ?? model.name) : undefined;
   }
 
   function repairsForStep(

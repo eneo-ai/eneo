@@ -31,6 +31,19 @@ from eneo.flows.flow_resource_bindings import is_uuid_shaped_resource_ref
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
 from eneo.flows.input_binding_contract_rules import validate_source_refs_binding
 
+# Safety guard against runaway tool output and oversized requests. This should
+# not be a practical product cap for legitimate advanced flows.
+MAX_FLOW_AUTHORING_STEPS = 256
+# The most bytes one step of an authoring request may take on the wire: its
+# settings, contracts and templates plus the prompt of its assistant. An
+# allowance sized to hold a long prompt with room to spare, not a measurement.
+MAX_FLOW_AUTHORING_STEP_BYTES = 64 * 1024
+# The most a request that carries a flow's steps may take:
+# 256 steps x 64 KiB = 16 MiB.
+MAX_FLOW_AUTHORING_REQUEST_BYTES = (
+    MAX_FLOW_AUTHORING_STEPS * MAX_FLOW_AUTHORING_STEP_BYTES
+)
+
 
 class AssistantSpecLocalRefNotPortableError(ValueError):
     def __init__(self, resource_ref: str) -> None:

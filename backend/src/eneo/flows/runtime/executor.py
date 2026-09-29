@@ -391,6 +391,9 @@ class FlowRunExecutorConfig:
     document_render_limits: DocumentRenderLimits = field(
         default_factory=lambda: DEFAULT_DOCUMENT_RENDER_LIMITS
     )
+    # The organization's switch for security classifications. A run is held to
+    # the rule unless the tenant turned it off.
+    security_classification_enabled: bool = True
 
     @classmethod
     def from_settings(
@@ -404,6 +407,7 @@ class FlowRunExecutorConfig:
         runtime_policy: FlowRuntimePolicy | None = None,
         mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
         rag_evidence_policy: FlowRagEvidencePolicy | None = None,
+        security_classification_enabled: bool = True,
     ) -> "FlowRunExecutorConfig":
         settings = get_settings()
         resolved_runtime_policy = runtime_policy or default_flow_runtime_policy(
@@ -425,6 +429,7 @@ class FlowRunExecutorConfig:
             ),
             rag_evidence_policy=rag_evidence_policy or FlowRagEvidencePolicy(),
             document_render_limits=document_render_limits,
+            security_classification_enabled=security_classification_enabled,
         )
 
     def step_deadline_seconds(self, step: RuntimeStep) -> float:
@@ -646,6 +651,9 @@ class FlowRunExecutor:
             )
         )
         self.rag_evidence_policy = resolved_config.rag_evidence_policy
+        self.security_classification_enabled = (
+            resolved_config.security_classification_enabled
+        )
         self.max_audio_files = resolved_config.max_audio_files
         self.max_generic_files = resolved_config.max_generic_files
         self.input_limits = resolved_config.input_limits
@@ -2937,6 +2945,7 @@ class FlowRunExecutor:
         space = state.flow_space
         evaluation = evaluate_step_security_classification(
             step_order=step.step_order,
+            step_id=step.step_id,
             # Preflight runs before any step completes, so the definition
             # boundary (not the completed set) bounds the references.
             upstream_step_orders=resolve_step_upstream_orders(
@@ -2959,6 +2968,7 @@ class FlowRunExecutor:
             prior_output_levels_by_order=prior_output_levels_by_order,
             assistant=assistant,
             space=space,
+            security_enabled=self.security_classification_enabled,
         )
         return evaluation.effective_output_level
 

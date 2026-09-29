@@ -512,6 +512,10 @@ Flows evaluate step security classification from several inputs:
 
 Current enforcement prevents a step from lowering the effective classification of its output. In practice, that means a flow cannot use an override to lower the classification below what the input material already implies.
 
+While the organization has security classifications turned off, none of these levels applies: a flow follows the same rule as the rest of the platform and no step is refused for its classification.
+
+When a save is refused for its classification, the response names the step, the level it must reach, what sets that level (a step it reads, its knowledge sources or the space) and the space's models that would clear it.
+
 ### Supported external effects
 
 Flow input may use HTTP GET. HTTP POST input and MCP servers or tools are not

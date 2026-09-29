@@ -43,6 +43,7 @@ from eneo.database.tables.spaces_table import (
     SpacesCompletionModels,
     SpacesEmbeddingModels,
 )
+from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.websites_table import Websites
 from eneo.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthoringPolicy
 from eneo.flows.ai_builder.ai_builder_context import (
@@ -874,12 +875,22 @@ async def test_a_moved_alias_is_renumbered_with_the_authors_spacing(
 
 
 async def _classify_first_step_unread(
-    db_container, seeded: Seeded, second_step: dict[str, Any]
+    db_container,
+    seeded: Seeded,
+    second_step: dict[str, Any],
+    *,
+    classifications_on: bool = True,
 ) -> None:
     """Step 1 is classified above what the other steps' models may read, and
-    nothing reads it: `second_step` is how step 2 is kept from it."""
+    nothing reads it: `second_step` is how step 2 is kept from it. The level
+    only applies while the organization has classifications turned on."""
 
     async with db_container() as container:
+        await container.session().execute(
+            sa.update(Tenants)
+            .where(Tenants.id == container.user().tenant_id)
+            .values(security_enabled=classifications_on)
+        )
         await container.session().execute(
             sa.update(FlowSteps)
             .where(FlowSteps.flow_id == seeded.flow_id, FlowSteps.step_order == 1)
@@ -943,6 +954,36 @@ async def test_a_prompt_that_reads_a_classified_step_in_the_saved_flow_is_refuse
         )
 
     assert await _states(db_container, seeded, strict=False) == before
+
+
+async def test_a_prompt_that_reads_a_classified_step_is_kept_while_classifications_are_off(
+    db_container, seeded: Seeded
+) -> None:
+    """The stored level stays on step 1, but with the organization's
+    classifications turned off nothing applies it: the edit the test above
+    refuses is saved."""
+
+    await _classify_first_step_unread(
+        db_container,
+        seeded,
+        {"input_bindings": {"question": "Granska underlaget."}},
+        classifications_on=False,
+    )
+
+    calls = await _edit(
+        db_container,
+        seeded,
+        [
+            _keep(1),
+            _keep(2),
+            _keep(3, assistant_spec={"instructions": "Läs {{ step_1.output.text }}."}),
+        ],
+    )
+
+    assert calls == {seeded.assistant_ids[2]: 1}
+    assert await _prompt(db_container, seeded.assistant_ids[2]) == (
+        "Läs {{ step_1.output.text }}."
+    )
 
 
 async def test_a_prompt_that_reads_both_steps_before_an_added_first_step_reads_them_moved(

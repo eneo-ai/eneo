@@ -5159,6 +5159,81 @@ async def test_runtime_step_security_reuses_flow_space_for_all_assistants(user):
     assert executor.space_repo.get_execution_assistant.await_count == 2
 
 
+@pytest.mark.asyncio
+async def test_a_preflight_refusal_names_its_step_on_the_failed_run(user):
+    executor, _, _, _ = _build_executor(user)
+    strong = _security_assistant(uuid4(), model_level=3)
+    weak = _security_assistant(uuid4(), model_level=1)
+    space = _security_space(
+        space_id=uuid4(), assistants=[strong, weak], security_level=1
+    )
+    _stub_security_assistants(executor, space)
+    first = replace(
+        _security_step(step_order=1, assistant_id=strong.id),
+        output_classification_override=3,
+    )
+    second = _security_step(
+        step_order=2, assistant_id=weak.id, input_source="previous_step"
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await executor._resolve_step_output_levels(
+            steps=[first, second], state=_empty_execution_state()
+        )
+
+    context = exc_info.value.context
+    assert context is not None
+    assert context["step_id"] == str(second.step_id)
+    assert context["cause"] == "reads"
+    assert context["source_step_orders"] == [1]
+    # The execution space carries no model list, so a run refusal claims none.
+    assert "qualifying_model_ids" not in context
+    run_error = executor._run_error_from_bad_request(
+        exc_info.value,
+        source=FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
+        default_code=FlowApiErrorCode.DEFINITION_INVALID,
+    )
+    assert run_error.step_order == 2
+    # The refusal codes are request-path codes: a run reports the definition
+    # as invalid, as the guide says.
+    assert run_error.code is FlowApiErrorCode.DEFINITION_INVALID
+
+
+def test_the_executor_config_carries_the_tenants_security_switch():
+    on = FlowRunExecutorConfig.from_settings(max_inline_text_bytes=1)
+    off = FlowRunExecutorConfig.from_settings(
+        max_inline_text_bytes=1, security_classification_enabled=False
+    )
+
+    assert on.security_classification_enabled is True
+    assert off.security_classification_enabled is False
+
+
+@pytest.mark.asyncio
+async def test_a_preflight_while_classifications_are_off_classifies_nothing(user):
+    executor, _, _, _ = _build_executor(user)
+    executor.security_classification_enabled = False
+    strong = _security_assistant(uuid4(), model_level=3)
+    weak = _security_assistant(uuid4(), model_level=1)
+    space = _security_space(
+        space_id=uuid4(), assistants=[strong, weak], security_level=1
+    )
+    _stub_security_assistants(executor, space)
+    first = replace(
+        _security_step(step_order=1, assistant_id=strong.id),
+        output_classification_override=3,
+    )
+    second = _security_step(
+        step_order=2, assistant_id=weak.id, input_source="previous_step"
+    )
+
+    levels = await executor._resolve_step_output_levels(
+        steps=[first, second], state=_empty_execution_state()
+    )
+
+    assert levels == {1: None, 2: None}
+
+
 def _step_for_execute_step(*, step_order: int = 1) -> RuntimeStep:
     return RuntimeStep(
         step_id=uuid4(),

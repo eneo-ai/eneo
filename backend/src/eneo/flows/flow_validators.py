@@ -45,6 +45,7 @@ from eneo.flows.domain.step_mapped_execution import (
     single_mapped_array_key,
 )
 from eneo.flows.domain.text_processing import text_processing_config
+from eneo.flows.flow_authoring_spec import MAX_FLOW_AUTHORING_STEPS
 from eneo.flows.flow_authoring_transcription import requires_audio_transcription
 from eneo.flows.flow_capability_manifest import (
     FlowOutputMode,
@@ -138,12 +139,34 @@ __all__ = [
     "collect_step_graph_issues",
     "flow_run_input",
     "run_input_alias_refusal",
+    "step_limit_issue",
     "takes_runtime_files",
     "validate_form_schema",
+    "validate_step_count",
     "validate_step_graph",
     "validate_steps",
     "validate_variable_alias_collisions",
 ]
+
+
+def step_limit_issue(step_count: int) -> FlowStepGraphIssue | None:
+    """The refusal for a flow with more steps than a flow can have, if any."""
+    if step_count <= MAX_FLOW_AUTHORING_STEPS:
+        return None
+    return _bad_request_issue(
+        code=FlowGraphIssueCode.FLOW_STEP_LIMIT_EXCEEDED,
+        message=(
+            f"A flow can have at most {MAX_FLOW_AUTHORING_STEPS} steps; this one has "
+            f"{step_count}. Remove steps or split the work into several flows."
+        ),
+        context={"step_count": step_count, "max_steps": MAX_FLOW_AUTHORING_STEPS},
+    )
+
+
+def validate_step_count(step_count: int) -> None:
+    issue = step_limit_issue(step_count)
+    if issue is not None:
+        raise _to_exception(issue)
 
 
 def validate_steps(
@@ -186,6 +209,10 @@ def collect_step_graph_issues(
 ) -> list[FlowStepGraphIssue]:
     if not steps:
         return []
+
+    limit_issue = step_limit_issue(len(steps))
+    if limit_issue is not None:
+        return [limit_issue]
 
     sorted_steps = sorted(steps, key=lambda item: item.step_order)
     step_orders = [step.step_order for step in sorted_steps]

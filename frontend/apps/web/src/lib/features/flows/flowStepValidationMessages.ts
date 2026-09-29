@@ -50,7 +50,15 @@ const CODE_TO_MESSAGE: Record<string, () => string> = {
   transcribe_only_violation: () => m.flow_validation_msg_transcribe_only_violation(),
   flow_audio_transcription_required: () => m.flow_validation_msg_audio_transcription_required(),
   flow_audio_transcription_model_required: () =>
-    m.flow_validation_msg_audio_transcription_model_required()
+    m.flow_validation_msg_audio_transcription_model_required(),
+  flow_step_limit_exceeded: () => m.flow_error_flow_step_limit_exceeded(),
+  // The security-classification refusals a save raises. Their facts, when the
+  // server sends them, turn this generic sentence into an actionable one
+  // (describeClassificationRefusal).
+  flow_step_security_classification_mismatch: () =>
+    m.flow_error_flow_step_security_classification_mismatch(),
+  flow_step_output_classification_write_down: () =>
+    m.flow_error_flow_step_output_classification_write_down()
 };
 
 export function getValidationIssueMessage(code: string): string {
@@ -63,6 +71,102 @@ export type ParsedValidationError =
   | { kind: "flow"; code: string; message: string; detail?: string };
 
 /**
+ * The facts of a security-classification refusal: what the step must clear,
+ * what it has, and what sets the level. `qualifyingModelIds` are the space's
+ * usable models that would clear it (model refusals only).
+ */
+export type ClassificationRefusal = {
+  kind: "model_below_required" | "output_write_down";
+  requiredLevel: number;
+  currentLevel: number | null;
+  cause: "reads" | "knowledge" | "space";
+  sourceStepOrders: number[];
+  qualifyingModelIds: string[];
+};
+
+const CLASSIFICATION_KIND_BY_CODE: Record<string, ClassificationRefusal["kind"]> = {
+  flow_step_security_classification_mismatch: "model_below_required",
+  flow_step_output_classification_write_down: "output_write_down"
+};
+
+function isLevel(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value);
+}
+
+/**
+ * The refusal facts of a classification code, or undefined when the payload
+ * lacks them: the caller then shows the generic sentence rather than a
+ * message built on a guess.
+ */
+function readClassificationRefusal(
+  code: string,
+  context: Record<string, unknown>
+): ClassificationRefusal | undefined {
+  const kind = CLASSIFICATION_KIND_BY_CODE[code];
+  if (!kind) return undefined;
+  const { required_level: requiredLevel, current_level: current, cause } = context;
+  if (!isLevel(requiredLevel)) return undefined;
+  if (cause !== "reads" && cause !== "knowledge" && cause !== "space") return undefined;
+  if (current != null && !isLevel(current)) return undefined;
+  if (current == null && kind === "output_write_down") return undefined;
+  const list = (value: unknown) => (Array.isArray(value) ? value : []);
+  const sourceStepOrders = list(context.source_step_orders).filter(isLevel);
+  if (cause === "reads" && sourceStepOrders.length === 0) return undefined;
+  return {
+    kind,
+    requiredLevel,
+    currentLevel: current ?? null,
+    cause,
+    sourceStepOrders,
+    qualifyingModelIds: list(context.qualifying_model_ids).filter(
+      (id): id is string => typeof id === "string"
+    )
+  };
+}
+
+export type ClassificationNames = {
+  stepLabel: (stepOrder: number) => string;
+  modelName: (modelId: string) => string | undefined;
+};
+
+/** The actionable sentence for a refusal: what is read, what the model has, what to choose. */
+export function describeClassificationRefusal(
+  refusal: ClassificationRefusal,
+  names: ClassificationNames
+): string {
+  const level = String(refusal.requiredLevel);
+  const why =
+    refusal.cause === "reads"
+      ? m.flow_validation_classification_reads({
+          level,
+          sources: refusal.sourceStepOrders.map(names.stepLabel).join(", ")
+        })
+      : refusal.cause === "knowledge"
+        ? m.flow_validation_classification_knowledge({ level })
+        : m.flow_validation_classification_space({ level });
+  if (refusal.kind === "output_write_down") {
+    return `${why} ${m.flow_validation_classification_write_down({
+      override: String(refusal.currentLevel),
+      level
+    })}`;
+  }
+  const modelState =
+    refusal.currentLevel === null
+      ? m.flow_validation_classification_model_none()
+      : m.flow_validation_classification_model_level({ level: String(refusal.currentLevel) });
+  const models = refusal.qualifyingModelIds
+    .map(names.modelName)
+    .filter((name): name is string => Boolean(name));
+  const choice =
+    models.length > 0
+      ? m.flow_validation_classification_choose_model({ models: models.join(", ") })
+      : refusal.qualifyingModelIds.length === 0
+        ? m.flow_validation_classification_no_model({ level })
+        : m.flow_validation_classification_choose_level({ level });
+  return `${why} ${modelState} ${choice}`;
+}
+
+/**
  * Structured identity of a server-side validation failure, read from the
  * error payload the backend now emits (context.issue_code + step_order).
  */
@@ -71,6 +175,7 @@ export function parseServerValidationIdentity(error: { response?: unknown }): {
   stepOrder: number | null;
   field: string | null;
   reference: string | null;
+  classification?: ClassificationRefusal;
 } | null {
   // The backend's GeneralError body arrives as EneoError.response;
   // context.issue_code is the one validation discriminator — a symbolic
@@ -93,7 +198,8 @@ export function parseServerValidationIdentity(error: { response?: unknown }): {
   const field = typeof context.field === "string" && context.field ? context.field : null;
   const reference =
     typeof context.reference === "string" && context.reference ? context.reference : null;
-  return { code, stepOrder, field, reference };
+  const classification = readClassificationRefusal(code, context);
+  return { code, stepOrder, field, reference, ...(classification ? { classification } : {}) };
 }
 
 /**

@@ -381,6 +381,7 @@ async def _execute_flow_run_async_traced(
                         runtime_policy=runtime_policy,
                         mapped_execution_policy=mapped_execution_policy,
                         rag_evidence_policy=rag_evidence_policy,
+                        security_classification_enabled=tenant.security_enabled,
                     ),
                 )
                 result = await executor.execute_claimed(

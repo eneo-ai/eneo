@@ -6,6 +6,9 @@ from eneo.flows.api.flow_authoring_router import (
 from eneo.flows.api.flow_http_test_router import (
     router as _http_test_router,
 )
+from eneo.flows.api.flow_security_classification_router import (
+    router as _security_classification_router,
+)
 from eneo.flows.api.flow_template_router import (
     router as _template_router,
 )
@@ -13,6 +16,7 @@ from eneo.flows.api.flow_template_router import (
 router = _APIRouter()
 router.include_router(_authoring_router)
 router.include_router(_template_router)
+router.include_router(_security_classification_router)
 router.include_router(_http_test_router)
 
 __all__ = ["router"]

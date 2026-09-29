@@ -39,6 +39,10 @@ from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
     FlowApiErrorCode,
 )
+from eneo.flows.flow_authoring_spec import (
+    MAX_FLOW_AUTHORING_REQUEST_BYTES,
+    MAX_FLOW_AUTHORING_STEPS,
+)
 from eneo.flows.flow_metadata import FlowFormFieldType
 from eneo.flows.flow_run_error import FlowRunDispatchErrorKind
 from eneo.flows.published_definition import parse_verified_published_definition
@@ -487,6 +491,7 @@ REQUIRED_PATHS: dict[str, set[str]] = {
     "/api/v1/flows/{id}/template-files/": {"post"},
     "/api/v1/flows/{id}/template-files/{file_id}/": {"delete"},
     "/api/v1/flows/{id}/template-inspect/": {"get"},
+    "/api/v1/flows/{id}/security-classification/preview": {"post"},
     "/api/v1/flows/{id}/runs/": {"get", "post"},
     "/api/v1/flows/{id}/runs/{run_id}/": {"get"},
     "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/": {"get"},
@@ -619,6 +624,10 @@ NON_RUNTIME_REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
         "delete_flow_template_file"
     ),
     ("/api/v1/flows/{id}/template-inspect/", "get"): "inspect_flow_template",
+    (
+        "/api/v1/flows/{id}/security-classification/preview",
+        "post",
+    ): "preview_flow_security_classification",
     ("/api/v1/settings/flow-input-limits", "get"): "get_flow_input_limits",
     ("/api/v1/settings/flow-input-limits", "patch"): "update_flow_input_limits",
     (
@@ -747,6 +756,10 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
         "/api/v1/flows/{id}/template-inspect/",
         "get",
     ): {"400", "403", "404", "422"},
+    (
+        "/api/v1/flows/{id}/security-classification/preview",
+        "post",
+    ): {"400", "403", "404"},
     (
         "/api/v1/flows/{id}/runs/",
         "post",
@@ -3094,6 +3107,68 @@ def test_openapi_http_test_schema_uses_typed_transport_contract(
             openapi_spec, schemas["HttpAuthoredConfig"]["properties"]["response_format"]
         )
     ) == {"text", "json"}
+
+
+def test_openapi_security_classification_preview_is_a_closed_typed_contract(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    operation = _get_operation(
+        openapi_spec,
+        "/api/v1/flows/{id}/security-classification/preview",
+        "post",
+    )
+    request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
+    assert request_schema == {
+        "$ref": "#/components/schemas/FlowSecurityClassificationPreviewRequest"
+    }
+    request = schemas["FlowSecurityClassificationPreviewRequest"]
+    assert request["additionalProperties"] is False
+    steps = _non_null_schema(request["properties"]["steps"])
+    assert steps["items"] == {"$ref": "#/components/schemas/FlowStepUpdateRequest"}
+    # The service owns the step limit and its documented refusal; a typed
+    # bound would answer with a generic 422 first.
+    assert "maxItems" not in steps
+    # A flow of the largest size uses at most that many assistants.
+    assert request["properties"]["assistants"]["maxItems"] == MAX_FLOW_AUTHORING_STEPS
+    candidate = schemas["FlowSecurityClassificationAssistantCandidate"]
+    assert candidate["properties"]["update"] == {
+        "$ref": "#/components/schemas/FlowAssistantUpdateRequest"
+    }
+
+    violation = schemas["FlowStepSecurityClassificationViolationPublic"]["properties"]
+    assert _extract_enum_values(openapi_spec, violation["code"]) == {
+        "flow_step_security_classification_mismatch",
+        "flow_step_output_classification_write_down",
+    }
+    assert _extract_enum_values(openapi_spec, violation["cause"]) == {
+        "reads",
+        "knowledge",
+        "space",
+    }
+    step = schemas["FlowStepSecurityClassificationPublic"]
+    assert {
+        "step_order",
+        "reads",
+        "input_level",
+        "knowledge_level",
+        "required_model_level",
+        "model_level",
+        "qualifying_model_ids",
+        "effective_output_level",
+        "output_floor",
+        "violation",
+    } <= set(step["properties"])
+    too_large = operation["responses"]["413"]["content"]["application/json"]["example"]
+    assert too_large["code"] == "flow_request_body_too_large"
+    assert too_large["context"] == {"max_bytes": MAX_FLOW_AUTHORING_REQUEST_BYTES}
+    response = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    assert response == {
+        "$ref": "#/components/schemas/FlowSecurityClassificationPreviewPublic"
+    }
+    description = str(operation["description"])
+    assert "does not save" in description
+    assert "writes no audit" in description
 
 
 def test_openapi_flow_runtime_mutation_requests_reject_unknown_fields(

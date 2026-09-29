@@ -135,6 +135,12 @@ const FLOW_API_ERROR_MESSAGES = {
     m.flow_error_flow_assistant_snapshot_republish_required,
   flow_assistant_snapshot_drift: m.flow_error_flow_assistant_snapshot_drift,
   flow_input_contract_inapplicable: m.flow_error_flow_input_contract_inapplicable,
+  flow_step_limit_exceeded: m.flow_error_flow_step_limit_exceeded,
+  flow_request_body_too_large: m.flow_error_flow_request_body_too_large,
+  flow_step_security_classification_mismatch:
+    m.flow_error_flow_step_security_classification_mismatch,
+  flow_step_output_classification_write_down:
+    m.flow_error_flow_step_output_classification_write_down,
   flow_step_missing: m.flow_error_flow_step_missing,
   flow_step_attempt_start_failed: m.flow_error_flow_step_attempt_start_failed,
   flow_step_execution_failed: m.flow_error_flow_step_execution_failed,

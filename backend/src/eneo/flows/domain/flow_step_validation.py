@@ -54,6 +54,7 @@ class FlowGraphIssueCode(StrEnum):
         "flow_review_policy_outbound_output_unsupported"
     )
     FLOW_STEP_INVALID = "flow_step_invalid"
+    FLOW_STEP_LIMIT_EXCEEDED = "flow_step_limit_exceeded"
     INPUT_CONTRACT_SOURCE_MISMATCH = "input_contract_source_mismatch"
     INPUT_CONTRACT_TYPE_MISMATCH = "input_contract_type_mismatch"
     INVALID_INPUT_CONTRACT_SCHEMA = "invalid_input_contract_schema"

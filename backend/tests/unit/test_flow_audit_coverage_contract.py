@@ -549,6 +549,11 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
         ),
         idempotency="the reviewed checksum, target state, and mapping decision identify replays",
     ),
+    "preview_flow_security_classification": _no_business_event(
+        owner=(
+            "flow_security_classification_router.preview_flow_security_classification"
+        )
+    ),
     "validate_flow_package": _no_business_event(
         owner="flow_package_router.validate_flow_package"
     ),

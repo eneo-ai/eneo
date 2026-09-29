@@ -9,6 +9,7 @@ from eneo.assistants.api.assistant_models import AssistantUpdatePublic
 from eneo.assistants.api.assistant_update_adapter import (
     to_flow_assistant_update_command,
 )
+from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
@@ -26,6 +27,18 @@ from eneo.main.exceptions import ErrorCodes, UnauthorizedException
 from eneo.server.dependencies.container import get_container
 
 router = APIRouter()
+
+
+def flow_assistant_update_command(
+    assistant_in: FlowAssistantUpdateRequest,
+) -> AssistantUpdateCommand:
+    """The command a flow-managed assistant update applies, and a preview evaluates."""
+    return to_flow_assistant_update_command(
+        AssistantUpdatePublic.model_validate(
+            assistant_in.model_dump(exclude_unset=True)
+        )
+    )
+
 
 # Mutations commit before the response is sent; see flow_authoring_router.
 _MUTATING_CONTAINER = get_container(
@@ -60,7 +73,7 @@ _FLOW_ASSISTANT_PUBLIC_EXAMPLE: dict[str, object] = {
 }
 
 
-async def _require_flow_assistant_access(
+async def require_flow_assistant_access(
     request: Request,
     container: Container,
     *,
@@ -129,7 +142,7 @@ async def create_flow_assistant(
     assistant_in: FlowAssistantCreateRequest,
     container: Container = Depends(_MUTATING_CONTAINER),
 ):
-    await _require_flow_assistant_access(request, container, flow_id=id)
+    await require_flow_assistant_access(request, container, flow_id=id)
     flow_service = container.flow_service()
     assistant_assembler = container.assistant_assembler()
     user = container.user()
@@ -205,7 +218,7 @@ async def get_flow_assistant(
         get_container(with_user=True, with_module_user=True)
     ),
 ):
-    await _require_flow_assistant_access(request, container, flow_id=id)
+    await require_flow_assistant_access(request, container, flow_id=id)
     flow_service = container.flow_service()
     assistant_assembler = container.assistant_assembler()
     assistant, permissions = await flow_service.get_flow_assistant(
@@ -265,15 +278,11 @@ async def update_flow_assistant(
     assistant_in: FlowAssistantUpdateRequest,
     container: Container = Depends(_MUTATING_CONTAINER),
 ):
-    await _require_flow_assistant_access(request, container, flow_id=id)
+    await require_flow_assistant_access(request, container, flow_id=id)
     flow_service = container.flow_service()
     assistant_assembler = container.assistant_assembler()
     user = container.user()
-    update = to_flow_assistant_update_command(
-        AssistantUpdatePublic.model_validate(
-            assistant_in.model_dump(exclude_unset=True)
-        )
-    )
+    update = flow_assistant_update_command(assistant_in)
 
     updated_assistant, permissions = await flow_service.update_flow_assistant(
         flow_id=id,
@@ -355,7 +364,7 @@ async def delete_flow_assistant(
     request: Request,
     container: Container = Depends(_MUTATING_CONTAINER),
 ):
-    await _require_flow_assistant_access(request, container, flow_id=id)
+    await require_flow_assistant_access(request, container, flow_id=id)
     flow_service = container.flow_service()
     user = container.user()
     assistant, _ = await flow_service.get_flow_assistant(

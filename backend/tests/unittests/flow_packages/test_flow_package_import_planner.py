@@ -53,6 +53,7 @@ from eneo.flows.domain.flow_step_validation import (
     FlowStepValidationError,
 )
 from eneo.flows.flow_authoring_spec import (
+    MAX_FLOW_AUTHORING_STEPS,
     AssistantSpec,
     FlowDraftSpecCore,
     FormFieldSpec,
@@ -667,6 +668,43 @@ def test_planner_accepts_a_package_that_reads_the_run_text_of_a_free_text_run() 
     build_flow_package_import_plan(
         envelope, candidates=FlowPackageImportPlannerCandidates()
     )
+
+
+def test_planner_refuses_a_package_with_more_steps_than_a_flow_can_have() -> None:
+    assistant = AssistantSpec(instructions="No package resources.")
+
+    def package(step_count: int) -> FlowPackageEnvelope:
+        return _envelope(
+            requirements=[],
+            assistant=assistant,
+            extra_steps=[
+                StepSpec(
+                    plan_step_ref=f"step-{index}",
+                    name=f"Step {index}",
+                    assistant_spec=assistant,
+                    input_source=InputSource.PREVIOUS_STEP,
+                )
+                for index in range(2, step_count + 1)
+            ],
+        )
+
+    plan = build_flow_package_import_plan(
+        package(MAX_FLOW_AUTHORING_STEPS),
+        candidates=FlowPackageImportPlannerCandidates(),
+    )
+    assert plan.package_summary.steps_count == MAX_FLOW_AUTHORING_STEPS
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        build_flow_package_import_plan(
+            package(MAX_FLOW_AUTHORING_STEPS + 1),
+            candidates=FlowPackageImportPlannerCandidates(),
+        )
+
+    assert exc_info.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+    assert exc_info.value.context == {"reason": "flow_step_limit_exceeded"}
+    # The package contract carries no counts; its message states them.
+    assert str(MAX_FLOW_AUTHORING_STEPS) in str(exc_info.value)
+    assert str(MAX_FLOW_AUTHORING_STEPS + 1) in str(exc_info.value)
 
 
 def test_planner_rejects_section_step_whose_prompt_reads_json_step() -> None:

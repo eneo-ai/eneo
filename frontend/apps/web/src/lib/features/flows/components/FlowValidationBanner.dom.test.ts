@@ -1,10 +1,30 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import type { FlowStep } from "@eneo/eneo-js";
+import { readable } from "svelte/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { m } from "$lib/paraglide/messages";
 
+import {
+  describeClassificationRefusal,
+  getValidationIssueMessage,
+  type ClassificationRefusal
+} from "$lib/features/flows/flowStepValidationMessages";
+
 import FlowValidationBanner from "./FlowValidationBanner.svelte";
+
+vi.mock("$lib/features/spaces/SpacesManager", () => ({
+  getSpacesManager: () => ({
+    state: {
+      currentSpace: readable({
+        completion_models: [
+          { id: "model-a", name: "model-a-name", nickname: "Modell A" },
+          { id: "model-b", name: "Modell B", nickname: null }
+        ]
+      })
+    }
+  })
+}));
 
 afterEach(() => {
   cleanup();
@@ -263,3 +283,89 @@ it.each([
     ).toBeNull();
   }
 );
+
+describe("FlowValidationBanner security classification refusals", () => {
+  const code = "flow_step_security_classification_mismatch";
+  const RAW = "Step 3: assistant model does not meet the required security classification.";
+  const refusal: ClassificationRefusal = {
+    kind: "model_below_required",
+    requiredLevel: 3,
+    currentLevel: 2,
+    cause: "reads",
+    sourceStepOrders: [1],
+    qualifyingModelIds: ["model-a", "model-b"]
+  };
+  const steps = [
+    { ...makeStep(), id: "step-1", step_order: 1, user_description: "Transkribera" },
+    makeStep()
+  ];
+  const names = {
+    stepLabel: (order: number) => (order === 1 ? "Transkribera" : `Steg ${order}`),
+    modelName: (id: string) => ({ "model-a": "Modell A", "model-b": "Modell B" })[id]
+  };
+
+  it("says which step is read, what the model is cleared for and which models to choose", async () => {
+    const onNavigateToStep = vi.fn();
+    render(FlowValidationBanner, {
+      errors: new Map([[`flow:server:${code}:3`, [RAW]]]),
+      steps,
+      onNavigateToStep,
+      repairIssue: { code, stepOrder: 3, field: null, reference: null, classification: refusal },
+      isExpanded: true
+    });
+
+    expect(screen.getByText(describeClassificationRefusal(refusal, names))).toBeTruthy();
+    expect(screen.getByText(/Modell A/)).toBeTruthy();
+    expect(screen.getByText(/Modell B/)).toBeTruthy();
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.flow_validation_technical_details() })
+    );
+    expect(screen.getAllByText(RAW)).toHaveLength(1);
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_validation_go_to_step() }));
+    expect(onNavigateToStep).toHaveBeenCalledWith("step-3");
+  });
+
+  it("falls back to the translated sentence for a refusal without facts", () => {
+    render(FlowValidationBanner, {
+      errors: new Map([[`flow:server:${code}:3`, [RAW]]]),
+      steps,
+      isExpanded: true
+    });
+
+    expect(screen.getByText(getValidationIssueMessage(code))).toBeTruthy();
+  });
+
+  it("does not show facts that belong to another refusal", () => {
+    render(FlowValidationBanner, {
+      errors: new Map([[`flow:server:${code}:3`, [RAW]]]),
+      steps,
+      repairIssue: {
+        code: "flow_step_output_classification_write_down",
+        stepOrder: 3,
+        field: null,
+        reference: null,
+        classification: { ...refusal, kind: "output_write_down" }
+      },
+      isExpanded: true
+    });
+
+    expect(screen.getByText(getValidationIssueMessage(code))).toBeTruthy();
+  });
+});
+
+it("shows the translated step limit refusal with the server sentence as detail", async () => {
+  const code = "flow_step_limit_exceeded";
+  const raw = "A flow can have at most 256 steps; this one has 257. Remove steps and try again.";
+  render(FlowValidationBanner, {
+    errors: new Map([[`flow:server:${code}`, [raw]]]),
+    steps: [],
+    isExpanded: true
+  });
+
+  expect(screen.getByText(getValidationIssueMessage(code))).toBeTruthy();
+  await fireEvent.click(
+    screen.getByRole("button", { name: m.flow_validation_technical_details() })
+  );
+  expect(screen.getAllByText(raw)).toHaveLength(1);
+});

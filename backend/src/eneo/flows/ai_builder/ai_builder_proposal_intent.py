@@ -46,6 +46,7 @@ from eneo.flows.ai_builder.ai_builder_structured_field_normalizer import (
 )
 from eneo.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
 from eneo.flows.flow_authoring_spec import (
+    MAX_FLOW_AUTHORING_STEPS,
     InputSource,
     InputType,
     OutputType,
@@ -54,10 +55,6 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 
 if TYPE_CHECKING:
     from eneo.flows.ai_builder.planning_state import NamedResultPlacement
-
-# Safety guard against runaway tool output. This should not be a practical
-# product cap for legitimate advanced flows.
-MAX_PROPOSAL_STEPS = 256
 
 
 def fold_named_result_location(
@@ -729,9 +726,9 @@ class CreateFlowIntent(BaseModel):
     ) -> list[CreateSemanticStepIntent]:
         if not value:
             raise ValueError("propose_flow requires at least one step.")
-        if len(value) > MAX_PROPOSAL_STEPS:
+        if len(value) > MAX_FLOW_AUTHORING_STEPS:
             raise ValueError(
-                f"propose_flow supports at most {MAX_PROPOSAL_STEPS} semantic steps."
+                f"propose_flow supports at most {MAX_FLOW_AUTHORING_STEPS} semantic steps."
             )
         return value
 
@@ -940,7 +937,9 @@ def build_create_flow_tool_schema(
                         "type": "array",
                         "minItems": 1,
                         "maxItems": (
-                            1 if is_pure_audio_transcription else MAX_PROPOSAL_STEPS
+                            1
+                            if is_pure_audio_transcription
+                            else MAX_FLOW_AUTHORING_STEPS
                         ),
                         "items": step_schema,
                     },
