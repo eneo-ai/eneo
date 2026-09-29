@@ -70,8 +70,8 @@ async def get_tenant_integrations(
     "/tenant/add/{integration_id}/",
     response_model=TenantIntegration,
     status_code=200,
-    description="Add an integration to the tenant.",
-    responses=responses.get_responses([400, 404]),
+    description="Add an integration to the tenant. Requires administrator permission.",
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def add_tenant_integration(
     integration_id: UUID,
@@ -108,8 +108,8 @@ async def add_tenant_integration(
 @router.delete(
     "/tenant/remove/{tenant_integration_id}/",
     status_code=204,
-    description="Remove an integration from the tenant.",
-    responses=responses.get_responses([404]),
+    description="Remove an integration from the tenant. Requires administrator permission.",
+    responses=responses.get_responses([403, 404]),
 )
 async def remove_tenant_integration(
     tenant_integration_id: UUID,
@@ -118,15 +118,9 @@ async def remove_tenant_integration(
     service = container.tenant_integration_service()
     user = container.user()
 
-    # Get tenant integration info BEFORE deletion (snapshot pattern)
-    # Use tenant_id filter to prevent cross-tenant deletion
-    tenant_integration_repo = container.tenant_integration_repo()
-    tenant_integration = await tenant_integration_repo.one(
-        id=tenant_integration_id, tenant_id=user.tenant_id
+    tenant_integration = await service.remove_tenant_integration(
+        tenant_integration_id=tenant_integration_id
     )
-
-    # Delete tenant integration
-    await service.remove_tenant_integration(tenant_integration_id=tenant_integration_id)
 
     # Audit logging
     audit_service = container.audit_service()
