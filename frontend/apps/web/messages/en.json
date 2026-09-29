@@ -1969,6 +1969,7 @@
   "provider_name_hint": "A unique name to identify this provider instance",
   "change": "Change",
   "cancel_keep_current_key": "Cancel and keep current key",
+  "provider_endpoint_change_requires_key": "You changed the endpoint. Enter the API key again; the stored key is not sent to a different destination.",
   "will_be_encrypted": "Will be encrypted before storage",
   "endpoint_required_azure": "Required. Your Azure OpenAI resource endpoint",
   "endpoint_required_vllm": "Endpoint URL is required for vLLM",

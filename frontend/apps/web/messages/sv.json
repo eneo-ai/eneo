@@ -2002,6 +2002,7 @@
   "provider_name_hint": "Ett unikt namn för att identifiera denna leverantörsinstans",
   "change": "Ändra",
   "cancel_keep_current_key": "Avbryt och behåll nuvarande nyckel",
+  "provider_endpoint_change_requires_key": "Du ändrade endpointen. Ange API-nyckeln igen; den lagrade nyckeln skickas inte till en annan destination.",
   "will_be_encrypted": "Kommer att krypteras före lagring",
   "endpoint_required_azure": "Krävs. Din Azure OpenAI-resursendpoint",
   "endpoint_required_vllm": "Endpoint-URL krävs för vLLM",
