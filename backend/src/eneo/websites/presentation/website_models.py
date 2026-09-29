@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Optional, Union
+from urllib.parse import urlparse
 from uuid import UUID
 
 from pydantic import BaseModel, Field, ValidationInfo, field_serializer, field_validator
@@ -22,6 +23,21 @@ from eneo.main.models import (
 from eneo.websites.crawl_dependencies.crawl_models import CrawlRunSparse
 from eneo.websites.domain.crawl_run import CrawlRun, CrawlType
 from eneo.websites.domain.website import UpdateInterval, Website
+
+
+def _require_http_url(url: str) -> str:
+    """Accept only http(s) URLs with a host name; returns the trimmed URL.
+
+    Early feedback for the API. The crawler enforces its own destination
+    policy at connection time, so stored URLs are covered regardless.
+    """
+    url = url.strip()
+    parsed = urlparse(url)
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
+        raise ValueError(
+            "URL must start with http:// or https:// and include a host name"
+        )
+    return url
 
 
 class WebsiteBase(BaseModel):
@@ -172,6 +188,11 @@ class WebsiteCreate(BaseModel):
     )
     """Password for HTTP Basic Authentication. Must be provided with username."""
 
+    @field_validator("url")
+    @classmethod
+    def validate_url_is_http(cls, v: str) -> str:
+        return _require_http_url(v)
+
     @field_validator("http_auth_password")
     @classmethod
     def validate_auth_fields_together(
@@ -206,6 +227,15 @@ class WebsiteUpdate(BaseModel):
         description="Password for HTTP Basic Authentication. "
         "Set to null to remove auth. Must be provided with username.",
     )
+
+    @field_validator("url")
+    @classmethod
+    def validate_url_is_http(
+        cls, v: Union[str, NotProvided]
+    ) -> Union[str, NotProvided]:
+        if not is_provided(v):
+            return v
+        return _require_http_url(v)
 
     @field_validator("http_auth_password")
     @classmethod

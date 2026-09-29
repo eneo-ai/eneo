@@ -754,17 +754,19 @@ class UserService:
 
     async def _get_user_from_token(self, token: str):
         settings = get_settings()
-        payload, claims = self.auth_service.get_jwt_payload_with_claims(
+        payload = self.auth_service.get_jwt_payload(
             token,
             key=str(settings.jwt_secret),
             aud=settings.jwt_audience,
             algs=[settings.jwt_algorithm],
         )
-        if payload.username is None:
-            return None
-        user = await self.repo.get_user_by_username(payload.username)
+        user = await self.repo.get_user_by_id_and_tenant_id(
+            payload.user_id, tenant_id=payload.tenant_id
+        )
         if user is not None:
-            self.auth_service.validate_credential_version(claims, user)
+            self.auth_service.validate_local_credential_version(
+                payload.credential_version, user
+            )
         return user
 
     async def _resolve_space_id_for_scope(
