@@ -1,0 +1,307 @@
+{
+ "version": 1,
+ "description": "Oracle experiment case selection (protocol-oracle-2026-09-29.md section 4). Tags are mechanical (section 4 rules), not outcomes. held_out = in no question/classification tuning screen list.",
+ "repetitions": 3,
+ "cases": [
+  {
+   "id": "mc_oms03_lss",
+   "held_out": true,
+   "f18": false,
+   "edit_target": false,
+   "why": "Review checkpoint (view, approve), free text plus two PDFs, seven facts.",
+   "tuned_by_question_policy": [],
+   "tuned_by_review_lane": [
+    "decisive_rr.sh",
+    "screen_rr.sh"
+   ]
+  },
+  {
+   "id": "mc_int12_tjansteskrivelse",
+   "held_out": true,
+   "f18": false,
+   "edit_target": false,
+   "why": "DOCX template, five mixed files, ten required facts (the longest chain).",
+   "tuned_by_question_policy": [],
+   "tuned_by_review_lane": []
+  },
+  {
+   "id": "mc_int15_underrattelser",
+   "held_out": true,
+   "f18": false,
+   "edit_target": false,
+   "why": "Reference rutin (PDF), csv and docx input, eleven facts, 17 forbidden literals.",
+   "tuned_by_question_policy": [],
+   "tuned_by_review_lane": []
+  },
+  {
+   "id": "mc_int14_personuppgiftsincident",
+   "held_out": true,
+   "f18": false,
+   "edit_target": false,
+   "why": "Docx and json input, personal-data forbidden literals (16).",
+   "tuned_by_question_policy": [],
+   "tuned_by_review_lane": []
+  },
+  {
+   "id": "mc_int05_synpunkter_rapport",
+   "held_out": true,
+   "f18": false,
+   "edit_target": false,
+   "why": "Reference report (docx) and a csv input, docx output.",
+   "tuned_by_question_policy": [],
+   "tuned_by_review_lane": []
+  },
+  {
+   "id": "mc_utb10_overklagande_komvux",
+   "held_out": true,
+   "f18": false,
+   "edit_target": false,
+   "why": "Two files (pdf, txt), render_verbatim docx; the simple control.",
+   "tuned_by_question_policy": [],
+   "tuned_by_review_lane": []
+  },
+  {
+   "id": "mb_utb08_grundbelopp",
+   "held_out": true,
+   "f18": false,
+   "edit_target": false,
+   "why": "Structured xlsx as attachment and as input, a form field, computed sums.",
+   "tuned_by_question_policy": [],
+   "tuned_by_review_lane": []
+  },
+  {
+   "id": "mb_nar08_foretradesratt",
+   "held_out": true,
+   "f18": false,
+   "edit_target": false,
+   "why": "xlsx input, one JSON record per person, eight facts.",
+   "tuned_by_question_policy": [],
+   "tuned_by_review_lane": []
+  },
+  {
+   "id": "mb_kop02_felanmalan_vite",
+   "held_out": true,
+   "f18": false,
+   "edit_target": false,
+   "why": "Commented csv input, PDF output, seven facts.",
+   "tuned_by_question_policy": [],
+   "tuned_by_review_lane": []
+  },
+  {
+   "id": "mc_oms16_stiftelse",
+   "held_out": true,
+   "f18": false,
+   "edit_target": false,
+   "why": "Six reference documents (foundation deeds) attached, free text input, JSON output.",
+   "tuned_by_question_policy": [],
+   "tuned_by_review_lane": []
+  },
+  {
+   "id": "mc_liv01_registrering",
+   "held_out": false,
+   "f18": false,
+   "edit_target": false,
+   "why": "DOCX template, reference PDF and ten form fields; a form-only run.",
+   "tuned_by_question_policy": [
+    "indata_municipal_ids.txt",
+    "pio3_municipal_ids.txt",
+    "pio3r_municipal_ids.txt"
+   ],
+   "tuned_by_review_lane": []
+  },
+  {
+   "id": "mc_byg08_eldstad",
+   "held_out": false,
+   "f18": false,
+   "edit_target": false,
+   "why": "DOCX template, pdf input plus free text; the small template case.",
+   "tuned_by_question_policy": [
+    "io_floor_ab.sh",
+    "pio3_municipal_ids.txt",
+    "pio3r_municipal_ids.txt",
+    "s1c-aff_municipal_ids.txt",
+    "screen_io2.sh",
+    "screen_io3.sh"
+   ],
+   "tuned_by_review_lane": []
+  },
+  {
+   "id": "mc_nar07_arbetsgivarintyg",
+   "held_out": false,
+   "f18": false,
+   "edit_target": false,
+   "why": "DOCX template, seven form fields, csv and pdf input.",
+   "tuned_by_question_policy": [
+    "s1c-aff_municipal_ids.txt"
+   ],
+   "tuned_by_review_lane": []
+  },
+  {
+   "id": "mc_utb11_fristaende_forskola",
+   "held_out": false,
+   "f18": false,
+   "edit_target": false,
+   "why": "Review checkpoint (view, approve), six mixed files, render_verbatim.",
+   "tuned_by_question_policy": [
+    "pio3_municipal_ids.txt",
+    "pio3r_municipal_ids.txt"
+   ],
+   "tuned_by_review_lane": []
+  },
+  {
+   "id": "mc_nar05_brandfarlig_vara",
+   "held_out": false,
+   "f18": false,
+   "edit_target": false,
+   "why": "Review checkpoint (edit, approve), three form fields, docx and pdf input.",
+   "tuned_by_question_policy": [
+    "pio3_municipal_ids.txt"
+   ],
+   "tuned_by_review_lane": []
+  },
+  {
+   "id": "mc_mil11_pcb",
+   "held_out": false,
+   "f18": false,
+   "edit_target": false,
+   "why": "Five csv and pdf files, six facts, no oracle issue named in the corpus review.",
+   "tuned_by_question_policy": [
+    "pio3_municipal_ids.txt",
+    "s1c-aff_municipal_ids.txt"
+   ],
+   "tuned_by_review_lane": []
+  },
+  {
+   "id": "mc_kop04_skadestand",
+   "held_out": false,
+   "f18": false,
+   "edit_target": false,
+   "why": "Reference rutin (PDF), csv and pdf input, a computed amount.",
+   "tuned_by_question_policy": [
+    "s1c-aff_municipal_ids.txt"
+   ],
+   "tuned_by_review_lane": []
+  },
+  {
+   "id": "mb_int09_temperaturlogg",
+   "held_out": false,
+   "f18": true,
+   "edit_target": false,
+   "why": "A .txt upload read as a file: the harness input-refusal class, reported as its own stratum.",
+   "tuned_by_question_policy": [
+    "pio3_municipal_ids.txt"
+   ],
+   "tuned_by_review_lane": []
+  },
+  {
+   "id": "mc_int01_diarieforing",
+   "held_out": false,
+   "f18": false,
+   "edit_target": false,
+   "why": "Reference registration rutin (docx), docx/pdf/txt input, JSON output.",
+   "tuned_by_question_policy": [
+    "io3_ab.sh",
+    "io_floor_ab.sh",
+    "screen_io2.sh",
+    "screen_io3.sh"
+   ],
+   "tuned_by_review_lane": []
+  },
+  {
+   "id": "mc_int07_arkivleverans",
+   "held_out": false,
+   "f18": false,
+   "edit_target": false,
+   "why": "csv, pdf and txt input, text output, four facts.",
+   "tuned_by_question_policy": [
+    "pio3_municipal_ids.txt",
+    "pio3r_municipal_ids.txt"
+   ],
+   "tuned_by_review_lane": []
+  }
+ ],
+ "excluded": {
+  "h3_pending_adjudication": {
+   "why": "H3 adjudicates the oracle case by case (decision-corpus-vnext-2026-09-29.md); reported separately, not in this experiment.",
+   "ids": [
+    "mc_oms09_klagomal_omsorg",
+    "mc_int13_delegationsbeslut",
+    "mc_int08_samradsredogorelse"
+   ]
+  },
+  "corpus_review_oracle_suspect": {
+   "why": "review-corpus-2026-09-29.md names an oracle defect or ambiguity that makes a correct output fail or a wrong one pass.",
+   "ids": {
+    "mc_oms01_ekonomiskt_bistand": "A2: review target judged by 21 exact leaf names",
+    "mc_oms04_orosanmalan": "A5: boolean review target unmeasurable by design",
+    "mc_ofm01_arsrakning": "F3: reviewed value held in more than one place is called unmeasurable",
+    "mc_byg01_tillbyggnad": "F1: review placement judged by leaf names",
+    "mc_int10_miljotillsyn": "F12: target group lacks the prompt's own phrase",
+    "mc_int04_remissvar": "A9: forbidden MSB:s is a fair phrase",
+    "mc_oms07_merkostnad_assistans": "A12: required 4672 is a subtotal",
+    "mc_mil07_hygienisk_behandling": "A12: 11 l/s is supply, protocol also has 13 l/s extract",
+    "mc_utb01_specialkost": "F10: association check is layout dependent",
+    "mc_markupplatelse": "F21: required 3456 fails on \"3 456 kr\"; also a harness input refusal",
+    "mc_int06_anbudsutvardering": "F21: forbidden 395 kr can occur in a correct output",
+    "mb_byg05_materialinventering": "F21: forbidden 17 03 01* false hit after normalisation",
+    "mc_oms12_avgiftsberakning": "F21: forbidden 8 kap. 5 § matches inside 18 kap. 5 §",
+    "mc_tra06_planbesked": "F21: required 30 m also matches 30 mars",
+    "mc_utb07_franvaro": "F21: required fredag is arbitrary"
+   }
+  },
+  "harness_input_refusal_class": {
+   "why": "F18: the harness refuses a run unless the flow has exactly one file-input step (ABT _runtime_file_step_id); rule unreviewed (adjudication A3). One such case (mb_int09) stays as its own stratum; the rest wait for H1/A3.",
+   "ids": [
+    "mc_nar01_serveringstillstand",
+    "mc_mil01_enskilt_avlopp",
+    "mc_tra02_transportdispens",
+    "mc_tillganglighet",
+    "mc_detaljplan_synpunkter",
+    "mb_mil05_forbranning",
+    "mb_upp01_aktivitetsbidrag",
+    "mb_int01_postlista"
+   ]
+  },
+  "review_edit_target_until_h2": {
+   "why": "The review-edit oracle finds its target by leaf NAMES from the case oracle (ABT _review_target_edit); a valid flow with a differently named review field stops the run as review_target_missing. Until the typed H2 check exists these cases can turn a naming difference into a delivery failure, so they are excluded (the ones already excluded above stay in their own group).",
+   "ids": [
+    "mc_int02_allman_handling",
+    "mc_byg20_bostadsanpassning",
+    "mc_int09_livsmedelskontroll",
+    "mc_utb02_tillaggsbelopp",
+    "mc_tra01_parkeringstillstand"
+   ]
+  }
+ },
+ "reserve_in_order": [
+  "mc_utb06_tillgodoraknande",
+  "mc_skolskjuts_avvikelse",
+  "mc_byg16_lagenhetsregister",
+  "mc_byg10_grannehorande",
+  "mc_byg06_forhandsbesked",
+  "mc_mil06_miljofarlig_c",
+  "mc_mil13_massor",
+  "mc_kop07_medborgarforslag",
+  "mc_va_driftstorning",
+  "mb_utb04_modersmal"
+ ],
+ "tuning_sources": {
+  "question_policy": [
+   "pio3_municipal_ids.txt",
+   "pio3r_municipal_ids.txt",
+   "pio3rc_municipal_ids.txt",
+   "s1c-aff_municipal_ids.txt",
+   "indata_municipal_ids.txt",
+   "screen_io.sh",
+   "screen_io2.sh",
+   "screen_io3.sh",
+   "io3_ab.sh",
+   "io_floor_ab.sh"
+  ],
+  "review_lane": [
+   "screen_rr.sh",
+   "decisive_rr.sh"
+  ],
+  "location": "demo-stack/builder-guards/"
+ }
+}

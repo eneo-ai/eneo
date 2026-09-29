@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import argparse
 import copy
+import functools
 import hashlib
+import importlib
 import io
 import itertools
 import json
@@ -105,6 +107,12 @@ MAX_INTERACTIONS_PER_CASE = 6
 # delay between a run finishing and the harness seeing it.
 RUNTIME_POLL_INITIAL_INTERVAL_SECONDS = 1
 RUNTIME_POLL_MAX_INTERVAL_SECONDS = 10
+# The arms of one experiment share this harness's run and scoring; only who
+# authors the flow differs. `builder` is the journey below; every other arm is
+# a sibling module that is handed this module and registers nothing here.
+ARMS = ("builder", "oracle")
+INTAKE_ANSWER_MODES = ("asked", "upfront")
+ORACLE_ARM_MODULE = "ai_builder_oracle_arm"
 # v9: `execution` replaces `execute_flow` and `runtime_files`.
 SUPPORTED_CASES_FILE_VERSION = 9
 # The edit capability corpus: its own cases file, so the release corpus and
@@ -182,6 +190,7 @@ _require_local_eneo_checkout()
 LOCAL_APP_VERSION = os.getenv("ENEO_APP_VERSION") or _local_app_version()
 
 # Keep standalone script execution on the same production models as the API.
+from ai_builder_code_identity import require_code_from_tree  # noqa: E402
 from ai_builder_edit_expectation import (  # noqa: E402
     PERSISTED_STEP_KEYS,
     EditExpectation,
@@ -196,6 +205,7 @@ from ai_builder_edit_expectation import (  # noqa: E402
     snapshot_view,
     unassessed_check,
 )
+from ai_builder_intake_answers import intake_message  # noqa: E402
 from ai_builder_release_gate import replacement_limit  # noqa: E402
 
 from eneo.files.docx_template_validation import (  # noqa: E402
@@ -1278,6 +1288,7 @@ def main() -> int:
     # directory with other single-case runs can be attributed.
     case: BattleCase | None = None
     try:
+        _validate_arm_args(args)
         cases = _cases_from_args(args)
         not_supported_on_parent = _parent_unsupported_case_ids(cases)
         for case_id in not_supported_on_parent:
@@ -1311,6 +1322,7 @@ def main() -> int:
             or args.sealed_targeted_suite
             or len(cases) > 1
             or args.repetitions > 1
+            or getattr(args, "arm", "builder") != "builder"
         ):
             if args.repetitions > 1 and getattr(args, "session_id", None):
                 raise ValueError(
@@ -1370,6 +1382,104 @@ def main() -> int:
         print(f"battle test failed: {error}", file=sys.stderr)
         print(f"failure bundle: {bundle_path}", file=sys.stderr)
         return 1
+
+
+def _verify_target(args: argparse.Namespace) -> bool:
+    """Whether a non-release run verifies the deployed revision like a release run."""
+
+    return bool(getattr(args, "verify_target", False)) or (
+        getattr(args, "arm", "builder") == "oracle"
+    )
+
+
+def _require_code_from_own_tree() -> None:
+    """A leg names the commit and the cleanliness of the tree this harness lives
+    in (`_git_output` runs there); the code it runs must be that tree's. Python
+    imports `eneo` from wherever `sys.path` points, so a `PYTHONPATH` or an
+    editable install of another checkout would run other code under this tree's
+    revision. Refused by path identity, naming the foreign module."""
+
+    require_code_from_tree(
+        Path(__file__).resolve().parents[2],
+        what="A leg that verifies its deployed revision",
+    )
+
+
+def _intake_mode(args: argparse.Namespace) -> str:
+    """How the case's configured intake answers reach the arm (see the flag)."""
+
+    explicit = getattr(args, "intake_answers", None)
+    if explicit is not None:
+        return str(explicit)
+    return "upfront" if getattr(args, "arm", "builder") == "oracle" else "asked"
+
+
+def _first_message(case: BattleCase, args: argparse.Namespace) -> str:
+    """The Builder's first message: the request, plus the answers up front on request.
+
+    An edit is a chat turn about a saved flow, not an intake, so it keeps its
+    prompt. In `asked` mode (every receipt before the oracle experiment) the
+    message is the prompt, byte for byte.
+    """
+
+    if _intake_mode(args) != "upfront" or case.edit is not None:
+        return case.prompt
+    return intake_message(case.prompt, case.configured_question_answers)
+
+
+def _intake_run_context(
+    args: argparse.Namespace, cases: Sequence[BattleCase]
+) -> JsonObject:
+    """What the receipt records about intake: nothing in `asked` mode, so a
+    receipt taken before the oracle experiment keeps its run context."""
+
+    if _intake_mode(args) != "upfront":
+        return {}
+    return {
+        "intake_answers": "upfront",
+        # Every case, an edit included (it is sent its prompt): the digest of
+        # the very text `_first_message` returns.
+        "intake_answers_sha256_by_id": {
+            case.case_id: hashlib.sha256(
+                _first_message(case, args).encode("utf-8")
+            ).hexdigest()
+            for case in cases
+        },
+    }
+
+
+def _validate_arm_args(args: argparse.Namespace) -> None:
+    """An arm other than the Builder is one exploratory suite, and says so."""
+
+    # A namespace built by hand (the tests') may not carry the arm options.
+    arm = getattr(args, "arm", "builder")
+    specs_dir = getattr(args, "oracle_specs_dir", None)
+    if arm == "builder":
+        if specs_dir:
+            raise ValueError("--oracle-specs-dir belongs to --arm oracle.")
+        return
+    refused = [
+        option
+        for option, present in (
+            ("--run-suite", getattr(args, "run_suite", False)),
+            ("--sealed-targeted-suite", getattr(args, "sealed_targeted_suite", False)),
+            ("--seed-calibration", getattr(args, "seed_calibration", False)),
+            ("--session-id", getattr(args, "session_id", None) is not None),
+            ("--file-id", bool(getattr(args, "file_ids", None))),
+            # No Builder runs, so a Builder model would be recorded as if it did.
+            ("--model-id", getattr(args, "model_id", None) is not None),
+        )
+        if present
+    ]
+    if refused:
+        raise ValueError(f"--arm {arm} cannot use {', '.join(refused)}.")
+    if not specs_dir:
+        raise ValueError(f"--arm {arm} requires --oracle-specs-dir.")
+    if getattr(args, "intake_answers", None) == "asked":
+        raise ValueError(
+            f"--arm {arm} reads every configured answer up front; "
+            "--intake-answers asked would give it less than its author had."
+        )
 
 
 def _parse_args() -> argparse.Namespace:
@@ -1536,6 +1646,43 @@ def _parse_args() -> argparse.Namespace:
             "calibration block, --repetitions times, without any Builder call; "
             "writes seed-calibration.json for the edit capability gate."
         ),
+    )
+    parser.add_argument(
+        "--arm",
+        choices=ARMS,
+        default="builder",
+        help=(
+            "Who authors the flow. builder (default): the AI Builder journey. "
+            "oracle: an expert gold spec from --oracle-specs-dir is applied "
+            "through FlowAuthoringCommandService, with no Builder call; the run "
+            "and its scoring are this harness's own (ai_builder_oracle_arm.py)."
+        ),
+    )
+    parser.add_argument(
+        "--intake-answers",
+        choices=INTAKE_ANSWER_MODES,
+        default=None,
+        help=(
+            "asked (the default for the builder arm): the case's configured "
+            "answers reach the Builder only when it asks the question. upfront: "
+            "the first message is the request followed by every configured "
+            "answer, the same text an oracle-arm author reads (always the mode "
+            "of --arm oracle)."
+        ),
+    )
+    parser.add_argument(
+        "--verify-target",
+        action="store_true",
+        help=(
+            "Before any case runs (and again at the end), verify that the API's "
+            "/version is the local tree's revision, as a release run does, and "
+            "record the verified target in the receipt. Always on for --arm oracle."
+        ),
+    )
+    parser.add_argument(
+        "--oracle-specs-dir",
+        default=None,
+        help="Directory with the frozen gold specs and manifest.json (arm oracle).",
     )
     parser.add_argument(
         "--timeout-seconds",
@@ -2159,14 +2306,9 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             if isinstance(profile_name, str)
             else {}
         )
-        configured_answers = {
-            **dict(profile_answers),
-            **dict(overrides),
-        }
-        answer_sources = {
-            **{question_id: "profile" for question_id in profile_answers},
-            **{question_id: "case_override" for question_id in overrides},
-        }
+        configured_answers, answer_sources = _merged_configured_answers(
+            profile_answers, overrides
+        )
         if (
             isinstance(expected, Mapping)
             and expected.get("allow_question_instead_of_plan") is not True
@@ -2440,6 +2582,25 @@ def _output_association(value: object, *, owner: str) -> OutputAssociation:
     if not all(isinstance(item, str) and item.strip() for item in literals):
         raise ValueError(f"{owner} needs non-empty fact, with and not_with literals.")
     return OutputAssociation(*cast(list[str], literals))
+
+
+def _merged_configured_answers(
+    profile_answers: Mapping[str, object], overrides: Mapping[str, object]
+) -> tuple[JsonObject, JsonObject]:
+    """The answers a case's requester gives: the profile's, then the case's own.
+
+    The one place profile answers and case overrides meet. What the Builder
+    answers, what it is told up front (`_first_message`) and what an oracle
+    author is shown all come from the parse that calls this, so they cannot
+    disagree about which answers a case has.
+    """
+
+    configured: JsonObject = {**dict(profile_answers), **dict(overrides)}
+    sources: JsonObject = {
+        **{question_id: "profile" for question_id in profile_answers},
+        **{question_id: "case_override" for question_id in overrides},
+    }
+    return configured, sources
 
 
 def _synthetic_user_profiles(
@@ -3261,6 +3422,15 @@ def _acquire_observations_with_case_isolation(
 
 
 def _suite_run_context(args: argparse.Namespace) -> JsonObject:
+    context = _builder_suite_run_context(args)
+    # Only a non-builder arm carries its keys, so every builder receipt keeps
+    # its run context (and the comparator's gated fields) exactly as before.
+    if getattr(args, "arm", "builder") != "builder":
+        context.update(importlib.import_module(ORACLE_ARM_MODULE).arm_run_context(args))
+    return context
+
+
+def _builder_suite_run_context(args: argparse.Namespace) -> JsonObject:
     return {
         "ui_language": getattr(args, "ui_language", "sv"),
         "auto_confirm_requirements": getattr(
@@ -3522,6 +3692,25 @@ def _failure_execution_provenance(
     return provenance
 
 
+def _observation_runner(args: argparse.Namespace) -> Callable[..., JsonObject]:
+    """The function that acquires one observation for the selected arm.
+
+    Every arm returns the same bundle shape and is sealed, hashed and
+    receipted below by the same code; the oracle arm is handed this module so
+    it runs and scores through it rather than through a second copy.
+    """
+
+    arm = getattr(args, "arm", "builder")
+    if arm == "builder":
+        return _run_case
+    if arm == "oracle":
+        return functools.partial(
+            importlib.import_module(ORACLE_ARM_MODULE).run_oracle_case,
+            harness=sys.modules[__name__],
+        )
+    raise ValueError(f"unknown arm {arm!r}; choose one of {', '.join(ARMS)}.")
+
+
 def _acquire_suite_observation(
     *,
     repetition: int,
@@ -3546,7 +3735,7 @@ def _acquire_suite_observation(
         f"repetition {repetition}/{total_repetitions}"
     )
     try:
-        bundle = _run_case(
+        bundle = _observation_runner(args)(
             case=case,
             config=config,
             args=args,
@@ -3656,12 +3845,23 @@ def _run_suite(
         not isinstance(requested_model_id, str) or not requested_model_id.strip()
     ):
         raise ValueError("Release suite requires --model-id before execution.")
+    # A release run always verifies the deployed revision; an experiment leg
+    # asks for it (--verify-target, always for the oracle arm), so its receipt
+    # names the revision the API actually ran.
+    verify_target = is_release_run or _verify_target(args)
+    # A leg that names the revision it ran against must also be a run of that
+    # revision's bytes: `verify_target` (an experiment leg) therefore requires a
+    # clean tracked source, like a release run, and the code it runs must be the
+    # tree's own (path identity).
+    if _verify_target(args):
+        _require_code_from_own_tree()
+    require_clean_source = acquisition_contract.require_clean_source or verify_target
     release_identity = _release_run_identity(
         cases=cases,
         cases_path=cases_path,
         requested_model_id=requested_model_id,
-        require_clean_source=acquisition_contract.require_clean_source,
-        config=config if is_release_run else None,
+        require_clean_source=require_clean_source,
+        config=config if verify_target else None,
     )
     failure_execution_provenance = _failure_execution_provenance(release_identity)
     # The frozen slice gates SEALED acquisition. An exploratory probe spends a
@@ -3696,6 +3896,7 @@ def _run_suite(
     provisioned_fixtures = _provision_fixtures(config=config, cases=cases)
     expected_observations = _expected_observations(cases, args.repetitions)
     run_context = _suite_run_context(args)
+    run_context.update(_intake_run_context(args, cases))
     run_context["run_slots"] = run_slots
     evaluator_identity = _suite_evaluator_identity(
         release_identity=release_identity,
@@ -3821,13 +4022,13 @@ def _run_suite(
             cases=cases,
             cases_path=cases_path,
             requested_model_id=requested_model_id,
-            require_clean_source=acquisition_contract.require_clean_source,
-            config=config if is_release_run else None,
+            require_clean_source=require_clean_source,
+            config=config if verify_target else None,
         )
         release_identity_recheck_checks = _release_identity_recheck_checks(
             expected=release_identity,
             actual=release_identity_recheck,
-            require_verified_target=is_release_run,
+            require_verified_target=verify_target,
         )
     except (
         HTTPError,
@@ -3841,7 +4042,7 @@ def _run_suite(
         release_identity_recheck_checks = _release_identity_recheck_checks(
             expected=release_identity,
             actual=release_identity_recheck,
-            require_verified_target=is_release_run,
+            require_verified_target=verify_target,
         )
     suite_identity_failure_count = sum(
         1
@@ -4287,7 +4488,8 @@ def _release_run_identity(
     tracked_status = _git_output("status", "--porcelain", "--untracked-files=no")
     if require_clean_source and tracked_status:
         raise ValueError(
-            "Live release execution requires a clean tracked source revision."
+            "A release run, or a leg that verifies its deployed revision, "
+            "requires a clean tracked source revision."
         )
     source_revision = _git_output("rev-parse", "HEAD")
     stable_build = {
@@ -5096,7 +5298,7 @@ def _run_case_session(
     first = _send_and_fetch(
         config=config,
         session_id=session_id,
-        message=case.prompt,
+        message=_first_message(case, args),
         model_id=args.model_id,
         file_ids=file_ids,
         ui_language=args.ui_language,
@@ -5517,18 +5719,21 @@ def _apply_execute_and_cleanup_flow(
     *,
     case: BattleCase,
     config: ApiConfig,
-    plan_id: str,
+    plan_id: str | None,
     runtime_file_paths: tuple[Path, ...],
     timeout_seconds: int,
     artifact_output_dir: Path,
     seeded_flow: SeededFlow | None = None,
     edit_evidence: JsonObject | None = None,
     structure_passed: Callable[[], bool] | None = None,
+    create_flow: Callable[[], JsonObject] | None = None,
 ) -> tuple[JsonObject, JsonObject | None, JsonObject]:
     """Own one benchmark Flow from materialization through evidence.
 
     A create plan is materialized with `/create` and the Flow it creates is
-    deleted here. An edit plan is approved and applied to its seeded Flow
+    deleted here; an arm without a Builder plan supplies `create_flow`, which
+    creates the Flow and answers `{"flow_id": ...}`, and the rest of the
+    lifecycle is the same. An edit plan is approved and applied to its seeded Flow
     against the revision captured at seeding; that Flow belongs to the
     seeding owner (`_run_case`), which deletes it. An edit runs only when its
     structure passed: a failed edit is already failed, and its run would only
@@ -5548,11 +5753,16 @@ def _apply_execute_and_cleanup_flow(
         try:
             if seeded_flow is None:
                 with _FLOW_APPLY_LOCK:
-                    apply_result = _request_json(
-                        config=config,
-                        method="POST",
-                        path=f"/flows/ai-builder/plans/{plan_id}/create",
-                    )
+                    if create_flow is not None:
+                        apply_result = create_flow()
+                    else:
+                        if plan_id is None:
+                            raise ValueError("a create needs a plan or create_flow.")
+                        apply_result = _request_json(
+                            config=config,
+                            method="POST",
+                            path=f"/flows/ai-builder/plans/{plan_id}/create",
+                        )
                 flow_id = _required_string(apply_result, "flow_id")
                 flow = _request_json(
                     config=config,
@@ -8260,6 +8470,13 @@ def _quality_report_with_live_provenance(
 
 def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
     """Recompute whether a completed observation is safe to evaluate."""
+
+    if bundle.get("arm") == "oracle":
+        # No Builder ran, so no planner or classifier evidence exists to
+        # recompute: the arm owns what its evidence is.
+        return importlib.import_module(ORACLE_ARM_MODULE).oracle_evidence_report(
+            sys.modules[__name__], bundle
+        )
 
     case = bundle.get("case")
     case = case if isinstance(case, Mapping) else {}
@@ -11664,6 +11881,54 @@ def _decision_score(
     }
 
 
+def _review_edit_check_if_declared(
+    expected: Mapping[str, Any],
+    runtime_evidence: Mapping[str, object] | None,
+    output_expectation: OutputExpectation | None,
+) -> JsonObject | None:
+    """An executed edit review is scored by what reaches delivery.
+
+    Shared by every arm: the check exists when the case declares an edit review
+    and has an output expectation, and is read from the run's own evidence.
+    """
+
+    review_policy = expected.get("expected_review_policy")
+    if (
+        isinstance(review_policy, Mapping)
+        and cast(Mapping[str, object], review_policy).get("mode") == "edit"
+        and output_expectation is not None
+    ):
+        return _review_edit_delivery_check(runtime_evidence)
+    return None
+
+
+def _final_output_scoring(
+    expected: Mapping[str, Any],
+    runtime_evidence: Mapping[str, object] | None,
+    output_expectation: OutputExpectation | None,
+) -> tuple[list[JsonObject], JsonObject]:
+    """The run-level verdict on what a run delivered: (runtime checks, output report).
+
+    The one place it is computed. `_quality_report` calls it for a Builder
+    observation, an arm without a Builder calls it for its own, and the audit
+    recomputes a stored output with a corrected expectation through it, so no
+    caller carries a second copy of how a run is judged.
+    """
+
+    expected_runtime_evidence = expected.get("expected_runtime_evidence")
+    runtime_checks = (
+        _runtime_evidence_checks(
+            evidence=runtime_evidence,
+            expected=expected_runtime_evidence,
+        )
+        if isinstance(expected_runtime_evidence, Mapping)
+        else []
+    )
+    return runtime_checks, _output_report(
+        output_expectation, runtime_evidence, runtime_checks=runtime_checks
+    )
+
+
 def _quality_report(
     *,
     plan: JsonObject | None,
@@ -12019,12 +12284,12 @@ def _quality_report(
             )
             if topology_warning is not None:
                 warnings.append(topology_warning)
-        # An executed edit review is scored by what reaches delivery.
         if (
-            cast(Mapping[str, object], expected_review_policy).get("mode") == "edit"
-            and output_expectation is not None
-        ):
-            checks.append(_review_edit_delivery_check(runtime_evidence))
+            review_edit_check := _review_edit_check_if_declared(
+                expected, runtime_evidence, output_expectation
+            )
+        ) is not None:
+            checks.append(review_edit_check)
             delivery_check_names.append("review_edit_reaches_delivery")
     expected_first_pass = expected.get("expected_first_pass_authoring")
     if isinstance(expected_first_pass, Mapping):
@@ -12054,20 +12319,11 @@ def _quality_report(
                     expected_targets=review_targets,
                 )
             )
-    expected_runtime_evidence = expected.get("expected_runtime_evidence")
-    runtime_checks = (
-        _runtime_evidence_checks(
-            evidence=runtime_evidence,
-            expected=expected_runtime_evidence,
-        )
-        if isinstance(expected_runtime_evidence, Mapping)
-        else []
+    runtime_checks, output_report = _final_output_scoring(
+        expected, runtime_evidence, output_expectation
     )
     checks.extend(runtime_checks)
     delivery_check_names.extend(str(check["name"]) for check in runtime_checks)
-    output_report = _output_report(
-        output_expectation, runtime_evidence, runtime_checks=runtime_checks
-    )
     if expected.get("expected_persisted_named_results") is True:
         persisted_named_results = _persisted_named_result_names(classifier_diagnostics)
         add_check(

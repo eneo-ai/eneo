@@ -84,6 +84,11 @@ DEFAULT_MATRIX_STATE = (
 # this map against the harness source.
 _OUTCOME_RANK: dict[str, int] = {
     "plan_first_pass": 6,
+    # Arm O (ai_builder_oracle_arm.py): an expert spec the platform accepted
+    # ranks with a Builder plan that needed no repair; one it refused ranks
+    # with a terminal error.
+    "oracle_spec_applied": 6,
+    "oracle_spec_rejected": 1,
     "clarification_stop_intended": 5,
     "clarify_ok": 5,
     "plan_repaired": 4,
@@ -775,6 +780,11 @@ def _run_context(summary: dict[str, Any]) -> dict[str, Any]:
     return cast(dict[str, Any], raw) if isinstance(raw, dict) else {}
 
 
+def _case_contract_ids(summary: dict[str, Any]) -> list[str]:
+    contracts = _evaluator_identity(summary).get("case_contract_sha256_by_id")
+    return list(cast(dict[str, Any], contracts)) if isinstance(contracts, dict) else []
+
+
 def _incompatible_identity_fields(
     baseline_summary: dict[str, Any],
     current_summary: dict[str, Any],
@@ -793,8 +803,13 @@ def _incompatible_identity_fields(
     baseline_context = _run_context(baseline_summary)
     current_context = _run_context(current_summary)
     incompatible: list[str] = []
+    # An oracle receipt ran no Builder: it has no Builder model to match, and
+    # its authoring arm is the very thing the comparison varies.
+    oracle_arm = "oracle" in (baseline_context.get("arm"), current_context.get("arm"))
     for field in _IDENTITY_FIELDS:
         if field == "harness_sha256" and allow_harness_change:
+            continue
+        if field == "requested_model_id" and oracle_arm:
             continue
         before, after = baseline_marker[field], current_marker[field]
         if before is None or after is None:
@@ -812,6 +827,31 @@ def _incompatible_identity_fields(
             incompatible.append(f"run_context.{field} (missing)")
         elif before != after:
             incompatible.append(f"run_context.{field}")
+    # What the arms were told up front. A receipt that says nothing was taken in
+    # `asked` mode. When either receipt is `upfront`, EACH must carry the digest
+    # of the text it sent for every case the two share, and the digests must be
+    # equal: a receipt that omits one is not comparable, never assumed equal.
+    if baseline_context.get("intake_answers", "asked") != current_context.get(
+        "intake_answers", "asked"
+    ):
+        incompatible.append("run_context.intake_answers")
+    elif baseline_context.get("intake_answers") == "upfront":
+        before_hashes = cast(
+            dict[str, Any], baseline_context.get("intake_answers_sha256_by_id") or {}
+        )
+        after_hashes = cast(
+            dict[str, Any], current_context.get("intake_answers_sha256_by_id") or {}
+        )
+        shared = set(_case_contract_ids(baseline_summary)) & set(
+            _case_contract_ids(current_summary)
+        )
+        if any(
+            case_id not in before_hashes
+            or case_id not in after_hashes
+            or before_hashes[case_id] != after_hashes[case_id]
+            for case_id in shared
+        ):
+            incompatible.append("run_context.intake_answers_sha256_by_id")
     return incompatible
 
 
