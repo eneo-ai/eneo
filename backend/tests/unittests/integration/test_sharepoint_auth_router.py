@@ -94,15 +94,23 @@ async def test_missing_oauth_token_is_an_explicit_failure(
     token_router.tenant_app_auth_service.get_access_token.assert_not_awaited()
 
 
-async def test_failed_app_token_never_falls_back_to_personal_oauth(
-    integration_access, token_router
+@pytest.mark.parametrize("auth_method", ["tenant_app", "service_account"])
+async def test_failed_organization_token_never_switches_identity(
+    integration_access, token_router, auth_method
 ):
     case = integration_access
     case.use_organization_connection()
+    case.app.auth_method = auth_method
     connection = await case.service.get_authorized_integration(case.integration.id)
-    token_router.tenant_app_auth_service.get_access_token.side_effect = RuntimeError(
-        "unavailable"
+    app_token = token_router.tenant_app_auth_service.get_access_token
+    service_token = token_router.service_account_auth_service.refresh_access_token
+    selected, other = (
+        (service_token, app_token)
+        if auth_method == "service_account"
+        else (app_token, service_token)
     )
+    selected.side_effect = RuntimeError("unavailable")
     with pytest.raises(ValueError, match="Failed to acquire access token"):
         await token_router.get_token_for_integration(connection)
+    other.assert_not_awaited()
     token_router.oauth_token_service.get_oauth_token_by_user_integration.assert_not_awaited()
