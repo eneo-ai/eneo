@@ -172,6 +172,45 @@ async def test_tree_enforces_space_access(
     browsing_api.tree.assert_not_awaited()
 
 
+@pytest.mark.parametrize(
+    "access, expected",
+    [
+        ("viewer", 200),
+        ("no_import_permission", 200),
+        ("nonmember", 404),
+        ("foreign_tenant", 404),
+    ],
+)
+async def test_available_connections_preserve_knowledge_page_access(
+    integration_access, browsing_api, access, expected
+):
+    case = integration_access
+    case.app_repo.one_or_none = AsyncMock(return_value=None)
+    if access == "viewer":
+        case.space.user_id = None
+        case.space.tenant_space_id = uuid4()
+        case.space.members[case.user.id] = SpaceMember(
+            id=case.user.id, email=case.user.email, role=SpaceRoleValue.VIEWER
+        )
+    elif access == "no_import_permission":
+        case.user.roles[0].permissions.remove(Permission.INTEGRATIONS)
+    elif access == "nonmember":
+        case.space.user_id = uuid4()
+    else:
+        case.space.tenant_id = uuid4()
+
+    # The knowledge page loads this list even for users who can only read it.
+    async with AsyncClient(
+        transport=ASGITransport(app=browsing_api.app), base_url="http://test"
+    ) as client:
+        response = await client.get(f"/integrations/spaces/{case.space.id}/available/")
+    assert response.status_code == expected, response.text
+    if expected == 200:
+        assert response.json()["items"] == []
+    browsing_api.tokens.one_or_none.assert_not_awaited()
+    browsing_api.tree.assert_not_awaited()
+
+
 @pytest.mark.parametrize("organization", [False, True])
 async def test_authorized_preview_and_tree_still_work(
     integration_access, browsing_api, organization

@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from eneo.actors import ActorManager
+    from eneo.actors.actors.space_actor import SpaceActor
     from eneo.integration.domain.entities.tenant_sharepoint_app import (
         TenantSharePointApp,
     )
@@ -74,13 +75,17 @@ class UserIntegrationService:
         self.oauth_token_repo = oauth_token_repo
         self.sharepoint_subscription_service = sharepoint_subscription_service
 
-    def require_space_import_access(self, space: "Space") -> None:
-        """Browsing remote content requires import rights, not knowledge read rights."""
+    def _get_readable_space_actor(self, space: "Space") -> "SpaceActor":
         if space.tenant_id != self.user.tenant_id:
             raise NotFoundException("Space not found")
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_read_space():
             raise NotFoundException("Space not found")
+        return actor
+
+    def require_space_import_access(self, space: "Space") -> None:
+        """Browsing remote content requires import rights, not knowledge read rights."""
+        actor = self._get_readable_space_actor(space)
         if not actor.can_create_integrations():
             raise UnauthorizedException(
                 "You cannot import integrations into this space"
@@ -294,7 +299,9 @@ class UserIntegrationService:
         - Shared/Organization spaces: Only authenticated tenant_app integrations (admin-only).
           This allows admins to import organization-wide knowledge into both org and shared spaces.
         """
-        self.require_space_import_access(space)
+        actor = self._get_readable_space_actor(space)
+        if not actor.can_create_integrations():
+            return []
         all_integrations = await self.get_my_integrations(
             user_id=self.user.id,
             tenant_id=self.user.tenant_id,
