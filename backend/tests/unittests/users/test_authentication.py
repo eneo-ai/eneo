@@ -58,6 +58,39 @@ async def test_can_create_access_token_successfully(auth_service: AuthService):
     assert creds["token_version"] == 2
 
 
+def test_expiry_time_is_applied_as_minutes(auth_service: AuthService):
+    """A configured 1440 yields a 24-hour session; the unit is minutes."""
+    access_token = auth_service.create_access_token_for_user(
+        user=TEST_USER,
+        secret_key=str(JWT_SECRET),
+        audience=JWT_AUDIENCE,
+        expires_in=1440,
+    )
+    creds = jwt.decode(
+        access_token,
+        str(JWT_SECRET),
+        audience=JWT_AUDIENCE,
+        algorithms=[JWT_ALGORITHM],
+    )
+    # ``iat`` is backdated by two seconds so the token is valid immediately.
+    lifetime_seconds = creds["exp"] - creds["iat"] - 2
+    assert abs(lifetime_seconds - 24 * 60 * 60) < 5
+
+
+def test_default_expiry_comes_from_settings(auth_service: AuthService):
+    access_token = auth_service.create_access_token_for_user(
+        user=TEST_USER, secret_key=str(JWT_SECRET), audience=JWT_AUDIENCE
+    )
+    creds = jwt.decode(
+        access_token,
+        str(JWT_SECRET),
+        audience=JWT_AUDIENCE,
+        algorithms=[JWT_ALGORITHM],
+    )
+    lifetime_seconds = creds["exp"] - creds["iat"] - 2
+    assert abs(lifetime_seconds - JWT_EXPIRY_TIME_MINUTES * 60) < 5
+
+
 async def test_token_missing_user_is_invalid(auth_service: AuthService):
     with pytest.raises(ValueError, match="user is required"):
         auth_service.create_access_token_for_user(
