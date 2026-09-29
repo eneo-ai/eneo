@@ -236,7 +236,7 @@ async def test_create_from_template_prefers_template_model_when_available(
     space.get_completion_model.return_value = template_model
 
     created_app = MagicMock(id=None, completion_model=None)
-    service.app_template_service.get_app_template.return_value = template
+    service.app_template_service.get_consumable_app_template.return_value = template
     service.file_service.get_file_infos.return_value = []
     service.factory.create_app_from_template.return_value = created_app
     service.repo.add.return_value = created_app
@@ -273,7 +273,7 @@ async def test_create_from_template_keeps_fallback_when_template_has_no_model(
     template_data.get_ids_by_type.return_value = []
 
     created_app = MagicMock(id=None, completion_model=None)
-    service.app_template_service.get_app_template.return_value = template
+    service.app_template_service.get_consumable_app_template.return_value = template
     service.file_service.get_file_infos.return_value = []
     service.factory.create_app_from_template.return_value = created_app
     service.repo.add.return_value = created_app

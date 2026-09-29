@@ -869,9 +869,7 @@ async def test_create_from_template_prefers_template_model_when_available(
     refreshed_space = MagicMock()
     refreshed_space.get_assistant.return_value = created_assistant
 
-    setup.service.assistant_template_service.get_assistant_template.return_value = (
-        template
-    )
+    setup.service.assistant_template_service.get_consumable_assistant_template.return_value = template
     setup.service.file_service.get_file_infos.return_value = []
     setup.service.factory.create_assistant.return_value = created_assistant
     setup.service.space_repo.update.return_value = refreshed_space
@@ -910,9 +908,7 @@ async def test_create_from_template_keeps_fallback_when_template_has_no_model(
     refreshed_space = MagicMock()
     refreshed_space.get_assistant.return_value = created_assistant
 
-    setup.service.assistant_template_service.get_assistant_template.return_value = (
-        template
-    )
+    setup.service.assistant_template_service.get_consumable_assistant_template.return_value = template
     setup.service.file_service.get_file_infos.return_value = []
     setup.service.factory.create_assistant.return_value = created_assistant
     setup.service.space_repo.update.return_value = refreshed_space
