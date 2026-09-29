@@ -27,7 +27,7 @@ import pytest
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
-    GeneratedImage,
+    GeneratedFile,
     McpToolReference,
     ResponseType,
     TokenUsage,
@@ -1138,7 +1138,7 @@ async def test_streaming_abort_links_files_a_tool_already_produced():
     async def file_then_error_stream():
         yield Completion(
             response_type=ResponseType.FILES,
-            image=GeneratedImage(
+            image=GeneratedFile(
                 data=b"%PDF-1.7", mime_type="application/pdf", tool_call_id="call-1"
             ),
         )

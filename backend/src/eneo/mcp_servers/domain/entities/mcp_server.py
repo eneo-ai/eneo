@@ -1,7 +1,9 @@
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
+from urllib.parse import unquote, urlsplit
 from uuid import UUID
 
 from eneo.base.base_entity import Entity
@@ -35,7 +37,45 @@ CAPABILITY_PURPOSES: tuple[CapabilityPurpose, ...] = (
     "web_search",
     "image_generation",
     "tabular_analysis",
+    "document_creation",
+    "spreadsheet_creation",
 )
+
+# Purposes whose providers deliver files. A binary embedded resource of one
+# of the listed types, returned by an active provider of that purpose, is
+# admitted as a generated file; the same resource from any other server stays
+# an ordinary result. Eligibility is host configuration, never provider
+# metadata.
+DOCX_MIME_TYPE = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
+XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+PDF_MIME_TYPE = "application/pdf"
+GENERATED_FILE_TYPES_BY_PURPOSE: dict[str, frozenset[str]] = {
+    "document_creation": frozenset({DOCX_MIME_TYPE, PDF_MIME_TYPE}),
+    "spreadsheet_creation": frozenset({XLSX_MIME_TYPE}),
+}
+_GENERATED_FILE_EXTENSIONS: dict[str, str] = {
+    DOCX_MIME_TYPE: "docx",
+    XLSX_MIME_TYPE: "xlsx",
+    PDF_MIME_TYPE: "pdf",
+}
+_UNSAFE_FILENAME_CHARACTERS = re.compile(r"[\x00-\x1f\x7f/\\:*?\"<>|]+")
+
+
+def generated_filename(uri: str | None, mime_type: str) -> str:
+    """A safe display name for a generated file, with the extension its type
+    implies. Taken from the resource URI's last path segment when there is
+    one; the provider cannot choose a path, a hidden name or another type."""
+    extension = _GENERATED_FILE_EXTENSIONS.get(mime_type, "bin")
+    segment = unquote(urlsplit(uri or "").path.rstrip("/").rsplit("/", 1)[-1])
+    stem = _UNSAFE_FILENAME_CHARACTERS.sub("_", segment).strip(" .")
+    base, dot, extension_part = stem.rpartition(".")
+    if dot and base and re.fullmatch(r"[A-Za-z0-9]{1,5}", extension_part):
+        stem = base.strip(" .")
+    stem = stem[:120] or "document"
+    return f"{stem}.{extension}"
+
 
 # Who a capability provider serves. "everyone" is the tenant's default provider
 # for its purpose (at most one active per tenant and purpose); "groups" targets
@@ -82,6 +122,10 @@ class BundledToolSpec:
 BUNDLED_TOOLS: dict[str, BundledToolSpec] = {
     "compute": BundledToolSpec(purpose=GENERAL_PURPOSE, forward_identity=False),
     "tabular": BundledToolSpec(purpose="tabular_analysis", forward_identity=True),
+    "documents": BundledToolSpec(purpose="document_creation", forward_identity=False),
+    "spreadsheets": BundledToolSpec(
+        purpose="spreadsheet_creation", forward_identity=False
+    ),
 }
 
 

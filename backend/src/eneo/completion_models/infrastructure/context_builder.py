@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Optional, Protocol, Sequence
@@ -85,20 +86,33 @@ def _replayable_tool_calls(
     return replayable
 
 
+_GENERATED_PLACEHOLDER = re.compile(r"\[(Image|File) (\d+) \(")
+
+
 def _with_generated_image_references(
     tc: ToolCallInfo, file_reference_urls: Optional[dict[UUID, str]]
 ) -> str:
-    """The persisted result plus one reference line per generated image.
+    """The persisted result plus one reference line per generated file.
 
-    Numbering follows the "[Image N ...]" placeholders the result already
-    carries, in the order the files were persisted for this call.
+    Labels follow the "[Image N ...]" and "[File N ...]" placeholders the
+    result already carries: they appear in the order the files were persisted
+    for this call, so the n-th placeholder names the n-th generated file.
     """
     result = tc.result or ""
     if not tc.generated_file_ids or not file_reference_urls:
         return result
+    labels = [
+        f"{kind} {number}" for kind, number in _GENERATED_PLACEHOLDER.findall(result)
+    ]
+
+    def label(position: int) -> str:
+        # Results persisted before documents existed carry image placeholders
+        # only, which the list covers; fall back to the old numbering anyway.
+        return labels[position] if position < len(labels) else f"Image {position + 1}"
+
     lines = [
-        f"Reference url for Image {index}: {file_reference_urls[file_id]}"
-        for index, file_id in enumerate(tc.generated_file_ids, start=1)
+        f"Reference url for {label(position)}: {file_reference_urls[file_id]}"
+        for position, file_id in enumerate(tc.generated_file_ids)
         if file_id in file_reference_urls
     ]
     if not lines:

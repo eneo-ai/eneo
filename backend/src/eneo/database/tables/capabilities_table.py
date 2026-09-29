@@ -23,7 +23,8 @@ class SpaceCapabilities(BaseCrossReference):
     purpose: Mapped[CapabilityPurpose] = mapped_column(String(), primary_key=True)
     __table_args__ = (
         CheckConstraint(
-            "purpose IN ('web_search', 'image_generation', 'tabular_analysis')",
+            "purpose IN ('web_search', 'image_generation', 'tabular_analysis', "
+            "'document_creation', 'spreadsheet_creation')",
             name="ck_space_capability_purpose",
         ),
     )
@@ -43,7 +44,8 @@ class AssistantCapabilities(BaseCrossReference):
     purpose: Mapped[CapabilityPurpose] = mapped_column(String(), primary_key=True)
     __table_args__ = (
         CheckConstraint(
-            "purpose IN ('web_search', 'image_generation', 'tabular_analysis')",
+            "purpose IN ('web_search', 'image_generation', 'tabular_analysis', "
+            "'document_creation', 'spreadsheet_creation')",
             name="ck_assistant_capability_purpose",
         ),
     )
@@ -69,7 +71,8 @@ class GovernancePolicyCapabilities(BaseCrossReference):
     is_default_enabled: Mapped[bool] = mapped_column(server_default="true")
     __table_args__ = (
         CheckConstraint(
-            "purpose IN ('web_search', 'image_generation', 'tabular_analysis')",
+            "purpose IN ('web_search', 'image_generation', 'tabular_analysis', "
+            "'document_creation', 'spreadsheet_creation')",
             name="ck_policy_capability_purpose",
         ),
     )

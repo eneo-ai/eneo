@@ -24,8 +24,10 @@ from eneo.internal_mcp.constants import (
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 from eneo.mcp_servers.domain.entities.mcp_server import (
+    GENERATED_FILE_TYPES_BY_PURPOSE,
     MCPServer,
     MCPServerTool,
+    generated_filename,
     is_capability_purpose,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
@@ -616,7 +618,9 @@ class MCPProxySession:
         """
         self._failed_server_ids.add(server_id)
 
-    def _truncate_tool_result(self, result: dict[str, Any]) -> dict[str, Any]:
+    def _truncate_tool_result(
+        self, result: dict[str, Any], purpose: str | None = None
+    ) -> dict[str, Any]:
         """Trim an oversized tool result to the budget instead of failing it.
 
         Leading content blocks are kept whole until the budget runs out; the
@@ -624,12 +628,19 @@ class MCPProxySession:
         dropped. A trailing notice tells the model the output was truncated,
         so e.g. a large page extraction still yields its head as usable,
         citable content rather than an error.
+
+        ``purpose`` is the producing server's purpose: only a document or
+        spreadsheet provider's binary resources become generated files.
         """
         blocks: list[dict[str, Any]] = result.get("content") or []
-        # Image blocks never reach the model as text (they become generated
-        # files), so they are sized separately and excluded from the char
-        # budget; only text-like blocks compete for it.
+        carried_blob = any(block.get("blob") for block in blocks)
+        # Image and file blocks never reach the model as text (they become
+        # generated files), so they are sized separately and excluded from the
+        # char budget; only text-like blocks compete for it.
         image_blocks, image_notices = self._admit_image_blocks(blocks)
+        file_blocks, blocks, file_notices = self._admit_file_blocks(blocks, purpose)
+        image_blocks = image_blocks + file_blocks
+        image_notices = image_notices + file_notices
         text_blocks = [block for block in blocks if block.get("type") != "image"]
         if image_notices:
             text_blocks = text_blocks + image_notices
@@ -638,8 +649,9 @@ class MCPProxySession:
         text_result = {**result, "content": text_blocks}
         serialized = json.dumps(text_result, ensure_ascii=False, default=str)
         if len(serialized) <= max_chars:
-            if not image_blocks and not image_notices:
+            if not image_blocks and not image_notices and not carried_blob:
                 return result
+            # Rebuilt, never the original: stripped blobs must not travel on.
             return {**result, "content": text_blocks + image_blocks}
 
         remaining = max_chars
@@ -674,6 +686,82 @@ class MCPProxySession:
         )
         kept.append({"type": "text", "text": notice})
         return {**result, "content": kept + image_blocks}
+
+    @staticmethod
+    def _admit_file_blocks(
+        blocks: list[dict[str, Any]], purpose: str | None
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        """Split binary embedded resources into admitted generated files.
+
+        Returns ``(file_blocks, remaining_blocks, notices)``. A resource's blob
+        is admitted when the producing server provides a file-delivering
+        purpose, the declared type is one that purpose delivers, the decoded
+        size fits the byte cap and the per-result count cap holds. Admitted
+        resources leave the result and come back as ``file`` blocks; every
+        other blob is stripped, so the resource stays an ordinary (citable)
+        result and its bytes never reach the model.
+        """
+        allowed = GENERATED_FILE_TYPES_BY_PURPOSE.get(purpose or "", frozenset())
+        max_bytes = _settings.mcp_tool_file_max_bytes
+        max_count = _settings.mcp_tool_file_max_count
+        admitted: list[dict[str, Any]] = []
+        remaining: list[dict[str, Any]] = []
+        notices: list[dict[str, Any]] = []
+        for block in blocks:
+            if block.get("type") != "resource" or not block.get("blob"):
+                remaining.append(block)
+                continue
+            stripped = {key: value for key, value in block.items() if key != "blob"}
+            mime_type = (
+                str(block.get("mime_type") or "").split(";", 1)[0].strip().lower()
+            )
+            if mime_type not in allowed:
+                if allowed:
+                    notices.append(
+                        {
+                            "type": "text",
+                            "text": (
+                                f"[A file of unsupported type {mime_type!r} was "
+                                "dropped.]"
+                            ),
+                        }
+                    )
+                remaining.append(stripped)
+                continue
+            encoded = str(block["blob"])
+            decoded_size = len(encoded) * 3 // 4
+            if decoded_size > max_bytes:
+                notices.append(
+                    {
+                        "type": "text",
+                        "text": (
+                            f"[A file of ~{decoded_size / (1024 * 1024):.1f} MB "
+                            f"exceeded the {max_bytes // (1024 * 1024)} MB limit and "
+                            "was dropped.]"
+                        ),
+                    }
+                )
+                continue
+            if len(admitted) >= max_count:
+                notices.append(
+                    {
+                        "type": "text",
+                        "text": (
+                            f"[A file beyond the {max_count} per result limit was "
+                            "dropped.]"
+                        ),
+                    }
+                )
+                continue
+            admitted.append(
+                {
+                    "type": "file",
+                    "data": encoded,
+                    "mime_type": mime_type,
+                    "filename": generated_filename(block.get("uri"), mime_type),
+                }
+            )
+        return admitted, remaining, notices
 
     @staticmethod
     def _admit_image_blocks(
@@ -1047,7 +1135,7 @@ class MCPProxySession:
             # failures count toward the server-wide circuit breaker.
             await self._record_success(server.id)
             auth_denied = self._is_auth_denied_result(result)
-            result = self._truncate_tool_result(result)
+            result = self._truncate_tool_result(result, server.purpose)
             if is_error:
                 blocks: list[Any] = list(result.get("content") or [])
                 if auth_denied:

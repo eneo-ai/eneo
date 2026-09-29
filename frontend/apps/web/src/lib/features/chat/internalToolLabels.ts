@@ -152,6 +152,14 @@ const CAPABILITY_STEPS: Record<
   tabular_analysis: {
     running: () => m.tool_tabular_analysis(),
     done: () => m.tool_tabular_analysis_done()
+  },
+  document_creation: {
+    running: () => m.tool_document_creation(),
+    done: () => m.tool_document_creation_done()
+  },
+  spreadsheet_creation: {
+    running: () => m.tool_spreadsheet_creation(),
+    done: () => m.tool_spreadsheet_creation_done()
   }
 };
 

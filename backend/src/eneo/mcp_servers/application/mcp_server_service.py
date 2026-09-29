@@ -163,11 +163,21 @@ class BundledTool:
 BUNDLED_TOOL_NAMES: dict[str, str] = {
     "compute": "Compute",
     "tabular": "Tabular analysis",
+    "documents": "Documents",
+    "spreadsheets": "Spreadsheets",
 }
 BUNDLED_TOOL_DESCRIPTIONS: dict[str, str] = {
     "tabular": (
         "Inspects and queries attached CSV and Excel files with DuckDB in an "
         "isolated sandbox. Files are fetched through short-lived signed links."
+    ),
+    "documents": (
+        "Renders Word (DOCX) and PDF documents from Markdown in an isolated "
+        "sandbox. The files are saved in the conversation."
+    ),
+    "spreadsheets": (
+        "Builds Excel (XLSX) workbooks with named sheets and typed cells in an "
+        "isolated sandbox. The files are saved in the conversation."
     ),
     "compute": (
         "Runs JavaScript over JSON in an isolated sandbox for exact "

@@ -297,6 +297,41 @@ def test_build_tool_result_with_references_turns_image_blocks_into_generated_ima
     assert encoded not in llm_text
 
 
+def test_build_tool_result_with_references_turns_file_blocks_into_generated_files():
+    pdf = b"%PDF-1.7 report"
+    encoded = base64.b64encode(pdf).decode("ascii")
+    llm_text, _, refs, files = _build_tool_result_with_references(
+        content_list=[
+            {"type": "text", "text": "Done."},
+            {
+                "type": "image",
+                "data": base64.b64encode(b"png").decode(),
+                "mime_type": "image/png",
+            },
+            {
+                "type": "file",
+                "data": encoded,
+                "mime_type": "application/pdf",
+                "filename": "report.pdf",
+            },
+        ],
+        tool_call_id="call_doc",
+        mcp_tool_name="documents__create_document",
+        existing_prefixes=set(),
+    )
+
+    assert refs == []
+    assert [(f.filename, f.mime_type) for f in files] == [
+        (None, "image/png"),
+        ("report.pdf", "application/pdf"),
+    ]
+    assert files[1].data == pdf
+    # Images and files are numbered separately; bytes never reach the model.
+    assert "[Image 1 (image/png)" in llm_text
+    assert "[File 1 (report.pdf) was created" in llm_text
+    assert encoded not in llm_text
+
+
 def test_build_tool_result_with_references_skips_undecodable_image_blocks():
     llm_text, display_text, refs, images = _build_tool_result_with_references(
         content_list=[

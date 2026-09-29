@@ -7,7 +7,7 @@ export function initMCPServers(client) {
      * Lists all MCP servers from the global catalog (admin only).
      * @param {Object} [params]
      * @param {string[]} [params.tags] Optional tags to filter by
-     * @param {"general" | "web_search" | "image_generation" | "tabular_analysis"} [params.purpose] Optional purpose to filter by
+     * @param {"general" | "web_search" | "image_generation" | "tabular_analysis" | "document_creation" | "spreadsheet_creation"} [params.purpose] Optional purpose to filter by
      * @throws {EneoError}
      * */
     list: async (params = {}) => {
@@ -45,7 +45,7 @@ export function initMCPServers(client) {
      * @param {string} params.name Name of the MCP server
      * @param {string} [params.http_url] HTTP URL to the MCP server (not used by built-in providers)
      * @param {"none" | "bearer" | "api_key_header" | "internal"} [params.http_auth_type] Authentication type (default: none); "internal" is a built-in provider on Eneo's loopback server
-     * @param {"general" | "web_search" | "image_generation" | "tabular_analysis"} [params.purpose] Server purpose (default: general)
+     * @param {"general" | "web_search" | "image_generation" | "tabular_analysis" | "document_creation" | "spreadsheet_creation"} [params.purpose] Server purpose (default: general)
      * @param {string} [params.description] Description
      * @param {{[key: string]: unknown} | null} [params.http_auth_config_schema] Authentication configuration
      * @param {{[key: string]: unknown} | null} [params.config_schema] JSON schema for configuration
@@ -125,7 +125,7 @@ export function initMCPServers(client) {
      * @param {string} [params.name] Name of the MCP server
      * @param {string} [params.http_url] HTTP URL to the MCP server
      * @param {"none" | "bearer" | "api_key_header" | "internal"} [params.http_auth_type] Authentication type; "internal" is a built-in provider on Eneo's loopback server
-     * @param {"general" | "web_search" | "image_generation" | "tabular_analysis"} [params.purpose] Server purpose; moving into a capability purpose saves it as an inactive provider
+     * @param {"general" | "web_search" | "image_generation" | "tabular_analysis" | "document_creation" | "spreadsheet_creation"} [params.purpose] Server purpose; moving into a capability purpose saves it as an inactive provider
      * @param {string} [params.description] Description
      * @param {{[key: string]: unknown} | null} [params.http_auth_config_schema] Authentication configuration
      * @param {{[key: string]: unknown} | null} [params.config_schema] JSON schema for configuration
@@ -218,7 +218,7 @@ export function initMCPServers(client) {
      * Get all available MCP servers with tenant enablement status.
      * Shows both enabled and disabled MCPs for the current tenant.
      * @param {Object} [params]
-     * @param {"general" | "web_search" | "image_generation" | "tabular_analysis"} [params.purpose] Optional purpose to filter by
+     * @param {"general" | "web_search" | "image_generation" | "tabular_analysis" | "document_creation" | "spreadsheet_creation"} [params.purpose] Optional purpose to filter by
      * @throws {EneoError}
      * */
     listSettings: async (params = {}) => {

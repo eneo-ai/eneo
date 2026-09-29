@@ -92,6 +92,37 @@ def _image_tool_call(result: str, generated_file_ids) -> ToolCallInfo:
     )
 
 
+def test_replayed_references_follow_image_and_file_placeholders():
+    image, document = uuid4(), uuid4()
+    result = (
+        "[Image 1 (image/png) was generated and is shown to the user.]\n"
+        "[File 1 (report.docx) was created and is offered to the user as a download.]"
+    )
+    session = SimpleNamespace(
+        questions=[
+            SimpleNamespace(
+                question="q",
+                answer="a",
+                files=[],
+                generated_files=[],
+                tool_calls=[_image_tool_call(result, [image, document])],
+            )
+        ]
+    )
+
+    messages, _ = ContextBuilder()._build_messages(
+        session,
+        max_tokens=10_000,
+        file_reference_urls={image: "https://x/i", document: "https://x/d"},
+    )
+
+    assert messages[0].tool_calls[0].result == (
+        f"{result}\n"
+        "Reference url for Image 1: https://x/i\n"
+        "Reference url for File 1: https://x/d"
+    )
+
+
 def test_replayed_tool_result_carries_a_reference_url_per_generated_image():
     first, second = uuid4(), uuid4()
     result = (

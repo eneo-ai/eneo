@@ -25,7 +25,7 @@ from typing_extensions import override
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
-    GeneratedImage,
+    GeneratedFile,
     McpToolReference,
     ModelKwargs,
     ResponseType,
@@ -81,6 +81,11 @@ THINKING_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 MCP_IMAGE_PLACEHOLDER_TEMPLATE = (
     "[Image {index} ({mime_type}) was generated and is shown to the user.]"
 )
+# The same for a generated document or spreadsheet (an admitted binary
+# resource); the user gets it as a download.
+MCP_FILE_PLACEHOLDER_TEMPLATE = (
+    "[File {index} ({filename}) was created and is offered to the user as a download.]"
+)
 
 # Markdown image token: ![alt](url "optional title"). Captures the url only.
 _MARKDOWN_IMAGE_PATTERN = re.compile(r"!\[[^\]]*\]\(\s*<?([^)\s>]+)>?[^)]*\)")
@@ -135,7 +140,7 @@ def _build_tool_result_with_references(
     tool_call_id: Optional[str],
     mcp_tool_name: Optional[str],
     existing_prefixes: set[str],
-) -> tuple[str, str, list[McpToolReference], list[GeneratedImage]]:
+) -> tuple[str, str, list[McpToolReference], list[GeneratedFile]]:
     """Build LLM-facing and user-facing tool result texts; capture resource refs.
 
     Two texts are produced because they serve different audiences:
@@ -162,15 +167,21 @@ def _build_tool_result_with_references(
     that emits both an inline ``![](url)`` and a ``resource_link`` for the same
     object renders it once (inline wins).
 
-    ``image`` blocks (base64 bytes) become ``GeneratedImage`` values that the
-    ask path persists as generated files. The base64 never reaches the model
-    or the persisted result text; both see a short placeholder instead.
+    ``image`` blocks (base64 bytes) and ``file`` blocks (binary resources the
+    proxy admitted from a document or spreadsheet provider) become
+    ``GeneratedFile`` values that the ask path persists as generated files.
+    The base64 never reaches the model or the persisted result text; both see
+    a short placeholder instead.
     """
     text_parts: list[str] = []
     resource_texts: list[str] = []
     llm_blocks: list[str] = []
     refs: list[McpToolReference] = []
-    images: list[GeneratedImage] = []
+    images: list[GeneratedFile] = []
+    # Placeholders number images and documents separately ("Image N",
+    # "File N"); replay appends reference urls in the same numbering.
+    pictures = 0
+    documents = 0
 
     # Inline Markdown wins. Collect every image url already embedded in any
     # text/resource block so a resource_link for the same object is suppressed
@@ -217,17 +228,39 @@ def _build_tool_result_with_references(
             if not data:
                 continue
             images.append(
-                GeneratedImage(
+                GeneratedFile(
                     data=data,
                     mime_type=mime_type,
                     tool_call_id=tool_call_id,
                     mcp_tool_name=mcp_tool_name,
                 )
             )
+            pictures += 1
             text_parts.append(
                 MCP_IMAGE_PLACEHOLDER_TEMPLATE.format(
-                    index=len(images), mime_type=mime_type
+                    index=pictures, mime_type=mime_type
                 )
+            )
+        elif block_type == "file":
+            try:
+                data = base64.b64decode(ci.get("data") or "", validate=True)
+            except (binascii.Error, ValueError):
+                continue
+            if not data:
+                continue
+            filename = ci.get("filename") or "document"
+            images.append(
+                GeneratedFile(
+                    data=data,
+                    mime_type=ci.get("mime_type") or "application/octet-stream",
+                    tool_call_id=tool_call_id,
+                    mcp_tool_name=mcp_tool_name,
+                    filename=filename,
+                )
+            )
+            documents += 1
+            text_parts.append(
+                MCP_FILE_PLACEHOLDER_TEMPLATE.format(index=documents, filename=filename)
             )
         elif block_type == "resource_link":
             # Typed image block (MCP spec, 2025-11-25). Display-only: it carries
@@ -1237,7 +1270,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 tool_round = 0
                 seen_prefixes: set[str] = set()
                 captured_refs: list[McpToolReference] = []
-                captured_images: list[GeneratedImage] = []
+                captured_images: list[GeneratedFile] = []
                 collected_tool_metadata: list[ToolCallMetadata] = (
                     self._always_active_skill_metadata(skill_runtime)
                 )

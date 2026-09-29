@@ -1320,6 +1320,84 @@ class TestTruncateToolResult:
         assert "3 image content block(s)" in notice["text"]
         assert kept == images[:2]
 
+    def test_document_resource_from_a_document_provider_becomes_a_file(self):
+        docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        result = {
+            "content": [
+                {"type": "text", "text": "Created the report."},
+                {
+                    "type": "resource",
+                    "uri": "eneo-tool-runtime://documents/1/Kvartalsrapport.docx",
+                    "mime_type": docx,
+                    "blob": "UEsDBA==",
+                },
+            ],
+            "is_error": False,
+        }
+
+        admitted = MCPProxySession([])._truncate_tool_result(  # pyright: ignore[reportPrivateUsage]
+            result, "document_creation"
+        )
+
+        assert admitted["content"] == [
+            {"type": "text", "text": "Created the report."},
+            {
+                "type": "file",
+                "data": "UEsDBA==",
+                "mime_type": docx,
+                "filename": "Kvartalsrapport.docx",
+            },
+        ]
+
+    def test_blobs_from_other_servers_or_of_other_types_are_stripped(self):
+        resource = {
+            "type": "resource",
+            "uri": "https://example.com/a.pdf",
+            "mime_type": "application/pdf",
+            "blob": "JVBERi0=",
+        }
+        # A general server's binary resource stays an ordinary, citable result.
+        general = MCPProxySession([])._truncate_tool_result(  # pyright: ignore[reportPrivateUsage]
+            {"content": [resource], "is_error": False}, "general"
+        )
+        assert general["content"] == [
+            {k: v for k, v in resource.items() if k != "blob"}
+        ]
+        # A spreadsheet provider may not deliver a PDF.
+        sheet = MCPProxySession([])._truncate_tool_result(  # pyright: ignore[reportPrivateUsage]
+            {"content": [resource], "is_error": False}, "spreadsheet_creation"
+        )
+        assert all(block.get("type") != "file" for block in sheet["content"])
+        assert all("blob" not in block for block in sheet["content"])
+        assert "unsupported type" in sheet["content"][-1]["text"]
+
+    def test_oversized_document_is_dropped_with_notice(self, monkeypatch):
+        from eneo.mcp_servers.infrastructure.proxy import mcp_proxy_session
+
+        monkeypatch.setattr(
+            mcp_proxy_session._settings,  # pyright: ignore[reportPrivateUsage]
+            "mcp_tool_file_max_bytes",
+            3,
+        )
+        result = {
+            "content": [
+                {
+                    "type": "resource",
+                    "uri": "x://report.pdf",
+                    "mime_type": "application/pdf",
+                    "blob": "JVBERi0xLjc=",
+                }
+            ],
+            "is_error": False,
+        }
+
+        admitted = MCPProxySession([])._truncate_tool_result(  # pyright: ignore[reportPrivateUsage]
+            result, "document_creation"
+        )
+
+        assert [block["type"] for block in admitted["content"]] == ["text"]
+        assert "exceeded" in admitted["content"][0]["text"]
+
     def test_total_size_respects_budget(self):
         import json
 

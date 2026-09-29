@@ -1,10 +1,12 @@
+import io
 from collections import defaultdict
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from uuid import UUID
 
 from fastapi import UploadFile
+from starlette.datastructures import Headers
 
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import (
@@ -42,6 +44,8 @@ from eneo.files.file_repo import (
     select_primary_file_content,
 )
 from eneo.files.file_usage import FileUsageRepository
+from eneo.files.generated_documents import validate_generated_document
+from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -456,6 +460,40 @@ class FileService:
         return File(
             **info.model_dump(),
             blob=image_data,
+            text=None,
+            transcription=None,
+        )
+
+    async def save_generated_document(
+        self, data: bytes, name: str, mimetype: str
+    ) -> File:
+        """Persist a tool-generated document (DOCX, XLSX, PDF) as a File.
+
+        The bytes must pass the format checks in ``generated_documents``
+        (raises ``GeneratedDocumentRejected``). The document is then prepared
+        exactly like an uploaded one, so it keeps its exact original (signed
+        references and downloads work) and gains extracted text; page images
+        are not derived. Like generated images it is stored inline.
+        """
+        self._authenticated_user()
+        validate_generated_document(data, mimetype)
+        upload = UploadFile(
+            file=io.BytesIO(data),
+            filename=name,
+            headers=Headers({"content-type": mimetype}),
+        )
+        async with self.protocol.prepare_upload(
+            upload,
+            max_size=get_settings().mcp_tool_file_max_bytes,
+        ) as prepared:
+            async with self._write_transaction():
+                file_id = await self._persist_prepared_file(
+                    replace(prepared, derivatives=())
+                )
+                info = await self.get_file_by_id(file_id)
+        return File(
+            **info.model_dump(),
+            blob=data,
             text=None,
             transcription=None,
         )

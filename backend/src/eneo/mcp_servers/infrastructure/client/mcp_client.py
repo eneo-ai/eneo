@@ -1009,6 +1009,11 @@ class MCPClient:
                             ),
                             "mime_type": getattr(resource, "mimeType", None),
                             "meta": _truncate_meta(raw_meta, RESOURCE_META_MAX_BYTES),
+                            # Base64 bytes of a binary resource. The proxy
+                            # admits it as a generated file (document and
+                            # spreadsheet providers) or strips it; it never
+                            # reaches the model.
+                            "blob": getattr(resource, "blob", None),
                         }
                     )
                 elif content_item.type == "resource_link":

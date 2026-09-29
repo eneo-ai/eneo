@@ -589,7 +589,7 @@ class TestImageReferenceRendering:
         assert out.count("photo.png") == 1
 
 
-class TestGeneratedImageMintAudit:
+class TestGeneratedFileMintAudit:
     async def test_previous_turn_generated_images_are_audited_once(self, monkeypatch):
         _enable_file_references(monkeypatch)
         audit_service = AsyncMock()

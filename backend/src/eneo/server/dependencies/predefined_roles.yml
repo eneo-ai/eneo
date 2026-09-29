@@ -10,6 +10,8 @@ roles:
       - web_search
       - image_generation
       - tabular_analysis
+      - document_creation
+      - spreadsheet_creation
 
   - name: 'AI Configurator'
     permissions:
@@ -27,6 +29,8 @@ roles:
       - web_search
       - image_generation
       - tabular_analysis
+      - document_creation
+      - spreadsheet_creation
 
   - name: 'Owner'
     permissions:
@@ -51,3 +55,5 @@ roles:
       - web_search
       - image_generation
       - tabular_analysis
+      - document_creation
+      - spreadsheet_creation

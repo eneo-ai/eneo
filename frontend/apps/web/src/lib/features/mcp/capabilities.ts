@@ -7,12 +7,17 @@
  * Adding a capability means adding one entry here (plus its messages); every
  * admin, space, assistant and chat surface renders from this list.
  */
-import { Globe, Image, Sheet } from "@lucide/svelte";
+import { FileSpreadsheet, FileText, Globe, Image, Sheet } from "@lucide/svelte";
 import { m } from "$lib/paraglide/messages";
 
 export const GENERAL_PURPOSE = "general";
 
-export type CapabilityPurpose = "web_search" | "image_generation" | "tabular_analysis";
+export type CapabilityPurpose =
+  | "web_search"
+  | "image_generation"
+  | "tabular_analysis"
+  | "document_creation"
+  | "spreadsheet_creation";
 
 export type CapabilityDescriptor = {
   purpose: CapabilityPurpose;
@@ -75,6 +80,32 @@ export const CAPABILITIES: readonly CapabilityDescriptor[] = [
     noActiveProviderHint: m.tabular_analysis_no_active_provider_hint,
     notAvailableHereHint: m.tabular_analysis_not_available_here_hint,
     classificationHint: m.tabular_analysis_classification_hint
+  },
+  {
+    purpose: "document_creation",
+    icon: FileText,
+    label: m.document_creation,
+    providerNamePlaceholder: m.document_creation_provider_name_placeholder,
+    providerManagedNote: m.document_creation_provider_managed_note,
+    forwardIdentityHint: m.document_creation_forward_identity_hint,
+    capabilityHint: m.document_creation_capability_hint,
+    spaceHint: m.document_creation_space_group_hint,
+    noActiveProviderHint: m.document_creation_no_active_provider_hint,
+    notAvailableHereHint: m.document_creation_not_available_here_hint,
+    classificationHint: m.document_creation_classification_hint
+  },
+  {
+    purpose: "spreadsheet_creation",
+    icon: FileSpreadsheet,
+    label: m.spreadsheet_creation,
+    providerNamePlaceholder: m.spreadsheet_creation_provider_name_placeholder,
+    providerManagedNote: m.spreadsheet_creation_provider_managed_note,
+    forwardIdentityHint: m.spreadsheet_creation_forward_identity_hint,
+    capabilityHint: m.spreadsheet_creation_capability_hint,
+    spaceHint: m.spreadsheet_creation_space_group_hint,
+    noActiveProviderHint: m.spreadsheet_creation_no_active_provider_hint,
+    notAvailableHereHint: m.spreadsheet_creation_not_available_here_hint,
+    classificationHint: m.spreadsheet_creation_classification_hint
   }
 ];
 

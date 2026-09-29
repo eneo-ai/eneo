@@ -281,7 +281,7 @@ describe("Tools capability configuration", () => {
     await expect.element(page.getByText("Design team")).toBeVisible();
     await expect.element(page.getByText(m.tools_group_override())).toBeVisible();
     // No capability card has a default provider: group-only setup does not count as one.
-    expect(page.getByText(m.tools_no_default()).elements().length).toBe(3);
+    expect(page.getByText(m.tools_no_default()).elements().length).toBe(5);
   });
 
   it("hides function connections by default and reveals only external ones on request", async () => {

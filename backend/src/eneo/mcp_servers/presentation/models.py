@@ -20,7 +20,12 @@ from eneo.security_classifications.presentation.security_classification_models i
 T = TypeVar("T", bound=BaseModel)
 
 MCPServerPurpose = Literal[
-    "general", "web_search", "image_generation", "tabular_analysis"
+    "general",
+    "web_search",
+    "image_generation",
+    "tabular_analysis",
+    "document_creation",
+    "spreadsheet_creation",
 ]
 MCPServerAudience = Literal["everyone", "groups"]
 

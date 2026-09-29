@@ -21,6 +21,7 @@
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
   import AsyncImage from "$lib/components/AsyncImage.svelte";
+  import GeneratedFileChip from "./GeneratedFileChip.svelte";
   import { m } from "$lib/paraglide/messages";
   import { ChevronRight, Check, X, Wrench } from "@lucide/svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
@@ -537,5 +538,10 @@
 
 {#each message.generated_files as file (file.id)}
   {@const url = attachmentUrls.getUrl(file) ?? null}
-  <AsyncImage {url}></AsyncImage>
+  <!-- An empty mimetype is the placeholder of an image still being generated. -->
+  {#if !file.mimetype || file.mimetype.startsWith("image/")}
+    <AsyncImage {url}></AsyncImage>
+  {:else}
+    <GeneratedFileChip {file} {url} />
+  {/if}
 {/each}

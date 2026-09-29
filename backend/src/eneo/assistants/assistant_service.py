@@ -9,7 +9,7 @@ from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
-    GeneratedImage,
+    GeneratedFile,
     McpToolReference,
     ModelKwargs,
     ResponseType,
@@ -37,6 +37,7 @@ from eneo.files.attachment_budget import (
 from eneo.files.file_models import File, FileType
 from eneo.files.file_reference import inline_file_text_for_model, url_only_file_ids
 from eneo.files.file_service import FileService
+from eneo.files.generated_documents import GeneratedDocumentRejected
 from eneo.governance_policy.domain.policy_resolver import (
     select_effective_completion_model,
     select_effective_inline_file_text,
@@ -59,6 +60,7 @@ from eneo.internal_mcp.builtin_tools import with_live_builtin_tools
 from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import (
     BadRequestException,
+    FileTooLargeException,
     NotFoundException,
     UnauthorizedException,
 )
@@ -401,8 +403,26 @@ class AssistantService:
         authenticated.tools = await with_live_builtin_tools(server)
         return authenticated
 
-    async def _save_generated_image(self, image: "GeneratedImage") -> "File":
-        """Persist a tool-produced image as a generated file."""
+    async def _save_generated_image(self, image: "GeneratedFile") -> "File | None":
+        """Persist a tool-produced image or document as a generated file.
+
+        Returns None for a document the file store refuses (wrong format,
+        active content, too large): the answer continues without it.
+        """
+        if image.filename is not None:
+            # A document or spreadsheet the proxy admitted from a provider of
+            # that purpose; the file store checks its format before keeping it.
+            try:
+                return await self.file_service.save_generated_document(
+                    image.data, name=image.filename, mimetype=image.mime_type
+                )
+            except (GeneratedDocumentRejected, FileTooLargeException) as exc:
+                logger.warning(
+                    "Rejected a generated document from %s: %s",
+                    image.mcp_tool_name,
+                    exc,
+                )
+                return None
         extension = _extension_for_mime(image.mime_type)
         return await self.file_service.save_image_from_bytes(
             image.data,
@@ -2240,6 +2260,8 @@ class AssistantService:
                             and chunk.image is not None
                         ):
                             image_file = await self._save_generated_image(chunk.image)
+                            if image_file is None:
+                                continue
                             generated_files.append(image_file)
                             # The image chunk precedes the tool-call chunk that
                             # references it; the ids are attached to the tool
@@ -2610,10 +2632,12 @@ class AssistantService:
                     final_reasoning = getattr(answer, "reasoning_content", None)
                     generated_file_ids_by_call: dict[str, list[UUID]] = {}
                     for image in cast(
-                        list[GeneratedImage],
+                        list[GeneratedFile],
                         getattr(answer, "generated_images", None) or [],
                     ):
                         image_file = await self._save_generated_image(image)
+                        if image_file is None:
+                            continue
                         generated_files.append(image_file)
                         if image.tool_call_id:
                             generated_file_ids_by_call.setdefault(
