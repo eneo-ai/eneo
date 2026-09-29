@@ -390,6 +390,7 @@ def build_create_command(request: MaterializeRequest) -> CreateFlowAuthoringComm
 
 ContainerFactory = Callable[[Any, UUID], Awaitable[Any]]
 SessionScope = Callable[[], AbstractAsyncContextManager[Any]]
+PersistenceScope = Callable[[], AbstractAsyncContextManager[None]]
 
 
 async def _open_container(session: Any, user_id: UUID) -> Any:
@@ -406,68 +407,71 @@ async def _open_container(session: Any, user_id: UUID) -> Any:
     return container
 
 
-def _database_session_scope(database_url: str) -> SessionScope:
-    """One transaction on its own engine (no pool) per call.
+def _transaction_scope() -> AbstractAsyncContextManager[Any]:
+    """The API's own request transaction, on the session manager that
+    `_process_persistence` starts."""
 
-    Observations run in worker threads, each with its own event loop, and an
-    async engine is bound to the loop that made its connections.
+    from eneo.database.database import get_session_with_transaction
+
+    return asynccontextmanager(get_session_with_transaction)()
+
+
+@asynccontextmanager
+async def _process_persistence() -> AsyncIterator[None]:
+    """Start what the API's lifespan starts for a container, and stop it after.
+
+    The Container hands out the durable object-content runtime and every File
+    service needs the session manager. Both are process singletons this process
+    never started; the lifespan's own start function does, so nothing here
+    copies its steps.
     """
 
-    @asynccontextmanager
-    async def scope() -> AsyncIterator[Any]:
-        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-        from sqlalchemy.pool import NullPool
+    from eneo.server.dependencies.lifespan import start_persistence, stop_persistence
 
-        from eneo.database.database import SafeAsyncSession
+    await start_persistence()
+    try:
+        yield
+    finally:
+        await stop_persistence()
 
-        engine = create_async_engine(database_url, poolclass=NullPool)
-        try:
-            maker = async_sessionmaker(
-                autocommit=False,
-                bind=engine,
-                autobegin=False,
-                class_=SafeAsyncSession,
-            )
-            async with maker() as session, session.begin():
-                yield session
-        finally:
-            await engine.dispose()
 
-    return scope
+# The session manager and the object-content runtime are singletons of the
+# process and refuse a second start, so one apply owns them at a time.
+_PERSISTENCE_LOCK = threading.Lock()
 
 
 class InProcessSpecMaterializer:
     """Apply the create command in this process, against the stack's database.
 
-    UNVERIFIED LIVE at the time of writing: the command it builds, the result
-    mapping and the refusal/infrastructure split are unit-tested with a fake
-    service and session; the database session and container wiring were
-    written from `get_container` and `AIBuilderPlanLifecycle` and have not run
-    against a stack. The first live observation is the smoke that settles it
-    (protocol section 8).
+    The process must run with the stack's settings (database, object store,
+    encryption key): it starts the same persistence the API does. Each apply
+    starts it on the event loop that runs the apply and stops it after, because
+    observations run in worker threads and a pooled engine is bound to the loop
+    that made its connections. The command it builds, the result mapping and
+    the refusal/infrastructure split are unit-tested with a fake service; the
+    integration test applies a spec, template included, in a fresh process
+    against a real database. Not yet run against a live stack.
     """
 
     def __init__(
         self,
         *,
         user_id: UUID,
-        database_url: str | None = None,
         authoring_service: FlowAuthoringCommandService | None = None,
         container_factory: ContainerFactory | None = None,
         session_scope: SessionScope | None = None,
+        persistence: PersistenceScope | None = None,
     ) -> None:
-        if session_scope is None and database_url is None:
-            raise ValueError("a database_url or a session_scope is required.")
         self._user_id = user_id
         self._authoring_service = authoring_service or FlowAuthoringCommandService()
         self._container_factory = container_factory or _open_container
-        self._session_scope = session_scope or _database_session_scope(
-            cast(str, database_url)
-        )
+        self._session_scope = session_scope or _transaction_scope
+        self._persistence = persistence or _process_persistence
 
     def materialize(self, request: MaterializeRequest) -> MaterializedFlow:
         try:
-            return asyncio.run(self._apply(request))
+            with _PERSISTENCE_LOCK:
+                return asyncio.run(self._apply(request))
         except _REFUSING_EXCEPTIONS as error:
             raise MaterializeRefused(
                 code=str(getattr(error, "code", type(error).__name__)),
@@ -480,7 +484,7 @@ class InProcessSpecMaterializer:
             ) from error
 
     async def _apply(self, request: MaterializeRequest) -> MaterializedFlow:
-        async with self._session_scope() as session:
+        async with self._persistence(), self._session_scope() as session:
             container = await self._container_factory(session, self._user_id)
             result = await self._authoring_service.apply(
                 command=build_create_command(request),
@@ -502,16 +506,13 @@ _materializers: dict[tuple[str, str], SpecMaterializer] = {}
 def _default_materializer(harness: ModuleType, config: Any) -> SpecMaterializer:
     """One in-process materializer per (stack, user), built from the API key's user."""
 
-    from eneo.main.config import get_settings
-
     key = (str(config.base_url), str(config.api_key)[-8:])
     with _MATERIALIZER_LOCK:
         cached = _materializers.get(key)
         if cached is None:
             me = harness._request_json(config=config, method="GET", path="/users/me/")
             cached = InProcessSpecMaterializer(
-                user_id=UUID(harness._required_string(me, "id")),
-                database_url=get_settings().database_url,
+                user_id=UUID(harness._required_string(me, "id"))
             )
             _materializers[key] = cached
         return cached

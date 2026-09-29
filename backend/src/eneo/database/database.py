@@ -41,6 +41,10 @@ class DatabaseSessionManager:
         self._engine: AsyncEngine | None = None
         self._sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
+    @property
+    def initialized(self) -> bool:
+        return self._engine is not None
+
     def init(self, host: str) -> None:
         # If already initialized, don't reinitialize (important for tests)
         if self._engine is not None:

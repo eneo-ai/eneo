@@ -35,38 +35,77 @@ async def lifespan(app: FastAPI):
     await shutdown()
 
 
+async def start_persistence() -> None:
+    """Bring up what any process that reads or writes application data needs.
+
+    The database session manager and the durable object-content runtime are
+    process singletons, and the container hands out services that need both.
+    The API's lifespan and every other process that builds a container (the
+    workers, the Flow AI Builder measurement harness) start them here.
+
+    A second start while persistence is running is refused before anything is
+    touched: the running owner keeps its engine and runtime. A failed start
+    leaves nothing started that this call started: the caller never reaches its
+    own stop, so whatever escapes (cancellation included) unwinds here first.
+    """
+    if object_content_runtime.enabled:
+        raise RuntimeError("Persistence is already running in this process")
+    settings = get_settings()
+    # `init` keeps an engine another owner opened; only an engine this call
+    # opens is this call's to close.
+    opened_database = not sessionmanager.initialized
+    sessionmanager.init(settings.database_url)
+    try:
+        # PostgreSQL owns the optional administrator-managed connection, so it
+        # must be available before object-content imports or loads that
+        # configuration. The root encryption key remains deployment bootstrap
+        # material.
+        encryption_key = None if settings.testing else settings.encryption_key
+        object_content_runtime.start(
+            encryption=EncryptionService(encryption_key),
+        )
+        try:
+            await object_content_runtime.validate_configuration()
+        except ObjectStoreConnectionDatabaseUnavailable:
+            # Connection metadata lives in PostgreSQL. Treat an outage there
+            # like any other transient storage dependency failure and retry
+            # through readiness and reconciliation after startup.
+            pass
+        except (ObjectContentConfigurationError, ObjectStoreConnectionError):
+            # Before the next clause: a configuration error is also an
+            # ObjectContentUnavailableError, and it is not transient.
+            raise
+        except ObjectContentUnavailableError:
+            # A transient database/store outage is a readiness failure. The
+            # process remains live and retries the binding check on readiness
+            # and every reconciliation attempt.
+            pass
+    except BaseException:
+        await _stop(close_database=opened_database)
+        raise
+
+
+async def stop_persistence() -> None:
+    await _stop(close_database=True)
+
+
+async def _stop(*, close_database: bool) -> None:
+    try:
+        await object_content_runtime.stop()
+    finally:
+        # A store that fails to close must not keep the database open.
+        if close_database:
+            await sessionmanager.close()
+
+
 async def startup():
     settings = get_settings()
     # Skip all startup dependencies when in OpenAPI-only mode
     if settings.openapi_only_mode:
         return
 
-    sessionmanager.init(settings.database_url)
-    # PostgreSQL owns the optional administrator-managed connection, so it must
-    # be available before object-content imports or loads that configuration.
-    # The root encryption key remains deployment bootstrap material.
-    encryption_key = None if settings.testing else settings.encryption_key
-    object_content_runtime.start(
-        encryption=EncryptionService(encryption_key),
-    )
+    await start_persistence()
     aiohttp_client.start()
-    try:
-        await object_content_runtime.validate_configuration()
-    except ObjectStoreConnectionDatabaseUnavailable:
-        # Connection metadata lives in PostgreSQL. Treat an outage there like
-        # any other transient storage dependency failure and retry through
-        # readiness and reconciliation after startup.
-        pass
-    except (ObjectContentConfigurationError, ObjectStoreConnectionError):
-        await object_content_runtime.stop()
-        await sessionmanager.close()
-        await aiohttp_client.stop()
-        raise
-    except ObjectContentUnavailableError:
-        # A transient database/store outage is a readiness failure. The process
-        # remains live and retries the binding check on readiness and every
-        # reconciliation attempt.
-        pass
     await job_manager.init()
 
     # init predefined roles
@@ -79,8 +118,7 @@ async def shutdown():
     if settings.openapi_only_mode:
         return
 
-    await object_content_runtime.stop()
-    await sessionmanager.close()
+    await stop_persistence()
     await aiohttp_client.stop()
     await job_manager.close()
     await websocket_manager.shutdown()

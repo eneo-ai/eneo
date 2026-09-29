@@ -4,11 +4,13 @@ sealed, receipted bundle, with no Builder call and the harness's own scoring."""
 from __future__ import annotations
 
 import argparse
+import asyncio
 import dataclasses
 import hashlib
 import importlib.util
 import json
 import sys
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -271,8 +273,24 @@ class _RecordingService:
         )
 
 
-def _materializer(arm: ModuleType, service: _RecordingService) -> Any:
+def _materializer(
+    arm: ModuleType,
+    service: _RecordingService,
+    *,
+    persistence_start_error: Exception | None = None,
+    persistence_scope: Any = None,
+) -> Any:
     entered: list[str] = []
+
+    @asynccontextmanager
+    async def persistence() -> Any:
+        if persistence_start_error is not None:
+            raise persistence_start_error
+        entered.append("start")
+        try:
+            yield
+        finally:
+            entered.append("stop")
 
     @asynccontextmanager
     async def scope() -> Any:
@@ -292,6 +310,7 @@ def _materializer(arm: ModuleType, service: _RecordingService) -> Any:
         authoring_service=service,
         container_factory=container_factory,
         session_scope=scope,
+        persistence=persistence_scope or persistence,
     )
     materializer.entered = entered
     return materializer
@@ -321,7 +340,8 @@ def test_apply_runs_in_one_transaction_with_the_authoring_service(
     assert call["template_asset_service"] == "template-assets"
     assert call["command"].origin.kind == "flow_package"
     assert type(call["origin_policy"]).__name__ == "NoopFlowAuthoringOriginPolicy"
-    assert materializer.entered == ["open", "commit"]
+    # Persistence is up before the transaction opens and down after it commits.
+    assert materializer.entered == ["start", "open", "commit", "stop"]
 
 
 def test_a_platform_refusal_is_an_outcome_and_anything_else_is_the_stacks(
@@ -339,6 +359,101 @@ def test_a_platform_refusal_is_an_outcome_and_anything_else_is_the_stacks(
     broken = _materializer(arm, _RecordingService(error=RuntimeError("db gone")))
     with pytest.raises(arm.MaterializeInfrastructureError, match="db gone"):
         broken.materialize(_request(arm))
+
+
+def test_persistence_is_stopped_after_a_refused_or_a_broken_apply(
+    arm: ModuleType,
+) -> None:
+    from eneo.main.exceptions import BadRequestException
+
+    for error, outcome in (
+        (BadRequestException("nej", code="bad_spec"), arm.MaterializeRefused),
+        (RuntimeError("db gone"), arm.MaterializeInfrastructureError),
+    ):
+        materializer = _materializer(arm, _RecordingService(error=error))
+        with pytest.raises(outcome):
+            materializer.materialize(_request(arm))
+        assert materializer.entered == ["start", "open", "stop"]
+
+
+def test_persistence_that_cannot_start_is_the_stacks_fault_and_nothing_opens(
+    arm: ModuleType,
+) -> None:
+    service = _RecordingService()
+    materializer = _materializer(
+        arm, service, persistence_start_error=RuntimeError("no object content")
+    )
+    with pytest.raises(arm.MaterializeInfrastructureError, match="no object content"):
+        materializer.materialize(_request(arm))
+    assert materializer.entered == [] and service.calls == []
+
+
+def test_concurrent_applies_take_turns_with_the_process_singletons(
+    arm: ModuleType,
+) -> None:
+    """The singletons refuse a second start, and observations run in threads."""
+
+    guard = threading.Lock()
+    running = 0
+    peak = 0
+
+    @asynccontextmanager
+    async def persistence() -> Any:
+        nonlocal running, peak
+        with guard:
+            running += 1
+            peak = max(peak, running)
+        try:
+            await asyncio.sleep(0.02)
+            yield
+        finally:
+            with guard:
+                running -= 1
+
+    materializer = _materializer(
+        arm, _RecordingService(), persistence_scope=persistence
+    )
+    threads = [
+        threading.Thread(target=materializer.materialize, args=(_request(arm),))
+        for _ in range(4)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert peak == 1
+
+
+def test_the_default_persistence_is_the_lifespans_own_start_and_stop(
+    arm: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import eneo.server.dependencies.lifespan as lifespan
+
+    calls: list[str] = []
+
+    async def start() -> None:
+        calls.append("start")
+
+    async def stop() -> None:
+        calls.append("stop")
+
+    monkeypatch.setattr(lifespan, "start_persistence", start)
+    monkeypatch.setattr(lifespan, "stop_persistence", stop)
+
+    async def apply(*, fail: bool) -> None:
+        async with arm._process_persistence():
+            calls.append("body")
+            if fail:
+                raise RuntimeError("boom")
+
+    asyncio.run(apply(fail=False))
+    assert calls == ["start", "body", "stop"]
+
+    calls.clear()
+    with pytest.raises(RuntimeError, match="boom"):
+        asyncio.run(apply(fail=True))
+    assert calls == ["start", "body", "stop"]
 
 
 # -------------------------------------------------- one observation, end to end
