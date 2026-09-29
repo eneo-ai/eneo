@@ -28,6 +28,9 @@ from eneo.database.database import (
 )
 from eneo.object_content.runtime import object_content_runtime
 from eneo.roles.permissions import Permission
+from eneo.security_classifications.presentation.security_classification_router import (
+    toggle_security_classifications,
+)
 from eneo.server.endpoint_routes import (
     EndpointRoute,
     endpoint_routes,
@@ -84,6 +87,7 @@ def request_operation(
     user: UserInDB | None,
     use_key: bool = False,
     expect_admission: bool = False,
+    body: dict[str, object] | None = None,
 ):
     async def token_user(_self: UserService, token: str) -> UserInDB:
         assert user is not None
@@ -148,7 +152,9 @@ def request_operation(
             if use_key
             else {"Authorization": "Bearer test-token"}
         )
-    return TestClient(app).request(operation.method, path, headers=headers, json={})
+    return TestClient(app).request(
+        operation.method, path, headers=headers, json=body if body is not None else {}
+    )
 
 
 @pytest.mark.parametrize("operation", OPERATIONS, ids=lambda case: case.identity)
@@ -215,6 +221,31 @@ def test_storage_settings_read_preserves_admin_access(
         user=make_user(permission),
         use_key=use_key,
         expect_admission=expected == 200,
+    )
+    assert response.status_code == expected, response.text
+    if expected == 200:
+        assert response.json() == "admitted"
+
+
+@pytest.mark.parametrize("use_key", [False, True], ids=["session", "api-key"])
+@pytest.mark.parametrize(
+    "permission,expected", [(Permission.ADMIN, 200), (Permission.INSIGHTS, 403)]
+)
+def test_toggling_security_classifications_requires_admin_before_dispatch(
+    monkeypatch, use_key, permission, expected
+):
+    operation = next(
+        case
+        for case in OPERATIONS
+        if case.route.endpoint is toggle_security_classifications
+    )
+    response = request_operation(
+        monkeypatch,
+        operation,
+        user=make_user(permission),
+        use_key=use_key,
+        expect_admission=expected == 200,
+        body={"enabled": True},
     )
     assert response.status_code == expected, response.text
     if expected == 200:

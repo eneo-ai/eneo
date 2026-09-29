@@ -570,12 +570,12 @@ async def get_conversation_insights(
     "/conversation-insights/jobs/{job_id}/",
     response_model=AnalysisJobStatusResponse,
     description="Get the status of a conversation insights analysis job.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AnalysisService authorizes insights for the requested assistant or space.",
+    reason="Current insight access to the job's assistant or group chat is required.",
 )
 async def get_conversation_insight_job(
     job_id: UUID,
@@ -586,6 +586,8 @@ async def get_conversation_insight_job(
     job = await manager.get_job(tenant_id=tenant_id, job_id=job_id)
     if job is None:
         raise NotFoundException("Insights analysis job not found")
+
+    await container.analysis_service().authorize_insight_job(job)
 
     return AnalysisJobStatusResponse(
         job_id=job.job_id,

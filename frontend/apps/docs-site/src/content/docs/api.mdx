@@ -44,6 +44,11 @@ the `admin` permission because they use stored provider credentials. Updating
 the tenant's favorite provider types also requires `admin`. The shared model
 catalogue at `/api/v1/ai-models/` remains available to authenticated users.
 
+Polling `GET /api/v1/analysis/conversation-insights/jobs/{job_id}/` checks the
+caller's current insight access to the job's assistant or group chat. A caller
+whose access was revoked after starting the job receives `403`; a missing job
+returns `404`. Knowing the job ID alone does not grant access to its answer.
+
 Contributors must [declare and test endpoint access](/contributing/security#declare-access-on-every-endpoint)
 when adding or changing an endpoint.
 

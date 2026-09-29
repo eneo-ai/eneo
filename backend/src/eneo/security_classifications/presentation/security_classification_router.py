@@ -384,8 +384,8 @@ async def update_security_classification(
 )
 @endpoint_access(
     authentication=Authentication.USER,
-    authorization=Authorization.AUTHENTICATED,
-    reason="Tenant members may read classifications; service authorizes administrative mutations.",
+    authorization=Permission.ADMIN,
+    reason="Changing tenant security classifications requires the admin permission.",
 )
 async def toggle_security_classifications(
     request: SecurityEnableRequest,

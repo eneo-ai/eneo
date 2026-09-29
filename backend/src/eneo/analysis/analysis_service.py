@@ -19,6 +19,7 @@ from eneo.analysis.analysis import (
     ConversationInsightResponse,
     Counts,
 )
+from eneo.analysis.analysis_job import AnalysisJob
 from eneo.analysis.analysis_repo import AnalysisRepository
 from eneo.assistants.assistant import Assistant
 from eneo.assistants.assistant_service import AssistantService
@@ -636,6 +637,17 @@ class AnalysisService:
             raise BadRequestException(
                 "Either assistant_id or group_chat_id must be provided"
             )
+
+    async def authorize_insight_job(self, job: AnalysisJob) -> None:
+        """Recheck access to the resource behind a persisted insight result."""
+        if job.tenant_id != self.user.tenant_id:
+            raise NotFoundException("Insights analysis job not found")
+        if (job.assistant_id is None) == (job.group_chat_id is None):
+            raise NotFoundException("Insights analysis job not found")
+        await self._check_insight_access(
+            assistant_id=job.assistant_id,
+            group_chat_id=job.group_chat_id,
+        )
 
     async def get_questions_since(
         self,

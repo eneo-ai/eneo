@@ -8,7 +8,10 @@ from eneo.actors import SpaceActor
 from eneo.ai_models.completion_models.completion_model import (
     CompletionModel,
 )
-from eneo.analysis.analysis import AnalysisProcessingMode
+from eneo.analysis.analysis import AnalysisJobStatus, AnalysisProcessingMode
+from eneo.analysis.analysis_job import AnalysisJob
+from eneo.analysis.analysis_job_manager import AnalysisJobManager
+from eneo.analysis.analysis_router import get_conversation_insight_job
 from eneo.analysis.analysis_service import (
     ASYNC_AUTO_QUESTION_THRESHOLD,
     NO_QUESTIONS_ANSWER,
@@ -106,6 +109,72 @@ def analysis_service(user, mock_space_service):
         group_chat_service=group_chat_service,
         completion_service=AsyncMock(),
     )
+
+
+@pytest.mark.parametrize("target", ["assistant", "group_chat"])
+async def test_insight_job_poll_rechecks_access_after_revocation(
+    service: AnalysisService,
+    mock_actor: SpaceActor,
+    monkeypatch: pytest.MonkeyPatch,
+    target: str,
+):
+    target_id = uuid4()
+    job_id = uuid4()
+    now = datetime.now(timezone.utc)
+    job = AnalysisJob(
+        job_id=job_id,
+        tenant_id=TEST_UUID,
+        status=AnalysisJobStatus.COMPLETED,
+        question="What happened?",
+        assistant_id=target_id if target == "assistant" else None,
+        group_chat_id=target_id if target == "group_chat" else None,
+        answer="Private insight answer",
+        created_at=now,
+        updated_at=now,
+    )
+    get_job = AsyncMock(return_value=job)
+    monkeypatch.setattr(AnalysisJobManager, "get_job", get_job)
+    container = MagicMock()
+    container.user.return_value = service.user
+    container.analysis_service.return_value = service
+
+    response = await get_conversation_insight_job(job_id=job_id, container=container)
+    assert response.answer == "Private insight answer"
+    get_job.assert_awaited_with(tenant_id=TEST_UUID, job_id=job_id)
+
+    if target == "assistant":
+        mock_actor.can_access_insight_assistant.return_value = False
+    else:
+        mock_actor.can_access_insight_group_chat.return_value = False
+
+    with pytest.raises(UnauthorizedException):
+        await get_conversation_insight_job(job_id=job_id, container=container)
+
+
+@pytest.mark.parametrize("invalid_target", ["missing", "ambiguous", "other_tenant"])
+async def test_insight_job_poll_rejects_invalid_persisted_access_target(
+    service: AnalysisService,
+    mock_actor: SpaceActor,
+    invalid_target: str,
+):
+    now = datetime.now(timezone.utc)
+    job = AnalysisJob(
+        job_id=uuid4(),
+        tenant_id=uuid4() if invalid_target == "other_tenant" else TEST_UUID,
+        status=AnalysisJobStatus.COMPLETED,
+        question="What happened?",
+        assistant_id=None if invalid_target == "missing" else uuid4(),
+        group_chat_id=uuid4() if invalid_target == "ambiguous" else None,
+        answer="Private insight answer",
+        created_at=now,
+        updated_at=now,
+    )
+
+    with pytest.raises(NotFoundException, match="Insights analysis job not found"):
+        await service.authorize_insight_job(job)
+
+    mock_actor.can_access_insight_assistant.assert_not_called()
+    mock_actor.can_access_insight_group_chat.assert_not_called()
 
 
 async def test_get_message_for_insights_authorizes_assistant_before_hydration(
