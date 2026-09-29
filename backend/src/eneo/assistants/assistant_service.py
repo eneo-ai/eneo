@@ -655,8 +655,10 @@ class AssistantService:
         name: str | None = None,
         enabled_capabilities: list[CapabilityPurpose] | None = None,
     ):
-        template = await self.assistant_template_service.get_assistant_template(
-            assistant_template_id=template_data.id
+        template = (
+            await self.assistant_template_service.get_consumable_assistant_template(
+                assistant_template_id=template_data.id
+            )
         )
 
         if (
