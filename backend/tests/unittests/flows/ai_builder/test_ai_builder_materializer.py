@@ -1900,7 +1900,6 @@ class TestExecuteEditFlow:
             flow_description="Desc",
             assistants_to_update=[
                 AssistantToUpdate(
-                    existing_step_id=uuid4(),
                     existing_assistant_id=assistant_id,
                     assistant_spec=AssistantSpec(instructions="New prompt"),
                 ),
@@ -1961,7 +1960,6 @@ class TestExecuteEditFlow:
             ],
             assistants_to_update=[
                 AssistantToUpdate(
-                    existing_step_id=uuid4(),
                     existing_assistant_id=existing_assistant_id,
                     assistant_spec=AssistantSpec(instructions="Updated"),
                 ),
@@ -2020,7 +2018,6 @@ class TestExecuteEditFlow:
             flow_description="Desc",
             assistants_to_update=[
                 AssistantToUpdate(
-                    existing_step_id=uuid4(),
                     existing_assistant_id=assistant_id,
                     assistant_spec=AssistantSpec(instructions="New prompt"),
                 ),
@@ -2065,7 +2062,6 @@ class TestExecuteEditFlow:
             flow_description="",
             assistants_to_update=[
                 AssistantToUpdate(
-                    existing_step_id=uuid4(),
                     existing_assistant_id=assistant_id,
                     assistant_spec=AssistantSpec(
                         instructions="Prompt",
@@ -2112,7 +2108,6 @@ class TestExecuteEditFlow:
             flow_description="",
             assistants_to_update=[
                 AssistantToUpdate(
-                    existing_step_id=uuid4(),
                     existing_assistant_id=assistant_id,
                     assistant_spec=AssistantSpec(instructions="Pure text step"),
                 ),
@@ -2160,7 +2155,6 @@ class TestExecuteEditFlow:
             flow_description="",
             assistants_to_update=[
                 AssistantToUpdate(
-                    existing_step_id=uuid4(),
                     existing_assistant_id=assistant_id,
                     assistant_spec=AssistantSpec(
                         instructions="Prompt",
@@ -2257,7 +2251,6 @@ class TestExecuteResultCounting:
             ],
             assistants_to_update=[
                 AssistantToUpdate(
-                    existing_step_id=uuid4(),
                     existing_assistant_id=mod_assistant_id,
                     assistant_spec=AssistantSpec(instructions="y"),
                 ),

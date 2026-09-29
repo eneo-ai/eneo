@@ -181,6 +181,13 @@ class FlowDraftMaterializer:
                 steps=final_steps,
                 metadata_json=changeset.metadata_json,
                 expected_revision=expected_revision,
+                unchanged_step_ids=frozenset(
+                    compiled.saved_step.id
+                    for compiled in changeset.compiled_steps
+                    if compiled.change_kind is FlowDraftStepChangeKind.UNCHANGED
+                    and compiled.saved_step is not None
+                    and compiled.saved_step.id is not None
+                ),
             )
         progress.flow_updated = True
         progress.emit(FlowDraftMaterializationStage.FLOW_UPDATED)
@@ -295,21 +302,28 @@ def _build_flow_steps(
                 code="missing_materialized_assistant_id",
                 context={"plan_step_ref": compiled.plan_step_ref},
             )
+        # A retained step is its saved row with the authored columns laid over
+        # it: its id and every column the spec has no field for stay, so the
+        # repository patches the row instead of replacing it.
+        saved = {} if compiled.saved_step is None else compiled.saved_step.model_dump()
         final_steps.append(
-            FlowStep(
-                assistant_id=assistant_id,
-                step_order=compiled.step_order,
-                user_description=compiled.user_description,
-                input_source=compiled.input_source,
-                input_type=compiled.input_type,
-                output_mode=compiled.output_mode,
-                output_type=compiled.output_type,
-                input_bindings=compiled.input_bindings,
-                input_contract=compiled.input_contract,
-                output_contract=compiled.output_contract,
-                input_config=compiled.input_config,
-                output_config=compiled.output_config,
-                review_policy=compiled.review_policy,
+            FlowStep.model_validate(
+                {
+                    **saved,
+                    "assistant_id": assistant_id,
+                    "step_order": compiled.step_order,
+                    "user_description": compiled.user_description,
+                    "input_source": compiled.input_source,
+                    "input_type": compiled.input_type,
+                    "output_mode": compiled.output_mode,
+                    "output_type": compiled.output_type,
+                    "input_bindings": compiled.input_bindings,
+                    "input_contract": compiled.input_contract,
+                    "output_contract": compiled.output_contract,
+                    "input_config": compiled.input_config,
+                    "output_config": compiled.output_config,
+                    "review_policy": compiled.review_policy,
+                }
             )
         )
     return final_steps

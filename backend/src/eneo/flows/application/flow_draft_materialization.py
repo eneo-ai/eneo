@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import enum
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal, cast, get_args
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from eneo.flows.application.flow_authoring_snapshot import flow_step_to_authoring_spec
+from eneo.flows.domain.canonical_json_hash import json_values_differ
 from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
 from eneo.flows.enums import FlowInputSource, FlowInputType, FlowOutputMode
 from eneo.flows.flow_authoring_spec import (
@@ -23,6 +26,8 @@ from eneo.flows.flow_authoring_transcription import (
 )
 from eneo.flows.flow_authoring_variable_rewriting import (
     build_ref_to_order,
+    renumber_input_binding_aliases,
+    renumber_step_aliases,
     rewrite_step_spec_variables,
 )
 from eneo.flows.flow_metadata import (
@@ -32,7 +37,10 @@ from eneo.flows.flow_metadata import (
 )
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
 from eneo.flows.http_transport import redact_persisted_config
-from eneo.flows.step_lineage import existing_step_ref_for_order
+from eneo.flows.step_lineage import (
+    existing_step_order_from_ref,
+    existing_step_ref_for_order,
+)
 from eneo.main.exceptions import BadRequestException
 
 # The rule an invalid existing-step ref broke. The error's code says the ref
@@ -78,7 +86,6 @@ class FlowDraftAssistantToCreate(BaseModel):
 
 class FlowDraftAssistantToUpdate(BaseModel):
     existing_step_ref: str | None = None
-    existing_step_id: UUID | None = None
     existing_assistant_id: UUID | None = None
     assistant_spec: AssistantSpec
 
@@ -87,13 +94,17 @@ class FlowDraftCompiledStep(BaseModel):
     plan_step_ref: str
     change_kind: FlowDraftStepChangeKind
     step_order: int
-    user_description: str
+    user_description: str | None
     input_source: FlowInputSource
     input_type: FlowInputType
     output_mode: FlowOutputMode
     output_type: OutputType
     assistant_id: UUID | None = None
     existing_step_ref: str | None = None
+    # The saved row this step is, read when the changeset was compiled: it
+    # keeps the row's id and every column the authoring spec has no field for
+    # (a timeout, a classification override), so the write patches the row.
+    saved_step: FlowStep | None = None
     input_bindings: FlowPersistedJsonObject | None = None
     input_contract: FlowPersistedJsonObject | None = None
     output_contract: FlowPersistedJsonObject | None = None
@@ -171,6 +182,16 @@ def compile_flow_draft_changeset(
         updated_existing_step_refs=updated_existing_step_refs,
     )
     ref_to_order = build_ref_to_order(spec.steps)
+    # Where each kept step's alias changes: a step that reads it by alias is
+    # written with the new one.
+    alias_renumbering = {
+        saved_order: index + 1
+        for index, step in enumerate(spec.steps)
+        if (saved_order := existing_step_order_from_ref(step.existing_step_ref))
+        is not None
+        and saved_order != index + 1
+    }
+    runtime_aliases = {f"step_{order}": order for order in ref_to_order.values()}
     assistants_to_create: list[FlowDraftAssistantToCreate] = []
     assistants_to_update: list[FlowDraftAssistantToUpdate] = []
     compiled_steps: list[FlowDraftCompiledStep] = []
@@ -190,7 +211,6 @@ def compile_flow_draft_changeset(
                 assistants_to_update.append(
                     FlowDraftAssistantToUpdate(
                         existing_step_ref=existing_ref,
-                        existing_step_id=existing_step.id,
                         existing_assistant_id=existing_step.assistant_id,
                         assistant_spec=rewritten_spec.assistant_spec,
                     )
@@ -200,6 +220,8 @@ def compile_flow_draft_changeset(
                     step_spec=rewritten_spec,
                     existing_step=existing_step,
                     step_order=step_order,
+                    alias_renumbering=alias_renumbering,
+                    runtime_aliases=runtime_aliases,
                     change_kind=(
                         FlowDraftStepChangeKind.MODIFIED
                         if updates_step
@@ -346,7 +368,12 @@ def preserve_modified_step_output_config(
     *,
     step_spec: StepSpec,
     existing_step: FlowStep,
+    alias_renumbering: Mapping[int, int],
 ) -> StepSpec:
+    """A step the spec gives no output config keeps its saved one, with the
+    alias of each step that moved renumbered: the saved config reads steps at
+    their saved positions, and the spec's aliases are already rewritten."""
+
     if step_spec.output_config is not None:
         return step_spec
     if step_spec.output_mode.value != existing_step.output_mode:
@@ -354,7 +381,11 @@ def preserve_modified_step_output_config(
     if step_spec.output_type.value != existing_step.output_type:
         return step_spec
     return step_spec.model_copy(
-        update={"output_config": redact_persisted_config(existing_step.output_config)}
+        update={
+            "output_config": renumber_step_aliases(
+                redact_persisted_config(existing_step.output_config), alias_renumbering
+            )
+        }
     )
 
 
@@ -522,31 +553,129 @@ def _compile_new_step(
     )
 
 
+def _same_authored_value(left: object, right: object) -> bool:
+    return not json_values_differ(left, right)
+
+
+def _saved_where_unchanged(
+    step_spec: StepSpec,
+    existing_step: FlowStep,
+    *,
+    alias_renumbering: Mapping[int, int],
+    runtime_aliases: Mapping[str, int],
+) -> dict[str, object]:
+    """What a step the edit names keeps of its saved row where the edit did not
+    change it: the description and the input bindings, the two columns the
+    spec shows in a form its validators change (a padded question is stripped,
+    a step saved without a description is named "Step N", a template is
+    written `{{ step_N.x }}`). Each is judged by reading the saved value
+    through the same validators and rewriting as the spec's; when the two are
+    equal the row keeps what was saved, with the aliases of moved steps
+    renumbered, and is not rewritten to what the spec shows."""
+
+    saved_bindings = renumber_input_binding_aliases(
+        existing_step.input_bindings, alias_renumbering
+    )
+    try:
+        saved_view = rewrite_step_spec_variables(
+            flow_step_to_authoring_spec(
+                existing_step.model_copy(update={"input_bindings": saved_bindings}),
+                plan_ref=step_spec.plan_step_ref,
+            ),
+            dict(runtime_aliases),
+        )
+    except ValueError:
+        # A step in a mode authoring cannot express (an HTTP step) has no
+        # view to compare with: nothing of it is carried.
+        return {}
+    kept: dict[str, object] = {}
+    if _same_authored_value(step_spec.name, saved_view.name):
+        kept["user_description"] = existing_step.user_description
+    if _same_authored_value(step_spec.input_bindings, saved_view.input_bindings):
+        kept["input_bindings"] = saved_bindings
+    return kept
+
+
 def _compile_existing_step(
     *,
     step_spec: StepSpec,
     existing_step: FlowStep,
     step_order: int,
+    alias_renumbering: Mapping[int, int],
+    runtime_aliases: Mapping[str, int],
     change_kind: FlowDraftStepChangeKind,
 ) -> FlowDraftCompiledStep:
+    if change_kind is FlowDraftStepChangeKind.UNCHANGED:
+        return _compile_untouched_step(
+            step_spec=step_spec,
+            existing_step=existing_step,
+            step_order=step_order,
+            alias_renumbering=alias_renumbering,
+        )
     effective_spec = preserve_modified_step_output_config(
         step_spec=step_spec,
         existing_step=existing_step,
+        alias_renumbering=alias_renumbering,
     )
+    kept = _saved_where_unchanged(
+        effective_spec,
+        existing_step,
+        alias_renumbering=alias_renumbering,
+        runtime_aliases=runtime_aliases,
+    )
+    return FlowDraftCompiledStep.model_validate(
+        {
+            "plan_step_ref": effective_spec.plan_step_ref,
+            "change_kind": change_kind,
+            "step_order": step_order,
+            "user_description": effective_spec.name,
+            "assistant_id": existing_step.assistant_id,
+            "saved_step": existing_step,
+            "input_source": FlowInputSource(effective_spec.input_source.value),
+            "input_type": FlowInputType(effective_spec.input_type.value),
+            "output_mode": FlowOutputMode(effective_spec.output_mode.value),
+            "output_type": OutputType(effective_spec.output_type.value),
+            "input_bindings": effective_spec.input_bindings,
+            "input_contract": effective_spec.input_contract,
+            "output_contract": effective_spec.output_contract,
+            "input_config": effective_spec.input_config,
+            "output_config": effective_spec.output_config,
+            "review_policy": effective_spec.review_policy,
+            **kept,
+        }
+    )
+
+
+def _compile_untouched_step(
+    *,
+    step_spec: StepSpec,
+    existing_step: FlowStep,
+    step_order: int,
+    alias_renumbering: Mapping[int, int],
+) -> FlowDraftCompiledStep:
+    """A step no admitted change names is its saved row, whatever the spec and
+    the origin's policy derived for it. Only a runtime alias of a step that
+    changed position is written anew, and only that token."""
+
     return FlowDraftCompiledStep(
-        plan_step_ref=effective_spec.plan_step_ref,
-        change_kind=change_kind,
+        plan_step_ref=step_spec.plan_step_ref,
+        change_kind=FlowDraftStepChangeKind.UNCHANGED,
         step_order=step_order,
-        user_description=effective_spec.name,
+        user_description=existing_step.user_description,
         assistant_id=existing_step.assistant_id,
-        input_source=FlowInputSource(effective_spec.input_source.value),
-        input_type=FlowInputType(effective_spec.input_type.value),
-        output_mode=FlowOutputMode(effective_spec.output_mode.value),
-        output_type=OutputType(effective_spec.output_type.value),
-        input_bindings=effective_spec.input_bindings,
-        input_contract=effective_spec.input_contract,
-        output_contract=effective_spec.output_contract,
-        input_config=effective_spec.input_config,
-        output_config=effective_spec.output_config,
-        review_policy=effective_spec.review_policy,
+        saved_step=existing_step,
+        input_source=FlowInputSource(existing_step.input_source),
+        input_type=FlowInputType(existing_step.input_type),
+        output_mode=FlowOutputMode(existing_step.output_mode),
+        output_type=OutputType(existing_step.output_type.value),
+        input_bindings=renumber_input_binding_aliases(
+            existing_step.input_bindings, alias_renumbering
+        ),
+        input_contract=existing_step.input_contract,
+        output_contract=existing_step.output_contract,
+        input_config=existing_step.input_config,
+        output_config=renumber_step_aliases(
+            existing_step.output_config, alias_renumbering
+        ),
+        review_policy=existing_step.review_policy,
     )

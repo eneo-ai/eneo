@@ -41,6 +41,26 @@ from eneo.flows.flow_variable_definitions import (
 from eneo.main.exceptions import TypedIOValidationException
 
 _TEMPLATE_VAR_PATTERN = re.compile(r"\{\{\s*([^{}]+)\s*\}\}")
+# A template expression the resolver interpolates: `{{ head.tail }}`.
+TEMPLATE_VARIABLE_PATTERN = _TEMPLATE_VAR_PATTERN
+
+
+def runtime_step_alias(step_order: int) -> str:
+    """The name a step's result has in a template: `step_<order>`."""
+
+    return f"step_{step_order}"
+
+
+def runtime_step_alias_order(name: str) -> int | None:
+    """The step order `name` is the alias of, when the resolver would find a
+    step's result under it: exactly `runtime_step_alias(order)`, so no leading
+    zero and ASCII digits only."""
+
+    raw = name.removeprefix("step_")
+    if raw == name or not (raw.isascii() and raw.isdigit()):
+        return None
+    order = int(raw)
+    return order if runtime_step_alias(order) == name else None
 
 
 def _variable_resolution_error(message: str) -> TypedIOValidationException:
@@ -250,7 +270,7 @@ class FlowVariableResolver:
                 "error_message": result.error_message,
             }
             # Prompt aliases follow authored order; persisted execution identity uses step_id.
-            step_key = f"step_{result.step_order}"
+            step_key = runtime_step_alias(result.step_order)
             context[step_key] = step_ctx
             context.register_source(
                 (step_key,),
@@ -317,7 +337,7 @@ class FlowVariableResolver:
             runtime_source = _VariableSourceDescriptor(kind="runtime_input")
             context.register_source(("step_input",), runtime_source)
             if current_step_order is not None:
-                step_key = f"step_{current_step_order}"
+                step_key = runtime_step_alias(current_step_order)
                 existing = context.get(step_key)
                 if isinstance(existing, dict):
                     existing["input"] = current_step_input

@@ -20,7 +20,7 @@ from eneo.flows.application.flow_draft_materialization import (
 from eneo.flows.application.flow_draft_materialization_executor import (
     FlowDraftMaterializer,
 )
-from eneo.flows.domain.flow import Flow, FlowTemplateAsset
+from eneo.flows.domain.flow import Flow, FlowStep, FlowTemplateAsset
 from eneo.flows.flow_authoring_spec import AssistantSpec
 from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
@@ -277,7 +277,6 @@ async def test_edit_mode_updates_assistants_before_flow_and_deletes_nothing() ->
             flow_description="Description",
             assistants_to_update=[
                 FlowDraftAssistantToUpdate(
-                    existing_step_id=uuid4(),
                     existing_assistant_id=existing_assistant_id,
                     assistant_spec=AssistantSpec(instructions="Updated prompt"),
                 )
@@ -625,3 +624,71 @@ async def test_progress_snapshots_are_bounded_shared_values() -> None:
     ]
     assert snapshots[-1].assistants_created == 1
     assert snapshots[-1].flow_updated is True
+
+
+@pytest.mark.asyncio
+async def test_a_retained_step_is_written_as_its_saved_row_with_the_authored_columns() -> (
+    None
+):
+    """The step keeps its id and the columns the spec has no field for; the
+    columns the changeset carries replace the saved ones; an added step has
+    neither."""
+
+    flow_id, kept_assistant_id, new_assistant_id = uuid4(), uuid4(), uuid4()
+    saved = FlowStep(
+        id=uuid4(),
+        flow_id=flow_id,
+        tenant_id=uuid4(),
+        assistant_id=kept_assistant_id,
+        step_order=1,
+        timeout_seconds=90,
+        output_classification_override=2,
+        user_description="Gammal",
+        input_source="flow_input",
+        input_type="text",
+        output_mode="pass_through",
+        output_type="text",
+    )
+    service = _flow_service()
+    service.update_flow.return_value = MagicMock(draft_revision=2)
+    created = MagicMock()
+    created.id = new_assistant_id
+    service.create_flow_assistant.return_value = (created, [])
+    retained = _compiled_step(
+        change_kind=FlowDraftStepChangeKind.UNCHANGED, assistant_id=kept_assistant_id
+    ).model_copy(update={"saved_step": saved})
+
+    await FlowDraftMaterializer().execute(
+        changeset=FlowDraftChangeSet(
+            flow_name="Flow",
+            flow_description="",
+            assistants_to_create=[
+                FlowDraftAssistantToCreate(
+                    plan_step_ref="step_b",
+                    assistant_spec=AssistantSpec(instructions="Do it."),
+                )
+            ],
+            compiled_steps=[
+                retained,
+                _compiled_step(plan_step_ref="step_b", step_order=2),
+            ],
+        ),
+        flow_service=service,
+        space_id=uuid4(),
+        flow_id=flow_id,
+        expected_revision=1,
+        binding_source=FlowResourceBindingSource.AI_BUILDER,
+    )
+
+    kept, added = service.update_flow.await_args.kwargs["steps"]
+    assert (kept.id, kept.timeout_seconds, kept.output_classification_override) == (
+        saved.id,
+        90,
+        2,
+    )
+    assert kept.user_description == "Test step"
+    assert (added.id, added.timeout_seconds, added.output_classification_override) == (
+        None,
+        None,
+        None,
+    )

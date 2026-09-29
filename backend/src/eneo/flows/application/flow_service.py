@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, cast
@@ -17,6 +17,7 @@ from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
 )
+from eneo.flows.domain.canonical_json_hash import json_values_differ
 from eneo.flows.domain.flow import (
     Flow,
     FlowPersistedJsonObject,
@@ -205,7 +206,12 @@ class FlowService:
         steps: list[FlowStep] | None = None,
         metadata_json: FlowPersistedJsonObject | None | NotProvided = NOT_PROVIDED,
         expected_revision: int | None = None,
+        unchanged_step_ids: frozenset[UUID] = frozenset(),
     ) -> Flow:
+        """`unchanged_step_ids`: saved steps the caller hands back as they are
+        saved. They are written as given: dropping the configuration of modes
+        they do not use would be a change nobody made."""
+
         existing = await self.get_flow(flow_id)
         if existing.published_version is not None:
             raise BadRequestException(
@@ -213,7 +219,12 @@ class FlowService:
             )
 
         if steps is not None:
-            steps = [clean_inactive_step_config(step) for step in steps]
+            steps = [
+                step
+                if step.id is not None and step.id in unchanged_step_ids
+                else clean_inactive_step_config(step)
+                for step in steps
+            ]
             self._validate_update_step_identity(
                 incoming_steps=steps,
                 stored_steps=existing.steps,
@@ -246,8 +257,14 @@ class FlowService:
 
         normalized_steps = self._normalize_steps_for_tenant(next_steps)
         if steps is not None:
-            normalized_steps = self._protect_authored_step_secrets(normalized_steps)
-        persisted_steps = self._merge_step_secrets(normalized_steps, existing.steps)
+            normalized_steps = self._protect_authored_step_secrets(
+                normalized_steps,
+                stored_steps=existing.steps,
+                unchanged_step_ids=unchanged_step_ids,
+            )
+        persisted_steps = self._merge_step_secrets(
+            normalized_steps, existing.steps, unchanged_step_ids=unchanged_step_ids
+        )
         self._reject_unresolved_secret_sentinels(persisted_steps)
         updated = existing.model_copy(
             deep=True,
@@ -742,32 +759,43 @@ class FlowService:
             for step in steps
         ]
 
-    def _protect_authored_step_secrets(self, steps: list[FlowStep]) -> list[FlowStep]:
+    def _protect_authored_step_secrets(
+        self,
+        steps: list[FlowStep],
+        *,
+        stored_steps: Sequence[FlowStep] = (),
+        unchanged_step_ids: frozenset[UUID] = frozenset(),
+    ) -> list[FlowStep]:
         """Encrypt author-supplied HTTP credentials, or refuse to store them raw.
 
         Runs on incoming authored steps, before stored-secret sentinels are
         merged: only here is a secret value known to have come from the author
         rather than from the existing row. Encrypting at this point is what lets
         the merge combine ciphertext with ciphertext.
+
+        What is not authored is left as it is: a step the caller hands back as
+        saved (`unchanged_step_ids`), and a config equal to the one its saved
+        step holds, carry what storage already protected.
         """
-        return [
-            step.model_copy(
-                update={
-                    "input_config": self._protect_config(
-                        step.input_config,
-                        step_order=step.step_order,
-                        label="input_config",
-                    ),
-                    "output_config": self._protect_config(
-                        step.output_config,
-                        step_order=step.step_order,
-                        label="output_config",
-                    ),
-                },
-                deep=True,
-            )
-            for step in steps
-        ]
+        stored_by_id = {step.id: step for step in stored_steps if step.id is not None}
+        protected: list[FlowStep] = []
+        for step in steps:
+            stored = stored_by_id.get(step.id) if step.id is not None else None
+            if stored is not None and step.id in unchanged_step_ids:
+                protected.append(step)
+                continue
+            update: dict[str, object] = {}
+            for label in ("input_config", "output_config"):
+                config = getattr(step, label)
+                if stored is not None and not json_values_differ(
+                    config, getattr(stored, label)
+                ):
+                    continue
+                update[label] = self._protect_config(
+                    config, step_order=step.step_order, label=label
+                )
+            protected.append(step.model_copy(update=update, deep=True))
+        return protected
 
     def _protect_config(
         self,
@@ -847,12 +875,20 @@ class FlowService:
         self,
         incoming_steps: list[FlowStep],
         stored_steps: list[FlowStep],
+        *,
+        unchanged_step_ids: frozenset[UUID] = frozenset(),
     ) -> list[FlowStep]:
-        """Merge secret sentinels by persisted draft step id, not mutable order."""
+        """Merge secret sentinels by persisted draft step id, not mutable order.
+
+        A step handed back as saved, and a config equal to the saved one, hold
+        no sentinel to resolve: they are kept as they are, not re-shaped."""
         stored_by_id = {step.id: step for step in stored_steps if step.id is not None}
         result: list[FlowStep] = []
         for step in incoming_steps:
             stored = stored_by_id.get(step.id) if step.id is not None else None
+            if stored is not None and step.id in unchanged_step_ids:
+                result.append(step)
+                continue
             input_config = self._merge_config_secrets(
                 step.input_config, stored.input_config if stored else None
             )
@@ -918,6 +954,8 @@ class FlowService:
         if incoming is None or not is_authored_config(incoming):
             return incoming
         if stored is None or not is_authored_config(stored):
+            return incoming
+        if not json_values_differ(incoming, stored):
             return incoming
         incoming_config = HttpAuthoredConfig.model_validate(incoming)
         stored_config = HttpAuthoredConfig.model_validate(stored)

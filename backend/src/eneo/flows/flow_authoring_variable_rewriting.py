@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Any, cast
 
 from eneo.flows.domain.flow_step_validation import FlowStepValidationView
@@ -14,6 +15,11 @@ from eneo.flows.flow_authoring_spec import AssistantSpec, StepSpec
 from eneo.flows.input_binding_contract_rules import (
     SOURCE_REFS_BINDING_KEY,
     source_ref_bindings,
+)
+from eneo.flows.variable_resolver import (
+    TEMPLATE_VARIABLE_PATTERN,
+    runtime_step_alias,
+    runtime_step_alias_order,
 )
 
 _TEMPLATE_EXPRESSION_PATTERN = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
@@ -92,6 +98,78 @@ def flow_step_validation_views_from_draft_spec(
         )
         for index, step in enumerate(rewritten_steps)
     ]
+
+
+def renumber_step_aliases(value: Any, renumbering: Mapping[int, int]) -> Any:
+    """`value` with the runtime alias (`step_N`) at the head of each template
+    expression renumbered when its step changed position, and nothing else: the
+    author's spacing and every other character stay. An expression and an
+    alias are what the runtime resolver reads as one, so an unclosed
+    expression, `step_02` or a numeral in another script is left as it is."""
+
+    if not renumbering:
+        return value
+    if isinstance(value, str):
+        return TEMPLATE_VARIABLE_PATTERN.sub(
+            lambda match: _renumber_expression(match, renumbering), value
+        )
+    if isinstance(value, dict):
+        return {
+            key: renumber_step_aliases(inner, renumbering)
+            for key, inner in cast(dict[str, Any], value).items()
+        }
+    if isinstance(value, list):
+        return [
+            renumber_step_aliases(item, renumbering) for item in cast(list[Any], value)
+        ]
+    return value
+
+
+def _renumber_expression(match: re.Match[str], renumbering: Mapping[int, int]) -> str:
+    whole = match.group(0)
+    expression_start = match.start(1) - match.start(0)
+    expression = match.group(1)
+    head = expression.split(".", maxsplit=1)[0]
+    name = head.strip()
+    order = runtime_step_alias_order(name)
+    if order is None or order not in renumbering or not expression.startswith(name):
+        return whole
+    return (
+        whole[:expression_start]
+        + runtime_step_alias(renumbering[order])
+        + whole[expression_start + len(name) :]
+    )
+
+
+def renumber_input_binding_aliases(
+    input_bindings: dict[str, Any] | None, renumbering: Mapping[int, int]
+) -> dict[str, Any] | None:
+    """`input_bindings` with the aliases in its templates and the `step_ref` of
+    each source ref renumbered when their step changed position."""
+
+    if input_bindings is None or not renumbering:
+        return input_bindings
+    renumbered = cast(
+        dict[str, Any], renumber_step_aliases(input_bindings, renumbering)
+    )
+    source_refs = renumbered.get(SOURCE_REFS_BINDING_KEY)
+    if isinstance(source_refs, list):
+        renumbered[SOURCE_REFS_BINDING_KEY] = [
+            _renumber_source_ref(item, renumbering)
+            for item in cast(list[Any], source_refs)
+        ]
+    return renumbered
+
+
+def _renumber_source_ref(source_ref: Any, renumbering: Mapping[int, int]) -> Any:
+    if not isinstance(source_ref, dict):
+        return source_ref
+    payload = cast(dict[str, Any], source_ref)
+    step_ref = payload.get("step_ref")
+    order = runtime_step_alias_order(step_ref) if isinstance(step_ref, str) else None
+    if order is None or order not in renumbering:
+        return payload
+    return {**payload, "step_ref": runtime_step_alias(renumbering[order])}
 
 
 def rewrite_variable_string(

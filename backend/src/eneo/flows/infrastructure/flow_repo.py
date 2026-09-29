@@ -37,6 +37,7 @@ from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringSnapshot,
     AssistantAuthoringSnapshots,
 )
+from eneo.flows.domain.canonical_json_hash import json_values_differ
 from eneo.flows.domain.flow import (
     Flow,
     FlowSparse,
@@ -798,7 +799,7 @@ class FlowRepository:
             values = {
                 field: getattr(step, field)
                 for field in ("input_config", "output_config")
-                if getattr(step, field) != getattr(stored, field)
+                if json_values_differ(getattr(step, field), getattr(stored, field))
             }
             if values:
                 changes.append((step.id, values))
@@ -960,6 +961,15 @@ class FlowRepository:
         )
         existing_by_id = {row.id: row for row in existing_rows}
         incoming_ids = {step.id for step in steps if step.id is not None}
+        # Both sides of a comparison are read the same way: a stored row as the
+        # domain step it parses to, before any write, so a stored shape the
+        # domain normalizes is not a difference.
+        stored_rows = {
+            row.id: self._step_to_db_row(
+                flow_id=flow_id, tenant_id=tenant_id, step=FlowStep.model_validate(row)
+            )
+            for row in existing_rows
+        }
 
         retained_steps: list[tuple[FlowStep, FlowSteps]] = []
         new_steps: list[FlowStep] = []
@@ -1014,14 +1024,22 @@ class FlowRepository:
             )
 
         for step, existing in retained_steps:
-            payload = self._step_to_db_row(
-                flow_id=flow_id, tenant_id=tenant_id, step=step
-            )
+            # A retained row is patched, not replaced: only the columns that
+            # differ are written, and a row nothing changed is not written.
+            patch = {
+                column: value
+                for column, value in self._step_to_db_row(
+                    flow_id=flow_id, tenant_id=tenant_id, step=step
+                ).items()
+                if json_values_differ(stored_rows[existing.id][column], value)
+            }
+            if not patch:
+                continue
             await self.session.execute(
                 sa.update(FlowSteps)
                 .where(FlowSteps.id == existing.id)
                 .where(FlowSteps.tenant_id == tenant_id)
-                .values(**payload)
+                .values(**patch)
             )
 
         for step in new_steps:

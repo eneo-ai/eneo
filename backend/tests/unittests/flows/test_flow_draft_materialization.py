@@ -28,6 +28,7 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from eneo.flows.flow_metadata import normalize_flow_metadata_for_write
+from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from eneo.main.exceptions import BadRequestException
 
 
@@ -787,3 +788,268 @@ def test_shared_compile_preserves_authored_disabled_upload(
     )
 
     assert changeset.compiled_steps[0].input_config == input_config
+
+
+def test_a_saved_column_the_edit_did_not_change_is_carried_as_saved() -> None:
+    """The spec shows a padded question stripped. The edit did not change it,
+    so the compiled step keeps the saved text; a column the edit did change
+    takes the spec's value."""
+
+    saved = _flow_step(step_order=1).model_copy(
+        update={
+            "input_bindings": {"question": "  Läs {{ x }}\n"},
+            "output_config": {"citation_mode": "off"},
+        }
+    )
+    changeset = compile_flow_draft_changeset(
+        FlowDraftSpecCore(
+            flow_name="Flow",
+            steps=[
+                _step_spec(
+                    plan_step_ref="a",
+                    existing_step_ref="existing_step_1",
+                    name="Existing 1",
+                    input_bindings={"question": "Läs {{ x }}"},
+                    output_config={"citation_mode": "inline_inref_sidecar"},
+                )
+            ],
+        ),
+        current_flow=_flow(saved),
+    )
+
+    (compiled,) = changeset.compiled_steps
+    assert compiled.input_bindings == {"question": "  Läs {{ x }}\n"}
+    assert compiled.output_config == {"citation_mode": "inline_inref_sidecar"}
+    assert compiled.user_description == "Existing 1"
+
+
+def test_a_saved_reference_to_a_step_that_moved_is_written_at_its_new_position() -> (
+    None
+):
+    """Carrying what was saved must not carry a position the producer left:
+    the reference differs from the saved one, so the spec's is used."""
+
+    producer = _flow_step(step_order=1)
+    consumer = _flow_step(step_order=2).model_copy(
+        update={"input_bindings": {"question": "Skriv {{ step_1.output.text }}"}}
+    )
+    changeset = compile_flow_draft_changeset(
+        FlowDraftSpecCore(
+            flow_name="Flow",
+            steps=[
+                _step_spec(plan_step_ref="new", name="Ny"),
+                _step_spec(
+                    plan_step_ref="p1",
+                    existing_step_ref="existing_step_1",
+                    name="Existing 1",
+                ),
+                _step_spec(
+                    plan_step_ref="p2",
+                    existing_step_ref="existing_step_2",
+                    name="Existing 2",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_bindings={"question": "Skriv {{ p1.output.text }}"},
+                ),
+            ],
+        ),
+        current_flow=_flow(producer, consumer),
+    )
+
+    assert changeset.compiled_steps[2].input_bindings == {
+        "question": "Skriv {{ step_2.output.text }}"
+    }
+
+
+def _compile_pair(
+    saved_consumer: dict,
+    *,
+    consumer_spec: dict,
+    updated: frozenset[str] | None,
+    saved_producer: dict | None = None,
+    producer_first: bool = False,
+):
+    """A saved producer and consumer compiled with the consumer's spec given,
+    optionally with a new step added in front of both."""
+
+    producer = _flow_step(step_order=1).model_copy(update=saved_producer or {})
+    consumer = FlowStep.model_validate(
+        {
+            **_flow_step(step_order=2).model_dump(),
+            "input_source": "previous_step",
+            **saved_consumer,
+        }
+    )
+    steps = [
+        _step_spec(
+            plan_step_ref="p1", existing_step_ref="existing_step_1", name="Existing 1"
+        ),
+        _step_spec(
+            plan_step_ref="p2",
+            existing_step_ref="existing_step_2",
+            input_source=InputSource.PREVIOUS_STEP,
+            **consumer_spec,
+        ),
+    ]
+    if producer_first:
+        steps.insert(0, _step_spec(plan_step_ref="new", name="Ny"))
+    return compile_flow_draft_changeset(
+        FlowDraftSpecCore(flow_name="Flow", steps=steps),
+        current_flow=_flow(producer, consumer),
+        updated_existing_step_refs=updated,
+    )
+
+
+def test_a_step_no_change_names_is_its_saved_row_whatever_the_spec_says() -> None:
+    """The spec carries the validators' form of every step, and the origin's
+    policy its own derivations. A step no admitted change names takes none of
+    it: description NULL, `{}` configs and the author's spacing stay."""
+
+    changeset = _compile_pair(
+        {
+            "user_description": None,
+            "input_bindings": {"question": "  Skriv {{step_1.output.text}}\n"},
+            "input_config": {},
+            "output_config": {},
+        },
+        consumer_spec={
+            "name": "Ett annat namn",
+            "input_bindings": {"question": "Skriv {{ p1.output.text }}"},
+            "output_config": {"citation_mode": "off"},
+        },
+        updated=frozenset(),
+    )
+
+    consumer = changeset.compiled_steps[1]
+    assert consumer.change_kind is FlowDraftStepChangeKind.UNCHANGED
+    assert consumer.user_description is None
+    assert consumer.input_bindings == {"question": "  Skriv {{step_1.output.text}}\n"}
+    assert consumer.input_config == {}
+    assert consumer.output_config == {}
+    assert changeset.assistants_to_update == []
+
+
+def test_a_step_no_change_names_keeps_every_saved_column_the_spec_shows_otherwise() -> (
+    None
+):
+    """Its input and output modes, contracts and review policy are the saved
+    ones, though the spec gives other values for each."""
+
+    saved = {
+        "input_source": "all_previous_steps",
+        "input_type": "json",
+        "output_mode": "render_verbatim",
+        "output_type": "json",
+        "input_contract": {"type": "object", "properties": {"a": {"type": "string"}}},
+        "output_contract": {"type": "object", "properties": {"b": {"type": "number"}}},
+        "review_policy": FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW),
+    }
+    changeset = _compile_pair(saved, consumer_spec={}, updated=frozenset())
+
+    consumer = changeset.compiled_steps[1]
+    assert {column: getattr(consumer, column) for column in saved} == saved
+
+
+def test_a_step_no_change_names_has_only_the_alias_of_a_moved_step_renumbered() -> None:
+    changeset = _compile_pair(
+        {
+            "input_bindings": {
+                "question": "Skriv {{step_1.output.text}} och {{ step_1 }}, "
+                "inte step_1 eller {{ step_10.x }}",
+                "source_refs": [{"step_ref": "step_1", "field": "svar"}],
+            },
+            "output_config": {"footer": "{{step_1.output.text}}"},
+        },
+        consumer_spec={"input_bindings": {"question": "Skriv {{ p1.output.text }}"}},
+        updated=frozenset(),
+        producer_first=True,
+    )
+
+    consumer = changeset.compiled_steps[2]
+    assert consumer.input_bindings == {
+        "question": "Skriv {{step_2.output.text}} och {{ step_2 }}, "
+        "inte step_1 eller {{ step_10.x }}",
+        "source_refs": [{"step_ref": "step_2", "field": "svar"}],
+    }
+    assert consumer.output_config == {"footer": "{{step_2.output.text}}"}
+
+
+def test_a_step_the_edit_names_keeps_no_description_until_it_is_renamed() -> None:
+    kept = _compile_pair(
+        {"user_description": None},
+        consumer_spec={"name": "Step 2"},
+        updated=frozenset({"existing_step_2"}),
+    )
+    renamed = _compile_pair(
+        {"user_description": None},
+        consumer_spec={"name": "Granska"},
+        updated=frozenset({"existing_step_2"}),
+    )
+
+    assert kept.compiled_steps[1].user_description is None
+    assert renamed.compiled_steps[1].user_description == "Granska"
+
+
+def test_a_step_the_edit_names_keeps_the_saved_spacing_of_bindings_it_did_not_change() -> (
+    None
+):
+    changeset = _compile_pair(
+        {"input_bindings": {"question": "Skriv {{step_1.output.text}}"}},
+        consumer_spec={"input_bindings": {"question": "Skriv {{ p1.output.text }}"}},
+        updated=frozenset({"existing_step_2"}),
+    )
+
+    assert changeset.compiled_steps[1].input_bindings == {
+        "question": "Skriv {{step_1.output.text}}"
+    }
+
+
+def test_a_binding_that_differs_from_the_saved_one_only_in_json_type_is_the_specs() -> (
+    None
+):
+    """`True` is not `1` in a saved value: the edit changed it, so the step is
+    written with what the spec says, not with what was saved."""
+
+    changeset = _compile_pair(
+        {"input_bindings": {"flag": 1, "ratio": 1.0}},
+        consumer_spec={"input_bindings": {"flag": True, "ratio": 1}},
+        updated=frozenset({"existing_step_2"}),
+    )
+
+    bindings = changeset.compiled_steps[1].input_bindings
+    assert bindings is not None
+    assert bindings["flag"] is True
+    assert isinstance(bindings["ratio"], int)
+    assert not isinstance(bindings["ratio"], float)
+
+
+def test_a_step_the_edit_names_has_the_alias_of_a_moved_step_renumbered_in_what_it_keeps() -> (
+    None
+):
+    changeset = _compile_pair(
+        {"input_bindings": {"question": "Skriv {{step_1.output.text}}"}},
+        consumer_spec={"input_bindings": {"question": "Skriv {{ p1.output.text }}"}},
+        updated=frozenset({"existing_step_2"}),
+        producer_first=True,
+    )
+
+    assert changeset.compiled_steps[2].input_bindings == {
+        "question": "Skriv {{step_2.output.text}}"
+    }
+
+
+def test_a_named_step_keeping_its_saved_output_config_reads_moved_steps_where_they_are() -> (
+    None
+):
+    """The spec gives the step no output config, so it keeps the saved one; a
+    template binding in it that reads a step that moved reads its new place."""
+
+    changeset = _compile_pair(
+        {"output_config": {"bindings": {"sammanfattning": "{{step_1.output.text}}"}}},
+        consumer_spec={},
+        updated=frozenset({"existing_step_2"}),
+        producer_first=True,
+    )
+
+    assert changeset.compiled_steps[2].output_config == {
+        "bindings": {"sammanfattning": "{{step_2.output.text}}"}
+    }
