@@ -135,12 +135,14 @@ async def generate_original_signed_url(
     service = container.info_blob_service()
     blob = await service.ensure_original_available(id)
     user = container.user()
-    expires_at = int(time.time()) + signed_url_req.expires_in
+    issued_at = int(time.time())
+    expires_at = issued_at + signed_url_req.expires_in
     token = generate_info_blob_original_download_token(
         info_blob_id=id,
         expires_at=expires_at,
         content_disposition=signed_url_req.content_disposition,
         tenant_id=blob.tenant_id,
+        issued_at=issued_at,
     )
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,

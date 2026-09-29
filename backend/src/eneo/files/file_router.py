@@ -279,16 +279,17 @@ async def generate_signed_url(
     service = container.file_service()
     await service.get_file_infos(file_ids=[id])
 
-    # Calculate expiration time
-    expires_at = int(time.time()) + signed_url_req.expires_in
+    issued_at = int(time.time())
+    expires_at = issued_at + signed_url_req.expires_in
 
-    # Generate the signed token. tenant_id is bound into the signature so the
-    # download handler refuses cross-tenant replay even if the URL leaks.
+    # The tenant is bound into the signed claims so the download handler
+    # refuses cross-tenant replay even if the URL leaks.
     token = generate_signed_token(
         file_id=id,
         expires_at=expires_at,
         content_disposition=signed_url_req.content_disposition,
         tenant_id=container.user().tenant_id,
+        issued_at=issued_at,
     )
 
     # Build the full URL
@@ -325,12 +326,14 @@ async def generate_original_signed_url(
     file = await service.ensure_original_available(id)
     current_user = container.user()
 
-    expires_at = int(time.time()) + signed_url_req.expires_in
+    issued_at = int(time.time())
+    expires_at = issued_at + signed_url_req.expires_in
     token = generate_file_original_download_token(
         file_id=id,
         expires_at=expires_at,
         content_disposition=signed_url_req.content_disposition,
         tenant_id=current_user.tenant_id,
+        issued_at=issued_at,
     )
     await container.audit_service().log_async(
         tenant_id=current_user.tenant_id,
@@ -359,28 +362,31 @@ def _validate_download_claims(
     *,
     file_id: UUID,
     payload: dict[str, object] | None,
-) -> tuple[ContentDisposition, UUID | None]:
+) -> tuple[ContentDisposition, UUID]:
     """Validate token claims; returns the disposition and the tenant claim.
 
-    The tenant claim (present on newly minted tokens) is enforced against the
-    file's tenant by the download service, refusing cross-tenant replay if a
-    URL leaks. Tokens minted before the claim existed carry None and skip the
-    check until they expire.
+    Every valid token carries the tenant that owns the file. The download
+    service compares it with the stored file's tenant, so a leaked link
+    cannot be redeemed against another tenant's file. A token without the
+    claim is invalid, whatever else it carries.
     """
     if not payload:
         raise AuthenticationException("Invalid or expired token")
-    if str(file_id) != payload["file_id"]:
+    if str(file_id) != payload.get("file_id"):
         raise UnauthorizedException("Token not valid for this file")
-    tenant_claim = payload.get("tenant_id")
-    expected_tenant_id = UUID(str(tenant_claim)) if tenant_claim is not None else None
-    return ContentDisposition(str(payload["content_disposition"])), expected_tenant_id
+    try:
+        expected_tenant_id = UUID(str(payload["tenant_id"]))
+        content_disposition = ContentDisposition(str(payload["content_disposition"]))
+    except (KeyError, ValueError):
+        raise AuthenticationException("Invalid token claims") from None
+    return content_disposition, expected_tenant_id
 
 
 @authenticates(Authentication.SIGNED_URL)
 def authorize_signed_file(
     id: UUID,
     token: Annotated[str, Query(description="The signed token for file access")],
-) -> tuple[ContentDisposition, UUID | None]:
+) -> tuple[ContentDisposition, UUID]:
     return _validate_download_claims(file_id=id, payload=verify_signed_token(token))
 
 
@@ -388,7 +394,7 @@ def authorize_signed_file(
 def authorize_original_signed_file(
     id: UUID,
     token: Annotated[str, Query(description="The signed original-download token")],
-) -> tuple[ContentDisposition, UUID | None]:
+) -> tuple[ContentDisposition, UUID]:
     return _validate_download_claims(
         file_id=id, payload=verify_file_original_download_token(token)
     )
@@ -466,9 +472,7 @@ def _range_not_satisfiable_response(exc: FileContentRangeError) -> JSONResponse:
 )
 async def download_file_signed(
     id: UUID,
-    access: Annotated[
-        tuple[ContentDisposition, UUID | None], Depends(authorize_signed_file)
-    ],
+    access: Annotated[tuple[ContentDisposition, UUID], Depends(authorize_signed_file)],
     container: Annotated[
         Container,
         Depends(get_container(with_transaction=False)),
@@ -515,7 +519,7 @@ async def download_file_signed(
 async def download_original_file_signed(
     id: UUID,
     access: Annotated[
-        tuple[ContentDisposition, UUID | None], Depends(authorize_original_signed_file)
+        tuple[ContentDisposition, UUID], Depends(authorize_original_signed_file)
     ],
     container: Annotated[
         Container,
@@ -538,7 +542,6 @@ async def download_original_file_signed(
         download,
         content_disposition=content_disposition,
         ranged=range is not None,
-        tenant_claim_present=expected_tenant_id is not None,
     )
     return _download_response(
         download,
@@ -553,7 +556,6 @@ async def _audit_original_download_redeemed(
     *,
     content_disposition: ContentDisposition,
     ranged: bool,
-    tenant_claim_present: bool,
 ) -> None:
     """Record that a signed original link was redeemed.
 
@@ -581,7 +583,6 @@ async def _audit_original_download_redeemed(
                     extra={
                         "content_disposition": content_disposition.value,
                         "ranged": ranged,
-                        "tenant_claim_present": tenant_claim_present,
                         "content_length": download.content_length,
                     },
                 ),
