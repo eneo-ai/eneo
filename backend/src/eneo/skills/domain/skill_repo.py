@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Protocol
 from uuid import UUID
 
@@ -15,12 +15,16 @@ from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     Skill,
     SkillAdoptionCursor,
+    SkillAdoptionFilter,
     SkillAdoptionProjectionPage,
+    SkillAdoptionResourceKind,
     SkillBindingReference,
     SkillCatalogEntry,
+    SkillDetachment,
     SkillExecutionBlock,
     SkillExecutionBlockChange,
     SkillPublicationChange,
+    SkillRemovalOutcome,
     SkillRevision,
     SkillRevisionChange,
     SkillRevisionSummary,
@@ -29,6 +33,7 @@ from eneo.skills.domain.skill import (
     SkillRuntimePolicySnapshot,
     SkillStatusChange,
     SkillSummary,
+    SkillUsageCounts,
 )
 
 
@@ -71,7 +76,21 @@ class SkillRepo(Protocol):
         limit: int,
         after_slug: str | None,
         search: str | None = None,
+        removed: bool = False,
+        after_id: UUID | None = None,
     ) -> list[SkillSummary]: ...
+
+    async def get_usage_counts(
+        self, *, tenant_id: UUID, skill_ids: Sequence[UUID]
+    ) -> dict[UUID, SkillUsageCounts]: ...
+
+    async def remove_organization_many(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_ids: Sequence[UUID],
+        detach_bindings: bool = False,
+    ) -> list[SkillRemovalOutcome] | None: ...
 
     async def get_organization_for_tenant(
         self,
@@ -85,9 +104,21 @@ class SkillRepo(Protocol):
         *,
         tenant_id: UUID,
         skill_id: UUID,
+        actor_user_id: UUID,
+        actor_group_ids: Collection[UUID],
+        readable_kinds: Collection[SkillAdoptionResourceKind],
         limit: int,
         after: SkillAdoptionCursor | None,
+        filters: SkillAdoptionFilter,
     ) -> SkillAdoptionProjectionPage | None: ...
+
+    async def detach_organization_bindings(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        selection: SkillDetachment,
+    ) -> SkillDetachment | None: ...
 
     async def list_assistant_pin_advance_targets(
         self,
@@ -97,6 +128,7 @@ class SkillRepo(Protocol):
         expected_published_revision_id: UUID,
         after_assistant_id: UUID | None,
         limit: int,
+        only_ids: Sequence[UUID] | None = None,
     ) -> tuple[list[AssistantPinAdvanceTarget], UUID | None]: ...
 
     async def get_fleet_advance_candidate(
@@ -125,6 +157,7 @@ class SkillRepo(Protocol):
         expected_published_revision_id: UUID,
         after_app_id: UUID | None,
         limit: int,
+        only_ids: Sequence[UUID] | None = None,
     ) -> tuple[list[AppPinAdvanceTarget], UUID | None]: ...
 
     async def advance_app_skill_pins(
@@ -198,13 +231,6 @@ class SkillRepo(Protocol):
     ) -> SkillPublicationChange | None: ...
 
     async def delete(self, *, skill_id: UUID) -> Skill | None: ...
-
-    async def delete_organization(
-        self,
-        *,
-        tenant_id: UUID,
-        skill_id: UUID,
-    ) -> Skill | None: ...
 
     async def get_active_execution_block(
         self,

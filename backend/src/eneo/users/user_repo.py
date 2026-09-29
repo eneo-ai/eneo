@@ -14,7 +14,6 @@ from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
-from eneo.database.tables.widget_table import Widgets
 from eneo.main.exceptions import SystemUserProtected, UniqueException
 from eneo.main.logging import get_logger
 from eneo.main.models import ModelId
@@ -147,10 +146,6 @@ class UsersRepository:
         )
 
         return await self._get_model_from_query(query, with_deleted=False)
-
-    async def get_user_by_widget_id(self, widget_id: UUID) -> UserInDB | None:
-        query = sa.select(Users).join(Widgets).where(Widgets.id == widget_id)
-        return await self.delegate.get_model_from_query(query)
 
     async def get_total_count(
         self,

@@ -3,8 +3,9 @@
   import { toastError } from "$lib/core/errors";
   import SelectEmbeddingModel from "$lib/features/ai-models/components/SelectEmbeddingModel.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
@@ -13,7 +14,7 @@
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
   import type { Website } from "@eneo/eneo-js";
-  import { AlertCircle, Eye, EyeOff, Info, LockKeyhole } from "lucide-svelte";
+  import { CircleAlert, Eye, EyeOff, Info, LockKeyhole } from "@lucide/svelte";
   import { untrack } from "svelte";
   import { isSupportedWebsiteUrl } from "./websiteForm";
 
@@ -236,11 +237,11 @@
   {/if}
 
   <Dialog.Content
-    class="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
+    class={dialogLayout.content("medium")}
     showCloseButton={!isProcessing}
     closeLabel={m.close()}
   >
-    <Dialog.Header class="border-b px-6 py-5 pr-12">
+    <Dialog.Header class={dialogLayout.header}>
       <Dialog.Title>
         {mode === "create" ? m.create_website_integration() : m.edit_website_integration()}
       </Dialog.Title>
@@ -254,11 +255,11 @@
         void submitForm();
       }}
     >
-      <div class="min-h-0 flex-1 overflow-y-auto px-6 py-5 [scrollbar-gutter:stable]">
+      <div class="{dialogLayout.body} [scrollbar-gutter:stable]">
         <div class="flex flex-col gap-5">
           {#if formError}
             <Alert.Root variant="destructive" aria-live="assertive">
-              <AlertCircle aria-hidden="true" />
+              <CircleAlert aria-hidden="true" />
               <Alert.Description>{formError}</Alert.Description>
             </Alert.Root>
           {/if}
@@ -443,7 +444,7 @@
         </div>
       </div>
 
-      <Dialog.Footer class="mx-0 mb-0 shrink-0 border-t px-6 py-4">
+      <Dialog.Footer class={dialogLayout.footer}>
         <Dialog.Close>
           {#snippet child({ props })}
             <Button {...props} type="button" variant="outline" disabled={isProcessing}>
@@ -469,21 +470,15 @@
   </Dialog.Content>
 </Dialog.Root>
 
-<AlertDialog.Root bind:open={showDuplicateWarning}>
-  <AlertDialog.Content>
-    <AlertDialog.Header>
-      <AlertDialog.Title>{m.website_exists_on_org()}</AlertDialog.Title>
-      <AlertDialog.Description>
-        {#if existingOnOrg}
-          {m.website_exists_on_org_description({ spaceName: existingOnOrg.space_name })}
-        {/if}
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-    <AlertDialog.Footer>
-      <AlertDialog.Cancel disabled={isProcessing}>{m.go_back()}</AlertDialog.Cancel>
-      <AlertDialog.Action disabled={isProcessing} onclick={() => void createWebsite()}>
-        {isProcessing ? m.creating() : m.create_anyway()}
-      </AlertDialog.Action>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={showDuplicateWarning}
+  title={m.website_exists_on_org()}
+  description={existingOnOrg
+    ? m.website_exists_on_org_description({ spaceName: existingOnOrg.space_name })
+    : undefined}
+  confirmLabel={m.create_anyway()}
+  pendingLabel={m.creating()}
+  cancelLabel={m.go_back()}
+  variant="default"
+  onConfirm={createWebsite}
+/>

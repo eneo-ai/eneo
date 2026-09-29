@@ -15,7 +15,7 @@
   } from "@eneo/eneo-js";
   import { writable, type Writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
-  import { Pencil, TriangleAlert, Clock, ArrowRight, ExternalLink } from "lucide-svelte";
+  import { Pencil, TriangleAlert, Clock, ArrowRight, ExternalLink } from "@lucide/svelte";
 
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Tabs from "$lib/components/ui/tabs/index.js";

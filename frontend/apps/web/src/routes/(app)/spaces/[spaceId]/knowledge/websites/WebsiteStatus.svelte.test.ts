@@ -1,9 +1,43 @@
 import type { CrawlRun, WebsiteSparse } from "@eneo/eneo-js";
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
-import { expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import WebsiteStatus from "./WebsiteStatus.svelte";
+
+function website(latestCrawl: Partial<CrawlRun>): WebsiteSparse {
+  return {
+    id: "w1",
+    url: "https://example.org",
+    latest_crawl: {
+      phase: "terminal",
+      status: "complete",
+      outcome: "succeeded",
+      finished_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      pages_crawled: 10,
+      pages_failed: 0,
+      files_downloaded: 0,
+      files_failed: 0,
+      ...latestCrawl
+    }
+  } as unknown as WebsiteSparse;
+}
+
+describe("WebsiteStatus", () => {
+  it("renders a completed crawl as succeeded", async () => {
+    render(WebsiteStatus, { website: website({}) });
+    await expect.element(page.getByText(m.crawl_status_succeeded(), { exact: true })).toBeVisible();
+  });
+
+  it("renders a completed crawl with failures as partly completed", async () => {
+    render(WebsiteStatus, {
+      website: website({ outcome: "partial", pages_failed: 2, failure_code: "processing_failed" })
+    });
+    await expect
+      .element(page.getByText(m.crawl_completed_with_warnings(), { exact: true }))
+      .toBeVisible();
+  });
+});
 
 it("updates website status when refreshed knowledge replaces its latest crawl", async () => {
   const run: CrawlRun = {

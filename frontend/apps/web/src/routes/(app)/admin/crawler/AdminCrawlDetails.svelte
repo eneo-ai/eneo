@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { RefreshCw } from "lucide-svelte";
-  import dayjs from "dayjs";
+  import { RefreshCw } from "@lucide/svelte";
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import type {
     AdminCrawlerDetails,
     AdminCrawlerRelatedPage,
@@ -69,7 +69,7 @@
   );
 
   function date(value: string | null | undefined) {
-    return value ? dayjs(value).format("YYYY-MM-DD HH:mm") : "—";
+    return formatDateTime(value) || "—";
   }
 
   async function loadDetails(fallbackRun?: CrawlRun) {

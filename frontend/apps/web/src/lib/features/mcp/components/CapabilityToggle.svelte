@@ -1,8 +1,9 @@
 <script lang="ts">
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { m } from "$lib/paraglide/messages";
-  import { Input } from "@eneo/ui";
-  import { LockKeyhole } from "lucide-svelte";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
+  import { LockKeyhole } from "@lucide/svelte";
   import type { CapabilityDescriptor, CapabilityPurpose } from "$lib/features/mcp/capabilities";
   import { readinessMessage } from "$lib/features/mcp/readiness";
   let {
@@ -14,6 +15,7 @@
     selectedModel?: { supports_tool_calling?: boolean } | null;
     enabledCapabilities?: CapabilityPurpose[];
   } = $props();
+  const uid = $props.id();
   const {
     state: { currentSpace }
   } = getSpacesManager();
@@ -44,14 +46,9 @@
     : ''}"
 >
   <capability.icon class="text-muted h-4 w-4 shrink-0" aria-hidden="true" />
-  <Input.Switch
-    class="min-w-0 flex-1 [&_button:disabled]:opacity-50"
-    value={on}
-    disabled={!on && !!blockingMessage}
-    sideEffect={toggle}
-  >
-    <div class="flex flex-col gap-1">
-      <span class="flex flex-wrap items-center gap-2">
+  <Field.Field orientation="horizontal" class="min-w-0 flex-1 gap-4">
+    <Field.Content class="gap-1">
+      <Field.Label for={`${uid}-switch`} class="flex-wrap">
         <span class="font-medium {blockingMessage ? 'text-secondary' : 'text-default'}"
           >{capability.label()}</span
         >
@@ -62,8 +59,17 @@
             <LockKeyhole class="h-3 w-3" aria-hidden="true" />{m.not_available()}
           </span>
         {/if}
-      </span>
-      <span class="text-muted text-xs">{blockingMessage || capability.capabilityHint()}</span>
-    </div>
-  </Input.Switch>
+      </Field.Label>
+      <Field.Description id={`${uid}-hint`} class="text-muted text-xs">
+        {blockingMessage || capability.capabilityHint()}
+      </Field.Description>
+    </Field.Content>
+    <Switch
+      id={`${uid}-switch`}
+      checked={on}
+      disabled={!on && !!blockingMessage}
+      onCheckedChange={toggle}
+      aria-describedby={`${uid}-hint`}
+    />
+  </Field.Field>
 </div>

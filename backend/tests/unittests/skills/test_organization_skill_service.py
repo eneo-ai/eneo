@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -22,9 +23,9 @@ from eneo.skills.domain.skill import (
     PersonalChatPinConfirmOutcome,
     PersonalChatPinOverride,
     PersonalDefaultsSnapshot,
-    PublishedSkillDeletionError,
     SkillAdoptionCursor,
     SkillAdoptionDrift,
+    SkillAdoptionFilter,
     SkillAdoptionPersonalChat,
     SkillAdoptionProjectionPage,
     SkillAdoptionResource,
@@ -32,8 +33,11 @@ from eneo.skills.domain.skill import (
     SkillAdoptionRevisionCount,
     SkillAdoptionSummary,
     SkillBlockedForBindingError,
+    SkillDetachment,
+    SkillHasBindingsError,
     SkillNotPublishedForBindingError,
     SkillPublicationChange,
+    SkillRemovalOutcome,
     SkillRevision,
     SkillRevisionChange,
     SkillRevisionConflictError,
@@ -69,12 +73,15 @@ def _service(*, organization, permissions, repo=None):
         id=uuid4(),
         tenant_id=organization.tenant_id,
         permissions=permissions,
+        user_groups_ids=set(),
     )
     space_service = AsyncMock()
     space_service.get_or_create_tenant_space.return_value = organization
     repo = repo or AsyncMock()
     if not isinstance(repo.list_active_execution_blocks.return_value, dict):
         repo.list_active_execution_blocks.return_value = {}
+    if not isinstance(repo.get_usage_counts.return_value, dict):
+        repo.get_usage_counts.return_value = {}
     return OrganizationSkillService(
         user=user,
         repo=repo,
@@ -562,18 +569,77 @@ async def test_admin_can_unpublish_without_changing_revision_history():
     )
 
 
-async def test_previously_published_skill_cannot_be_deleted():
+async def test_bound_skill_cannot_be_removed():
     organization = _organization()
     repo = AsyncMock()
-    repo.delete_organization.side_effect = PublishedSkillDeletionError
+    repo.remove_organization_many.side_effect = SkillHasBindingsError
     service = _service(
         organization=organization,
         permissions={Permission.ADMIN},
         repo=repo,
     )
 
-    with pytest.raises(PublishedSkillDeletionError):
+    with pytest.raises(SkillHasBindingsError):
         await service.delete(skill_id=uuid4())
+
+
+async def test_detaching_removal_forwards_the_flag_and_audits_every_detached_resource():
+    organization = _organization()
+    skill = SimpleNamespace(
+        id=uuid4(),
+        slug="payroll",
+        display_name="Payroll",
+        current_revision_id=uuid4(),
+        current_revision_number=2,
+        content_digest="a" * 64,
+        published_revision_number=1,
+        removed_at=None,
+    )
+    assistant_id, app_id, policy_id = uuid4(), uuid4(), uuid4()
+    repo = AsyncMock()
+    repo.remove_organization_many.return_value = [
+        SkillRemovalOutcome(
+            skill=skill,
+            detached=SkillDetachment(
+                assistant_ids=(assistant_id,),
+                app_ids=(app_id,),
+                policy_ids=(policy_id,),
+            ),
+        )
+    ]
+    service = _service(
+        organization=organization, permissions={Permission.ADMIN}, repo=repo
+    )
+
+    outcomes = await service.remove_many(skill_ids=[skill.id], detach_bindings=True)
+
+    assert outcomes == repo.remove_organization_many.return_value
+    repo.remove_organization_many.assert_awaited_once_with(
+        tenant_id=organization.tenant_id, skill_ids=[skill.id], detach_bindings=True
+    )
+    service.audit_service.log.assert_awaited_once()
+    metadata = service.audit_service.log.await_args.kwargs["metadata"]
+    assert metadata["extra"]["detached"] == {
+        "assistant_count": 1,
+        "app_count": 1,
+        "personal_chat_count": 1,
+        "assistant_ids": [str(assistant_id)],
+        "app_ids": [str(app_id)],
+        "personal_chat_policy_ids": [str(policy_id)],
+    }
+
+
+async def test_removal_defaults_to_refusing_bound_skills():
+    organization = _organization()
+    repo = AsyncMock()
+    repo.remove_organization_many.return_value = []
+    service = _service(
+        organization=organization, permissions={Permission.ADMIN}, repo=repo
+    )
+
+    await service.remove_many(skill_ids=[uuid4()])
+
+    assert repo.remove_organization_many.await_args.kwargs["detach_bindings"] is False
 
 
 async def test_missing_tenant_skill_is_not_exposed():
@@ -631,6 +697,10 @@ async def test_missing_tenant_skill_has_no_adoption_projection():
     repo.get_organization_adoption_projection_page.assert_awaited_once_with(
         tenant_id=organization.tenant_id,
         skill_id=skill_id,
+        actor_user_id=service.user.id,
+        actor_group_ids=service.user.user_groups_ids,
+        readable_kinds=set(),
+        filters=SkillAdoptionFilter(),
         limit=25,
         after=None,
     )
@@ -757,12 +827,20 @@ async def test_adoption_projection_uses_an_opaque_stable_cursor_without_duplicat
         call(
             tenant_id=organization.tenant_id,
             skill_id=skill.id,
+            actor_user_id=service.user.id,
+            actor_group_ids=service.user.user_groups_ids,
+            readable_kinds=set(),
+            filters=SkillAdoptionFilter(),
             limit=2,
             after=None,
         ),
         call(
             tenant_id=organization.tenant_id,
             skill_id=skill.id,
+            actor_user_id=service.user.id,
+            actor_group_ids=service.user.user_groups_ids,
+            readable_kinds=set(),
+            filters=SkillAdoptionFilter(),
             limit=2,
             after=decoded_cursor,
         ),
@@ -1027,3 +1105,112 @@ async def test_pin_advance_rejection_from_the_fit_owner_propagates():
             expected_pinned_revision_id=uuid4(),
             expected_published_revision_id=uuid4(),
         )
+
+
+async def test_skill_management_permission_does_not_grant_bulk_removal():
+    organization = _organization()
+    service = _service(
+        organization=organization,
+        permissions={Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+    )
+    with pytest.raises(UnauthorizedException):
+        await service.remove_many(skill_ids=[uuid4()])
+    service.repo.remove_organization_many.assert_not_awaited()
+
+
+def _detachable_skill():
+    return SimpleNamespace(
+        id=uuid4(),
+        slug="payroll",
+        is_active=True,
+        published_revision_number=1,
+        publication_state=SimpleNamespace(value="published"),
+        current_revision=SimpleNamespace(
+            id=uuid4(),
+            revision_number=1,
+            display_name="Payroll",
+            content_digest="a" * 64,
+            instructions="Use approved payroll sources.",
+        ),
+    )
+
+
+async def test_detach_bindings_forwards_the_selection_and_audits_actual_deletions():
+    organization = _organization()
+    skill = _detachable_skill()
+    assistant_id, missing_id, app_id = uuid4(), uuid4(), uuid4()
+    repo = AsyncMock()
+    repo.detach_organization_bindings.return_value = SkillDetachment(
+        assistant_ids=(assistant_id,), app_ids=(app_id,)
+    )
+    repo.get_organization_for_tenant.return_value = skill
+    service = _service(
+        organization=organization, permissions={Permission.ADMIN}, repo=repo
+    )
+
+    detached = await service.detach_bindings(
+        skill_id=skill.id, assistant_ids=[assistant_id, missing_id], app_ids=[app_id]
+    )
+
+    assert detached == repo.detach_organization_bindings.return_value
+    repo.detach_organization_bindings.assert_awaited_once_with(
+        tenant_id=organization.tenant_id,
+        skill_id=skill.id,
+        selection=SkillDetachment(
+            assistant_ids=(assistant_id, missing_id), app_ids=(app_id,)
+        ),
+    )
+    service.audit_service.log.assert_awaited_once()
+    kwargs = service.audit_service.log.await_args.kwargs
+    assert kwargs["action"] is ActionType.SKILL_BINDINGS_DETACHED
+    assert kwargs["entity_id"] == skill.id
+    # The trail names what was deleted, not what was requested.
+    assert kwargs["metadata"]["changes"] == {"assistant_count": 1, "app_count": 1}
+    assert kwargs["metadata"]["extra"]["assistant_ids"] == [str(assistant_id)]
+    assert kwargs["metadata"]["extra"]["app_ids"] == [str(app_id)]
+
+
+async def test_detach_bindings_without_deletions_writes_no_audit_row():
+    organization = _organization()
+    repo = AsyncMock()
+    repo.detach_organization_bindings.return_value = SkillDetachment()
+    service = _service(
+        organization=organization, permissions={Permission.ADMIN}, repo=repo
+    )
+
+    detached = await service.detach_bindings(
+        skill_id=uuid4(), assistant_ids=[uuid4()], app_ids=[]
+    )
+
+    assert detached.is_empty
+    service.audit_service.log.assert_not_awaited()
+
+
+async def test_detach_bindings_is_admin_only_bounded_and_scoped_to_a_known_skill():
+    organization = _organization()
+    repo = AsyncMock()
+    repo.detach_organization_bindings.return_value = None
+    editor = _service(
+        organization=organization, permissions={Permission.SKILLS}, repo=repo
+    )
+    with pytest.raises(UnauthorizedException):
+        await editor.detach_bindings(
+            skill_id=uuid4(), assistant_ids=[uuid4()], app_ids=[]
+        )
+
+    admin = _service(
+        organization=organization, permissions={Permission.ADMIN}, repo=repo
+    )
+    with pytest.raises(BadRequestException):
+        await admin.detach_bindings(skill_id=uuid4(), assistant_ids=[], app_ids=[])
+    with pytest.raises(BadRequestException):
+        await admin.detach_bindings(
+            skill_id=uuid4(), assistant_ids=[uuid4() for _ in range(101)], app_ids=[]
+        )
+    repo.detach_organization_bindings.assert_not_awaited()
+
+    with pytest.raises(NotFoundException):
+        await admin.detach_bindings(
+            skill_id=uuid4(), assistant_ids=[uuid4()], app_ids=[]
+        )
+    admin.audit_service.log.assert_not_awaited()

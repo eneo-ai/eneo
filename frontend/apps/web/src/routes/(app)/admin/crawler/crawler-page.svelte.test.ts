@@ -9,7 +9,8 @@ import type {
 } from "@eneo/eneo-js";
 import "../../../../app.css";
 import { m } from "$lib/paraglide/messages";
-import dayjs from "dayjs";
+import { formatDateTime, formatTime } from "$lib/core/formatting/dateTime";
+import { formatBytes } from "$lib/core/formatting/formatBytes";
 import { crawlRunStateLabel } from "$lib/features/knowledge/crawlRunState";
 
 const api = vi.hoisted(() => ({
@@ -256,7 +257,9 @@ it("separates the selected crawl from current source data and keeps action conte
   await expect.element(dialog.getByRole("table", { name: m.crawl_counts_caption() })).toBeVisible();
   await dialog.getByRole("tab", { name: m.admin_crawler_source(), exact: true }).click();
   await expect.element(dialog.getByText("Alex Sourceowner", { exact: true })).toBeVisible();
-  await expect.element(dialog.getByText("2.0 MB", { exact: true })).toBeVisible();
+  await expect
+    .element(dialog.getByText(formatBytes(details.indexed_size, 1), { exact: true }))
+    .toBeVisible();
   await expect.element(dialog.getByText(m.admin_crawler_source_description())).toBeVisible();
   expect(api.adminCrawler.details).toHaveBeenCalledTimes(1);
   await dialog.getByRole("tab", { name: m.history(), exact: true }).click();
@@ -264,7 +267,7 @@ it("separates the selected crawl from current source data and keeps action conte
     .element(
       dialog.getByText(
         m.admin_crawler_selected_run({
-          date: dayjs(details.run.created_at).format("YYYY-MM-DD HH:mm")
+          date: formatDateTime(details.run.created_at)
         }),
         { exact: true }
       )
@@ -606,7 +609,9 @@ it.each(["Municipal website", null])(
     await expect.element(page.getByText("Sam Operator", { exact: false })).toBeVisible();
     await page.getByRole("tab", { name: m.admin_crawler_source(), exact: true }).click();
     await expect.element(page.getByText("Alex Sourceowner", { exact: true })).toBeVisible();
-    await expect.element(page.getByText("2.0 MB", { exact: true })).toBeVisible();
+    await expect
+      .element(page.getByText(formatBytes(details.indexed_size, 1), { exact: true }))
+      .toBeVisible();
     await expect.poll(() => api.adminCrawler.failures.mock.calls.length).toBe(1);
     expect(api.websites.crawlRuns.failures).not.toHaveBeenCalled();
     await userEvent.keyboard("{Escape}");
@@ -982,7 +987,7 @@ it.each(["ok", "degraded", "stale", "unknown"] as const)(
       failed: status === "degraded" ? 1 : 0
     });
     const lastRun = m.admin_crawler_scheduler_last_run({
-      time: dayjs("2026-09-09T11:00:00Z").format("HH:mm")
+      time: formatTime("2026-09-09T11:00:00Z")
     });
     if (known) {
       await expect.element(group).toHaveTextContent(counts);
@@ -1033,7 +1038,7 @@ it("opens the schedule tab, queries websites and renders their state", async () 
   await expect.element(table).toHaveTextContent(m.admin_crawler_no_run());
   await expect.element(table).toHaveTextContent(
     m.admin_crawler_state_blocked_backoff({
-      time: dayjs("2026-09-09T14:00:00Z").format("YYYY-MM-DD HH:mm")
+      time: formatDateTime("2026-09-09T14:00:00Z")
     })
   );
   await expect

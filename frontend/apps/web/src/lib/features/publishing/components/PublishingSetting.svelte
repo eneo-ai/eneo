@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Tooltip } from "@eneo/ui";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import type { PublishableResource, PublishableResourceEndpoints } from "../Publisher";
   import PublishingDialog from "./PublishingDialog.svelte";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
@@ -46,12 +46,24 @@
       <PublishingStatusChip {resource}></PublishingStatusChip>
     {/if}
   </div>
-  <Tooltip text={hasUnsavedChanges ? m.save_or_discard_changes_before_updating() : undefined}>
+  {#snippet publishingDialog()}
     <PublishingDialog
       {resource}
       endpoints={wrappedPublisher}
       includeTrigger
       isDisabled={hasUnsavedChanges}
     ></PublishingDialog>
-  </Tooltip>
+  {/snippet}
+  {#if hasUnsavedChanges}
+    <Tooltip.Root>
+      <Tooltip.Trigger>
+        {#snippet child({ props })}
+          <span {...props}>{@render publishingDialog()}</span>
+        {/snippet}
+      </Tooltip.Trigger>
+      <Tooltip.Content>{m.save_or_discard_changes_before_updating()}</Tooltip.Content>
+    </Tooltip.Root>
+  {:else}
+    {@render publishingDialog()}
+  {/if}
 </div>

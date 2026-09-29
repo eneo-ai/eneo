@@ -43,7 +43,10 @@ vi.mock("$lib/components/toast", () => ({
   }
 }));
 
-vi.mock("$lib/core/errors", () => ({ toastError }));
+vi.mock("$lib/core/errors", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("$lib/core/errors")>()),
+  toastError
+}));
 
 import WebsiteActions from "./WebsiteActions.svelte";
 

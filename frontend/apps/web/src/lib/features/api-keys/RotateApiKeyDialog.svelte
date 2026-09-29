@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ApiKeyCreatedResponse, ApiKeyV2 } from "@eneo/eneo-js";
-  import { AlertCircle } from "lucide-svelte";
+  import { CircleAlert } from "@lucide/svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "svelte-sonner";
@@ -145,7 +145,7 @@
         {/if}
 
         <Alert.Root class="mt-2" variant={disableGracePeriod ? "destructive" : "default"}>
-          <AlertCircle />
+          <CircleAlert />
           <Alert.Description class="text-xs">
             {#if disableGracePeriod}
               {m.api_keys_rotate_disable_grace_warning()}

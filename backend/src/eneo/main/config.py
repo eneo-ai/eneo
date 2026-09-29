@@ -9,6 +9,8 @@ from urllib.parse import urlparse
 from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from eneo.main.removed_env import check_removed_variables
+
 # Version manifest lookup:
 # - Docker: Package is installed with --no-editable, so __file__ points to site-packages.
 #   The manifest is placed at /app/.release-please-manifest.json by inject-backend-version.sh
@@ -204,9 +206,8 @@ def _set_app_version():
         return "DEV"
 
 
-_SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS = frozenset(
-    {"development", "local", "dev", "test"}
-)
+_DEVELOPMENT_ENVIRONMENTS = frozenset({"development", "local", "dev"})
+_SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS = _DEVELOPMENT_ENVIRONMENTS | {"test"}
 
 
 class Settings(BaseSettings):
@@ -217,6 +218,11 @@ class Settings(BaseSettings):
     # Environment setting (development, staging, production)
     # Controls error detail exposure in API responses
     environment: str = "production"
+
+    @property
+    def is_development(self) -> bool:
+        """Local development or test: verbose errors and developer tools."""
+        return self.environment.strip().lower() in _DEVELOPMENT_ENVIRONMENTS
 
     # Explicit opt-in for the development-only SharePoint fixture API. Runtime
     # environment checks provide a second guard so fixture data cannot be
@@ -480,6 +486,11 @@ class Settings(BaseSettings):
     crawl_page_max_size: int = Field(
         default=10 * 1024 * 1024, ge=64 * 1024, le=1024 * 1024 * 1024
     )
+    # The website crawler never reaches loopback, link-local (cloud metadata),
+    # unspecified or multicast addresses. Private (intranet) ranges are allowed
+    # by default; set to True to refuse them too. Operator-only, never
+    # tenant-configurable.
+    crawler_block_private_networks: bool = False
     autothrottle_enabled: bool = True  # Pace bounded request batches conservatively
     # Migration
     migration_auto_recalc_threshold: int = (
@@ -631,6 +642,12 @@ class Settings(BaseSettings):
                     f"Legacy variables will be removed in v3.0"
                 )
 
+        return values
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_variables(cls, values: dict[str, object]) -> dict[str, object]:
+        check_removed_variables(os.environ, values)
         return values
 
     @model_validator(mode="after")

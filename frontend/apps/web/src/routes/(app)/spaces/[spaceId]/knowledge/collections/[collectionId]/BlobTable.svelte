@@ -1,13 +1,12 @@
 <script lang="ts">
   import type { InfoBlob } from "@eneo/eneo-js";
-  import { Table } from "@eneo/ui";
-  import { createRender } from "svelte-headless-table";
+  import * as Table from "$lib/components/resource-table/index.js";
   import BlobPreview from "$lib/features/knowledge/components/BlobPreview.svelte";
   import BlobActions from "./BlobActions.svelte";
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { PAGINATION } from "$lib/core/constants";
   import { m } from "$lib/paraglide/messages";
-  import dayjs from "dayjs";
 
   export let blobs: InfoBlob[];
   export let canEdit: boolean;
@@ -20,7 +19,7 @@
       header: m.name(),
       value: (item) => item.metadata.title ?? "",
       cell: (item) => {
-        return createRender(BlobPreview, {
+        return Table.renderComponent(BlobPreview, {
           blob: item.value,
           isTableView: true
         });
@@ -30,8 +29,7 @@
     table.column({
       header: m.created(),
       accessor: (item) => item,
-      cell: (item) =>
-        item.value.created_at ? dayjs(item.value.created_at).format("YYYY-MM-DD HH:mm") : "—",
+      cell: (item) => formatDateTime(item.value.created_at) || "—",
       plugins: {
         sort: { getSortValue: (item) => item.created_at ?? "" }
       }
@@ -48,7 +46,7 @@
 
     table.columnActions({
       cell: (item) => {
-        return createRender(BlobActions, {
+        return Table.renderComponent(BlobActions, {
           blob: item.value,
           canEdit
         });

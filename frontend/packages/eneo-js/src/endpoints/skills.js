@@ -196,15 +196,30 @@ export function initSkills(client) {
 
     organization: {
       /**
-       * List organisation Skill drafts and publication status.
-       * @param {{limit?: number, cursor?: string | null, search?: string | null}} [params]
+       * List current or removed organisation Skills with configured usage counts.
+       * @param {{limit?: number, cursor?: string | null, search?: string | null, removed?: boolean}} [params]
        * @returns {Promise<OrganizationSkillSummaryPagePublic>}
        * @throws {EneoError}
        */
-      list: async ({ limit, cursor, search } = {}) => {
+      list: async ({ limit, cursor, search, removed } = {}) => {
         return await client.fetch("/api/v1/skills/organization/", {
           method: "get",
-          params: { query: { limit, cursor, search } }
+          params: { query: { limit, cursor, search, removed } }
+        });
+      },
+
+      /**
+       * Remove a bounded selection atomically while retaining version history.
+       * With `detach_bindings`, every Assistant, App and Personal Chat binding of
+       * the selected Skills is deleted in the same transaction.
+       * @param {import('../types/fetch').JSONRequestBody<"post", "/api/v1/skills/organization/remove/">} params
+       * @returns {Promise<import('../types/resources').SkillRemovalResult>}
+       * @throws {EneoError}
+       */
+      removeMany: async ({ skill_ids, detach_bindings = false }) => {
+        return await client.fetch("/api/v1/skills/organization/remove/", {
+          method: "post",
+          requestBody: { "application/json": { skill_ids, detach_bindings } }
         });
       },
 
@@ -222,17 +237,24 @@ export function initSkills(client) {
       },
 
       /**
-       * List the structural adoption of an organisation Skill.
-       * @param {{skillId: string, limit?: number, cursor?: string | null}} params
+       * List the structural adoption of an organisation Skill. The optional
+       * filters narrow the resource rows; the summary stays whole-skill.
+       * @param {{skillId: string, limit?: number, cursor?: string | null, query?: string, kind?: import('../types/resources').SkillAdoptionResourceKind, drift?: import('../types/resources').SkillAdoptionDrift}} params
        * @returns {Promise<SkillAdoptionProjectionPagePublic>}
        * @throws {EneoError}
        */
-      getAdoption: async ({ skillId, limit, cursor }) => {
+      getAdoption: async ({ skillId, limit, cursor, query, kind, drift }) => {
         return await client.fetch("/api/v1/skills/organization/{skill_id}/adoption/", {
           method: "get",
           params: {
             path: { skill_id: skillId },
-            query: { limit, cursor }
+            query: {
+              limit,
+              cursor,
+              ...(query ? { query } : {}),
+              ...(kind ? { kind } : {}),
+              ...(drift ? { drift } : {})
+            }
           }
         });
       },
@@ -395,15 +417,31 @@ export function initSkills(client) {
       },
 
       /**
-       * Delete an eligible organisation Skill draft.
-       * @param {{skillId: string}} params
+       * Detach an organisation Skill from selected Assistants and Apps (at most 100).
+       * @param {{skillId: string} & import('../types/fetch').JSONRequestBody<"post", "/api/v1/skills/organization/{skill_id}/detach/">} params
+       * @returns {Promise<import('../types/resources').SkillDetachmentTotals>}
+       * @throws {EneoError}
+       */
+      detach: async ({ skillId, ...request }) => {
+        return await client.fetch("/api/v1/skills/organization/{skill_id}/detach/", {
+          method: "post",
+          params: { path: { skill_id: skillId } },
+          requestBody: { "application/json": request }
+        });
+      },
+
+      /**
+       * Remove an organisation Skill while retaining its history. With
+       * `detachBindings`, its Assistant, App and Personal Chat bindings are
+       * deleted in the same transaction; otherwise a bound Skill is refused.
+       * @param {{skillId: string, detachBindings?: boolean}} params
        * @returns {Promise<void>}
        * @throws {EneoError}
        */
-      delete: async ({ skillId }) => {
+      delete: async ({ skillId, detachBindings = false }) => {
         await client.fetch("/api/v1/skills/organization/{skill_id}/", {
           method: "delete",
-          params: { path: { skill_id: skillId } }
+          params: { path: { skill_id: skillId }, query: { detach_bindings: detachBindings } }
         });
       }
     },

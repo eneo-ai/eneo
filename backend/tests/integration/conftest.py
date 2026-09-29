@@ -118,11 +118,13 @@ if not os.getenv("CRAWL_MAX_LENGTH"):
 
 import contextlib
 from typing import AsyncGenerator, Generator
+from unittest.mock import patch
 
 import psycopg2
 from cryptography.fernet import Fernet
 from dependency_injector import providers
 from httpx import ASGITransport, AsyncClient
+from psycopg2.extensions import connection as PostgresConnection
 from sqlalchemy import text
 from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
@@ -133,7 +135,8 @@ from eneo.database.database import sessionmanager
 from eneo.main.config import Settings, reset_settings, set_settings
 from eneo.main.container.container import Container
 from eneo.server.main import get_application
-from init_db import add_tenant_user
+from init_db import add_tenant_user, create_salt_and_hashed_password
+from tests.database_reset import reset_populated_tables
 from tests.fixtures import mint_v2_api_key
 
 # Detect if we're in a devcontainer environment
@@ -406,7 +409,33 @@ def override_settings_for_session(test_settings: Settings):
 
 
 @pytest.fixture(scope="session")
-async def setup_database(test_settings: Settings):
+def seed_default_tenant_user() -> Callable[[PostgresConnection], None]:
+    """Reuse one real password hash per worker for the fixed baseline user."""
+    password = "IntegrationPass123!"
+    credentials = create_salt_and_hashed_password(password)
+
+    def seed(conn: PostgresConnection) -> None:
+        # Only the synchronous baseline seed uses these credentials. Restore the
+        # real function before returning so password/auth tests still hash their
+        # own inputs with fresh salts and the production bcrypt cost.
+        with patch("init_db.create_salt_and_hashed_password", return_value=credentials):
+            add_tenant_user(
+                conn,
+                tenant_name="test_tenant",
+                quota_limit=1000000,
+                user_name="test_user",
+                user_email="test@example.com",
+                user_password=password,
+            )
+
+    return seed
+
+
+@pytest.fixture(scope="session")
+async def setup_database(
+    test_settings: Settings,
+    seed_default_tenant_user: Callable[[PostgresConnection], None],
+):
     """
     Initialize the database schema and seed test data.
     Runs Alembic migrations and creates a default tenant/user using init_db logic.
@@ -434,14 +463,7 @@ async def setup_database(test_settings: Settings):
         password=test_settings.postgres_password,
     )
 
-    add_tenant_user(
-        conn,
-        tenant_name="test_tenant",
-        quota_limit=1000000,
-        user_name="test_user",
-        user_email="test@example.com",
-        user_password="IntegrationPass123!",
-    )
+    seed_default_tenant_user(conn)
 
     # Create required feature flags for initial setup
     cursor = conn.cursor()
@@ -516,40 +538,24 @@ async def setup_database(test_settings: Settings):
 async def cleanup_database(
     setup_database: _DeploymentPolicySeed,
     test_settings: Settings,
+    seed_default_tenant_user: Callable[[PostgresConnection], None],
 ):
     """
-    Automatically truncate all tables and reseed after each test.
+    Automatically empty all tables and reseed after each test.
 
-    This isolates row data, not everything: TRUNCATE resets pg_class but leaves
-    pg_statistic behind, so a test that runs ANALYZE hands its planner
-    statistics to whichever test runs next in the same worker. Tests that assert
-    on a query plan must measure statistics inside a rolled-back savepoint —
-    see tests/integration/skills/test_skill_adoption_projection.py.
+    This isolates row data, not everything: planner statistics survive, so a
+    test that runs ANALYZE hands them to whichever test runs next in the same
+    worker. Tests that assert on a query plan must measure statistics inside a
+    rolled-back savepoint — see
+    tests/integration/skills/test_skill_adoption_projection.py.
 
-    Optimized for speed:
-    - Single TRUNCATE statement for all tables (instead of one per table)
-    - Models are NOT seeded here - seed_default_models fixture handles that
+    Models are NOT seeded here - seed_default_models fixture handles that.
     """
     yield
 
-    # Clean up after each test - truncate everything in ONE statement
     async with sessionmanager.session() as session:
         async with session.begin():
-            # Get all tables except alembic_version
-            result = await session.execute(
-                text("""
-                SELECT string_agg('"' || tablename || '"', ', ')
-                FROM pg_tables
-                WHERE schemaname = 'public' AND tablename != 'alembic_version'
-            """)
-            )
-            tables_csv = result.scalar()
-
-            if tables_csv:
-                # Single TRUNCATE for all tables - much faster than one-by-one!
-                await session.execute(
-                    text(f"TRUNCATE TABLE {tables_csv} RESTART IDENTITY CASCADE")
-                )
+            await reset_populated_tables(session)
 
     # Reseed tenant/user using existing helper function
     conn = psycopg2.connect(
@@ -560,14 +566,7 @@ async def cleanup_database(
         password=test_settings.postgres_password,
     )
 
-    add_tenant_user(
-        conn,
-        tenant_name="test_tenant",
-        quota_limit=1000000,
-        user_name="test_user",
-        user_email="test@example.com",
-        user_password="IntegrationPass123!",
-    )
+    seed_default_tenant_user(conn)
 
     # Add using_templates feature flag (not handled by add_tenant_user)
     cursor = conn.cursor()
@@ -942,14 +941,10 @@ def encryption_service(test_settings):
 @pytest.fixture
 def patch_auth_service_jwt(monkeypatch, test_settings):
     """Ensure AuthService uses the runtime test settings for JWT operations."""
-    from datetime import datetime, timedelta, timezone
-
-    import jwt as jwt_lib
-
-    from eneo.authentication.auth_models import JWTCreds, JWTMeta, JWTPayload
     from eneo.authentication.auth_service import AuthService
     from eneo.users.user import UserInDB
 
+    original_create_token = AuthService.create_access_token_for_user
     original_get_jwt_payload = AuthService.get_jwt_payload
 
     def patched_create_token(
@@ -960,31 +955,16 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
         expires_in: float | None = None,
         extra_claims: dict[str, object] | None = None,
     ) -> str:
-        secret = secret_key or test_settings.jwt_secret
-        aud = audience or test_settings.jwt_audience
-        expiry_minutes = expires_in or test_settings.jwt_expiry_time
-
-        jwt_meta = JWTMeta(
-            iss=test_settings.jwt_issuer,
-            aud=aud,
-            iat=datetime.timestamp(datetime.now(timezone.utc) - timedelta(seconds=2)),
-            exp=datetime.timestamp(
-                datetime.now(timezone.utc) + timedelta(minutes=expiry_minutes)
-            ),
+        return original_create_token(
+            self,
+            user,
+            secret_key=secret_key or test_settings.jwt_secret,
+            audience=audience or test_settings.jwt_audience,
+            expires_in=expires_in
+            if expires_in is not None
+            else test_settings.jwt_expiry_time,
+            extra_claims=extra_claims,
         )
-        jwt_creds = JWTCreds(
-            sub=user.email,
-            username=user.username,
-            credential_version=getattr(user, "credential_version", 0),
-        )
-        payload = {
-            **JWTPayload(
-                **jwt_meta.model_dump(), **jwt_creds.model_dump()
-            ).model_dump(),
-            **(extra_claims or {}),
-        }
-
-        return jwt_lib.encode(payload, secret, algorithm=test_settings.jwt_algorithm)
 
     def patched_get_jwt_payload(
         self,
@@ -1138,39 +1118,20 @@ def oidc_mock(monkeypatch):
 
 
 @pytest.fixture
-async def tenant_user_token(test_tenant, test_settings):
-    """Create a JWT token for a regular (non-admin) tenant user.
+async def tenant_user_token(test_tenant, db_container, patch_auth_service_jwt):
+    """Mint a real non-admin account's session for authorization boundary tests."""
+    from eneo.users.user import UserAdd, UserState
 
-    This token represents a normal user within the tenant,
-    NOT a system administrator. Used to test authorization boundaries.
-
-    Creates the JWT directly using jwt.encode() with test_settings values,
-    matching the pattern used in patch_auth_service_jwt fixture.
-    """
-    from datetime import datetime, timedelta, timezone
-
-    import jwt
-
-    now = datetime.now(timezone.utc)
-
-    # Create JWT payload matching app's expectations
-    payload = {
-        "sub": f"user@{test_tenant.slug}.test",  # Email as subject
-        "username": "testuser",  # Username for regular user
-        "iss": test_settings.jwt_issuer,
-        "aud": test_settings.jwt_audience,
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(minutes=30)).timestamp()),
-        "tenant_id": str(test_tenant.id),
-        "email": f"user@{test_tenant.slug}.test",
-    }
-
-    # Encode using test JWT secret (HS256)
-    token = jwt.encode(
-        payload, test_settings.jwt_secret, algorithm=test_settings.jwt_algorithm
-    )
-
-    return token
+    async with db_container() as container:
+        user = await container.user_repo().add(
+            UserAdd(
+                email=f"regular-{test_tenant.id}@example.com",
+                username="testuser",
+                tenant_id=test_tenant.id,
+                state=UserState.ACTIVE,
+            )
+        )
+        return container.auth_service().create_access_token_for_user(user)
 
 
 @pytest.fixture(autouse=True)

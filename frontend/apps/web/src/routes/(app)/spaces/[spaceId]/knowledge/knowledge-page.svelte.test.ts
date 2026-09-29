@@ -34,7 +34,10 @@ vi.mock("$lib/features/jobs/JobManager", () => ({
 vi.mock("$lib/components/toast", () => ({
   toast: { success: toastSuccess, error: toastError }
 }));
-vi.mock("$lib/core/errors", () => ({ toastError }));
+vi.mock("$lib/core/errors", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("$lib/core/errors")>()),
+  toastError
+}));
 
 const space = {
   id: "space-1",

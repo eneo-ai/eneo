@@ -164,8 +164,8 @@ describe("bulk website actions", () => {
 
   it("projects visible website IDs from row data identity rather than display index", () => {
     const rows = [
-      { id: "0", dataId: "website-uuid-1", isData: () => true },
-      { id: "1", dataId: "website-uuid-2", isData: () => true }
+      { id: "0", original: { id: "website-uuid-1" } },
+      { id: "1", original: { id: "website-uuid-2" } }
     ];
 
     expect(visibleWebsiteIdsFromTableRows(rows)).toEqual(["website-uuid-1", "website-uuid-2"]);

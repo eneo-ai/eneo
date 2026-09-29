@@ -27,8 +27,9 @@ describe("organisation Skills page loader", () => {
 
     await expect(load(fixture.input as never)).resolves.toEqual({
       page: fixture.managementPage,
+      removed: false,
       search: "leave"
     });
-    expect(fixture.organizationList).toHaveBeenCalledWith({ search: "leave" });
+    expect(fixture.organizationList).toHaveBeenCalledWith({ search: "leave", removed: false });
   });
 });

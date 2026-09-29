@@ -1,6 +1,6 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Tooltip } from "@eneo/ui";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import {
     loadLucideIconOrNull,
     type LucideIconComponent
@@ -35,9 +35,11 @@
 <div class="flex flex-col gap-1 py-1">
   <div class="flex items-center gap-2">
     {#if iconName}
-      <div class="border-strong bg-subtle flex h-6 w-6 items-center justify-center rounded border">
+      <div
+        class="border-stronger bg-subtle flex h-6 w-6 items-center justify-center rounded border"
+      >
         {#if IconComponent}
-          <IconComponent class="text-text h-4 w-4" />
+          <IconComponent class="text-default h-4 w-4" />
         {/if}
       </div>
     {/if}
@@ -52,13 +54,18 @@
   </div>
   {#if description}
     {#if showTooltip}
-      <Tooltip text={description} placement="bottom">
-        <span class="text-dimmer line-clamp-1 max-w-[40ch] text-sm break-all">
-          {description}
-        </span>
-      </Tooltip>
+      <Tooltip.Root>
+        <Tooltip.Trigger>
+          {#snippet child({ props })}
+            <span {...props} class="text-muted line-clamp-1 max-w-[40ch] text-sm break-all">
+              {description}
+            </span>
+          {/snippet}
+        </Tooltip.Trigger>
+        <Tooltip.Content side="bottom">{description}</Tooltip.Content>
+      </Tooltip.Root>
     {:else}
-      <span class="text-dimmer line-clamp-1 text-sm break-all">
+      <span class="text-muted line-clamp-1 text-sm break-all">
         {description}
       </span>
     {/if}

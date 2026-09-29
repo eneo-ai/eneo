@@ -1,24 +1,16 @@
 <script lang="ts">
+  import {
+    formatDateTime,
+    formatRelativeTime,
+    formatDuration
+  } from "$lib/core/formatting/dateTime";
   import type { CrawlResourceFailure, CrawlRun } from "@eneo/eneo-js";
-  import { Table } from "@eneo/ui";
-  import { createRender } from "svelte-headless-table";
+  import * as Table from "$lib/components/resource-table/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
 
-  import dayjs from "dayjs";
-  import relativeTime from "dayjs/plugin/relativeTime";
-  import utc from "dayjs/plugin/utc";
-  import "dayjs/locale/sv";
-  import "dayjs/locale/en";
   import CrawlResultCell from "./CrawlResultCell.svelte";
   import CrawlRunDetails from "$lib/features/knowledge/CrawlRunDetails.svelte";
   import { crawlRunState, crawlRunStateLabel } from "$lib/features/knowledge/crawlRunState";
-  dayjs.extend(relativeTime);
-  dayjs.extend(utc);
-
-  // Set dayjs locale based on paraglide locale
-  // eslint-disable-next-line svelte/no-immutable-reactive-statements
-  $: dayjs.locale(getLocale());
 
   export let runs: CrawlRun[];
   export let onrerun: (() => void) | undefined = undefined;
@@ -39,14 +31,14 @@
       id: "created_at",
       header: m.started(),
       cell: (item) => {
-        return createRender(Table.ButtonCell, {
-          label: dayjs(item.value.created_at).format("YYYY-MM-DD HH:mm"),
+        return Table.renderComponent(Table.ButtonCell, {
+          label: formatDateTime(item.value.created_at),
           onclick: () => showFailures(item.value)
         });
       },
       plugins: {
         sort: { getSortValue: (run) => run.created_at ?? "" },
-        tableFilter: { getFilterValue: (run) => dayjs(run.created_at).format("YYYY-MM-DD HH:mm") }
+        tableFilter: { getFilterValue: (run) => formatDateTime(run.created_at) }
       }
     }),
 
@@ -54,7 +46,7 @@
       accessor: (item) => item,
       header: m.status(),
       cell: (item) => {
-        return createRender(Table.FormattedCell, {
+        return Table.renderComponent(Table.FormattedCell, {
           value: crawlRunStateLabel(crawlRunState(item.value)),
           class: ""
         });
@@ -72,7 +64,7 @@
       accessor: (item) => item,
       header: m.results(),
       cell: (item) => {
-        return createRender(CrawlResultCell, {
+        return Table.renderComponent(CrawlResultCell, {
           crawl: item.value,
           onshowFailures: (kind) => showFailures(item.value, kind)
         });
@@ -92,15 +84,17 @@
         }
       },
       cell: (item) => {
-        const started = dayjs(item.value.created_at);
-        let value: string = m.started_time_ago({ timeAgo: dayjs().to(started) });
+        let value: string = m.started_time_ago({
+          timeAgo: formatRelativeTime(item.value.created_at)
+        });
 
-        if (item.value.finished_at) {
-          const finished = dayjs(item.value.finished_at);
-          value = started.to(finished, true);
+        if (item.value.finished_at && item.value.created_at) {
+          value = formatDuration(
+            new Date(item.value.finished_at).getTime() - new Date(item.value.created_at).getTime()
+          );
         }
 
-        return createRender(Table.FormattedCell, {
+        return Table.renderComponent(Table.FormattedCell, {
           value
         });
       }

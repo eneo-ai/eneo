@@ -1,39 +1,27 @@
 <script lang="ts">
-  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { dynamicColour } from "$lib/core/colours";
   import type { AppSparse } from "@eneo/eneo-js";
   import AppIcon from "$lib/features/apps/components/AppIcon.svelte";
-  import AppActions from "./AppActions.svelte";
+  import ResourceTile from "$lib/features/spaces/components/ResourceTile.svelte";
+  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { localizeHref } from "$lib/paraglide/runtime";
+  import AppActions from "./AppActions.svelte";
 
-  export let app: AppSparse;
+  let { app }: { app: AppSparse } = $props();
 
   const {
     state: { currentSpace }
   } = getSpacesManager();
 </script>
 
-<!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing for dynamic path -->
-<a
-  aria-label={app.name}
-  {...dynamicColour({ basedOn: app.id })}
+<ResourceTile
   href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${app.id}`)}
-  class="group border-dynamic-default bg-dynamic-dimmer text-dynamic-stronger hover:bg-dynamic-default hover:text-on-fill relative flex aspect-square flex-col items-start gap-2 border-t p-2 px-4"
+  name={app.name}
+  id={app.id}
 >
-  <h2 class="line-clamp-2 pt-1 font-mono text-sm">
-    {app.name}
-  </h2>
-
-  <div class="hover:text-primary absolute right-2 bottom-2">
-    <AppActions {app}></AppActions>
-  </div>
-
-  <span
-    class="group-hover:text-on-fill pointer-events-none absolute inset-0 flex items-center justify-center font-mono text-[4.5rem]"
-  >
-    <AppIcon {app}></AppIcon>
-  </span>
-
-  <div class="flex-grow"></div>
-</a>
-<!-- eslint-enable svelte/no-navigation-without-resolve -->
+  {#snippet icon()}
+    <AppIcon {app} />
+  {/snippet}
+  {#snippet actions()}
+    <AppActions {app} />
+  {/snippet}
+</ResourceTile>

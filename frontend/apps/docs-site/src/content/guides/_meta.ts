@@ -14,6 +14,7 @@ const meta: MetaRecord = {
   "object-content-storage": "Choose Content Storage",
   "document-processing": "Document Processing",
   "sharepoint-integration": "SharePoint Integration",
+  "upgrade-2-2-0": "Upgrading to 2.2.0",
   "upgrade-1-7-0": "Upgrading to 1.7.0",
 };
 

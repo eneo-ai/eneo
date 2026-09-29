@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { Table } from "@eneo/ui";
+  import * as Table from "$lib/components/resource-table/index.js";
   import WebsiteActions from "./WebsiteActions.svelte";
-  import { createRender } from "svelte-headless-table";
   import WebsiteStatus from "./WebsiteStatus.svelte";
   import CrawlRunDetails from "$lib/features/knowledge/CrawlRunDetails.svelte";
   import WebsiteSync from "./WebsiteSync.svelte";
@@ -11,9 +10,9 @@
   import { derived, writable } from "svelte/store";
   import type { CrawlResourceFailure, CrawlRun, WebsiteSparse } from "@eneo/eneo-js";
   import { IconWeb } from "@eneo/icons/web";
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName";
   import { m } from "$lib/paraglide/messages";
-  import dayjs from "dayjs";
   import {
     toggleVisibleWebsiteSelection,
     visibleWebsiteIdsFromTableRows
@@ -78,14 +77,14 @@
       accessor: (item) => item,
       id: "select",
       header: () => {
-        return createRender(SelectionHeaderCheckbox, {
+        return Table.renderComponent(SelectionHeaderCheckbox, {
           selectedWebsiteIds,
           visibleWebsiteIds,
           onToggleAll: toggleSelectAll
         });
       },
       cell: (item) => {
-        return createRender(SelectionCellCheckbox, {
+        return Table.renderComponent(SelectionCellCheckbox, {
           websiteId: item.value.id,
           websiteName: formatWebsiteName(item.value),
           selectedWebsiteIds,
@@ -103,7 +102,7 @@
       accessor: (item) => item,
       header: m.website(),
       cell: (item) => {
-        return createRender(Table.PrimaryCell, {
+        return Table.renderComponent(Table.PrimaryCell, {
           link: `/spaces/${$currentSpace.routeId}/knowledge/websites/${item.value.id}`,
           label: formatWebsiteName(item.value),
           tooltip: item.value.url,
@@ -129,7 +128,7 @@
       accessor: "url",
       header: m.link(),
       cell: (item) => {
-        return createRender(Table.ButtonCell, {
+        return Table.renderComponent(Table.ButtonCell, {
           link: item.value,
           label: m.go_to_website(),
           linkIsExternal: true
@@ -141,7 +140,7 @@
       accessor: (item) => item,
       header: m.status(),
       cell: (item) => {
-        return createRender(WebsiteStatus, {
+        return Table.renderComponent(WebsiteStatus, {
           website: item.value,
           onshowFailures: (kind) => {
             selectedRun = item.value.latest_crawl ?? null;
@@ -168,7 +167,7 @@
       accessor: (item) => item,
       header: m.auto_updates(),
       cell: (item) => {
-        return createRender(WebsiteSync, {
+        return Table.renderComponent(WebsiteSync, {
           website: item.value
         });
       },
@@ -185,8 +184,8 @@
       accessor: "last_indexed_at",
       header: m.website_last_indexed(),
       cell: (item) =>
-        createRender(Table.FormattedCell, {
-          value: item.value ? dayjs(item.value).format("YYYY-MM-DD HH:mm") : "—",
+        Table.renderComponent(Table.FormattedCell, {
+          value: formatDateTime(item.value) || "—",
           monospaced: true,
           class: "whitespace-nowrap"
         })
@@ -194,7 +193,7 @@
 
     table.columnActions({
       cell: (item) => {
-        return createRender(WebsiteActions, { website: item.value });
+        return Table.renderComponent(WebsiteActions, { website: item.value });
       }
     })
   ]);

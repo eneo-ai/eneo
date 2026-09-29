@@ -89,7 +89,7 @@ class AssistantAssembler:
         max_size = settings.attachment_max_size_bytes
         return FileRestrictions(
             accepted_file_types=[
-                AcceptedFileType(mimetype=mimetype, size_limit=max_size)
+                AcceptedFileType.for_mimetype(mimetype=mimetype, size_limit=max_size)
                 for mimetype in TextMimeTypes.values()
             ],
             limit=Limit(

@@ -1,30 +1,27 @@
-import { createTabs } from "@melt-ui/svelte";
 import { getContext, setContext } from "svelte";
-import type { Writable } from "svelte/store";
+import { get, type Writable } from "svelte/store";
 
 const ctxKey = "content";
 
-export function createContentTabs(
-  initialTab: string | undefined = undefined,
-  value: Writable<string> | undefined = undefined,
-  onValueChange: ((args: { curr: string; next: string }) => string) | undefined = undefined
-) {
-  const ctx = createTabs({
-    autoSet: true,
-    loop: true,
-    orientation: "horizontal",
-    activateOnFocus: false,
-    defaultValue: initialTab,
-    value,
-    onValueChange
-  }) as ReturnType<typeof createTabs>;
+export type ContentTabs = {
+  value: Writable<string>;
+  /** Selects the first registered tab when nothing is selected yet. */
+  registerTab: (tab: string) => void;
+};
 
-  setContext<typeof ctx>(ctxKey, ctx);
+export function createContentTabs(value: Writable<string>): ContentTabs {
+  const ctx: ContentTabs = {
+    value,
+    registerTab(tab) {
+      if (!get(value)) value.set(tab);
+    }
+  };
+  setContext<ContentTabs>(ctxKey, ctx);
   return ctx;
 }
 
 export function getContentTabs() {
-  return getContext<ReturnType<typeof createContentTabs>>(ctxKey);
+  return getContext<ContentTabs>(ctxKey);
 }
 
-export type ValueState = ReturnType<typeof createContentTabs>["states"]["value"];
+export type ValueState = Writable<string>;

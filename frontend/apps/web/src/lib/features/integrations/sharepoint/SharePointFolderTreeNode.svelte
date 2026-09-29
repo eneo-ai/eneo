@@ -2,14 +2,14 @@
   import {
     ChevronRight,
     File,
-    FileAudio,
+    FileHeadphone,
     FileImage,
     FileText,
     Folder,
     FolderOpen,
     LoaderCircle,
     RefreshCw
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -149,7 +149,7 @@
           {#if IMAGE_EXTENSIONS.includes(ext)}
             <FileImage class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
           {:else if AUDIO_EXTENSIONS.includes(ext)}
-            <FileAudio class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
+            <FileHeadphone class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
           {:else if TEXT_EXTENSIONS.includes(ext)}
             <FileText class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
           {:else}

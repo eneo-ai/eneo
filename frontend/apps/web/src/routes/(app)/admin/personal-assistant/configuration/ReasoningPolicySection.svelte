@@ -5,7 +5,7 @@
   import * as Select from "$lib/components/ui/select/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
-  import Brain from "lucide-svelte/icons/brain";
+  import Brain from "@lucide/svelte/icons/brain";
 
   const DEFAULT_VALUE = "default";
   const VALUE_PREFIX = "reasoning:";

@@ -7,7 +7,7 @@
 -->
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Check, X, Loader2, ChevronRight } from "lucide-svelte";
+  import { Check, X, LoaderCircle, ChevronRight } from "@lucide/svelte";
   import ToolCallDetailsPanel from "./ToolCallDetailsPanel.svelte";
 
   type Status = "preparing" | "running" | "complete" | "failed" | "denied";
@@ -87,7 +87,7 @@
   >
     <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border {ui.ring}">
       {#if status === "running" || status === "preparing"}
-        <Loader2 class="h-3.5 w-3.5 animate-spin" />
+        <LoaderCircle class="h-3.5 w-3.5 animate-spin" />
       {:else if status === "complete"}
         <Check class="h-3.5 w-3.5" />
       {:else}

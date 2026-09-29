@@ -4,7 +4,7 @@ import secrets
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 from urllib.parse import urlencode
 from uuid import UUID
 
@@ -23,6 +23,7 @@ from eneo.authentication.auth_models import (
     ApiKeyState,
     ApiKeyType,
     ApiKeyV2InDB,
+    JWTPayload,
     compute_effective_state,
 )
 from eneo.authentication.auth_service import AuthService
@@ -46,12 +47,6 @@ MODULE_AUDIENCE_PREFIX = "eneo-module:"
 # claim existed fall back to ``iat``, which equals the handoff time for any
 # never-refreshed token.
 MODULE_HANDOFF_AT_CLAIM = "handoff_at"
-# Immutable identity claims minted at ticket exchange and preserved across
-# refresh. Resource authentication resolves the principal by these - never by
-# email: the active-email unique index excludes soft-deleted rows, so an email
-# can move to a replacement account while an older module token is still valid.
-MODULE_USER_ID_CLAIM = "user_id"
-MODULE_TENANT_ID_CLAIM = "tenant_id"
 
 
 class ModuleTicketRequest(BaseModel):
@@ -287,7 +282,8 @@ class ModuleAuthBroker:
                 "user_id": str(user.id),
                 "tenant_id": str(user.tenant_id),
                 "module_id": str(module.id),
-                "credential_version": getattr(user, "credential_version", 0),
+                "token_version": 2,
+                "credential_version": user.credential_version,
             }
         )
         await self.redis_client.setex(_ticket_redis_key(ticket), ttl, payload)
@@ -329,6 +325,10 @@ class ModuleAuthBroker:
             raise AuthenticationException("Invalid or expired module ticket.")
 
         data = json.loads(raw)
+        # A pre-upgrade handoff may have originated from a confused session.
+        # It must not mint a new identity-bound token after the cutover.
+        if data.get("token_version") != 2:
+            raise AuthenticationException("Invalid or expired module ticket.")
         module = await self.module_repo.get_module(UUID(data["module_id"]))
         tenant_id = UUID(data["tenant_id"])
         module_id = UUID(data["module_id"])
@@ -366,10 +366,9 @@ class ModuleAuthBroker:
             raise AuthenticationException("Invalid or expired module ticket.")
 
         # Consume before comparing so a ticket issued before a credential
-        # change cannot be retried. Tickets from before this field existed
-        # belong to the version-zero compatibility baseline.
+        # change cannot be retried.
         self.auth_service.validate_local_credential_version(
-            data.get("credential_version", 0), user
+            data.get("credential_version"), user
         )
 
         handoff_at = int(time.time())
@@ -380,8 +379,6 @@ class ModuleAuthBroker:
             expires_in=expires_in_seconds / 60,
             extra_claims={
                 MODULE_HANDOFF_AT_CLAIM: handoff_at,
-                MODULE_USER_ID_CLAIM: str(user.id),
-                MODULE_TENANT_ID_CLAIM: str(user.tenant_id),
             },
         )
 
@@ -452,8 +449,13 @@ class ModuleAuthBroker:
             aud=module_audience(module.name),
         )
         try:
-            handoff_at = int(float(claims.get(MODULE_HANDOFF_AT_CLAIM, claims["iat"])))
-        except (KeyError, TypeError, ValueError) as exc:
+            raw_handoff_at = claims.get(MODULE_HANDOFF_AT_CLAIM, claims["iat"])
+            if isinstance(raw_handoff_at, bool) or not isinstance(
+                raw_handoff_at, (str, int, float)
+            ):
+                raise ValueError("Invalid handoff time")
+            handoff_at = int(float(raw_handoff_at))
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
             raise AuthenticationException(
                 "Could not validate token credentials."
             ) from exc
@@ -465,8 +467,6 @@ class ModuleAuthBroker:
             expires_in=expires_in_seconds / 60,
             extra_claims={
                 MODULE_HANDOFF_AT_CLAIM: handoff_at,
-                MODULE_USER_ID_CLAIM: str(user.id),
-                MODULE_TENANT_ID_CLAIM: str(user.tenant_id),
             },
         )
 
@@ -495,24 +495,19 @@ class ModuleAuthBroker:
             user=ModuleTokenUser(id=user.id, email=user.email, username=user.username),
         )
 
-    def validate_module_user_token(
-        self, token: str, module: ModuleInDB
-    ) -> dict[str, Any]:
+    def validate_module_user_token(self, token: str, module: ModuleInDB) -> JWTPayload:
         """Validate a module user token for the given module.
 
         Module-facing endpoints call this on EVERY request (alongside the sk_
         key check) - the module session alone must never authorize anything.
-        Returns the verified claims, including the identity claims minted at
+        Returns the typed claims, including the identity claims minted at
         exchange. Raises AuthenticationException on any mismatch (signature,
         expiry, or audience minted for a different module).
         """
         settings = get_settings()
         key = str(settings.jwt_secret)
         aud = module_audience(module.name)
-        _payload, claims = self.auth_service.get_jwt_payload_with_claims(
-            token, key=key, aud=aud
-        )
-        return claims
+        return self.auth_service.get_jwt_payload(token, key=key, aud=aud)
 
     async def authenticate_resource_request(
         self,
@@ -555,23 +550,17 @@ class ModuleAuthBroker:
             raise UnauthorizedException("API key is not registered for this module.")
 
         claims = self.validate_module_user_token(access_token, module)
-        try:
-            token_user_id = UUID(str(claims[MODULE_USER_ID_CLAIM]))
-            token_tenant_id = UUID(str(claims[MODULE_TENANT_ID_CLAIM]))
-        except (KeyError, ValueError) as exc:
-            raise AuthenticationException(
-                "Could not validate token credentials."
-            ) from exc
-
-        if token_tenant_id != api_key.tenant_id:
+        if claims.tenant_id != api_key.tenant_id:
             raise AuthenticationException("Module user is not active in this tenant.")
 
         user = await self.user_repo.get_user_by_id_and_tenant_id(
-            token_user_id, tenant_id=token_tenant_id
+            claims.user_id, tenant_id=claims.tenant_id
         )
         if user is None or not user.is_active:
             raise AuthenticationException("Module user is not active in this tenant.")
-        self.auth_service.validate_credential_version(claims, user)
+        self.auth_service.validate_local_credential_version(
+            claims.credential_version, user
+        )
 
         await self.user_service.validate_active_identity(
             user, correlation_id="module-resource-auth"

@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { dynamicColour } from "$lib/core/colours";
-  import { Tooltip } from "@eneo/ui";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
 
   export let member:
     | {
@@ -20,14 +20,22 @@
 
 <div aria-hidden="true">
   {#if "email" in member}
-    <Tooltip text={member.email} placement="top">
-      <div
-        {...dynamicColour({ basedOn: member.email })}
-        class="chip bg-dynamic-default text-on-fill capitalize"
-      >
-        {member.email.slice(0, 1)}
-      </div>
-    </Tooltip>
+    <Tooltip.Root>
+      <Tooltip.Trigger>
+        {#snippet child({ props })}
+          <!-- Not a tab stop: the chip sits in an aria-hidden subtree. -->
+          {@const { tabindex: _tabindex, ...triggerProps } = props}
+          <div
+            {...triggerProps}
+            {...dynamicColour({ basedOn: member.email })}
+            class="chip bg-dynamic-default text-on-fill capitalize"
+          >
+            {member.email.slice(0, 1)}
+          </div>
+        {/snippet}
+      </Tooltip.Trigger>
+      <Tooltip.Content>{member.email}</Tooltip.Content>
+    </Tooltip.Root>
   {:else}
     <div class="fallback chip">{member.label}</div>
   {/if}

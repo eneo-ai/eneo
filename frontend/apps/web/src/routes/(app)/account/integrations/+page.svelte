@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import type { PageProps } from "./$types";
   import { onDestroy } from "svelte";
   import { IntegrationAuthService } from "$lib/features/integrations/IntegrationAuthService.svelte";
@@ -75,7 +75,7 @@
                   {#snippet action()}
                     {#if integration.tenant_app_configured === false}
                       <div class="flex flex-col gap-1">
-                        <Button disabled variant="outlined">{m.not_available()}</Button>
+                        <Button disabled variant="outline">{m.not_available()}</Button>
                         <p class="text-secondary text-xs">
                           {m.contact_admin_to_configure()}
                         </p>
@@ -85,11 +85,9 @@
                       ></UserConnectedSplitButton>
                     {:else}
                       <Button
-                        on:click={() => {
+                        onclick={() => {
                           auth.connect(integration);
-                        }}
-                        variant="primary"
-                        >{auth.isConnecting(integration) ? m.connecting() : m.connect()}</Button
+                        }}>{auth.isConnecting(integration) ? m.connecting() : m.connect()}</Button
                       >
                     {/if}
                   {/snippet}

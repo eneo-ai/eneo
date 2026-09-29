@@ -38,7 +38,8 @@ and Redis. Everything is deployed with Docker Compose behind Traefik.
 - `@eneo/eneo-js`: the typed API client (`fetch` wrapper, endpoint modules,
   WebSocket client, and `schema.d.ts` generated from the backend OpenAPI
   document)
-- `@eneo/ui`: shared component library
+- shadcn-svelte components on bits-ui (`apps/web/src/lib/components/ui`)
+- `@eneo/ui`: shared design tokens, themes and icons
 
 **Responsibilities:**
 
@@ -66,7 +67,7 @@ frontend/
 │   └── docs-site/               # This documentation site (Nextra)
 └── packages/
     ├── eneo-js/                 # Typed API client
-    ├── ui/                      # Shared UI components
+    ├── ui/                      # Design tokens, themes and icons
     └── eslint-plugin/           # Repository lint rules
 ```
 

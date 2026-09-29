@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { IconChevronRight } from "@eneo/icons/chevron-right";
   import { IconProfile } from "@eneo/icons/profile";
   import { IconLogout } from "@eneo/icons/logout";
-  import { Button, Dropdown } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import * as Accordion from "$lib/components/ui/accordion/index.js";
+  import { Accordion as AccordionPrimitive } from "bits-ui";
   import SpaceAccordionContent from "./SpaceAccordionContent.svelte";
   import { getAppContext } from "$lib/core/AppContext";
-  import { createAccordion } from "@melt-ui/svelte";
-  import { slide } from "svelte/transition";
   import { onMount } from "svelte";
 
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
@@ -24,13 +24,7 @@
       (space.applications?.apps.count ?? 0) > 0
   );
 
-  const {
-    elements: { content, item, trigger, root },
-    helpers: { isSelected }
-  } = createAccordion({
-    multiple: true,
-    defaultValue: spacesWithContent.map((space) => space.id)
-  });
+  let openSpaces = spacesWithContent.map((space) => space.id);
 
   let div: HTMLDivElement;
   const scrollKey = "__dashboard__scroll__";
@@ -60,59 +54,51 @@
     class="bg-frosted-glass-primary sticky top-0 z-10 flex items-center justify-between p-4 py-2.5"
   >
     <EneoWordMark class="text-brand-eneo my-2 h-5 w-20"></EneoWordMark>
-    <Dropdown.Root>
-      <Dropdown.Trigger let:trigger asFragment>
-        <Button is={trigger} padding="icon">
-          <IconProfile />
-        </Button>
-      </Dropdown.Trigger>
-      <Dropdown.Menu let:item>
-        <div class="p-2">
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger>
+        {#snippet child({ props })}
+          <Button {...props} variant="ghost" size="icon" aria-label={m.user_menu()}>
+            <IconProfile />
+          </Button>
+        {/snippet}
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Content align="end">
+        <DropdownMenu.Label class="font-normal">
           {m.logged_in_as()}<br /><span class="font-mono text-sm">{user.email}</span>
-        </div>
-        <div class="border-default my-1 border-b"></div>
-        <Button
-          is={item}
-          variant="destructive"
-          href={localizeHref("/logout")}
-          padding="icon-leading"
-          data-sveltekit-preload-data="false"
-        >
-          <IconLogout />
-          {m.logout()}</Button
-        >
-      </Dropdown.Menu>
-    </Dropdown.Root>
+        </DropdownMenu.Label>
+        <DropdownMenu.Separator />
+        <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
+        <DropdownMenu.Item variant="destructive">
+          {#snippet child({ props })}
+            <a {...props} href={localizeHref("/logout")} data-sveltekit-preload-data="false">
+              <IconLogout />
+              {m.logout()}
+            </a>
+          {/snippet}
+        </DropdownMenu.Item>
+        <!-- eslint-enable svelte/no-navigation-without-resolve -->
+      </DropdownMenu.Content>
+    </DropdownMenu.Root>
   </div>
 
-  <div {...$root}>
+  <Accordion.Root type="multiple" bind:value={openSpaces}>
     {#each spacesWithContent as space (space.id)}
-      <div class="mx-auto max-w-[1400px]" {...$item(space.id)} use:item>
-        <!-- Level 1: Space Trigger -->
-        <button
-          class="hover:bg-hover-dimmer col-span-2 flex w-full items-center justify-between px-[1.4rem] py-4 font-mono text-sm uppercase md:col-span-3 lg:col-span-4"
-          {...$trigger(space.id)}
-          use:trigger
+      <Accordion.Item
+        value={space.id}
+        class="border-default mx-auto w-full max-w-[1400px] border-b"
+      >
+        <Accordion.Trigger
+          level={2}
+          class="hover:bg-hover-dimmer items-center rounded-none px-[1.4rem] py-4 font-mono text-sm uppercase hover:no-underline"
         >
-          <span>
-            {space.personal ? "Personal" : `Space: ${space.name}`}
-          </span>
-
-          <IconChevronRight
-            class={$isSelected(space.id) ? "rotate-90 transition-all" : "transition-all"}
-          ></IconChevronRight>
-        </button>
-
-        <!-- Level 1: Space Content (contains Level 2 accordion) -->
-        {#if $isSelected(space.id)}
-          <div class="pl-4" {...$content(space.id)} use:content transition:slide>
-            <SpaceAccordionContent {space} />
-          </div>
-        {/if}
-        <div class="border-default border-b"></div>
-      </div>
+          {space.personal ? m.personal() : m.dashboard_space_heading({ name: space.name })}
+        </Accordion.Trigger>
+        <AccordionPrimitive.Content class="pb-0 pl-4">
+          <SpaceAccordionContent {space} />
+        </AccordionPrimitive.Content>
+      </Accordion.Item>
     {/each}
-  </div>
+  </Accordion.Root>
 </div>
 
 <style>

@@ -3,7 +3,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { onMount } from "svelte";
   import AssistantsTable from "./AssistantsTable.svelte";
-  import TemplateCreateAssistantHint from "$lib/features/templates/components/assistants/TemplateCreateAssistantHint.svelte";
+  import TemplateCreateHint from "$lib/features/templates/components/TemplateCreateHint.svelte";
   import { initTemplateController } from "$lib/features/templates/TemplateController";
   import { createAssistantTemplateAdapter } from "$lib/features/templates/TemplateAdapter";
   import CreateNew from "./CreateNew.svelte";
@@ -49,7 +49,7 @@
 
   <Page.Main>
     {#if $currentSpace.applications.assistants.length < 1 && data.settings.using_templates && $currentSpace.hasPermission("create", "assistant")}
-      <TemplateCreateAssistantHint></TemplateCreateAssistantHint>
+      <TemplateCreateHint kind="assistant" />
     {:else}
       <AssistantsTable items={$currentSpace.applications.chat}></AssistantsTable>
     {/if}

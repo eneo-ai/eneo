@@ -6,8 +6,10 @@
 
 <script lang="ts">
   import type { User } from "@eneo/eneo-js";
-  import { Button, Dialog, Dropdown } from "@eneo/ui";
-  import { MoreVertical, Edit, UserMinus, UserPlus, Trash2 } from "lucide-svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import { EllipsisVertical, SquarePen, UserMinus, UserPlus, Trash2 } from "@lucide/svelte";
   import { invalidate } from "$app/navigation";
   import UserEditor from "./editor/UserEditor.svelte";
   import { getAppContext } from "$lib/core/AppContext";
@@ -20,15 +22,8 @@
   let { user } = $props<{ user: User }>();
 
   async function deleteUser() {
-    isProcessing = true;
-    try {
-      await eneo.users.delete(user);
-      invalidate("admin:users"); // Stable dependency key
-      $showDeleteDialog = false;
-    } catch (e) {
-      console.error(e);
-    }
-    isProcessing = false;
+    await eneo.users.delete(user);
+    invalidate("admin:users"); // Stable dependency key
   }
 
   async function deactivateUser() {
@@ -55,85 +50,74 @@
   const isActive = $derived(user.state === "active" || user.state === "invited");
   const isInactive = $derived(user.state === "inactive");
 
-  let isProcessing = $state(false);
   let showEditDialog = $state(false);
-  let showDeleteDialog = $state<Dialog.OpenState | undefined>(undefined);
+  let showDeleteDialog = $state(false);
 </script>
 
-<Dropdown.Root>
-  <Dropdown.Trigger asFragment let:trigger>
-    <Button is={trigger} padding="icon" aria-label={m.actions()}>
-      <MoreVertical size={16} />
-    </Button>
-  </Dropdown.Trigger>
+<DropdownMenu.Root>
+  <DropdownMenu.Trigger>
+    {#snippet child({ props })}
+      <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
+        <EllipsisVertical size={16} />
+      </Button>
+    {/snippet}
+  </DropdownMenu.Trigger>
 
-  <Dropdown.Menu let:item>
+  <DropdownMenu.Content align="end">
     <!-- Edit action - always available -->
-    <Button
-      is={item}
-      padding="icon-leading"
-      on:click={() => {
+    <DropdownMenu.Item
+      onSelect={() => {
         showEditDialog = true;
       }}
     >
-      <Edit size={16} />
+      <SquarePen size={16} />
       {m.edit_user()}
-    </Button>
+    </DropdownMenu.Item>
 
     <!-- Deactivate - only for active/invited users -->
     {#if isActive}
-      <Button
-        is={item}
-        padding="icon-leading"
-        disabled={user.id === currentUser.id}
-        on:click={deactivateUser}
-      >
+      <DropdownMenu.Item disabled={user.id === currentUser.id} onSelect={deactivateUser}>
         <UserMinus size={16} />
         {m.deactivate_user()}
-      </Button>
+      </DropdownMenu.Item>
     {/if}
 
     <!-- Reactivate - only for inactive users -->
     {#if isInactive}
-      <Button is={item} padding="icon-leading" on:click={reactivateUser}>
+      <DropdownMenu.Item onSelect={reactivateUser}>
         <UserPlus size={16} />
         {m.reactivate_user()}
-      </Button>
+      </DropdownMenu.Item>
     {/if}
 
     <!-- Delete - always available but destructive -->
-    <Button
-      is={item}
+    <DropdownMenu.Item
       variant="destructive"
-      padding="icon-leading"
       disabled={user.id === currentUser.id}
-      on:click={() => {
-        $showDeleteDialog = true;
+      onSelect={() => {
+        showDeleteDialog = true;
       }}
     >
       <Trash2 size={16} />
       {m.delete_user()}
-    </Button>
-  </Dropdown.Menu>
-</Dropdown.Root>
+    </DropdownMenu.Item>
+  </DropdownMenu.Content>
+</DropdownMenu.Root>
 
 <!-- Edit Dialog - hide built-in trigger since we control it from dropdown -->
 <UserEditor {user} mode="update" hideTrigger={true} bind:open={showEditDialog}></UserEditor>
 
 <!-- Delete Confirmation Dialog -->
-<Dialog.Root alert bind:isOpen={showDeleteDialog}>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.delete_user()}</Dialog.Title>
-    <Dialog.Description>
-      {m.do_you_really_want_to_delete()}
-      <span class="italic">{user.email}</span>?
-    </Dialog.Description>
-
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={deleteUser}>
-        {isProcessing ? m.deleting() : m.delete()}
-      </Button>
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+<ConfirmDialog
+  bind:open={showDeleteDialog}
+  title={m.delete_user()}
+  confirmLabel={m.delete()}
+  pendingLabel={m.deleting()}
+  errorContext={m.could_not_delete_user()}
+  onConfirm={deleteUser}
+>
+  {#snippet description()}
+    {m.do_you_really_want_to_delete()}
+    <span class="italic">{user.email}</span>?
+  {/snippet}
+</ConfirmDialog>

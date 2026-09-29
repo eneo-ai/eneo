@@ -7,7 +7,14 @@
     ObjectContentMoves,
     StorageKind
   } from "@eneo/eneo-js";
-  import { AlertCircle, ChevronDown, Database, HardDrive, Info, Loader2 } from "lucide-svelte";
+  import {
+    CircleAlert,
+    ChevronDown,
+    Database,
+    HardDrive,
+    Info,
+    LoaderCircle
+  } from "@lucide/svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -264,7 +271,7 @@
           </dl>
         {:else if inventoryStatus === "loading"}
           <p class="text-secondary flex items-center gap-2 text-sm" aria-live="polite">
-            <Loader2 class="size-4 animate-spin" />
+            <LoaderCircle class="size-4 animate-spin" />
             {m.storage_inventory_loading()}
           </p>
         {:else}
@@ -296,7 +303,7 @@
       variant="destructive"
       aria-live="assertive"
     >
-      <AlertCircle />
+      <CircleAlert />
       <Alert.Title>{m.storage_inventory_error_title()}</Alert.Title>
       <Alert.Description>
         <p>{m.storage_inventory_error_description()}</p>

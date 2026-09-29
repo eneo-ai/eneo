@@ -516,18 +516,19 @@ async def test_admin_command_requires_readiness_before_queueing(
                 == StorageKind.POSTGRES_INLINE.value
             )
             assert await session.get(ObjectContentMoves, content_id) is None
-            initial_revision = (
-                await DeploymentPolicyRepository(session).get()
-            ).revision
 
         runtime.selectable = True
         queued = await deployment_policy_router.queue_object_content_moves(
             request,
             container,
         )
+        # The policy row survives the per-test reset, so earlier tests on this
+        # worker may already have advanced its revision.
+        async with session.begin():
+            revision = (await DeploymentPolicyRepository(session).get()).revision
         paused = await deployment_policy_router.set_object_content_moves_paused(
             DeploymentPolicyPauseUpdate(
-                expected_revision=initial_revision,
+                expected_revision=revision,
                 moves_paused=True,
             ),
             container,
@@ -543,9 +544,9 @@ async def test_admin_command_requires_readiness_before_queueing(
 
     assert queued.queued_count == 1
     assert queued.target_too_large_count == 0
-    assert paused.policy_revision == initial_revision + 1
+    assert paused.policy_revision == revision + 1
     assert paused.paused is True
-    assert resumed.policy_revision == initial_revision + 2
+    assert resumed.policy_revision == revision + 2
     assert resumed.paused is False
     assert projection.paused is True
     assert len(projection.moves) == 1
@@ -1746,6 +1747,10 @@ async def test_move_candidate_query_uses_bounded_ordered_index(
         )
         session.add(owner)
         await session.flush()
+        # The plan under test only needs 20k available, referenced rows. Skip the
+        # per-row reference triggers while generating them and set the count
+        # directly; with triggers on this fixture alone takes ~40 s in CI.
+        await session.execute(text("SET LOCAL session_replication_role = replica"))
         await session.execute(
             text(
                 """
@@ -1754,7 +1759,7 @@ async def test_move_candidate_query_uses_bounded_ordered_index(
                         id, tenant_id, storage_kind, state, access_class,
                         sha256, size_bytes, declared_media_type,
                         verified_media_type, idempotency_key,
-                        request_fingerprint, available_at
+                        request_fingerprint, available_at, reference_count
                     )
                     SELECT
                         gen_random_uuid(), :tenant_id, 'postgres_inline',
@@ -1762,7 +1767,7 @@ async def test_move_candidate_query_uses_bounded_ordered_index(
                         decode(repeat('00', 32), 'hex'), 0,
                         'application/octet-stream', 'application/octet-stream',
                         'move-plan-' || candidate::text,
-                        decode(repeat('00', 32), 'hex'), now()
+                        decode(repeat('00', 32), 'hex'), now(), 1
                     FROM generate_series(1, 20000) AS candidate
                     RETURNING id
                 ), stored AS (

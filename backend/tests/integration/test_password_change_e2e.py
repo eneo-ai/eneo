@@ -13,6 +13,20 @@ from eneo.users.password import LOCAL_PASSWORD_POLICY
 from eneo.users.user_service import UserService
 
 
+@pytest.mark.integration
+async def test_baseline_seed_keeps_real_password_hashing(admin_user):
+    from init_db import create_salt_and_hashed_password
+
+    password = "IntegrationPass123!"
+    assert AuthService.verify_password(password, admin_user.password)
+
+    # The seed's cached credentials must not escape into later init/auth calls.
+    salt, hashed_password = create_salt_and_hashed_password(password)
+    assert salt != admin_user.salt
+    assert hashed_password != admin_user.password
+    assert AuthService.verify_password(password, hashed_password)
+
+
 async def _create_local_user(client, super_api_key: str) -> tuple[str, str]:
     suffix = uuid4().hex[:8]
     tenant_response = await client.post(

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { CrawlResourceFailure, CrawlRun } from "@eneo/eneo-js";
-  import { Label } from "@eneo/ui";
+  import StatusBadge, { type StatusBadgeColor } from "$lib/components/StatusBadge.svelte";
   import { m } from "$lib/paraglide/messages";
   import {
     crawlRunFailureMessage,
@@ -25,7 +25,7 @@
   $: filesFailed = crawl.files_failed ?? 0;
   $: state = crawlRunState(crawl);
 
-  function successLabel(currentCrawl: CrawlRun): { label: string; color: Label.LabelColor } {
+  function successLabel(currentCrawl: CrawlRun): { label: string; color: StatusBadgeColor } {
     const pagesCrawled = currentCrawl.pages_crawled ?? 0;
     const filesDownloaded = currentCrawl.files_downloaded ?? 0;
     if (pagesCrawled && filesDownloaded) {
@@ -51,7 +51,7 @@
     currentCrawl: CrawlRun
   ): {
     label: string;
-    color: Label.LabelColor;
+    color: StatusBadgeColor;
     tooltip?: string;
   } {
     return {
@@ -77,24 +77,24 @@
 <div class="flex w-full flex-wrap items-center gap-2 {cls}" style="justify-content: flex-{align}">
   {#if state === "succeeded" || state === "partial" || state === "running" || state === "finalizing" || state === "stopping"}
     {#if pagesCrawled || filesDownloaded}
-      <Label.Single capitalize={false} item={successLabel(crawl)}></Label.Single>
+      <StatusBadge capitalize={false} item={successLabel(crawl)} />
     {/if}
     {#if pagesUnchanged}
-      <Label.Single
+      <StatusBadge
         capitalize={false}
         item={{ color: "gray", label: m.pages_unchanged_count({ count: pagesUnchanged }) }}
-      ></Label.Single>
+      />
     {/if}
     {#if !pagesCrawled && !filesDownloaded && !pagesUnchanged && !pagesFailed && !filesFailed}
-      <Label.Single capitalize={false} item={crawlStatus(state, crawl)}></Label.Single>
+      <StatusBadge capitalize={false} item={crawlStatus(state, crawl)} />
     {/if}
   {:else if state === "unchanged" && pagesUnchanged}
-    <Label.Single
+    <StatusBadge
       capitalize={false}
       item={{ color: "gray", label: m.pages_unchanged_count({ count: pagesUnchanged }) }}
-    ></Label.Single>
+    />
   {:else}
-    <Label.Single capitalize={false} item={crawlStatus(state, crawl)}></Label.Single>
+    <StatusBadge capitalize={false} item={crawlStatus(state, crawl)} />
   {/if}
   <CrawlFailureActions run={crawl} onselect={onshowFailures} />
 </div>

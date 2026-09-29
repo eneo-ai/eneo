@@ -1,39 +1,35 @@
 <script lang="ts">
-  import { browser } from "$app/environment";
-  import { replaceState } from "$app/navigation";
-  import { page } from "$app/stores";
+  import { untrack, type Snippet } from "svelte";
+  import { Tabs } from "bits-ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { getContentTabs } from "./ctx";
-  import { Button } from "@eneo/ui";
 
-  export let tab: string;
-  export let padding: "icon-leading" | "text" = "text";
-  export let label: string | undefined = undefined;
-  export let asFragment = false;
+  type Props = {
+    tab: string;
+    label?: string;
+    /** Render only the snippet, which receives the trigger props to spread on its own element. */
+    asFragment?: boolean;
+    children?: Snippet<[{ trigger: Record<string, unknown> }]>;
+  };
 
-  const {
-    elements: { trigger }
-  } = getContentTabs();
+  let { tab, label, asFragment = false, children }: Props = $props();
 
-  function updateUrl() {
-    if (!browser) return;
-
-    // Create new URL object (don't mutate $page.url)
-    const url = new URL($page.url);
-    url.searchParams.set("tab", tab);
-    // Reset to page 1 when switching tabs to avoid empty results
-    url.searchParams.delete("page");
-
-    // replaceState updates the URL without triggering SvelteKit navigation,
-    // so tab switching is instant (no load functions re-run)
-    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with mutated query params
-    replaceState(url, { ...$page.state, tab });
-  }
+  untrack(() => getContentTabs().registerTab(tab));
 </script>
 
-{#if asFragment}
-  <slot trigger={[$trigger(tab)]} />
-{:else}
-  <Button is={[$trigger(tab)]} {padding} {label} on:click={updateUrl} displayActiveState>
-    <slot trigger={[$trigger(tab)]} />
-  </Button>
-{/if}
+<Tabs.Trigger value={tab}>
+  {#snippet child({ props })}
+    {#if asFragment}
+      {@render children?.({ trigger: props })}
+    {:else}
+      <Button
+        {...props}
+        variant="ghost"
+        aria-label={label}
+        class="data-[state=active]:bg-accent-dimmer data-[state=active]:text-accent-stronger tracking-[0.01rem] data-[state=active]:font-medium data-[state=active]:tracking-normal"
+      >
+        {@render children?.({ trigger: props })}
+      </Button>
+    {/if}
+  {/snippet}
+</Tabs.Trigger>

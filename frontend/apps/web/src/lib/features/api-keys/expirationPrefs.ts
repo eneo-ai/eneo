@@ -48,20 +48,6 @@ export function dismiss(
   }
 }
 
-export function clearForKey(ctx: PrefsContext, keyId: string): void {
-  try {
-    const prefix = `${DISMISS_PREFIX}${ctx.tenantId}:${ctx.userId}:${keyId}:`;
-    for (let i = localStorage.length - 1; i >= 0; i--) {
-      const k = localStorage.key(i);
-      if (k?.startsWith(prefix)) {
-        localStorage.removeItem(k);
-      }
-    }
-  } catch {
-    // ignore
-  }
-}
-
 export function isMutedNonCritical(ctx: PrefsContext): boolean {
   try {
     return localStorage.getItem(muteKey(ctx)) === "true";

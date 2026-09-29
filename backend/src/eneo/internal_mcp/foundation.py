@@ -27,10 +27,10 @@ from contextlib import asynccontextmanager
 from typing import Any, NamedTuple
 from uuid import UUID, uuid4
 
-import jwt
 from dependency_injector import providers
 from mcp.server.fastmcp import Context, FastMCP
 
+from eneo.authentication.auth_service import AuthService
 from eneo.database.database import sessionmanager
 from eneo.main.config import get_settings
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
@@ -54,11 +54,11 @@ def bearer_from_ctx(ctx: Context) -> str:
 
 def assistant_id_from_token(token: str) -> UUID:
     settings = get_settings()
-    claims = jwt.decode(
+    _, claims = AuthService().get_jwt_payload_with_claims(
         token,
         key=str(settings.jwt_secret),
-        audience=settings.jwt_audience,
-        algorithms=[settings.jwt_algorithm],
+        aud=settings.jwt_audience,
+        algs=[settings.jwt_algorithm],
     )
     raw = claims.get("assistant_id")
     if not raw:
@@ -69,11 +69,11 @@ def assistant_id_from_token(token: str) -> UUID:
 def mcp_server_id_from_token(token: str) -> UUID:
     """The built-in provider row this token was minted for."""
     settings = get_settings()
-    claims = jwt.decode(
+    _, claims = AuthService().get_jwt_payload_with_claims(
         token,
         key=str(settings.jwt_secret),
-        audience=settings.jwt_audience,
-        algorithms=[settings.jwt_algorithm],
+        aud=settings.jwt_audience,
+        algs=[settings.jwt_algorithm],
     )
     raw = claims.get("mcp_server_id")
     if not raw:

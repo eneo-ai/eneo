@@ -14,13 +14,13 @@
     Calendar,
     Clock,
     Gauge,
-    Globe2,
+    Earth,
     Layers,
     Link,
-    AlertCircle,
+    CircleAlert,
     Check,
     RotateCcw
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { fly } from "svelte/transition";
 
   const eneo = getEneo();
@@ -158,7 +158,7 @@
       id: "requireTenantAllowedOrigin",
       title: m.api_keys_admin_policy_require_tenant_origin(),
       description: m.api_keys_admin_policy_require_tenant_origin_desc(),
-      icon: Globe2,
+      icon: Earth,
       type: "toggle" as const
     },
     {
@@ -228,7 +228,7 @@
   {#if errorMessage}
     <div transition:fly={{ y: -8, duration: 150 }}>
       <Alert.Root variant="destructive">
-        <AlertCircle />
+        <CircleAlert />
         <Alert.Description>{errorMessage}</Alert.Description>
       </Alert.Root>
     </div>

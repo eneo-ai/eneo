@@ -1,6 +1,6 @@
 import { render } from "vitest-browser-svelte";
 import { describe, expect, it } from "vitest";
-import { Markdown } from "@eneo/ui";
+import { Markdown } from "$lib/components/markdown/index.js";
 
 const fence = (lang: string, code: string) => `Exempel:\n\n\`\`\`${lang}\n${code}\n\`\`\`\n`;
 

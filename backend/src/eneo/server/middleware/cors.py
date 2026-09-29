@@ -12,8 +12,11 @@ import typing
 from collections.abc import Sequence
 
 from starlette.datastructures import URL, Headers, MutableHeaders
-from starlette.responses import PlainTextResponse, Response
+from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from eneo.main.exceptions import ErrorCodes
+from eneo.main.models import GeneralError
 
 ALL_METHODS = ("DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT")
 SAFELISTED_HEADERS = {"Accept", "Accept-Language", "Content-Language", "Content-Type"}
@@ -108,10 +111,22 @@ class CORSMiddleware:
         if not await self.is_allowed_origin(
             origin=origin, request_headers=headers, request_url=URL(scope=scope)
         ):
-            response = PlainTextResponse(
-                "Disallowed CORS origin",
+            # Unlike a preflight, this response reaches the caller's own code,
+            # so it answers in the API error contract. A server-side caller
+            # that forwards the browser's Origin header lands here on every
+            # method, and a bare text body leaves it nothing to act on.
+            response = JSONResponse(
                 status_code=400,
                 headers={"Vary": "Origin"},
+                content=GeneralError(
+                    message=(
+                        "Origin is not allowed. A server-side caller should not "
+                        "forward the browser Origin header."
+                    ),
+                    eneo_error_code=ErrorCodes.BAD_REQUEST,
+                    code="disallowed_cors_origin",
+                    context={"origin": origin},
+                ).model_dump(exclude_none=True),
             )
             await response(scope, receive, send)
             return
@@ -194,6 +209,8 @@ class CORSMiddleware:
         # the browser to enforce the CORS policy, but its more informative
         # if we do.
         if failures:
+            # A browser never exposes a preflight body to the page, so this one
+            # stays plain text for parity with upstream Starlette.
             failure_text = "Disallowed CORS " + ", ".join(failures)
             return PlainTextResponse(failure_text, status_code=400, headers=headers)
 

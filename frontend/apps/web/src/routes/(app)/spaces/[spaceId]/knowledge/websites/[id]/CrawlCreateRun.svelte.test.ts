@@ -22,7 +22,10 @@ vi.mock("$lib/core/Eneo", () => ({
 
 vi.mock("$app/navigation", () => ({ invalidate }));
 
-vi.mock("$lib/core/errors", () => ({ toastError }));
+vi.mock("$lib/core/errors", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("$lib/core/errors")>()),
+  toastError
+}));
 
 import CrawlCreateRun from "./CrawlCreateRun.svelte";
 

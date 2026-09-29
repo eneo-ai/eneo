@@ -8,7 +8,7 @@
   import { Label } from "$lib/components/ui/label/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { Paperclip } from "lucide-svelte";
+  import { Paperclip } from "@lucide/svelte";
   import PolicySection from "$lib/features/admin/PolicySection.svelte";
   import OpenFilesHelp from "$lib/features/assistants/components/OpenFilesHelp.svelte";
 

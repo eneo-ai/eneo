@@ -1,7 +1,7 @@
 <script lang="ts">
-  import dayjs from "dayjs";
+  import { formatDate, formatDateTime, formatTime } from "$lib/core/formatting/dateTime";
   import type { AdminCrawlerSchedulerHealth } from "@eneo/eneo-js";
-  import { CircleCheck, CircleHelp, CircleX, TriangleAlert } from "lucide-svelte";
+  import { CircleCheck, CircleQuestionMark, CircleX, TriangleAlert } from "@lucide/svelte";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { m } from "$lib/paraglide/messages";
 
@@ -32,9 +32,8 @@
   );
 
   function lastRun(ranAt: string) {
-    const at = dayjs(ranAt);
-    const sameDay = at.isSame(asOf ? dayjs(asOf) : dayjs(), "day");
-    return at.format(sameDay ? "HH:mm" : "YYYY-MM-DD HH:mm");
+    const sameDay = formatDate(ranAt) === formatDate(asOf ?? Date.now());
+    return sameDay ? formatTime(ranAt) : formatDateTime(ranAt);
   }
 </script>
 
@@ -56,7 +55,7 @@
             data-icon="inline-start"
           />
         {:else if status === "stale"}<CircleX aria-hidden="true" data-icon="inline-start" />
-        {:else}<CircleHelp aria-hidden="true" data-icon="inline-start" />{/if}
+        {:else}<CircleQuestionMark aria-hidden="true" data-icon="inline-start" />{/if}
         {label}
       </Badge>
       {#if status !== "unknown"}

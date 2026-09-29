@@ -1,7 +1,7 @@
 <script lang="ts">
-  import dayjs from "dayjs";
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import type { AdminCrawlerScheduledWebsite } from "@eneo/eneo-js";
-  import { Clock3, LoaderCircle, TriangleAlert } from "lucide-svelte";
+  import { Clock3, LoaderCircle, TriangleAlert } from "@lucide/svelte";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
@@ -27,7 +27,7 @@
   } = $props();
 
   function date(value: string | null | undefined) {
-    return value ? dayjs(value).format("YYYY-MM-DD HH:mm") : "—";
+    return formatDateTime(value) || "—";
   }
 
   function stateLabel(item: AdminCrawlerScheduledWebsite) {

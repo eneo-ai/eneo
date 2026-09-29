@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { Writable } from "svelte/store";
-  import { AlertTriangle, LoaderCircle } from "lucide-svelte";
+  import { TriangleAlert, LoaderCircle } from "@lucide/svelte";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
@@ -75,7 +75,7 @@
 
     <div class="border-destructive/40 bg-destructive/10 rounded-lg border px-4 py-3">
       <div class="flex items-start gap-3">
-        <AlertTriangle class="text-destructive mt-0.5 size-4 shrink-0" aria-hidden="true" />
+        <TriangleAlert class="text-destructive mt-0.5 size-4 shrink-0" aria-hidden="true" />
         <div class="flex flex-col gap-2 text-sm">
           <p class="font-semibold">{m.warning_permanent_deletion()}</p>
           <ul class="text-muted-foreground list-inside list-disc space-y-1">

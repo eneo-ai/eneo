@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { ChevronDown, FileText } from "lucide-svelte";
+  import { ChevronDown, FileText } from "@lucide/svelte";
   import { slide } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
 

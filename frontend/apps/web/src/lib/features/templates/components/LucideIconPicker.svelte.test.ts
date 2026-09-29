@@ -1,9 +1,9 @@
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { Rocket } from "lucide-svelte";
+import { House, Rocket } from "@lucide/svelte";
 import { m } from "$lib/paraglide/messages";
-import { loadLucideIcons, type LucideIconRegistry } from "../lucideIcons";
+import { createLucideRegistry, loadLucideIcons } from "../lucideIcons";
 import LucideIconPicker from "./LucideIconPicker.svelte";
 
 vi.mock("../lucideIcons", async (importOriginal) => ({
@@ -11,7 +11,7 @@ vi.mock("../lucideIcons", async (importOriginal) => ({
   loadLucideIcons: vi.fn()
 }));
 
-const registry = { Rocket } as unknown as LucideIconRegistry;
+const registry = createLucideRegistry({ icons: { Rocket } } as never);
 const rocketIcon = () => document.querySelector("svg.lucide-rocket");
 
 beforeEach(() => {
@@ -49,5 +49,19 @@ describe("LucideIconPicker", () => {
     await vi.waitFor(() => expect(rocketIcon()).not.toBeNull());
     expect(loadLucideIcons).toHaveBeenCalledTimes(2);
     expect(page.getByRole("alert").elements()).toHaveLength(0);
+  });
+
+  it("shows an icon saved under a name Lucide has since renamed", async () => {
+    vi.mocked(loadLucideIcons)
+      .mockReset()
+      .mockResolvedValue(createLucideRegistry({ icons: { House }, Home: House } as never));
+    render(LucideIconPicker, { value: "home", compact: true });
+
+    await vi.waitFor(() => expect(document.querySelector("svg.lucide-house")).not.toBeNull());
+    await page.getByRole("button", { name: m.change_icon_current({ iconName: "home" }) }).click();
+
+    await expect
+      .element(page.getByRole("button", { name: m.select_icon({ iconName: "house" }) }))
+      .toHaveAttribute("aria-pressed", "true");
   });
 });

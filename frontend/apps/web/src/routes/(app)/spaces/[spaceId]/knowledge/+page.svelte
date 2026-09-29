@@ -7,7 +7,8 @@
   import { writable } from "svelte/store";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getEneo } from "$lib/core/Eneo";
-  import { Button as LegacyButton, Tooltip } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { resolve } from "$app/paths";
   import { IconInfo } from "@eneo/icons/info";
   import { IconLinkExternal } from "@eneo/icons/link-external";
@@ -24,8 +25,7 @@
   import type { IntegrationKnowledge, WebsiteSparse } from "@eneo/eneo-js";
   import { getJobManager, jobCompletionEvents } from "$lib/features/jobs/JobManager";
   import { untrack } from "svelte";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
-  import { Button } from "$lib/components/ui/button/index.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { canRequestCrawlStop } from "$lib/features/knowledge/crawlRunState";
   import {
     bulkDeletionWaitsForCrawlerCleanup,
@@ -170,7 +170,6 @@
         eneo.websites.bulkStop({ website_ids: websiteIds })
       );
 
-      stopDialogOpen = false;
       const failedWebsiteIds = bulkFailureWebsiteIds(result.errors);
       $selectedWebsiteIds = result.failed > 0 ? new Set(failedWebsiteIds) : new Set();
 
@@ -185,9 +184,6 @@
       } else {
         toast.info(m.crawls_not_running());
       }
-    } catch (error) {
-      toastError(error, m.bulk_crawl_stop_failed());
-      console.error(error);
     } finally {
       isBulkStopping = false;
       await refreshWebsiteData();
@@ -208,7 +204,6 @@
         eneo.websites.bulkDelete({ website_ids: websiteIds })
       );
 
-      deleteDialogOpen = false;
       if (result.failed > 0) {
         if (bulkDeletionWaitsForCrawlerCleanup(result.errors)) {
           const cleanupPending = result.errors.some(
@@ -240,9 +235,6 @@
         }
         $selectedWebsiteIds = new Set();
       }
-    } catch (error) {
-      toastError(error, m.bulk_website_remove_failed());
-      console.error(error);
     } finally {
       isBulkDeleting = false;
       await refreshWebsiteData();
@@ -275,18 +267,21 @@
        consistent whether or not the user can create. A real <button> trigger
        keeps it keyboard-focusable (tabbable), and aria-label exposes the reason
        to screen readers rather than relying on hover alone. -->
-  <Tooltip text={message} placement="bottom" asFragment let:trigger>
-    {@const tip = trigger[0]}
-    <button
-      {...tip}
-      use:tip.action
-      type="button"
-      aria-label={message}
-      class="text-secondary hover:text-primary hover:bg-hover-default focus-visible:ring-accent-default flex cursor-help items-center rounded-md p-1.5 focus:outline-none focus-visible:ring-2"
-    >
-      <IconInfo />
-    </button>
-  </Tooltip>
+  <Tooltip.Root>
+    <Tooltip.Trigger>
+      {#snippet child({ props })}
+        <button
+          {...props}
+          type="button"
+          aria-label={message}
+          class="text-secondary hover:text-primary hover:bg-hover-default focus-visible:ring-accent-default flex cursor-help items-center rounded-md p-1.5 focus:outline-none focus-visible:ring-2"
+        >
+          <IconInfo />
+        </button>
+      {/snippet}
+    </Tooltip.Trigger>
+    <Tooltip.Content side="bottom">{message}</Tooltip.Content>
+  </Tooltip.Root>
 {/snippet}
 
 <Page.Root tabController={selectedTab}>
@@ -375,19 +370,17 @@
         {#if data.availableIntegrations.length > 0}
           <ImportKnowledgeDialog></ImportKnowledgeDialog>
         {:else if isPersonalSpace}
-          <LegacyButton
-            variant="primary"
+          <Button
             onclick={() => (window.location.href = resolve("/account/integrations?tab=providers"))}
           >
             {m.configure_integrations()}
-          </LegacyButton>
+          </Button>
         {:else if isAdmin}
-          <LegacyButton
-            variant="primary"
+          <Button
             onclick={() => (window.location.href = resolve("/admin/integrations?tab=providers"))}
           >
             {m.configure_integrations()}
-          </LegacyButton>
+          </Button>
         {:else}
           <p class="text-secondary max-w-72 text-right text-xs">
             {isOrgSpace
@@ -436,12 +429,12 @@
                 <IconLinkExternal class="-mt-0.5 inline" size="sm"></IconLinkExternal>
               </p>
               <div class="flex-grow"></div>
-              <LegacyButton
-                variant="outlined"
+              <Button
+                variant="outline"
                 class="min-w-24"
-                on:click={() => {
+                onclick={() => {
                   showIntegrationsNotice = false;
-                }}>{m.dismiss()}</LegacyButton
+                }}>{m.dismiss()}</Button
               >
             </div>
           </div>
@@ -457,36 +450,22 @@
   </Page.Main>
 </Page.Root>
 
-<AlertDialog.Root bind:open={stopDialogOpen}>
-  <AlertDialog.Content>
-    <AlertDialog.Header>
-      <AlertDialog.Title>
-        {m.stop_crawls_title({ count: stopTargetIds.length })}
-      </AlertDialog.Title>
-      <AlertDialog.Description>{m.stop_crawls_description()}</AlertDialog.Description>
-    </AlertDialog.Header>
-    <AlertDialog.Footer>
-      <AlertDialog.Cancel disabled={isBulkStopping}>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action variant="destructive" disabled={isBulkStopping} onclick={bulkStop}>
-        {isBulkStopping ? m.stopping_crawls() : m.stop_crawl()}
-      </AlertDialog.Action>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={stopDialogOpen}
+  title={m.stop_crawls_title({ count: stopTargetIds.length })}
+  description={m.stop_crawls_description()}
+  confirmLabel={m.stop_crawl()}
+  pendingLabel={m.stopping_crawls()}
+  errorContext={m.bulk_crawl_stop_failed()}
+  onConfirm={bulkStop}
+/>
 
-<AlertDialog.Root bind:open={deleteDialogOpen}>
-  <AlertDialog.Content>
-    <AlertDialog.Header>
-      <AlertDialog.Title>
-        {m.remove_websites_title({ count: deleteTargetIds.length })}
-      </AlertDialog.Title>
-      <AlertDialog.Description>{m.remove_websites_description()}</AlertDialog.Description>
-    </AlertDialog.Header>
-    <AlertDialog.Footer>
-      <AlertDialog.Cancel disabled={isBulkDeleting}>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action variant="destructive" disabled={isBulkDeleting} onclick={bulkDelete}>
-        {isBulkDeleting ? m.removing_websites() : m.remove_websites_confirm()}
-      </AlertDialog.Action>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={deleteDialogOpen}
+  title={m.remove_websites_title({ count: deleteTargetIds.length })}
+  description={m.remove_websites_description()}
+  confirmLabel={m.remove_websites_confirm()}
+  pendingLabel={m.removing_websites()}
+  errorContext={m.bulk_website_remove_failed()}
+  onConfirm={bulkDelete}
+/>

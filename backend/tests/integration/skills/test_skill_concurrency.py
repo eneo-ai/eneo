@@ -6,10 +6,12 @@ import pytest
 import sqlalchemy as sa
 
 from eneo.apps.app_runs.app_run_repo import _serialize_skill_provenance
-from eneo.database.tables.app_table import AppRuns
+from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.governance_policy_table import GovernancePolicies
 from eneo.database.tables.job_table import Jobs
+from eneo.database.tables.skill_table import Skills
 from eneo.database.tables.spaces_table import Spaces, SpacesUsers
 from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.jobs.job_models import Task
@@ -22,8 +24,10 @@ from eneo.roles.permissions import Permission
 from eneo.skills.domain.skill import (
     SkillBindingIntent,
     SkillBindingReference,
+    SkillDetachment,
     SkillHasActiveAppRunsError,
     SkillHasBindingsError,
+    SkillRemovalBusyError,
     SkillRuntimePolicy,
 )
 
@@ -1076,3 +1080,628 @@ async def test_binding_write_waits_for_concurrent_policy_lowering(
             )
             == []
         )
+
+
+@pytest.fixture
+async def organization_removal_skills(db_container, admin_user):
+    async with db_container() as container:
+        organization = await container.session().scalar(
+            sa.select(Spaces).where(
+                Spaces.tenant_id == admin_user.tenant_id,
+                Spaces.user_id.is_(None),
+                Spaces.tenant_space_id.is_(None),
+            )
+        )
+        assert organization is not None
+        skills = []
+        for index in range(2):
+            skill = await container.skill_repo().create(
+                space_id=organization.id,
+                slug=f"removal-{index}",
+                display_name=f"Removal {index}",
+                description="Concurrent removal",
+                instructions="Retained instructions",
+                content_digest=str(index) * 64,
+                created_by_user_id=admin_user.id,
+            )
+            await container.skill_repo().publish_organization(
+                tenant_id=admin_user.tenant_id,
+                skill_id=skill.id,
+                expected_revision_id=skill.current_revision.id,
+            )
+            skills.append(skill)
+    return skills
+
+
+async def test_bulk_removal_refuses_a_concurrent_binding_save_without_partial_writes(
+    db_container,
+    skill_concurrency_resources,
+    organization_removal_skills,
+    admin_user,
+):
+    resources = skill_concurrency_resources
+    skills = organization_removal_skills
+    # Bind the later ID so removal has acquired another row lock before NOWAIT fails.
+    ordered = sorted(skills, key=lambda skill: skill.id)
+    bound = ordered[1]
+    reference = SkillBindingReference(
+        skill_id=bound.id, skill_revision_id=bound.current_revision.id
+    )
+    async with db_container() as writer:
+        await writer.skill_service().replace_app_bindings(
+            space_id=resources.space_id, app_id=resources.app_id, references=[reference]
+        )
+        with pytest.raises(SkillRemovalBusyError):
+            async with db_container() as remover:
+                await asyncio.wait_for(
+                    remover.organization_skill_service().remove_many(
+                        skill_ids=[skill.id for skill in skills]
+                    ),
+                    timeout=2,
+                )
+    async with db_container() as container:
+        with pytest.raises(SkillHasBindingsError) as caught:
+            await container.organization_skill_service().remove_many(
+                skill_ids=[skill.id for skill in skills]
+            )
+        assert caught.value.details == {"skill_ids": [str(bound.id)]}
+        for skill in skills:
+            retained = await container.skill_repo().get_organization_for_tenant(
+                tenant_id=admin_user.tenant_id, skill_id=skill.id
+            )
+            assert retained is not None and retained.removed_at is None
+
+
+async def test_removal_winning_lock_rejects_a_waiting_binding_save(
+    db_container,
+    db_session,
+    skill_concurrency_resources,
+    organization_removal_skills,
+    admin_user,
+):
+    resources = skill_concurrency_resources
+    skill = organization_removal_skills[0]
+    writer_pid = asyncio.get_running_loop().create_future()
+
+    async def attach():
+        async with db_container() as container:
+            writer_pid.set_result(await _backend_pid(container))
+            await container.skill_service().replace_app_bindings(
+                space_id=resources.space_id,
+                app_id=resources.app_id,
+                references=[
+                    SkillBindingReference(
+                        skill_id=skill.id, skill_revision_id=skill.current_revision.id
+                    )
+                ],
+            )
+
+    async with db_container() as remover:
+        await remover.organization_skill_service().delete(skill_id=skill.id)
+        task = asyncio.create_task(attach())
+        try:
+            pid = await asyncio.wait_for(writer_pid, timeout=5)
+            await _wait_until_database_lock(db_session, pid=pid)
+        except BaseException:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            raise
+    with pytest.raises(NotFoundException):
+        await asyncio.wait_for(task, timeout=5)
+    async with db_container() as container:
+        assert (
+            await container.skill_repo().list_app_bindings(app_id=resources.app_id)
+            == []
+        )
+
+
+@pytest.mark.parametrize("status", [Status.QUEUED, Status.IN_PROGRESS])
+async def test_bulk_removal_waits_for_active_app_runs_and_retains_finished_run_provenance(
+    db_container,
+    skill_concurrency_resources,
+    organization_removal_skills,
+    status,
+):
+    resources = skill_concurrency_resources
+    skills = organization_removal_skills
+    skill = skills[0]
+    async with db_container() as container:
+        service = container.skill_service()
+        await service.replace_app_bindings(
+            space_id=resources.space_id,
+            app_id=resources.app_id,
+            references=[
+                SkillBindingReference(
+                    skill_id=skill.id, skill_revision_id=skill.current_revision.id
+                )
+            ],
+        )
+        composition = await service.compose_for_app(
+            app_id=resources.app_id, base_instructions="App instructions"
+        )
+        job_id, run_id = uuid4(), uuid4()
+        container.session().add(
+            Jobs(
+                id=job_id,
+                user_id=resources.user_id,
+                task=Task.RUN_APP.value,
+                status=status.value,
+            )
+        )
+        container.session().add(
+            AppRuns(
+                id=run_id,
+                tenant_id=resources.tenant_id,
+                user_id=resources.user_id,
+                app_id=resources.app_id,
+                job_id=job_id,
+                completion_model_id=resources.completion_model_id,
+                skill_provenance=_serialize_skill_provenance(composition.provenance),
+            )
+        )
+        await container.session().flush()
+        await service.replace_app_bindings(
+            space_id=resources.space_id, app_id=resources.app_id, references=[]
+        )
+        with pytest.raises(SkillHasActiveAppRunsError) as caught:
+            await container.organization_skill_service().remove_many(
+                skill_ids=[item.id for item in skills]
+            )
+        assert caught.value.details == {"skill_ids": [str(skill.id)]}
+        for item in skills:
+            retained = await container.skill_repo().get(skill_id=item.id)
+            assert retained is not None and retained.removed_at is None
+        await container.session().execute(
+            sa.update(Jobs)
+            .where(Jobs.id == job_id)
+            .values(status=Status.COMPLETE.value)
+        )
+        await container.organization_skill_service().remove_many(
+            skill_ids=[item.id for item in skills]
+        )
+        run = await container.session().get(AppRuns, run_id)
+        assert run is not None and run.skill_provenance == _serialize_skill_provenance(
+            composition.provenance
+        )
+        historical = await service.compose_for_execution_snapshot(
+            tenant_id=resources.tenant_id,
+            space_id=resources.space_id,
+            provenance=composition.provenance,
+            base_instructions="App instructions",
+        )
+        assert historical.provenance == composition.provenance
+
+
+async def test_personal_chat_binding_blocks_the_whole_removal_batch(
+    db_container,
+    organization_removal_skills,
+    admin_user,
+):
+    skills = organization_removal_skills
+    async with db_container() as container:
+        container.session().add(
+            SpacesUsers(
+                space_id=skills[0].space_id, user_id=admin_user.id, role="admin"
+            )
+        )
+        policy = GovernancePolicies(
+            tenant_id=admin_user.tenant_id,
+            scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT.value,
+        )
+        container.session().add(policy)
+        await container.session().flush()
+        await container.skill_service().replace_governance_bindings(
+            policy_id=policy.id,
+            organization_space_id=skills[0].space_id,
+            intents=[
+                SkillBindingIntent(
+                    reference=SkillBindingReference(
+                        skill_id=skills[0].id,
+                        skill_revision_id=skills[0].current_revision.id,
+                    )
+                )
+            ],
+        )
+        with pytest.raises(SkillHasBindingsError) as caught:
+            await container.organization_skill_service().remove_many(
+                skill_ids=[skill.id for skill in skills]
+            )
+        assert caught.value.details == {"skill_ids": [str(skills[0].id)]}
+        counts = await container.skill_repo().get_usage_counts(
+            tenant_id=admin_user.tenant_id, skill_ids=[skill.id for skill in skills]
+        )
+        assert counts[skills[0].id].personal_chat_pinned
+        assert counts[skills[0].id].distinct_space_count == 0
+        assert await container.skill_repo().get(skill_id=skills[1].id) is not None
+
+
+async def _bind_everywhere(container, resources, skill, admin_user):
+    """Bind one organisation Skill to the fixture Assistant, App and Personal Chat."""
+    reference = SkillBindingReference(
+        skill_id=skill.id, skill_revision_id=skill.current_revision.id
+    )
+    service = container.skill_service()
+    await service.replace_assistant_bindings(
+        space_id=resources.space_id,
+        assistant_id=resources.assistant_id,
+        intents=[SkillBindingIntent(reference=reference)],
+    )
+    await service.replace_app_bindings(
+        space_id=resources.space_id, app_id=resources.app_id, references=[reference]
+    )
+    container.session().add(
+        SpacesUsers(space_id=skill.space_id, user_id=admin_user.id, role="admin")
+    )
+    policy = GovernancePolicies(
+        tenant_id=admin_user.tenant_id,
+        scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT.value,
+    )
+    container.session().add(policy)
+    await container.session().flush()
+    await service.replace_governance_bindings(
+        policy_id=policy.id,
+        organization_space_id=skill.space_id,
+        intents=[SkillBindingIntent(reference=reference)],
+    )
+    return policy.id
+
+
+async def test_detaching_removal_deletes_every_binding_and_bumps_each_parent(
+    db_container,
+    skill_concurrency_resources,
+    organization_removal_skills,
+    admin_user,
+):
+    resources = skill_concurrency_resources
+    skills = organization_removal_skills
+    bound, free = skills
+
+    async def row_version(container, table, row_id):
+        # The pin-update guards compare xmin, so that is what must change.
+        return await container.session().scalar(
+            sa.select(
+                sa.cast(sa.literal_column(f"{table.__tablename__}.xmin"), sa.Text)
+            )
+            .select_from(table)
+            .where(table.id == row_id)
+        )
+
+    async with db_container() as container:
+        policy_id = await _bind_everywhere(container, resources, bound, admin_user)
+    parents = (
+        (Assistants, resources.assistant_id),
+        (Apps, resources.app_id),
+        (GovernancePolicies, policy_id),
+    )
+    async with db_container() as container:
+        before = {
+            table: await row_version(container, table, row_id)
+            for table, row_id in parents
+        }
+        outcomes = await container.organization_skill_service().remove_many(
+            skill_ids=[bound.id, free.id], detach_bindings=True
+        )
+
+        by_id = {outcome.skill.id: outcome for outcome in outcomes}
+        assert by_id[bound.id].detached.assistant_ids == (resources.assistant_id,)
+        assert by_id[bound.id].detached.app_ids == (resources.app_id,)
+        assert by_id[bound.id].detached.policy_ids == (policy_id,)
+        assert by_id[free.id].detached.is_empty
+        repo = container.skill_repo()
+        assert (
+            await repo.list_assistant_bindings(assistant_id=resources.assistant_id)
+            == []
+        )
+        assert await repo.list_app_bindings(app_id=resources.app_id) == []
+        assert await repo.list_policy_bindings(policy_id=policy_id) == []
+        for skill in skills:
+            retained = await repo.get_organization_for_tenant(
+                tenant_id=admin_user.tenant_id, skill_id=skill.id
+            )
+            assert retained is not None and retained.removed_at is not None
+    async with db_container() as container:
+        # Parent rows were rewritten, so staged pin updates re-validate against them.
+        for table, row_id in parents:
+            assert await row_version(container, table, row_id) != before[table]
+        # A second call is idempotent and reports nothing new detached.
+        again = await container.organization_skill_service().remove_many(
+            skill_ids=[bound.id], detach_bindings=True
+        )
+        assert again[0].detached.is_empty
+
+
+async def test_detaching_removal_still_refuses_active_app_runs(
+    db_container,
+    skill_concurrency_resources,
+    organization_removal_skills,
+):
+    resources = skill_concurrency_resources
+    skill = organization_removal_skills[0]
+    async with db_container() as container:
+        service = container.skill_service()
+        reference = SkillBindingReference(
+            skill_id=skill.id, skill_revision_id=skill.current_revision.id
+        )
+        await service.replace_app_bindings(
+            space_id=resources.space_id, app_id=resources.app_id, references=[reference]
+        )
+        composition = await service.compose_for_app(
+            app_id=resources.app_id, base_instructions="App instructions"
+        )
+        job_id = uuid4()
+        container.session().add(
+            Jobs(
+                id=job_id,
+                user_id=resources.user_id,
+                task=Task.RUN_APP.value,
+                status=Status.IN_PROGRESS.value,
+            )
+        )
+        container.session().add(
+            AppRuns(
+                id=uuid4(),
+                tenant_id=resources.tenant_id,
+                user_id=resources.user_id,
+                app_id=resources.app_id,
+                job_id=job_id,
+                completion_model_id=resources.completion_model_id,
+                skill_provenance=_serialize_skill_provenance(composition.provenance),
+            )
+        )
+        await container.session().flush()
+
+        with pytest.raises(SkillHasActiveAppRunsError):
+            await container.organization_skill_service().remove_many(
+                skill_ids=[skill.id], detach_bindings=True
+            )
+        # Nothing was detached before the refusal.
+        assert (
+            len(await container.skill_repo().list_app_bindings(app_id=resources.app_id))
+            == 1
+        )
+
+
+async def test_detaching_removal_fails_fast_while_a_binding_save_holds_its_parent(
+    db_container,
+    skill_concurrency_resources,
+    organization_removal_skills,
+):
+    resources = skill_concurrency_resources
+    skill = organization_removal_skills[0]
+    async with db_container() as container:
+        await container.skill_service().replace_app_bindings(
+            space_id=resources.space_id,
+            app_id=resources.app_id,
+            references=[
+                SkillBindingReference(
+                    skill_id=skill.id, skill_revision_id=skill.current_revision.id
+                )
+            ],
+        )
+    async with db_container() as writer:
+        # A binding save locks its parent first; hold only that lock so the
+        # removal gets past the Skill rows and meets the parent NOWAIT.
+        assert await writer.skill_repo().lock_app_for_binding_update(
+            app_id=resources.app_id
+        )
+        with pytest.raises(SkillRemovalBusyError):
+            async with db_container() as remover:
+                await asyncio.wait_for(
+                    remover.organization_skill_service().remove_many(
+                        skill_ids=[skill.id], detach_bindings=True
+                    ),
+                    timeout=2,
+                )
+    async with db_container() as container:
+        assert (
+            len(await container.skill_repo().list_app_bindings(app_id=resources.app_id))
+            == 1
+        )
+        retained = await container.skill_repo().get(skill_id=skill.id)
+        assert retained is not None and retained.removed_at is None
+
+
+async def test_execution_plan_read_waiting_behind_detaching_removal_sees_no_binding(
+    db_container,
+    db_session,
+    skill_concurrency_resources,
+    organization_removal_skills,
+):
+    resources = skill_concurrency_resources
+    skill = organization_removal_skills[0]
+    reader_pid = asyncio.get_running_loop().create_future()
+
+    async def prepare_run():
+        async with db_container() as container:
+            reader_pid.set_result(await _backend_pid(container))
+            return await container.skill_repo().list_app_bindings_for_execution_plan(
+                app_id=resources.app_id
+            )
+
+    async with db_container() as container:
+        await container.skill_service().replace_app_bindings(
+            space_id=resources.space_id,
+            app_id=resources.app_id,
+            references=[
+                SkillBindingReference(
+                    skill_id=skill.id, skill_revision_id=skill.current_revision.id
+                )
+            ],
+        )
+    async with db_container() as remover:
+        await remover.organization_skill_service().remove_many(
+            skill_ids=[skill.id], detach_bindings=True
+        )
+        # The run's share lock on the Skill row queues behind the removal's
+        # exclusive lock; after commit it must re-evaluate against the
+        # removed row, not compose the Skill from its pre-removal snapshot.
+        task = asyncio.create_task(prepare_run())
+        try:
+            pid = await asyncio.wait_for(reader_pid, timeout=5)
+            await _wait_until_database_lock(db_session, pid=pid)
+        except BaseException:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            raise
+    assert await asyncio.wait_for(task, timeout=5) == []
+
+
+async def test_detaching_removal_rolls_back_entirely_when_the_audit_write_fails(
+    db_container,
+    skill_concurrency_resources,
+    organization_removal_skills,
+    admin_user,
+    monkeypatch,
+):
+    resources = skill_concurrency_resources
+    skill = organization_removal_skills[0]
+
+    async def row_versions(container):
+        versions = {}
+        for table, row_id in parents:
+            versions[table] = await container.session().scalar(
+                sa.select(
+                    sa.cast(sa.literal_column(f"{table.__tablename__}.xmin"), sa.Text)
+                )
+                .select_from(table)
+                .where(table.id == row_id)
+            )
+        return versions
+
+    async with db_container() as container:
+        policy_id = await _bind_everywhere(container, resources, skill, admin_user)
+    parents = (
+        (Assistants, resources.assistant_id),
+        (Apps, resources.app_id),
+        (GovernancePolicies, policy_id),
+    )
+    async with db_container() as container:
+        before = await row_versions(container)
+
+    async def audit_down(**_kwargs):
+        raise RuntimeError("audit store unavailable")
+
+    with pytest.raises(RuntimeError, match="audit store unavailable"):
+        async with db_container() as container:
+            service = container.organization_skill_service()
+            monkeypatch.setattr(service.audit_service, "log", audit_down)
+            await service.remove_many(skill_ids=[skill.id], detach_bindings=True)
+
+    async with db_container() as container:
+        repo = container.skill_repo()
+        # Deletes ran before the audit call; none of them may survive it.
+        assert (
+            len(await repo.list_assistant_bindings(assistant_id=resources.assistant_id))
+            == 1
+        )
+        assert len(await repo.list_app_bindings(app_id=resources.app_id)) == 1
+        assert len(await repo.list_policy_bindings(policy_id=policy_id)) == 1
+        assert await row_versions(container) == before
+        retained = await repo.get(skill_id=skill.id)
+        assert retained is not None and retained.removed_at is None
+        assert (
+            await container.session().scalar(
+                sa.select(sa.func.count())
+                .select_from(AuditLog)
+                .where(AuditLog.entity_id == skill.id)
+            )
+            == 0
+        )
+
+
+async def test_execution_plan_never_composes_a_removed_skill(
+    db_container,
+    skill_concurrency_resources,
+    organization_removal_skills,
+):
+    resources = skill_concurrency_resources
+    skill = organization_removal_skills[0]
+    async with db_container() as container:
+        await container.skill_service().replace_app_bindings(
+            space_id=resources.space_id,
+            app_id=resources.app_id,
+            references=[
+                SkillBindingReference(
+                    skill_id=skill.id, skill_revision_id=skill.current_revision.id
+                )
+            ],
+        )
+        # Simulate the Read Committed race: the binding row still exists when
+        # the run prepares, but the Skill row has been marked removed.
+        await container.session().execute(
+            sa.update(Skills)
+            .where(Skills.id == skill.id)
+            .values(
+                removed_at=sa.func.now(),
+                is_active=False,
+                published_revision_number=None,
+            )
+        )
+        repo = container.skill_repo()
+        assert len(await repo.list_app_bindings(app_id=resources.app_id)) == 1
+        assert (
+            await repo.list_app_bindings_for_execution_plan(app_id=resources.app_id)
+            == []
+        )
+
+
+async def test_selected_detach_keeps_unselected_bindings_and_personal_chat(
+    db_container,
+    skill_concurrency_resources,
+    organization_removal_skills,
+    admin_user,
+):
+    resources = skill_concurrency_resources
+    skill = organization_removal_skills[0]
+    async with db_container() as container:
+        policy_id = await _bind_everywhere(container, resources, skill, admin_user)
+    async with db_container() as container:
+        detached = await container.organization_skill_service().detach_bindings(
+            skill_id=skill.id, assistant_ids=[resources.assistant_id], app_ids=[]
+        )
+    assert detached == SkillDetachment(assistant_ids=(resources.assistant_id,))
+    async with db_container() as container:
+        repo = container.skill_repo()
+        assert (
+            await repo.list_assistant_bindings(assistant_id=resources.assistant_id)
+            == []
+        )
+        assert len(await repo.list_app_bindings(app_id=resources.app_id)) == 1
+        assert len(await repo.list_policy_bindings(policy_id=policy_id)) == 1
+        retained = await repo.get(skill_id=skill.id)
+        assert retained is not None and retained.published_revision_number == 1
+
+
+async def test_selected_detach_fails_fast_and_rolls_back_while_a_parent_save_holds_its_lock(
+    db_container,
+    skill_concurrency_resources,
+    organization_removal_skills,
+    admin_user,
+):
+    resources = skill_concurrency_resources
+    skill = organization_removal_skills[0]
+    async with db_container() as container:
+        await _bind_everywhere(container, resources, skill, admin_user)
+    async with db_container() as writer:
+        # Assistants are detached before Apps; holding the App lock proves the
+        # earlier Assistant deletion is rolled back with the refusal.
+        assert await writer.skill_repo().lock_app_for_binding_update(
+            app_id=resources.app_id
+        )
+        with pytest.raises(SkillRemovalBusyError):
+            async with db_container() as remover:
+                await asyncio.wait_for(
+                    remover.organization_skill_service().detach_bindings(
+                        skill_id=skill.id,
+                        assistant_ids=[resources.assistant_id],
+                        app_ids=[resources.app_id],
+                    ),
+                    timeout=2,
+                )
+    async with db_container() as container:
+        repo = container.skill_repo()
+        assert (
+            len(await repo.list_assistant_bindings(assistant_id=resources.assistant_id))
+            == 1
+        )
+        assert len(await repo.list_app_bindings(app_id=resources.app_id)) == 1

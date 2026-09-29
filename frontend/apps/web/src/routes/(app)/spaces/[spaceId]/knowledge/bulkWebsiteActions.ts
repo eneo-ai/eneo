@@ -86,18 +86,11 @@ export function toggleVisibleWebsiteSelection(
   return nextSelection;
 }
 
+/** Row ids are display indexes; the website id lives on the row's data. */
 export function visibleWebsiteIdsFromTableRows(
-  rows: Iterable<{ dataId?: string; isData: () => boolean }>
+  rows: Iterable<{ original: { id: string } }>
 ): string[] {
-  const websiteIds: string[] = [];
-
-  for (const row of rows) {
-    if (row.isData() && row.dataId !== undefined) {
-      websiteIds.push(row.dataId);
-    }
-  }
-
-  return websiteIds;
+  return Array.from(rows, (row) => row.original.id);
 }
 
 export function bulkFailureWebsiteIds(errors: readonly BulkError[]): string[] {

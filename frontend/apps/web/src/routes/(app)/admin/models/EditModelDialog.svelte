@@ -25,7 +25,7 @@
   } from "@eneo/eneo-js";
   import { invalidate } from "$app/navigation";
   import type { Writable } from "svelte/store";
-  import { Loader2 } from "lucide-svelte";
+  import { LoaderCircle } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { getErrorMessage, toastError } from "$lib/core/errors";
@@ -276,7 +276,7 @@
       <Button variant="outline" onclick={handleCancel}>{m.cancel()}</Button>
       <Button onclick={handleSubmit} disabled={isSubmitting}>
         {#if isSubmitting}
-          <Loader2 class="animate-spin" aria-hidden="true" />
+          <LoaderCircle class="animate-spin" aria-hidden="true" />
         {/if}
         {isSubmitting ? m.saving() : m.save()}
       </Button>

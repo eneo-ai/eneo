@@ -13,6 +13,7 @@ import pytest
 from aiohttp import web
 
 from eneo.crawler import python_engine
+from eneo.crawler.destination_policy import DestinationPolicy
 from eneo.crawler.engine import (
     ConditionalGet,
     CrawlEvent,
@@ -147,7 +148,7 @@ async def test_malformed_anchor_does_not_abort_valid_child_discovery() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start")
             )
         ]
@@ -182,7 +183,7 @@ async def test_crawl_emits_pages_incrementally_and_follows_scoped_links() -> Non
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start")
             )
         ]
@@ -230,7 +231,7 @@ async def test_redirect_target_is_not_recrawled_or_counted_against_page_limit() 
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(
                     f"{base_url}/start",
                     max_items=2,
@@ -289,7 +290,7 @@ async def test_concurrent_redirect_target_is_owned_once_without_displacing_child
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(
                     f"{base_url}/start",
                     max_items=3,
@@ -334,7 +335,7 @@ async def test_concurrent_redirect_cycle_emits_one_explicit_failure() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(
                     f"{base_url}/start",
                     max_items=3,
@@ -393,7 +394,7 @@ async def test_redirect_handoffs_keep_page_requests_bounded() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(
                     f"{base_url}/start",
                     max_items=max_items,
@@ -456,7 +457,7 @@ async def test_page_fetches_refill_available_slots_before_the_slowest_finishes()
         async def collect() -> list[CrawlEvent]:
             return [
                 event
-                async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                async for event in PythonCrawlEngine(destination_policy=None).crawl(
                     _request(
                         f"{base_url}/start",
                         max_items=4,
@@ -517,7 +518,7 @@ async def test_page_refill_applies_one_delay_while_other_requests_finish() -> No
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(
                     f"{base_url}/start",
                     max_items=5,
@@ -562,7 +563,7 @@ async def test_expired_refill_delay_does_not_spin_at_page_limit(monkeypatch) -> 
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(
                     f"{base_url}/start",
                     max_items=3,
@@ -613,7 +614,7 @@ async def test_page_limit_selection_is_independent_of_response_order() -> None:
         async def selected_urls() -> list[str]:
             events = [
                 event
-                async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                async for event in PythonCrawlEngine(destination_policy=None).crawl(
                     _request(
                         f"{base_url}/start",
                         max_items=4,
@@ -674,7 +675,7 @@ async def test_discovered_page_and_file_work_shares_the_configured_item_budget(
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(
                     f"{base_url}/start",
                     max_items=6,
@@ -716,7 +717,7 @@ async def test_item_budget_adapts_to_a_page_with_many_files() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start", max_items=4)
             )
         ]
@@ -766,7 +767,7 @@ async def test_link_reorder_window_stays_bounded_behind_slow_page() -> None:
         async def collect() -> list[CrawlEvent]:
             return [
                 event
-                async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                async for event in PythonCrawlEngine(destination_policy=None).crawl(
                     _request(
                         f"{base_url}/start",
                         max_items=21,
@@ -827,7 +828,7 @@ async def test_robots_policy_is_checked_before_each_target_request(
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start", obey_robots=obey_robots)
             )
         ]
@@ -865,7 +866,7 @@ async def test_crawl_honors_robots_rules() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start", obey_robots=True)
             )
         ]
@@ -894,7 +895,7 @@ async def test_unreachable_robots_prevents_discovery(robots_status: int) -> None
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start", obey_robots=True)
             )
         ]
@@ -935,7 +936,7 @@ async def test_robots_content_negotiation_preserves_disallow_rules() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start", obey_robots=True)
             )
         ]
@@ -962,9 +963,7 @@ async def test_robots_request_timeout_blocks_the_origin() -> None:
         )
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
-                request
-            )
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(request)
         ]
 
     assert events == [
@@ -1009,7 +1008,7 @@ async def test_sitemap_file_crawl_negotiates_media_and_rediscovers_links() -> No
     contents: list[bytes] = []
     async with _serve(app) as base_url:
         events: list[CrawlEvent] = []
-        async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+        async for event in PythonCrawlEngine(destination_policy=None).crawl(
             _request(
                 f"{base_url}/sitemap.xml",
                 crawl_type=CrawlType.SITEMAP,
@@ -1066,7 +1065,7 @@ async def test_sitemap_crawl_follows_nested_indexes_but_not_page_links() -> None
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
             )
         ]
@@ -1112,7 +1111,7 @@ async def test_sitemap_pages_and_linked_files_share_the_item_budget() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(
                     f"{base_url}/sitemap.xml",
                     crawl_type=CrawlType.SITEMAP,
@@ -1166,7 +1165,7 @@ async def test_sitemap_page_limit_ignores_known_non_page_urls() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(
                     f"{base_url}/sitemap.xml",
                     crawl_type=CrawlType.SITEMAP,
@@ -1214,7 +1213,7 @@ async def test_sitemap_marks_only_an_additional_valid_page_as_truncated() -> Non
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(
                     f"{base_url}/sitemap.xml",
                     crawl_type=CrawlType.SITEMAP,
@@ -1274,7 +1273,7 @@ async def test_redirect_validators_belong_to_each_requested_url(
             hints.append(ConditionalGet(url=f"{base_url}/canonical", etag='"target"'))
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(
                     f"{base_url}/sitemap.xml",
                     crawl_type=CrawlType.SITEMAP,
@@ -1326,7 +1325,7 @@ async def test_recursive_discovery_ignores_cached_inventory(
             hints.append(ConditionalGet(f"{base_url}/start/old", etag='"known"'))
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(
                     f"{base_url}/start",
                     download_files=False,
@@ -1361,7 +1360,7 @@ async def test_crawl_retries_service_unavailable_with_retry_after() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start")
             )
         ]
@@ -1401,7 +1400,7 @@ async def test_sitemap_fetch_retries_service_unavailable() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
             )
         ]
@@ -1423,7 +1422,7 @@ async def test_empty_sitemap_emits_an_authoritative_snapshot() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
             )
         ]
@@ -1450,7 +1449,7 @@ async def test_discarded_validator_hints_do_not_make_empty_sitemap_partial() -> 
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(
                     f"{base_url}/sitemap.xml",
                     crawl_type=CrawlType.SITEMAP,
@@ -1502,7 +1501,7 @@ async def test_filtered_only_sitemap_is_not_authoritatively_empty(
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
             )
         ]
@@ -1529,7 +1528,7 @@ async def test_off_origin_only_sitemap_index_is_not_authoritatively_empty() -> N
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
             )
         ]
@@ -1560,7 +1559,7 @@ async def test_structurally_untrusted_sitemap_is_not_authoritatively_empty(
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
             )
         ]
@@ -1592,7 +1591,7 @@ async def test_sitemap_index_with_empty_child_is_authoritatively_empty() -> None
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
             )
         ]
@@ -1627,7 +1626,7 @@ async def test_sitemap_index_with_discarded_item_content_is_not_empty() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
             )
         ]
@@ -1663,7 +1662,7 @@ async def test_sitemap_with_visible_page_and_discarded_content_is_incomplete() -
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
             )
         ]
@@ -1704,7 +1703,7 @@ async def test_sitemap_skips_missing_location_without_losing_valid_pages() -> No
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
             )
         ]
@@ -1733,7 +1732,7 @@ async def test_crawl_rejects_oversized_response() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start", max_response_bytes=10)
             )
         ]
@@ -1762,7 +1761,7 @@ async def test_crawl_with_no_file_links_skips_temporary_directory(
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start", download_files=True)
             )
         ]
@@ -1807,7 +1806,7 @@ async def test_external_document_link_is_ignored_before_file_budgeting() -> None
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start", max_items=3)
             )
         ]
@@ -1874,7 +1873,7 @@ async def test_extensionless_document_reaches_bounded_text_extraction(
     documents: list[tuple[str, str, str]] = []
     events: list[CrawlEvent] = []
     async with _serve(app) as base_url:
-        async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+        async for event in PythonCrawlEngine(destination_policy=None).crawl(
             _request(f"{base_url}/start", max_items=2, max_response_bytes=100)
         ):
             events.append(event)
@@ -1918,7 +1917,7 @@ async def test_document_probe_does_not_follow_outside_pages_or_external_links(
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start", download_files=download_files)
             )
         ]
@@ -2054,7 +2053,7 @@ async def test_downloaded_file_is_removed_after_event_consumer_resumes() -> None
 
     async with _serve(app) as base_url:
         downloaded_paths: list[Path] = []
-        async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+        async for event in PythonCrawlEngine(destination_policy=None).crawl(
             _request(f"{base_url}/start")
         ):
             if isinstance(event, FileDownloaded):
@@ -2090,7 +2089,7 @@ async def test_file_download_retries_service_unavailable() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start")
             )
         ]
@@ -2132,7 +2131,7 @@ async def test_file_download_retries_an_incomplete_payload_from_a_clean_file() -
 
     async with _serve(app) as base_url:
         downloaded: list[bytes] = []
-        async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+        async for event in PythonCrawlEngine(destination_policy=None).crawl(
             _request(f"{base_url}/start")
         ):
             if isinstance(event, FileDownloaded):
@@ -2167,7 +2166,7 @@ async def test_retry_backoff_releases_process_wide_http_capacity(monkeypatch) ->
     app.router.add_get("/other", other)
 
     async with _serve(app) as base_url:
-        engine = PythonCrawlEngine(global_concurrency=1, allow_private_network=True)
+        engine = PythonCrawlEngine(global_concurrency=1, destination_policy=None)
 
         async def collect(path: str) -> list[CrawlEvent]:
             return [
@@ -2212,7 +2211,7 @@ async def test_closing_crawl_stream_removes_download_workspace() -> None:
     app.router.add_get("/guide.pdf", guide)
 
     async with _serve(app) as base_url:
-        stream = PythonCrawlEngine(allow_private_network=True).crawl(
+        stream = PythonCrawlEngine(destination_policy=None).crawl(
             _request(f"{base_url}/start")
         )
         downloaded_path: Path | None = None
@@ -2270,7 +2269,7 @@ async def test_file_size_limit_applies_to_streams_without_content_length(
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start", max_file_bytes=5)
             )
         ]
@@ -2318,7 +2317,7 @@ async def test_file_downloads_use_bounded_concurrency() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start", concurrency=2)
             )
         ]
@@ -2365,7 +2364,7 @@ async def test_file_downloads_are_emitted_in_completion_order() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start", concurrency=2)
             )
         ]
@@ -2399,12 +2398,8 @@ async def test_process_wide_http_capacity_bounds_concurrent_crawls(monkeypatch) 
     app.router.add_get("/two", slow)
 
     async with _serve(app) as base_url:
-        first_engine = PythonCrawlEngine(
-            global_concurrency=1, allow_private_network=True
-        )
-        second_engine = PythonCrawlEngine(
-            global_concurrency=1, allow_private_network=True
-        )
+        first_engine = PythonCrawlEngine(global_concurrency=1, destination_policy=None)
+        second_engine = PythonCrawlEngine(global_concurrency=1, destination_policy=None)
 
         async def collect(engine: PythonCrawlEngine, path: str) -> list[CrawlEvent]:
             return [
@@ -2465,7 +2460,7 @@ async def test_waiting_crawl_gets_next_global_slot_when_twenty_are_busy(
     app.router.add_get("/fast", fast)
 
     async with _serve(app) as base_url:
-        engine = PythonCrawlEngine(global_concurrency=20, allow_private_network=True)
+        engine = PythonCrawlEngine(global_concurrency=20, destination_policy=None)
 
         async def collect(path: str) -> list[CrawlEvent]:
             return [
@@ -2518,7 +2513,7 @@ async def test_sitemap_lastmod_emits_stable_snapshot() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
             )
         ]
@@ -2529,18 +2524,24 @@ async def test_sitemap_lastmod_emits_stable_snapshot() -> None:
     assert finished.sitemap_fingerprint is not None
 
 
-def test_non_global_network_targets_are_rejected() -> None:
-    assert not _address_is_allowed("127.0.0.1", allow_private_network=False)
-    assert not _address_is_allowed("169.254.169.254", allow_private_network=False)
-    assert not _address_is_allowed("10.0.0.1", allow_private_network=False)
-    assert not _address_is_allowed("224.0.0.1", allow_private_network=False)
-    assert not _address_is_allowed("::1", allow_private_network=False)
-    assert _address_is_allowed("8.8.8.8", allow_private_network=False)
+def test_disallowed_network_targets_are_rejected() -> None:
+    policy = DestinationPolicy()
+    assert not _address_is_allowed("127.0.0.1", policy=policy)
+    assert not _address_is_allowed("169.254.169.254", policy=policy)
+    assert not _address_is_allowed("224.0.0.1", policy=policy)
+    assert not _address_is_allowed("::1", policy=policy)
+    assert not _address_is_allowed("fe80::1%eth0", policy=policy)
+    assert _address_is_allowed("10.0.0.1", policy=policy)
+    assert _address_is_allowed("8.8.8.8", policy=policy)
+    blocking = DestinationPolicy(block_private_networks=True)
+    assert not _address_is_allowed("10.0.0.1", policy=blocking)
+    assert _address_is_allowed("8.8.8.8", policy=blocking)
     with pytest.raises(_UnsafeTarget):
         _reject_disallowed_literal(
-            "http://169.254.169.254/latest/meta-data/",
-            allow_private_network=False,
+            "http://169.254.169.254/latest/meta-data/", policy=policy
         )
+    with pytest.raises(_UnsafeTarget):
+        _reject_disallowed_literal("http://10.0.0.1/intranet", policy=blocking)
 
 
 async def test_private_seed_becomes_a_safe_page_failure() -> None:
@@ -2573,7 +2574,7 @@ async def test_redirect_is_validated_before_out_of_scope_target_is_requested() -
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start")
             )
         ]
@@ -2614,7 +2615,7 @@ async def test_https_upgrade_checks_the_target_origins_robots_policy(
     # One global HTTP slot also proves that policy loading cannot deadlock
     # behind the page request that needs that policy.
     async def collect_events() -> list[CrawlEvent]:
-        engine = PythonCrawlEngine(allow_private_network=True, global_concurrency=1)
+        engine = PythonCrawlEngine(destination_policy=None, global_concurrency=1)
         return [
             event
             async for event in engine.crawl(
@@ -2681,7 +2682,7 @@ async def test_https_upgrade_paces_child_pages_and_files_by_the_target_policy(
         events = [
             event
             async for event in PythonCrawlEngine(
-                allow_private_network=True, global_concurrency=3
+                destination_policy=None, global_concurrency=3
             ).crawl(
                 _request(
                     "http://example.test/start", obey_robots=obey_robots, max_seconds=25
@@ -2719,7 +2720,7 @@ async def test_robots_wait_leaves_http_capacity_free_and_honors_the_crawl_deadli
     async def collect_paced_crawl() -> list[CrawlEvent]:
         events: list[CrawlEvent] = []
         async for event in PythonCrawlEngine(
-            allow_private_network=True, global_concurrency=1
+            destination_policy=None, global_concurrency=1
         ).crawl(_request("http://paced.test/start", obey_robots=True, max_seconds=1)):
             events.append(event)
             if isinstance(event, PageCrawled):
@@ -2730,7 +2731,7 @@ async def test_robots_wait_leaves_http_capacity_free_and_honors_the_crawl_deadli
         return [
             event
             async for event in PythonCrawlEngine(
-                allow_private_network=True, global_concurrency=1
+                destination_policy=None, global_concurrency=1
             ).crawl(_request("http://fast.test/start", max_items=1))
         ]
 
@@ -2801,7 +2802,7 @@ async def test_https_upgrade_keeps_files_and_nested_sitemaps_without_forwarding_
             http_pass="password",
         )
         events: list[CrawlEvent] = []
-        async for event in PythonCrawlEngine(allow_private_network=True).crawl(request):
+        async for event in PythonCrawlEngine(destination_policy=None).crawl(request):
             if isinstance(event, FileDownloaded):
                 assert event.path.read_bytes() == b"PDF content"
             events.append(event)
@@ -2846,7 +2847,7 @@ async def test_https_upgrade_does_not_allow_downgrades_or_new_authorities(
     async with _serve_origins(app, monkeypatch) as requests:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request("http://example.test/start")
             )
         ]
@@ -2886,7 +2887,7 @@ async def test_basic_auth_is_not_sent_after_origin_change() -> None:
                 http_user="user",
                 http_pass="secret",
             )
-            engine = PythonCrawlEngine(allow_private_network=True)
+            engine = PythonCrawlEngine(destination_policy=None)
             events = [event async for event in engine.crawl(request)]
 
     assert seen_authorization == []
@@ -2906,7 +2907,7 @@ async def test_page_limit_marks_crawl_partial() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start", max_items=1)
             )
         ]
@@ -2929,7 +2930,7 @@ async def test_max_seconds_marks_slow_crawl_partial() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start", max_seconds=0.01)
             )
         ]
@@ -2954,7 +2955,7 @@ async def test_max_seconds_includes_robots_fetch() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(
                     f"{base_url}/start",
                     obey_robots=True,
@@ -2988,7 +2989,7 @@ async def test_file_downloads_share_the_overall_crawl_deadline() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start", max_seconds=0.05)
             )
         ]
@@ -3012,7 +3013,7 @@ async def test_bogus_response_charset_becomes_page_failure() -> None:
     async with _serve(app) as base_url:
         events = [
             event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            async for event in PythonCrawlEngine(destination_policy=None).crawl(
                 _request(f"{base_url}/start")
             )
         ]
@@ -3037,7 +3038,7 @@ async def test_cancellation_propagates_and_stops_in_flight_fetches() -> None:
         async def collect() -> list[CrawlEvent]:
             return [
                 event
-                async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                async for event in PythonCrawlEngine(destination_policy=None).crawl(
                     _request(f"{base_url}/start")
                 )
             ]

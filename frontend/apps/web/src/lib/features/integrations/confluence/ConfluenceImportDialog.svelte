@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { getEneo } from "$lib/core/Eneo";
   import SelectEmbeddingModel from "$lib/features/ai-models/components/SelectEmbeddingModel.svelte";
@@ -7,17 +8,16 @@
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { IconSearch } from "@eneo/icons/search";
   import { type IntegrationKnowledgePreview } from "@eneo/eneo-js";
-  import { Button, Dialog } from "@eneo/ui";
-  import { createCombobox } from "@melt-ui/svelte";
+  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Command from "$lib/components/ui/command/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import * as Popover from "$lib/components/ui/popover/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import type { IntegrationImportDialogProps } from "../IntegrationData";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
-
-  type PreviewOption = {
-    label: string;
-    value: IntegrationKnowledgePreview;
-  };
 
   let { goBack, openController, integration }: IntegrationImportDialogProps = $props();
 
@@ -28,10 +28,15 @@
   } = getSpacesManager();
   const { startUpdatePolling, updateJobs } = getJobManager();
 
-  let availableResources = $state<PreviewOption[] | null>(null);
+  const uid = $props.id();
+  let filter = $state("");
+  let pickerOpen = $state(false);
+  let pickerTrigger = $state<HTMLButtonElement | null>(null);
+  let selectedResource = $state<IntegrationKnowledgePreview | undefined>();
+  let availableResources = $state<IntegrationKnowledgePreview[] | null>(null);
   let filteredResources = $derived.by(() => {
     return (availableResources ?? []).filter((resource) =>
-      resource.value.name.toLowerCase().startsWith($inputValue.toLowerCase())
+      resource.name.toLowerCase().startsWith(filter.toLowerCase())
     );
   });
 
@@ -47,28 +52,18 @@
     }
 
     const preview = await eneo.integrations.knowledge.preview({ id });
-    availableResources = preview.map((space) => {
-      return {
-        label: space.name,
-        value: space
-      };
-    });
+    availableResources = preview;
   });
 
-  const {
-    elements: { menu, input, option },
-    states: { open, inputValue, selected }
-  } = createCombobox<IntegrationKnowledgePreview>({
-    portal: null,
-    positioning: {
-      sameWidth: true,
-      fitViewport: true,
-      placement: "bottom"
-    }
-  });
+  function selectResource(resource: IntegrationKnowledgePreview) {
+    selectedResource = resource;
+    pickerOpen = false;
+    filter = "";
+    void tick().then(() => pickerTrigger?.focus());
+  }
 
   const importKnowledge = createAsyncState(async () => {
-    if (!$selected) return;
+    if (!selectedResource) return;
     if (!selectedEmbeddingModel) return;
     // Need to destructure for ts narrowing
     const { id } = integration;
@@ -77,7 +72,7 @@
     try {
       await eneo.integrations.knowledge.import({
         integration: { id },
-        preview: $selected.value,
+        preview: selectedResource,
         embedding_model: selectedEmbeddingModel,
         space: $currentSpace
       });
@@ -86,7 +81,7 @@
       updateJobs();
       // Make sure we're also polling for further updates (polling will stop once all jobs are finished)
       startUpdatePolling();
-      $inputValue = ""; // Reset input in case something else should be added
+      selectedResource = undefined; // Reset in case something else should be added
       $openController = false;
     } catch (error) {
       toastError(error);
@@ -94,108 +89,103 @@
   });
 
   $effect(() => {
-    if (!$open) {
-      $inputValue = $selected?.value.name ?? $inputValue;
-    }
-
     if ($openController && availableResources === null) {
       loadPreview();
     }
   });
-
-  let inputElement = $state<HTMLInputElement>();
 </script>
 
-<Dialog.Root {openController}>
-  <Dialog.Content width="medium">
-    <Dialog.Title>{m.import_knowledge_from_confluence()}</Dialog.Title>
+<Dialog.Root bind:open={$openController}>
+  <Dialog.Content class={dialogLayout.content("medium")} closeLabel={m.close()}>
+    <Dialog.Header class={dialogLayout.header}>
+      <Dialog.Title>{m.import_knowledge_from_confluence()}</Dialog.Title>
+    </Dialog.Header>
 
-    <Dialog.Section scrollable={false}>
-      {#if $currentSpace.embedding_models.length < 1}
-        <p
-          class="label-warning border-label-default bg-label-dimmer text-label-stronger m-4 rounded-md border px-2 py-1 text-sm"
-        >
-          <span class="font-bold">{m.warning()}:</span>
-          {m.warning_no_embedding_models()}
-        </p>
-        <div class="border-default border-t"></div>
-      {/if}
-
-      <div class="flex flex-grow flex-col gap-1 rounded-md p-4">
-        <div>
-          <span class="pl-3 font-medium">{m.import_knowledge_from()}</span>
-        </div>
-        <div class="relative flex flex-grow">
-          <input
-            bind:this={inputElement}
-            placeholder={m.find_confluence_space()}
-            {...$input}
-            required
-            use:input
-            class="border-stronger bg-primary ring-default placeholder:text-secondary disabled:bg-secondary disabled:text-muted relative
-        h-10 w-full items-center justify-between overflow-hidden rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2 disabled:shadow-none disabled:hover:ring-0"
-          />
-          <button
-            onclick={() => {
-              inputElement?.focus();
-              $open = true;
-            }}
+    <div class={dialogLayout.body}>
+      <div class={dialogLayout.section}>
+        {#if $currentSpace.embedding_models.length < 1}
+          <p
+            class="label-warning border-label-default bg-label-dimmer text-label-stronger m-4 rounded-md border px-2 py-1 text-sm"
           >
-            <IconSearch class="absolute top-2 right-4" />
-          </button>
-        </div>
-        <ul
-          class="shadow-bg-secondary border-stronger bg-primary relative z-10 flex flex-col gap-1 overflow-y-auto rounded-lg border p-1 shadow-md focus:!ring-0"
-          {...$menu}
-          use:menu
-        >
-          <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-          <div class="bg-primary text-primary flex flex-col gap-0" tabindex="0">
-            {#if loadPreview.isLoading}
-              <div class="flex gap-2 px-2 py-1">
-                <IconLoadingSpinner class="animate-spin"></IconLoadingSpinner>
-                {m.loading_available_spaces()}
-              </div>
-            {:else if filteredResources.length > 0}
-              {#each filteredResources as previewItem (previewItem.value.key)}
-                {@const item = $state.snapshot(previewItem)}
-                <li
-                  {...$option(item)}
-                  use:option
-                  class="hover:bg-hover-default flex items-center gap-1 rounded-md px-2 py-1 hover:cursor-pointer"
+            <span class="font-bold">{m.warning()}:</span>
+            {m.warning_no_embedding_models()}
+          </p>
+          <div class="border-default border-t"></div>
+        {/if}
+
+        <Field.Field class="p-4">
+          <Field.Label id={`${uid}-resource-label`} for={`${uid}-resource`}
+            >{m.import_knowledge_from()}</Field.Label
+          >
+          <Popover.Root bind:open={pickerOpen}>
+            <Popover.Trigger>
+              {#snippet child({ props })}
+                <button
+                  {...props}
+                  bind:this={pickerTrigger}
+                  id={`${uid}-resource`}
+                  aria-labelledby={`${uid}-resource-label ${uid}-resource`}
+                  type="button"
+                  class={buttonVariants({
+                    variant: "outline",
+                    class: "w-full justify-between font-normal"
+                  })}
                 >
-                  <span class=" text-primary truncate py-1">
-                    {item.value.name}
+                  <span class="truncate" class:text-muted={!selectedResource}>
+                    {selectedResource?.name ?? m.find_confluence_space()}
                   </span>
-                </li>
-              {/each}
-            {:else}
-              <span class="text-secondary px-2 py-1">{m.no_matching_spaces_found()}</span>
-            {/if}
-          </div>
-        </ul>
+                  <IconSearch />
+                </button>
+              {/snippet}
+            </Popover.Trigger>
+            <Popover.Content align="start" class="w-(--bits-popover-anchor-width) p-0">
+              <Command.Root shouldFilter={false}>
+                <Command.Input bind:value={filter} placeholder={m.find_confluence_space()} />
+                <Command.List>
+                  {#if loadPreview.isLoading}
+                    <div class="flex gap-2 px-2 py-1.5 text-sm">
+                      <IconLoadingSpinner class="animate-spin"></IconLoadingSpinner>
+                      {m.loading_available_spaces()}
+                    </div>
+                  {:else}
+                    {#each filteredResources as resource (resource.key)}
+                      <Command.Item value={resource.key} onSelect={() => selectResource(resource)}>
+                        <span class="truncate">{resource.name}</span>
+                      </Command.Item>
+                    {:else}
+                      <p class="text-secondary px-2 py-1.5 text-sm">
+                        {m.no_matching_spaces_found()}
+                      </p>
+                    {/each}
+                  {/if}
+                </Command.List>
+              </Command.Root>
+            </Popover.Content>
+          </Popover.Root>
+        </Field.Field>
+
+        {#if $currentSpace.embedding_models.length > 1}
+          <div class="border-default w-full border-b"></div>
+        {/if}
+
+        <SelectEmbeddingModel
+          hideWhenNoOptions
+          bind:value={selectedEmbeddingModel}
+          selectableModels={$currentSpace.embedding_models}
+        ></SelectEmbeddingModel>
       </div>
+    </div>
 
-      {#if $currentSpace.embedding_models.length > 1}
-        <div class="border-default w-full border-b"></div>
-      {/if}
-
-      <SelectEmbeddingModel
-        hideWhenNoOptions
-        bind:value={selectedEmbeddingModel}
-        selectableModels={$currentSpace.embedding_models}
-      ></SelectEmbeddingModel>
-    </Dialog.Section>
-
-    <Dialog.Controls>
-      <Button onclick={goBack}>{m.back()}</Button>
+    <Dialog.Footer class={dialogLayout.footer}>
+      <Button variant="ghost" onclick={goBack}>{m.back()}</Button>
       <Button
-        variant="primary"
-        disabled={importKnowledge.isLoading || $currentSpace.embedding_models.length === 0}
+        disabled={importKnowledge.isLoading ||
+          !selectedResource ||
+          $currentSpace.embedding_models.length === 0}
         onclick={importKnowledge}
       >
         {importKnowledge.isLoading ? m.importing() : m.import_space()}
       </Button>
-    </Dialog.Controls>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

@@ -9,6 +9,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import BlobTable from "../../collections/[collectionId]/BlobTable.svelte";
   import CrawlLimitations from "./CrawlLimitations.svelte";
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName.js";
   import CrawlCreateRun from "./CrawlCreateRun.svelte";
   import { m } from "$lib/paraglide/messages";
@@ -17,11 +18,10 @@
     isCompletedWithMissingResources,
     isActiveCrawlRun
   } from "$lib/features/knowledge/crawlRunState";
-  import { Info, LoaderCircle, TriangleAlert } from "lucide-svelte";
+  import { Info, LoaderCircle, TriangleAlert } from "@lucide/svelte";
   import type { CrawlResourceFailure, CrawlRun, WebsiteInfoBlobPage } from "@eneo/eneo-js";
   import CrawlRunDetails from "$lib/features/knowledge/CrawlRunDetails.svelte";
   import CrawlFailureActions from "$lib/features/knowledge/CrawlFailureActions.svelte";
-  import dayjs from "dayjs";
   import { mergeLatestCrawlRun, pollWebsiteDetail } from "./websiteDetailPolling";
 
   export let data;
@@ -301,7 +301,7 @@
               </h2>
               <p class="text-secondary mt-1 max-w-prose text-sm">
                 {m.crawl_content_failure_description({
-                  date: dayjs(latestCompletedRun.created_at).format("YYYY-MM-DD HH:mm")
+                  date: formatDateTime(latestCompletedRun.created_at)
                 })}
               </p>
             </div>

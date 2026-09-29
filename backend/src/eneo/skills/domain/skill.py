@@ -32,6 +32,7 @@ MAX_SKILL_ADOPTION_PAGE_LIMIT = 100
 DEFAULT_SKILL_ADOPTION_PAGE_LIMIT = 25
 MAX_SKILL_EXECUTION_BLOCK_REASON_LENGTH = 1000
 MAX_RETAINED_SKILL_ACTIVATION_REJECTIONS = 50
+MAX_SKILL_REMOVAL_BATCH_SIZE = 100
 
 _SKILL_SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _SKILL_BOUNDARY = (
@@ -383,6 +384,7 @@ class Skill:
     current_revision: SkillRevision
     published_revision_number: int | None = None
     first_published_at: datetime | None = None
+    removed_at: datetime | None = None
 
     @property
     def publication_state(self) -> "SkillPublicationState":
@@ -394,9 +396,18 @@ class Skill:
 
 
 @dataclass(frozen=True)
+class SkillUsageCounts:
+    assistant_count: int = 0
+    app_count: int = 0
+    distinct_space_count: int = 0
+    personal_chat_pinned: bool = False
+
+
+@dataclass(frozen=True)
 class OrganizationSkillProjection:
     skill: Skill
     execution_blocked: bool
+    usage: SkillUsageCounts = SkillUsageCounts()
 
 
 class SkillPublicationState(str, Enum):
@@ -452,6 +463,7 @@ class SkillSummary:
     updated_at: datetime
     published_revision_number: int | None = None
     first_published_at: datetime | None = None
+    removed_at: datetime | None = None
 
     @property
     def publication_state(self) -> SkillPublicationState:
@@ -463,9 +475,31 @@ class SkillSummary:
 
 
 @dataclass(frozen=True)
+class SkillDetachment:
+    """Bindings deleted together with a Skill; empty when nothing was detached."""
+
+    assistant_ids: tuple[UUID, ...] = ()
+    app_ids: tuple[UUID, ...] = ()
+    policy_ids: tuple[UUID, ...] = ()
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.assistant_ids or self.app_ids or self.policy_ids)
+
+
+@dataclass(frozen=True)
+class SkillRemovalOutcome:
+    """One reviewed Skill after a removal batch, with what was detached for it."""
+
+    skill: SkillSummary
+    detached: SkillDetachment = SkillDetachment()
+
+
+@dataclass(frozen=True)
 class OrganizationSkillSummaryProjection:
     skill: SkillSummary
     execution_blocked: bool
+    usage: SkillUsageCounts = SkillUsageCounts()
 
 
 @dataclass(frozen=True)
@@ -539,6 +573,15 @@ class SkillAdoptionSummary:
 
 
 @dataclass(frozen=True)
+class SkillAdoptionFilter:
+    """Narrows the resource rows of an adoption page; totals stay whole-skill."""
+
+    query: str | None = None
+    kind: SkillAdoptionResourceKind | None = None
+    drift: SkillAdoptionDrift | None = None
+
+
+@dataclass(frozen=True)
 class SkillAdoptionResource:
     kind: SkillAdoptionResourceKind
     resource_id: UUID
@@ -548,6 +591,11 @@ class SkillAdoptionResource:
     revision_id: UUID
     revision_number: int
     drift: SkillAdoptionDrift
+    # Set only for resources in a personal space: whose space it is.
+    owner_name: str | None = None
+    # False when the space is another user's personal space, which the
+    # organisation admin cannot open (space_actor grants them no role there).
+    can_open: bool = True
 
 
 @dataclass(frozen=True)
@@ -556,6 +604,9 @@ class SkillAdoptionProjectionPage:
     items: tuple[SkillAdoptionResource, ...]
     limit: int
     next_cursor: str | None
+    # Resources matching the filter across all pages, for "n of m shown".
+    # Counted on the first page only; continuations leave it None.
+    matched_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -674,11 +725,19 @@ class PersonalChatPinConfirmOutcome(str, Enum):
 
 
 class SkillHasBindingsError(Exception):
-    pass
+    def __init__(self, *, skill_ids: list[UUID] | None = None) -> None:
+        self.details = {"skill_ids": [str(skill_id) for skill_id in skill_ids or []]}
+        super().__init__()
 
 
 class SkillHasActiveAppRunsError(Exception):
-    pass
+    def __init__(self, *, skill_ids: list[UUID] | None = None) -> None:
+        self.details = {"skill_ids": [str(skill_id) for skill_id in skill_ids or []]}
+        super().__init__()
+
+
+class SkillRemovalBusyError(Exception):
+    """A concurrent Skill operation must finish before removal can be retried."""
 
 
 class SkillRevisionConflictError(Exception):

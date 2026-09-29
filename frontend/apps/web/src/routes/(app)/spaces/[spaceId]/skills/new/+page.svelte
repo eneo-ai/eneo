@@ -60,16 +60,18 @@
     ></Page.Title>
   </Page.Header>
   <Page.Main>
-    <div class="mx-auto flex w-full max-w-[44rem] flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8">
-      <p class="text-muted-foreground max-w-[65ch] text-sm leading-6">
-        {m.skills_library_new_intro()}
-      </p>
-      <SkillForm
-        class="max-w-none"
-        onSubmit={createSkill}
-        showDiscardAction
-        onDirtyChange={(dirty) => (formDirty = dirty)}
-      />
+    <div class="mx-auto w-full max-w-[1100px] px-4 py-6 sm:px-6 sm:py-8">
+      <div class="flex max-w-[44rem] flex-col gap-6">
+        <p class="text-muted-foreground max-w-[65ch] text-sm leading-6">
+          {m.skills_library_new_intro()}
+        </p>
+        <SkillForm
+          class="max-w-none"
+          onSubmit={createSkill}
+          showDiscardAction
+          onDirtyChange={(dirty) => (formDirty = dirty)}
+        />
+      </div>
     </div>
   </Page.Main>
 </Page.Root>

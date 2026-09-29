@@ -4,10 +4,9 @@
   import { IconRefresh } from "@eneo/icons/refresh";
   import { IconStop } from "@eneo/icons/stop";
   import type { CrawlRun, Website } from "@eneo/eneo-js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { toastError } from "$lib/core/errors";
   import { toast } from "$lib/components/toast";
 
   export let website: Website;
@@ -28,11 +27,7 @@
     isStarting = true;
     try {
       await eneo.websites.crawlRuns.create(website);
-      startDialogOpen = false;
       await invalidate("crawlruns:list");
-    } catch (error) {
-      console.error(error);
-      toastError(error, m.error_creating_crawl_run());
     } finally {
       isStarting = false;
     }
@@ -44,12 +39,8 @@
     isStopping = true;
     try {
       await eneo.websites.crawlRuns.cancel(activeRun);
-      stopDialogOpen = false;
       toast.success(m.crawl_stopped());
       await invalidate("crawlruns:list");
-    } catch (error) {
-      console.error(error);
-      toastError(error, m.stop_crawl_failed());
     } finally {
       isStopping = false;
     }
@@ -73,36 +64,23 @@
   </Button>
 {/if}
 
-<AlertDialog.Root bind:open={startDialogOpen}>
-  <AlertDialog.Content>
-    <AlertDialog.Header>
-      <AlertDialog.Title>{m.sync_website()}</AlertDialog.Title>
-      <AlertDialog.Description>
-        {m.confirm_sync_website({ websiteName })}
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-    <AlertDialog.Footer>
-      <AlertDialog.Cancel disabled={isStarting}>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action disabled={isStarting} onclick={createRun}>
-        {isStarting ? m.starting() : m.start_crawl()}
-      </AlertDialog.Action>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={startDialogOpen}
+  title={m.sync_website()}
+  description={m.confirm_sync_website({ websiteName })}
+  confirmLabel={m.start_crawl()}
+  pendingLabel={m.starting()}
+  variant="default"
+  errorContext={m.error_creating_crawl_run()}
+  onConfirm={createRun}
+/>
 
-<AlertDialog.Root bind:open={stopDialogOpen}>
-  <AlertDialog.Content>
-    <AlertDialog.Header>
-      <AlertDialog.Title>{m.stop_crawl_title()}</AlertDialog.Title>
-      <AlertDialog.Description>
-        {m.stop_crawl_description({ websiteName })}
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-    <AlertDialog.Footer>
-      <AlertDialog.Cancel disabled={isStopping}>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action variant="destructive" disabled={isStopping} onclick={stopRun}>
-        {isStopping ? m.stopping_crawl() : m.stop_crawl()}
-      </AlertDialog.Action>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={stopDialogOpen}
+  title={m.stop_crawl_title()}
+  description={m.stop_crawl_description({ websiteName })}
+  confirmLabel={m.stop_crawl()}
+  pendingLabel={m.stopping_crawl()}
+  errorContext={m.stop_crawl_failed()}
+  onConfirm={stopRun}
+/>

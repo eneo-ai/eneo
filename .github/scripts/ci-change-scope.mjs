@@ -41,11 +41,19 @@ function classify(rawFiles) {
   }
 
   const full = files.some(isFullCiFile);
-  const backend = full || files.some(isBackendFile);
-  const frontend = full || files.some(isShippedFrontendFile);
+  // Both Python consumers and the web package validate this shared contract.
+  const whatsNewContract = files.some((file) => [
+    "frontend/packages/whats-new/version-order.cases.json",
+    "frontend/packages/whats-new/releases.schema.json",
+  ].includes(file));
+  const backend = full || whatsNewContract || files.some(isBackendFile)
+    || files.includes("scripts/backend_test_shard.py");
+  // The release-notes check runs in the frontend job against the real file.
+  const frontend =
+    full || files.some(isShippedFrontendFile) || files.includes("scripts/check_whats_new.py");
   const frontendE2e = full || backend || frontend || files.some(isE2eFile);
   const schema = full || backend || files.some(isSchemaFile);
-  const scripts = full || files.some(isScriptTestFile);
+  const scripts = full || whatsNewContract || files.some(isScriptTestFile);
   const routeMetadata = full || backend || files.includes("scripts/check_route_metadata.py");
   const dockerBackend = full || backend;
   const dockerFrontend = full || frontend;
@@ -151,6 +159,9 @@ function runSelfTest() {
   assert.equal(classify(["backend/src/eneo/server/main.py"]).route_metadata, true);
   assert.equal(classify(["backend/src/eneo/server/main.py"]).docker_backend, true);
 
+  assert.equal(classify(["scripts/backend_test_shard.py"]).backend, true);
+  assert.equal(classify(["scripts/backend_test_shard.py"]).scripts, true);
+
   assert.equal(classify(["frontend/apps/web/src/routes/+page.svelte"]).frontend, true);
   assert.equal(classify(["frontend/apps/web/src/routes/+page.svelte"]).frontend_e2e, true);
   assert.equal(classify(["frontend/apps/web/src/routes/+page.svelte"]).docker_frontend, true);
@@ -160,6 +171,14 @@ function runSelfTest() {
   assert.equal(classify(["frontend/knip.json"]).frontend_e2e, true);
   assert.equal(classify(["frontend/packages/eneo-js/src/types/schema.d.ts"]).schema, true);
   assert.equal(classify([".github/scripts/project-intake.mjs"]).scripts, true);
+  assert.equal(classify(["scripts/check_whats_new.py"]).frontend, true);
+  assert.equal(classify(["scripts/check_whats_new.py"]).scripts, true);
+  for (const name of ["version-order.cases.json", "releases.schema.json"]) {
+    const contractScope = classify([`frontend/packages/whats-new/${name}`]);
+    assert.equal(contractScope.backend, true);
+    assert.equal(contractScope.frontend, true);
+    assert.equal(contractScope.scripts, true);
+  }
   assert.equal(classify(["e2e/mock_model_server.py"]).frontend_e2e, true);
   assert.equal(classify([".devcontainer/Dockerfile"]).docker_devcontainer, true);
 

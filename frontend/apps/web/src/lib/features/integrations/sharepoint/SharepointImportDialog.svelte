@@ -5,16 +5,16 @@
   import type { EmbeddingModel, IntegrationKnowledgePreview } from "@eneo/eneo-js";
   import {
     Check,
-    CheckCircle2,
+    CircleCheck,
     Cloud,
     FileText,
     FlaskConical,
-    Globe2,
+    Earth,
     LoaderCircle,
     RefreshCw,
     Trash2,
     Users
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -156,7 +156,7 @@
       case "my_teams":
         return Users;
       case "other_sites":
-        return Globe2;
+        return Earth;
       case "onedrive":
         return Cloud;
     }
@@ -805,7 +805,7 @@
           <span
             class="bg-positive-default/10 flex size-14 items-center justify-center rounded-full"
           >
-            <CheckCircle2 class="text-positive-stronger size-8" aria-hidden="true" />
+            <CircleCheck class="text-positive-stronger size-8" aria-hidden="true" />
           </span>
           <div>
             <h3 id="sharepoint-simulation-complete-heading" class="text-lg font-semibold">

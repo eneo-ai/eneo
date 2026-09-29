@@ -37,6 +37,12 @@ JWT_ALGORITHM=HS256
 # Generate strong secret: python -c 'import secrets; print(secrets.token_hex(32))'
 JWT_SECRET=
 
+# API_KEY_HASH_SECRET - keeps API keys valid across JWT_SECRET rotation
+# API key hashes are derived from this value; when unset, JWT_SECRET is used.
+# Set it once (e.g. to the current JWT_SECRET before rotating that) and keep
+# it stable, otherwise every issued API key stops resolving.
+API_KEY_HASH_SECRET=
+
 JWT_TOKEN_PREFIX=Bearer
 URL_SIGNING_KEY=
 
@@ -367,6 +373,12 @@ CRAWL_FETCH_CONCURRENCY=4
 CRAWL_GLOBAL_HTTP_CONCURRENCY=20
 CRAWL_REQUEST_DELAY_SECONDS=0
 CRAWL_PAGE_MAX_SIZE=10485760
+
+# The crawler never connects to loopback, link-local (cloud metadata),
+# unspecified or multicast addresses. Private (intranet) ranges are allowed
+# by default so intranet sites can be indexed; set to true to refuse them too.
+# Only http(s) is crawled, and the worker's HTTP(S)_PROXY is not used.
+CRAWLER_BLOCK_PRIVATE_NETWORKS=false
 
 # --- ADVANCED SETTINGS ------------------------------------------------------
 

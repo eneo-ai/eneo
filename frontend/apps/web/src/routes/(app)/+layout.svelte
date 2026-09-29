@@ -1,11 +1,14 @@
 <script lang="ts">
   import { IconArrowUpToLine } from "@eneo/icons/arrow-up-to-line";
-  import { Button } from "@eneo/ui";
   import { page } from "$app/stores";
   import { getAppContext, initAppContext } from "$lib/core/AppContext";
   import JobManagerDropdown from "$lib/features/jobs/components/JobManagerDropdownButton.svelte";
   import { initJobManager } from "$lib/features/jobs/JobManager";
   import { initExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
+  import { initWhatsNewStore } from "$lib/features/whats-new/whatsNewStore";
+  import { initWhatsNewTour } from "$lib/features/whats-new/tour";
+  import { beforeNavigate } from "$app/navigation";
+  import WhatsNewAnnouncement from "$lib/features/whats-new/WhatsNewAnnouncement.svelte";
   import ProfileMenu from "./ProfileMenu.svelte";
   import { initEneo } from "$lib/core/Eneo";
   import { initEneoSocket } from "$lib/core/EneoSocket";
@@ -25,6 +28,11 @@
   initAppContext(data);
   initJobManager(data);
   initExpiringKeysStore(data);
+  const whatsNew = initWhatsNewStore(data);
+  const whatsNewTour = initWhatsNewTour();
+  $: whatsNew.setEnabled(data.whatsNewEnabled);
+  $: if (!data.whatsNewEnabled) whatsNewTour.stop();
+  beforeNavigate(({ to }) => whatsNewTour.beforeNavigation(to?.url ?? null));
   initAttachmentUrlService(data);
   initFaviconUrlService();
   const socket = initEneoSocket(data);
@@ -34,6 +42,7 @@
   // e.g. will run in child components first. This would mean the socket is not yet open when trying to subscribe in a child.
   if (browser) socket.connect();
   onDestroy(() => {
+    whatsNewTour.stop();
     // Socket needs to be disconnected so it can be garbage collected during HMR
     socket.disconnect();
   });
@@ -63,6 +72,7 @@
 <div class="bg-secondary absolute inset-0"></div>
 
 <PageLoadBar color="var(--accent-default)" displayThresholdMs={200} />
+<WhatsNewAnnouncement />
 
 <div
   class="fixed inset-0 z-[100] h-3"
@@ -98,15 +108,16 @@
         ></IconEneo>
       </a>
       <!-- eslint-enable svelte/no-navigation-without-resolve -->
-      <Button
-        unstyled
-        class="text-accent-stronger hover:bg-hover-default hidden h-9 w-9 items-center justify-center rounded-lg text-lg md:group-hover:flex"
+      <button
+        type="button"
+        class="text-accent-stronger hover:bg-hover-default hidden h-9 w-9 cursor-pointer items-center justify-center rounded-lg text-lg md:group-hover:flex"
+        aria-label={m.hide_header()}
         on:click={() => {
           $showHeader = false;
         }}
       >
         <IconArrowUpToLine />
-      </Button>
+      </button>
     </div>
     <nav class="flex h-[3.25rem] w-full items-center gap-1 overflow-x-auto px-3">
       <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
@@ -147,7 +158,7 @@
     </nav>
   </header>
 
-  <main class="border-box bg-primary relative z-10 flex-grow overflow-clip transition-all">
+  <main class="bg-primary relative z-10 flex-grow overflow-clip transition-all">
     <slot />
   </main>
 </div>

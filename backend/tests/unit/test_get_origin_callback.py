@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -6,6 +7,7 @@ from starlette.datastructures import Headers
 
 from eneo.allowed_origins import get_origin_callback as callback_module
 from eneo.authentication.auth_models import ApiKeyPolicyResponse
+from eneo.main.exceptions import ErrorCodes
 from eneo.server.middleware.cors import CORSMiddleware
 
 
@@ -246,6 +248,53 @@ async def test_cors_middleware_rejects_origin_before_calling_application():
 
     assert not application_called
     assert sent_messages[0]["status"] == 400
+
+
+@pytest.mark.asyncio
+async def test_rejected_origin_answers_in_the_api_error_contract():
+    """A caller that forwards a browser Origin reads this body, so it carries
+    the same shape and a machine code like every other 400."""
+
+    async def callback(origin, headers, is_preflight, request_url):  # noqa: ARG001
+        return False
+
+    async def app(scope, receive, send):  # noqa: ARG001
+        raise AssertionError("application must not be called")
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    sent_messages = []
+
+    async def send(message):
+        sent_messages.append(message)
+
+    cors = CORSMiddleware(app, callback=callback)
+    await cors(
+        {
+            "type": "http",
+            "path": "/api/v1/flows/",
+            "method": "POST",
+            "headers": [(b"origin", b"https://proxy.example")],
+        },
+        receive,
+        send,
+    )
+
+    start, body = sent_messages[0], sent_messages[1]
+    headers = Headers(raw=start["headers"])
+    assert start["status"] == 400
+    assert headers["content-type"] == "application/json"
+    assert headers["vary"] == "Origin"
+    assert json.loads(body["body"]) == {
+        "message": (
+            "Origin is not allowed. A server-side caller should not forward "
+            "the browser Origin header."
+        ),
+        "eneo_error_code": ErrorCodes.BAD_REQUEST.value,
+        "code": "disallowed_cors_origin",
+        "context": {"origin": "https://proxy.example"},
+    }
 
 
 @pytest.mark.asyncio

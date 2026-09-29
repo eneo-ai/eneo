@@ -1,7 +1,7 @@
 import { render } from "vitest-browser-svelte";
 import { describe, expect, it } from "vitest";
 import { marked } from "marked";
-import { Markdown } from "@eneo/ui";
+import { Markdown } from "$lib/components/markdown/index.js";
 import InrefProbe from "./__fixtures__/InrefProbe.svelte";
 
 // The chat appends streamed text to the answer every buffered flush. The

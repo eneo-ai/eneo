@@ -36,7 +36,7 @@
     ImageModel,
     TranscriptionModel
   } from "@eneo/eneo-js";
-  import { Tooltip } from "@eneo/ui";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { IconInfo } from "@eneo/icons/info";
   import { m } from "$lib/paraglide/messages";
 
@@ -83,21 +83,18 @@
       {displayName}
     </h4>
     {#if showDescriptionButton && descriptionText}
-      <Tooltip text={descriptionText} asFragment let:trigger>
-        {@const tooltipTrigger = trigger[0]}
-        <button
-          type="button"
-          {...tooltipTrigger}
-          use:tooltipTrigger.action
+      <Tooltip.Root>
+        <Tooltip.Trigger
           aria-label={m.show_model_info()}
           tabindex={descriptionTabbable ? 0 : -1}
-          on:click|stopPropagation
-          on:pointerdown|stopPropagation
+          onclick={(event) => event.stopPropagation()}
+          onpointerdown={(event) => event.stopPropagation()}
           class="text-secondary hover:text-primary focus-visible:ring-default focus-visible:ring-offset-primary inline-flex shrink-0 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
         >
           <IconInfo class="size-4" />
-        </button>
-      </Tooltip>
+        </Tooltip.Trigger>
+        <Tooltip.Content>{descriptionText}</Tooltip.Content>
+      </Tooltip.Root>
     {/if}
   </div>
 {/if}

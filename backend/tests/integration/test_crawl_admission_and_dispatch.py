@@ -1469,7 +1469,7 @@ async def test_recursive_crawl_rediscovers_children_of_cached_pages(
 
         container = Container(session=providers.Object(SessionProxy()))
         container.crawler.override(
-            providers.Object(PythonCrawlEngine(allow_private_network=True))
+            providers.Object(PythonCrawlEngine(destination_policy=None))
         )
         embeddings = Mock(
             get_embeddings=AsyncMock(side_effect=AssertionError("Unchanged text"))

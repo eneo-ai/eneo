@@ -1,10 +1,10 @@
 <script lang="ts">
+  import { intlLocale } from "$lib/core/formatting/dateTime";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import Info from "@lucide/svelte/icons/info";
   import {
@@ -29,7 +29,7 @@
   const remainingCount = $derived(Math.max(0, rows.length - visibleCount));
   const summary = $derived(summarizeSkillActivation(evidence));
   const unmatchedRejections = $derived(getUnmatchedActivationRejections(evidence));
-  const numberFormatter = $derived(new Intl.NumberFormat(getLocale() === "sv" ? "sv-SE" : "en-US"));
+  const numberFormatter = $derived(new Intl.NumberFormat(intlLocale()));
 
   const status = $derived<"activated" | "none" | "warning">(
     summary.blocked > 0 || summary.rejected > 0

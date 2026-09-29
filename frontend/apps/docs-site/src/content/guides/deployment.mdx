@@ -381,6 +381,11 @@ value and a comment.
     | `CLOSESPIDER_ITEMCOUNT` | `20000` | Max pages and linked files per crawl |
     | `CRAWL_JOB_CONCURRENCY_LIMIT` | `WORKER_MAX_JOBS` | Cluster-wide crawl admission limit across crawler replicas |
     | `CRAWL_HEARTBEAT_INTERVAL_SECONDS` | `300` | PostgreSQL lease renewal interval |
+    | `CRAWLER_BLOCK_PRIVATE_NETWORKS` | `false` | Also refuse private (intranet) ranges; loopback, link-local and metadata addresses are always refused |
+
+    <Callout type="warning">
+      **Crawler network access.** The crawler only fetches `http(s)` URLs. Loopback, link-local (including the cloud metadata address), unspecified and multicast destinations are always refused at connection time, including after redirects. Private (intranet) ranges are allowed by default so intranet sites can be indexed; set `CRAWLER_BLOCK_PRIVATE_NETWORKS=true` on backend and worker to refuse them as well. The worker's `HTTP_PROXY`/`HTTPS_PROXY` are not used for crawling.
+    </Callout>
 
     **Background Worker:**
 
@@ -950,13 +955,13 @@ frontend:
 
 # Production (pin to specific version)
 frontend:
-  image: ghcr.io/eneo-ai/eneo-frontend:v1.2.3
+  image: ghcr.io/eneo-ai/eneo-frontend:2.2.0
 backend:
-  image: ghcr.io/eneo-ai/eneo-backend:v1.2.3
+  image: ghcr.io/eneo-ai/eneo-backend:2.2.0
 worker:
-  image: ghcr.io/eneo-ai/eneo-backend:v1.2.3
+  image: ghcr.io/eneo-ai/eneo-backend:2.2.0
 db-init:
-  image: ghcr.io/eneo-ai/eneo-backend:v1.2.3
+  image: ghcr.io/eneo-ai/eneo-backend:2.2.0
 ```
 
 **Find available versions:**
@@ -1013,7 +1018,14 @@ checksum and skew-recovery checks.
 <Steps>
 ### Update version tags (if pinned)
 
-Edit `docker-compose.yml` and update version tags (e.g., `v1.2.3` → `v1.2.4`).
+Edit `docker-compose.yml` and update the image tags, for example `ghcr.io/eneo-ai/eneo-backend:2.1.1` → `ghcr.io/eneo-ai/eneo-backend:2.2.0`. Eneo image tags have no `v` prefix.
+
+### Rename environment variables that are no longer read
+
+From 2.2, `db-init`, the backend, the worker and the web app refuse to start
+while a renamed variable is set without its replacement, and the web app
+refuses to start without `ENEO_BACKEND_URL`. Before upgrading to 2.2, follow
+[Upgrading to 2.2.0](/guides/upgrade-2-2-0#environment-variables).
 
 ### Review network changes
 
@@ -1038,7 +1050,7 @@ old workers before starting `db-init`. The schema expansion installs a database
 write fence because old File/Icon code still changes legacy payload columns.
 
 Follow the [File and Icon storage upgrade
-checklist](/guides/file-icon-storage-upgrade#before-you-upgrade). Keep the API
+checklist](/guides/file-icon-storage-upgrade#before-you-start). Keep the API
 closed until the new migration and same-release worker are ready.
 
 ### Take the stopped-writer recovery point

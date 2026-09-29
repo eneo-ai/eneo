@@ -12,7 +12,10 @@ const createRun = vi.hoisted(() => vi.fn());
 const cancelRun = vi.hoisted(() => vi.fn());
 const listFailures = vi.hoisted(() => vi.fn());
 const showError = vi.hoisted(() => vi.fn());
-vi.mock("$lib/core/errors", () => ({ toastError: showError }));
+vi.mock("$lib/core/errors", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("$lib/core/errors")>()),
+  toastError: showError
+}));
 const route = vi.hoisted(() => ({
   url: new URL("http://localhost/?tab=crawls"),
   state: { tab: "crawls" }

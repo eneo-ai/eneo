@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { HTMLInputAttributes } from "svelte/elements";
-  import { Eye, EyeOff } from "lucide-svelte";
+  import { Eye, EyeOff } from "@lucide/svelte";
   import { Input } from "$lib/components/ui/input";
   import { m } from "$lib/paraglide/messages";
   import { cn } from "$lib/utils";

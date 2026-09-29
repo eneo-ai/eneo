@@ -13,7 +13,7 @@ import json
 import re
 import time
 from types import TracebackType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from eneo.authentication.signed_urls import looks_like_reference_url
@@ -30,6 +30,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     is_capability_purpose,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
+    MCPAuthenticationError,
     MCPClient,
     MCPClientError,
     validate_tool_catalog,
@@ -60,6 +61,14 @@ REFERENCE_URL_VALID_NOTICE = (
     "url, the tool runs somewhere that cannot reach this deployment's file "
     "references: tell the user that the tool cannot access the file from where "
     "it runs."
+)
+AUTH_DENIED_NOTICE = (
+    "Access was denied by this MCP tool. Check its permissions or the "
+    "credentials used by its server."
+)
+_AUTH_DENIED_ERROR = re.compile(
+    r"(?:error:\s*)?(?:unauthorized|(?:http\s*)?401(?:\s+unauthorized)?)",
+    re.IGNORECASE,
 )
 MCP_IDENTITY_CATALOG_PREPARATION_TIMEOUT_SECONDS = float(
     _settings.mcp_client_connect_timeout_seconds
@@ -923,6 +932,37 @@ class MCPProxySession:
             "is_error": True,
         }
 
+    @staticmethod
+    def _is_auth_denied_result(result: dict[str, Any]) -> bool:
+        if not result.get("is_error"):
+            return False
+        content: object = result.get("content")
+        if not isinstance(content, list):
+            return False
+        for block in cast("list[object]", content[:3]):
+            if not isinstance(block, dict):
+                continue
+            block_values = cast("dict[str, object]", block)
+            raw_text = block_values.get("text")
+            if not isinstance(raw_text, str):
+                continue
+            text = raw_text.strip()
+            if len(text) > 512:
+                continue
+            if _AUTH_DENIED_ERROR.fullmatch(text):
+                return True
+            try:
+                payload: object = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                error = cast("dict[str, object]", payload).get("error")
+                if isinstance(error, str) and _AUTH_DENIED_ERROR.fullmatch(
+                    error.strip()
+                ):
+                    return True
+        return False
+
     async def call_tool(
         self,
         tool_name: str,
@@ -987,21 +1027,30 @@ class MCPProxySession:
             logger.debug(
                 f"[MCPProxy] {original_tool_name} completed in {elapsed_ms:.0f}ms [{status}]"
             )
-            if is_error:
-                await self._record_failure(server.id)
-            else:
-                await self._record_success(server.id)
+            # A protocol-level result proves the server responded, even when
+            # its tool reports an application or permission error. Only client
+            # failures count toward the server-wide circuit breaker.
+            await self._record_success(server.id)
+            auth_denied = self._is_auth_denied_result(result)
             result = self._truncate_tool_result(result)
             if is_error:
+                blocks: list[Any] = list(result.get("content") or [])
+                if auth_denied:
+                    blocks.append({"type": "text", "text": AUTH_DENIED_NOTICE})
                 # A tool that failed on a reference URL should not be retried
                 # into a loop; appended after truncation so the pointer to the
                 # built-in reader survives it.
                 hint = self._reference_fallback_hint(tool_name, arguments)
                 if hint:
-                    blocks: list[Any] = list(result.get("content") or [])
                     blocks.append({"type": "text", "text": hint})
+                if auth_denied or hint:
                     result = {**result, "content": blocks}
             return result
+        except MCPAuthenticationError:
+            return {
+                "content": [{"type": "text", "text": AUTH_DENIED_NOTICE}],
+                "is_error": True,
+            }
         except MCPClientError:
             self._mark_server_failed(server.id)
             await self._record_failure(server.id)

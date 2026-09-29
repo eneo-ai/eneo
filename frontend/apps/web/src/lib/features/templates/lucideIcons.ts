@@ -15,14 +15,37 @@ import type { Component } from "svelte";
  */
 
 export type LucideIconComponent = Component<{ class?: string }>;
-export type LucideIconRegistry = Record<string, LucideIconComponent>;
+
+type LucideModule = Record<string, unknown> & { icons: Record<string, LucideIconComponent> };
+
+export type LucideIconRegistry = {
+  /** Current icon names in PascalCase: what the picker offers. */
+  names: string[];
+  /**
+   * The icon for a stored name. Lucide keeps aliases for icons it has renamed
+   * (`home` is now `house`), so names saved from older versions still resolve.
+   */
+  get(name: string | null | undefined): LucideIconComponent | null;
+};
+
+export function createLucideRegistry(module: LucideModule): LucideIconRegistry {
+  return {
+    names: Object.keys(module.icons).sort(),
+    get(name) {
+      if (!name) return null;
+      const key = toPascalCase(name);
+      if (key === "Icon") return null;
+      return module.icons[key] ?? (module[key] as LucideIconComponent | undefined) ?? null;
+    }
+  };
+}
 
 let registry: Promise<LucideIconRegistry> | undefined;
 
 /** The full Lucide registry, fetched on first use and shared afterwards. */
 export function loadLucideIcons(): Promise<LucideIconRegistry> {
-  registry ??= import("lucide-svelte").then(
-    (module) => module as unknown as LucideIconRegistry,
+  registry ??= import("@lucide/svelte").then(
+    (module) => createLucideRegistry(module as unknown as LucideModule),
     (error: unknown) => {
       // Do not keep a failed download; the next caller retries the request.
       registry = undefined;
@@ -50,7 +73,7 @@ export async function loadLucideIcon(
 ): Promise<LucideIconComponent | null> {
   if (!name) return null;
   const icons = await loadLucideIcons();
-  return icons[toPascalCase(name)] ?? null;
+  return icons.get(name);
 }
 
 /** Like loadLucideIcon, but a failed download yields null instead of rejecting. */

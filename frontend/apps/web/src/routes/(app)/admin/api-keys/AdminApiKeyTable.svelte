@@ -25,8 +25,8 @@
     Activity,
     User,
     Link,
-    AlertTriangle
-  } from "lucide-svelte";
+    TriangleAlert
+  } from "@lucide/svelte";
   import { slide } from "svelte/transition";
   import { SvelteSet, SvelteURLSearchParams } from "svelte/reactivity";
   import {
@@ -442,7 +442,7 @@
                           class="border-warning-default/40 bg-warning-dimmer/40 text-warning-stronger dark:bg-warning-dimmer/20 rounded-lg border p-3 text-xs"
                         >
                           <span class="inline-flex items-center gap-1.5">
-                            <AlertTriangle class="h-3.5 w-3.5" />
+                            <TriangleAlert class="h-3.5 w-3.5" />
                             {m.api_keys_admin_usage_sampled_notice()}
                           </span>
                         </div>

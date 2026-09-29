@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { AssistantSkillBindingInput, AssistantSkillBindingSummary } from "@eneo/eneo-js";
-  import { BookOpenCheck } from "lucide-svelte";
+  import { BookOpenCheck } from "@lucide/svelte";
   import { resolve } from "$app/paths";
   import { Button } from "$lib/components/ui/button/index.js";
   import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";

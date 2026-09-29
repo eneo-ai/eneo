@@ -9,7 +9,7 @@
   import type { SkillRevisionFormValue } from "$lib/features/skills/skillBindings";
   import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
-  import { Info } from "lucide-svelte";
+  import { Info } from "@lucide/svelte";
   import { tick } from "svelte";
 
   const EDIT_SKILL_PERMISSION: ResourcePermission = "edit";

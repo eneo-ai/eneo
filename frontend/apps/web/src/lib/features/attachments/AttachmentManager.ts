@@ -21,14 +21,18 @@ export type Attachment = {
   remove: () => void;
 };
 
+export type AcceptedFormat = {
+  mimetype: string;
+  maxSize: number;
+  /** Lowercase extensions including the leading dot, e.g. `[".pdf"]`. */
+  extensions: string[];
+};
+
 export type AttachmentRules = {
   maxTotalCount?: number;
   maxTotalSize?: number;
   acceptString?: string;
-  acceptedFormats?: {
-    mimetype: string;
-    maxSize: number;
-  }[];
+  acceptedFormats?: AcceptedFormat[];
 };
 
 export type AttachmentValidationError = {
@@ -38,6 +42,19 @@ export type AttachmentValidationError = {
   fileSizeBytes?: number;
   maxSizeBytes?: number;
 };
+
+export function unsupportedTypeError(file: File): AttachmentValidationError {
+  // Some files have a codec in the type, separated by a `;`
+  const mimetype = file.type.split(";")[0];
+  return {
+    kind: "unsupported_type",
+    fileName: file.name,
+    message: m.attachment_error_unsupported_type({
+      fileName: file.name,
+      fileType: mimetype || m.unknown()
+    })
+  };
+}
 
 const [getAttachmentManager, setAttachmentManager] =
   createContext<ReturnType<typeof createAttachmentManager>>();
@@ -229,14 +246,7 @@ function createAttachmentManager(data: AttachmentManagerParams) {
         const format = selectedRules.acceptedFormats.find((format) => format.mimetype === mimetype);
 
         if (!format) {
-          errors.push({
-            kind: "unsupported_type",
-            fileName: file.name,
-            message: m.attachment_error_unsupported_type({
-              fileName: file.name,
-              fileType: mimetype
-            })
-          });
+          errors.push(unsupportedTypeError(file));
           continue;
         }
 

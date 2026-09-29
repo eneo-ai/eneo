@@ -32,6 +32,7 @@ from aiohttp.abc import AbstractResolver, ResolveResult
 from aiohttp.resolver import DefaultResolver
 
 from eneo.crawler.cpu_work import run_cpu_work
+from eneo.crawler.destination_policy import DestinationPolicy
 from eneo.crawler.engine import (
     ConditionalGet,
     CrawlEvent,
@@ -219,17 +220,16 @@ def _log_skipped_sitemap_entries(count: int) -> None:
         )
 
 
-def _address_is_allowed(address: str, *, allow_private_network: bool) -> bool:
-    if allow_private_network:
+def _address_is_allowed(address: str, *, policy: DestinationPolicy | None) -> bool:
+    if policy is None:  # Unrestricted: only for crawling local test servers.
         return True
     try:
-        parsed = ipaddress.ip_address(address)
-        return parsed.is_global and not parsed.is_multicast
+        return policy.allows(ipaddress.ip_address(address))
     except ValueError:
         return False
 
 
-def _reject_disallowed_literal(url: str, *, allow_private_network: bool) -> None:
+def _reject_disallowed_literal(url: str, *, policy: DestinationPolicy | None) -> None:
     hostname = urlsplit(url).hostname
     if hostname is None:
         raise _UnsafeTarget("Crawler target has no hostname")
@@ -237,16 +237,16 @@ def _reject_disallowed_literal(url: str, *, allow_private_network: bool) -> None
         ipaddress.ip_address(hostname)
     except ValueError:
         return
-    if not _address_is_allowed(hostname, allow_private_network=allow_private_network):
-        raise _UnsafeTarget("Crawler target uses a non-global IP address")
+    if not _address_is_allowed(hostname, policy=policy):
+        raise _UnsafeTarget("Crawler target uses a disallowed IP address")
 
 
 class _SafeResolver(AbstractResolver):
-    """Resolve hostnames while preventing DNS rebinding to local networks."""
+    """Resolve hostnames while preventing DNS rebinding to disallowed networks."""
 
-    def __init__(self, *, allow_private_network: bool) -> None:
+    def __init__(self, *, policy: DestinationPolicy | None) -> None:
         self._delegate = DefaultResolver()
-        self._allow_private_network = allow_private_network
+        self._policy = policy
 
     async def resolve(
         self,
@@ -256,13 +256,11 @@ class _SafeResolver(AbstractResolver):
     ) -> list[ResolveResult]:
         results = await self._delegate.resolve(host, port, family)
         if not results or any(
-            not _address_is_allowed(
-                result["host"], allow_private_network=self._allow_private_network
-            )
+            not _address_is_allowed(result["host"], policy=self._policy)
             for result in results
         ):
             raise _UnsafeTarget(
-                f"Crawler target resolves to a non-global address: {host}"
+                f"Crawler target resolves to a disallowed address: {host}"
             )
         return results
 
@@ -290,6 +288,9 @@ def _process_http_capacity(limit: int) -> asyncio.Semaphore:
     return _process_capacity
 
 
+_DEFAULT_DESTINATION_POLICY = DestinationPolicy()
+
+
 class PythonCrawlEngine:
     """Bounded HTTP crawler implemented on Eneo's existing Python runtime."""
 
@@ -297,12 +298,12 @@ class PythonCrawlEngine:
         self,
         *,
         global_concurrency: int = 20,
-        allow_private_network: bool = False,
+        destination_policy: DestinationPolicy | None = _DEFAULT_DESTINATION_POLICY,
     ) -> None:
         if global_concurrency <= 0:
             raise ValueError("global_concurrency must be greater than zero")
         self._global_concurrency = global_concurrency
-        self._allow_private_network = allow_private_network
+        self._destination_policy = destination_policy
 
     @property
     def _capacity(self) -> asyncio.Semaphore:
@@ -370,9 +371,7 @@ class PythonCrawlEngine:
         files_dir: TemporaryDirectory[str] | None = None
         try:
             connector = aiohttp.TCPConnector(
-                resolver=_SafeResolver(
-                    allow_private_network=self._allow_private_network
-                )
+                resolver=_SafeResolver(policy=self._destination_policy)
             )
             async with aiohttp.ClientSession(
                 headers=headers,
@@ -1371,9 +1370,7 @@ class PythonCrawlEngine:
                 current, previous, allow_https_upgrade=True
             ):
                 raise _RedirectRejected("redirect target is outside crawl scope")
-            _reject_disallowed_literal(
-                current, allow_private_network=self._allow_private_network
-            )
+            _reject_disallowed_literal(current, policy=self._destination_policy)
             # Resolve the policy before holding HTTP capacity: loading robots
             # itself needs a slot, including after an HTTP-to-HTTPS redirect.
             policy = await robots(current) if robots is not None else None

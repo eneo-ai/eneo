@@ -70,6 +70,7 @@ from eneo.completion_models.infrastructure.completion_service import CompletionS
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.completion_models.presentation import CompletionModelAssembler
 from eneo.conversations.application.conversation_service import ConversationService
+from eneo.crawler.destination_policy import DestinationPolicy
 from eneo.crawler.python_engine import PythonCrawlEngine
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
@@ -396,6 +397,8 @@ from eneo.websites.infrastructure.update_website_size_service import (
     UpdateWebsiteSizeService,
 )
 from eneo.websites.infrastructure.website_cleaner_service import WebsiteCleanerService
+from eneo.whats_new.whats_new_repo import WhatsNewRepository
+from eneo.whats_new.whats_new_service import WhatsNewService
 from eneo.worker.task_manager import TaskManager
 from eneo.workflows.step_repo import StepRepository
 
@@ -413,8 +416,12 @@ def _create_redis_client() -> aioredis.Redis:
 
 
 def _build_crawl_engine() -> PythonCrawlEngine:
+    settings = get_settings()
     return PythonCrawlEngine(
-        global_concurrency=get_settings().crawl_global_http_concurrency
+        global_concurrency=settings.crawl_global_http_concurrency,
+        destination_policy=DestinationPolicy(
+            block_private_networks=settings.crawler_block_private_networks
+        ),
     )
 
 
@@ -641,6 +648,7 @@ class Container(containers.DeclarativeContainer):
         TenantRepository, session=session, encryption_service=encryption_service
     )
     settings_repo = providers.Factory(SettingsRepository, session=session)
+    whats_new_repo = providers.Factory(WhatsNewRepository, session=session)
     prompt_repo = providers.Factory(
         PromptRepository, session=session, factory=prompt_factory
     )
@@ -1104,6 +1112,11 @@ class Container(containers.DeclarativeContainer):
         AllowedOriginService,
         user=user,
         repo=allowed_origin_repo,
+    )
+    whats_new_service = providers.Factory(
+        WhatsNewService,
+        user=user,
+        repo=whats_new_repo,
     )
     role_service = providers.Factory(
         RolesService, user=user, repo=role_repo, user_repo=user_repo

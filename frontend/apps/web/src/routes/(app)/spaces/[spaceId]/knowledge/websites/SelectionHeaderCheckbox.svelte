@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Input } from "@eneo/ui";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import { m } from "$lib/paraglide/messages";
   import type { Readable, Writable } from "svelte/store";
 
@@ -15,9 +15,9 @@
   $: isSomeSelected = selectedVisibleCount > 0 && !isAllSelected;
 </script>
 
-<Input.Checkbox
+<Checkbox
   checked={isAllSelected}
   indeterminate={isSomeSelected}
   onCheckedChange={onToggleAll}
-  ariaLabel={isAllSelected ? m.deselect_all() : m.select_all()}
+  aria-label={isAllSelected ? m.deselect_all() : m.select_all()}
 />

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { ChevronRight, LoaderCircle } from "lucide-svelte";
+  import { ChevronRight, LoaderCircle } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Field from "$lib/components/ui/field";
   import { Input } from "$lib/components/ui/input";

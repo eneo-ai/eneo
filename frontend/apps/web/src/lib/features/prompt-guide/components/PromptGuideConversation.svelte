@@ -21,11 +21,11 @@
 -->
 
 <script lang="ts">
-  import { LoaderCircle } from "lucide-svelte";
+  import { LoaderCircle } from "@lucide/svelte";
   import { tick } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import { extractStructuredQuestion } from "../extractStructuredQuestion";
-  import PromptGuideMarkdown from "./PromptGuideMarkdown.svelte";
+  import { Markdown } from "$lib/components/markdown/index.js";
   import PromptGuideQuestionCard from "./PromptGuideQuestionCard.svelte";
 
   export type Turn = {
@@ -108,7 +108,11 @@
             <div class="flex flex-col gap-2">
               {#if segment.kind === "parsed"}
                 {#if segment.proseBefore.trim()}
-                  <PromptGuideMarkdown source={segment.proseBefore} class="text-default" />
+                  <Markdown
+                    source={segment.proseBefore}
+                    class="text-default text-sm"
+                    defaultCodeLanguage="plaintext"
+                  />
                 {/if}
                 <PromptGuideQuestionCard
                   question={segment.question}
@@ -116,11 +120,19 @@
                   onAnswer={onQuestionAnswer}
                 />
                 {#if segment.proseAfter.trim()}
-                  <PromptGuideMarkdown source={segment.proseAfter} class="text-default" />
+                  <Markdown
+                    source={segment.proseAfter}
+                    class="text-default text-sm"
+                    defaultCodeLanguage="plaintext"
+                  />
                 {/if}
               {:else if segment.kind === "pending"}
                 {#if segment.proseBefore.trim()}
-                  <PromptGuideMarkdown source={segment.proseBefore} class="text-default" />
+                  <Markdown
+                    source={segment.proseBefore}
+                    class="text-default text-sm"
+                    defaultCodeLanguage="plaintext"
+                  />
                 {/if}
                 <div class="text-muted flex items-center gap-2 text-xs italic" role="status">
                   <LoaderCircle class="size-3.5 animate-spin" aria-hidden="true" />
@@ -129,9 +141,13 @@
               {:else}
                 <!-- 'invalid' and 'none' both render the raw turn text. For
                      'invalid' the malformed `eneo-question` block surfaces as
-                     a normal code block via PromptGuideMarkdown; the user can
+                     a normal code block via Markdown; the user can
                      still type a free-text reply through the bottom input. -->
-                <PromptGuideMarkdown source={turn.text} class="text-default" />
+                <Markdown
+                  source={turn.text}
+                  class="text-default text-sm"
+                  defaultCodeLanguage="plaintext"
+                />
               {/if}
               {#if turn.isStreaming}
                 <span class="sr-only">{m.prompt_guide_streaming_announcement()}</span>

@@ -6,18 +6,18 @@
 
 <script lang="ts">
   import type { components } from "@eneo/eneo-js";
-  import { Button, Dropdown } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import {
-    MoreVertical,
-    Edit,
+    EllipsisVertical,
+    SquarePen,
     Trash2,
     RotateCcw,
     ArrowUpToLine,
     ArrowDownToLine
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
-  import { writable } from "svelte/store";
   import { goto, invalidate } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { getEneo } from "$lib/core/Eneo";
@@ -31,8 +31,8 @@
   let { template, type }: { template: Template; type: "assistant" | "app" } = $props();
 
   const eneo = getEneo();
-  let isDeleteOpen = writable(false);
-  let isRollbackOpen = writable(false);
+  let isDeleteOpen = $state(false);
+  let isRollbackOpen = $state(false);
 
   function handleEdit() {
     goto(resolve(`/admin/templates/edit/${type}/${template.id}`));
@@ -57,20 +57,22 @@
   }
 </script>
 
-<Dropdown.Root>
-  <Dropdown.Trigger asFragment let:trigger>
-    <Button is={trigger} padding="icon" aria-label={m.actions()}>
-      <MoreVertical size={16} />
-    </Button>
-  </Dropdown.Trigger>
+<DropdownMenu.Root>
+  <DropdownMenu.Trigger>
+    {#snippet child({ props })}
+      <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
+        <EllipsisVertical size={16} />
+      </Button>
+    {/snippet}
+  </DropdownMenu.Trigger>
 
-  <Dropdown.Menu let:item>
-    <Button is={item} padding="icon-leading" onclick={handleEdit}>
-      <Edit size={16} />
+  <DropdownMenu.Content align="end">
+    <DropdownMenu.Item onSelect={handleEdit}>
+      <SquarePen size={16} />
       {m.edit()}
-    </Button>
+    </DropdownMenu.Item>
 
-    <Button is={item} padding="icon-leading" onclick={toggleDefault}>
+    <DropdownMenu.Item onSelect={toggleDefault}>
       {#if template.is_default}
         <ArrowDownToLine size={16} />
         {m.unset_default_status()}
@@ -78,28 +80,23 @@
         <ArrowUpToLine size={16} />
         {m.set_as_default_template()}
       {/if}
-    </Button>
+    </DropdownMenu.Item>
 
     {#if template.original_snapshot}
-      <Button is={item} padding="icon-leading" onclick={() => isRollbackOpen.set(true)}>
+      <DropdownMenu.Item onSelect={() => (isRollbackOpen = true)}>
         <RotateCcw size={16} />
         {m.rollback()}
-      </Button>
+      </DropdownMenu.Item>
     {/if}
 
-    <Button
-      is={item}
-      padding="icon-leading"
-      onclick={() => isDeleteOpen.set(true)}
-      variant="destructive"
-    >
+    <DropdownMenu.Item variant="destructive" onSelect={() => (isDeleteOpen = true)}>
       <Trash2 size={16} />
       {m.delete()}
-    </Button>
-  </Dropdown.Menu>
-</Dropdown.Root>
+    </DropdownMenu.Item>
+  </DropdownMenu.Content>
+</DropdownMenu.Root>
 
-<TemplateDeleteDialog openController={isDeleteOpen} {template} {type} />
+<TemplateDeleteDialog bind:open={isDeleteOpen} {template} {type} />
 {#if template.original_snapshot}
-  <TemplateRollbackDialog openController={isRollbackOpen} {template} {type} />
+  <TemplateRollbackDialog bind:open={isRollbackOpen} {template} {type} />
 {/if}

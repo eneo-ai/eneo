@@ -1,13 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import dayjs from "dayjs";
+  import { formatDateTime, formatTime } from "$lib/core/formatting/dateTime";
   import type {
     AdminCrawlerOverview,
     AdminCrawlerQuery,
     AdminCrawlerScheduledWebsitePage,
     AdminCrawlerScheduleQuery
   } from "@eneo/eneo-js";
-  import { ArrowRight, RefreshCw } from "lucide-svelte";
+  import { ArrowRight, RefreshCw } from "@lucide/svelte";
   import { Page } from "$lib/components/layout";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
@@ -253,7 +253,7 @@
   }
 
   function date(value: string | null | undefined) {
-    return value ? dayjs(value).format("YYYY-MM-DD HH:mm") : "—";
+    return formatDateTime(value) || "—";
   }
 
   onMount(() => {
@@ -617,7 +617,9 @@
                     })} ·
                   {/if}
                   {overview
-                    ? m.admin_crawler_fetched({ time: dayjs(overview.as_of).format("HH:mm:ss") })
+                    ? m.admin_crawler_fetched({
+                        time: formatTime(overview.as_of, { seconds: true })
+                      })
                     : ""}
                 </p>
                 {#if cursors.length > 1 || nextCursor}

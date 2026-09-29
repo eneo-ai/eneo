@@ -16,9 +16,9 @@
   {...dynamicColour({ basedOn: assistant.id })}
   class="group border-dynamic-default bg-dynamic-dimmer text-dynamic-stronger hover:bg-dynamic-default hover:text-on-fill relative flex aspect-square flex-col items-start gap-2 border-t p-2 px-4"
 >
-  <h2 class="line-clamp-2 pt-1 font-mono text-sm">
+  <h4 class="line-clamp-2 pt-1 font-mono text-sm">
     {displayName}
-  </h2>
+  </h4>
 
   <span
     class="group-hover:text-on-fill pointer-events-none absolute inset-0 flex items-center justify-center font-mono text-[4.5rem]"

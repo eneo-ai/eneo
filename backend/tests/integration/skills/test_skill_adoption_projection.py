@@ -13,11 +13,14 @@ from eneo.database.tables.skill_table import (
     SkillRevisions,
     Skills,
 )
-from eneo.database.tables.spaces_table import Spaces, SpacesUsers
+from eneo.database.tables.spaces_table import Spaces, SpacesUserGroups, SpacesUsers
+from eneo.database.tables.user_groups_table import UserGroups
+from eneo.database.tables.users_table import Users
 from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.skills.domain.skill import (
     SkillAdoptionCursor,
     SkillAdoptionDrift,
+    SkillAdoptionFilter,
     SkillAdoptionResourceKind,
     SkillBindingIntent,
     SkillBindingReference,
@@ -322,6 +325,10 @@ async def test_adoption_projection_counts_exact_revisions_and_distinct_spaces(
         )
 
         projection = await repo.get_organization_adoption_projection_page(
+            actor_user_id=admin_user.id,
+            actor_group_ids=admin_user.user_groups_ids,
+            readable_kinds=set(SkillAdoptionResourceKind),
+            filters=SkillAdoptionFilter(),
             tenant_id=admin_user.tenant_id,
             skill_id=skill.id,
             limit=10,
@@ -331,6 +338,15 @@ async def test_adoption_projection_counts_exact_revisions_and_distinct_spaces(
         assert projection.summary is not None
         summary = projection.summary
         resources = projection.items
+
+        counts = await repo.get_usage_counts(
+            tenant_id=admin_user.tenant_id, skill_ids=[skill.id, uuid4()]
+        )
+        assert set(counts) == {skill.id}
+        assert counts[skill.id].assistant_count == summary.assistant_count
+        assert counts[skill.id].app_count == summary.app_count
+        assert counts[skill.id].distinct_space_count == summary.distinct_space_count
+        assert counts[skill.id].personal_chat_pinned is True
 
         assert summary.assistant_count == 2
         assert summary.app_count == 1
@@ -454,11 +470,15 @@ async def test_adoption_projection_counts_exact_revisions_and_distinct_spaces(
                 capture_statement,
             )
         assert second_page.summary is None
+        assert second_page.matched_count is None
+        assert first_page.matched_count is not None
         assert len(captured_statements) == 1
         continuation_statement = captured_statements[0][0]
         assert "organization_skill_adoption_resources" in continuation_statement
         assert "organization_skill_adoption_facts" not in continuation_statement
         assert "organization_skill_adoption_totals" not in continuation_statement
+        # Continuations never recount the matching population.
+        assert "organization_skill_adoption_matched" not in continuation_statement
         assert (
             "organization_skill_adoption_revision_counts" not in continuation_statement
         )
@@ -629,6 +649,10 @@ async def test_adoption_continuations_seek_composite_binding_indexes(
         sa.event.listen(sync_engine, "before_cursor_execute", capture_statement)
         try:
             assistant_page = await repo.get_organization_adoption_projection_page(
+                actor_user_id=admin_user.id,
+                actor_group_ids=admin_user.user_groups_ids,
+                readable_kinds=set(SkillAdoptionResourceKind),
+                filters=SkillAdoptionFilter(),
                 tenant_id=admin_user.tenant_id,
                 skill_id=target.id,
                 limit=page_limit,
@@ -649,6 +673,10 @@ async def test_adoption_continuations_seek_composite_binding_indexes(
         sa.event.listen(sync_engine, "before_cursor_execute", capture_statement)
         try:
             app_page = await repo.get_organization_adoption_projection_page(
+                actor_user_id=admin_user.id,
+                actor_group_ids=admin_user.user_groups_ids,
+                readable_kinds=set(SkillAdoptionResourceKind),
+                filters=SkillAdoptionFilter(),
                 tenant_id=admin_user.tenant_id,
                 skill_id=target.id,
                 limit=page_limit,
@@ -712,6 +740,10 @@ async def test_unpublished_skill_without_bindings_has_an_empty_projection(
         )
 
         projection = await repo.get_organization_adoption_projection_page(
+            actor_user_id=admin_user.id,
+            actor_group_ids=admin_user.user_groups_ids,
+            readable_kinds=set(SkillAdoptionResourceKind),
+            filters=SkillAdoptionFilter(),
             tenant_id=admin_user.tenant_id,
             skill_id=skill.id,
             limit=10,
@@ -816,6 +848,10 @@ async def test_adoption_projection_uses_one_consistent_statement_snapshot(
         monkeypatch.setattr(reader_session, "execute", execute_then_pause)
         projection_task = asyncio.create_task(
             reader_container.skill_repo().get_organization_adoption_projection_page(
+                actor_user_id=admin_user.id,
+                actor_group_ids=admin_user.user_groups_ids,
+                readable_kinds=set(SkillAdoptionResourceKind),
+                filters=SkillAdoptionFilter(),
                 tenant_id=admin_user.tenant_id,
                 skill_id=skill_id,
                 limit=10,
@@ -844,6 +880,10 @@ async def test_adoption_projection_uses_one_consistent_statement_snapshot(
 
     async with db_container(user=admin_user) as verify_container:
         updated_projection = await verify_container.skill_repo().get_organization_adoption_projection_page(
+            actor_user_id=admin_user.id,
+            actor_group_ids=admin_user.user_groups_ids,
+            readable_kinds=set(SkillAdoptionResourceKind),
+            filters=SkillAdoptionFilter(),
             tenant_id=admin_user.tenant_id,
             skill_id=skill_id,
             limit=10,
@@ -878,6 +918,10 @@ async def test_adoption_projection_repo_does_not_cross_tenant_boundary(
 
         foreign_tenant_id = uuid4()
         projection = await repo.get_organization_adoption_projection_page(
+            actor_user_id=admin_user.id,
+            actor_group_ids=admin_user.user_groups_ids,
+            readable_kinds=set(SkillAdoptionResourceKind),
+            filters=SkillAdoptionFilter(),
             tenant_id=foreign_tenant_id,
             skill_id=skill.id,
             limit=10,
@@ -885,3 +929,179 @@ async def test_adoption_projection_repo_does_not_cross_tenant_boundary(
         )
 
         assert projection is None
+
+
+async def test_adoption_rows_name_personal_owners_and_spaces_the_admin_can_open(
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    async with db_container() as container:
+        session = container.session()
+        organization = await _organization_space(
+            session, tenant_id=admin_user.tenant_id
+        )
+        model = await completion_model_factory(session, "skill-adoption-owner-model")
+        other = Users(
+            email=f"anna-{uuid4().hex[:8]}@example.com",
+            username="Anna Andersson",
+            tenant_id=admin_user.tenant_id,
+            state="active",
+        )
+        group = UserGroups(
+            name=f"group-{uuid4().hex[:8]}", tenant_id=admin_user.tenant_id
+        )
+        session.add_all([other, group])
+        await session.flush()
+        spaces = {
+            "own personal": await space_factory(
+                session, "Own personal", [model.id], user_id=admin_user.id
+            ),
+            "other personal": await space_factory(
+                session, "Annas yta", [model.id], user_id=other.id
+            ),
+            "member": await space_factory(session, "Member space", [model.id]),
+            "group member": await space_factory(session, "Group space", [model.id]),
+            "stranger": await space_factory(session, "Stranger space", [model.id]),
+        }
+        session.add(
+            SpacesUsers(
+                space_id=spaces["member"].id, user_id=admin_user.id, role="admin"
+            )
+        )
+        session.add(
+            SpacesUserGroups(
+                space_id=spaces["group member"].id,
+                user_group_id=group.id,
+                role="editor",
+            )
+        )
+        await session.flush()
+        repo = container.skill_repo()
+        skill = await repo.create(
+            space_id=organization.id,
+            slug=f"adoption-owner-{uuid4().hex[:8]}",
+            display_name="Adoption owners",
+            description="Names owners and openable spaces.",
+            instructions="Use the approved instructions.",
+            content_digest="5" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        await repo.publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_revision_id=skill.current_revision.id,
+        )
+        for label, space in spaces.items():
+            assistant = await assistant_factory(
+                session, f"Assistant in {label}", model.id, space_id=space.id
+            )
+            session.add(
+                AssistantSkillBindings(
+                    assistant_id=assistant.id,
+                    skill_id=skill.id,
+                    skill_revision_id=skill.current_revision.id,
+                    space_id=space.id,
+                    position=0,
+                    tenant_id=admin_user.tenant_id,
+                    skill_space_id=organization.id,
+                    activation_mode="always",
+                )
+            )
+        await session.flush()
+
+        async def rows(
+            filters: SkillAdoptionFilter,
+            *,
+            group_ids=frozenset(),
+            readable_kinds=frozenset(SkillAdoptionResourceKind),
+        ):
+            projection = await repo.get_organization_adoption_projection_page(
+                tenant_id=admin_user.tenant_id,
+                skill_id=skill.id,
+                actor_user_id=admin_user.id,
+                actor_group_ids=group_ids,
+                readable_kinds=readable_kinds,
+                limit=10,
+                after=None,
+                filters=filters,
+            )
+            assert projection is not None
+            return projection
+
+        everything = await rows(SkillAdoptionFilter())
+        by_name = {
+            resource.name: (resource.owner_name, resource.can_open)
+            for resource in everything.items
+        }
+        assert by_name == {
+            "Assistant in own personal": (
+                admin_user.username or admin_user.email,
+                True,
+            ),
+            "Assistant in other personal": ("Anna Andersson", False),
+            "Assistant in member": (None, True),
+            "Assistant in group member": (None, False),
+            "Assistant in stranger": (None, False),
+        }
+        assert everything.matched_count == 5
+        assert everything.summary is not None
+        assert everything.summary.assistant_count == 5
+
+        with_group = await rows(SkillAdoptionFilter(), group_ids=frozenset({group.id}))
+        assert {resource.name: resource.can_open for resource in with_group.items}[
+            "Assistant in group member"
+        ] is True
+
+        # Without the tenant permission for the kind, no destination is readable.
+        no_permission = await rows(
+            SkillAdoptionFilter(),
+            readable_kinds=frozenset({SkillAdoptionResourceKind.APP}),
+        )
+        assert all(resource.can_open is False for resource in no_permission.items)
+
+        # A viewer reads only published resources; the seeded ones are unpublished.
+        session.add(
+            SpacesUsers(
+                space_id=spaces["stranger"].id, user_id=admin_user.id, role="viewer"
+            )
+        )
+        await session.flush()
+        as_viewer = await rows(SkillAdoptionFilter())
+        assert {resource.name: resource.can_open for resource in as_viewer.items}[
+            "Assistant in stranger"
+        ] is False
+        await session.execute(
+            sa.update(Assistants)
+            .where(Assistants.space_id == spaces["stranger"].id)
+            .values(published=True)
+        )
+        as_viewer_published = await rows(SkillAdoptionFilter())
+        assert {
+            resource.name: resource.can_open for resource in as_viewer_published.items
+        }["Assistant in stranger"] is True
+
+        # Search matches resource, space and owner names; totals stay whole-skill.
+        by_owner = await rows(SkillAdoptionFilter(query="anna"))
+        assert [resource.name for resource in by_owner.items] == [
+            "Assistant in other personal"
+        ]
+        assert by_owner.matched_count == 1
+        assert by_owner.summary is not None and by_owner.summary.assistant_count == 5
+        by_space = await rows(SkillAdoptionFilter(query="stranger"))
+        assert by_space.matched_count == 1
+        apps_only = await rows(SkillAdoptionFilter(kind=SkillAdoptionResourceKind.APP))
+        assert apps_only.items == () and apps_only.matched_count == 0
+        behind = await rows(SkillAdoptionFilter(drift=SkillAdoptionDrift.BEHIND))
+        assert behind.matched_count == 0
+        current = await rows(SkillAdoptionFilter(drift=SkillAdoptionDrift.CURRENT))
+        assert current.matched_count == 5
+        # LIKE wildcards are literal in the search: "%" matches no name.
+        wildcard = await rows(SkillAdoptionFilter(query="%"))
+        assert wildcard.matched_count == 0
+        literal_underscore = await rows(SkillAdoptionFilter(query="_"))
+        assert [r.name for r in literal_underscore.items] == (
+            ["Assistant in own personal"] if "_" in (admin_user.username or "") else []
+        )

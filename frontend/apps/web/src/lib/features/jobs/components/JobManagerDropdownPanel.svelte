@@ -3,7 +3,7 @@
 
   import { getJobManager } from "../JobManager";
   import JobListView from "./JobListView.svelte";
-  import { ProgressBar } from "@eneo/ui";
+  import { Progress } from "$lib/components/ui/progress/index.js";
   import { m } from "$lib/paraglide/messages";
   import ExpiringKeysNotification from "$lib/features/api-keys/ExpiringKeysNotification.svelte";
   import { getExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
@@ -64,7 +64,12 @@
                 </div>
               {:else}
                 <div class="flex w-48 min-w-48 items-center gap-x-4">
-                  <ProgressBar progress={upload.progress}></ProgressBar>
+                  <Progress
+                    value={upload.progress}
+                    class="h-2"
+                    indicatorClass={upload.progress === 100 ? "bg-positive-default" : undefined}
+                    aria-label={m.upload_progress_for({ name: upload.file.name })}
+                  />
                   <div class="w-10 text-end">
                     <span class="text-primary text-sm">{upload.progress}%</span>
                   </div>

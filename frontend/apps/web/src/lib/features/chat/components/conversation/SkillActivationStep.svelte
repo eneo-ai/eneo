@@ -11,7 +11,7 @@
 -->
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { BookOpenCheck, ChevronRight, X } from "lucide-svelte";
+  import { BookOpenCheck, ChevronRight, X } from "@lucide/svelte";
   import { slide } from "svelte/transition";
   import { Badge } from "$lib/components/ui/badge/index.js";
 

@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { CrawlRun, CrawlResourceFailure, Eneo } from "@eneo/eneo-js";
   import { untrack } from "svelte";
-  import { RefreshCw } from "lucide-svelte";
+  import { RefreshCw } from "@lucide/svelte";
   import { cn } from "$lib/utils";
   import CrawlLoadError from "./CrawlLoadError.svelte";
   import CrawlRunCounts from "./CrawlRunCounts.svelte";

@@ -10,15 +10,16 @@
 -->
 
 <script lang="ts">
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { Page, Settings } from "$lib/components/layout";
-  import { Button, Tooltip } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { IconSparkles } from "@eneo/icons/sparkles";
   import { IconInfo } from "@eneo/icons/info";
   import { beforeNavigate, invalidate } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { fade } from "svelte/transition";
   import { untrack } from "svelte";
-  import dayjs from "dayjs";
 
   import { initAssistantEditor } from "$lib/features/assistants/AssistantEditor.js";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
@@ -93,13 +94,12 @@
 
     <Page.Flex>
       {#if $currentChanges.hasUnsavedChanges}
-        <Button variant="destructive" disabled={$isSaving} on:click={() => discardChanges()}>
+        <Button variant="destructive" disabled={$isSaving} onclick={() => discardChanges()}>
           {m.discard_all_changes()}
         </Button>
         <Button
-          variant="positive"
-          class="h-8 w-32 whitespace-nowrap"
-          on:click={async () => {
+          class="bg-positive-default hover:bg-positive-stronger h-8 w-32 whitespace-nowrap"
+          onclick={async () => {
             $update.completion_model_kwargs = filterSupportedModelKwargs(
               $update.completion_model_kwargs,
               $update.completion_model
@@ -115,7 +115,7 @@
         {#if showSavedNotice}
           <p class="text-positive-stronger px-4" transition:fade>{m.all_changes_saved()}</p>
         {/if}
-        <Button variant="primary" class="w-32" href={backHref}>{m.done()}</Button>
+        <Button class="w-32" href={backHref}>{m.done()}</Button>
       {/if}
     </Page.Flex>
   </Page.Header>
@@ -179,21 +179,31 @@
         >
           <div slot="toolbar" class="text-secondary flex items-center gap-1">
             {#if !isPromptGuide && data.promptGuideAvailability}
-              <Tooltip
-                text={data.promptGuideAvailability.available
-                  ? m.prompt_guide_button_tooltip()
-                  : promptGuideDisabledTooltip(data.promptGuideAvailability.disabled_reason)}
-              >
-                <Button
-                  variant="simple"
-                  padding="icon-leading"
-                  disabled={!data.promptGuideAvailability.available}
-                  on:click={() => (isModalOpen = true)}
-                >
-                  <IconSparkles />
-                  {m.prompt_guide_button()}
-                </Button>
-              </Tooltip>
+              {@const available = data.promptGuideAvailability.available}
+              <Tooltip.Root>
+                <Tooltip.Trigger onclick={available ? () => (isModalOpen = true) : undefined}>
+                  {#snippet child({ props })}
+                    {#if available}
+                      <Button {...props} variant="ghost">
+                        <IconSparkles />
+                        {m.prompt_guide_button()}
+                      </Button>
+                    {:else}
+                      <span {...props} class="inline-flex">
+                        <Button variant="ghost" disabled>
+                          <IconSparkles />
+                          {m.prompt_guide_button()}
+                        </Button>
+                      </span>
+                    {/if}
+                  {/snippet}
+                </Tooltip.Trigger>
+                <Tooltip.Content>
+                  {available
+                    ? m.prompt_guide_button_tooltip()
+                    : promptGuideDisabledTooltip(data.promptGuideAvailability.disabled_reason)}
+                </Tooltip.Content>
+              </Tooltip.Root>
             {/if}
             <PromptVersionDialog
               title={m.prompt_history_for({ name: $resource.name })}
@@ -201,7 +211,7 @@
                 return data.eneo.assistants.listPrompts({ id: data.assistant.id });
               }}
               onPromptSelected={(prompt) => {
-                const restoredDate = dayjs(prompt.created_at).format("YYYY-MM-DD HH:mm");
+                const restoredDate = formatDateTime(prompt.created_at);
                 $update.prompt.text = prompt.text;
                 $update.prompt.description = `Restored prompt from ${restoredDate}`;
               }}
@@ -217,7 +227,7 @@
                 onApply={(text) => {
                   $update.prompt.text = text;
                   $update.prompt.description = m.prompt_guide_apply_description({
-                    date: dayjs().format("YYYY-MM-DD HH:mm")
+                    date: formatDateTime(new Date())
                   });
                   isModalOpen = false;
                   if (promptGuideRunId) {
