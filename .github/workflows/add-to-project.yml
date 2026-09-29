@@ -11,6 +11,10 @@ permissions:
   issues: write
   pull-requests: write
 
+concurrency:
+  group: project-intake-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
 env:
   PROJECT_OWNER: eneo-ai
   PROJECT_NUMBER: "5"
@@ -25,8 +29,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Ensure planning labels
-        run: node .github/scripts/ensure-planning-labels.mjs
+      - name: Ensure repository labels
+        run: node .github/scripts/ensure-labels.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # Classification must not depend on the separate organization Project PAT.
+      - name: Apply issue classification and validate planning metadata
+        run: node .github/scripts/project-intake.mjs
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -60,8 +70,3 @@ jobs:
         with:
           project-url: ${{ env.PROJECT_URL }}
           github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}
-
-      - name: Validate planning metadata
-        run: node .github/scripts/project-intake.mjs
-        env:
-          GH_TOKEN: ${{ github.token }}
