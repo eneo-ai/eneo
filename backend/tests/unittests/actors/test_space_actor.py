@@ -19,6 +19,10 @@ from eneo.roles.permissions import Permission
 # so tests focus on space-role logic, not tenant-permission blocking
 ALL_PERMISSIONS = set(Permission)
 
+# Every mock space, user and key lives in this tenant unless a test says otherwise.
+TENANT_ID = UUID("00000000-0000-0000-0000-00000000aaaa")
+OTHER_TENANT_ID = UUID("00000000-0000-0000-0000-00000000bbbb")
+
 
 # Mocking external dependencies
 class MockUser:
@@ -50,8 +54,10 @@ class MockSpace:
         tenant_space_id=None,
         id=None,
         group_members=None,
+        tenant_id=TENANT_ID,
     ):
         self.user_id = user_id
+        self.tenant_id = tenant_id
         self.personal = personal
         self.members = members or {}
         self.group_members = group_members or {}
@@ -87,6 +93,7 @@ class MockPermission:
 def _actor(user, space: MockSpace) -> SpaceActor:
     facts = SpaceAccessFacts(
         id=space.id,
+        tenant_id=space.tenant_id,
         user_id=space.user_id,
         tenant_space_id=space.tenant_space_id,
         members={
@@ -111,6 +118,7 @@ def test_space_access_facts_seal_member_snapshots() -> None:
     source_members = {member_id: SpaceRoleFact(id=member_id, role=MockSpaceRole.VIEWER)}
     facts = SpaceAccessFacts(
         id=uuid4(),
+        tenant_id=TENANT_ID,
         user_id=None,
         tenant_space_id=uuid4(),
         members=source_members,
@@ -611,11 +619,19 @@ def test_group_editor_cannot_manage_group_members(
 class MockServiceKey:
     """Minimal stand-in for ApiKeyV2InDB used by SpaceActor."""
 
-    def __init__(self, scope_type, scope_id, permission, ownership="service"):
+    def __init__(
+        self,
+        scope_type,
+        scope_id,
+        permission,
+        ownership="service",
+        tenant_id=TENANT_ID,
+    ):
         self.scope_type = scope_type
         self.scope_id = scope_id
         self.permission = permission
         self.ownership = ownership
+        self.tenant_id = tenant_id
 
 
 class MockServiceUser(MockUser):
@@ -1452,3 +1468,79 @@ def test_skill_actions_require_tenant_skill_permission(
         )
 
     assert _skill_actions(_actor(user, space)) == _NO_SKILL_ACTIONS
+
+
+# ---------------------------------------------------------------------------
+# API keys never reach outside their own tenant
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("permission", ["read", "write", "admin"])
+def test_tenant_key_has_no_role_in_foreign_tenant_space(permission):
+    key = MockServiceKey("tenant", None, permission)
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpace(
+        user_id=None, tenant_space_id="org-2", id="s2", tenant_id=OTHER_TENANT_ID
+    )
+    actor = _actor(user, space)
+    assert actor._get_role() is None
+    assert not actor.can_read_space()
+    assert not actor.can_edit_space()
+
+
+def test_tenant_key_keeps_role_in_own_tenant_space():
+    key = MockServiceKey("tenant", None, "admin")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpace(user_id=None, tenant_space_id="org-1", id="s1")
+    actor = _actor(user, space)
+    assert actor.can_edit_space()
+
+
+def test_space_key_has_no_role_in_foreign_tenant_space_even_when_ids_match():
+    key = MockServiceKey("space", "s1", "admin")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpace(
+        user_id=None, tenant_space_id="org-2", id="s1", tenant_id=OTHER_TENANT_ID
+    )
+    actor = _actor(user, space)
+    assert actor._get_role() is None
+
+
+def test_assistant_key_has_no_role_in_foreign_tenant_space():
+    key = MockServiceKey("assistant", "a1", "write")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpaceWithResources(
+        user_id=None,
+        tenant_space_id="org-2",
+        id="s1",
+        tenant_id=OTHER_TENANT_ID,
+        assistants=[MockAssistant("a1")],
+    )
+    actor = _actor(user, space)
+    assert actor._get_role() is None
+
+
+def test_user_key_has_no_role_in_foreign_tenant_space_despite_membership():
+    """A user-owned key is confined to its tenant even if the user somehow
+    holds a membership row in a foreign space."""
+    key = MockServiceKey("tenant", None, "admin", ownership="user")
+    user = MockServiceUser(
+        id=42, active_api_key=key, role="admin", permissions=ALL_PERMISSIONS
+    )
+    space = MockSpace(
+        user_id=None,
+        tenant_space_id="org-2",
+        id="s2",
+        tenant_id=OTHER_TENANT_ID,
+        members={42: MockGroupMember(42, "admin")},
+    )
+    actor = _actor(user, space)
+    assert actor._get_role() is None
+
+
+def test_key_denies_when_facts_carry_no_tenant():
+    key = MockServiceKey("tenant", None, "admin")
+    user = MockServiceUser(id=99, active_api_key=key)
+    space = MockSpace(user_id=None, tenant_space_id="org-1", id="s1", tenant_id=None)
+    actor = _actor(user, space)
+    assert actor._get_role() is None
