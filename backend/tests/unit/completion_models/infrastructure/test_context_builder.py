@@ -56,6 +56,21 @@ def _names(files: list[File]) -> list[str]:
     return [file.name for file in files]
 
 
+def test_knowledge_prompt_places_citations_after_sourced_sentences():
+    prompt = context_builder._Prompt(version=2)
+    prompt.knowledge = '"""source_id: a5477f85\nBrasilianskt kaffe har låg syra."""'
+
+    text = str(prompt)
+
+    assert "after the punctuation ending its complete sourced sentence" in text
+    assert "If a list item or table cell has no sentence" in text
+    assert "Never put it after a heading, bold label" in text
+    assert (
+        'Example: **Smakprofil:** Brasilianskt kaffe är fylligt och milt. <inref id="<source_id>"/>'
+        in text
+    )
+
+
 def test_generated_images_replay_only_from_latest_turn():
     session = SimpleNamespace(questions=[_turn(1), _turn(2), _turn(3)])
 

@@ -267,6 +267,13 @@ def test_build_tool_result_with_references_uses_self_describing_resource_blocks(
     )
     assert "Tool summary." in llm_text
     assert '<inref id="<source_id>"/>' in llm_text
+    assert "after the punctuation ending its complete sourced sentence" in llm_text
+    assert "If a list item or table cell has no sentence" in llm_text
+    assert "Never put it after a heading, bold label" in llm_text
+    assert (
+        'Example: **Smakprofil:** Brasilianskt kaffe är fylligt och milt. <inref id="<source_id>"/>'
+        in llm_text
+    )
 
     # No standalone JSON index, and _meta is not forwarded to the model.
     assert "MCP referenced resources:" not in llm_text
