@@ -286,6 +286,29 @@ value and a comment.
     | `REDIS_HOST` | `redis` | Compose service name |
     | `REDIS_PORT` | `6379` | |
 
+    **Redis authentication (optional):**
+
+    Redis is only reachable on the internal `data_net` network and runs without a
+    password by default. To require one, define `REDIS_PASSWORD` in the
+    deployment `.env` next to `docker-compose.yml`. The Redis container and the
+    backend, worker and database initialisation services all read that value, so
+    it is set in one place.
+
+    ```bash
+    # .env
+    REDIS_PASSWORD=<output of: openssl rand -hex 32>
+    ```
+
+    Apply the change with `docker compose up -d`. Redis and the backend services
+    restart together; queued jobs and other Redis data stay in the volume. While
+    the password is set, run Redis commands with
+    `docker compose exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping'`.
+
+    | Variable | Default | Description |
+    |----------|---------|-------------|
+    | `REDIS_PASSWORD` | unset | Password the backend and workers present to Redis. Unset or blank connects without authentication |
+    | `REDIS_USERNAME` | unset | Redis ACL user, for a Redis managed outside the bundled stack. Requires `REDIS_PASSWORD` |
+
     **Security (required):**
 
     | Variable | Template value | Description |
