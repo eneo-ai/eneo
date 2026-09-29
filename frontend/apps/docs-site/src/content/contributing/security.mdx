@@ -68,6 +68,9 @@ replaces those resource checks. Use a named permission whenever the operation
 requires one. `Authorization.AUTHENTICATED` is an explicit grant to authenticated
 callers, suitable for a shared catalogue or an operation whose service restricts
 access to the caller's own resources; its reason must identify that purpose.
+When several routes rely on the same access rule, reuse a router-local named
+constant for their `reason`. Keep the full `@endpoint_access` declaration on
+each route, and use separate reasons when the underlying checks differ.
 
 The declaration is the single source for the endpoint's permission and session
 requirements. Do not repeat these with `validate_permission` in handlers or
