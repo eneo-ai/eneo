@@ -2,11 +2,13 @@ import { timingSafeEqual, createHash } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { publicError, ToolError } from "./errors";
-import type { CallContext, ToolDefinition } from "./tools/types";
+import { RichResult, type CallContext, type ToolDefinition } from "./tools/types";
 
 const VERSION = process.env.APP_VERSION ?? "0.0.0-dev";
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_RESULT_BYTES = 512 * 1024;
+// Files a tool returns; matches Eneo's default MCP_TOOL_FILE_MAX_BYTES for one result.
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const BODY_TIMEOUT_MS = 10_000;
 
 export type Endpoint = {
@@ -110,14 +112,27 @@ export function createHandler(options: ServerOptions) {
           },
           async (input) => {
             try {
-              const result = await deadline(
+              const output = await deadline(
                 tool.execute(input, callContext(request, endpoint)),
                 endpoint.toolTimeoutMs,
               );
+              const result = output instanceof RichResult ? output.structured : output;
+              const files = output instanceof RichResult ? output.files : [];
               const text = JSON.stringify(result);
               if (Buffer.byteLength(text) > MAX_RESULT_BYTES)
                 throw new ToolError("RESULT_TOO_LARGE", "Result exceeds the byte limit.");
-              return { content: [{ type: "text" as const, text }], structuredContent: result };
+              if (files.reduce((n, f) => n + (f.blob.length * 3) / 4, 0) > MAX_FILE_BYTES)
+                throw new ToolError("RESULT_TOO_LARGE", "Produced files exceed the byte limit.");
+              return {
+                content: [
+                  { type: "text" as const, text },
+                  ...files.map((file) => ({
+                    type: "resource" as const,
+                    resource: { uri: file.uri, mimeType: file.mimeType, blob: file.blob },
+                  })),
+                ],
+                structuredContent: result,
+              };
             } catch (error) {
               const safe = publicError(error);
               if (safe.code === "INTERNAL_ERROR")

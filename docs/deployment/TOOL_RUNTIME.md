@@ -9,6 +9,11 @@ It has two endpoints:
 - `/mcp/tabular`: `inspect_table`, `query_table` and `assert_table` over
   attached CSV and XLSX files. It is added as the provider of the **Tabular
   analysis** capability (`tabular_analysis`, "Analysera tabelldata" in Swedish).
+- `/mcp/documents`: `create_document`, which renders Word (DOCX) or PDF from
+  Markdown. It provides **Create documents** (`document_creation`).
+- `/mcp/spreadsheets`: `create_spreadsheet`, which builds XLSX workbooks with
+  named sheets and typed cells. It provides **Create spreadsheets**
+  (`spreadsheet_creation`).
 
 ## TL;DR
 
@@ -68,6 +73,28 @@ At most `TOOL_RUNTIME_TABULAR_CONCURRENCY` (default 2) DuckDB children run at
 once; other calls wait. Formulas are read as their cached values. Writing
 spreadsheets is not part of this endpoint.
 
+## Created documents and spreadsheets
+
+The renderers run in a sandbox child and return the file inside the tool result
+as a standard MCP embedded resource. The runtime keeps no copy and serves no
+download links. Eneo then does the following:
+
+1. It admits the file only because the server provides `document_creation`
+   (DOCX, PDF) or `spreadsheet_creation` (XLSX). The same resource from any
+   other server stays an ordinary result.
+2. It checks the bytes: OOXML packages must be well-formed, bounded and free of
+   macros, embedded objects and externally loaded content. PDFs must be
+   complete and free of script, launch actions and embedded files.
+3. It saves the document as a File in the conversation, with extracted text and
+   its exact original. The user downloads it from a chip under the answer. It
+   survives reloads, follows the conversation's access rules and is deleted with
+   the conversation.
+
+Spreadsheets store text as text: a value starting with `=` is never written as a
+formula. Formula writing, templates and editing existing files are not part of
+this release. `DOCUMENT_ORGANISATION_NAME` sets the name shown in document
+footers.
+
 ## Enable it
 
 1. Generate a token: `openssl rand -hex 32`.
@@ -102,10 +129,11 @@ spreadsheets is not part of this endpoint.
    tests the connection and discovers the tool. Review it, then enable the
    server in the spaces that should use it.
 6. In **Admin > Tools > Functions**, choose **Use bundled provider** on the
-   **Tabular analysis** card. If no provider is active yet, it becomes the
-   default. Then enable the capability in spaces and assistants. The
-   `tabular_analysis` permission is granted to the predefined User, AI
-   Configurator and Owner roles. Custom roles need it added.
+   **Tabular analysis**, **Create documents** and **Create spreadsheets** cards. If no provider is active yet, it becomes the
+   default. Then enable the capabilities in spaces and assistants. Their
+   permissions (`tabular_analysis`, `document_creation`,
+   `spreadsheet_creation`) are granted to the predefined User, AI Configurator
+   and Owner roles. Custom roles need them added.
 
 ## Rotate the token
 
@@ -125,8 +153,9 @@ Docker Desktop):
 | After the burst                                | ~69 MiB  |
 
 Each concurrent compute call costs about 32 MiB for its child process. A
-tabular query child can use up to 256 MB for DuckDB, which is why only
-`TOOL_RUNTIME_TABULAR_CONCURRENCY` of them run at once. The overlay caps the
+tabular query child can use up to 256 MB for DuckDB. Such children, and the
+document renderers, share `TOOL_RUNTIME_TABULAR_CONCURRENCY` slots, so only
+that many run at once. The overlay caps the
 container at 2 GiB, 2 CPUs and 256 processes. `/tmp` is a 512 MiB tmpfs that
 holds job scratch space and the 256 MiB parsed-sheet cache, and it counts
 towards memory. If you raise either concurrency setting, raise `mem_limit` with

@@ -8,6 +8,9 @@ documentation lives in `docs/deployment/TOOL_RUNTIME.md`.
 - `POST /mcp/tabular` exposes `inspect_table`, `query_table` and
   `assert_table` over signed Eneo attachment URLs. It fetches only from the
   origin Eneo sends in `X-Eneo-File-Origin`.
+- `POST /mcp/documents` (`create_document`, DOCX or PDF from Markdown) and
+  `POST /mcp/spreadsheets` (`create_spreadsheet`, XLSX) return the file as an
+  embedded resource that Eneo saves in the conversation.
 - `GET /health/live` and `GET /health/ready` are the health endpoints.
 
 ## Layout
@@ -20,11 +23,14 @@ documentation lives in `docs/deployment/TOOL_RUNTIME.md`.
 | `src/child.ts`               | Child entrypoint                                         |
 | `src/tools/compute/`         | QuickJS engine, limits and the tool definition           |
 | `src/tools/tabular/`         | Download policy, parsed-sheet cache, DuckDB/XLSX engines |
+| `src/tools/documents/`       | Markdown parser and DOCX, PDF and XLSX renderers         |
 
 The compute engine was ported from eneo-tools (`packages/compute`, commit
 `585b271`). The tabular engines were ported from `packages/tabular` and
 `packages/files` at the same commit, with workspaces, handles and the database
-replaced by per-call signed URLs and a disposable cache. New tools belong here only when they need platform-owned
+replaced by per-call signed URLs and a disposable cache. The renderers come
+from `packages/document-export`, returning embedded resources instead of
+download links. New tools belong here only when they need platform-owned
 isolation. Domain integrations stay separate MCP services.
 
 ## Development
@@ -67,6 +73,7 @@ network without egress.
 | `TABULAR_CONCURRENCY` | 2       | DuckDB children running at once        |
 | `TABULAR_MAX_UPLOAD_MB` | 20    | Largest attachment downloaded          |
 | `TABULAR_CACHE_MB`    | 256     | Parsed-sheet cache budget on `/tmp`    |
+| `DOCUMENT_ORGANISATION_NAME` | none | Name in generated document footers |
 
 Releases are versioned by `VERSION` and published by
 `.github/workflows/tool_runtime_image.yml` from develop. A published version tag

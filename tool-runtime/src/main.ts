@@ -6,6 +6,8 @@ import { computeTools } from "./tools/compute/tool";
 import { defaultCacheRoot, SheetCache } from "./tools/tabular/cache";
 import type { QueryJobResult, SheetMetadata } from "./tools/tabular/ports";
 import { tabularTools } from "./tools/tabular/tool";
+import type { RenderResult } from "./tools/documents/ports";
+import { documentTools, fileRenderer, spreadsheetTools } from "./tools/documents/tool";
 
 const config = loadConfig(process.env);
 // The whole-job deadline covers child start-up (Bun plus the WASM engine) on top of the
@@ -47,6 +49,24 @@ endpoints.push({
     },
   }),
 });
+
+// Rendering shares the native-job slots: a large workbook or PDF is as heavy as a query.
+const renderTimeoutMs = 25_000;
+const render = fileRenderer((job) =>
+  slot(async () => (await runIsolated({ job }, renderTimeoutMs)) as RenderResult),
+);
+endpoints.push(
+  {
+    slug: "documents",
+    toolTimeoutMs: renderTimeoutMs + 5_000,
+    tools: documentTools(config.documents, render),
+  },
+  {
+    slug: "spreadsheets",
+    toolTimeoutMs: renderTimeoutMs + 5_000,
+    tools: spreadsheetTools(config.documents, render),
+  },
+);
 
 const fetch = createHandler({
   token: config.token,

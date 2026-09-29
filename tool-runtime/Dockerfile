@@ -20,10 +20,11 @@ LABEL org.opencontainers.image.source="${SOURCE_URL}" \
       org.opencontainers.image.revision="${GIT_SHA}"
 USER root
 # coreutils provides /usr/bin/timeout, the external watchdog for sandbox children.
+# fonts-dejavu-core is embedded in generated PDFs (Swedish characters included).
 # The upgrade picks up Debian security fixes the base image has not yet absorbed.
 RUN apt-get update \
     && apt-get upgrade -y \
-    && apt-get install -y --no-install-recommends coreutils \
+    && apt-get install -y --no-install-recommends coreutils fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production \

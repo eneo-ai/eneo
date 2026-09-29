@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { computeConfigSchema, type ComputeConfig } from "./tools/compute/config";
 import { tabularConfigSchema, type TabularConfig } from "./tools/tabular/config";
+import { documentConfigSchema, type DocumentConfig } from "./tools/documents/config";
 
 // Everything comes from the environment: the runtime has no database, no tenant state and no
 // operator API. Eneo decides who may call a tool; this process only checks the shared bearer.
@@ -39,6 +40,8 @@ const environmentSchema = z.object({
   TABULAR_CACHE_MB: z.coerce.number().int().optional(),
   // Native DuckDB children are memory-heavy (up to memory_mb each): run few at a time.
   TABULAR_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(2),
+  // Shown in the footer of generated documents.
+  DOCUMENT_ORGANISATION_NAME: z.string().max(120).optional(),
 });
 
 export type RuntimeConfig = {
@@ -47,6 +50,7 @@ export type RuntimeConfig = {
   maxConcurrency: number;
   compute: ComputeConfig;
   tabular: { config: TabularConfig; allowedFileOrigins: string[]; concurrency: number };
+  documents: DocumentConfig;
 };
 
 export function loadConfig(environment: Record<string, string | undefined>): RuntimeConfig {
@@ -59,6 +63,11 @@ export function loadConfig(environment: Record<string, string | undefined>): Run
       ...(parsed.COMPUTE_TIMEOUT_MS !== undefined ? { timeout_ms: parsed.COMPUTE_TIMEOUT_MS } : {}),
       ...(parsed.COMPUTE_MEMORY_MB !== undefined ? { memory_mb: parsed.COMPUTE_MEMORY_MB } : {}),
     }),
+    documents: documentConfigSchema.parse(
+      parsed.DOCUMENT_ORGANISATION_NAME
+        ? { organisation_name: parsed.DOCUMENT_ORGANISATION_NAME }
+        : {},
+    ),
     tabular: {
       allowedFileOrigins: parsed.TOOL_RUNTIME_FILE_ORIGINS,
       concurrency: parsed.TABULAR_CONCURRENCY,
