@@ -97,6 +97,7 @@ services:
       context: .
       dockerfile: Dockerfile
     command: bash -lc "cd /workspace/backend && .venv/bin/task-execution-worker"
+    restart: unless-stopped
     networks:
       - eneo
     environment:
@@ -112,6 +113,7 @@ services:
       context: .
       dockerfile: Dockerfile
     command: bash -lc "cd /workspace/backend && .venv/bin/task-maintenance-worker"
+    restart: unless-stopped
     networks:
       - eneo
     environment:
@@ -121,6 +123,35 @@ services:
       - ../:/workspace
       - backend_venv:/workspace/backend/.venv
       - /var/run/docker.sock:/var/run/docker.sock
+
+  # Website crawls are delivered to their own ARQ queue (arq:crawler) and only
+  # this role consumes it. Mirrors the crawler-worker service in
+  # docs/deployment/docker-compose.yml: run.sh selects the crawler settings.
+  # All three worker services restart until post-create.sh has finished
+  # installing the shared .venv.
+  crawler-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: bash -lc "cd /workspace/backend && exec ./run.sh"
+    restart: unless-stopped
+    networks:
+      - eneo
+    environment:
+      - POSTGRES_HOST=db
+      - REDIS_HOST=redis
+      - RUN_AS_WORKER=true
+      - WORKER_ROLE=crawler
+      - OBJECT_CONTENT_ENDPOINT_URL
+      - OBJECT_CONTENT_REGION
+      - OBJECT_CONTENT_BUCKET
+      - OBJECT_CONTENT_ACCESS_KEY_ID
+      - OBJECT_CONTENT_SECRET_ACCESS_KEY
+      - OBJECT_CONTENT_DEPLOYMENT_ID
+      - OBJECT_CONTENT_ALLOW_INSECURE_HTTP=${OBJECT_CONTENT_ALLOW_INSECURE_HTTP:-true}
+    volumes:
+      - ../:/workspace
+      - backend_venv:/workspace/backend/.venv
 
 volumes:
   postgres_data:

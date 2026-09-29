@@ -89,6 +89,7 @@ cd frontend && bun run dev               # Terminal 2: Frontend (port 3000)
 cd backend && uv run worker              # Terminal 3: General ARQ worker
 cd backend && uv run task-execution-worker    # Terminal 4: Platform execution worker
 cd backend && uv run task-maintenance-worker  # Terminal 5: Platform maintenance worker and scheduler
+cd backend && uv run arq src.eneo.worker.arq.CrawlerWorkerSettings  # Terminal 6: Crawler worker
 ```
 
 #### Manual Setup
@@ -133,6 +134,9 @@ cd backend && uv run task-execution-worker
 
 # Terminal 5: Platform maintenance worker and scheduler
 cd backend && uv run task-maintenance-worker
+
+# Terminal 6: Crawler worker (website crawls)
+cd backend && uv run arq src.eneo.worker.arq.CrawlerWorkerSettings
 ```
 
 #### Access Your Development Environment
@@ -195,7 +199,12 @@ cd backend && uv run task-maintenance-worker
 ```
 
 Keep the general `uv run worker` process running as well. It consumes a
-different ARQ queue for uploads, crawling, integrations, and audit jobs.
+different ARQ queue for uploads, integrations, audit jobs, and crawl scheduling.
+Website crawls run on their own queue, so also start the crawler worker:
+
+```bash
+cd backend && uv run arq src.eneo.worker.arq.CrawlerWorkerSettings
+```
 
 ## Get Help
 

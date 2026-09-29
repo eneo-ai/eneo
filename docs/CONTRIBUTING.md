@@ -42,17 +42,25 @@ cp frontend/apps/web/.env.example frontend/apps/web/.env
 # Initialize database
 cd backend && uv run python init_db.py
 
-# Start development services (5 terminals)
+# Start development services (6 terminals)
 cd backend && uv run start                    # Terminal 1: API
 cd frontend && bun run dev                    # Terminal 2: web app
 cd backend && uv run worker                   # Terminal 3: general jobs
 cd backend && uv run task-execution-worker    # Terminal 4: Flow execution
 cd backend && uv run task-maintenance-worker  # Terminal 5: Flow maintenance
+cd backend && uv run arq src.eneo.worker.arq.CrawlerWorkerSettings  # Terminal 6: website crawls
 ```
 
-All three worker processes are required for a complete development environment.
-The general worker handles uploads, crawling, integrations, and audit jobs;
-Flow execution and Flow maintenance use separate ARQ queues and capacity.
+All four worker processes are required for a complete development environment.
+The general worker handles uploads, integrations, audit jobs, and crawl
+scheduling and repair; website crawls run on the crawler worker's own ARQ queue
+(`arq:crawler`), and Flow execution and Flow maintenance use separate queues and
+capacity. Without the crawler worker a started crawl stays queued.
+
+In the devcontainer, Compose also starts the Flow and crawler workers. On a fresh
+container they exit until `post-create.sh` has installed the backend environment
+and restart automatically (`restart: unless-stopped`), so a few early restarts
+are normal.
 
 For a Git worktree checkout, expose only its Git common directory to the
 container with a narrow local mount, or use a plain clone; never mount the

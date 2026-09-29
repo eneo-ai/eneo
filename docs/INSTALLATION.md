@@ -86,7 +86,7 @@ cd frontend
 bun run dev
 ```
 
-**Terminal 3 - ARQ worker (document processing, crawler, apps, and existing background jobs):**
+**Terminal 3 - ARQ worker (document processing, apps, crawl scheduling, and existing background jobs):**
 ```bash
 cd backend
 uv run worker
@@ -102,6 +102,12 @@ uv run task-execution-worker
 ```bash
 cd backend
 uv run task-maintenance-worker
+```
+
+**Terminal 6 - Crawler worker (website crawls):**
+```bash
+cd backend
+uv run arq src.eneo.worker.arq.CrawlerWorkerSettings
 ```
 
 The platform workers use separate execution and maintenance capacity queues so

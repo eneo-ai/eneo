@@ -166,16 +166,16 @@ update interval to re-enable it.
 Crawl limits are not set per website. They are deployment defaults from
 `env_backend.env` that a system administrator can override per tenant.
 
-| Setting                            | Default             | Purpose                                              |
-| ---------------------------------- | ------------------- | ---------------------------------------------------- |
-| `CRAWL_MAX_LENGTH`                 | 36000 s (10 hours)  | Maximum duration of one crawl                        |
-| `CLOSESPIDER_ITEMCOUNT`            | 20000               | Maximum pages per crawl                              |
-| `DOWNLOAD_MAX_SIZE`                | 10485760 (10 MB)    | Maximum size of a downloaded file                    |
-| `OBEY_ROBOTS`                      | `true`              | Respect `robots.txt`                                 |
-| `CRAWL_PAGE_BATCH_SIZE`            | 100                 | Pages committed per database write                   |
-| `CRAWL_EMBEDDING_CONCURRENCY`      | 3                   | Parallel embedding calls per crawl                   |
-| `TENANT_WORKER_CONCURRENCY_LIMIT`  | 4                   | Concurrent crawl jobs per tenant                     |
-| `USING_CRAWL`                      | `true`              | Enable crawling for the deployment                   |
+| Setting                              | Default            | Purpose                                           |
+| ------------------------------------ | ------------------ | ------------------------------------------------- |
+| `CRAWL_MAX_LENGTH`                   | 36000 s (10 hours) | Maximum duration of one crawl                     |
+| `CLOSESPIDER_ITEMCOUNT`              | 20000              | Maximum combined pages and linked files per crawl |
+| `DOWNLOAD_MAX_SIZE`                  | 10485760 (10 MB)   | Maximum size of a downloaded file                 |
+| `OBEY_ROBOTS`                        | `true`             | Respect `robots.txt`                              |
+| `CRAWL_PAGE_BATCH_SIZE`              | 100                | Pages committed per database write                |
+| `CRAWL_EMBEDDING_CONCURRENCY`        | 3                  | Parallel embedding calls per crawl                |
+| `CRAWL_JOB_TENANT_CONCURRENCY_LIMIT` | 4                  | Concurrent crawl jobs per tenant                  |
+| `CRAWL_JOB_CONCURRENCY_LIMIT`        | `WORKER_MAX_JOBS`  | Concurrent crawl jobs across the whole deployment |
 
 Per-tenant overrides are stored on the tenant and read by the worker at the
 start of every crawl:
@@ -333,14 +333,25 @@ settings in `env_backend.env` control throughput:
 # Concurrent jobs per worker process (default 15)
 WORKER_MAX_JOBS=15
 
-# Concurrent crawl jobs per tenant (default 4, 0 = unlimited)
-TENANT_WORKER_CONCURRENCY_LIMIT=4
+# Concurrent crawl jobs per tenant (default 4); a single-tenant deployment
+# can raise it to the deployment-wide limit
+CRAWL_JOB_TENANT_CONCURRENCY_LIMIT=4
+
+# Concurrent crawl jobs across all crawler workers (defaults to WORKER_MAX_JOBS)
+# CRAWL_JOB_CONCURRENCY_LIMIT=15
 ```
 
-Keep `WORKER_MAX_JOBS` at or below roughly 60 % of `DB_POOL_SIZE +
-DB_POOL_MAX_OVERFLOW` so the API keeps enough database connections. The
-backend template documents the sizing table. To add capacity, run an
-additional worker container with the same environment.
+Every API and worker process owns its own database pool, so size PostgreSQL
+`max_connections` for the sum of all pools; the backend template documents the
+budget table. To add crawl capacity, run additional crawler worker containers
+with the same environment and set `CRAWL_JOB_CONCURRENCY_LIMIT` to their
+combined capacity. Use the same limits on the backend and every worker.
+
+`TENANT_WORKER_CONCURRENCY_LIMIT`, `USING_CRAWL` and the other crawler variables
+of earlier releases are no longer read. A value other than the old default stops
+startup, so a limit you chose is never dropped silently; the old default only
+warns. See the [upgrade guide](/guides/upgrade-2-2-0#retired-crawler-variables)
+for every variable and its replacement.
 
 ### Health
 

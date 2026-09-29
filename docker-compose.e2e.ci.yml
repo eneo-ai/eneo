@@ -156,6 +156,26 @@ services:
     command: ["task-maintenance-worker"]
     networks: [e2e]
 
+  # Website crawls are delivered to their own ARQ queue (arq:crawler) and only
+  # this role consumes it. Same as the crawler-worker service in
+  # docs/deployment/docker-compose.yml: the image's run.sh reads WORKER_ROLE.
+  crawler-worker:
+    image: eneo-e2e-backend
+    depends_on:
+      e2e-backend:
+        condition: service_healthy
+    environment:
+      <<: *e2e-backend-environment
+      RUN_AS_WORKER: "true"
+      WORKER_ROLE: crawler
+    networks: [e2e]
+    healthcheck:
+      test: ["CMD", "arq", "--check", "src.eneo.worker.arq.CrawlerWorkerSettings"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
+
 networks:
   e2e:
     name: eneo-e2e

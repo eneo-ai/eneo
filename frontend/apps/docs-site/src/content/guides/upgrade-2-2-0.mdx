@@ -36,10 +36,13 @@ administrator with the `modules` permission; see
 [Module administration](/guides/deployment#module-administration). Delete the
 variable.
 
+The crawler variables of earlier releases are also removed; see
+[Retired crawler variables](#retired-crawler-variables).
+
 Find old names in the environment files:
 
 ```bash
-grep -n -E 'INTRIC_|SUPER_DUPER' env_backend.env env_frontend.env
+grep -n -E 'INTRIC_|SUPER_DUPER|TENANT_WORKER_|USING_CRAWL|CRAWL_FEEDER_|CRAWL_STALE_|CRAWL_JOB_MAX_AGE|CRAWL_PAGE_MAX_RETRIES|CRAWL_PAGE_RETRY_DELAY|ORPHAN_CRAWL_' env_backend.env env_frontend.env
 ```
 
 If you pass variables another way, such as Compose `environment:` entries or a
@@ -47,12 +50,14 @@ secret store, check there too.
 
 ### What you see at startup
 
-| Situation                                         | `db-init`, backend and worker                   | Web app                                    |
-| ------------------------------------------------- | ----------------------------------------------- | ------------------------------------------ |
-| An old name is set and its new name is not        | Does not start; names the replacement           | Does not start; names the replacement      |
-| Both the old and the new name are set             | Starts; warns that the old name is ignored      | Starts; warns that the old name is ignored |
-| `ENEO_SUPER_DUPER_API_KEY` or its old name is set | Starts; logs an error that it is no longer read | —                                          |
-| `ENEO_BACKEND_URL` is not set                     | —                                               | Does not start; says that it is required   |
+| Situation                                               | `db-init`, backend and worker                   | Web app                                    |
+| ------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------ |
+| An old name is set and its new name is not              | Does not start; names the replacement           | Does not start; names the replacement      |
+| Both the old and the new name are set                   | Starts; warns that the old name is ignored      | Starts; warns that the old name is ignored |
+| `ENEO_SUPER_DUPER_API_KEY` or its old name is set       | Starts; logs an error that it is no longer read | —                                          |
+| A retired crawler variable differs from its old default | Does not start; names the replacement, if any   | —                                          |
+| A retired crawler variable is at its old default        | Starts; warns that it is no longer read         | —                                          |
+| `ENEO_BACKEND_URL` is not set                           | —                                               | Does not start; says that it is required   |
 
 A service that does not start logs, for example:
 
@@ -65,6 +70,41 @@ Eneo cannot start while removed environment variables are set:
 `docker compose run --rm db-init`, the message appears directly above
 `Error running alembic migrations`. Services that restart automatically keep
 restarting until the variable is renamed.
+
+### Retired crawler variables
+
+The Python crawler replaced the Scrapy crawler, its Redis feeder and its
+per-tenant semaphore. Crawl admission, leases and recovery now live in
+PostgreSQL, and these variables are no longer read. One rule applies to all of
+them:
+
+- A variable set to a value **different from its old default** stops startup,
+  because a value you chose would otherwise be lost. The message names the
+  setting that replaces it, or says that it is no longer configurable. Remove the
+  variable.
+- A variable set to its **old default** only logs a warning. The deployment
+  templates shipped these defaults, so a copied template starts as before.
+
+| Variable                              | Old default | Replaced by                                                              |
+| ------------------------------------- | ----------- | ------------------------------------------------------------------------ |
+| `TENANT_WORKER_CONCURRENCY_LIMIT`     | `4`         | `CRAWL_JOB_TENANT_CONCURRENCY_LIMIT`                                     |
+| `CRAWL_FEEDER_INTERVAL_SECONDS`       | `10`        | Nothing: the feeder that paced crawl dispatch is gone                    |
+| `CRAWL_FEEDER_BATCH_SIZE`             | `10`        | Nothing: the feeder that paced crawl dispatch is gone                    |
+| `USING_CRAWL`                         | `true`      | Nothing: crawling cannot be switched off by environment                  |
+| `CRAWL_FEEDER_ENABLED`                | `true`      | Nothing: PostgreSQL dispatches scheduled crawls                          |
+| `TENANT_WORKER_SEMAPHORE_TTL_SECONDS` | `39600`     | Nothing: the Redis slot counter it expired is gone                       |
+| `ORPHAN_CRAWL_RUN_TIMEOUT_HOURS`      | `12`        | Nothing: stuck crawls are recovered when their PostgreSQL lease expires  |
+| `CRAWL_STALE_THRESHOLD_MINUTES`       | `30`        | Nothing: a new crawl no longer preempts an older one of the same website |
+| `CRAWL_JOB_MAX_AGE_SECONDS`           | `1800`      | Nothing: queued crawls wait in PostgreSQL admission instead of expiring  |
+| `CRAWL_PAGE_MAX_RETRIES`              | `3`         | Nothing: the crawler retries pages by its own policy                     |
+| `CRAWL_PAGE_RETRY_DELAY`              | `1.0`       | Nothing: the crawler retries pages by its own policy                     |
+
+The crawler worker takes queued crawls as capacity allows, bounded by
+`CRAWL_JOB_CONCURRENCY_LIMIT` and `CRAWL_JOB_TENANT_CONCURRENCY_LIMIT`; there is no
+pacing interval or batch size.
+
+To keep crawls from running, leave the `crawler-worker` service stopped (started
+crawls then stay queued) and set each website's update interval to Never.
 
 To check a deployment for leftovers:
 
