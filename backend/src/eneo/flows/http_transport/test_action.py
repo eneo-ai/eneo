@@ -88,7 +88,7 @@ async def execute_http_test(
             variables=test_variables,
             interpolate=interpolate,
         )
-    except HttpTemplateInterpolationError as exc:
+    except (HttpTemplateInterpolationError, TypedIOValidationException) as exc:
         return HttpTestResult(
             success=False,
             error_code=HttpTransportError.VARIABLE_RESOLUTION_FAILED,

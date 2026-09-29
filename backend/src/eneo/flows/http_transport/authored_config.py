@@ -103,3 +103,28 @@ class HttpAuthoredConfig(BaseModel):
     body: HttpBody = Field(default_factory=lambda: HttpBody(mode=HttpBodyMode.AUTO))
     custom_headers: list[CustomHeader] = Field(default_factory=_default_custom_headers)
     response_format: HttpResponseFormat | None = None
+
+    def interpolated_templates(self) -> list[str]:
+        """The strings the request compiler fills with run variables.
+
+        Whatever a template reads, the request carries: this is the list of
+        places a step's data can enter an HTTP call. A credential is never one:
+        it is a literal, and the compiler refuses a template in it.
+        """
+        candidates: list[SecretValue | None] = [self.url]
+        match self.auth:
+            case HttpAuthApiKey(header_name=name):
+                candidates.append(name)
+            case HttpAuthBasicAuth(username=user):
+                candidates.append(user)
+            case HttpAuthBearer() | HttpAuthNone():
+                pass
+        candidates.extend(
+            header.value for header in self.custom_headers if not header.secret
+        )
+        if self.body.mode in (HttpBodyMode.JSON_TEMPLATE, HttpBodyMode.TEXT_TEMPLATE):
+            candidates.append(self.body.template)
+        return [value for value in candidates if isinstance(value, str)]
+
+
+HTTP_CONFIG_KEYS = frozenset(HttpAuthoredConfig.model_fields)

@@ -160,6 +160,44 @@ def test_template_expression_url_is_validated_after_interpolation() -> None:
     assert HttpTransportError.INVALID_URL not in errors
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("ftp://example.org/{{ flow_input.id }}", id="fixed-ftp-scheme"),
+        pytest.param("FTP://example.org/{{ flow_input.id }}", id="upper-case-scheme"),
+        pytest.param(
+            "  file:///etc/{{ flow_input.id }}", id="leading-space-file-scheme"
+        ),
+        pytest.param("gopher://{{ flow_input.host }}/x", id="scheme-before-the-host"),
+    ],
+)
+def test_a_fixed_scheme_that_is_not_http_is_refused_before_the_template_is_filled(
+    url: str,
+) -> None:
+    errors = _validate(_config(url=url))
+
+    assert HttpTransportError.INVALID_URL in errors
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("https://example.org/{{ flow_input.id }}", id="https-prefix"),
+        pytest.param("HTTP://example.org/{{ flow_input.id }}", id="upper-case-http"),
+        pytest.param("{{ flow_input.url }}", id="entirely-templated"),
+        pytest.param("{{ base_url }}/api", id="templated-base"),
+        pytest.param("{{ scheme }}://example.org/x", id="templated-scheme"),
+        pytest.param("ht{{ tail }}://example.org/x", id="scheme-cut-by-a-template"),
+        pytest.param("https://{{ flow_input.host }}/x", id="templated-host"),
+    ],
+)
+def test_a_url_whose_fixed_part_is_fine_waits_for_the_template(url: str) -> None:
+    errors = _validate(_config(url=url))
+
+    assert HttpTransportError.MISSING_URL not in errors
+    assert HttpTransportError.INVALID_URL not in errors
+
+
 def test_valid_https_url_no_url_errors() -> None:
     errors = _validate(_config(url="https://example.org/api"))
 

@@ -20,7 +20,11 @@ from eneo.flows.http_transport.authored_config import (
     HttpMethod,
     SecretValue,
 )
-from eneo.flows.variable_resolver import FlowVariableContext, FlowVariableInterpolation
+from eneo.flows.variable_resolver import (
+    FlowVariableContext,
+    FlowVariableInterpolation,
+    iter_template_expressions,
+)
 from eneo.main.exceptions import TypedIOValidationException
 
 
@@ -91,15 +95,18 @@ def compile_http_config(
             )
         return FlowVariableInterpolation(text=_interpolate(template), edges=())
 
-    # Auth -> headers
+    # Auth -> headers. A credential is sent as stored: interpolating it would
+    # put run data into a header the destination reads.
     match authored.auth:
         case HttpAuthBearer(token=token):
-            headers["Authorization"] = f"Bearer {_interpolate(_secret_text(token))}"
+            headers["Authorization"] = (
+                f"Bearer {_credential_text(token, field='auth.token')}"
+            )
         case HttpAuthApiKey(header_name=name, key=key):
-            headers[_interpolate(name)] = _interpolate(_secret_text(key))
+            headers[_interpolate(name)] = _credential_text(key, field="auth.key")
         case HttpAuthBasicAuth(username=user, password=pwd):
             encoded = base64.b64encode(
-                f"{_interpolate(user)}:{_interpolate(_secret_text(pwd))}".encode()
+                f"{_interpolate(user)}:{_credential_text(pwd, field='auth.password')}".encode()
             ).decode()
             headers["Authorization"] = f"Basic {encoded}"
         case HttpAuthNone():
@@ -108,7 +115,9 @@ def compile_http_config(
     custom_header_edges: dict[str, tuple[FlowResolvedInputEdge, ...]] = {}
     for index, header in enumerate(authored.custom_headers):
         if header.secret:
-            headers[header.name] = _interpolate(_secret_text(header.value))
+            headers[header.name] = _credential_text(
+                header.value, field=f"custom_headers[{index}].value"
+            )
             custom_header_edges.pop(header.name, None)
             continue
         interpolation = _interpolate_evidenced(
@@ -144,6 +153,17 @@ def compile_http_config(
             body_edges,
         ),
     )
+
+
+def _credential_text(value: SecretValue, *, field: str) -> str:
+    text = _secret_text(value)
+    if iter_template_expressions(text):
+        raise TypedIOValidationException(
+            f"HTTP credential {field} holds a template; a credential must be a "
+            "literal value and is never filled from run data.",
+            code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
+        )
+    return text
 
 
 def _secret_text(value: SecretValue) -> str:

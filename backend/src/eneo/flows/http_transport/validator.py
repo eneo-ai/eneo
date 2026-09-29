@@ -14,6 +14,8 @@ from eneo.flows.http_transport.authored_config import (
 )
 from eneo.flows.http_transport.errors import HttpTransportError
 
+_HTTP_SCHEMES = ("http", "https")
+
 
 def validate_authored_config(
     config: HttpAuthoredConfig,
@@ -25,14 +27,9 @@ def validate_authored_config(
     """Validate authored config. Returns list of error codes (empty = valid)."""
     errors: list[HttpTransportError] = []
 
-    url_error = validate_http_url(config.url)
-    # Template URLs are validated after interpolation by the draft/runtime sender.
-    if url_error is not None and not _contains_template_marker(config.url):
+    url_error = authored_url_error(config.url)
+    if url_error is not None:
         errors.append(url_error)
-    elif contains_url_userinfo(config.url):
-        # Userinfo is authored literally even when the host is a template, so
-        # deferring it to interpolation would let the credential be stored.
-        errors.append(HttpTransportError.INVALID_URL)
 
     # Auth credentials validation (skip sentinel values — already stored)
     match config.auth:
@@ -70,6 +67,28 @@ def validate_authored_config(
     return errors
 
 
+def authored_url_error(url: str) -> HttpTransportError | None:
+    """The URL's defect that can be known before the request.
+
+    A fixed URL is validated whole. A URL with a template is only known once it
+    is filled, at the request, but what the template does not fill is authored
+    literally and is validated now: a scheme written before the first template
+    must be http or https, and userinfo is refused even when the host is a
+    template, so deferring it to interpolation would let the credential be
+    stored.
+    """
+    if not _contains_template_marker(url):
+        return validate_http_url(url)
+    fixed_prefix = url.split("{{", 1)[0].strip()
+    if "://" in fixed_prefix:
+        scheme = fixed_prefix.split("://", 1)[0].lower()
+        if scheme not in _HTTP_SCHEMES:
+            return HttpTransportError.INVALID_URL
+    if contains_url_userinfo(url):
+        return HttpTransportError.INVALID_URL
+    return None
+
+
 def validate_http_url(url: str) -> HttpTransportError | None:
     if not url.strip():
         return HttpTransportError.MISSING_URL
@@ -77,7 +96,7 @@ def validate_http_url(url: str) -> HttpTransportError | None:
         parsed = urlparse(url.strip())
     except Exception:
         return HttpTransportError.INVALID_URL
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+    if parsed.scheme not in _HTTP_SCHEMES or not parsed.netloc:
         return HttpTransportError.INVALID_URL
     if contains_url_userinfo(url):
         return HttpTransportError.INVALID_URL

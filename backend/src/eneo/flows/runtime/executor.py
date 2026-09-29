@@ -112,6 +112,11 @@ from eneo.flows.flow_security_classification import (
     evidence_classification_level,
 )
 from eneo.flows.flow_template_asset_repo import FlowTemplateAssetRepository
+from eneo.flows.http_transport import (
+    credential_template_message,
+    sent_step_http_configs,
+    templated_step_credentials,
+)
 from eneo.flows.infrastructure.flow_provider_call_recorder import (
     FlowProviderCallRecorder,
     ProviderCallEvidencePersistenceError,
@@ -866,6 +871,7 @@ class FlowRunExecutor:
             "flow_executor.steps_parsed run_id=%s step_count=%d", run_id, len(steps)
         )
         try:
+            self._refuse_unacceptable_http_configs(steps)
             step_output_levels = await self._resolve_step_output_levels(
                 steps=steps, state=state
             )
@@ -2885,6 +2891,59 @@ class FlowRunExecutor:
                     context={"step_order": step.step_order},
                 ) from exc
 
+    def _refuse_unacceptable_http_configs(self, steps: list[RuntimeStep]) -> None:
+        """Refuse a run whose stored HTTP config the runtime would reject, before any step.
+
+        A stored config is parsed as the request compiler parses it, and its
+        timeout is held to the runtime's own cap, so a config the runtime would
+        reject after claiming the step fails the run here instead. A credential
+        is a literal and the compiler refuses a template in one, but only after
+        the step has run; a version published before that rule keeps its
+        ciphertext, so it is read decrypted.
+        """
+        for step in steps:
+            configs = sent_step_http_configs(
+                step_order=step.step_order,
+                input_source=step.input_source,
+                output_mode=step.output_mode,
+                input_config=step.input_config,
+                output_config=step.output_config,
+            )
+            for label, config in configs:
+                self._refuse_timeout_over_the_cap(step, label, config.timeout_seconds)
+            for label, fields in templated_step_credentials(
+                step_order=step.step_order,
+                input_source=step.input_source,
+                output_mode=step.output_mode,
+                input_config=step.input_config,
+                output_config=step.output_config,
+                encryption_service=self.encryption_service,
+            ):
+                raise BadRequestException(
+                    credential_template_message(
+                        step_order=step.step_order, label=label, fields=fields
+                    ),
+                    code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
+                    context={"step_order": step.step_order},
+                )
+
+    def _refuse_timeout_over_the_cap(
+        self, step: RuntimeStep, label: str, timeout_seconds: int
+    ) -> None:
+        try:
+            self.http_runtime.resolve_timeout_seconds(
+                timeout_seconds, step_order=step.step_order, config_label=label
+            )
+        except TypedIOValidationException as exc:
+            raise BadRequestException(
+                str(exc),
+                code=exc.code,
+                context={
+                    "step_order": step.step_order,
+                    "field": f"{label}.timeout_seconds",
+                },
+            ) from None
+
     async def _resolve_step_output_levels(
         self, *, steps: list[RuntimeStep], state: RunExecutionState
     ) -> dict[int, int | None]:
@@ -2928,6 +2987,9 @@ class FlowRunExecutor:
                     if flow_output_mode_uses_completion_model(step.output_mode)
                     else None
                 ),
+                output_mode=step.output_mode,
+                input_config=step.input_config,
+                output_config=step.output_config,
                 step_ref_mapping=state.step_ref_mapping,
                 max_prior_step_order=step.step_order - 1,
             ),

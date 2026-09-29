@@ -69,6 +69,16 @@ from eneo.users.user_repo import UsersRepository
 
 logger = logging.getLogger(__name__)
 
+# Typed failures of compiling the delivery from the published definition: the
+# same definition compiles the same way on every attempt, so they are not retried.
+_PERMANENT_DELIVERY_ERROR_CODES = frozenset(
+    {
+        FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
+        FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class FlowWebhookDeliveryResult:
@@ -240,14 +250,16 @@ class FlowRunWebhookDeliveryService:
             BadRequestException,
             FlowPublishedDefinitionWithoutExecutableStepsError,
         ) as exc:
-            resolver_text_failure = (
-                payload_prepared
-                and isinstance(exc.__cause__, TypedIOValidationException)
-                and exc.__cause__.code
-                in {
-                    FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
-                    FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
-                }
+            failure_codes = {
+                exc.code if isinstance(exc, BadRequestException) else None,
+                (
+                    exc.__cause__.code
+                    if isinstance(exc.__cause__, TypedIOValidationException)
+                    else None
+                ),
+            }
+            permanent_failure = payload_prepared and bool(
+                failure_codes & _PERMANENT_DELIVERY_ERROR_CODES
             )
             terminal_error = (
                 self._terminal_error_for_definition_failure(
@@ -264,7 +276,7 @@ class FlowRunWebhookDeliveryService:
                         now=now,
                         error=exc,
                         force_dead_letter=(
-                            terminal_error is not None or resolver_text_failure
+                            terminal_error is not None or permanent_failure
                         ),
                         terminal_error=terminal_error,
                     )

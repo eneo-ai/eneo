@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Protocol
 
+from eneo.flows.enums import FlowInputSource, FlowOutputMode
 from eneo.flows.http_transport.authored_config import (
     SECRET_SENTINEL,
     CustomHeader,
@@ -16,6 +17,13 @@ from eneo.flows.http_transport.authored_config import (
 )
 from eneo.flows.http_transport.errors import AuthoredSecretEncryptionUnavailableError
 from eneo.flows.http_transport.normalizer import is_authored_config
+from eneo.flows.http_transport.step_configs import sent_step_http_configs
+from eneo.flows.variable_resolver import iter_template_expressions
+
+
+class SupportsDecryption(Protocol):
+    def is_encrypted(self, value: str) -> bool: ...
+    def decrypt(self, ciphertext: str) -> str: ...
 
 
 class SupportsEncryption(Protocol):
@@ -70,6 +78,100 @@ def authored_secret_fields(config: HttpAuthoredConfig) -> tuple[str, ...]:
         path
         for path, value, declared_secret in _secret_bearing_fields(config)
         if declared_secret and isinstance(value, str) and value
+    )
+
+
+def secret_fields_holding_templates(config: HttpAuthoredConfig) -> tuple[str, ...]:
+    """Name the declared secret fields whose value is a template.
+
+    A credential is a literal. Interpolating one would let a step's output, the
+    run input or a form field reach a header the destination reads, and once the
+    credential is stored encrypted no check of the stored config could see it.
+    A stored-secret sentinel is a reference, not text, so it holds no template.
+    """
+    return tuple(
+        path
+        for path, value, declared_secret in _secret_bearing_fields(config)
+        if declared_secret
+        and isinstance(value, str)
+        and iter_template_expressions(value)
+    )
+
+
+class _ReadableCiphertext:
+    """The encryption service, opened only where its key can open the value.
+
+    A credential the key cannot open (no key configured, another key) is opaque
+    to a check that reads what the runtime would send; it is left as stored.
+    """
+
+    def __init__(self, service: SupportsEncryption) -> None:
+        self._service = service
+
+    def is_encrypted(self, value: str) -> bool:
+        return self._service.is_encrypted(value) and self._service.can_decrypt(value)
+
+    def decrypt(self, ciphertext: str) -> str:
+        return self._service.decrypt(ciphertext)
+
+
+def templated_secret_fields(
+    config: HttpAuthoredConfig,
+    encryption_service: SupportsEncryption | None,
+) -> tuple[str, ...]:
+    """Name the secret fields of a stored config whose decrypted value is a template.
+
+    Reads what the runtime would interpolate: stored credentials are ciphertext,
+    so they are decrypted first, where the key can open them.
+    """
+    return secret_fields_holding_templates(
+        decrypt_authored_config(
+            config,
+            (
+                _ReadableCiphertext(encryption_service)
+                if encryption_service is not None
+                else None
+            ),
+        )
+    )
+
+
+def templated_step_credentials(
+    *,
+    step_order: int,
+    input_source: FlowInputSource | str,
+    output_mode: FlowOutputMode | str,
+    input_config: Mapping[str, object] | None,
+    output_config: Mapping[str, object] | None,
+    encryption_service: SupportsEncryption | None,
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """The (config label, credential fields) of a step whose credentials hold templates.
+
+    Each config is parsed as the runtime parses it (``sent_step_http_configs``);
+    a config the runtime would reject raises there, before its credentials are
+    read.
+    """
+    found = (
+        (label, templated_secret_fields(config, encryption_service))
+        for label, config in sent_step_http_configs(
+            step_order=step_order,
+            input_source=input_source,
+            output_mode=output_mode,
+            input_config=input_config,
+            output_config=output_config,
+        )
+    )
+    return tuple((label, fields) for label, fields in found if fields)
+
+
+def credential_template_message(
+    *, step_order: int, label: str, fields: Sequence[str]
+) -> str:
+    named = ", ".join(f"{label}.{field}" for field in fields)
+    return (
+        f"Step {step_order}: {named} is a credential and must hold the literal "
+        "secret, not a {{ ... }} reference. Put references in the URL, a header "
+        "that is not secret, or the body."
     )
 
 
@@ -199,7 +301,7 @@ def protect_authored_secrets(
 
 def decrypt_authored_config(
     config: HttpAuthoredConfig,
-    encryption_service: SupportsEncryption | None,
+    encryption_service: SupportsDecryption | None,
 ) -> HttpAuthoredConfig:
     """Decrypt sensitive fields for runtime execution."""
     if encryption_service is None:

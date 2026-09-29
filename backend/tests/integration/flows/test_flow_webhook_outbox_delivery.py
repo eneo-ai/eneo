@@ -1058,6 +1058,131 @@ async def test_flow_webhook_delivery_rejects_file_backed_preview_without_http(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    ("output_config", "expected_in_error"),
+    [
+        pytest.param(
+            {
+                "url": "https://example.org/hook",
+                "auth": {"mode": "bearer_token", "token": "{{step_1.output.text}}"},
+                "timeout_seconds": 5,
+            },
+            "auth.token",
+            id="templated-credential",
+        ),
+        pytest.param(
+            {"url": "https://example.org/hook", "timeout_seconds": 5},
+            "authored HTTP config",
+            id="missing-auth",
+        ),
+        pytest.param(
+            {
+                "url": "https://example.org/hook",
+                "auth": {"mode": "bogus"},
+                "timeout_seconds": 5,
+            },
+            "output_config.auth",
+            id="bogus-auth-mode",
+        ),
+        pytest.param(
+            {"url": "not a url", "auth": {"mode": "none"}, "timeout_seconds": 5},
+            "output_config.url",
+            id="malformed-url",
+        ),
+        pytest.param(
+            {
+                "url": "https://alice:secret@{{step_1.output.text}}/hook",
+                "auth": {"mode": "none"},
+                "timeout_seconds": 5,
+            },
+            "output_config.url",
+            id="templated-userinfo",
+        ),
+        pytest.param(
+            {
+                "url": "ftp://example.org/{{step_1.output.text}}",
+                "auth": {"mode": "none"},
+                "timeout_seconds": 5,
+            },
+            "output_config.url",
+            id="fixed-non-http-scheme-before-a-template",
+        ),
+    ],
+)
+async def test_flow_webhook_delivery_dead_letters_a_config_the_runtime_rejects_without_retry(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    output_config,
+    expected_in_error,
+):
+    # A version published before the config was validated. Compiling the
+    # request never changes between attempts, so retrying it five times only
+    # delays the run's failure.
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+        )
+        flow, run, step = await _create_running_webhook_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            output_config=output_config,
+            prior_output_payload={"text": "classified-text"},
+        )
+        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
+        delivery_id = await webhook_repo.insert_pending_delivery(
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            intent=_intent(
+                run_id=run.id,
+                step_id=step.id,
+                step_order=step.step_order,
+            ),
+        )
+        service = _delivery_service(
+            session=session,
+            container=container,
+            webhook_repo=webhook_repo,
+        )
+        send_http_request = AsyncMock()
+        service._send_http_request = send_http_request
+        now = datetime.now(timezone.utc)
+
+        result = await service.deliver_due(now=now)
+        repeated = await service.deliver_due(now=now + timedelta(hours=1))
+        delivery_state = (
+            await session.execute(
+                sa.select(
+                    FlowRunWebhookDeliveries.delivery_status,
+                    FlowRunWebhookDeliveries.delivery_attempts,
+                    FlowRunWebhookDeliveries.delivery_last_error,
+                ).where(FlowRunWebhookDeliveries.id == delivery_id)
+            )
+        ).one()
+
+    assert result.attempted_count == 1
+    assert result.retry_scheduled_count == 0
+    assert result.dead_lettered_count == 1
+    assert repeated.attempted_count == 0
+    assert (
+        delivery_state.delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+    )
+    assert delivery_state.delivery_attempts == 1
+    assert expected_in_error in delivery_state.delivery_last_error
+    assert "classified-text" not in delivery_state.delivery_last_error
+    assert "alice:secret" not in delivery_state.delivery_last_error
+    send_http_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_flow_webhook_delivery_dead_letters_file_backed_template_reference_once(
     setup_database,
     completion_model_factory,

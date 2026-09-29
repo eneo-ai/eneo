@@ -727,3 +727,185 @@ async def test_deliver_webhook_retry_keeps_same_idempotency_key_after_partial_fa
     second_outcome = deps.audit_http_outbound.await_args_list[1].kwargs["outcome"]
     assert first_outcome.name == "FAILURE"
     assert second_outcome.name == "SUCCESS"
+
+
+class _NoEncryption:
+    def is_encrypted(self, value: str) -> bool:
+        return False
+
+
+_CREDENTIAL_WITH_TEMPLATE = {
+    "url": "https://example.org/hook",
+    "auth": {"mode": "bearer_token", "token": "{{ step_1.output.text }}"},
+}
+
+
+@pytest.mark.asyncio
+async def test_http_input_refuses_a_template_in_a_credential_before_send() -> None:
+    step = _Step(
+        step_order=2,
+        step_id="s2",
+        input_type="text",
+        input_source="http_get",
+        input_config=_CREDENTIAL_WITH_TEMPLATE,
+    )
+    send_http_request = AsyncMock()
+    deps = _make_deps(
+        send_http_request=send_http_request, encryption_service=_NoEncryption()
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await resolve_http_input_source_text(
+            step=step,
+            run=_Run(id="run-1", flow_id="flow-1", tenant_id="tenant-1"),
+            context=FlowVariableResolver().build_context_with_evidence({}, []),
+            deps=deps,
+        )
+
+    assert exc_info.value.code == "typed_io_http_invalid_config"
+    assert "auth.token" in str(exc_info.value)
+    send_http_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_webhook_refuses_a_template_in_a_credential_before_send() -> None:
+    step = _Step(
+        step_order=2,
+        step_id="s2",
+        input_type="text",
+        input_source="previous_step",
+        output_config={
+            "url": "https://example.org/hook",
+            "auth": {"mode": "none"},
+            "custom_headers": [
+                {"name": "X-Key", "value": "{{ step_1.output.text }}", "secret": True}
+            ],
+        },
+    )
+    send_http_request = AsyncMock()
+    deps = _make_deps(
+        send_http_request=send_http_request, encryption_service=_NoEncryption()
+    )
+
+    with pytest.raises(
+        BadRequestException, match=r"custom_headers\[0\]\.value"
+    ) as exc_info:
+        await deliver_webhook(
+            step=step,
+            text_payload="done",
+            run=_Run(id="run-1", flow_id="flow-1", tenant_id="tenant-1"),
+            context={"step_1": {"output": {"text": "classified"}}},
+            deps=deps,
+            idempotency_key="run-1:s2:1:webhook",
+        )
+
+    # The typed code stays on the error, so a delivery can tell it is permanent.
+    assert exc_info.value.code == "typed_io_http_invalid_config"
+    assert isinstance(exc_info.value.__cause__, TypedIOValidationException)
+    send_http_request.assert_not_awaited()
+
+
+_UNACCEPTED_WEBHOOK_CONFIGS = [
+    pytest.param(
+        {"url": "https://example.org/hook"}, "output_config", id="missing-auth"
+    ),
+    pytest.param(
+        {"url": "https://example.org/hook", "auth": {"mode": "bogus"}},
+        "output_config.auth",
+        id="bogus-auth-mode",
+    ),
+    pytest.param(
+        {"url": "not a url", "auth": {"mode": "none"}},
+        "output_config.url",
+        id="malformed-url",
+    ),
+    pytest.param(
+        {"url": "{{ step_1.output.text }}", "auth": {"mode": "none"}},
+        "output_config.url",
+        id="url-that-fills-to-something-malformed",
+    ),
+    pytest.param(
+        {"url": "   ", "auth": {"mode": "none"}},
+        "output_config.url",
+        id="empty-url",
+    ),
+    pytest.param(
+        {
+            "url": "https://alice:secret@{{ step_1.output.text }}/hook",
+            "auth": {"mode": "none"},
+        },
+        "output_config.url",
+        id="templated-userinfo",
+    ),
+    pytest.param(
+        {
+            "url": "ftp://example.org/{{ step_1.output.text }}",
+            "auth": {"mode": "none"},
+        },
+        "output_config.url",
+        id="fixed-non-http-scheme-before-a-template",
+    ),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("config", "field"), _UNACCEPTED_WEBHOOK_CONFIGS)
+async def test_webhook_raises_the_typed_code_for_a_config_the_runtime_rejects(
+    config: dict[str, Any], field: str
+) -> None:
+    send_http_request = AsyncMock()
+    deps = _make_deps(
+        send_http_request=send_http_request, encryption_service=_NoEncryption()
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await deliver_webhook(
+            step=_Step(
+                step_order=2,
+                step_id="s2",
+                input_type="text",
+                input_source="previous_step",
+                output_config=config,
+            ),
+            text_payload="done",
+            run=_Run(id="run-1", flow_id="flow-1", tenant_id="tenant-1"),
+            context={"step_1": {"output": {"text": "not a url"}}},
+            deps=deps,
+            idempotency_key="run-1:s2:1:webhook",
+        )
+
+    assert exc_info.value.code == "typed_io_http_invalid_config"
+    assert field in str(exc_info.value)
+    assert "alice:secret" not in str(exc_info.value)
+    send_http_request.assert_not_awaited()
+    deps.audit_http_outbound.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_http_input_refuses_an_effective_url_that_is_not_absolute_http() -> None:
+    step = _Step(
+        step_order=2,
+        step_id="s2",
+        input_type="text",
+        input_source="http_get",
+        input_config={"url": "{{ flow_input.target }}", "auth": {"mode": "none"}},
+    )
+    send_http_request = AsyncMock()
+    deps = _make_deps(
+        send_http_request=send_http_request, encryption_service=_NoEncryption()
+    )
+    context = FlowVariableResolver().build_context_with_evidence(
+        {"target": "ftp://example.org/x"}, []
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await resolve_http_input_source_text(
+            step=step,
+            run=_Run(id="run-1", flow_id="flow-1", tenant_id="tenant-1"),
+            context=context,
+            deps=deps,
+        )
+
+    assert exc_info.value.code == "typed_io_http_invalid_config"
+    assert "input_config.url" in str(exc_info.value)
+    send_http_request.assert_not_awaited()

@@ -1,4 +1,5 @@
 from eneo.flows.http_transport.authored_config import (
+    HTTP_CONFIG_KEYS,
     SECRET_SENTINEL,
     CustomHeader,
     HttpAuth,
@@ -26,23 +27,33 @@ from eneo.flows.http_transport.errors import (
     HttpTemplateInterpolationError,
     HttpTransportError,
 )
-from eneo.flows.http_transport.normalizer import is_authored_config
+from eneo.flows.http_transport.normalizer import (
+    is_authored_config,
+    parse_authored_http_config,
+    url_error_message,
+)
 from eneo.flows.http_transport.request_preview import HttpRequestPreview
 from eneo.flows.http_transport.secret_codec import (
+    credential_template_message,
     decrypt_authored_config,
     merge_secrets_on_update,
     protect_authored_secrets,
     redact_authored_config,
     redact_persisted_config,
+    secret_fields_holding_templates,
+    templated_secret_fields,
+    templated_step_credentials,
     unprotected_persisted_secret_fields,
     unresolved_secret_sentinel_fields,
 )
+from eneo.flows.http_transport.step_configs import sent_step_http_configs
 from eneo.flows.http_transport.validator import validate_authored_config
 
 __all__ = [
     "AuthoredSecretEncryptionUnavailableError",
     "CustomHeader",
     "EffectiveHttpRequest",
+    "HTTP_CONFIG_KEYS",
     "HttpAuth",
     "HttpAuthApiKey",
     "HttpAuthBasicAuth",
@@ -61,15 +72,22 @@ __all__ = [
     "SecretValue",
     "HttpTemplateInterpolationError",
     "compile_http_config",
+    "credential_template_message",
     "decrypt_authored_config",
     "contains_secret_sentinel",
     "is_secret_sentinel",
     "is_authored_config",
+    "parse_authored_http_config",
     "merge_secrets_on_update",
     "protect_authored_secrets",
     "redact_authored_config",
     "redact_persisted_config",
+    "sent_step_http_configs",
+    "secret_fields_holding_templates",
+    "templated_secret_fields",
+    "templated_step_credentials",
     "unprotected_persisted_secret_fields",
     "unresolved_secret_sentinel_fields",
+    "url_error_message",
     "validate_authored_config",
 ]

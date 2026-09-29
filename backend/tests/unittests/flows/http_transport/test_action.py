@@ -61,7 +61,7 @@ async def test_execute_http_test_interpolates_raw_context_before_send() -> None:
     result = await execute_http_test(
         config=_config(
             url="{{base_url}}/events/{{name}}",
-            auth=HttpAuthBearer(token="{{token}}"),
+            auth=HttpAuthBearer(token="sekret-token-123"),
             custom_headers=[
                 CustomHeader(name="X-Case", value="{{flow_input.case_id}}"),
             ],
@@ -75,7 +75,6 @@ async def test_execute_http_test_interpolates_raw_context_before_send() -> None:
         test_variables={
             "base_url": "https://example.org",
             "name": "alex",
-            "token": "sekret-token-123",
             "flow_input": {"case_id": "CASE-1"},
             "text": "hello",
         },
@@ -114,6 +113,27 @@ async def test_execute_http_test_returns_typed_variable_failure() -> None:
     assert result.success is False
     assert result.error_code == HttpTransportError.VARIABLE_RESOLUTION_FAILED
     assert "Unknown variable reference" in (result.error_message or "")
+    assert result.request_preview is None
+
+
+@pytest.mark.asyncio
+async def test_execute_http_test_refuses_a_template_in_a_credential() -> None:
+    async def _send_http_request(**_kwargs: Any) -> httpx.Response:
+        raise AssertionError("request should not be sent with a templated credential")
+
+    result = await execute_http_test(
+        config=_config(auth=HttpAuthBearer(token="{{ step_1.output.text }}")),
+        direction="output",
+        method="POST",
+        test_variables={"step_1": {"output": {"text": "classified"}}},
+        interpolate=_transport_interpolate,
+        send_http_request=_send_http_request,
+    )
+
+    assert result.success is False
+    assert result.error_code == HttpTransportError.VARIABLE_RESOLUTION_FAILED
+    assert "auth.token" in (result.error_message or "")
+    assert "classified" not in (result.error_message or "")
     assert result.request_preview is None
 
 

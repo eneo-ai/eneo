@@ -7,7 +7,6 @@ from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable, Protocol
 
 import httpx
-from pydantic import ValidationError
 
 from eneo.audit.domain.outcome import Outcome
 from eneo.flows.domain.flow import FlowPersistedJsonObject
@@ -22,12 +21,13 @@ from eneo.flows.flow_run_provenance import (
 from eneo.flows.flow_run_redaction import redact_string
 from eneo.flows.http_transport import (
     EffectiveHttpRequest,
-    HttpAuthoredConfig,
     HttpMethod,
     compile_http_config,
     decrypt_authored_config,
-    is_authored_config,
+    parse_authored_http_config,
+    url_error_message,
 )
+from eneo.flows.http_transport.validator import validate_http_url
 from eneo.flows.variable_resolver import FlowVariableContext
 from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 
@@ -115,7 +115,7 @@ class FlowHttpOrchestrationDeps:
 
 def _compile_authored_http_request(
     *,
-    raw_config: FlowPersistedJsonObject,
+    raw_config: FlowPersistedJsonObject | None,
     direction: str,
     method: HttpMethod,
     context: FlowPersistedJsonObject,
@@ -123,21 +123,9 @@ def _compile_authored_http_request(
     config_label: str,
     deps: FlowHttpOrchestrationDeps,
 ) -> tuple[EffectiveHttpRequest, str | None]:
-    if not is_authored_config(raw_config):
-        raise TypedIOValidationException(
-            _authored_http_config_required_message(
-                step_order=step_order,
-                config_label=config_label,
-            ),
-            code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
-        )
-    try:
-        authored = HttpAuthoredConfig.model_validate(raw_config)
-    except ValidationError as exc:
-        raise TypedIOValidationException(
-            f"Step {step_order}: {config_label} is not a valid authored HTTP config.",
-            code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
-        ) from exc
+    authored = parse_authored_http_config(
+        raw_config, step_order=step_order, config_label=config_label
+    )
 
     decrypted = decrypt_authored_config(authored, deps.encryption_service)
     effective_request = compile_http_config(
@@ -167,17 +155,6 @@ def _compile_authored_http_request(
     )
 
 
-def _authored_http_config_required_message(
-    *,
-    step_order: int,
-    config_label: str,
-) -> str:
-    return (
-        f"Step {step_order}: {config_label} must use authored HTTP config with an auth field; "
-        "legacy flat HTTP config is no longer supported."
-    )
-
-
 async def resolve_http_input_source_text(
     *,
     step: RuntimeHttpStep,
@@ -190,12 +167,6 @@ async def resolve_http_input_source_text(
             f"Step {step.step_order}: HTTP input orchestration only supports input_source 'http_get'.",
             code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
         )
-    if not isinstance(step.input_config, dict):
-        raise TypedIOValidationException(
-            f"Step {step.step_order}: HTTP input source requires input_config object.",
-            code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
-        )
-
     method: HttpMethod = "GET"
     effective_request, response_format = _compile_authored_http_request(
         raw_config=step.input_config,
@@ -207,9 +178,14 @@ async def resolve_http_input_source_text(
         deps=deps,
     )
     url = effective_request.url
-    if not url:
+    url_error = validate_http_url(url)
+    if url_error is not None:
         raise TypedIOValidationException(
-            f"Step {step.step_order}: input_config.url is required for HTTP input.",
+            url_error_message(
+                step_order=step.step_order,
+                config_label="input_config",
+                url_error=url_error,
+            ),
             code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
         )
     timeout_seconds = effective_request.timeout
@@ -386,13 +362,6 @@ async def deliver_webhook(
 ) -> None:
     if step.output_config is None:
         return
-    if not is_authored_config(step.output_config):
-        raise BadRequestException(
-            _authored_http_config_required_message(
-                step_order=step.step_order,
-                config_label="output_config",
-            )
-        )
     try:
         effective_request, _ = _compile_authored_http_request(
             raw_config=step.output_config,
@@ -404,10 +373,18 @@ async def deliver_webhook(
             deps=deps,
         )
     except TypedIOValidationException as exc:
-        raise BadRequestException(str(exc)) from exc
+        raise BadRequestException(str(exc), code=exc.code) from exc
     url = effective_request.url
-    if not url:
-        raise BadRequestException("Webhook output mode requires output_config.url.")
+    url_error = validate_http_url(url)
+    if url_error is not None:
+        raise BadRequestException(
+            url_error_message(
+                step_order=step.step_order,
+                config_label="output_config",
+                url_error=url_error,
+            ),
+            code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
+        )
     timeout_seconds = effective_request.timeout
     headers = {
         name: value

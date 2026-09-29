@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from typing import Literal, Protocol, TypeAlias, TypeGuard
+from dataclasses import dataclass
+from typing import Literal, Protocol, TypeAlias, TypeGuard, cast
 
-from eneo.flows.enums import FlowInputSource
+from pydantic import ValidationError
+
+from eneo.flows.enums import FlowInputSource, FlowOutputMode
 from eneo.flows.flow_variable_definitions import PREVIOUS_STEP_TEXT_ALIAS
+from eneo.flows.http_transport import (
+    HTTP_CONFIG_KEYS,
+    HttpAuthoredConfig,
+    is_authored_config,
+)
 from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.template_reference_analyzer import TemplateReference, analyze_template
 
@@ -101,7 +109,7 @@ def resolve_upstream_step_orders(
     return []
 
 
-def resolve_step_upstream_orders(
+def resolve_step_input_orders(
     *,
     input_source: FlowInputSource | str,
     step_order: int,
@@ -110,12 +118,12 @@ def resolve_step_upstream_orders(
     step_ref_mapping: dict[str, int],
     max_prior_step_order: int,
 ) -> list[int]:
-    """Resolve the prior steps a step definition reads.
+    """Resolve the prior steps whose output reaches the step's model.
 
     The step input is the explicit underlag when present, otherwise the
     implicit source. The assistant prompt is a second input channel: its step
     references are interpolated into the prompt regardless of the input, so
-    they always join the upstream set.
+    they always join the set.
     """
     question_template = effective_question_binding(input_bindings)
     binding_references = (
@@ -148,6 +156,131 @@ def resolve_step_upstream_orders(
             )
         )
     return sorted(orders)
+
+
+def resolve_step_upstream_orders(
+    *,
+    input_source: FlowInputSource | str,
+    step_order: int,
+    input_bindings: object,
+    prompt_template: str | None,
+    output_mode: FlowOutputMode | str,
+    input_config: Mapping[str, object] | None,
+    output_config: Mapping[str, object] | None,
+    step_ref_mapping: dict[str, int],
+    max_prior_step_order: int,
+) -> list[int]:
+    """Resolve every prior step whose output reaches the step's result.
+
+    The step's input and prompt (``resolve_step_input_orders``), plus the
+    templates the runtime fills from earlier results in the configuration of
+    the mode the step runs: the bindings of a template fill, the request of an
+    ``http_post`` delivery, the request of an ``http_get`` input. What a
+    template reads is carried by the result or the request, so the security
+    classification counts it like any other input.
+
+    A configuration this cannot read reads as every earlier step: the step
+    cannot run with it, and a classification check must not take "unreadable"
+    for "reads nothing". ``output_mode`` is a ``FlowOutputMode`` or the value it
+    is stored as; anything else raises ``ValueError`` like ``input_source``.
+    """
+    orders = set(
+        resolve_step_input_orders(
+            input_source=input_source,
+            step_order=step_order,
+            input_bindings=input_bindings,
+            prompt_template=prompt_template,
+            step_ref_mapping=step_ref_mapping,
+            max_prior_step_order=max_prior_step_order,
+        )
+    )
+    channels = _config_channels(
+        input_source=FlowInputSource(input_source),
+        output_mode=FlowOutputMode(output_mode),
+        input_config=input_config,
+        output_config=output_config,
+        step_order=step_order,
+    )
+    if channels is None:
+        return list(range(1, max_prior_step_order + 1))
+    for channel in channels:
+        for template in channel.templates:
+            orders.update(
+                resolve_reference_step_orders(
+                    references=analyze_template(
+                        template, step_refs=step_ref_mapping, form_field_names=set()
+                    ),
+                    step_order=channel.context_step_order,
+                    max_prior_step_order=max_prior_step_order,
+                )
+            )
+    return sorted(orders)
+
+
+@dataclass(frozen=True, slots=True)
+class _ConfigChannel:
+    templates: list[str]
+    # The runtime builds the variable context for the step at this order, and
+    # ``föregående_steg`` names the step before it.
+    context_step_order: int
+
+
+def _config_channels(
+    *,
+    input_source: FlowInputSource,
+    output_mode: FlowOutputMode,
+    input_config: Mapping[str, object] | None,
+    output_config: Mapping[str, object] | None,
+    step_order: int,
+) -> list[_ConfigChannel] | None:
+    """The configured templates the runtime interpolates, or None if unreadable."""
+    channels: list[_ConfigChannel] = []
+    if output_mode is FlowOutputMode.TEMPLATE_FILL:
+        bindings = _template_fill_bindings(output_config)
+        if bindings is None:
+            return None
+        channels.append(_ConfigChannel(bindings, step_order))
+    if output_mode is FlowOutputMode.HTTP_POST:
+        templates = _http_config_templates(output_config)
+        if templates is None:
+            return None
+        # A webhook is built once the step has answered, so its context is the
+        # step's own: ``föregående_steg`` is the step's result there.
+        channels.append(_ConfigChannel(templates, step_order + 1))
+    if input_source is FlowInputSource.HTTP_GET:
+        templates = _http_config_templates(input_config)
+        if templates is None:
+            return None
+        channels.append(_ConfigChannel(templates, step_order))
+    return channels
+
+
+def _template_fill_bindings(config: Mapping[str, object] | None) -> list[str] | None:
+    bindings = config.get("bindings") if config is not None else None
+    if bindings is None:
+        return []
+    if not isinstance(bindings, Mapping):
+        return None
+    values = list(cast(Mapping[object, object], bindings).values())
+    if not all(isinstance(value, str) for value in values):
+        return None
+    return cast(list[str], values)
+
+
+def _http_config_templates(config: Mapping[str, object] | None) -> list[str] | None:
+    # The lineage reads the HTTP fields only. Other keys of the object (the
+    # retrieval policy, runtime input) hold no template of this channel.
+    http_fields = {
+        key: value for key, value in (config or {}).items() if key in HTTP_CONFIG_KEYS
+    }
+    if not http_fields:
+        return []
+    if not is_authored_config(http_fields):
+        return None
+    try:
+        return HttpAuthoredConfig.model_validate(http_fields).interpolated_templates()
+    except ValidationError:
+        return None
 
 
 def selected_source_step_order(

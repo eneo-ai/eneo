@@ -364,6 +364,8 @@ Secret auth fields and secret custom headers are redacted in API responses as:
 
 Send that sentinel back only when you want Eneo to keep the stored secret for an existing draft step. If the saved secret cannot be resolved during the draft HTTP test, the test response uses `HTTP_UNRESOLVED_STORED_SECRET`; re-enter and save the secret before testing again.
 
+Credentials are literal values. A bearer token, an API key, a basic-auth password, and a secret custom-header value are sent exactly as stored and are never filled from a step output, the run input, or a form field. A `{{ ... }}` reference in one of them is refused: when you create or update the step, when you publish the flow (Eneo reads the stored credential to check), and when a run starts, before any step runs. Put references in the URL, a header that is not secret, the basic-auth username, or the body instead. The draft HTTP test reports `HTTP_VARIABLE_RESOLUTION_FAILED` for a templated credential.
+
 The draft HTTP test endpoint returns a typed `request_preview` containing `method`, `url`, `headers`, and `body_preview` when Eneo can compile the request. Template interpolation failures return `HTTP_VARIABLE_RESOLUTION_FAILED` without a preview because there is no safe effective request to show.
 
 ### `transcribe_only`
@@ -495,6 +497,8 @@ Flows evaluate step security classification from several inputs:
 - the classification implied by previous outputs
 - knowledge-source classifications
 - any explicit output classification override
+
+"Previous outputs" covers everything a step reads from earlier steps: its input, its prompt, the bindings of a `template_fill` step, and the URL, headers, and body templates of an HTTP request. A `{{ ... }}` reference to an earlier step in any of these counts, so a step cannot pull in higher-classified material through a template that its own input does not name.
 
 Current enforcement prevents a step from lowering the effective classification of its output. In practice, that means a flow cannot use an override to lower the classification below what the input material already implies.
 

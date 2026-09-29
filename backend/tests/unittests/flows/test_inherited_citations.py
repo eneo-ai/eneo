@@ -364,3 +364,33 @@ def test_repeated_retrieval_left_out_of_the_prompt_keeps_inherited_membership() 
 
     assert context["upstream_step_orders"] == [2]
     assert context["available_source_ids"] == [source_a]
+
+
+def test_inherited_citation_context_ignores_what_only_the_delivery_config_reads() -> (
+    None
+):
+    # A webhook template is filled after the model has answered: the model never
+    # sees step 1's text, so it must not be offered step 1's sources to cite.
+    step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=2,
+        assistant_id=uuid4(),
+        user_description="Deliver",
+        input_source="previous_step",
+        input_bindings={"question": "Sammanfatta."},
+        input_config=None,
+        output_mode="http_post",
+        output_config={
+            "url": "https://example.org/{{ step_1.output.text }}",
+            "auth": {"mode": "none"},
+        },
+    )
+
+    context = collect_inherited_citation_context(
+        step=step,
+        state=_run_state(_completed_grounded_result(step_order=1)),
+        prompt_template=None,
+    )
+
+    assert context["upstream_step_orders"] == []
+    assert context["available_source_ids"] == []

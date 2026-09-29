@@ -1278,7 +1278,13 @@ async def test_duplicate_worker_exits_when_step_already_claimed(user):
 
 
 def _execute_setup_for_security(
-    user, *, space_level: int, model_level: int, model_levels: list[int] | None = None
+    user,
+    *,
+    space_level: int,
+    model_level: int,
+    model_levels: list[int] | None = None,
+    step_fields: dict[str, object] | None = None,
+    step_fields_index: int = 0,
 ):
     """One step by default; `model_levels` gives one step per assistant level."""
     executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
@@ -1320,6 +1326,7 @@ def _execute_setup_for_security(
                         "assistant_id": str(candidate.id),
                         "input_source": "flow_input" if index == 0 else "previous_step",
                         "output_mode": "pass_through",
+                        **((step_fields or {}) if index == step_fields_index else {}),
                     }
                     for index, candidate in enumerate(assistants)
                 ]
@@ -1351,6 +1358,258 @@ async def test_execute_records_the_runs_evidence_level_before_the_first_step(use
     flow_run_repo.record_evidence_classification_level.assert_awaited_once_with(
         run_id=queued_run.id, tenant_id=user.tenant_id, level=3
     )
+
+
+class _OpaqueEncryption:
+    """Ciphertext that shows nothing of the plaintext, as real ciphertext does."""
+
+    def is_encrypted(self, value: str) -> bool:
+        return value.startswith("enc:")
+
+    def can_decrypt(self, value: str) -> bool:
+        return value.startswith("enc:")
+
+    def decrypt(self, ciphertext: str) -> str:
+        return ciphertext.removeprefix("enc:")[::-1]
+
+    def encrypt(self, plaintext: str) -> str:
+        return f"enc:{plaintext[::-1]}"
+
+
+_TEMPLATED_CREDENTIAL = "{{ step_1.output.text }}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("step_fields", "field"),
+    [
+        pytest.param(
+            {
+                "output_mode": "http_post",
+                "output_config": {
+                    "url": "https://example.org/hook",
+                    "auth": {
+                        "mode": "bearer_token",
+                        "token": _OpaqueEncryption().encrypt(_TEMPLATED_CREDENTIAL),
+                    },
+                },
+            },
+            "output_config.auth.token",
+            id="http_post-bearer",
+        ),
+        pytest.param(
+            {
+                "input_source": "http_get",
+                "input_config": {
+                    "url": "https://example.org/lookup",
+                    "auth": {"mode": "none"},
+                    "custom_headers": [
+                        {
+                            "name": "X-Key",
+                            "value": _OpaqueEncryption().encrypt(_TEMPLATED_CREDENTIAL),
+                            "secret": True,
+                        }
+                    ],
+                },
+            },
+            "input_config.custom_headers[0].value",
+            id="http_get-secret-header",
+        ),
+    ],
+)
+async def test_execute_refuses_a_stored_credential_that_holds_a_template_before_any_step(
+    user, step_fields, field
+):
+    # A version published before credentials had to be literal: the stored
+    # credential is ciphertext, so only the decrypted value shows the template.
+    executor, flow_run_repo, queued_run = _execute_setup_for_security(
+        user, space_level=1, model_level=1, step_fields=step_fields
+    )
+    executor.encryption_service = _OpaqueEncryption()
+
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
+        dispatch_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result["status"] == "failed"
+    flow_run_repo.claim_step_result.assert_not_awaited()
+    flow_run_repo.record_evidence_classification_level.assert_not_awaited()
+    executor._execute_step.assert_not_awaited()
+    terminalized = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
+    assert terminalized["error"].code.value == "typed_io_http_invalid_config"
+    assert terminalized["error"].step_order == 1
+    assert field in terminalized["error"].message
+    assert _TEMPLATED_CREDENTIAL not in terminalized["error"].message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("step_fields", "field"),
+    [
+        pytest.param(
+            {
+                "output_mode": "http_post",
+                "output_config": {
+                    "url": "https://example.org/hook",
+                    "auth": {"mode": "bogus", "token": "s3cret-value"},
+                },
+            },
+            "output_config.auth",
+            id="http_post-unknown-auth-mode",
+        ),
+        pytest.param(
+            {
+                "input_source": "http_get",
+                "input_config": {
+                    "url": "https://example.org/lookup",
+                    "auth": {"mode": "none"},
+                    "timeout_seconds": "soon",
+                },
+            },
+            "input_config.timeout_seconds",
+            id="http_get-timeout-not-a-number",
+        ),
+        pytest.param(
+            {
+                "output_mode": "http_post",
+                "output_config": {"url": "https://example.org/hook"},
+            },
+            "output_config",
+            id="http_post-missing-auth",
+        ),
+        pytest.param(
+            {
+                "input_source": "http_get",
+                "input_config": {"url": "not a url", "auth": {"mode": "none"}},
+            },
+            "input_config.url",
+            id="http_get-malformed-url",
+        ),
+        pytest.param(
+            {
+                "input_source": "http_get",
+                "input_config": {
+                    "url": "https://example.org/lookup",
+                    "auth": {"mode": "none"},
+                    "timeout_seconds": 100000,
+                },
+            },
+            "input_config.timeout_seconds",
+            id="http_get-timeout-above-the-runtime-cap",
+        ),
+    ],
+)
+async def test_execute_fails_a_stored_http_config_that_does_not_parse_before_any_step(
+    user, step_fields, field
+):
+    # The published-step parser does not validate the auth shape, so the
+    # preflight is the first to read it: a controlled run failure, not a crash.
+    executor, flow_run_repo, queued_run = _execute_setup_for_security(
+        user, space_level=1, model_level=1, step_fields=step_fields
+    )
+    executor.encryption_service = _OpaqueEncryption()
+
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
+        dispatch_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {"status": "failed", "error": "typed_io_http_invalid_config"}
+    flow_run_repo.claim_step_result.assert_not_awaited()
+    executor._execute_step.assert_not_awaited()
+    terminalized = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
+    assert terminalized["error"].step_order == 1
+    assert field in terminalized["error"].message
+    assert "bogus" not in terminalized["error"].message
+    assert "s3cret-value" not in terminalized["error"].message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("https://alice:secret@{{ flow_input.host }}/hook", id="userinfo"),
+        pytest.param("ftp://example.org/{{ flow_input.id }}", id="fixed-scheme"),
+    ],
+)
+@pytest.mark.parametrize("side", ["input", "output"])
+async def test_execute_claims_no_step_of_a_run_whose_fixed_url_parts_are_refused(
+    user, side, url
+):
+    # What the template does not fill is authored literally, so a userinfo or a
+    # scheme that is not http(s) is known before the run: the runtime would
+    # refuse it only after interpolation, mid-run.
+    config = {"url": url, "auth": {"mode": "none"}}
+    executor, flow_run_repo, queued_run = _execute_setup_for_security(
+        user,
+        space_level=1,
+        model_level=1,
+        model_levels=[1, 1],
+        step_fields=(
+            {"input_source": "http_get", "input_config": config}
+            if side == "input"
+            else {"output_mode": "http_post", "output_config": config}
+        ),
+        # A webhook is terminal: it is the last step.
+        step_fields_index=0 if side == "input" else 1,
+    )
+
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
+        dispatch_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {"status": "failed", "error": "typed_io_http_invalid_config"}
+    flow_run_repo.claim_step_result.assert_not_awaited()
+    executor._execute_step.assert_not_awaited()
+    terminalized = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
+    assert f"{side}_config.url" in terminalized["error"].message
+    assert "alice:secret" not in terminalized["error"].message
+
+
+@pytest.mark.asyncio
+async def test_execute_lets_a_literal_stored_credential_through_the_preflight(user):
+    executor, flow_run_repo, queued_run = _execute_setup_for_security(
+        user,
+        space_level=1,
+        model_level=1,
+        step_fields={
+            "output_mode": "http_post",
+            "output_config": {
+                "url": "https://example.org/hook",
+                "auth": {
+                    "mode": "bearer_token",
+                    "token": _OpaqueEncryption().encrypt("literal-token"),
+                },
+            },
+        },
+    )
+    executor.encryption_service = _OpaqueEncryption()
+
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
+        dispatch_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {"status": "skipped", "reason": "step_already_claimed"}
+    flow_run_repo.record_evidence_classification_level.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -4561,6 +4820,8 @@ def _security_step(
     input_source: str = "flow_input",
     input_bindings: dict[str, object] | None = None,
     output_mode: str = "pass_through",
+    input_config: dict[str, object] | None = None,
+    output_config: dict[str, object] | None = None,
 ) -> RuntimeStep:
     return RuntimeStep(
         step_id=uuid4(),
@@ -4569,9 +4830,9 @@ def _security_step(
         user_description=f"Step {step_order}",
         input_source=input_source,
         input_bindings=input_bindings,
-        input_config=None,
+        input_config=input_config,
         output_mode=output_mode,
-        output_config=None,
+        output_config=output_config,
     )
 
 
@@ -4681,6 +4942,189 @@ async def test_runtime_preflight_ignores_prompts_of_deterministic_steps(user):
     levels = await executor._resolve_step_output_levels(
         steps=[first, compose], state=_empty_execution_state()
     )
+
+    assert levels == {1: 3, 2: 1}
+
+
+def _authored_http(**fields: object) -> dict[str, object]:
+    return {"url": "https://example.org/hook", "auth": {"mode": "none"}, **fields}
+
+
+_READ_STEP_1 = "{{ step_1.output.text }}"
+_LITERAL_UNDERLAG = {"question": "Fast text."}
+
+
+async def _preflight_levels(
+    user,
+    *,
+    later: list[tuple[int, dict[str, object]]],
+    first_level: int = 3,
+) -> dict[int, int | None]:
+    """Preflight a classified first step followed by steps of the given model level.
+
+    Each later step reads step 1 only through the fields given for it (a
+    template_fill binding, an http_post template, an http_get template); its
+    input is a literal underlag, so no other channel carries step 1.
+    """
+    executor, _, _, _ = _build_executor(user)
+    strong = _security_assistant(uuid4(), model_level=3)
+    assistants = [_security_assistant(uuid4(), model_level=level) for level, _ in later]
+    space = _security_space(
+        space_id=uuid4(), assistants=[strong, *assistants], security_level=1
+    )
+    _stub_security_assistants(executor, space)
+    first = replace(
+        _security_step(step_order=1, assistant_id=strong.id),
+        output_classification_override=first_level,
+    )
+    rest = [
+        replace(
+            _security_step(
+                step_order=order,
+                assistant_id=assistant.id,
+                input_source="previous_step",
+                input_bindings=_LITERAL_UNDERLAG,
+            ),
+            **fields,
+        )
+        for order, (assistant, (_, fields)) in enumerate(
+            zip(assistants, later), start=2
+        )
+    ]
+    return await executor._resolve_step_output_levels(
+        steps=[first, *rest], state=_empty_execution_state()
+    )
+
+
+_CHANNELS_READING_STEP_1: list[tuple[str, dict[str, object]]] = [
+    (
+        "http_post-url",
+        {
+            "output_mode": "http_post",
+            "output_config": _authored_http(url=f"https://example.org/{_READ_STEP_1}"),
+        },
+    ),
+    (
+        "http_post-body",
+        {
+            "output_mode": "http_post",
+            "output_config": _authored_http(
+                body={"mode": "text_template", "template": _READ_STEP_1}
+            ),
+        },
+    ),
+    (
+        "http_get-url",
+        {
+            "input_source": "http_get",
+            "input_bindings": None,
+            "input_config": _authored_http(url=f"https://example.org/{_READ_STEP_1}"),
+        },
+    ),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fields",
+    [fields for _, fields in _CHANNELS_READING_STEP_1],
+    ids=[name for name, _ in _CHANNELS_READING_STEP_1],
+)
+async def test_runtime_preflight_reads_config_templates_of_model_steps(user, fields):
+    with pytest.raises(BadRequestException) as exc_info:
+        await _preflight_levels(user, later=[(1, fields)])
+
+    assert exc_info.value.code == "flow_step_security_classification_mismatch"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fields",
+    [fields for _, fields in _CHANNELS_READING_STEP_1],
+    ids=[name for name, _ in _CHANNELS_READING_STEP_1],
+)
+async def test_runtime_preflight_lifts_the_step_that_templates_a_classified_step(
+    user, fields
+):
+    levels = await _preflight_levels(user, later=[(3, fields)])
+
+    assert levels == {1: 3, 2: 3}
+
+
+@pytest.mark.asyncio
+async def test_runtime_preflight_lifts_a_template_fill_that_binds_a_classified_step(
+    user,
+):
+    # A deterministic step has no model to clear, yet what it renders carries
+    # step 1's level: a later low model reading it is refused, an equal one is not.
+    fill = {
+        "output_mode": "template_fill",
+        "output_config": {"bindings": {"beslut": _READ_STEP_1}},
+    }
+    reads_the_fill = {"input_bindings": {"question": "{{ step_2.output.text }}"}}
+
+    assert await _preflight_levels(user, later=[(1, fill)]) == {1: 3, 2: 3}
+    assert await _preflight_levels(user, later=[(1, fill), (3, reads_the_fill)]) == {
+        1: 3,
+        2: 3,
+        3: 3,
+    }
+    with pytest.raises(BadRequestException) as exc_info:
+        await _preflight_levels(user, later=[(1, fill), (1, reads_the_fill)])
+
+    assert exc_info.value.code == "flow_step_security_classification_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_runtime_preflight_refuses_a_template_fill_override_below_what_it_binds(
+    user,
+):
+    fill = {
+        "output_mode": "template_fill",
+        "output_config": {"bindings": {"beslut": _READ_STEP_1}},
+        "output_classification_override": 1,
+    }
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await _preflight_levels(user, later=[(1, fill)])
+
+    assert exc_info.value.code == "flow_step_output_classification_write_down"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fields",
+    [
+        pytest.param(
+            {
+                "output_mode": "template_fill",
+                "output_config": {"bindings": {"namn": "{{ indata_text }}"}},
+            },
+            id="template_fill-binding-of-the-flow-input",
+        ),
+        pytest.param(
+            {
+                "output_mode": "http_post",
+                "output_config": _authored_http(
+                    url="https://example.org/{{ step_2.status }}"
+                ),
+            },
+            id="http_post-template-of-the-step-itself",
+        ),
+        pytest.param(
+            {
+                "input_source": "http_get",
+                "input_bindings": None,
+                "input_config": _authored_http(url="https://example.org/lookup"),
+            },
+            id="http_get-without-a-template",
+        ),
+    ],
+)
+async def test_runtime_preflight_leaves_config_without_a_classified_read_alone(
+    user, fields
+):
+    levels = await _preflight_levels(user, later=[(1, fields)])
 
     assert levels == {1: 3, 2: 1}
 

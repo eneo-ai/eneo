@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStep
-from eneo.flows.http_transport.authored_config import HttpAuthoredConfig
+from eneo.flows.http_transport.authored_config import HTTP_CONFIG_KEYS
 
-_HTTP_CONFIG_KEYS = frozenset(HttpAuthoredConfig.model_fields)
 _TEMPLATE_CONFIG_KEYS = frozenset(
     {
         "template_asset_id",
@@ -19,10 +18,10 @@ _TEMPLATE_CONFIG_KEYS = frozenset(
 def clean_inactive_step_config(step: FlowStep) -> FlowStep:
     """Drop only configuration owned by modes the step no longer uses."""
     input_keys = (
-        _HTTP_CONFIG_KEYS if step.input_source != "http_get" else frozenset[str]()
+        HTTP_CONFIG_KEYS if step.input_source != "http_get" else frozenset[str]()
     )
     output_keys = (
-        _HTTP_CONFIG_KEYS if step.output_mode != "http_post" else frozenset[str]()
+        HTTP_CONFIG_KEYS if step.output_mode != "http_post" else frozenset[str]()
     )
     if step.output_mode != "template_fill":
         output_keys = output_keys | _TEMPLATE_CONFIG_KEYS

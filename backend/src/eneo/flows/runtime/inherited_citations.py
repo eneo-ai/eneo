@@ -12,7 +12,7 @@ from eneo.flows.source_display import (
     format_source_display_name,
     resolve_reference_title,
 )
-from eneo.flows.step_lineage import resolve_step_upstream_orders
+from eneo.flows.step_lineage import resolve_step_input_orders
 
 ReferencePayload = dict[str, Any]
 SourceEntry = dict[str, Any]
@@ -62,7 +62,7 @@ def collect_inherited_citation_context(
     state: RunExecutionState,
     prompt_template: str | None,
 ) -> dict[str, Any]:
-    upstream_orders = resolve_step_upstream_orders(
+    upstream_orders = resolve_step_input_orders(
         input_source=step.input_source,
         step_order=step.step_order,
         input_bindings=step.input_bindings,

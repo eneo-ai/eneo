@@ -49,6 +49,7 @@ from eneo.flows.flow_validators import (
     validate_steps,
     validate_variable_alias_collisions,
 )
+from eneo.flows.flow_validators_http import credential_template_error
 from eneo.flows.http_transport import (
     AuthoredSecretEncryptionUnavailableError,
     HttpAuthoredConfig,
@@ -56,6 +57,7 @@ from eneo.flows.http_transport import (
     is_authored_config,
     merge_secrets_on_update,
     protect_authored_secrets,
+    templated_step_credentials,
     unprotected_persisted_secret_fields,
     unresolved_secret_sentinel_fields,
 )
@@ -242,20 +244,22 @@ class FlowService:
             steps=next_steps,
             owning_flow_id=existing.id,
         )
-        await self._validate_step_security_classification_for_steps(
-            space_id=existing.space_id,
-            steps=next_steps,
-        )
 
         next_metadata = normalize_persisted_flow_metadata(existing.metadata_json)
         if metadata_json is not NOT_PROVIDED:
             next_metadata = normalize_flow_metadata_for_write(
                 cast(FlowPersistedJsonObject | None, metadata_json)
             )
+        # A step's own defect is reported before the classification, which
+        # reads its configuration (create and publish validate first too).
         self._validate_steps(next_steps, metadata_json=next_metadata)
         self._validate_variable_alias_collisions(
             steps=next_steps,
             metadata_json=next_metadata,
+        )
+        await self._validate_step_security_classification_for_steps(
+            space_id=existing.space_id,
+            steps=next_steps,
         )
 
         normalized_steps = self._normalize_steps_for_tenant(next_steps)
@@ -269,6 +273,9 @@ class FlowService:
             normalized_steps, existing.steps, unchanged_step_ids=unchanged_step_ids
         )
         self._reject_unresolved_secret_sentinels(persisted_steps)
+        # The step validation saw a retained credential as a sentinel; it is
+        # read here, once the stored value is back.
+        self._reject_templated_stored_secrets(persisted_steps)
         updated = existing.model_copy(
             deep=True,
             update={
@@ -479,6 +486,7 @@ class FlowService:
             steps=flow.steps,
             assistants_by_id=assistants_by_id,
         )
+        self._reject_templated_stored_secrets(flow.steps)
         self._reject_unprotected_stored_secrets(flow.steps)
 
         flow_with_normalized_metadata = flow.model_copy(
@@ -667,6 +675,9 @@ class FlowService:
                         if flow_output_mode_uses_completion_model(step.output_mode)
                         else None
                     ),
+                    output_mode=step.output_mode,
+                    input_config=step.input_config,
+                    output_config=step.output_config,
                     step_ref_mapping=step_ref_mapping,
                     max_prior_step_order=step.step_order - 1,
                 ),
@@ -866,6 +877,25 @@ class FlowService:
                         "credentials before publishing.",
                         step_order=step.step_order,
                     )
+
+    def _reject_templated_stored_secrets(self, steps: list[FlowStep]) -> None:
+        """Refuse to save or publish a stored credential that holds a template.
+
+        A credential is a literal; the runtime refuses to interpolate one. The
+        stored value is ciphertext, so it is read as the runtime reads it.
+        """
+        for step in steps:
+            for label, fields in templated_step_credentials(
+                step_order=step.step_order,
+                input_source=step.input_source,
+                output_mode=step.output_mode,
+                input_config=step.input_config,
+                output_config=step.output_config,
+                encryption_service=self.encryption_service,
+            ):
+                raise credential_template_error(
+                    step_order=step.step_order, label=label, fields=fields
+                )
 
     def _reject_unresolved_secret_sentinels(self, steps: list[FlowStep]) -> None:
         """Refuse sentinels that resolved to no stored credential.

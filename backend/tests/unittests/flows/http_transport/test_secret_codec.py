@@ -22,8 +22,13 @@ from eneo.flows.http_transport.secret_codec import (
     protect_authored_secrets,
     redact_authored_config,
     redact_persisted_config,
+    secret_fields_holding_templates,
+    templated_secret_fields,
+    templated_step_credentials,
     unresolved_secret_sentinel_fields,
 )
+from eneo.flows.variable_resolver import iter_template_expressions
+from eneo.main.exceptions import BadRequestException
 
 
 @dataclass
@@ -46,6 +51,17 @@ class _FakeEncryption:
 
     def decrypt(self, ciphertext: str) -> str:
         return ciphertext[len(self.prefix) :]
+
+
+@dataclass
+class _OpaqueEncryption(_FakeEncryption):
+    """Ciphertext that shows nothing of the plaintext, as real ciphertext does."""
+
+    def encrypt(self, plaintext: str) -> str:
+        return f"{self.prefix}{plaintext[::-1]}"
+
+    def decrypt(self, ciphertext: str) -> str:
+        return ciphertext[len(self.prefix) :][::-1]
 
 
 @dataclass
@@ -533,3 +549,323 @@ def test_merge_new_custom_header_value_passes_through() -> None:
     result = merge_secrets_on_update(incoming, stored)
 
     assert result.custom_headers[0].value == "new-val"
+
+
+# --- Credentials that hold templates ---
+
+
+def test_secret_fields_holding_templates_names_declared_secret_fields_only() -> None:
+    config = HttpAuthoredConfig(
+        url="https://example.org/{{ step_1.output.text }}",
+        auth=HttpAuthApiKey(header_name="X-{{ a }}", key="{{ flow_input.key }}"),
+        custom_headers=[
+            CustomHeader(name="X-Open", value="{{ step_1.output.text }}"),
+            CustomHeader(name="X-Ok", value="literal", secret=True),
+            CustomHeader(name="X-Bad", value="{{ datum }}", secret=True),
+        ],
+        body=HttpBody(mode=HttpBodyMode.TEXT_TEMPLATE, template="{{ b }}"),
+    )
+
+    assert secret_fields_holding_templates(config) == (
+        "auth.key",
+        "custom_headers[2].value",
+    )
+
+
+def test_secret_fields_holding_templates_ignores_literals_and_stored_secrets() -> None:
+    config = HttpAuthoredConfig(
+        url="https://example.org",
+        auth=HttpAuthBearer(token="Bearer {single} and {{ unclosed"),
+        custom_headers=[CustomHeader(name="X-S", value=SECRET_SENTINEL, secret=True)],
+    )
+
+    assert secret_fields_holding_templates(config) == ()
+
+
+def _parsed(payload: dict[str, object]) -> HttpAuthoredConfig:
+    return HttpAuthoredConfig.model_validate(payload)
+
+
+def test_templated_secret_fields_reads_the_decrypted_credential() -> None:
+    encryption = _OpaqueEncryption()
+    persisted = _parsed(
+        {
+            "url": "https://example.org",
+            "auth": {
+                "mode": "bearer_token",
+                "token": encryption.encrypt("{{ step_1.output.text }}"),
+            },
+            "custom_headers": [
+                {
+                    "name": "X-Ok",
+                    "value": encryption.encrypt("literal"),
+                    "secret": True,
+                },
+            ],
+        }
+    )
+    assert not iter_template_expressions(persisted.auth.token)  # pyright: ignore[reportAttributeAccessIssue]
+
+    assert templated_secret_fields(persisted, encryption) == ("auth.token",)
+    assert (
+        templated_secret_fields(
+            _parsed({"auth": {"mode": "none"}, "url": "x"}), encryption
+        )
+        == ()
+    )
+
+
+def test_templated_secret_fields_reads_a_plaintext_credential_as_stored() -> None:
+    persisted = _parsed(
+        {
+            "url": "https://example.org",
+            "auth": {"mode": "bearer_token", "token": "{{ step_1.output.text }}"},
+        }
+    )
+
+    assert templated_secret_fields(persisted, None) == ("auth.token",)
+    assert templated_secret_fields(persisted, _InactiveEncryption()) == ("auth.token",)
+
+
+def test_templated_secret_fields_leaves_what_the_key_cannot_decrypt() -> None:
+    class _KeyLost(_OpaqueEncryption):
+        def can_decrypt(self, value: str) -> bool:
+            return False
+
+        def decrypt(self, ciphertext: str) -> str:
+            raise AssertionError("must not decrypt what the key cannot open")
+
+    persisted = _parsed(
+        {
+            "url": "https://example.org",
+            "auth": {
+                "mode": "bearer_token",
+                "token": _OpaqueEncryption().encrypt("{{ step_1.output.text }}"),
+            },
+        }
+    )
+
+    assert templated_secret_fields(persisted, _KeyLost()) == ()
+
+
+def _templated_config() -> dict[str, object]:
+    return {
+        "url": "https://example.org",
+        "auth": {"mode": "bearer_token", "token": "{{ step_1.output.text }}"},
+    }
+
+
+def test_templated_step_credentials_reads_the_config_of_the_mode_the_step_runs() -> (
+    None
+):
+    encryption = _OpaqueEncryption()
+
+    def credentials(**fields: object) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        return templated_step_credentials(
+            **{
+                "step_order": 1,
+                "input_source": "previous_step",
+                "output_mode": "pass_through",
+                "input_config": None,
+                "output_config": None,
+                **fields,
+            },  # pyright: ignore[reportArgumentType]
+            encryption_service=encryption,
+        )
+
+    assert credentials(input_source="http_get", input_config=_templated_config()) == (
+        ("input_config", ("auth.token",)),
+    )
+    assert credentials(output_mode="http_post", output_config=_templated_config()) == (
+        ("output_config", ("auth.token",)),
+    )
+    assert credentials(
+        input_source="http_get",
+        input_config=_templated_config(),
+        output_mode="http_post",
+        output_config=_templated_config(),
+    ) == (("input_config", ("auth.token",)), ("output_config", ("auth.token",)))
+    # Configuration of a mode the step does not run is never sent.
+    assert credentials(input_config=_templated_config()) == ()
+    assert credentials(output_config=_templated_config()) == ()
+
+
+def test_templated_step_credentials_names_the_step_and_field_of_an_unreadable_config() -> (
+    None
+):
+    with pytest.raises(BadRequestException) as excinfo:
+        templated_step_credentials(
+            step_order=3,
+            input_source="previous_step",
+            output_mode="http_post",
+            input_config=None,
+            output_config={
+                "url": "https://example.org",
+                "auth": {"mode": "bogus", "token": "s3cret-value"},
+            },
+            encryption_service=_OpaqueEncryption(),
+        )
+
+    error = excinfo.value
+    assert error.code == "typed_io_http_invalid_config"
+    assert "Step 3" in str(error)
+    assert "output_config.auth" in str(error)
+    assert "bogus" not in str(error)
+    assert "s3cret-value" not in str(error)
+    assert error.__cause__ is None
+    assert error.context == {
+        "issue_code": "flow_step_invalid",
+        "step_order": 3,
+        "field": "output_config.auth",
+    }
+
+
+def test_templated_step_credentials_does_not_read_a_config_of_a_mode_not_run() -> None:
+    # Only what is sent has to parse: the input config of a step that is not
+    # http_get is another reader's.
+    assert (
+        templated_step_credentials(
+            step_order=1,
+            input_source="previous_step",
+            output_mode="pass_through",
+            input_config={"auth": {"mode": "bogus"}},
+            output_config=None,
+            encryption_service=_OpaqueEncryption(),
+        )
+        == ()
+    )
+
+
+_VALID_URL = "https://example.org/hook"
+
+
+@pytest.mark.parametrize(
+    ("kind", "config", "field"),
+    [
+        pytest.param(
+            "http_post", {"url": _VALID_URL}, "output_config", id="missing-auth"
+        ),
+        pytest.param(
+            "http_post",
+            {"url": _VALID_URL, "auth": {"mode": "bogus"}},
+            "output_config.auth",
+            id="bogus-auth-mode",
+        ),
+        pytest.param(
+            "http_post",
+            {"url": _VALID_URL, "auth": {"mode": "none"}, "timeout_seconds": "soon"},
+            "output_config.timeout_seconds",
+            id="timeout-not-a-number",
+        ),
+        pytest.param(
+            "http_post",
+            {"url": _VALID_URL, "auth": {"mode": "none"}, "unknown": 1},
+            "output_config.unknown",
+            id="unknown-key",
+        ),
+        pytest.param(
+            "http_get",
+            {"url": "not a url", "auth": {"mode": "none"}},
+            "input_config.url",
+            id="malformed-url",
+        ),
+        pytest.param(
+            "http_get",
+            {"url": "ftp://example.org/x", "auth": {"mode": "none"}},
+            "input_config.url",
+            id="unsupported-scheme",
+        ),
+        pytest.param(
+            "http_get",
+            {"url": "  ", "auth": {"mode": "none"}},
+            "input_config.url",
+            id="empty-url",
+        ),
+        pytest.param(
+            "http_get",
+            {
+                "url": "https://alice:secret@{{ flow_input.host }}/lookup",
+                "auth": {"mode": "none"},
+            },
+            "input_config.url",
+            id="templated-userinfo",
+        ),
+        pytest.param(
+            "http_get",
+            {
+                "url": "ftp://example.org/{{ flow_input.id }}",
+                "auth": {"mode": "none"},
+            },
+            "input_config.url",
+            id="fixed-non-http-scheme-before-a-template",
+        ),
+        pytest.param("http_get", None, "input_config", id="http_get-without-config"),
+        pytest.param(
+            "http_get", {"url": _VALID_URL}, "input_config", id="http_get-missing-auth"
+        ),
+    ],
+)
+def test_templated_step_credentials_refuses_any_config_the_runtime_would_not_accept(
+    kind: str, config: dict[str, object] | None, field: str
+) -> None:
+    fields: dict[str, object] = (
+        {"input_source": "http_get", "input_config": config}
+        if kind == "http_get"
+        else {"output_mode": "http_post", "output_config": config}
+    )
+
+    with pytest.raises(BadRequestException) as excinfo:
+        templated_step_credentials(
+            **{
+                "step_order": 2,
+                "input_source": "previous_step",
+                "output_mode": "pass_through",
+                "input_config": None,
+                "output_config": None,
+                **fields,
+            },  # pyright: ignore[reportArgumentType]
+            encryption_service=_OpaqueEncryption(),
+        )
+
+    error = excinfo.value
+    assert error.code == "typed_io_http_invalid_config"
+    assert str(error).startswith("Step 2: ")
+    assert field in str(error)
+    assert error.context["step_order"] == 2
+    assert error.context["field"] == field
+    assert error.context["issue_code"] == "flow_step_invalid"
+    assert "not a url" not in str(error)
+    assert "alice:secret" not in str(error)
+
+
+def test_templated_step_credentials_reads_a_fixed_url_only_once_it_is_known() -> None:
+    def credentials(url: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        return templated_step_credentials(
+            step_order=1,
+            input_source="http_get",
+            output_mode="pass_through",
+            input_config={"url": url, "auth": {"mode": "none"}},
+            output_config=None,
+            encryption_service=_OpaqueEncryption(),
+        )
+
+    # A URL with a template is checked once it is filled, at the request.
+    assert credentials("https://{{ flow_input.host }}/lookup") == ()
+    assert credentials("https://example.org/{{ flow_input.id }}") == ()
+    assert credentials("{{ flow_input.url }}") == ()
+    assert credentials("https://example.org/lookup") == ()
+
+
+def test_templated_step_credentials_accepts_a_webhook_without_config() -> None:
+    # The runtime sends nothing for it, so there is nothing to refuse.
+    assert (
+        templated_step_credentials(
+            step_order=1,
+            input_source="previous_step",
+            output_mode="http_post",
+            input_config=None,
+            output_config=None,
+            encryption_service=_OpaqueEncryption(),
+        )
+        == ()
+    )

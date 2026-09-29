@@ -1,20 +1,22 @@
 from __future__ import annotations
 
-from typing import Any
-
-from pydantic import ValidationError
+from collections.abc import Sequence
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.flow_step_validation import (
+    FlowGraphIssueCode,
     FlowStepValidationError,
     FlowStepValidationView,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.http_transport import (
-    HttpAuthoredConfig,
-    is_authored_config,
+    credential_template_message,
+    parse_authored_http_config,
+    secret_fields_holding_templates,
     validate_authored_config,
 )
 from eneo.main.config import get_settings
+from eneo.main.exceptions import TypedIOValidationException
 
 
 def validate_http_input_config(*, step: FlowStepValidationView) -> None:
@@ -50,15 +52,10 @@ def validate_http_config(
     method: str,
     direction: str,
 ) -> None:
-    authored_config = _require_authored_http_config(
-        step_order=step_order,
-        label=label,
-        config=config,
-    )
     validate_authored_http_config(
         step_order=step_order,
         label=label,
-        config=authored_config,
+        config=config,
         method=method,
         direction=direction,
     )
@@ -68,18 +65,19 @@ def validate_authored_http_config(
     *,
     step_order: int,
     label: str,
-    config: dict[str, Any],
+    config: object,
     method: str,
     direction: str,
 ) -> None:
     max_timeout = float(get_settings().flow_http_max_timeout_seconds)
     try:
-        authored = HttpAuthoredConfig.model_validate(config)
-    except ValidationError as exc:
+        authored = parse_authored_http_config(
+            config, step_order=step_order, config_label=label
+        )
+    except TypedIOValidationException as exc:
         raise FlowStepValidationError(
-            f"Step {step_order}: {label} is not a valid HTTP config: {exc}",
-            step_order=step_order,
-        ) from exc
+            str(exc), step_order=step_order, code=exc.code, context=exc.context
+        ) from None
     errors = validate_authored_config(
         authored, direction=direction, method=method, max_timeout=max_timeout
     )
@@ -87,19 +85,26 @@ def validate_authored_http_config(
         raise FlowStepValidationError(
             f"Step {step_order}: {label} validation failed: {errors[0].value}",
             step_order=step_order,
+            code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
+            context={"field": label},
+        )
+    templated = secret_fields_holding_templates(authored)
+    if templated:
+        raise credential_template_error(
+            step_order=step_order, label=label, fields=templated
         )
 
 
-def _require_authored_http_config(
-    *,
-    step_order: int,
-    label: str,
-    config: FlowPersistedJsonObject | None,
-) -> dict[str, Any]:
-    if not isinstance(config, dict) or not is_authored_config(config):
-        raise FlowStepValidationError(
-            f"Step {step_order}: {label} must use authored HTTP config with an auth field; "
-            "legacy flat HTTP config is no longer supported.",
-            step_order=step_order,
-        )
-    return config
+def credential_template_error(
+    *, step_order: int, label: str, fields: Sequence[str]
+) -> FlowStepValidationError:
+    return FlowStepValidationError(
+        credential_template_message(step_order=step_order, label=label, fields=fields),
+        step_order=step_order,
+        code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
+        context={
+            "issue_code": FlowGraphIssueCode.FLOW_STEP_INVALID.value,
+            "step_order": step_order,
+            "field": f"{label}.{fields[0]}",
+        },
+    )

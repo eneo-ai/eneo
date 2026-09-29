@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -32,6 +33,7 @@ from eneo.flows.flow_resource_bindings import (
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from eneo.flows.http_transport import SECRET_SENTINEL
+from eneo.flows.variable_resolver import iter_template_expressions
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import NOT_PROVIDED
 from eneo.prompts.api.prompt_models import PromptCreate
@@ -53,6 +55,16 @@ class _FakeEncryptionService:
 
     def decrypt(self, ciphertext: str) -> str:
         return ciphertext.removeprefix("enc:")
+
+
+class _OpaqueEncryptionService(_FakeEncryptionService):
+    """Ciphertext that shows nothing of the plaintext, as real ciphertext does."""
+
+    def encrypt(self, plaintext: str) -> str:
+        return f"enc:{plaintext[::-1]}"
+
+    def decrypt(self, ciphertext: str) -> str:
+        return ciphertext.removeprefix("enc:")[::-1]
 
 
 class _InactiveEncryptionService:
@@ -1955,6 +1967,425 @@ async def test_create_flow_encrypts_authored_value_wearing_encryption_prefix(use
     )
 
 
+def _credential_config(field: str, value: object) -> dict[str, Any]:
+    """An authored HTTP config whose one credential field holds `value`."""
+    base: dict[str, Any] = {"url": "https://example.org/hook", "auth": {"mode": "none"}}
+    if field == "auth.token":
+        base["auth"] = {"mode": "bearer_token", "token": value}
+    elif field == "auth.key":
+        base["auth"] = {"mode": "api_key", "header_name": "X-Key", "key": value}
+    elif field == "auth.password":
+        base["auth"] = {"mode": "basic_auth", "username": "u", "password": value}
+    else:
+        base["custom_headers"] = [
+            {"name": "X-Open", "value": "plain"},
+            {"name": "X-Secret", "value": value, "secret": True},
+        ]
+    return base
+
+
+_CREDENTIAL_CASES = [
+    pytest.param(side, field, id=f"{side}-{field}")
+    for side in ("input_config", "output_config")
+    for field in (
+        "auth.token",
+        "auth.key",
+        "auth.password",
+        "custom_headers[1].value",
+    )
+]
+_TEMPLATED_CREDENTIAL = "{{ step_1.output.text }}"
+
+
+def _http_step_with_credential(side: str, config: dict[str, Any], **update: Any):
+    fields: dict[str, Any] = (
+        {"input_source": "http_get", "input_type": "text", side: config}
+        if side == "input_config"
+        else {"output_mode": "http_post", "output_type": "text", side: config}
+    )
+    return _step(step_order=1).model_copy(update={**fields, **update})
+
+
+def _assert_credential_refusal(exc: BaseException, *, side: str, field: str) -> None:
+    assert isinstance(exc, BadRequestException)
+    assert f"{side}.{field}" in str(exc)
+    assert _TEMPLATED_CREDENTIAL not in str(exc)
+    assert exc.context["field"] == f"{side}.{field}"
+    assert exc.context["issue_code"] == "flow_step_invalid"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("side", "field"), _CREDENTIAL_CASES)
+async def test_create_flow_refuses_a_template_in_a_credential(user, side, field):
+    flow_repo = AsyncMock()
+    flow_repo.create.side_effect = lambda flow, tenant_id: flow
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=AsyncMock(),
+        encryption_service=_FakeEncryptionService(),
+    )
+    step = _http_step_with_credential(
+        side, _credential_config(field, _TEMPLATED_CREDENTIAL)
+    )
+
+    with pytest.raises(BadRequestException) as excinfo:
+        await service.create_flow(space_id=uuid4(), name="Flow", steps=[step])
+
+    _assert_credential_refusal(excinfo.value, side=side, field=field)
+    flow_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("side", "field"), _CREDENTIAL_CASES)
+async def test_create_flow_keeps_a_literal_credential_and_a_templated_open_field(
+    user, side, field
+):
+    flow_repo = AsyncMock()
+    flow_repo.create.side_effect = lambda flow, tenant_id: flow
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=AsyncMock(),
+        encryption_service=_FakeEncryptionService(),
+    )
+    config = _credential_config(field, "literal-{single}-credential")
+    config["url"] = "https://example.org/{{ flow_input.case }}"
+    step = _http_step_with_credential(side, config)
+
+    created = await service.create_flow(space_id=uuid4(), name="Flow", steps=[step])
+
+    assert getattr(created.steps[0], side)["url"].endswith("{{ flow_input.case }}")
+    flow_repo.create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("side", "field"), _CREDENTIAL_CASES)
+async def test_update_flow_refuses_a_new_template_in_a_credential(user, side, field):
+    step_id = uuid4()
+    stored = _published_flow_for_update(
+        user,
+        [
+            _http_step_with_credential(
+                side, _credential_config(field, "enc:stored-secret"), id=step_id
+            )
+        ],
+    )
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = stored
+    flow_repo.update.side_effect = lambda flow, **kwargs: flow
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=AsyncMock(),
+        encryption_service=_FakeEncryptionService(),
+    )
+
+    with pytest.raises(BadRequestException) as excinfo:
+        await service.update_flow(
+            flow_id=stored.id,
+            steps=[
+                _http_step_with_credential(
+                    side,
+                    _credential_config(field, _TEMPLATED_CREDENTIAL),
+                    id=step_id,
+                )
+            ],
+        )
+
+    _assert_credential_refusal(excinfo.value, side=side, field=field)
+    flow_repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("side", "field"), _CREDENTIAL_CASES)
+async def test_update_flow_refuses_a_retained_credential_that_holds_a_template(
+    user, side, field
+):
+    # The incoming step keeps the stored credential behind a sentinel, so the
+    # step validation never sees it: it is read once the stored value is merged.
+    encryption = _OpaqueEncryptionService()
+    step_id = uuid4()
+    stored = _published_flow_for_update(
+        user,
+        [
+            _http_step_with_credential(
+                side,
+                _credential_config(field, encryption.encrypt(_TEMPLATED_CREDENTIAL)),
+                id=step_id,
+            )
+        ],
+    )
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = stored
+    flow_repo.update.side_effect = lambda flow, **kwargs: flow
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=AsyncMock(),
+        encryption_service=encryption,
+    )
+
+    with pytest.raises(BadRequestException) as excinfo:
+        await service.update_flow(
+            flow_id=stored.id,
+            steps=[
+                _http_step_with_credential(
+                    side, _credential_config(field, SECRET_SENTINEL), id=step_id
+                )
+            ],
+        )
+
+    _assert_credential_refusal(excinfo.value, side=side, field=field)
+    flow_repo.update.assert_not_awaited()
+
+
+_BOGUS_HTTP_CONFIG = {"url": "https://example.org/hook", "auth": {"mode": "bogus"}}
+_UNACCEPTED_HTTP_CONFIGS = [
+    pytest.param(_BOGUS_HTTP_CONFIG, id="bogus-auth-mode"),
+    pytest.param({"url": "https://example.org/hook"}, id="missing-auth"),
+    pytest.param({"url": "not a url", "auth": {"mode": "none"}}, id="malformed-url"),
+    pytest.param(
+        {
+            "url": "https://alice:secret@{{ flow_input.host }}/hook",
+            "auth": {"mode": "none"},
+        },
+        id="templated-userinfo",
+    ),
+    pytest.param(
+        {
+            "url": "ftp://example.org/{{ flow_input.id }}",
+            "auth": {"mode": "none"},
+        },
+        id="fixed-non-http-scheme-before-a-template",
+    ),
+    pytest.param(
+        {
+            "url": "https://example.org/hook",
+            "auth": {"mode": "none"},
+            "timeout_seconds": 100000,
+        },
+        id="timeout-over-the-cap",
+    ),
+]
+
+
+def _flow_with_bogus_http_config(user, side, config):
+    return _published_flow_for_update(
+        user, [_http_step_with_credential(side, dict(config))]
+    )
+
+
+def _assert_typed_http_config_refusal(error: BaseException, *, side: str) -> None:
+    assert isinstance(error, BadRequestException)
+    assert error.code == "typed_io_http_invalid_config"
+    assert error.context["step_order"] == 1
+    assert error.context["issue_code"] == "flow_step_invalid"
+    assert error.context["field"].startswith(side)
+    assert "alice:secret" not in str(error)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("config", _UNACCEPTED_HTTP_CONFIGS)
+@pytest.mark.parametrize("side", ["input_config", "output_config"])
+async def test_create_flow_reports_the_typed_code_of_a_config_the_runtime_rejects(
+    user, side, config
+):
+    flow_repo = AsyncMock()
+    flow_repo.create.side_effect = lambda flow, tenant_id: flow
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=AsyncMock(),
+        encryption_service=_OpaqueEncryptionService(),
+    )
+    step = _http_step_with_credential(side, dict(config))
+
+    with pytest.raises(BadRequestException) as excinfo:
+        await service.create_flow(space_id=uuid4(), name="Flow", steps=[step])
+
+    _assert_typed_http_config_refusal(excinfo.value, side=side)
+    flow_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("config", _UNACCEPTED_HTTP_CONFIGS)
+@pytest.mark.parametrize("side", ["input_config", "output_config"])
+async def test_publish_flow_refuses_a_stored_http_config_that_does_not_parse(
+    user, side, config
+):
+    stored = _flow_with_bogus_http_config(user, side, config)
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = stored
+    flow_repo.allocate_next_version.return_value = 1
+    version_repo = AsyncMock()
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=version_repo,
+        encryption_service=_OpaqueEncryptionService(),
+    )
+
+    with pytest.raises(BadRequestException) as excinfo:
+        await service.publish_flow(flow_id=stored.id)
+
+    _assert_typed_http_config_refusal(excinfo.value, side=side)
+    version_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("config", _UNACCEPTED_HTTP_CONFIGS)
+@pytest.mark.parametrize("side", ["input_config", "output_config"])
+async def test_update_flow_refuses_a_stored_http_config_that_does_not_parse(
+    user, side, config
+):
+    stored = _flow_with_bogus_http_config(user, side, config)
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = stored
+    flow_repo.update.side_effect = lambda flow, **kwargs: flow
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=AsyncMock(),
+        encryption_service=_OpaqueEncryptionService(),
+    )
+
+    with pytest.raises(BadRequestException) as excinfo:
+        await service.update_flow(flow_id=stored.id, name="Renamed")
+
+    _assert_typed_http_config_refusal(excinfo.value, side=side)
+    flow_repo.update.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "config",
+    [param for param in _UNACCEPTED_HTTP_CONFIGS if param.id != "timeout-over-the-cap"],
+)
+@pytest.mark.parametrize("side", ["input_config", "output_config"])
+def test_the_stored_credential_scan_names_the_step_of_a_config_that_does_not_parse(
+    user, side, config
+):
+    # The step validation reads the config first, so this is the scan's own
+    # answer for a stored config that reaches it: a step-scoped error, never a
+    # bare pydantic one. (The timeout cap is the runtime's and is held at the
+    # run preflight.)
+    service = _service(
+        user=user,
+        flow_repo=AsyncMock(),
+        version_repo=AsyncMock(),
+        encryption_service=_OpaqueEncryptionService(),
+    )
+    step = _http_step_with_credential(side, dict(config))
+
+    with pytest.raises(BadRequestException) as excinfo:
+        service._reject_templated_stored_secrets([step])
+
+    _assert_typed_http_config_refusal(excinfo.value, side=side)
+    assert "bogus" not in str(excinfo.value)
+    assert "not a url" not in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_update_flow_keeps_a_retained_literal_credential(user):
+    encryption = _OpaqueEncryptionService()
+    step_id = uuid4()
+    stored = _published_flow_for_update(
+        user,
+        [
+            _http_step_with_credential(
+                "output_config",
+                _credential_config("auth.token", encryption.encrypt("literal-token")),
+                id=step_id,
+            )
+        ],
+    )
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = stored
+    flow_repo.update.side_effect = lambda flow, **kwargs: flow
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=AsyncMock(),
+        encryption_service=encryption,
+    )
+
+    await service.update_flow(
+        flow_id=stored.id,
+        steps=[
+            _http_step_with_credential(
+                "output_config",
+                _credential_config("auth.token", SECRET_SENTINEL),
+                id=step_id,
+            )
+        ],
+    )
+
+    flow_repo.update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("side", "field"), _CREDENTIAL_CASES)
+async def test_publish_flow_refuses_a_stored_credential_that_holds_a_template(
+    user, side, field
+):
+    # Stored credentials are ciphertext that shows nothing of what it holds:
+    # the check reads them as the runtime does, decrypted.
+    encryption = _OpaqueEncryptionService()
+    stored_value = encryption.encrypt(_TEMPLATED_CREDENTIAL)
+    assert not iter_template_expressions(stored_value)
+    stored = _published_flow_for_update(
+        user,
+        [_http_step_with_credential(side, _credential_config(field, stored_value))],
+    )
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = stored
+    flow_repo.allocate_next_version.return_value = 1
+    version_repo = AsyncMock()
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=version_repo,
+        encryption_service=encryption,
+    )
+
+    with pytest.raises(BadRequestException) as excinfo:
+        await service.publish_flow(flow_id=stored.id)
+
+    _assert_credential_refusal(excinfo.value, side=side, field=field)
+    version_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("side", "field"), _CREDENTIAL_CASES)
+async def test_publish_flow_allows_a_stored_literal_credential(user, side, field):
+    stored = _published_flow_for_update(
+        user,
+        [
+            _http_step_with_credential(
+                side,
+                _credential_config(
+                    field, _OpaqueEncryptionService().encrypt("literal-{single}")
+                ),
+            )
+        ],
+    )
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = stored
+    flow_repo.update.side_effect = lambda flow, **kwargs: flow
+    flow_repo.allocate_next_version.return_value = 1
+    version_repo = AsyncMock()
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=version_repo,
+        encryption_service=_OpaqueEncryptionService(),
+    )
+
+    await service.publish_flow(flow_id=stored.id)
+
+    version_repo.create.assert_awaited_once()
+
+
 @pytest.mark.asyncio
 async def test_create_flow_rejects_previous_step_input_for_first_step(user):
     flow_repo = AsyncMock()
@@ -2524,6 +2955,9 @@ class _ClassifiedStep:
     override: int | None = None
     question: str | None = None
     http: bool = False
+    output_mode: str = "pass_through"
+    input_config: dict[str, Any] | None = None
+    output_config: dict[str, Any] | None = None
 
 
 _MISMATCH = "flow_step_security_classification_mismatch"
@@ -2558,16 +2992,17 @@ def _classified_chain(user, steps: list[_ClassifiedStep], *, space_level: int = 
             user_description=f"Step {order}",
             input_source=spec.input_source,
             input_type="text",
-            output_mode="pass_through",
-            output_type="text",
+            output_mode=spec.output_mode,
+            output_type="docx" if spec.output_mode == "template_fill" else "text",
             input_bindings=(
                 {"question": spec.question} if spec.question is not None else None
             ),
             input_config=(
                 {"url": "https://example.org/input", "auth": {"mode": "none"}}
                 if spec.http
-                else None
+                else spec.input_config
             ),
+            output_config=spec.output_config,
             output_classification_override=spec.override,
         )
         assert isinstance(step.input_source, FlowInputSource)
@@ -2737,6 +3172,271 @@ async def test_save_accepts_a_step_cleared_for_everything_it_reads(
     await _save(service, flow, operation)
 
     assert _rows_written(flow_repo, operation)
+
+
+def _authored_http(**fields: Any) -> dict[str, Any]:
+    return {"url": "https://example.org/hook", "auth": {"mode": "none"}, **fields}
+
+
+_READ_STEP_1 = "{{ step_1.output.text }}"
+
+
+def _template_fill(binding: str, **fields: Any) -> _ClassifiedStep:
+    """A template fill step: deterministic, so it has no model to clear."""
+    return _ClassifiedStep(
+        model_level=1,
+        question="Fast text.",
+        output_mode="template_fill",
+        output_config={"bindings": {"beslut": binding}},
+        **fields,
+    )
+
+
+def _http_post(config: dict[str, Any], **fields: Any) -> _ClassifiedStep:
+    return _ClassifiedStep(
+        question="Fast text.",
+        output_mode="http_post",
+        output_config=config,
+        **fields,
+    )
+
+
+def _http_get(config: dict[str, Any], **fields: Any) -> _ClassifiedStep:
+    return _ClassifiedStep(input_source="http_get", input_config=config, **fields)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["create", "update"])
+@pytest.mark.parametrize(
+    ("steps", "code"),
+    [
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _template_fill(_READ_STEP_1),
+                _ClassifiedStep(model_level=1),
+            ],
+            _MISMATCH,
+            id="template_fill-binding-lifts-what-a-later-low-model-reads",
+        ),
+        pytest.param(
+            [_HIGH_FIRST_STEP, _template_fill(_READ_STEP_1, override=1)],
+            _WRITE_DOWN,
+            id="template_fill-binding-low-override",
+        ),
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _http_post(
+                    _authored_http(
+                        body={
+                            "mode": "json_template",
+                            "template": f'{{"t": "{_READ_STEP_1}"}}',
+                        }
+                    ),
+                    model_level=1,
+                ),
+            ],
+            _MISMATCH,
+            id="http_post-body-template-low-model",
+        ),
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _http_post(
+                    _authored_http(url=f"https://example.org/hook/{_READ_STEP_1}"),
+                    model_level=1,
+                ),
+            ],
+            _MISMATCH,
+            id="http_post-url-template-low-model",
+        ),
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _http_post(
+                    _authored_http(url=f"https://example.org/hook/{_READ_STEP_1}"),
+                    model_level=3,
+                    override=1,
+                ),
+            ],
+            _WRITE_DOWN,
+            id="http_post-url-template-low-override",
+        ),
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _http_get(
+                    _authored_http(url=f"https://example.org/lookup?q={_READ_STEP_1}"),
+                    model_level=1,
+                ),
+            ],
+            _MISMATCH,
+            id="http_get-url-template-low-model",
+        ),
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _http_get(
+                    _authored_http(url=f"https://example.org/lookup?q={_READ_STEP_1}"),
+                    model_level=3,
+                    override=1,
+                ),
+            ],
+            _WRITE_DOWN,
+            id="http_get-url-template-low-override",
+        ),
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _LITERAL_SECOND_STEP,
+                _http_post(
+                    _authored_http(url=f"https://example.org/hook/{_READ_STEP_1}"),
+                    model_level=1,
+                ),
+            ],
+            _MISMATCH,
+            id="http_post-reads-a-step-that-is-not-the-previous-one",
+        ),
+    ],
+)
+async def test_save_refuses_a_step_that_reads_a_classified_step_through_its_config(
+    user, steps, code, operation
+):
+    service, flow_repo, flow = _classified_chain(user, steps)
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await _save(service, flow, operation)
+
+    assert exc_info.value.code == code
+    assert not _rows_written(flow_repo, operation)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["create", "update"])
+@pytest.mark.parametrize(
+    "steps",
+    [
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _template_fill(_READ_STEP_1, override=3),
+                _ClassifiedStep(model_level=3),
+            ],
+            id="template_fill-binding-cleared-downstream",
+        ),
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _http_post(
+                    _authored_http(url=f"https://example.org/hook/{_READ_STEP_1}"),
+                    model_level=3,
+                ),
+            ],
+            id="http_post-template-equal-level",
+        ),
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _http_post(
+                    _authored_http(url=f"https://example.org/hook/{_READ_STEP_1}"),
+                    model_level=4,
+                ),
+            ],
+            id="http_post-template-higher-level",
+        ),
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _http_get(
+                    _authored_http(url=f"https://example.org/lookup?q={_READ_STEP_1}"),
+                    model_level=3,
+                ),
+            ],
+            id="http_get-template-equal-level",
+        ),
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _template_fill("{{ indata_text }}"),
+                _ClassifiedStep(model_level=1),
+            ],
+            id="template_fill-binding-of-the-flow-input-reads-no-step",
+        ),
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _LITERAL_SECOND_STEP,
+                _http_post(
+                    _authored_http(url="https://example.org/hook/{{ step_2.status }}"),
+                    model_level=1,
+                ),
+            ],
+            id="http_post-template-of-an-unclassified-step",
+        ),
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _http_post(_authored_http(), model_level=1),
+            ],
+            id="http_post-without-a-template",
+        ),
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _http_get(
+                    _authored_http(url="https://example.org/lookup"), model_level=1
+                ),
+            ],
+            id="http_get-without-a-template",
+        ),
+    ],
+)
+async def test_save_accepts_a_config_that_reads_only_what_the_step_is_cleared_for(
+    user, steps, operation
+):
+    service, flow_repo, flow = _classified_chain(user, steps)
+
+    await _save(service, flow, operation)
+
+    assert _rows_written(flow_repo, operation)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["create", "update"])
+@pytest.mark.parametrize(
+    ("config", "reported"),
+    [
+        pytest.param(
+            _authored_http(
+                url=f"https://example.org/{_READ_STEP_1}",
+                auth={"mode": "bearer_token", "token": ""},
+            ),
+            "HTTP_MISSING_AUTH",
+            id="missing-credentials",
+        ),
+        pytest.param(
+            {"url": f"https://example.org/{_READ_STEP_1}"},
+            "authored HTTP config",
+            id="flat-legacy-config",
+        ),
+    ],
+)
+async def test_save_reports_a_malformed_http_config_before_the_classification(
+    user, config, reported, operation
+):
+    # The config also reads a classified step through its url, so the
+    # classification check would refuse the save first if it ran first.
+    service, flow_repo, flow = _classified_chain(
+        user, [_HIGH_FIRST_STEP, _http_get(config, model_level=1)]
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await _save(service, flow, operation)
+
+    assert exc_info.value.code != _MISMATCH
+    assert reported in str(exc_info.value)
+    assert not _rows_written(flow_repo, operation)
 
 
 @pytest.mark.asyncio
