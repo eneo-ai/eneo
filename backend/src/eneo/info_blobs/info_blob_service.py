@@ -396,14 +396,18 @@ class InfoBlobService:
                     raise UnauthorizedException()
             case SpaceAction.EDIT:
                 if not actor.can_edit_info_blobs():
-                    raise UnauthorizedException()
+                    raise UnauthorizedException(
+                        "You do not have permission to edit this info blob."
+                    )
             case SpaceAction.DELETE:
                 if not actor.can_delete_info_blobs():
                     raise UnauthorizedException()
             case _:
                 # Fail closed: an action this check does not know about must
                 # not pass silently.
-                raise UnauthorizedException()
+                raise UnauthorizedException(
+                    "This action is not permitted on info blobs."
+                )
 
     async def publish_info_blob_without_validation(
         self,
