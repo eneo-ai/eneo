@@ -278,7 +278,7 @@ class AppService:
         name: str | None = None,
         transcription_model: "TranscriptionModel | None" = None,
     ):
-        template = await self.app_template_service.get_app_template(
+        template = await self.app_template_service.get_consumable_app_template(
             app_template_id=template_data.id
         )
 
