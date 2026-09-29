@@ -148,6 +148,8 @@ export function crawlFailureMessage(failureCode: string | null | undefined): str
       return m.crawl_failure_timed_out();
     case "processing_failed":
       return m.crawl_failure_processing_failed();
+    case "resources_missing":
+      return m.crawl_failure_resources_missing();
     case "page_limit_reached":
       return m.crawl_failure_page_limit_reached();
     case "content_skipped":

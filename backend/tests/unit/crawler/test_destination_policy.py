@@ -63,3 +63,22 @@ def test_private_is_denied_when_blocked(ip: str):
 def test_public_stays_allowed_when_private_is_blocked(ip: str):
     policy = DestinationPolicy(block_private_networks=True)
     assert policy.allows(ipaddress.ip_address(ip)) is True
+
+
+@pytest.mark.parametrize("block_private_networks", [False, True])
+def test_worker_crawl_engine_applies_the_operator_setting(
+    monkeypatch: pytest.MonkeyPatch, block_private_networks: bool
+):
+    from eneo.main.config import get_settings
+    from eneo.main.container import container
+
+    settings = get_settings().model_copy(
+        update={"crawler_block_private_networks": block_private_networks}
+    )
+    monkeypatch.setattr(container, "get_settings", lambda: settings)
+
+    policy = container._build_crawl_engine()._destination_policy
+
+    assert policy is not None
+    assert policy.allows(ipaddress.ip_address("10.0.0.1")) is not block_private_networks
+    assert policy.allows(ipaddress.ip_address("127.0.0.1")) is False

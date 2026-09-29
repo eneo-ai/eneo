@@ -63,6 +63,9 @@ class JobFailureCode(StrEnum):
     REMOTE_UNREACHABLE = "remote_unreachable"
     REMOTE_BLOCKED = "remote_blocked"
     TIMED_OUT = "timed_out"
+    RESOURCES_MISSING = "resources_missing"
+    PAGE_LIMIT_REACHED = "page_limit_reached"
+    CONTENT_SKIPPED = "content_skipped"
 
 
 _EXTRACTION_FAILURE_CODES = {

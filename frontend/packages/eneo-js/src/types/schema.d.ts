@@ -14645,7 +14645,10 @@ export interface components {
       | "lease_expired"
       | "remote_unreachable"
       | "remote_blocked"
-      | "timed_out";
+      | "timed_out"
+      | "resources_missing"
+      | "page_limit_reached"
+      | "content_skipped";
     /** JobPublic */
     JobPublic: {
       /** Created At */

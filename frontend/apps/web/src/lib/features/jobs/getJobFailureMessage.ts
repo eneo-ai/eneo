@@ -30,7 +30,10 @@ const JOB_FAILURE_MESSAGES: Record<JobFailureCode, (task: JobTask) => string> = 
   lease_expired: () => crawlFailureMessage("lease_expired"),
   remote_unreachable: () => crawlFailureMessage("remote_unreachable"),
   remote_blocked: () => crawlFailureMessage("remote_blocked"),
-  timed_out: () => crawlFailureMessage("timed_out")
+  timed_out: () => crawlFailureMessage("timed_out"),
+  resources_missing: () => crawlFailureMessage("resources_missing"),
+  page_limit_reached: () => crawlFailureMessage("page_limit_reached"),
+  content_skipped: () => crawlFailureMessage("content_skipped")
 };
 
 export function getJobFailureMessage(

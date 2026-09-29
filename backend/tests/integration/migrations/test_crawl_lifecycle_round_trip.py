@@ -21,6 +21,15 @@ _LIFECYCLE_REVISION = "202608301030"
 _CANCELLED_CLEANUP_REVISION = "202608311400"
 _WEBSITE_BLOB_CURSOR_REVISION = "202608311430"
 _WEBSITE_BLOB_CURSOR_INDEX = "ix_info_blobs_active_website_cursor"
+# crawl_runs columns that later migrations add, so they are absent at the
+# lifecycle revision. A new column must be listed here with its revision.
+_CRAWL_RUN_COLUMNS_ADDED_AFTER_LIFECYCLE = frozenset(
+    {
+        "failure_details_available",  # 202609091300
+        "pages_unchanged",  # 202609212000
+        "files_unchanged",  # 202609212000
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -537,12 +546,10 @@ def test_crawl_lifecycle_migration_preserves_and_terminalizes_legacy_history(
             migrated[3],
         )
 
-    assert _inspected_names(database_url, CrawlRuns.__tablename__, "columns") == {
-        column.name
-        for column in CrawlRuns.__table__.columns
-        # Added after the lifecycle revision exercised by this test.
-        if column.name != "failure_details_available"
-    }
+    assert _inspected_names(database_url, CrawlRuns.__tablename__, "columns") == (
+        {column.name for column in CrawlRuns.__table__.columns}
+        - _CRAWL_RUN_COLUMNS_ADDED_AFTER_LIFECYCLE
+    )
     assert _inspected_names(database_url, CrawlAttempts.__tablename__, "columns") == {
         column.name for column in CrawlAttempts.__table__.columns
     }
