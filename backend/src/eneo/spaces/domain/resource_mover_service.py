@@ -87,23 +87,7 @@ class ResourceMoverService:
         await self.space_repo.update(space=source_space)
 
     async def move_collection_to_space(self, collection_id: "UUID", space_id: "UUID"):
-        source_space = await self.space_service.get_space_by_collection(collection_id)
-        source_space_actor = self.actor_manager.get_space_actor_from_space(source_space)
-
-        if not source_space_actor.can_delete_collections():
-            raise UnauthorizedException(
-                "User does not have permission to move collection from space"
-            )
-
-        target_space = await self.space_service.get_space(space_id)
-        target_space_actor = self.actor_manager.get_space_actor_from_space(target_space)
-
-        if not target_space_actor.can_create_collections():
-            raise UnauthorizedException(
-                "User does not have permission to create collections in the space"
-            )
-
-        await self.group_service.import_group_to_space(
+        await self.group_service.move_group_owner_to_space(
             group_id=collection_id,
             space_id=space_id,
         )

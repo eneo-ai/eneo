@@ -91,6 +91,7 @@ class ActionType(str, Enum):
     WEBSITE_CRAWL_STOP_REQUESTED = "website_crawl_stop_requested"
     WEBSITE_CRAWL_PROBED = "website_crawl_probed"
     WEBSITE_TRANSFERRED = "website_transferred"
+    COLLECTION_TRANSFERRED = "collection_transferred"
     GROUP_CHAT_CREATED = "group_chat_created"
     COLLECTION_CREATED = "collection_created"
     COLLECTION_UPDATED = "collection_updated"

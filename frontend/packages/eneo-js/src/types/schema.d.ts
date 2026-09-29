@@ -8929,6 +8929,7 @@ export interface components {
       | "website_crawl_stop_requested"
       | "website_crawl_probed"
       | "website_transferred"
+      | "collection_transferred"
       | "group_chat_created"
       | "collection_created"
       | "collection_updated"
