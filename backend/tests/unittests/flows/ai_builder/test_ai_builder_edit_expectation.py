@@ -556,8 +556,15 @@ def test_an_inert_or_echoing_changed_step_fails_its_step_output() -> None:
     assert _failed(echo) == {"step_output_n1": "execution"}
     assert listed["verdict"] == "pass"
     assert previewed["verdict"] == "unmeasured"
-    assert edit.add_execution(
+    # An output nobody scored means the run never happened: unmeasured, never
+    # a failed edit and never a pass.
+    never_ran = edit.add_execution(
         structural, gold, evidence=evidence, output_success=None, step_results=[]
+    )
+    assert never_ran["failed_checks"] == []
+    assert never_ran["verdict"] == "unmeasured"
+    assert edit.add_execution(
+        structural, gold, evidence=evidence, output_success=False, step_results=[]
     )["failed_checks"] == ["run_output"]
 
 

@@ -145,6 +145,83 @@ ACQUISITION_FAILURE_CLASSES: frozenset[str] = frozenset(
         "provider_request",
     }
 )
+# What a row's `verdict_states` holds: a state for the Builder's plan, for a
+# reviewed edit reaching delivery, for the final output, and for the case as a
+# whole. A dimension the case does not ask for is `not_required`; the plan and
+# the case always count.
+VERDICT_STATE_DIMENSIONS: tuple[str, ...] = ("plan", "review_edit", "output", "case")
+VERDICT_STATES: tuple[str, ...] = ("pass", "fail", "unmeasured")
+NOT_REQUIRED_STATE = "not_required"
+
+
+def case_state(states: Mapping[str, str]) -> str:
+    """The case's state from its dimensions, the one rule of writer and reader.
+
+    Any failed required dimension fails the case, and it passes only when every
+    required dimension passed: an unmeasured one leaves it unmeasured, never a
+    pass, and never outweighs a failure.
+    """
+
+    counted = [
+        states[dimension]
+        for dimension in ("plan", "review_edit", "output")
+        if states[dimension] != NOT_REQUIRED_STATE
+    ]
+    if "fail" in counted:
+        return "fail"
+    return (
+        "pass"
+        if counted and all(state == "pass" for state in counted)
+        else "unmeasured"
+    )
+
+
+def verdict_state_counts(
+    rows_states: Iterable[Mapping[str, str]],
+) -> dict[str, dict[str, int]]:
+    """How many rows hold each state of each dimension: the summary's counts."""
+
+    counts: dict[str, dict[str, int]] = {}
+    for states in rows_states:
+        for dimension, state in states.items():
+            per_state = counts.setdefault(dimension, {})
+            per_state[state] = per_state.get(state, 0) + 1
+    return {
+        dimension: dict(sorted(per_state.items()))
+        for dimension, per_state in sorted(counts.items())
+    }
+
+
+def scorer_states_verdicts(summary: Mapping[str, Any], *, where: str) -> bool:
+    """Whether the scorer that wrote this receipt states its verdicts per
+    dimension, after checking the identity it recorded.
+
+    The scorer's version and the digest of its scoring modules are one pair:
+    both absent is a receipt from before either was recorded (legacy, may lack
+    the states); otherwise both must be present and well formed, so an explicit
+    null, a half-recorded pair or a malformed digest is no scorer identity and
+    refuses the receipt.
+    """
+
+    identity = _mapping(
+        summary.get("evaluator_identity"), where=where, key="evaluator_identity"
+    )
+    if "scorer_semantics_version" not in identity and "scorer_sha256" not in identity:
+        return False
+    version = identity.get("scorer_semantics_version")
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise ReceiptError(
+            f"{where}: scorer_semantics_version must be a positive integer beside "
+            "the scorer_sha256 it was recorded with."
+        )
+    if not is_sha256(identity.get("scorer_sha256")):
+        raise ReceiptError(
+            f"{where}: scorer_sha256 must be a SHA-256 digest beside the "
+            "scorer_semantics_version it was recorded with."
+        )
+    return True
+
+
 # `execution_failure`: the harness caught an exception and no journey exists.
 # `acquisition_failure`: the journey ended in an acquisition-class error.
 ACQUISITION_FAILURE_STATUSES: frozenset[str] = frozenset(
@@ -306,6 +383,8 @@ class Observation:
     # checks, and the Builder's own terminal error codes.
     evidence_failed_check_names: tuple[str, ...] = ()
     error_codes: tuple[str, ...] = ()
+    # Each dimension's own verdict; None on a row from before they were kept.
+    verdict_states: Mapping[str, str] | None = None
 
     @property
     def slot(self) -> tuple[str, int]:
@@ -343,6 +422,40 @@ def _edit_verdict(value: object, *, where: str) -> EditVerdict | None:
             str(edit["runtime_model_id"]) if edit.get("runtime_model_id") else None
         ),
     )
+
+
+def _verdict_states(
+    value: object, *, where: str, required: bool
+) -> Mapping[str, str] | None:
+    if value is None:
+        if required:
+            raise ReceiptError(
+                f"{where}: verdict_states is required by the scorer that wrote "
+                "this receipt."
+            )
+        return None
+    states = _mapping(value, where=where, key="verdict_states")
+    if set(states) != set(VERDICT_STATE_DIMENSIONS):
+        raise ReceiptError(
+            f"{where}: verdict_states must name exactly {VERDICT_STATE_DIMENSIONS}."
+        )
+    for dimension, state in states.items():
+        allowed = (
+            VERDICT_STATES
+            if dimension in {"plan", "case"}
+            else (*VERDICT_STATES, NOT_REQUIRED_STATE)
+        )
+        if state not in allowed:
+            raise ReceiptError(
+                f"{where}: verdict_states.{dimension} {state!r} is not one of "
+                f"{allowed}."
+            )
+    if states["case"] != case_state(states):
+        raise ReceiptError(
+            f"{where}: verdict_states.case {states['case']!r} contradicts its "
+            f"dimensions; they make it {case_state(states)!r}."
+        )
+    return dict(states)
 
 
 def observation_is_replacement_eligible(observation: Observation) -> bool:
@@ -412,7 +525,9 @@ def _check_names(row: Mapping[str, Any], key: str, *, where: str) -> tuple[str, 
     )
 
 
-def observation_from_row(raw_row: Any, *, where: str) -> Observation:
+def observation_from_row(
+    raw_row: Any, *, where: str, require_verdict_states: bool = False
+) -> Observation:
     if not isinstance(raw_row, Mapping):
         raise ReceiptError(f"{where} must be an object; got {type(raw_row).__name__}.")
     row = cast(Mapping[str, Any], raw_row)
@@ -530,6 +645,9 @@ def observation_from_row(raw_row: Any, *, where: str) -> Observation:
         error_codes=_string_tuple(
             failure_summary.get("error_codes"), where=where, key="error_codes"
         ),
+        verdict_states=_verdict_states(
+            row.get("verdict_states"), where=where, required=require_verdict_states
+        ),
     )
 
 
@@ -583,10 +701,32 @@ def receipt_from_summary(
     rows = _sequence(summary.get("results"), where=where, key="results")
     if not rows:
         raise ReceiptError(f"{where}: results must be a non-empty array.")
+    states_required = scorer_states_verdicts(summary, where=where)
     observations = tuple(
-        observation_from_row(row, where=f"results[{index}]")
+        observation_from_row(
+            row, where=f"results[{index}]", require_verdict_states=states_required
+        )
         for index, row in enumerate(rows)
     )
+    if states_required:
+        reported = _mapping(
+            _mapping(
+                summary.get("observation_summary"),
+                where=where,
+                key="observation_summary",
+            ).get("state_counts"),
+            where=where,
+            key="observation_summary.state_counts",
+        )
+        derived = verdict_state_counts(
+            cast(Mapping[str, str], observation.verdict_states)
+            for observation in observations
+        )
+        if dict(reported) != derived:
+            raise ReceiptError(
+                f"{where}: observation_summary.state_counts {dict(reported)} do not "
+                f"follow the rows' verdict_states {derived}."
+            )
     seen: set[tuple[str, int]] = set()
     for observation in observations:
         if observation.slot in seen:
@@ -910,7 +1050,9 @@ def _apply_replacements(receipt: Receipt, *, suite_dir: Path) -> Receipt:
             BUNDLE_SHA256_FIELD: descriptor.replacement_bundle_sha256,
         }
         replacement_observation = observation_from_row(
-            replacement_row, where=f"{where} replacement observation"
+            replacement_row,
+            where=f"{where} replacement observation",
+            require_verdict_states=scorer_states_verdicts(receipt.summary, where=where),
         )
         if replacement_observation.slot != descriptor.slot:
             raise ReceiptError(

@@ -157,17 +157,35 @@ def literal_appears(literal: str, text: str) -> bool:
     )
 
 
+def unassessed_check(name: str, subject: str, **fields: str) -> JsonObject:
+    """A check of the delivered output that a run without output never assessed:
+    `not_evaluated` (`passed` None), neither a failure, a hit nor a pass."""
+
+    return {
+        "name": name,
+        **fields,
+        "passed": None,
+        "status": "not_evaluated",
+        "reason": f"{subject!r} was not checked: the run delivered no output to inspect",
+    }
+
+
 def literal_checks(
     text: str,
     *,
     required: Sequence[str],
     forbidden: Sequence[str],
     normalize: Callable[[str], str],
+    delivered: bool,
 ) -> list[JsonObject]:
     """Each literal must (or must not) appear in the normalized text.
 
-    With no output to inspect, a required fact is missing but a forbidden literal
-    is `not_evaluated` (`passed` None): neither a leak nor a pass.
+    `delivered` says whether there is an output to inspect at all, which the
+    text cannot say: an output that came out empty is delivered, its required
+    facts missing and its forbidden literals absent. With nothing delivered
+    (no run, a failed run, an unreadable file) every literal is `not_evaluated`:
+    the run neither held a fact nor lost it, and neither leaked nor kept clear
+    of a forbidden literal.
     """
 
     normalized = normalize(text) if text else ""
@@ -177,17 +195,8 @@ def literal_checks(
         ("forbidden_literal", "literal", forbidden, False),
     ):
         for literal in literals:
-            if not normalized and not must_appear:
-                checks.append(
-                    {
-                        "name": name,
-                        key: literal,
-                        "passed": None,
-                        "status": "not_evaluated",
-                        "reason": f"{literal!r} was not checked: the run delivered "
-                        "no output to inspect",
-                    }
-                )
+            if not delivered:
+                checks.append(unassessed_check(name, literal, **{key: literal}))
                 continue
             present = literal_appears(normalize(literal), normalized)
             checks.append(
@@ -869,7 +878,8 @@ def add_execution(
     checks.append(
         {
             "name": "run_output",
-            "passed": output_success is True,
+            # No verdict on the output means no run: unmeasured, not a failure.
+            "passed": output_success if isinstance(output_success, bool) else None,
             "category": "execution",
             "detail": output_success,
         }
@@ -918,6 +928,7 @@ def _step_output(
         required=rule.required_facts,
         forbidden=rule.forbidden,
         normalize=normalized_text,
+        delivered=True,
     )
     failed = [check for check in literals if check["passed"] is False]
     return rule.output_kind in {None, kind} and all(

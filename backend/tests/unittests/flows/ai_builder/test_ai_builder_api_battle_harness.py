@@ -4386,6 +4386,12 @@ def test_suite_receipts_preserve_canonical_case_identity_for_every_outcome(
             "execution_failure": 1,
         },
         "verdict_counts": {"not_evaluated": 1, "pass": 1},
+        "state_counts": {
+            "plan": {"unmeasured": 2},
+            "review_edit": {"not_required": 2},
+            "output": {"not_required": 2},
+            "case": {"unmeasured": 2},
+        },
     }
 
 
@@ -4823,6 +4829,12 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
             "observation_status": "completed",
             "outcome_class": "plan_first_pass",
             "expectation_verdict": "pass",
+            "verdict_states": {
+                "plan": "pass",
+                "review_edit": "not_required",
+                "output": "not_required",
+                "case": "pass",
+            },
             "case_contract_sha256": harness._case_contract_sha256(case),
             "bundle_file": bundle_path.name,
             "bundle_sha256": digest,
@@ -10004,6 +10016,7 @@ def test_a_single_case_failure_bundle_names_its_case(
             run_suite=False,
             sealed_targeted_suite=False,
             session_id=None,
+            repetitions=1,
         ),
     )
 
@@ -12623,7 +12636,7 @@ def test_a_review_target_the_oracle_cannot_edit_is_an_unmeasured_observation(
     assert harness.observation_is_replacement_eligible(observation) is True
 
 
-def test_a_review_without_an_editable_target_fails_and_stops_the_run(
+def test_a_review_without_an_editable_target_stops_the_run_unmeasured(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     harness = _battle_harness()
@@ -12642,14 +12655,15 @@ def test_a_review_without_an_editable_target_fails_and_stops_the_run(
     assert [failure["kind"] for failure in evidence["execution"]["failures"]] == [
         "review_target_missing"
     ]
-    assert oracle["passed"] is False
+    # No leaf to edit, so no edit was made: nothing was measured, nothing failed.
+    assert oracle["passed"] is None
     # An edit review that was only approved has no evidence either.
     approved_only = {"execution": {"checkpoints": [{"action": "approve"}]}}
-    assert harness._review_edit_delivery_check(approved_only)["passed"] is False
+    assert harness._review_edit_delivery_check(approved_only)["passed"] is None
 
 
 @mark.parametrize(("mode", "scored"), [("view", False), ("edit", True)])
-def test_an_executed_edit_review_is_scored_and_absent_evidence_fails(
+def test_an_executed_edit_review_is_scored_and_absent_evidence_is_unmeasured(
     mode: str, scored: bool
 ) -> None:
     harness = _battle_harness()
@@ -12673,7 +12687,7 @@ def test_an_executed_edit_review_is_scored_and_absent_evidence_fails(
         for check in report["checks"]
         if check["name"] == "review_edit_reaches_delivery"
     ]
-    assert [check["passed"] for check in oracle] == ([False] if scored else [])
+    assert [check["passed"] for check in oracle] == ([None] if scored else [])
     with raises(ValueError, match="view"):
         harness._expected_checkpoint(
             {"review_mode": "view", "action": "edit_target"}, owner="checkpoint"

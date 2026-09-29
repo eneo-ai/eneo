@@ -712,6 +712,16 @@ _GATED_RUN_CONTEXT_FIELDS: tuple[str, ...] = (
     "ui_language",
 )
 
+# What scored the receipt: the declared meaning of its verdicts, and the bytes
+# of the scoring modules beside the harness (`--allow-harness-change` waives
+# that digest like the harness's own, never the declared version). The
+# receipts of the first scorer recorded neither, so both absent is one scorer
+# and comparable, while one absent beside a recorded scorer is a different one.
+_SCORER_IDENTITY_FIELDS: tuple[str, ...] = (
+    "scorer_semantics_version",
+    "scorer_sha256",
+)
+
 # Differences here are expected and reported, never fatal.
 _REPORTED_IDENTITY_FIELDS: tuple[str, ...] = (
     "cases_sha256",
@@ -729,7 +739,10 @@ def _identity_marker(summary: dict[str, Any]) -> dict[str, Any]:
     """Comparability key drawn from the receipt's own evaluator identity."""
 
     typed_identity = _evaluator_identity(summary)
-    return {field: typed_identity.get(field) for field in _IDENTITY_FIELDS}
+    return {
+        field: typed_identity.get(field)
+        for field in (*_IDENTITY_FIELDS, *_SCORER_IDENTITY_FIELDS)
+    }
 
 
 def _reported_identity_differences(
@@ -787,6 +800,11 @@ def _incompatible_identity_fields(
         if before is None or after is None:
             incompatible.append(f"{field} (missing)")
         elif before != after:
+            incompatible.append(field)
+    for field in _SCORER_IDENTITY_FIELDS:
+        if field == "scorer_sha256" and allow_harness_change:
+            continue
+        if baseline_marker[field] != current_marker[field]:
             incompatible.append(field)
     for field in _GATED_RUN_CONTEXT_FIELDS:
         before, after = baseline_context.get(field), current_context.get(field)

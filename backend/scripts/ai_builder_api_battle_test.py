@@ -59,6 +59,7 @@ from ai_builder_receipt import (  # noqa: E402
     BUNDLE_SHA256_FIELD,
     CLEAN_SPACE_LISTING_REQUESTS,
     FAILURE_CLASSES,
+    NOT_REQUIRED_STATE,
     REPLACEMENTS_FILE,
     SUPPORTED_RECEIPT_ARTIFACT_VERSION,
     FailureClass,
@@ -68,11 +69,13 @@ from ai_builder_receipt import (  # noqa: E402
     acquisition_validity_checks,
     capacity_preflight_verdict,
     capacity_snapshot_request_count,
+    case_state,
     failure_class_from_summary,
     load_recoverable_release_receipt,
     observation_from_row,
     observation_identity_failure_count,
     observation_is_replacement_eligible,
+    verdict_state_counts,
 )
 from ai_builder_receipt import canonical_sha256 as _canonical_sha256  # noqa: E402
 from ai_builder_receipt import (  # noqa: E402
@@ -136,6 +139,13 @@ _ERROR_TERMINATED_OUTCOME_CLASSES = frozenset({"builder_error"})
 # v4: an edit observation whose session ran no classifier takes attachment
 # identity from the session's attachment record (`attachment_evidence_source`).
 OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION = 4
+# v1: a verdict is stated per dimension (`verdict_states`), and a required fact,
+# an association or a reviewed edit on a run that delivered nothing is
+# `not_evaluated` instead of failed.
+SCORER_SEMANTICS_VERSION = 1
+# The scoring modules beside the harness: what a verdict means is written in
+# their bytes too, so a receipt records them with the harness's own digest.
+_SCORER_MODULES = ("ai_builder_edit_expectation.py", "ai_builder_receipt.py")
 
 
 def _ensure_backend_src_importable() -> None:
@@ -178,11 +188,13 @@ from ai_builder_edit_expectation import (  # noqa: E402
     add_execution,
     closed_object,
     evaluate_edit,
+    literal_appears,
     literal_checks,
     literal_list,
     parse_edit_expectation,
     seed_view,
     snapshot_view,
+    unassessed_check,
 )
 from ai_builder_release_gate import replacement_limit  # noqa: E402
 
@@ -298,6 +310,14 @@ class BattleTurnError(ValueError):
         self.cause = cause
 
 
+class HarnessRefusal(ValueError):
+    """The harness cannot run or judge this case on the Flow the Builder made.
+
+    The plan was observed, so its slot keeps and scores it; the run and its
+    delivery were never measured.
+    """
+
+
 class BattleFlowLifecycleError(ValueError):
     """An applied benchmark Flow could not complete its owned lifecycle."""
 
@@ -307,10 +327,14 @@ class BattleFlowLifecycleError(ValueError):
         message: str,
         flow_lifecycle: JsonObject,
         cause: Exception | None = None,
+        applied_flow_evidence: JsonObject | None = None,
     ) -> None:
         super().__init__(message)
         self.flow_lifecycle = flow_lifecycle
         self.cause = cause
+        # What the Flow held before the run failed: a refused run still scores
+        # the applied plan.
+        self.applied_flow_evidence = applied_flow_evidence
 
 
 def harness_failure_class(error: Exception) -> FailureClass:
@@ -1280,7 +1304,18 @@ def main() -> int:
             return _run_seed_calibration(
                 cases=cases, config=config, args=args, output_dir=output_dir
             )
-        if args.run_suite or args.sealed_targeted_suite or len(cases) > 1:
+        # Repetitions apply whatever the case count: one case run three times is
+        # a suite of three observations, with its receipt.
+        if (
+            args.run_suite
+            or args.sealed_targeted_suite
+            or len(cases) > 1
+            or args.repetitions > 1
+        ):
+            if args.repetitions > 1 and getattr(args, "session_id", None):
+                raise ValueError(
+                    "--session-id resumes one session; it cannot be repeated."
+                )
             return _run_suite(
                 cases=cases,
                 config=config,
@@ -3427,6 +3462,15 @@ def _require_clean_measurement_space(
         )
 
 
+def _scorer_sha256() -> str:
+    digest = hashlib.sha256()
+    for module in _SCORER_MODULES:
+        digest.update(
+            hashlib.sha256((Path(_SCRIPTS_DIR) / module).read_bytes()).digest()
+        )
+    return digest.hexdigest()
+
+
 def _suite_evaluator_identity(
     *,
     release_identity: Mapping[str, object],
@@ -3451,6 +3495,8 @@ def _suite_evaluator_identity(
         "observation_input_identity_semantics_version": (
             OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION
         ),
+        "scorer_semantics_version": SCORER_SEMANTICS_VERSION,
+        "scorer_sha256": _scorer_sha256(),
         "source_revision": build.get("source_revision"),
         "harness_sha256": build.get("harness_sha256"),
         "cases_sha256": build.get("cases_sha256"),
@@ -3514,7 +3560,9 @@ def _acquire_suite_observation(
         bundle["case_contract_sha256"] = _case_contract_sha256(case)
         bundle["artifact_schema_version"] = acquisition_contract.artifact_schema_version
         bundle["repetition"] = repetition
-        if case.required:
+        # A refused run was never observed whole: like any execution failure it
+        # carries no release identity checks and stays re-measurable.
+        if case.required and "harness_refusal" not in bundle:
             provenance = bundle.get("live_execution_provenance")
             quality_report = bundle.get("quality_report")
             checks = (
@@ -4144,7 +4192,9 @@ def _run_replacement_batch(
     )
 
     replacement_observations = [
-        observation_from_row(result, where=f"replacement result {index}")
+        observation_from_row(
+            result, where=f"replacement result {index}", require_verdict_states=True
+        )
         for index, result in enumerate(results)
     ]
     if any(
@@ -5204,24 +5254,35 @@ def _run_case_session(
         structural = _judge_edit(case.edit, edit_evidence)
         return structural["verdict"] == "pass"
 
+    refusal: BattleFlowLifecycleError | None = None
     if case.apply_plan and plan_id is not None:
-        applied_flow_evidence, runtime_evidence, flow_lifecycle = (
-            _apply_execute_and_cleanup_flow(
-                case=case,
-                config=config,
-                plan_id=plan_id,
-                runtime_file_paths=runtime_file_paths,
-                timeout_seconds=args.timeout_seconds,
-                artifact_output_dir=artifact_output_dir,
-                seeded_flow=seeded_flow,
-                edit_evidence=edit_evidence,
-                structure_passed=(
-                    structure_passed
-                    if case.edit is not None and case.execution is not None
-                    else None
-                ),
+        try:
+            applied_flow_evidence, runtime_evidence, flow_lifecycle = (
+                _apply_execute_and_cleanup_flow(
+                    case=case,
+                    config=config,
+                    plan_id=plan_id,
+                    runtime_file_paths=runtime_file_paths,
+                    timeout_seconds=args.timeout_seconds,
+                    artifact_output_dir=artifact_output_dir,
+                    seeded_flow=seeded_flow,
+                    edit_evidence=edit_evidence,
+                    structure_passed=(
+                        structure_passed
+                        if case.edit is not None and case.execution is not None
+                        else None
+                    ),
+                )
             )
-        )
+        except BattleFlowLifecycleError as error:
+            if not isinstance(error.cause, HarnessRefusal):
+                raise
+            # The harness cannot run this Flow, but the plan it was given was
+            # observed: keep scoring it, with no run and so no delivery.
+            refusal = error
+            applied_flow_evidence = error.applied_flow_evidence
+            runtime_evidence = None
+            flow_lifecycle = error.flow_lifecycle
     else:
         runtime_evidence = None
     journey = _journey_summary(
@@ -5338,6 +5399,12 @@ def _run_case_session(
     if case.edit is not None and seeded_flow is not None:
         bundle["case"]["edit"] = _edit_contract(case.edit)
         bundle["edit_evidence"] = edit_evidence
+    if refusal is not None:
+        fields = _failure_error_fields(refusal)
+        bundle["harness_refusal"] = {
+            "error": fields["error"],
+            "failure_class": fields["failure_class"],
+        }
     return bundle
 
 
@@ -5559,7 +5626,7 @@ def _apply_execute_and_cleanup_flow(
                 )
                 if unmeasured:
                     runtime_record["unmeasured"] = unmeasured
-                    raise ValueError(
+                    raise HarnessRefusal(
                         f"case {case.case_id} final output is unmeasured: {unmeasured}"
                     )
         except Exception as error:
@@ -5610,6 +5677,7 @@ def _apply_execute_and_cleanup_flow(
                 message=str(primary_error),
                 flow_lifecycle=lifecycle,
                 cause=primary_error,
+                applied_flow_evidence=applied_flow_evidence,
             ) from primary_error
         raise primary_error
 
@@ -5793,7 +5861,7 @@ def _execute_and_collect_runtime_evidence(
 def _runtime_file_step_id(contract: Mapping[str, object], *, case_id: str) -> str:
     input_steps = _mapping_list(contract.get("steps_requiring_input"))
     if len(input_steps) != 1:
-        raise ValueError(
+        raise HarnessRefusal(
             f"case {case_id} requires exactly one runtime file-input step."
         )
     return _required_string(input_steps[0], "step_id")
@@ -5814,7 +5882,7 @@ def _run_input_payload(
     if inputs.text is not None:
         # The run form offers free text only to a Flow without form fields.
         if declared:
-            raise ValueError(
+            raise HarnessRefusal(
                 f"case {case_id} sends free text, but the published Flow asks for "
                 f"form fields: {', '.join(sorted(declared))}."
             )
@@ -5823,7 +5891,7 @@ def _run_input_payload(
     # would run the Flow with that field empty.
     undeclared = sorted(set(inputs.form_fields) - declared)
     if undeclared:
-        raise ValueError(
+        raise HarnessRefusal(
             f"case {case_id} sets form field(s) the published Flow does not "
             f"declare: {', '.join(undeclared)}; it declares "
             f"{', '.join(sorted(declared)) or 'none'}."
@@ -6206,8 +6274,11 @@ def _review_edit_delivery_check(evidence: Mapping[str, object] | None) -> JsonOb
     The new string or number must appear in the delivered output, and the old
     one must not where it is attributable: the run had no file inputs, its
     sent input does not hold it, and no other leaf of the reviewed value holds
-    it (`old_absent_outside_edit`). Otherwise only the new value is scored. A
-    target none of whose leaves is named fails, as does no edit.
+    it (`old_absent_outside_edit`). Otherwise only the new value is scored.
+    Delivery is measured only where an edit was made: a target none of whose
+    leaves is named, a target that cannot be edited, and no checkpoint reached
+    are `not_evaluated`, never a failure, and an edit that did not arrive is
+    the one thing that fails.
     """
 
     evidence = evidence or {}
@@ -6230,7 +6301,8 @@ def _review_edit_delivery_check(evidence: Mapping[str, object] | None) -> JsonOb
         oracle = cast(JsonObject, oracle)
         old, new = oracle.get("old"), oracle.get("new")
         if new is None:
-            results.append({**oracle, "passed": False})
+            # No edit was made, so nothing was measured.
+            results.append({**oracle, "passed": None})
         else:
             attributable = (
                 oracle.get("old_absent_outside_edit") is True
@@ -6249,9 +6321,19 @@ def _review_edit_delivery_check(evidence: Mapping[str, object] | None) -> JsonOb
                     "passed": new_delivered and old_delivered is not True,
                 }
             )
+    verdicts = [result["passed"] for result in results]
+    # An edit that was made and lost is measured, whatever else could not be.
+    passed = (
+        False
+        if False in verdicts
+        else None
+        if not verdicts or None in verdicts
+        else True
+    )
     return {
         "name": "review_edit_reaches_delivery",
-        "passed": bool(results) and all(result["passed"] is True for result in results),
+        "passed": passed,
+        **({"status": "not_evaluated"} if passed is None else {}),
         "actual": results or "no reviewed value was edited",
         "expected": (
             "each edited review target reaches delivery; the old value is absent "
@@ -6525,7 +6607,10 @@ def _normalized_output_text(value: str) -> str:
 
 
 def _delivered_text(runtime_evidence: Mapping[str, object]) -> str | None:
-    """The run's delivered output as text: inline text, structured JSON or the file."""
+    """The run's delivered output as text: inline text, structured JSON or the file.
+
+    None when nothing readable was delivered; an empty string when an empty
+    output was."""
 
     run, final_file = (
         cast(Mapping[str, Any], value if isinstance(value, Mapping) else {})
@@ -6540,8 +6625,13 @@ def _delivered_text(runtime_evidence: Mapping[str, object]) -> str | None:
     raw_text = (
         result.get("text")
         if result.get("kind") == "inline_text"
-        else json.dumps(value, ensure_ascii=False, sort_keys=True)
-        if result.get("kind") == "structured" and value not in (None, "", [], {})
+        # A structured result that holds nothing delivered an empty output.
+        else (
+            json.dumps(value, ensure_ascii=False, sort_keys=True)
+            if value not in (None, "", [], {})
+            else ""
+        )
+        if result.get("kind") == "structured"
         else final_file.get("text")
     )
     return raw_text if isinstance(raw_text, str) else None
@@ -6639,6 +6729,7 @@ def _output_report(
             required=expect.required_facts,
             forbidden=expect.forbidden,
             normalize=_normalized_output_text,
+            delivered=isinstance(raw_text, str),
         )
     )
     lines = [
@@ -6646,17 +6737,24 @@ def _output_report(
         for line in (raw_text if isinstance(raw_text, str) else "").splitlines()
     ]
     for association in expect.associations:
+        if not isinstance(raw_text, str):
+            checks.append(
+                unassessed_check(
+                    "output_association", association.fact, fact=association.fact
+                )
+            )
+            continue
         fact, with_, not_with = (
             _normalized_output_text(literal)
             for literal in (association.fact, association.with_, association.not_with)
         )
-        holding = [line for line in lines if fact in line]
+        holding = [line for line in lines if literal_appears(fact, line)]
         checks.append(
             {
                 "name": "output_association",
                 "fact": association.fact,
-                "passed": any(with_ in line for line in holding)
-                and not any(not_with in line for line in holding),
+                "passed": any(literal_appears(with_, line) for line in holding)
+                and not any(literal_appears(not_with, line) for line in holding),
                 "reason": f"{len(holding)} line(s) hold {association.fact!r}; one "
                 f"must hold {association.with_!r} and none {association.not_with!r}",
             }
@@ -8794,8 +8892,15 @@ def _suite_result(bundle: JsonObject, bundle_path: Path) -> JsonObject:
 
 
 def _observation_failure_class(bundle: JsonObject) -> FailureClass | None:
-    if bundle.get("artifact_mode") == "live_execution_failure":
-        recorded = bundle.get("failure_class")
+    refusal = bundle.get("harness_refusal")
+    if bundle.get("artifact_mode") == "live_execution_failure" or isinstance(
+        refusal, Mapping
+    ):
+        recorded = (
+            cast(Mapping[str, object], refusal).get("failure_class")
+            if isinstance(refusal, Mapping)
+            else bundle.get("failure_class")
+        )
         if not isinstance(recorded, str) or recorded not in FAILURE_CLASSES:
             raise ValueError("execution failure bundle carries no failure class.")
         return cast(FailureClass, recorded)
@@ -8869,6 +8974,107 @@ def _suite_decision_scores(results: Sequence[Mapping[str, Any]]) -> JsonObject:
     }
 
 
+# Stops the harness itself chose, before the run could deliver anything.
+_HARNESS_ENDED_RUN_KINDS = frozenset(
+    {"review_target_missing", "review_target_unmeasured"}
+)
+
+
+def _checks_state(checks: Sequence[Mapping[str, Any]]) -> str:
+    """Fail if any check failed; pass only if every one passed; else unmeasured."""
+
+    if any(check.get("passed") is False for check in checks):
+        return "fail"
+    if checks and all(check.get("passed") is True for check in checks):
+        return "pass"
+    return "unmeasured"
+
+
+def _verdict_states(
+    bundle: Mapping[str, Any], *, observation_status: str
+) -> JsonObject:
+    """Plan placement, review-edit delivery and final output, each apart.
+
+    Every state is pass, fail or unmeasured; a dimension the case does not ask
+    for is `not_required`. A run that delivered nothing, or that the harness
+    stopped before any edit, leaves what needs delivery unmeasured, so a case
+    that requires delivery cannot pass without evidence of it. The case is
+    failed by any failed dimension and passed only when every required one
+    passed.
+    """
+
+    def mapping(value: object) -> Mapping[str, Any]:
+        return cast(Mapping[str, Any], value) if isinstance(value, Mapping) else {}
+
+    report = mapping(bundle.get("quality_report"))
+    contract = mapping(bundle.get("case") or bundle.get("case_contract"))
+    review_policy = mapping(
+        mapping(contract.get("expected")).get("expected_review_policy")
+    )
+    executes = isinstance(contract.get("execution"), Mapping)
+    checks = _mapping_list(report.get("checks"))
+    delivery_names = set(_string_list(report.get("delivery_check_names")))
+    edit_checks = _mapping_list(mapping(report.get("edit")).get("checks"))
+    evidence = bundle.get("runtime_evidence")
+    stopped = any(
+        failure.get("kind") in _HARNESS_ENDED_RUN_KINDS
+        for failure in _mapping_list(
+            mapping(mapping(evidence).get("execution")).get("failures")
+        )
+    )
+    structural = [c for c in edit_checks if c.get("category") != "execution"]
+    if observation_status == "error_terminated":
+        # The Builder's own terminal error is the product's answer.
+        plan = "fail"
+    elif not (
+        observation_status in {"completed", "invalid_evidence"}
+        or isinstance(bundle.get("harness_refusal"), Mapping)
+    ):
+        plan = "unmeasured"
+    elif structural:
+        # An edit case's plan is judged by its edit gold: a right decline has no
+        # plan for the generic checks to find.
+        plan = _checks_state(structural)
+    else:
+        plan = _checks_state([c for c in checks if c.get("name") not in delivery_names])
+    if not (executes and review_policy.get("mode") == "edit"):
+        review_edit = NOT_REQUIRED_STATE
+    else:
+        review_edit = _checks_state(
+            [c for c in checks if c.get("name") == "review_edit_reaches_delivery"]
+        )
+    if not executes:
+        output = NOT_REQUIRED_STATE
+    elif evidence is None or stopped:
+        output = "unmeasured"
+    else:
+        judged = {
+            *(str(c.get("name")) for c in _mapping_list(report.get("output_checks"))),
+            "review_edit_reaches_delivery",
+        }
+        output = _checks_state(
+            [
+                *_mapping_list(report.get("output_checks")),
+                *(
+                    c
+                    for c in checks
+                    if c.get("name") in delivery_names and c.get("name") not in judged
+                ),
+                *(c for c in edit_checks if c.get("category") == "execution"),
+            ]
+        )
+    states = {"plan": plan, "review_edit": review_edit, "output": output}
+    if observation_status == "acquisition_failure":
+        # Never measured cleanly: nothing was observed, so nothing failed.
+        states = {
+            k: v if v == NOT_REQUIRED_STATE else "unmeasured" for k, v in states.items()
+        }
+    elif observation_status == "invalid_evidence":
+        # Evidence that is not valid can fail an observation, never pass it.
+        states = {k: "unmeasured" if v == "pass" else v for k, v in states.items()}
+    return {**states, "case": case_state(states)}
+
+
 def _observation_projection(bundle: JsonObject) -> JsonObject:
     report = bundle.get("quality_report")
     checks = report.get("checks") if isinstance(report, Mapping) else []
@@ -8906,7 +9112,13 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
         for check in identity_checks
         if isinstance(check, Mapping) and check.get("passed") is not True
     ]
-    completed_live_execution = bundle.get("artifact_mode") == "live_execution"
+    # A run the harness refused kept its plan but never ran: it is an execution
+    # failure of the instrument, and its delivery is unmeasured.
+    refusal = bundle.get("harness_refusal")
+    refusal = cast(Mapping[str, Any], refusal) if isinstance(refusal, Mapping) else None
+    completed_live_execution = (
+        bundle.get("artifact_mode") == "live_execution" and refusal is None
+    )
     evidence_report = (
         _observation_evidence_report(bundle) if completed_live_execution else {}
     )
@@ -8917,7 +9129,7 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
     evidence_failed_checks = (
         evidence_failed_checks if isinstance(evidence_failed_checks, list) else []
     )
-    if bundle.get("artifact_mode") == "live_execution_failure":
+    if refusal is not None or bundle.get("artifact_mode") == "live_execution_failure":
         outcome_class = "execution_failure"
         observation_status = "execution_failure"
         expectation_verdict = "not_evaluated"
@@ -8958,6 +9170,7 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
             if check.get("passed") is False
         )
     )
+    error = bundle.get("error") or (refusal or {}).get("error")
     return {
         "artifact_mode": bundle.get("artifact_mode"),
         "case_identity": case_identity,
@@ -8982,7 +9195,7 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
         "evidence_valid": evidence_valid,
         "evidence_failed_check_count": len(evidence_failed_checks),
         "evidence_failed_checks": evidence_failed_checks,
-        "error": bundle.get("error") if isinstance(bundle.get("error"), str) else None,
+        "error": error if isinstance(error, str) else None,
         "client_turn_id": (
             bundle.get("client_turn_id")
             if isinstance(bundle.get("client_turn_id"), str)
@@ -9004,15 +9217,19 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
         "output_success": output_success if isinstance(output_success, bool) else None,
         "output_failed_checks": output_failed_checks,
         # Each required literal of the case, and whether the delivered output
-        # holds it, as `_output_report` scored it; None when nothing was scored.
+        # holds it (None: the run delivered nothing to check), as `_output_report`
+        # scored it; None when nothing was scored.
         "output_required_facts": (
             {
-                str(check.get("fact")): check.get("passed") is True
+                str(check.get("fact")): check.get("passed")
                 for check in _mapping_list(report.get("output_checks"))
                 if check.get("name") == "required_fact"
             }
             if "output_checks" in report
             else None
+        ),
+        "verdict_states": _verdict_states(
+            bundle, observation_status=observation_status
         ),
         "runtime_cost": _runtime_cost(bundle),
         "identity_failed_check_count": len(failed_identity_checks),
@@ -9261,9 +9478,17 @@ def _suite_observation_summary(results: list[JsonObject]) -> JsonObject:
         if not isinstance(verdict, str) or not verdict:
             verdict = "unknown"
         verdict_counts[verdict] = verdict_counts.get(verdict, 0) + 1
+    # Each dimension's states apart, so a delivery nobody measured is never
+    # folded into a pass or a fail.
+    state_counts = verdict_state_counts(
+        cast(Mapping[str, str], result["verdict_states"])
+        for result in results
+        if isinstance(result.get("verdict_states"), Mapping)
+    )
     return {
         "status_counts": dict(sorted(status_counts.items())),
         "verdict_counts": dict(sorted(verdict_counts.items())),
+        "state_counts": state_counts,
     }
 
 
@@ -9321,6 +9546,89 @@ def _verified_suite_receipt_membership(
     }
 
 
+def _rescored_evidence(
+    bundle: Mapping[str, Any], *, expected: Mapping[str, Any], path: Path
+) -> tuple[JsonObject, JsonObject, JsonObject, JsonObject]:
+    """The plan summary, event summary, journey and quality report a bundle's
+    kept evidence yields under the scorer as it is now."""
+
+    case = bundle.get("case")
+    case_id = _optional_string(case, "id") if isinstance(case, Mapping) else None
+    plan = bundle.get("plan")
+    plan = plan if isinstance(plan, dict) else None
+    summary = _summarize_plan(plan)
+    event_summary = _interaction_event_summary(
+        bundle.get("interactions")
+        if isinstance(bundle.get("interactions"), list)
+        else []
+    )
+    journey = _journey_summary(
+        bundle.get("interactions")
+        if isinstance(bundle.get("interactions"), list)
+        else [],
+        expected=expected,
+        interaction_limit=MAX_INTERACTIONS_PER_CASE,
+    )
+    report = _quality_report(
+        plan=plan,
+        summary=summary,
+        expected=expected,
+        event_summary=event_summary,
+        journey=journey,
+        classifier_diagnostics=(
+            bundle.get("classifier_diagnostics")
+            if isinstance(bundle.get("classifier_diagnostics"), Mapping)
+            else None
+        ),
+        attached_file_ids=tuple(
+            _string_list(case.get("file_ids")) if isinstance(case, Mapping) else ()
+        ),
+        applied_flow=(
+            bundle["applied_flow_evidence"].get("flow")
+            if isinstance(bundle.get("applied_flow_evidence"), Mapping)
+            and isinstance(bundle["applied_flow_evidence"].get("flow"), Mapping)
+            else None
+        ),
+        runtime_evidence=(
+            bundle.get("runtime_evidence")
+            if isinstance(bundle.get("runtime_evidence"), Mapping)
+            else None
+        ),
+        output_expectation=(
+            _output_expectation(
+                case["execution"]["expect"],
+                owner=f"{path} case.execution.expect",
+            )
+            if isinstance(case, Mapping) and isinstance(case.get("execution"), Mapping)
+            else None
+        ),
+    )
+    provenance = bundle.get("live_execution_provenance")
+    if not isinstance(provenance, Mapping):
+        raise ValueError(f"{path} has no live execution provenance")
+    report = _quality_report_with_live_provenance(
+        report,
+        provenance=provenance,
+        expected=expected,
+    )
+    edit_contract = case.get("edit") if isinstance(case, Mapping) else None
+    if isinstance(edit_contract, Mapping) and "expect" in edit_contract:
+        edit = _edit_case_from_contract(edit_contract, path=path, case_id=str(case_id))
+        report["edit"] = _edit_report(
+            edit,
+            executes=case.get("execute_flow") is True,
+            structural=_judge_edit(edit, bundle["edit_evidence"]),
+            evidence=bundle["edit_evidence"],
+            runtime_evidence=(
+                bundle.get("runtime_evidence")
+                if isinstance(bundle.get("runtime_evidence"), Mapping)
+                else None
+            ),
+            output_success=report.get("output_success"),
+        )
+    return summary, event_summary, journey, report
+
+
 def _reanalyze_bundles(
     *,
     bundle_paths: list[Path],
@@ -9364,83 +9672,9 @@ def _reanalyze_bundles(
                     else {}
                 )
             )
-            plan = bundle.get("plan")
-            plan = plan if isinstance(plan, dict) else None
-            summary = _summarize_plan(plan)
-            event_summary = _interaction_event_summary(
-                bundle.get("interactions")
-                if isinstance(bundle.get("interactions"), list)
-                else []
+            summary, event_summary, journey, report = _rescored_evidence(
+                bundle, expected=expected, path=bundle_path
             )
-            journey = _journey_summary(
-                bundle.get("interactions")
-                if isinstance(bundle.get("interactions"), list)
-                else [],
-                expected=expected,
-                interaction_limit=MAX_INTERACTIONS_PER_CASE,
-            )
-            report = _quality_report(
-                plan=plan,
-                summary=summary,
-                expected=expected,
-                event_summary=event_summary,
-                journey=journey,
-                classifier_diagnostics=(
-                    bundle.get("classifier_diagnostics")
-                    if isinstance(bundle.get("classifier_diagnostics"), Mapping)
-                    else None
-                ),
-                attached_file_ids=tuple(
-                    _string_list(case.get("file_ids"))
-                    if isinstance(case, Mapping)
-                    else ()
-                ),
-                applied_flow=(
-                    bundle["applied_flow_evidence"].get("flow")
-                    if isinstance(bundle.get("applied_flow_evidence"), Mapping)
-                    and isinstance(bundle["applied_flow_evidence"].get("flow"), Mapping)
-                    else None
-                ),
-                runtime_evidence=(
-                    bundle.get("runtime_evidence")
-                    if isinstance(bundle.get("runtime_evidence"), Mapping)
-                    else None
-                ),
-                output_expectation=(
-                    _output_expectation(
-                        case["execution"]["expect"],
-                        owner=f"{bundle_path} case.execution.expect",
-                    )
-                    if isinstance(case, Mapping)
-                    and isinstance(case.get("execution"), Mapping)
-                    else None
-                ),
-            )
-            provenance = bundle.get("live_execution_provenance")
-            if not isinstance(provenance, Mapping):
-                raise ValueError(f"{bundle_path} has no live execution provenance")
-            report = _quality_report_with_live_provenance(
-                report,
-                provenance=provenance,
-                expected=expected,
-            )
-            edit_contract = case.get("edit") if isinstance(case, Mapping) else None
-            if isinstance(edit_contract, Mapping) and "expect" in edit_contract:
-                edit = _edit_case_from_contract(
-                    edit_contract, path=bundle_path, case_id=str(case_id)
-                )
-                report["edit"] = _edit_report(
-                    edit,
-                    executes=case.get("execute_flow") is True,
-                    structural=_judge_edit(edit, bundle["edit_evidence"]),
-                    evidence=bundle["edit_evidence"],
-                    runtime_evidence=(
-                        bundle.get("runtime_evidence")
-                        if isinstance(bundle.get("runtime_evidence"), Mapping)
-                        else None
-                    ),
-                    output_success=report.get("output_success"),
-                )
             refreshed = {
                 **{
                     key: value
@@ -9655,7 +9889,7 @@ def _validated_reanalysis_bundle(path: Path, value: object) -> JsonObject:
         or not all(
             isinstance(check, Mapping)
             and isinstance(check.get("name"), str)
-            and isinstance(check.get("passed"), bool)
+            and (check.get("passed") is None or isinstance(check.get("passed"), bool))
             for check in checks
         )
         or not isinstance(warnings, list)
@@ -11461,6 +11695,8 @@ def _quality_report(
         )
 
     allows_structured_question = expected.get("allow_question_instead_of_plan") is True
+    # The checks that judge the run, not the plan: `_verdict_states` reads them.
+    delivery_check_names: list[str] = []
     question_event_ids = _string_list(event_summary.get("question_event_ids"))
     question_event_count = _int_value(event_summary.get("question_event_count"))
     if question_event_count is None:
@@ -11491,7 +11727,11 @@ def _quality_report(
     ):
         add_check(
             "expected_question_event_ids",
-            question_event_ids == expected_question_ids,
+            # Where a question may stand in for the plan, the ids are the only
+            # questions it may ask; asking none is a plan, which is allowed.
+            set(question_event_ids) <= set(expected_question_ids)
+            if allows_structured_question
+            else question_event_ids == expected_question_ids,
             question_event_ids,
             expected_question_ids,
         )
@@ -11785,6 +12025,7 @@ def _quality_report(
             and output_expectation is not None
         ):
             checks.append(_review_edit_delivery_check(runtime_evidence))
+            delivery_check_names.append("review_edit_reaches_delivery")
     expected_first_pass = expected.get("expected_first_pass_authoring")
     if isinstance(expected_first_pass, Mapping):
         checks.extend(
@@ -11823,6 +12064,7 @@ def _quality_report(
         else []
     )
     checks.extend(runtime_checks)
+    delivery_check_names.extend(str(check["name"]) for check in runtime_checks)
     output_report = _output_report(
         output_expectation, runtime_evidence, runtime_checks=runtime_checks
     )
@@ -11885,6 +12127,7 @@ def _quality_report(
     if plan is None:
         return {
             "checks": checks,
+            "delivery_check_names": delivery_check_names,
             "warnings": warnings,
             **decision_report,
             **output_report,
@@ -12230,6 +12473,7 @@ def _quality_report(
 
     return {
         "checks": checks,
+        "delivery_check_names": delivery_check_names,
         "warnings": warnings,
         "metrics": _source_context_metrics(summary),
         **decision_report,

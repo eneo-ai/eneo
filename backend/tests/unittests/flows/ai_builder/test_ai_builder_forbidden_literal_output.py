@@ -1,9 +1,10 @@
 """A forbidden literal is judged on the output a run delivered, and only on that.
 
 A run that failed or never delivered has nothing to inspect, so its forbidden
-literals are `not_evaluated`: never failed, never counted as a leak. A run that
-delivered the literal stays a hit however the delivered text writes it, and
-every reader of the check reads the new status as neither pass nor fail.
+literals and required facts are `not_evaluated`: never failed, never counted as
+a leak or a lost fact. A run that delivered the literal stays a hit however the
+delivered text writes it, and every reader of the check reads the new status as
+neither pass nor fail.
 """
 
 from __future__ import annotations
@@ -124,10 +125,11 @@ def test_a_forbidden_literal_on_a_run_without_delivered_output_is_not_evaluated(
     # Never a failure or a hit: a reader of "appears in" finds nothing.
     assert not [c for c in forbidden if c["passed"] is False]
     assert not [c for c in forbidden if "appears in" in c["reason"]]
-    # Nothing was delivered, so the run is no success and its lost fact stays lost.
+    # Nothing was delivered, so the run is no success; its fact was never
+    # assessed, so it is not lost either.
     assert report["output_success"] is False
     required = [c for c in report["output_checks"] if c["name"] == "required_fact"]
-    assert [c["passed"] for c in required] == [False]
+    assert [(c["passed"], c["status"]) for c in required] == [(None, "not_evaluated")]
 
 
 @mark.parametrize(
