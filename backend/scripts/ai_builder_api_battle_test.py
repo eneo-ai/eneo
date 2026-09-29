@@ -38,7 +38,7 @@ from typing import Any, Literal, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 # These are standalone scripts, not a package: operators run them directly and
 # tests load them by path, so neither route puts this directory on the import
@@ -207,9 +207,13 @@ from ai_builder_edit_expectation import (  # noqa: E402
 )
 from ai_builder_intake_answers import intake_message  # noqa: E402
 from ai_builder_release_gate import replacement_limit  # noqa: E402
+from pydantic import ValidationError  # noqa: E402
 
 from eneo.files.docx_template_validation import (  # noqa: E402
     docx_template_archive_metrics,
+)
+from eneo.flows.ai_builder.ai_builder_api_models import (  # noqa: E402
+    SendMessageRequest,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (  # noqa: E402
     StructuredQuestionAnswerMetadata,
@@ -259,6 +263,9 @@ class ApiConfig:
     # The suite's Flow-run slots, shared by its observations: a run holds one
     # from creation until it is terminal or cancelled. None is unlimited.
     run_slots: BoundedSemaphore | None = None
+    # The planner reasoning effort every message turn requests; None sends none
+    # and leaves the server's default. `_send_and_fetch` is the one sender.
+    reasoning_effort: str | None = None
 
 
 _READ_CHUNK_BYTES = 64 * 1024
@@ -1283,6 +1290,7 @@ def main() -> int:
         base_url=args.base_url.rstrip("/"),
         api_key=api_key,
         timeout_seconds=args.timeout_seconds,
+        reasoning_effort=_requested_reasoning_effort(args),
     )
     # Named in the failure bundle once known, so a run sharing its output
     # directory with other single-case runs can be attributed.
@@ -1371,6 +1379,7 @@ def main() -> int:
             "base_url": config.base_url,
             "space_id": args.space_id,
             **({"case_identity": _case_identity(case)} if case else {}),
+            **_failure_effort_field(config),
             **_failure_error_fields(error),
         }
         failure["artifact_mode"] = "live_execution_failure"
@@ -1448,6 +1457,45 @@ def _intake_run_context(
     }
 
 
+def _failure_effort_field(config: ApiConfig) -> JsonObject:
+    """The requested effort for a failure artifact, absent when none was asked.
+
+    A failure bundle is built apart from the observation that names the effort
+    in its model identity, so both failure paths take it from here.
+    """
+
+    if config.reasoning_effort is None:
+        return {}
+    return {"requested_reasoning_effort": config.reasoning_effort}
+
+
+def _reasoning_effort_arg(value: object) -> str | None:
+    """The one rule for a requested planner effort: the request model's own.
+
+    Which efforts a model honours is advertised per model and enforced by the
+    server, which rejects an unsupported one before any provider work; a
+    well-formed value the model lacks fails its turns there, not here.
+    """
+
+    try:
+        return SendMessageRequest.model_validate(
+            {
+                "client_turn_id": UUID(int=0),
+                "message": "effort",
+                "reasoning_effort": value,
+            }
+        ).reasoning_effort
+    except ValidationError as error:
+        raise argparse.ArgumentTypeError(
+            f"{value!r} is not a valid reasoning effort: {error.errors()[0]['msg']}"
+        ) from error
+
+
+def _requested_reasoning_effort(args: argparse.Namespace) -> str | None:
+    # A namespace built by hand (the tests') may not carry the option.
+    return getattr(args, "reasoning_effort", None)
+
+
 def _validate_arm_args(args: argparse.Namespace) -> None:
     """An arm other than the Builder is one exploratory suite, and says so."""
 
@@ -1468,6 +1516,7 @@ def _validate_arm_args(args: argparse.Namespace) -> None:
             ("--file-id", bool(getattr(args, "file_ids", None))),
             # No Builder runs, so a Builder model would be recorded as if it did.
             ("--model-id", getattr(args, "model_id", None) is not None),
+            ("--reasoning-effort", _requested_reasoning_effort(args) is not None),
         )
         if present
     ]
@@ -1609,6 +1658,18 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--model-id", default=None, help="Optional model UUID.")
+    parser.add_argument(
+        "--reasoning-effort",
+        type=_reasoning_effort_arg,
+        default=None,
+        help=(
+            "Reasoning effort every Builder message turn requests, as the model "
+            "advertises it (for example low, medium, high). Omitted, no effort "
+            "is sent and the server's default applies. It is recorded in "
+            "run_context; the comparator reports, and does not refuse, receipts "
+            "that differ in it. The server rejects a value the model lacks."
+        ),
+    )
     parser.add_argument(
         "--file-id",
         action="append",
@@ -3431,7 +3492,7 @@ def _suite_run_context(args: argparse.Namespace) -> JsonObject:
 
 
 def _builder_suite_run_context(args: argparse.Namespace) -> JsonObject:
-    return {
+    context: JsonObject = {
         "ui_language": getattr(args, "ui_language", "sv"),
         "auto_confirm_requirements": getattr(
             args,
@@ -3454,6 +3515,12 @@ def _builder_suite_run_context(args: argparse.Namespace) -> JsonObject:
             args, "observation_deadline_seconds", None
         ),
     }
+    # Only a requested effort is recorded, so a receipt taken at the server
+    # default keeps the shape of its run context. The comparator reports a
+    # difference.
+    if (effort := _requested_reasoning_effort(args)) is not None:
+        context["reasoning_effort"] = effort
+    return context
 
 
 def _write_not_supported_refusal(
@@ -3798,6 +3865,7 @@ def _acquire_suite_observation(
             "case_contract": _case_contract_payload(case),
             "case_contract_sha256": _case_contract_sha256(case),
             "repetition": repetition,
+            **_failure_effort_field(config),
             **_failure_error_fields(error),
             "release_identity": dict(release_identity),
             "live_execution_provenance": dict(failure_execution_provenance),
@@ -4265,10 +4333,21 @@ def _run_replacement_batch(
     requested_model_id = model.get("requested_id")
     if not isinstance(requested_model_id, str) or not requested_model_id:
         raise ValueError("base receipt has no requested model id.")
+    # The requests below carry the base run's effort, so it is replayed first
+    # (absent: the base run requested none).
+    try:
+        args.reasoning_effort = _reasoning_effort_arg(
+            run_context.get("reasoning_effort")
+        )
+    except argparse.ArgumentTypeError as error:
+        raise ValueError(
+            f"base receipt run_context.reasoning_effort: {error}"
+        ) from error
     config = ApiConfig(
         base_url=_replacement_summary_value(summary, "base_url").rstrip("/"),
         api_key=api_key,
         timeout_seconds=args.timeout_seconds,
+        reasoning_effort=_requested_reasoning_effort(args),
     )
     # Replacement acquisition must replay the base run's authoring context;
     # command-line defaults are not evidence that the operator chose the same run.
@@ -5553,6 +5632,7 @@ def _run_case_session(
         session_models=session_models,
         event_summary=event_summary,
         interactions=interactions,
+        requested_reasoning_effort=config.reasoning_effort,
     )
     quality_report = _quality_report_with_live_provenance(
         quality_report,
@@ -7002,6 +7082,8 @@ def _send_and_fetch(
     }
     if edit_context is not None:
         payload["edit_context"] = edit_context
+    if config.reasoning_effort is not None:
+        payload["reasoning_effort"] = config.reasoning_effort
     try:
         events = list(
             _send_message_stream(
@@ -7879,6 +7961,7 @@ def _resolved_model_identity(
     planner_observations: list[JsonObject] | None = None,
     missing_planner_interaction_indices: list[int] | None = None,
     terminal_error_interaction_indices: list[int] | None = None,
+    requested_reasoning_effort: str | None = None,
 ) -> JsonObject:
     session_models = session_models or {}
     raw_models = session_models.get("models")
@@ -7926,6 +8009,11 @@ def _resolved_model_identity(
         )
     return {
         "requested_id": requested_model_id,
+        **(
+            {"requested_reasoning_effort": requested_reasoning_effort}
+            if requested_reasoning_effort is not None
+            else {}
+        ),
         "resolved_id": selected_id if selected_model is not None else None,
         "resolved_name": resolved_name,
         "resolved_provider": resolved_provider,
@@ -8082,6 +8170,7 @@ def _live_execution_provenance(
     session_models: Mapping[str, object] | None = None,
     event_summary: Mapping[str, object] | None = None,
     interactions: object = None,
+    requested_reasoning_effort: str | None = None,
 ) -> JsonObject:
     source_revision = _git_output("rev-parse", "HEAD")
     tracked_status = _git_output("status", "--porcelain", "--untracked-files=no")
@@ -8134,6 +8223,7 @@ def _live_execution_provenance(
         planner_observations=planner_observations,
         missing_planner_interaction_indices=(missing_planner_interaction_indices),
         terminal_error_interaction_indices=terminal_error_interaction_indices,
+        requested_reasoning_effort=requested_reasoning_effort,
     )
     classifier_prompt_hashes = _classifier_prompt_hashes(classifier_diagnostics)
     classifier_request_composite_fingerprint = (

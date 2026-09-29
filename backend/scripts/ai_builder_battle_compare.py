@@ -734,6 +734,12 @@ _REPORTED_IDENTITY_FIELDS: tuple[str, ...] = (
     "target_sha256",
 )
 
+# Run-context fields an experiment varies on purpose: one build measured at two
+# reasoning efforts is the effort probe itself, so refusing it would refuse the
+# experiment. A receipt that records none ran at the server default, which
+# compares as a value of its own.
+_REPORTED_RUN_CONTEXT_FIELDS: tuple[str, ...] = ("reasoning_effort",)
+
 
 def _evaluator_identity(summary: dict[str, Any]) -> dict[str, Any]:
     identity = summary.get("evaluator_identity")
@@ -763,7 +769,7 @@ def _reported_identity_differences(
 
     baseline_identity = _evaluator_identity(baseline_summary)
     current_identity = _evaluator_identity(current_summary)
-    return {
+    differences = {
         field: {
             "baseline": baseline_identity.get(field),
             "current": current_identity.get(field),
@@ -771,6 +777,19 @@ def _reported_identity_differences(
         for field in _REPORTED_IDENTITY_FIELDS
         if baseline_identity.get(field) != current_identity.get(field)
     }
+    baseline_context = _run_context(baseline_summary)
+    current_context = _run_context(current_summary)
+    differences.update(
+        {
+            f"run_context.{field}": {
+                "baseline": baseline_context.get(field),
+                "current": current_context.get(field),
+            }
+            for field in _REPORTED_RUN_CONTEXT_FIELDS
+            if baseline_context.get(field) != current_context.get(field)
+        }
+    )
+    return differences
 
 
 def _run_context(summary: dict[str, Any]) -> dict[str, Any]:

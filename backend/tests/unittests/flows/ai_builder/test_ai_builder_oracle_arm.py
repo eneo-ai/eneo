@@ -804,6 +804,7 @@ def test_the_builder_arm_is_the_default_and_keeps_its_run_context(
     assert args.arm == "builder" and args.oracle_specs_dir is None
     context = harness._suite_run_context(args)
     assert "arm" not in context and "oracle_manifest_sha256" not in context
+    assert "reasoning_effort" not in context
     assert context == harness._builder_suite_run_context(args)
 
 
@@ -831,6 +832,20 @@ def test_arm_oracle_refuses_what_only_a_builder_run_uses(
         harness._validate_arm_args(
             _parse(harness, monkeypatch, "--oracle-specs-dir", "d")
         )
+    # No Builder call is made, so a requested effort would be recorded as if it
+    # had been used.
+    effort_args = _parse(
+        harness,
+        monkeypatch,
+        "--arm",
+        "oracle",
+        "--oracle-specs-dir",
+        "d",
+        "--reasoning-effort",
+        "high",
+    )
+    with pytest.raises(ValueError, match=r"cannot use --reasoning-effort"):
+        harness._validate_arm_args(effort_args)
 
 
 # ------------------------------------------------------------- the comparator

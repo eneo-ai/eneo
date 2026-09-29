@@ -422,6 +422,54 @@ def test_identity_that_differs_between_builds_is_reported_not_fatal(
     }
 
 
+def _with_effort(tmp_path: Path, name: str, effort: str | None) -> Path:
+    path = tmp_path / name
+    payload = _summary([_row("case-a", "plan_first_pass")])
+    if effort is not None:
+        payload["evaluator_identity"]["run_context"]["reasoning_effort"] = effort
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize(
+    ("baseline_effort", "current_effort"),
+    [(None, "high"), ("high", None), ("low", "high")],
+)
+def test_receipts_at_different_reasoning_efforts_compare_and_name_the_difference(
+    tmp_path: Path, baseline_effort: str | None, current_effort: str | None
+) -> None:
+    # The effort probe compares one build at two efforts: refusing on the
+    # difference would refuse the very experiment. It is reported instead, and
+    # an absent effort is the server default, a value of its own.
+    module = _compare_module()
+    baseline = _with_effort(tmp_path, "base.json", baseline_effort)
+    current = _with_effort(tmp_path, "cur.json", current_effort)
+
+    report = module.compare(baseline, current)
+
+    assert report["identity_differences"]["run_context.reasoning_effort"] == {
+        "baseline": baseline_effort,
+        "current": current_effort,
+    }
+    assert "run_context.reasoning_effort" in module._render_markdown(
+        report, only_changed=False
+    )
+
+
+@pytest.mark.parametrize("effort", [None, "high"])
+def test_receipts_at_the_same_reasoning_effort_report_no_difference(
+    tmp_path: Path, effort: str | None
+) -> None:
+    module = _compare_module()
+
+    report = module.compare(
+        _with_effort(tmp_path, "base.json", effort),
+        _with_effort(tmp_path, "cur.json", effort),
+    )
+
+    assert report["identity_differences"] == {}
+
+
 def test_changed_case_contract_is_reported_not_fatal(tmp_path: Path) -> None:
     # Correcting one case's expectations must not block comparing the rest,
     # but the rescored case has to be named so its delta is not read as

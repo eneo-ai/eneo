@@ -15,11 +15,13 @@ from pathlib import Path
 from threading import Barrier, Lock, Thread
 from types import ModuleType, SimpleNamespace
 from typing import Any, NoReturn, get_args
-from urllib.error import HTTPError
-from uuid import UUID
+from urllib.error import HTTPError, URLError
+from uuid import UUID, uuid4
 
+from pydantic import ValidationError
 from pytest import CaptureFixture, MonkeyPatch, mark, raises
 
+from eneo.flows.ai_builder.ai_builder_api_models import SendMessageRequest
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_form_field_type_values,
 )
@@ -336,6 +338,44 @@ def test_single_case_sealed_targeted_suite_uses_release_acquisition_and_repetiti
     )
 
 
+@mark.parametrize("effort", [None, "high"])
+def test_main_builds_the_api_config_with_the_requested_effort(
+    tmp_path: Path, monkeypatch: MonkeyPatch, effort: str | None
+) -> None:
+    harness = _battle_harness()
+    captured: dict[str, object] = {}
+    args = SimpleNamespace(
+        reanalyze_bundle=None,
+        api_key="test-key",
+        output_dir=str(tmp_path),
+        replacement_suite_dir=None,
+        space_id="space-1",
+        base_url="http://localhost:8123/api/v1",
+        timeout_seconds=1,
+        cases_file=None,
+        run_suite=False,
+        sealed_targeted_suite=True,
+        case_id=["interview_open_meeting_audio"],
+        cohort=None,
+        max_cases=None,
+        file_ids=None,
+        repetitions=1,
+        concurrency=1,
+        model_id="model-a",
+        reasoning_effort=effort,
+    )
+    monkeypatch.setattr(harness, "_parse_args", lambda: args)
+
+    def run_suite(**kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(harness, "_run_suite", run_suite)
+
+    assert harness.main() == 0
+    assert captured["config"].reasoning_effort == effort
+
+
 def test_sealed_targeted_suite_uses_release_identity_preflight_gates(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -631,6 +671,308 @@ def test_send_failure_preserves_turn_identity_for_failure_bundle(
         "failure_class": "dependency_stack",
         "client_turn_id": str(turn_id),
     }
+
+
+# ------------------------------------------------- the requested reasoning effort
+
+# Which efforts a model honours is advertised per model and enforced by the
+# server, so the parser owns only the request model's own rule for the field.
+_EFFORT_PROBES = [
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+    "x" * 32,
+    "",
+    " high",
+    "high ",
+    "x" * 33,
+]
+
+
+def _request_model_accepts_effort(value: str) -> bool:
+    try:
+        SendMessageRequest.model_validate(
+            {"client_turn_id": str(uuid4()), "message": "m", "reasoning_effort": value}
+        )
+    except ValidationError:
+        return False
+    return True
+
+
+@mark.parametrize("value", _EFFORT_PROBES)
+def test_reasoning_effort_flag_accepts_what_the_request_model_accepts(
+    value: str, monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]
+) -> None:
+    harness = _battle_harness()
+    monkeypatch.setattr(
+        sys, "argv", ["ai_builder_api_battle_test.py", "--reasoning-effort", value]
+    )
+
+    if _request_model_accepts_effort(value):
+        assert harness._parse_args().reasoning_effort == value
+        return
+    with raises(SystemExit) as exc_info:
+        harness._parse_args()
+    assert exc_info.value.code == 2
+    assert "--reasoning-effort" in capsys.readouterr().err
+
+
+def test_reasoning_effort_flag_defaults_to_none(monkeypatch: MonkeyPatch) -> None:
+    harness = _battle_harness()
+    monkeypatch.setattr(sys, "argv", ["ai_builder_api_battle_test.py"])
+
+    assert harness._parse_args().reasoning_effort is None
+
+
+def test_a_default_run_sends_no_reasoning_effort_key(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    sent_payloads: list[dict[str, object]] = []
+
+    def send_message_stream(**kwargs: object) -> Iterator[dict[str, object]]:
+        payload = kwargs["payload"]
+        assert isinstance(payload, dict)
+        sent_payloads.append(payload)
+        return iter(())
+
+    monkeypatch.setattr(harness, "_send_message_stream", send_message_stream)
+    monkeypatch.setattr(harness, "_request_json", lambda **_kwargs: {})
+
+    harness._send_and_fetch(
+        config=harness.ApiConfig(
+            base_url="http://localhost/api/v1",
+            api_key="local-test-key",
+            timeout_seconds=1,
+        ),
+        session_id="session-1",
+        message="Bygg ett flöde.",
+        model_id=None,
+        file_ids=(),
+        ui_language="sv",
+        question_answer=None,
+    )
+
+    assert "reasoning_effort" not in sent_payloads[0]
+
+
+def _drive_every_turn_kind(
+    monkeypatch: MonkeyPatch, tmp_path: Path, *, config: object
+) -> list[dict[str, object]]:
+    """Run one session whose turns are the opening message, a scripted
+    correction, a configured question answer and the requirements confirmation,
+    through the real `_send_and_fetch`; return every payload posted."""
+
+    harness = _battle_harness()
+    case = harness.BattleCase(
+        case_id="every-turn-kind",
+        prompt="Bygg ett flöde.",
+        script=harness.CaseScript(kind="correction", message="Rätta rubriken."),
+        configured_question_answers={"q-1": {"custom_value": "Ja."}},
+        question_answer_sources={"q-1": "case_override"},
+    )
+    card = {"requirements_version": "v1", "assumptions": [], "key_decisions": []}
+    events_by_turn: list[list[dict[str, object]]] = [
+        [{"event": "requirements_summary", "data": card}],
+        [{"event": "question", "data": {"question_id": "q-1", "allow_custom": True}}],
+        [
+            {
+                "event": "requirements_summary",
+                "data": {**card, "requirements_version": "v2"},
+            }
+        ],
+        [],
+    ]
+    posted: list[dict[str, object]] = []
+
+    def send_message_stream(**kwargs: object) -> Iterator[dict[str, object]]:
+        payload = kwargs["payload"]
+        assert isinstance(payload, dict)
+        posted.append(payload)
+        return iter(events_by_turn[len(posted) - 1])
+
+    class StopAfterTurns(Exception):
+        pass
+
+    def request_json(**kwargs: object) -> dict[str, object]:
+        if str(kwargs["path"]).endswith("/_diagnostics/classifier-slots"):
+            raise StopAfterTurns
+        return {}
+
+    monkeypatch.setattr(
+        harness, "_create_session", lambda **_kwargs: {"session_id": "session-1"}
+    )
+    monkeypatch.setattr(harness, "_send_message_stream", send_message_stream)
+    monkeypatch.setattr(harness, "_request_json", request_json)
+    with raises(StopAfterTurns):
+        harness._run_case_session(
+            case=case,
+            config=config,
+            args=SimpleNamespace(
+                space_id="space-1",
+                model_id=None,
+                ui_language="sv",
+                file_ids=None,
+                auto_confirm_requirements=True,
+            ),
+            existing_session_id=None,
+            artifact_output_dir=tmp_path,
+            cases_path=None,
+            provisioned_fixtures=None,
+            seeded_flow=None,
+        )
+    return posted
+
+
+def test_every_turn_kind_carries_the_requested_reasoning_effort(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    harness = _battle_harness()
+
+    posted = _drive_every_turn_kind(
+        monkeypatch,
+        tmp_path,
+        config=harness.ApiConfig(
+            base_url="http://localhost/api/v1",
+            api_key="local-test-key",
+            timeout_seconds=1,
+            reasoning_effort="high",
+        ),
+    )
+
+    assert [payload["message"] for payload in posted] == [
+        "Bygg ett flöde.",
+        "Rätta rubriken.",
+        "Ja.",
+        harness.CONFIRM_MESSAGE,
+    ]
+    assert [payload["reasoning_effort"] for payload in posted] == ["high"] * 4
+
+
+def test_no_turn_kind_sends_an_effort_when_none_was_requested(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    harness = _battle_harness()
+
+    posted = _drive_every_turn_kind(
+        monkeypatch,
+        tmp_path,
+        config=harness.ApiConfig(
+            base_url="http://localhost/api/v1",
+            api_key="local-test-key",
+            timeout_seconds=1,
+        ),
+    )
+
+    assert len(posted) == 4
+    assert all("reasoning_effort" not in payload for payload in posted)
+
+
+def test_run_context_records_the_effort_only_when_it_was_requested() -> None:
+    harness = _battle_harness()
+    default_args = SimpleNamespace(repetitions=3, concurrency=6)
+
+    default_context = harness._suite_run_context(default_args)
+    effort_context = harness._suite_run_context(
+        SimpleNamespace(repetitions=3, concurrency=6, reasoning_effort="high")
+    )
+
+    # A receipt taken at the server default keeps the shape of its run context.
+    assert "reasoning_effort" not in default_context
+    assert effort_context == {**default_context, "reasoning_effort": "high"}
+    assert (
+        harness._suite_run_context(
+            SimpleNamespace(repetitions=3, concurrency=6, reasoning_effort=None)
+        )
+        == default_context
+    )
+
+
+def test_the_suite_identity_seals_the_requested_effort() -> None:
+    harness = _battle_harness()
+
+    def identity(effort: str | None) -> dict[str, Any]:
+        return harness._suite_evaluator_identity(
+            release_identity={},
+            run_context=harness._suite_run_context(
+                SimpleNamespace(repetitions=1, concurrency=1, reasoning_effort=effort)
+            ),
+            expected_observations=[],
+        )
+
+    default, high, low = identity(None), identity("high"), identity("low")
+
+    assert "reasoning_effort" not in default["run_context"]
+    assert high["run_context"]["reasoning_effort"] == "high"
+    assert len({default["sha256"], high["sha256"], low["sha256"]}) == 3
+
+
+def test_an_observation_records_the_effort_it_requested(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    harness = _battle_harness()
+    monkeypatch.setattr(
+        harness,
+        "_git_output",
+        lambda *args: (
+            ""
+            if args == ("status", "--porcelain", "--untracked-files=no")
+            else "a" * 40
+        ),
+    )
+    case = harness.BattleCase(case_id="effort-case", prompt="Build it.", required=True)
+    release_identity = _release_identity_fixture(
+        harness, case_id=case.case_id, prompt=case.prompt
+    )
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text("{}", encoding="utf-8")
+
+    def provenance(**extra: object) -> dict[str, Any]:
+        return harness._live_execution_provenance(
+            case=case,
+            cases_path=cases_path,
+            latest_session={"telemetry": {"last_model": "openai/gpt-a"}},
+            classifier_diagnostics={
+                "session_id": "00000000-0000-0000-0000-000000000001",
+                "classifier_runs": [],
+            },
+            requested_model_id="model-a",
+            session_models={
+                "models": [{"id": "model-a", "name": "gpt-a", "provider": "openai"}]
+            },
+            **extra,
+        )
+
+    default, high = provenance(), provenance(requested_reasoning_effort="high")
+
+    assert "requested_reasoning_effort" not in default["model"]
+    assert high["model"]["requested_reasoning_effort"] == "high"
+    assert default["model"]["sha256"] != high["model"]["sha256"]
+    # The sealed identity still verifies with the extra recorded field: the
+    # provenance checks judge both alike.
+    assert [
+        (check["name"], check["passed"])
+        for check in harness._live_provenance_checks(default)
+    ] == [
+        (check["name"], check["passed"])
+        for check in harness._live_provenance_checks(high)
+    ]
+    for sealed in (default, high):
+        model_check = next(
+            check
+            for check in harness._required_case_identity_checks(
+                case=case,
+                release_identity=release_identity,
+                provenance=sealed,
+                journey_outcome="plan_first_pass",
+            )
+            if check["name"] == "suite_requested_model_identity"
+        )
+        assert model_check["passed"] is True
 
 
 def _document_plan(
@@ -4712,6 +5054,8 @@ def test_final_identity_probe_failure_still_writes_failed_summary(
         "flow-isolation-drift",
         "target-collision",
         "completed-clean",
+        "effort-replayed",
+        "effort-invalid",
     ],
 )
 def test_replacement_batch_reuses_context_and_preflights_publication(
@@ -4808,6 +5152,7 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
 
     monkeypatch.setattr(harness, "_provision_fixtures", provision)
     acquired: list[tuple[str, int, object]] = []
+    acquired_efforts: list[tuple[object, object]] = []
 
     def acquire(**kwargs: Any) -> dict[str, Any]:
         case = kwargs["case"]
@@ -4816,6 +5161,9 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
         assert isinstance(case, harness.BattleCase)
         assert isinstance(staging_dir, Path)
         acquired.append((case.case_id, repetition, kwargs["provisioned_fixtures"]))
+        acquired_efforts.append(
+            (kwargs["config"].reasoning_effort, kwargs["args"].reasoning_effort)
+        )
         bundle_path = staging_dir / f"{case.case_id}-r{repetition}.json"
         bundle_path.write_text(
             json.dumps({"case_id": case.case_id, "repetition": repetition})
@@ -4883,8 +5231,13 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
         receipt.summary["run_context"]["flow_isolation_semantics_version"] = 0
     if scenario == "target-collision":
         collision_path.write_text("occupied", encoding="utf-8")
+    if scenario == "effort-replayed":
+        # The base run asked for an effort: its replacements replay it.
+        receipt.summary["run_context"]["reasoning_effort"] = "high"
+    if scenario == "effort-invalid":
+        receipt.summary["run_context"]["reasoning_effort"] = " high"
 
-    if scenario != "success":
+    if scenario not in {"success", "effort-replayed"}:
         match = (
             "measured under a different confirmation turn"
             if scenario == "confirmation-drift"
@@ -4897,7 +5250,11 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
                     else (
                         "may not be re-measured"
                         if scenario == "completed-clean"
-                        else "target already exists"
+                        else (
+                            "run_context.reasoning_effort"
+                            if scenario == "effort-invalid"
+                            else "target already exists"
+                        )
                     )
                 )
             )
@@ -4916,6 +5273,7 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
             "scheduling-drift",
             "flow-isolation-drift",
             "completed-clean",
+            "effort-invalid",
         }:
             assert provisioned_cases == []
             assert acquired == []
@@ -4935,6 +5293,10 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
         ("provider-a", 4, provisioned),
         ("provider-b", 2, provisioned),
     ]
+    # Both the requests (config) and the recorded context (args) replay the
+    # base run's effort; a base that recorded none replays none.
+    expected_effort = "high" if scenario == "effort-replayed" else None
+    assert acquired_efforts == [(expected_effort, expected_effort)] * 2
     overlay = json.loads((suite_dir / "replacements.json").read_text())
     # The recovery batch binds its own capacity proof to the overlay, because
     # it spends capacity separately from whatever the base already proved.
@@ -10026,6 +10388,95 @@ def test_a_single_case_failure_bundle_names_its_case(
     assert written["case_identity"] == harness._case_identity(case)
 
 
+@mark.parametrize("effort", ["high", None])
+def test_a_single_case_transport_failure_bundle_carries_the_requested_effort(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    effort: str | None,
+) -> None:
+    # The effort is the experimental parameter: a run that dies on the wire
+    # must still say which effort it asked for. Unset, the key is absent, so a
+    # default failure bundle keeps its shape.
+    harness = _battle_harness()
+    case = harness.BattleCase(case_id="wire-case", prompt="Build a Flow.")
+    monkeypatch.setattr(harness, "_cases_from_args", lambda _args: [case])
+    monkeypatch.setattr(harness, "_cases_path_from_args", lambda _args: None)
+    monkeypatch.setattr(harness, "_provision_fixtures", lambda **_: {})
+
+    def drop_connection(**_kwargs: object) -> object:
+        raise URLError("connection reset")
+
+    monkeypatch.setattr(harness, "_run_case", drop_connection)
+    monkeypatch.setattr(
+        harness,
+        "_parse_args",
+        lambda: SimpleNamespace(
+            reanalyze_bundle=None,
+            api_key="test-key",
+            output_dir=str(tmp_path),
+            replacement_suite_dir=None,
+            base_url="http://localhost:8123/api/v1",
+            timeout_seconds=1,
+            space_id="space-1",
+            seed_calibration=False,
+            run_suite=False,
+            sealed_targeted_suite=False,
+            session_id=None,
+            repetitions=1,
+            reasoning_effort=effort,
+        ),
+    )
+
+    assert harness.main() == 1
+    written = json.loads(next(tmp_path.glob("*-wire-case-failure.json")).read_text())
+    assert written["artifact_mode"] == "live_execution_failure"
+    assert written.get("requested_reasoning_effort") == effort
+    assert ("requested_reasoning_effort" in written) is (effort is not None)
+
+
+@mark.parametrize("effort", ["high", None])
+def test_a_suite_transport_failure_bundle_carries_the_requested_effort(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    effort: str | None,
+) -> None:
+    harness = _battle_harness()
+    _allow_measurement_preflight(harness, monkeypatch)
+    case = harness.BattleCase(case_id="wire-case", prompt="Build a Flow.")
+    release_identity = _release_identity_fixture(
+        harness, case_id=case.case_id, prompt=case.prompt
+    )
+    monkeypatch.setattr(harness, "_release_run_identity", lambda **_: release_identity)
+    monkeypatch.setattr(harness, "_provision_fixtures", lambda **_: {})
+
+    def drop_connection(**_kwargs: object) -> object:
+        raise URLError("connection reset")
+
+    monkeypatch.setattr(harness, "_run_case", drop_connection)
+
+    harness._run_suite(
+        cases=[case],
+        config=harness.ApiConfig(
+            base_url="http://localhost:8123/api/v1",
+            api_key="test-key",
+            timeout_seconds=1,
+            reasoning_effort=effort,
+        ),
+        args=SimpleNamespace(
+            repetitions=1,
+            space_id="space-1",
+            timeout_seconds=900,
+            reasoning_effort=effort,
+        ),
+        output_dir=tmp_path,
+    )
+    suite_dir = next(tmp_path.glob("ai-builder-api-battle-suite-*"))
+    written = json.loads(next(suite_dir.glob("*-wire-case-failure.json")).read_text())
+    assert written["artifact_mode"] == "live_execution_failure"
+    assert written.get("requested_reasoning_effort") == effort
+    assert ("requested_reasoning_effort" in written) is (effort is not None)
+
+
 def test_capacity_preflight_holds_the_exact_finite_budget_boundary() -> None:
     # The snapshot is taken after the capacity reads were already counted, so
     # the budget that must remain is the demand minus those reads. One request
@@ -10278,6 +10729,7 @@ def _drive_cards(
     case: object,
     cards: list[dict[str, object]],
     via_metadata: bool = False,
+    reasoning_effort: str | None = None,
 ) -> tuple[dict[str, object], list[dict[str, object]]]:
     """Run _run_case against a Builder that shows ``cards`` one per turn.
 
@@ -10289,6 +10741,7 @@ def _drive_cards(
         base_url="http://localhost:8123/api/v1",
         api_key="test-key",
         timeout_seconds=1,
+        reasoning_effort=reasoning_effort,
     )
 
     send_calls: list[dict[str, object]] = []
@@ -10439,6 +10892,29 @@ def test_a_matching_disclosure_confirms_content_free_and_whole_version(
         "ui_language": "sv",
         "requirements_version": "v1",
     }
+
+
+@mark.parametrize("effort", [None, "high"])
+def test_a_driven_observation_bundle_names_the_effort_its_turns_requested(
+    tmp_path: Path, monkeypatch: MonkeyPatch, effort: str | None
+) -> None:
+    harness = _battle_harness()
+    case = harness.BattleCase(case_id="effort-bundle", prompt="Bygg ett flöde.")
+
+    bundle, send_calls = _drive_cards(
+        monkeypatch,
+        tmp_path,
+        harness=harness,
+        case=case,
+        cards=[{"assumptions": [], "key_decisions": []}],
+        reasoning_effort=effort,
+    )
+
+    assert len(send_calls) == 2
+    assert [call["config"].reasoning_effort for call in send_calls] == [effort] * 2
+    model = bundle["live_execution_provenance"]["model"]
+    assert model.get("requested_reasoning_effort") == effort
+    assert ("requested_reasoning_effort" in model) is (effort is not None)
 
 
 def test_metadata_only_disclosure_is_guarded_and_scored_identically(
