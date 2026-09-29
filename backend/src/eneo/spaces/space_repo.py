@@ -2072,7 +2072,9 @@ class SpaceRepository:
         their scope and permission in ``SpaceActor``.
         """
         query = (
-            sa.select(Spaces.id, Spaces.user_id, Spaces.tenant_space_id)
+            sa.select(
+                Spaces.id, Spaces.tenant_id, Spaces.user_id, Spaces.tenant_space_id
+            )
             .join(source.table, source.table.space_id == Spaces.id)
             .where(
                 source.table.id == source_id,
@@ -2083,9 +2085,10 @@ class SpaceRepository:
         space = (await self.session.execute(query)).tuples().one_or_none()
         if space is None:
             return None
-        space_id, user_id, tenant_space_id = space
+        space_id, tenant_id, user_id, tenant_space_id = space
         return SpaceAccessFacts(
             id=space_id,
+            tenant_id=tenant_id,
             user_id=user_id,
             tenant_space_id=tenant_space_id,
             members={},
