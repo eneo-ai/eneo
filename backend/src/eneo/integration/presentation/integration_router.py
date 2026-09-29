@@ -226,12 +226,9 @@ async def disconnect_user_integration(
     service = container.user_integration_service()
     user = container.user()
 
-    # Get user integration info BEFORE deletion (snapshot pattern)
-    user_integration_repo = container.user_integration_repo()
-    user_integration = await user_integration_repo.one(id=user_integration_id)
-
-    # Disconnect integration
-    await service.disconnect_integration(user_integration_id=user_integration_id)
+    user_integration = await service.disconnect_integration(
+        user_integration_id=user_integration_id
+    )
 
     # Audit logging
     audit_service = container.audit_service()

@@ -204,14 +204,17 @@ class UserIntegrationService:
 
         return results
 
-    async def disconnect_integration(self, user_integration_id: "UUID") -> None:
-        integration = await self.user_integration_repo.one(id=user_integration_id)
+    async def disconnect_integration(
+        self, user_integration_id: "UUID"
+    ) -> UserIntegration:
+        """Disconnect the caller's own connection and return its snapshot for auditing."""
+        integration = await self.user_integration_repo.one(
+            id=user_integration_id, tenant_id=self.user.tenant_id
+        )
 
         if integration.auth_type == "user_oauth":
             if integration.user_id != self.user.id:
-                raise UnauthorizedException(
-                    "You can only disconnect your own integrations"
-                )
+                raise NotFoundException("Integration not found")
         elif integration.auth_type == "tenant_app":
             raise UnauthorizedException(
                 "Tenant app integrations cannot be disconnected here. "
@@ -222,6 +225,7 @@ class UserIntegrationService:
         await self._cleanup_user_integration(integration)
 
         await self.user_integration_repo.remove(id=integration.id)
+        return integration
 
     async def _cleanup_user_integration(self, integration: UserIntegration) -> None:
         """Clean up Microsoft Graph webhook subscriptions before DB cascade delete.
