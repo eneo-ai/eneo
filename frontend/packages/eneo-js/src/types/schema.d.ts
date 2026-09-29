@@ -13749,6 +13749,8 @@ export interface components {
       mimetype: string;
       /** Size */
       size: number;
+      /** Original Size */
+      original_size?: number | null;
       /** Transcription */
       transcription?: string | null;
       /** Token Count */
@@ -27599,6 +27601,8 @@ export interface operations {
                 mimetype: string;
                 /** Size */
                 size: number;
+                /** Original Size */
+                original_size?: number | null;
                 /** Transcription */
                 transcription?: string | null;
                 /** Token Count */
@@ -28015,6 +28019,8 @@ export interface operations {
                 mimetype: string;
                 /** Size */
                 size: number;
+                /** Original Size */
+                original_size?: number | null;
                 /** Transcription */
                 transcription?: string | null;
                 /** Token Count */
@@ -29196,6 +29202,8 @@ export interface operations {
                     mimetype: string;
                     /** Size */
                     size: number;
+                    /** Original Size */
+                    original_size?: number | null;
                     /** Transcription */
                     transcription?: string | null;
                     /** Token Count */
@@ -29352,6 +29360,8 @@ export interface operations {
                     mimetype: string;
                     /** Size */
                     size: number;
+                    /** Original Size */
+                    original_size?: number | null;
                     /** Transcription */
                     transcription?: string | null;
                     /** Token Count */

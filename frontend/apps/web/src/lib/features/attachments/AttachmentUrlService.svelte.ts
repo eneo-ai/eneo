@@ -5,6 +5,8 @@ import type { Eneo } from "@eneo/eneo-js";
 import { SvelteMap } from "svelte/reactivity";
 
 const EXPIRES_AFTER_SECONDS = 3600;
+// Original-bytes links are capped server-side at one hour.
+const ORIGINAL_MAX_EXPIRES_IN_SECONDS = 3600;
 
 /** We cache generated Attachment URLs to not constantly regenerate them */
 class AttachmentUrlService {
@@ -52,17 +54,25 @@ class AttachmentUrlService {
   }
 
   async #generateUrl(fileId: string, kind: "primary" | "original", key: string) {
-    const request = {
-      fileId,
-      contentDisposition: "attachment" as const,
-      expiresIn: EXPIRES_AFTER_SECONDS + 60
-    };
-    const { url, expires_at } =
-      kind === "original"
-        ? await this.#eneo.files.generateOriginalSignedUrl(request)
-        : await this.#eneo.files.generateSignedUrl(request);
-    this.#attachmentUrls.set(key, { url, expiresAt: expires_at * 1000 });
-    this.#queuedFiles.delete(key);
+    try {
+      const { url, expires_at } =
+        kind === "original"
+          ? await this.#eneo.files.generateOriginalSignedUrl({
+              fileId,
+              contentDisposition: "attachment",
+              expiresIn: ORIGINAL_MAX_EXPIRES_IN_SECONDS
+            })
+          : await this.#eneo.files.generateSignedUrl({
+              fileId,
+              contentDisposition: "attachment",
+              expiresIn: EXPIRES_AFTER_SECONDS + 60
+            });
+      this.#attachmentUrls.set(key, { url, expiresAt: expires_at * 1000 });
+    } catch {
+      // Left uncached: the next lookup asks again instead of blocking the file.
+    } finally {
+      this.#queuedFiles.delete(key);
+    }
   }
 }
 

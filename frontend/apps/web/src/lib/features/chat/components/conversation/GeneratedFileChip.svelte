@@ -6,7 +6,7 @@
   import { m } from "$lib/paraglide/messages";
 
   type Props = {
-    file: { name: string; mimetype: string; size: number };
+    file: { name: string; mimetype: string; size: number; original_size?: number | null };
     /** Signed download URL; null while it is being minted. */
     url: string | null;
   };
@@ -14,6 +14,8 @@
   const { file, url }: Props = $props();
   const href = $derived(sanitizeLinkHref(url));
   const Icon = $derived(pickFileIcon(file.mimetype));
+  // The downloaded file's size; `size` counts the extracted text of a document.
+  const bytes = $derived(file.original_size ?? file.size);
   const extension = $derived(
     file.name.includes(".") ? (file.name.split(".").pop() ?? "").toUpperCase() : ""
   );
@@ -39,7 +41,7 @@
   <span class="flex min-w-0 flex-1 flex-col leading-tight">
     <span class="text-default truncate text-sm font-medium">{file.name}</span>
     <span class="text-tertiary truncate text-[11px] tabular-nums">
-      {extension}{file.size > 0 ? ` · ${formatBytes(file.size)}` : ""}
+      {extension}{bytes > 0 ? ` · ${formatBytes(bytes)}` : ""}
     </span>
   </span>
   <Download
