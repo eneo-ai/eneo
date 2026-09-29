@@ -59,7 +59,10 @@ from eneo.main.models import ModelId
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
 from eneo.users.user import UserUpdate
-from tests.integration.flows.conftest import _flow_worker_environment
+from tests.integration.flows.conftest import (
+    _flow_worker_environment,
+    assert_call_evidence_after_own_details,
+)
 
 _CHILD_ARGUMENT = "--ai-builder-turn-retry-child"
 _HARD_EXIT_CODE = 86
@@ -821,15 +824,21 @@ async def test_oversized_planning_state_is_committed_once_and_replayed(
     assert error_data["code"] == "planning_state_payload_too_large"
     assert error_data["category"] == "bad_request"
     assert error_data["phase"] == "planner"
-    assert error_data["details"] == {
-        "payload_bytes": PLANNING_STATE_PAYLOAD_CAP_BYTES + 1,
-        "payload_cap_bytes": PLANNING_STATE_PAYLOAD_CAP_BYTES,
-    }
+    # The turn had already called the provider, so the error carries that
+    # call's evidence after its own two details.
+    evidence = assert_call_evidence_after_own_details(
+        error_data["details"],
+        {
+            "payload_bytes": PLANNING_STATE_PAYLOAD_CAP_BYTES + 1,
+            "payload_cap_bytes": PLANNING_STATE_PAYLOAD_CAP_BYTES,
+        },
+    )
     provider_calls_before_replay = _marker_count(
         marker_path,
         "oversized_state_provider",
     )
     assert provider_calls_before_replay > 0
+    assert evidence["llm_calls"] == provider_calls_before_replay
 
     public_after = await _load_session(
         client=client,

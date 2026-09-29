@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import subprocess
@@ -24,6 +25,9 @@ from testcontainers.community.redis import RedisContainer
 
 from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.users_table import users_roles_table
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+    FAILED_TURN_EVIDENCE_KEYS,
+)
 from eneo.flows.flow_runtime_policy import MIN_TASK_EXECUTION_TIMEOUT_SECONDS
 from eneo.flows.runtime.executor import (
     _PROCESS_TEST_CRASH_AFTER_ATTEMPT_START_RUN_ID_ENV,
@@ -542,6 +546,41 @@ def _disposable_redis_endpoint(redis: RedisContainer) -> tuple[str, int]:
     if network_ip:
         return network_ip, 6379
     raise RuntimeError("Disposable Flow Redis container is unreachable.")
+
+
+def assert_call_evidence_after_own_details(
+    details: object, own_details: Mapping[str, object]
+) -> dict[str, object]:
+    """A failed turn's public error: its own details first, then call evidence.
+
+    The evidence is the closed set the proposal telemetry publishes, fits the
+    persisted bound older builds also validate (10 keys, 1024 bytes), reports
+    every count as a non-negative integer (a bool is not one), and never shows
+    a token sum without its source and missing-usage qualifier.
+    """
+    assert isinstance(details, dict)
+    assert list(details)[: len(own_details)] == list(own_details)
+    assert {key: details[key] for key in own_details} == own_details
+    evidence = {key: value for key, value in details.items() if key not in own_details}
+    assert set(evidence) <= set(FAILED_TURN_EVIDENCE_KEYS)
+    assert len(details) <= 10
+    assert len(json.dumps(details, ensure_ascii=False).encode("utf-8")) <= 1024
+    token_sums = {
+        "turn_reasoning_tokens",
+        "turn_completion_tokens",
+        "turn_prompt_tokens",
+    }
+    counts = token_sums | {
+        "llm_calls",
+        "calls_without_usage",
+        "last_call_output_cap_tokens",
+    }
+    for key in evidence.keys() & counts:
+        assert type(evidence[key]) is int, key
+        assert evidence[key] >= 0, key
+    if evidence.keys() & token_sums:
+        assert {"token_usage_source", "calls_without_usage"} <= evidence.keys()
+    return evidence
 
 
 def _flow_worker_environment(*, settings: Settings, queue_name: str) -> dict[str, str]:

@@ -180,6 +180,7 @@ from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
 from eneo.users.user import UserUpdate
 from tests.fixtures import mint_v2_api_key
+from tests.integration.flows.conftest import assert_call_evidence_after_own_details
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
@@ -2936,11 +2937,24 @@ async def test_ai_builder_known_provider_rejection_commits_and_replays_without_r
             assert [event["event"] for event in first_events] == ["error", "done"]
             first_error = cast(dict[str, object], first_events[0]["data"])
             assert first_error["code"] == "planner_upstream_error"
-            assert first_error["details"] == {
-                "another_call_permitted": False,
-                "provider_disposition": "known_rejection",
-                "provider_exception_class": expected_exception_class,
-                "retry_scope": "new_turn",
+            # The rejected call was the turn's only one and returned no usage:
+            # the error says so after its own four details, with no token sum.
+            evidence = assert_call_evidence_after_own_details(
+                first_error["details"],
+                {
+                    "another_call_permitted": False,
+                    "provider_disposition": "known_rejection",
+                    "provider_exception_class": expected_exception_class,
+                    "retry_scope": "new_turn",
+                },
+            )
+            assert evidence["llm_calls"] == 1
+            assert evidence["calls_without_usage"] == 1
+            assert evidence["token_usage_source"] == "none"
+            assert not evidence.keys() & {
+                "turn_reasoning_tokens",
+                "turn_completion_tokens",
+                "turn_prompt_tokens",
             }
             encoded_error = json.dumps(first_error)
             assert "sensitive-provider-material" not in encoded_error
