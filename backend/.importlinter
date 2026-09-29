@@ -152,3 +152,25 @@ source_modules =
     eneo.flows.ai_builder
 forbidden_modules =
     eneo.mcp_servers
+
+[importlinter:contract:flows-no-crawler]
+# Flows and the crawler are separate owners of outbound network access: neither
+# imports the other. The address classification they can share lives in
+# eneo.main.destination_policy.
+name = Flows must not import the crawler
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    eneo.flows
+forbidden_modules =
+    eneo.crawler
+
+[importlinter:contract:crawler-no-flows]
+# The other direction of the same boundary.
+name = Crawler must not import flows
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    eneo.crawler
+forbidden_modules =
+    eneo.flows

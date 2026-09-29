@@ -399,10 +399,10 @@ value and a comment.
     | `CLOSESPIDER_ITEMCOUNT` | `20000` | Max pages and linked files per crawl |
     | `CRAWL_JOB_CONCURRENCY_LIMIT` | `WORKER_MAX_JOBS` | Cluster-wide crawl admission limit across crawler replicas |
     | `CRAWL_HEARTBEAT_INTERVAL_SECONDS` | `300` | PostgreSQL lease renewal interval |
-    | `CRAWLER_BLOCK_PRIVATE_NETWORKS` | `false` | Also refuse private (intranet) ranges; loopback, link-local and metadata addresses are always refused |
+    | `CRAWLER_BLOCK_PRIVATE_NETWORKS` | `false` | Also refuse private (intranet) ranges; loopback, link-local, metadata and platform-service addresses are always refused |
 
     <Callout type="warning">
-      **Crawler network access.** The crawler only fetches `http(s)` URLs. Loopback, link-local (including the cloud metadata address), unspecified and multicast destinations are always refused at connection time, including after redirects. Private (intranet) ranges are allowed by default so intranet sites can be indexed; set `CRAWLER_BLOCK_PRIVATE_NETWORKS=true` on backend and worker to refuse them as well. The worker's `HTTP_PROXY`/`HTTPS_PROXY` are not used for crawling.
+      **Crawler network access.** The crawler only fetches `http(s)` URLs. Loopback, link-local (including the cloud metadata address), unspecified and multicast destinations are always refused at connection time, including after redirects. So are the Azure WireServer address `168.63.129.16` and the IETF protocol-assignments block `192.0.0.0/24`, except its globally reachable anycast addresses `192.0.0.9` and `192.0.0.10`. Private (intranet) ranges are allowed by default so intranet sites can be indexed; set `CRAWLER_BLOCK_PRIVATE_NETWORKS=true` on backend and worker to refuse them as well. The worker's `HTTP_PROXY`/`HTTPS_PROXY` are not used for crawling.
     </Callout>
 
     **Background Worker:**
