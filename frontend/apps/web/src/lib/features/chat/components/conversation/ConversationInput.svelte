@@ -29,6 +29,7 @@
   import { AlertTriangle, X } from "lucide-svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
+  import { modelSupportsToolCalling } from "$lib/features/mcp/readiness";
   import { chatCapabilities } from "../../chatCapabilities";
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
 
@@ -301,6 +302,16 @@
     return [];
   });
 
+  const effectiveModel = $derived.by(() => {
+    const partner = chat.partner;
+    if (!partner || !("completion_model" in partner)) return undefined;
+    return selectEffectiveChatModel(partner.completion_model, partner.effective_config);
+  });
+  // A model without tool calling never receives any tool: the backend drops
+  // MCP servers, capabilities and loopback tools alike. Every tool row then
+  // reads as unavailable for that reason, unless a more specific one applies.
+  const supportsToolCalling = $derived(modelSupportsToolCalling(effectiveModel));
+
   // The tenant's capability providers (web search, image generation) flow
   // through the same MCP inheritance chain as other servers but are presented
   // as capabilities, not servers: split them out of the generic rows and give
@@ -309,13 +320,23 @@
   const generalMcpServers = $derived(
     mcpServers
       .filter((server) => !isCapabilityPurpose(server.purpose))
-      .map((server) => ({
-        ...server,
-        available: server.is_enabled !== false,
-        reason: server.is_enabled === false ? "server_disabled" : null
-      }))
+      .map((server) => {
+        const reason =
+          server.is_enabled === false
+            ? "server_disabled"
+            : supportsToolCalling
+              ? null
+              : "model_no_tool_calling";
+        return { ...server, available: reason === null, reason };
+      })
   );
-  const capabilityServers = $derived(chatCapabilities(chat.partner, user));
+  const capabilityServers = $derived(
+    chatCapabilities(chat.partner, user).map((capability) =>
+      supportsToolCalling || !capability.available
+        ? capability
+        : { ...capability, available: false, reason: "model_no_tool_calling" }
+    )
+  );
   const toolPreferenceIds = $derived([...generalMcpServers, ...capabilityServers].map((s) => s.id));
 
   $effect(() => {
@@ -406,12 +427,6 @@
     return typeof partner?.knowledge_mode === "string" ? partner.knowledge_mode : undefined;
   });
 
-  const effectiveModel = $derived.by(() => {
-    const partner = chat.partner;
-    if (!partner || !("completion_model" in partner)) return undefined;
-    return selectEffectiveChatModel(partner.completion_model, partner.effective_config);
-  });
-  const supportsToolCalling = $derived(effectiveModel?.supports_tool_calling === true);
   const runtimeKnowledgeMode = $derived(
     effectiveKnowledgeMode(partnerKnowledgeMode, supportsToolCalling)
   );
@@ -560,6 +575,7 @@
           servers={generalMcpServers}
           {capabilityServers}
           internalServers={internalMcpServers}
+          modelSupportsTools={supportsToolCalling}
           disabledServerIds={disabledMcpServerIds}
           onSelectionChange={persistMcpServerSelection}
           bind:autoAcceptTools
