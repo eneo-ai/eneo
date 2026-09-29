@@ -1,6 +1,5 @@
 import logging
 from typing import TYPE_CHECKING, Optional
-from uuid import UUID
 
 from eneo.integration.application.tenant_sharepoint_app_service import (
     TenantSharePointAppService,
@@ -9,9 +8,6 @@ from eneo.integration.domain.entities.oauth_token import SharePointToken
 from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
     ServiceAccountAuthService,
 )
-from eneo.integration.infrastructure.auth_service.sharepoint_auth_service import (
-    SharepointAuthService,
-)
 from eneo.integration.infrastructure.auth_service.tenant_app_auth_service import (
     TenantAppAuthService,
 )
@@ -19,38 +15,28 @@ from eneo.integration.infrastructure.oauth_token_service import OauthTokenServic
 from eneo.integration.presentation.models import IntegrationType
 
 if TYPE_CHECKING:
+    from eneo.integration.application.user_integration_service import (
+        AuthorizedIntegration,
+    )
     from eneo.integration.domain.entities.tenant_sharepoint_app import (
         TenantSharePointApp,
     )
     from eneo.integration.domain.entities.user_integration import UserIntegration
-    from eneo.spaces.space import Space
 
 logger = logging.getLogger(__name__)
 
 
 class SharePointAuthRouter:
-    """Routes SharePoint authentication between user OAuth, tenant app, and service account.
-
-    Authentication Strategy:
-    - Personal spaces: Always use user OAuth (delegated permissions)
-    - Shared/Org spaces with tenant app configured:
-        - If auth_method='service_account': Use service account (delegated permissions via refresh token)
-        - If auth_method='tenant_app': Use tenant app (application permissions via client credentials)
-    - Shared/Org spaces without tenant app: Fallback to user OAuth with warning
-
-    Service accounts are recommended as they provide granular access control without person-dependency.
-    """
+    """Acquire tokens for an already authorized, explicitly selected connection."""
 
     def __init__(
         self,
-        user_oauth_service: SharepointAuthService,
         tenant_app_service: TenantSharePointAppService,
         tenant_app_auth_service: TenantAppAuthService,
         oauth_token_service: OauthTokenService,
         service_account_auth_service: Optional[ServiceAccountAuthService] = None,
     ) -> None:
         super().__init__()
-        self.user_oauth_service = user_oauth_service
         self.tenant_app_service = tenant_app_service
         self.tenant_app_auth_service = tenant_app_auth_service
         self.oauth_token_service = oauth_token_service
@@ -59,76 +45,13 @@ class SharePointAuthRouter:
         )
 
     async def get_token_for_integration(
-        self, user_integration: "UserIntegration", space: "Space"
-    ) -> SharePointToken | None:
-        """Get an appropriate SharePoint token based on space type and integration config.
-
-        Args:
-            user_integration: The user's integration (may use tenant app or user OAuth)
-            space: The space context (determines auth routing)
-
-        Returns:
-            SharePointToken with access token
-
-        Raises:
-            ValueError: If no valid authentication method is available
-        """
-        if space.is_personal():
-            logger.debug(f"Using user OAuth for personal space {space.id}")
-            return await self._get_user_oauth_token(user_integration)
-
-        if not space.is_personal():
-            tenant_app = await self.tenant_app_service.get_active_app_for_tenant(
-                user_integration.tenant_integration.tenant_id
-            )
-
-            if tenant_app:
-                logger.info(
-                    f"Using tenant app auth for {'org' if space.is_organization() else 'shared'} "
-                    f"space {space.id}"
-                )
-                return await self._get_tenant_app_token(tenant_app, user_integration)
-            else:
-                logger.warning(
-                    f"No tenant app configured for tenant {user_integration.tenant_integration.tenant_id}. "
-                    f"Falling back to user OAuth for {'org' if space.is_organization() else 'shared'} "
-                    f"space {space.id}. This creates person-dependency!"
-                )
-                return await self._get_user_oauth_token(user_integration)
-
-    async def get_token_by_auth_type(
-        self, user_integration: "UserIntegration", auth_type: str
+        self, connection: "AuthorizedIntegration"
     ) -> SharePointToken:
-        """Get token based on explicit auth type (for migrations and admin operations).
-
-        Args:
-            user_integration: The user integration
-            auth_type: "user_oauth" or "tenant_app"
-
-        Returns:
-            SharePointToken with access token
-        """
-        if auth_type == "tenant_app":
-            if not user_integration.tenant_app_id:
-                raise ValueError(
-                    f"Integration {user_integration.id} has no tenant_app_id"
-                )
-
-            # Note: This is a bit hacky - ideally we'd inject the repo
-            if hasattr(user_integration, "tenant_app") and user_integration.tenant_app:  # type: ignore[attr-defined]
-                return await self._get_tenant_app_token(
-                    user_integration.tenant_app,  # type: ignore[attr-defined]
-                    user_integration,
-                )
-            else:
-                raise ValueError(
-                    f"Cannot load tenant_app for integration {user_integration.id}"
-                )
-
-        elif auth_type == "user_oauth":
-            return await self._get_user_oauth_token(user_integration)
-        else:
-            raise ValueError(f"Invalid auth_type: {auth_type}")
+        if connection.tenant_app is not None:
+            return await self._get_tenant_app_token(
+                connection.tenant_app, connection.integration
+            )
+        return await self._get_user_oauth_token(connection.integration)
 
     async def _get_user_oauth_token(
         self, user_integration: "UserIntegration"
@@ -270,15 +193,3 @@ class SharePointAuthRouter:
             created_at=None,
             updated_at=None,
         )
-
-    async def should_use_tenant_app(self, tenant_id: UUID, space: "Space") -> bool:
-        """Check if tenant app auth should be used for a space.
-
-        Returns:
-            True if space is shared/org and tenant has app configured
-        """
-        if space.is_personal():
-            return False
-
-        tenant_app = await self.tenant_app_service.get_active_app_for_tenant(tenant_id)
-        return tenant_app is not None

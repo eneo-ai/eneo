@@ -20,6 +20,14 @@ There are two different use cases to consider:
 
 > **Important:** Both use cases require an administrator to first register a Microsoft Entra ID application and configure the integration in Eneo. The Microsoft Entra ID app handles authentication for all users. Without this setup, users cannot connect to SharePoint even in personal spaces. Each Eneo tenant supports exactly one SharePoint app registration — there is no multi-app or fallback configuration.
 
+### Access to connected content
+
+Your personal Microsoft connection belongs to you. Other Eneo users, including administrators, cannot use it to preview sites, browse folders or create imports. Connections and destination spaces must belong to the same Eneo tenant as the person making the request.
+
+Organization connections, using either a service account or application permissions, require Eneo administrator permission and an active SharePoint configuration. They can be used in shared and organization spaces. To browse folders or create an import, you must also have permission to import integrations into the destination space, through direct membership or a group.
+
+The connection you select determines which Microsoft account or application is used. Changing the destination space does not switch a personal connection to organization credentials. Reading documents already imported into a space continues to follow that space's knowledge permissions; it does not grant permission to browse the connected SharePoint library.
+
 ## Prerequisites
 
 Before you begin, you need:

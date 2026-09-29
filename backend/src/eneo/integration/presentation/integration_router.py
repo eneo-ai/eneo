@@ -190,7 +190,7 @@ async def get_user_integrations(
     response_model=UserIntegrationList,
     status_code=200,
     description="List integrations available for a specific space.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def get_available_integrations_for_space(
     space_id: UUID,
@@ -313,7 +313,7 @@ async def get_sync_logs(
     response_model=IntegrationPreviewDataList,
     status_code=200,
     description="Get preview data for a user integration.",
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def get_integration_preview(
     user_integration_id: UUID,
@@ -334,11 +334,13 @@ async def get_integration_preview(
     response_model=SharePointTreeResponse,
     status_code=200,
     description="Get SharePoint/OneDrive folder tree for a user integration.",
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def get_sharepoint_folder_tree(
     user_integration_id: UUID,
-    space_id: Annotated[UUID, Query(description="Space ID (for auth routing)")],
+    space_id: Annotated[
+        UUID, Query(description="Space ID (requires integration import rights)")
+    ],
     container: Annotated[Container, Depends(get_container(with_user=True))],
     site_id: Annotated[
         Optional[str],
@@ -352,16 +354,18 @@ async def get_sharepoint_folder_tree(
     ] = None,
     folder_path: Annotated[str, Query(description="Current folder path")] = "",
 ):
-    """Get SharePoint/OneDrive folder tree with hybrid authentication support.
+    """Browse an authorized SharePoint/OneDrive connection in an importable space.
 
-    Authentication is determined by space type:
-    - Personal space: Uses user OAuth
-    - Shared/Org space with tenant app: Uses tenant app (no person-dependency)
-    - Shared/Org space without tenant app: Falls back to user OAuth
+    Uses the selected connection's identity after ownership, tenant and space
+    authorization. Organization connections additionally require admin permission.
 
     Provide site_id for SharePoint sites, or drive_id for OneDrive.
     """
-    from eneo.main.exceptions import BadRequestException, NotFoundException
+    from eneo.main.exceptions import (
+        BadRequestException,
+        NotFoundException,
+        UnauthorizedException,
+    )
     from eneo.main.logging import get_logger
 
     logger = get_logger(__name__)
@@ -385,7 +389,7 @@ async def get_sharepoint_folder_tree(
             folder_path=folder_path,
         )
         return SharePointTreeResponse(**tree_data)
-    except (NotFoundException, BadRequestException):
+    except (NotFoundException, BadRequestException, UnauthorizedException):
         # The service raises typed domain exceptions with the correct HTTP status;
         # let them propagate to the global handlers instead of remapping by string.
         raise

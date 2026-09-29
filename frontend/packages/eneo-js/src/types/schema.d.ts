@@ -41405,6 +41405,15 @@ export interface operations {
           "application/json": components["schemas"]["UserIntegrationList"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -41537,6 +41546,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -41560,7 +41578,7 @@ export interface operations {
   get_sharepoint_folder_tree_api_v1_integrations__user_integration_id__sharepoint_tree__get: {
     parameters: {
       query: {
-        /** @description Space ID (for auth routing) */
+        /** @description Space ID (requires integration import rights) */
         space_id: string;
         /** @description SharePoint site ID (required for SharePoint) */
         site_id?: string | null;
@@ -41590,6 +41608,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
