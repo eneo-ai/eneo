@@ -573,7 +573,7 @@ async def test_released_upgrade_recovers_from_process_death_and_backup_restore(
         assert (
             report["worker"]["max_rss_bytes"]
             <= report["acceptance"]["maximum_worker_rss_bytes"]
-        )
+        ), report["worker"]
         _assert_adopted(url)
         assert _source_facts(url) == state["expected_sources"]
 
