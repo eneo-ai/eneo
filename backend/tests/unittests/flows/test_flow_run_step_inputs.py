@@ -794,12 +794,39 @@ async def test_each_file_is_held_to_the_limit_as_it_is_now() -> None:
 
 
 @pytest.mark.asyncio
-async def test_audio_uploaded_before_lengths_were_measured_is_refused() -> None:
-    with pytest.raises(BadRequestException) as error:
-        await _validate_audio((600.0, None))
+@pytest.mark.parametrize("single_recording", [True, False])
+@pytest.mark.parametrize("lengths", [(None,), (600.0, None), (None, None)])
+async def test_audio_uploaded_before_lengths_were_measured_is_admitted_under_the_limit(
+    lengths, single_recording
+) -> None:
+    # No length to hold: its decode enforces the limit the run is admitted under.
+    step_id, _file_ids, _repo, admitted = await _validate_audio(
+        lengths, single_recording=single_recording
+    )
 
-    assert error.value.code == "flow_run_audio_length_unknown"
-    assert len(error.value.context["file_ids"]) == 1
+    assert admitted == {step_id: 1_800}
+
+
+@pytest.mark.asyncio
+async def test_a_measured_file_over_the_limit_is_refused_beside_an_unmeasured_one() -> (
+    None
+):
+    with pytest.raises(BadRequestException) as error:
+        await _validate_audio((1_900.0, None), single_recording=False)
+
+    assert error.value.code == "flow_run_audio_exceeds_limit"
+    assert error.value.context["measured"] == 1_900
+
+
+@pytest.mark.asyncio
+async def test_measured_parts_over_the_limit_are_refused_whatever_unmeasured_parts_add() -> (
+    None
+):
+    with pytest.raises(BadRequestException) as error:
+        await _validate_audio((1_000.0, 800.5, None))
+
+    assert error.value.code == "flow_run_audio_exceeds_limit"
+    assert error.value.context["measured"] == 1_801
 
 
 @pytest.mark.asyncio

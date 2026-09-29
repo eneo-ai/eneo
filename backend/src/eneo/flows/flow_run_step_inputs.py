@@ -219,9 +219,15 @@ async def validate_audio_lengths(
 ) -> dict[UUID, int]:
     """Holds each audio step's files to the longest recording as it is now, by the
     decoded lengths measured as they were uploaded: every file, and one recording's
-    parts together, as transcription decodes them. Refused before the run is accepted, so no client
-    drops a recording the run cannot transcribe. Returns the limit each audio step
-    was admitted under, for its transcription to keep."""
+    parts together, as transcription decodes them. A measured length over the limit is
+    refused before the run is accepted, so no client drops a recording it was told the
+    run would transcribe. Returns the limit each audio step
+    was admitted under, for its transcription to keep.
+
+    A file uploaded before Eneo measured length has none to hold: it is admitted
+    under the same limit, and the decode that transcribes it, which counts what it
+    decodes, refuses it when it is longer. A measured length over the limit is
+    refused here whatever the unmeasured parts add."""
     ceiling = limits.longest_audio_seconds
     admitted: dict[UUID, int] = {}
     for step_id, requested in normalized_step_inputs.items():
@@ -234,17 +240,9 @@ async def validate_audio_lengths(
         ):
             continue
         lengths = await runtime_upload_repo.audio_seconds_by_file(file_ids=file_ids)
-        unmeasured = [str(file_id) for file_id in file_ids if file_id not in lengths]
-        if unmeasured:
-            raise FlowBadRequestException(
-                "Audio uploaded before Eneo measured audio length must be uploaded again.",
-                code=FlowApiErrorCode.RUN_AUDIO_LENGTH_UNKNOWN,
-                context={"step_id": str(step_id), "file_ids": unmeasured},
-            )
+        measured = [lengths[file_id] for file_id in file_ids if file_id in lengths]
         together = step_id in single_recording_steps
-        groups = (
-            [list(lengths.values())] if together else [[x] for x in lengths.values()]
-        )
+        groups = [measured] if together else [[length] for length in measured]
         for group in groups:
             if not within_decode_limit(group, ceiling):
                 raise FlowBadRequestException(

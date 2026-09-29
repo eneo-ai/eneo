@@ -31,3 +31,8 @@ class FlowRunPrefixSeed:
     # The source run's settled speaker-count bound, kept the same way;
     # NOT_PROVIDED when that run settled none.
     max_speakers: int | None | NotProvided = NOT_PROVIDED
+
+    @property
+    def reused_step_ids(self) -> frozenset[UUID]:
+        """The steps whose results the new run imports instead of executing."""
+        return frozenset(result.step_id for result in self.results)

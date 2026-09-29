@@ -250,8 +250,9 @@ class _PreparedRunCreation:
     preseed_steps: list[PreseedStep]
     step_input_files: list[FlowRunStepInputFileProjection]
     request_fingerprint: str
-    # The limit each audio step is admitted under, checked only for a new run
-    # (after the replay check): the tenant's limit may change between replays.
+    # The limit each audio step the run decodes is admitted under, checked only
+    # for a new run (after the replay check): the tenant's limit may change
+    # between replays. A step whose result the run imports is not in it.
     admit_audio: Callable[[], Awaitable[dict[UUID, int]]] | None = None
 
 
@@ -404,6 +405,9 @@ class FlowRunService:
             purpose=purpose,
             speaker_labels=speaker_labels,
             max_speakers=max_speakers,
+            reused_step_ids=(
+                prefix_seed.reused_step_ids if prefix_seed is not None else frozenset()
+            ),
         )
         if prefix_seed is not None:
             payload = {
@@ -500,6 +504,8 @@ class FlowRunService:
                 flow_id=flow_id, input_payload_json=payload
             )
             prepared = replace(prepared, input_payload_json=payload)
+        # A child run is admitted for the audio it decodes again, not for the
+        # audio whose transcription it imports.
         if prepared.admit_audio is not None:
             payload = with_admitted_audio_seconds(
                 prepared.input_payload_json, await prepared.admit_audio()
@@ -602,6 +608,7 @@ class FlowRunService:
         purpose: FlowRunPurpose,
         speaker_labels: bool | None,
         max_speakers: int | None | NotProvided,
+        reused_step_ids: frozenset[UUID],
     ) -> _PreparedRunCreation:
         normalized_inline_payload = normalize_and_validate_flow_run_payload(
             metadata=definition.metadata(),
@@ -654,7 +661,11 @@ class FlowRunService:
             admit_audio = partial(
                 validate_audio_lengths,
                 specs=runtime_specs,
-                normalized_step_inputs=normalized_step_inputs,
+                normalized_step_inputs={
+                    step_id: file_ids
+                    for step_id, file_ids in normalized_step_inputs.items()
+                    if step_id not in reused_step_ids
+                },
                 single_recording_steps=single_recording_steps,
                 runtime_upload_repo=self.runtime_upload_repo,
                 limits=flow_audio_decode_limits(limits),
