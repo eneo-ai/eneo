@@ -537,11 +537,11 @@
 <McpImageAttachments />
 
 {#each message.generated_files as file (file.id)}
-  {@const url = attachmentUrls.getUrl(file) ?? null}
   <!-- An empty mimetype is the placeholder of an image still being generated. -->
   {#if !file.mimetype || file.mimetype.startsWith("image/")}
-    <AsyncImage {url}></AsyncImage>
+    <AsyncImage url={attachmentUrls.getUrl(file) ?? null}></AsyncImage>
   {:else}
-    <GeneratedFileChip {file} {url} />
+    <!-- Documents download their exact bytes, never the extracted text. -->
+    <GeneratedFileChip {file} url={attachmentUrls.getOriginalUrl(file) ?? null} />
   {/if}
 {/each}

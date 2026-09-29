@@ -22,29 +22,47 @@ class AttachmentUrlService {
    *
    *  */
   getUrl(file: { id: string }) {
-    if (!browser || !file.id) return;
-    const record = this.#attachmentUrls.get(file.id);
+    return this.#cached(file.id, "primary");
+  }
+
+  /**
+   * Returns a signed URL for the exact bytes originally stored, never a processed
+   * representation. Use it to download documents: for a text-type file (a DOCX, PDF or XLSX
+   * a tool created) the primary representation is its extracted text.
+   */
+  getOriginalUrl(file: { id: string }) {
+    return this.#cached(file.id, "original");
+  }
+
+  #cached(fileId: string, kind: "primary" | "original") {
+    if (!browser || !fileId) return;
+    const key = `${kind}:${fileId}`;
+    const record = this.#attachmentUrls.get(key);
     if (record) {
       if (Date.now() < record.expiresAt) {
         return record.url;
       }
     }
-    if (!this.#queuedFiles.has(file.id)) {
-      this.#queuedFiles.add(file.id);
-      this.#generateUrl(file.id);
+    if (!this.#queuedFiles.has(key)) {
+      this.#queuedFiles.add(key);
+      this.#generateUrl(fileId, kind, key);
     }
 
     return undefined;
   }
 
-  async #generateUrl(fileId: string) {
-    const { url, expires_at } = await this.#eneo.files.generateSignedUrl({
+  async #generateUrl(fileId: string, kind: "primary" | "original", key: string) {
+    const request = {
       fileId,
-      contentDisposition: "attachment",
+      contentDisposition: "attachment" as const,
       expiresIn: EXPIRES_AFTER_SECONDS + 60
-    });
-    this.#attachmentUrls.set(fileId, { url, expiresAt: expires_at * 1000 });
-    this.#queuedFiles.delete(fileId);
+    };
+    const { url, expires_at } =
+      kind === "original"
+        ? await this.#eneo.files.generateOriginalSignedUrl(request)
+        : await this.#eneo.files.generateSignedUrl(request);
+    this.#attachmentUrls.set(key, { url, expiresAt: expires_at * 1000 });
+    this.#queuedFiles.delete(key);
   }
 }
 
