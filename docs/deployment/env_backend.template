@@ -44,7 +44,7 @@ JWT_SECRET=
 API_KEY_HASH_SECRET=
 
 JWT_TOKEN_PREFIX=Bearer
-URL_SIGNING_KEY=
+URL_SIGNING_KEY=                            # required, at least 32 random bytes: openssl rand -hex 32
 
 # Module auth broker (optional module applications, see MODULES.md)
 # Ticket: one-time login handoff carrier; only needs to cover one redirect.

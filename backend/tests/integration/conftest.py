@@ -108,7 +108,7 @@ if not os.getenv("JWT_SECRET"):
 if not os.getenv("JWT_TOKEN_PREFIX"):
     os.environ["JWT_TOKEN_PREFIX"] = "Bearer"
 if not os.getenv("URL_SIGNING_KEY"):
-    os.environ["URL_SIGNING_KEY"] = "test_key"
+    os.environ["URL_SIGNING_KEY"] = "unit-test-url-signing-key-with-at-least-32-bytes"
 if not os.getenv("ENCRYPTION_KEY"):
     os.environ["ENCRYPTION_KEY"] = "yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs="
 
@@ -264,7 +264,7 @@ def test_settings(
         jwt_secret="test_secret_key_for_integration_tests",
         jwt_token_prefix="Bearer",
         # Security
-        url_signing_key="test_url_signing_key",
+        url_signing_key="unit-test-url-signing-key-with-at-least-32-bytes",
         eneo_super_api_key="test-super-admin-key-for-integration-tests",
         # LLM API Keys - CRITICAL: Set to None to prevent reading from environment
         # Integration tests should NEVER use real API keys
