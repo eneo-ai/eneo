@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import importlib
 import importlib.util
+import io
 import json
 import sys
 from pathlib import Path
@@ -13,6 +14,14 @@ from types import ModuleType
 from typing import Any
 
 import pytest
+from docx import Document
+
+from eneo.flows.runtime.docx_template_runtime import (
+    extract_docx_text,
+    inspect_docx_template_placeholders,
+)
+from eneo.main.exceptions import BadRequestException
+from tests.docx_template_fixtures import control_template_bytes
 
 _SCRIPTS = Path(__file__).resolve().parents[4] / "scripts"
 SENTINEL = "ORACLE-SENTINEL-2b9c"
@@ -267,8 +276,9 @@ def _staged_from_sources(
     stage: ModuleType,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    attachment: str | None = None,
 ) -> tuple[Path, str]:
-    attachment = _docx(stage)
+    attachment = attachment or _docx(stage)
     monkeypatch.setattr(
         stage, "load_cases", lambda _path: {"case-1": _case(harness, attachment)}
     )
@@ -375,4 +385,171 @@ def test_a_replaced_fixture_or_case_outside_the_corpus_is_refused(
     (docs / "DOCS.json").write_text(json.dumps(listed, indent=1, sort_keys=True))
     stage.verify_docs(material)  # the docs' own manifest agrees
     with pytest.raises(stage.MaterialError, match=doc.name):
+        _verify_against_sources(stage, material)
+
+
+# ------------- every template field, staged beside the text
+
+FIELDS_HEADING = "Mallfält (innehållskontroller i mallen, i dokumentordning):"
+# The four selected cases that attach a Word template, with its field count.
+TEMPLATE_FIELD_COUNTS = {
+    "mc_byg08_eldstad": 7,
+    "mc_int12_tjansteskrivelse": 13,
+    "mc_liv01_registrering": 9,
+    "mc_nar07_arbetsgivarintyg": 24,
+}
+
+
+def _platform_field_lines(payload: bytes, name: str) -> list[str]:
+    """The fields the platform's own reader finds, one staged line each."""
+    return [
+        f"- {spec.name} — {spec.label} ({spec.kind})"
+        for spec in inspect_docx_template_placeholders(payload, filename=name)
+    ]
+
+
+def _rendering(
+    harness: ModuleType, stage: ModuleType, tmp_path: Path, fixtures: Path, name: str
+) -> str:
+    material = stage.request_material(_case(harness, name))
+    stage.stage_case(material, tmp_path, fixtures=fixtures)
+    return (tmp_path / "case-1" / "attachments" / f"{name}.txt").read_text("utf-8")
+
+
+def test_a_template_rendering_ends_with_its_fields_in_document_order(
+    harness: ModuleType, stage: ModuleType, tmp_path: Path
+) -> None:
+    """The tag is what a template_fill step binds and it is not the label."""
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    payload = control_template_bytes(
+        text=[
+            ("efternamn", "Arbetstagarens efternamn", "Efternamn"),
+            ("besked_datum", "Besked lämnades den", "ÅÅÅÅ-MM-DD"),
+        ],
+        rich=[("skal", "Skäl för beslutet", "Skriv skälen.")],
+    )
+    (fixtures / "mall.docx").write_bytes(payload)
+
+    rendering = _rendering(harness, stage, tmp_path / "out", fixtures, "mall.docx")
+
+    assert rendering == (
+        extract_docx_text(payload)
+        + "\n\n"
+        + FIELDS_HEADING
+        + "\n- efternamn — Arbetstagarens efternamn (text)"
+        + "\n- besked_datum — Besked lämnades den (text)"
+        + "\n- skal — Skäl för beslutet (rich)"
+    )
+
+
+def test_every_selected_template_lists_exactly_the_platforms_fields(
+    harness: ModuleType, stage: ModuleType, tmp_path: Path
+) -> None:
+    """Each selected case's attachments are staged from the corpus: a document
+    with fields renders as its text and then the platform reader's list of ALL
+    its fields, in its order and nothing more (full equality); any other
+    rendering has no such block."""
+    cases = stage.load_cases(_SCRIPTS / "ai_builder_api_municipal_cases.json")
+    counts: dict[str, int] = {}
+    nar07 = ""
+    for case_id in _selected_ids():
+        stage.stage_case(stage.request_material(cases[case_id]), tmp_path)
+        for name in cases[case_id].attachments:
+            rendering = (tmp_path / case_id / "attachments" / f"{name}.txt").read_text(
+                "utf-8"
+            )
+            payload = (stage.FIXTURES / name).read_bytes()
+            lines = (
+                _platform_field_lines(payload, name) if name.endswith(".docx") else []
+            )
+            if not lines:
+                assert FIELDS_HEADING not in rendering, (case_id, name)
+                continue
+            counts[case_id] = len(lines)
+            assert rendering.count(FIELDS_HEADING) == 1, (case_id, name)
+            assert rendering == (
+                extract_docx_text(payload)
+                + "\n\n"
+                + FIELDS_HEADING
+                + "\n"
+                + "\n".join(lines)
+            ), (case_id, name)
+            if case_id == "mc_nar07_arbetsgivarintyg":
+                nar07 = rendering
+
+    assert counts == TEMPLATE_FIELD_COUNTS
+    # Tags an author cannot derive from the labels are in the rendering.
+    assert "- efternamn — Arbetstagarens efternamn (text)" in nar07
+    assert "- upphorande_anledning — Anledning (text)\n- besked_datum — " in nar07
+
+
+def test_a_docx_without_fields_is_rendered_exactly_as_its_text(
+    harness: ModuleType, stage: ModuleType, tmp_path: Path
+) -> None:
+    plain = Document()
+    plain.add_paragraph("Ett vanligt dokument utan mallfält.")
+    plain_bytes = io.BytesIO()
+    plain.save(plain_bytes)
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    (fixtures / "vanlig.docx").write_bytes(plain_bytes.getvalue())
+    rendering = _rendering(harness, stage, tmp_path / "out", fixtures, "vanlig.docx")
+    assert rendering == extract_docx_text(plain_bytes.getvalue())
+
+    # And every fixture the corpus holds that has no fields: byte for byte the
+    # text the staging rendered before it listed fields.
+    plain_fixtures = 0
+    for path in sorted(stage.FIXTURES.glob("*.docx")):
+        payload = path.read_bytes()
+        if _platform_field_lines(payload, path.name):
+            continue
+        plain_fixtures += 1
+        assert stage._extract_text(path) == extract_docx_text(payload), path.name
+    assert plain_fixtures >= 60
+
+
+def test_a_template_the_platform_refuses_is_not_staged(
+    harness: ModuleType, stage: ModuleType, tmp_path: Path
+) -> None:
+    """The Builder refuses an attachment whose controls the platform cannot
+    read (here: no tag); staging says so instead of showing an author a text
+    the Builder would never plan from."""
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    (fixtures / "otaggad.docx").write_bytes(
+        control_template_bytes(text=[("", "Utan tagg", "x")])
+    )
+    with pytest.raises(BadRequestException, match="no tag"):
+        _rendering(harness, stage, tmp_path / "out", fixtures, "otaggad.docx")
+
+
+def test_a_template_rendering_edited_after_staging_is_refused_against_its_sources(
+    harness: ModuleType,
+    stage: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fresh stage of a template verifies; the same stage with its field
+    block cut off (manifest updated to match) is refused: the fields are part
+    of the frozen bytes."""
+    material, attachment = _staged_from_sources(
+        harness, stage, tmp_path, monkeypatch, "nar07_arbetsgivarintyg_mall.docx"
+    )
+    _verify_against_sources(stage, material)
+
+    case_dir = material / "case-1"
+    relative = f"attachments/{attachment}.txt"
+    staged = (case_dir / relative).read_text("utf-8")
+    assert FIELDS_HEADING in staged
+    trimmed = staged.split("\n\n" + FIELDS_HEADING)[0].encode("utf-8")
+    (case_dir / relative).write_bytes(trimmed)
+    manifest_path = case_dir / "MATERIAL.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["files"][relative] = hashlib.sha256(trimmed).hexdigest()
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=1, sort_keys=True)
+    )
+    stage.verify_staged_case(case_dir)  # self-consistent
+    with pytest.raises(stage.MaterialError, match=f"{attachment}.txt"):
         _verify_against_sources(stage, material)

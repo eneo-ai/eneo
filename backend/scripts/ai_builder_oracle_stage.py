@@ -12,6 +12,13 @@ fields of a parsed case are projected (PROJECTED_FIELDS): everything else
 `edit`, `note`, cohorts, the source URL) is never put in the staged tree, which
 carries a manifest of every file it holds.
 
+A Word template is staged as its text followed by every field it fills, each
+with tag, label and kind (`_docx_rendering`), read by the platform's own
+template reader: an expert author holding the template sees every field, and
+the tag is what a template_fill step binds. No expected value is involved. How
+this compares with what the Builder is shown, and how to read results on the
+template cases, is stated in the protocol, not here.
+
 The staging is deterministic, and `verify_staged_case` recomputes everything a
 freeze relies on from the staged BYTES: a manifest is never trusted for a
 digest it claims.
@@ -90,6 +97,31 @@ def request_material(case: Any) -> dict[str, Any]:
     }
 
 
+TEMPLATE_FIELDS_HEADING = "Mallfält (innehållskontroller i mallen, i dokumentordning):"
+
+
+def _docx_rendering(payload: bytes, *, filename: str) -> str:
+    """The document's text; a template's fields follow it, one line each.
+
+    The fields come from the reader the Builder and template_fill use, in its
+    order, and every one is listed. A document without fields is its text alone. A
+    document the platform cannot read as a template raises, as it does for the
+    Builder.
+    """
+
+    from eneo.flows.runtime.docx_template_runtime import (
+        extract_docx_text,
+        inspect_docx_template_placeholders,
+    )
+
+    text = extract_docx_text(payload)
+    fields = inspect_docx_template_placeholders(payload, filename=filename)
+    if not fields:
+        return text
+    lines = [f"- {field.name} — {field.label} ({field.kind})" for field in fields]
+    return "\n\n".join([text, "\n".join([TEMPLATE_FIELDS_HEADING, *lines])])
+
+
 def _extract_text(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix == ".pdf":
@@ -98,9 +130,7 @@ def _extract_text(path: Path) -> str:
         with pdfplumber.open(path) as pdf:
             return "\n".join((page.extract_text() or "") for page in pdf.pages)
     if suffix == ".docx":
-        from eneo.flows.runtime.docx_template_runtime import extract_docx_text
-
-        return extract_docx_text(path.read_bytes())
+        return _docx_rendering(path.read_bytes(), filename=path.name)
     if suffix == ".xlsx":
         import openpyxl
 
