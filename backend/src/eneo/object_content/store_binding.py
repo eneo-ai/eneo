@@ -7,11 +7,8 @@ was built from. Slot 1 is always the active destination; slot 2 exists only
 while a destination migration holds a candidate or retiring destination.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from sqlalchemy import delete, exists, func, select, text, update
@@ -33,13 +30,11 @@ from eneo.object_content.content import (
     ObjectContentUnavailableError,
     StorageKind,
 )
-from eneo.object_content.object_store_contract import (
+from eneo.object_content.s3_object_store import (
     ObjectStoreBindingError,
     ObjectStoreUnavailableError,
+    S3ObjectStore,
 )
-
-if TYPE_CHECKING:
-    from eneo.object_content.s3_object_store import S3ObjectStore
 
 #: Revision reported by a destination without a stored connection row —
 #: the legacy environment-managed configuration. The fence treats a missing

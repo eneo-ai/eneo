@@ -15,36 +15,30 @@ import sys
 import time
 from pathlib import Path
 
-_BYTES_PER_RUSAGE_UNIT = 1 if sys.platform == "darwin" else 1024
-
-
-def _peak_rss_bytes() -> int:
-    return int(
-        resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * _BYTES_PER_RUSAGE_UNIT
-    )
-
-
-_IMPORT_RSS_STAGES = {"stdlib": _peak_rss_bytes()}
-
 from eneo.database.database import DatabaseSessionManager
-
-_IMPORT_RSS_STAGES["database"] = _peak_rss_bytes()
-
 from eneo.object_content.configuration import ObjectContentCoreSettings
-
-_IMPORT_RSS_STAGES["configuration"] = _peak_rss_bytes()
-
 from eneo.object_content.content_service import ObjectContentService
-
-_IMPORT_RSS_STAGES["content_service"] = _peak_rss_bytes()
-
 from eneo.object_content.file_icon_backfill import (
     FileIconBackfill,
     FileIconBackfillSettings,
     FileIconBackfillState,
 )
 
-_IMPORT_RSS_STAGES["file_icon_backfill"] = _peak_rss_bytes()
+
+def _peak_rss_bytes() -> int:
+    if sys.platform == "linux":
+        # Linux preserves ru_maxrss across execve, including the pytest parent's
+        # peak. VmHWM belongs to this worker's new address space after execve.
+        for line in Path("/proc/self/status").read_text().splitlines():
+            fields = line.split()
+            if fields and fields[0] == "VmHWM:":
+                if len(fields) != 3 or fields[2] != "kB":
+                    raise ValueError(f"Unexpected VmHWM format: {line}")
+                return int(fields[1]) * 1024
+        raise RuntimeError("VmHWM is missing from /proc/self/status")
+
+    units = 1 if sys.platform == "darwin" else 1024
+    return int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * units)
 
 
 async def _worker_main() -> None:
@@ -85,10 +79,12 @@ async def _worker_main() -> None:
                     "active_seconds": active_seconds,
                     "schedule": "repeated run_once with 50 ms gaps; production minute cron not exercised",
                     "rss_after_imports_bytes": rss_after_imports,
-                    "rss_import_stages_bytes": _IMPORT_RSS_STAGES,
                     "rss_after_init_bytes": rss_after_init,
                     "rss_after_first_run_bytes": rss_after_first_run,
                     "max_rss_bytes": _peak_rss_bytes(),
+                    "rss_measurement": (
+                        "procfs_vmhwm" if sys.platform == "linux" else "getrusage"
+                    ),
                     "cpu_seconds": usage.ru_utime + usage.ru_stime,
                 }
             )
