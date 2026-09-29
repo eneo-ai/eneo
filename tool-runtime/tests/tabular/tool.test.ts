@@ -111,6 +111,17 @@ describe("file references", () => {
     expect(downloads.calls).toHaveLength(1);
   });
 
+  test("a link copied from history explains itself instead of failing as expired", async () => {
+    const { tool, downloads } = setup("stale");
+    await expect(
+      tool("inspect_table").execute(
+        { files: [{ url: url(FILE_A, "REDACTED"), filename: "a.csv" }] },
+        alice,
+      ),
+    ).rejects.toMatchObject({ code: "STALE_REFERENCE" });
+    expect(downloads.calls).toEqual([]);
+  });
+
   test("an operator allowlist also bounds Eneo's origin", async () => {
     const { tool, downloads } = setup("allowlist", ["http://backend:9000"]);
     await expect(

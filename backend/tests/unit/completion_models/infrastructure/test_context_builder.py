@@ -92,6 +92,45 @@ def _image_tool_call(result: str, generated_file_ids) -> ToolCallInfo:
     )
 
 
+def test_replayed_arguments_carry_fresh_reference_urls():
+    file_id = uuid4()
+    call = ToolCallInfo(
+        server_name="tabular",
+        tool_name="query_table",
+        tool_call_id="call-1",
+        arguments={
+            "file": {
+                "url": f"http://b/api/v1/files/{file_id}/original/download/?token=old.sig",
+                "filename": "a.xlsx",
+            }
+        },
+        result="{}",
+        mcp_tool_name="tabular__query_table",
+    )
+    # Persisted arguments never keep the token.
+    assert "token=old.sig" not in str(call.arguments)
+    session = SimpleNamespace(
+        questions=[
+            SimpleNamespace(
+                question="q",
+                answer="a",
+                files=[],
+                generated_files=[],
+                tool_calls=[call],
+            )
+        ]
+    )
+    fresh = f"http://b/api/v1/files/{file_id}/original/download/?token=fresh.sig"
+
+    messages, _ = ContextBuilder()._build_messages(
+        session, max_tokens=10_000, file_reference_urls={file_id: fresh}
+    )
+
+    assert messages[0].tool_calls[0].arguments == {
+        "file": {"url": fresh, "filename": "a.xlsx"}
+    }
+
+
 def test_replayed_references_follow_image_and_file_placeholders():
     image, document = uuid4(), uuid4()
     result = (

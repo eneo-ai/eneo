@@ -14,6 +14,7 @@ from eneo.authentication.signed_urls import (
     looks_like_reference_url,
     parse_file_reference_url,
     redact_reference_tokens,
+    restore_reference_tokens,
 )
 
 
@@ -128,3 +129,32 @@ class TestRedactReferenceTokens:
     def test_non_string_values_pass_through(self):
         assert redact_reference_tokens(None) is None
         assert redact_reference_tokens(7) == 7
+
+
+class TestRestoreReferenceTokens:
+    """Replay swaps redacted links for this request's fresh ones, so a model
+    copying the URL from its own earlier call sends a working link."""
+
+    def test_redacted_links_get_the_fresh_url_for_their_file(self):
+        file_id, other_id = uuid4(), uuid4()
+        stored = redact_reference_tokens(
+            {
+                "file": {"url": _signed_url(file_id), "filename": "a.xlsx"},
+                "files": [{"url": _signed_url(other_id), "alias": "b"}],
+                "sql": "SELECT 1",
+            }
+        )
+        fresh = _signed_url(file_id, base_url="http://backend:8000")
+
+        replayed = restore_reference_tokens(stored, {file_id: fresh})
+
+        assert isinstance(replayed, dict)
+        assert replayed["file"]["url"] == fresh
+        # No fresh URL for this file: it stays redacted rather than guessed.
+        assert replayed["files"][0]["url"].endswith(f"token={REDACTED_TOKEN}")
+        assert replayed["sql"] == "SELECT 1"
+
+    def test_live_links_and_other_values_are_left_alone(self):
+        live = _signed_url(uuid4())
+        assert restore_reference_tokens(live, {uuid4(): "x"}) == live
+        assert restore_reference_tokens(None, {}) is None

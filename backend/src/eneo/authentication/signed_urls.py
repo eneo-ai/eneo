@@ -4,6 +4,7 @@ import hmac
 import json
 import re
 import time
+from collections.abc import Mapping
 from typing import Any, cast
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
@@ -318,6 +319,44 @@ _REFERENCE_TOKEN = re.compile(
     r"[A-Za-z0-9_\-=.]+"
 )
 REDACTED_TOKEN = "REDACTED"
+
+
+_REDACTED_REFERENCE_URL = re.compile(
+    r"https?://[^\s\"'<>]*?/api/v1/files/(?P<file_id>[0-9a-fA-F-]{36})"
+    r"/original/download/?\?[^\s\"'<>]*?token=" + REDACTED_TOKEN + r"[^\s\"'<>]*"
+)
+
+
+def restore_reference_tokens(value: object, fresh_urls: Mapping[UUID, str]) -> object:
+    """Swap redacted reference URLs for this request's freshly minted ones.
+
+    The inverse of :func:`redact_reference_tokens` for replay: history keeps
+    tool-call arguments with the token redacted, and a model replaying them
+    tends to copy the URL from its own earlier call. Each redacted link to a
+    file with a fresh URL in ``fresh_urls`` becomes that URL, so a copied link
+    works. The fresh URL is minted for this request anyway and is never
+    persisted. Links to files without one stay redacted.
+    """
+    if isinstance(value, str):
+
+        def fresh(match: re.Match[str]) -> str:
+            try:
+                file_id = UUID(match.group("file_id"))
+            except ValueError:
+                return match.group(0)
+            return fresh_urls.get(file_id, match.group(0))
+
+        return _REDACTED_REFERENCE_URL.sub(fresh, value)
+    if isinstance(value, dict):
+        mapping = cast(dict[object, object], value)
+        return {
+            key: restore_reference_tokens(item, fresh_urls)
+            for key, item in mapping.items()
+        }
+    if isinstance(value, list):
+        entries = cast(list[object], value)
+        return [restore_reference_tokens(item, fresh_urls) for item in entries]
+    return value
 
 
 def redact_reference_tokens(value: object) -> object:

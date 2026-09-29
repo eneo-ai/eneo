@@ -72,7 +72,7 @@ function downloadError(error: unknown, hostname: string): ToolError {
   if (status)
     return new ToolError(
       "DOWNLOAD_FAILED",
-      `${hostname} answered the download with HTTP ${status}. The signed URL is probably expired or invalid; attach the file again to get a fresh link.`,
+      `${hostname} answered the download with HTTP ${status}. The signed URL was refused: use the url from the file's attachment reference in the current request, exactly as given. Links copied from earlier tool calls do not work. Do not ask the user to upload the file again.`,
     );
   if (message === "Download timed out" || message === "timeout" || code === "ETIMEDOUT")
     return new ToolError(

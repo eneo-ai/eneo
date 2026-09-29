@@ -101,6 +101,11 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
         "FILE_ORIGIN_NOT_ALLOWED",
         "Eneo's file origin is not in this runtime's TOOL_RUNTIME_FILE_ORIGINS. Align the two settings.",
       );
+    if (url.searchParams.get("token") === "REDACTED")
+      throw new ToolError(
+        "STALE_REFERENCE",
+        "This link was copied from conversation history, where its token is removed. Use the url from the file's attachment reference in the current request, exactly as given. Do not ask the user to upload the file again.",
+      );
     if (url.origin !== origin || !FILE_PATH.test(url.pathname) || !url.searchParams.get("token"))
       throw new ToolError(
         "INVALID_URL",
