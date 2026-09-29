@@ -2524,6 +2524,7 @@ class AssistantService:
                     if not completed and (
                         response_string
                         or reasoning_string
+                        or generated_files
                         or skill_runtime.snapshot().changed
                     ):
                         from eneo.sessions.session_service import (
@@ -2544,6 +2545,9 @@ class AssistantService:
                         skill_provenance, skill_activation = (
                             _final_skill_runtime_state()
                         )
+                        _attach_generated_file_ids(
+                            tool_calls, generated_file_ids_by_call
+                        )
                         schedule_background_save(
                             persist_partial_question_answer(
                                 tenant_id=tenant_id,
@@ -2553,6 +2557,8 @@ class AssistantService:
                                 reasoning=reasoning_string or None,
                                 skill_provenance=skill_provenance,
                                 skill_activation=skill_activation,
+                                generated_files=list(generated_files),
+                                tool_calls=tool_calls or None,
                             )
                         )
                         logger.info(
