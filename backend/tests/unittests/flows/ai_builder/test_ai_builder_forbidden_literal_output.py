@@ -392,4 +392,4 @@ def test_an_edit_slot_with_an_empty_step_output_is_a_failed_edit_not_a_leak() ->
         },
     )
     assert scored["failed_checks"] == ["step_output_n1"]
-    assert outcomes.edit_bucket(slot, DECLARED["edit"]) == "failed_edit"
+    assert outcomes.edit_outcome(slot, DECLARED["edit"])[0] == "failed_edit"
