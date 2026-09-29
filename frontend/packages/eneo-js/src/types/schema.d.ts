@@ -41707,6 +41707,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedSyncLogList"];
         };
       };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {

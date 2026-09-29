@@ -1,10 +1,13 @@
 """Real users, connections and space policy for integration access tests."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+from fastapi import FastAPI
+from fastapi.routing import APIRoute
 
 from eneo.actors import ActorFactory, ActorManager
 from eneo.integration.application.user_integration_service import UserIntegrationService
@@ -21,12 +24,34 @@ from eneo.integration.domain.repositories.tenant_sharepoint_app_repo import (
 from eneo.integration.domain.repositories.user_integration_repo import (
     UserIntegrationRepository,
 )
+from eneo.integration.presentation.integration_router import router
+from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleInDB
+from eneo.server.exception_handlers import add_exception_handlers
 from eneo.spaces.api.space_models import SpaceMember, SpaceRoleValue
 from eneo.spaces.space import Space
 from eneo.users.user import UserInDB
+
+
+@pytest.fixture
+def authenticated_integration_app() -> Callable[[Container], FastAPI]:
+    def create_app(container: Container) -> FastAPI:
+        app = FastAPI()
+        app.include_router(router, prefix="/integrations")
+        add_exception_handlers(app)
+        for route in router.routes:
+            if isinstance(route, APIRoute):
+                for dependency in route.dependant.dependencies:
+                    if (
+                        getattr(dependency.call, "__name__", "")
+                        == "_get_container_with_user"
+                    ):
+                        app.dependency_overrides[dependency.call] = lambda: container
+        return app
+
+    return create_app
 
 
 @dataclass

@@ -1956,6 +1956,12 @@ class SpaceRepository:
         if info_blob.tenant_id != self.user.tenant_id:
             return []
         source, source_id = knowledge_source_for(info_blob)
+        return await self.get_knowledge_source_read_access(source, source_id)
+
+    async def get_knowledge_source_read_access(
+        self, source: KnowledgeSource, source_id: UUID
+    ) -> list[SpaceAccessFacts]:
+        """Reader memberships for a source in this tenant, including distribution."""
         source_space_ids = source.spaces_seeing(source_id, self.user.tenant_id)
         user_group_ids = sa.select(UserGroups.id).where(
             UserGroups.id.in_(self.user.user_groups_ids),

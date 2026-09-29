@@ -7,7 +7,6 @@ from uuid import uuid4
 import pytest
 from dependency_injector import providers
 from fastapi import FastAPI
-from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 
 from eneo.integration.domain.entities.integration_preview import IntegrationPreview
@@ -17,10 +16,8 @@ from eneo.integration.domain.value_objects import IntegrationType
 from eneo.integration.infrastructure.preview_service.sharepoint_tree_service import (
     SharePointTreeService,
 )
-from eneo.integration.presentation.integration_router import router
 from eneo.main.container.container import Container
 from eneo.roles.permissions import Permission
-from eneo.server.exception_handlers import add_exception_handlers
 from eneo.spaces.api.space_models import SpaceMember, SpaceRoleValue
 
 
@@ -35,7 +32,7 @@ class BrowsingAPI:
 
 
 @pytest.fixture
-def browsing_api(integration_access, monkeypatch):
+def browsing_api(integration_access, monkeypatch, authenticated_integration_app):
     case = integration_access
     space_repo = AsyncMock()
     space_repo.one.return_value = case.space
@@ -86,17 +83,7 @@ def browsing_api(integration_access, monkeypatch):
         sharepoint_preview_service=providers.Object(preview),
         sharepoint_subscription_service=providers.Object(AsyncMock()),
     )
-    app = FastAPI()
-    app.include_router(router, prefix="/integrations")
-    add_exception_handlers(app)
-    for route in router.routes:
-        if isinstance(route, APIRoute):
-            for dependency in route.dependant.dependencies:
-                if (
-                    getattr(dependency.call, "__name__", "")
-                    == "_get_container_with_user"
-                ):
-                    app.dependency_overrides[dependency.call] = lambda: container
+    app = authenticated_integration_app(container)
     return BrowsingAPI(app, tokens, app_tokens, service_tokens, preview, tree)
 
 

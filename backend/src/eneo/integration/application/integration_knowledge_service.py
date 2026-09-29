@@ -26,6 +26,7 @@ from eneo.main.exceptions import (
 )
 from eneo.main.logging import get_logger
 from eneo.roles.permissions import Permission
+from eneo.spaces.space_repo import INTEGRATION_KNOWLEDGE_SOURCE
 
 if TYPE_CHECKING:
     from eneo.actors import ActorManager
@@ -146,6 +147,17 @@ class IntegrationKnowledgeService:
         )
         self.tenant_app_auth_service = tenant_app_auth_service
         self.service_account_auth_service = service_account_auth_service
+
+    async def require_sync_log_access(self, integration_knowledge_id: UUID) -> None:
+        """Sync history follows knowledge read access, not connection ownership."""
+        access = await self.space_repo.get_knowledge_source_read_access(
+            INTEGRATION_KNOWLEDGE_SOURCE, integration_knowledge_id
+        )
+        for space in access:
+            actor = self.actor_manager.get_space_actor(space)
+            if actor.can_read_space() and actor.can_read_integrations():
+                return
+        raise NotFoundException("Integration knowledge not found")
 
     async def _get_tenant_app_access_token(
         self, tenant_app: "TenantSharePointApp"

@@ -264,7 +264,7 @@ async def disconnect_user_integration(
     response_model=PaginatedSyncLogList,
     status_code=200,
     description="Get paginated sync history for an integration knowledge.",
-    responses=responses.get_responses([]),
+    responses=responses.get_responses([404]),
 )
 async def get_sync_logs(
     integration_knowledge_id: UUID,
@@ -275,6 +275,8 @@ async def get_sync_logs(
     ] = 10,
 ):
     """Get paginated sync history for an integration knowledge."""
+    service = container.integration_knowledge_service()
+    await service.require_sync_log_access(integration_knowledge_id)
     sync_log_repo = container.sync_log_repo()
 
     # Get total count
