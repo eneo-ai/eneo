@@ -8,7 +8,8 @@
   import type { SpaceSparse } from "@eneo/eneo-js";
   import { IconEdit } from "@eneo/icons/edit";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
-  import { Button, Dropdown } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
 
@@ -16,17 +17,25 @@
 </script>
 
 {#if space.permissions?.includes("edit")}
-  <Dropdown.Root>
-    <Dropdown.Trigger let:trigger asFragment>
-      <Button is={trigger} disabled={false} padding="icon">
-        <IconEllipsis></IconEllipsis>
-      </Button>
-    </Dropdown.Trigger>
-    <Dropdown.Menu let:item>
-      <Button is={item} href={localizeHref(`/spaces/${space.id}/settings`)} padding="icon-leading">
-        <IconEdit size="sm" />
-        {m.edit()}</Button
-      >
-    </Dropdown.Menu>
-  </Dropdown.Root>
+  <DropdownMenu.Root>
+    <DropdownMenu.Trigger>
+      {#snippet child({ props })}
+        <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
+          <IconEllipsis></IconEllipsis>
+        </Button>
+      {/snippet}
+    </DropdownMenu.Trigger>
+    <DropdownMenu.Content align="end">
+      <DropdownMenu.Item>
+        {#snippet child({ props })}
+          <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
+          <a {...props} href={localizeHref(`/spaces/${space.id}/settings`)}>
+            <IconEdit size="sm" />
+            {m.edit()}
+          </a>
+          <!-- eslint-enable svelte/no-navigation-without-resolve -->
+        {/snippet}
+      </DropdownMenu.Item>
+    </DropdownMenu.Content>
+  </DropdownMenu.Root>
 {/if}

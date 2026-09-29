@@ -1,26 +1,33 @@
 <script lang="ts">
+  import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { Page, Settings } from "$lib/components/layout";
+  import EditorPageHeader from "$lib/components/settings/EditorPageHeader.svelte";
+  import { guardUnsavedChanges } from "$lib/core/editing/guardUnsavedChanges";
+  import OpenFilesHelp from "$lib/features/assistants/components/OpenFilesHelp.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
-  import { hasPermission } from "$lib/core/hasPermission.js";
 
-  import { Button, Input, Tooltip } from "@eneo/ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { IconSparkles } from "@eneo/icons/sparkles";
-  import { afterNavigate, beforeNavigate, invalidate } from "$app/navigation";
+  import { invalidate } from "$app/navigation";
 
   import { initAssistantEditor } from "$lib/features/assistants/AssistantEditor.js";
-  import { fade } from "svelte/transition";
 
-  import AssistantSettingsAttachments from "./AssistantSettingsAttachments.svelte";
+  import AttachmentsEditor from "$lib/features/attachments/components/AttachmentsEditor.svelte";
+  import ConfigContextMeter from "$lib/features/assistants/components/ConfigContextMeter.svelte";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import SelectKnowledge from "$lib/features/knowledge/components/select/SelectKnowledge.svelte";
   import SelectMCPServers from "$lib/features/mcp/components/SelectMCPServers.svelte";
+  import PolicyFunctions from "$lib/features/mcp/components/PolicyFunctions.svelte";
+  import CapabilityToggle from "$lib/features/mcp/components/CapabilityToggle.svelte";
+  import { CAPABILITIES, getCapability } from "$lib/features/mcp/capabilities";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
   import PromptGuideModal from "$lib/features/prompt-guide/components/PromptGuideModal.svelte";
-  import dayjs from "dayjs";
   import PublishingSetting from "$lib/features/publishing/components/PublishingSetting.svelte";
-  import { page } from "$app/state";
   import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams.js";
   import {
     filterSupportedModelKwargs,
@@ -29,10 +36,9 @@
   import { m } from "$lib/paraglide/messages";
   import RetentionPolicyInput from "$lib/components/settings/RetentionPolicyInput.svelte";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
+  import { createIconEditor } from "$lib/features/icons/createIconEditor.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
   import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
-  import { Badge } from "$lib/components/ui/badge/index.js";
-  import { resolve } from "$app/paths";
   import {
     loadSkillBindingCatalogPage,
     loadSkillBindingPreview
@@ -41,6 +47,7 @@
   import { untrack } from "svelte";
 
   let { data } = $props();
+  const uid = $props.id();
 
   // Help assistants have logging permanently disabled (PRD §6); surface the
   // explanation in the security section on their edit page. `is_help_assistant`
@@ -50,24 +57,12 @@
     (data.assistant as { is_help_assistant?: boolean }).is_help_assistant ?? false
   );
 
-  // URL-only file handling is backed by originals in object storage. Without a
-  // connected store file text is always inlined, so the toggle is locked and
-  // says why, with a link on to the setup page for those who can act on it.
-  const objectStorageMissing = $derived(!data.settings.object_store_configured);
-  // The storage controls require the storage permission and live inside the
-  // admin area, so only users who can reach and use that page are pointed at it.
-  const canConfigureStorage = $derived(hasPermission(data.user)({ allOf: ["admin", "storage"] }));
-
   const {
     state: { currentSpace },
     refreshCurrentSpace
   } = getSpacesManager();
 
-  const {
-    state: { resource, update, currentChanges, isSaving },
-    saveChanges,
-    discardChanges
-  } = untrack(() =>
+  const editor = untrack(() =>
     initAssistantEditor({
       assistant: data.assistant,
       skillBindings: data.skillBindings.map((binding) => ({
@@ -86,8 +81,18 @@
       }
     })
   );
+  const {
+    state: { resource, update, currentChanges }
+  } = editor;
+  guardUnsavedChanges(editor);
 
   let cancelUploadsAndClearQueue = $state<() => void>(() => {});
+
+  // The editor only tracks completion_model.id, so resolve the full model (with its context
+  // window) from the space: the context meter then follows the picked model before saving.
+  const selectedCompletionModel = $derived(
+    $currentSpace.completion_models.find((model) => model.id === $update.completion_model?.id)
+  );
 
   async function createSkill(value: SkillFormValue) {
     return data.eneo.skills.create({ spaceId: $currentSpace.id, ...value });
@@ -116,54 +121,18 @@
     mcpEnforced ? (effectiveConfig?.available_mcp_servers ?? []) : undefined
   );
 
-  // Icon state
-  let currentIconId = $state<string | null>($resource.icon_id ?? null);
-  let iconUploading = $state(false);
-  let iconError = $state<string | null>(null);
-
-  function getIconUrl(id: string | null): string | null {
-    return id ? data.eneo.icons.url({ id }) : null;
-  }
-
-  let iconUrl = $derived(getIconUrl(currentIconId));
-
-  async function handleIconUpload(event: CustomEvent<File>) {
-    const file = event.detail;
-    iconUploading = true;
-    iconError = null;
-    try {
-      const newIcon = await data.eneo.icons.upload({ file });
+  let iconId = $state<string | null>($resource.icon_id ?? null);
+  const icon = createIconEditor({
+    iconId: () => iconId,
+    async setIconId(id) {
       await data.eneo.assistants.update({
         assistant: { id: $resource.id },
-        update: { icon_id: newIcon.id }
+        update: { icon_id: id }
       });
-      currentIconId = newIcon.id;
+      iconId = id;
       await refreshCurrentSpace("applications");
-    } catch (error) {
-      console.error("Failed to upload icon:", error);
-      iconError = m.avatar_upload_failed();
-    } finally {
-      iconUploading = false;
     }
-  }
-
-  async function handleIconDelete() {
-    iconError = null;
-    try {
-      if (currentIconId) {
-        await data.eneo.icons.delete({ id: currentIconId });
-      }
-      await data.eneo.assistants.update({
-        assistant: { id: $resource.id },
-        update: { icon_id: null }
-      });
-      currentIconId = null;
-      await refreshCurrentSpace("applications");
-    } catch (error) {
-      console.error("Failed to delete icon:", error);
-      iconError = m.avatar_delete_failed();
-    }
-  }
+  });
 
   let hasBehaviorChanges = $derived.by(() => {
     if (!$currentChanges.diff.completion_model_kwargs) return false;
@@ -207,29 +176,6 @@
         return m.prompt_guide_disabled_no_assignment();
     }
   }
-
-  beforeNavigate((navigate) => {
-    if ($currentChanges.hasUnsavedChanges && !confirm(m.unsaved_changes_warning())) {
-      navigate.cancel();
-      return;
-    }
-    // Discard changes that have been made, this is only important so we delete uploaded
-    // files that have not been saved to the assistant
-    discardChanges();
-  });
-
-  let showSavesChangedNotice = $state(false);
-
-  let previousRoute = $state(
-    untrack(
-      () =>
-        `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: data.assistant, tab: "chat" })}`
-    )
-  );
-  afterNavigate(({ from }) => {
-    if (page.url.searchParams.get("next") === "default") return;
-    if (from) previousRoute = from.url.toString();
-  });
 </script>
 
 <svelte:head>
@@ -239,52 +185,19 @@
 </svelte:head>
 
 <Page.Root>
-  <Page.Header>
-    <Page.Title
-      parent={{
-        title: $resource.name,
-        href: `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: data.assistant, tab: "chat" })}`
-      }}
-      title={m.edit()}
-    ></Page.Title>
-
-    <Page.Flex>
-      {#if $currentChanges.hasUnsavedChanges}
-        <Button
-          variant="destructive"
-          disabled={$isSaving}
-          on:click={() => {
-            cancelUploadsAndClearQueue();
-            discardChanges();
-          }}>{m.discard_all_changes()}</Button
-        >
-
-        <Button
-          variant="positive"
-          class="h-8 w-32 whitespace-nowrap"
-          on:click={async () => {
-            cancelUploadsAndClearQueue();
-
-            $update.completion_model_kwargs = filterSupportedModelKwargs(
-              $update.completion_model_kwargs,
-              $update.completion_model
-            );
-
-            if (!(await saveChanges())) return;
-            showSavesChangedNotice = true;
-            setTimeout(() => {
-              showSavesChangedNotice = false;
-            }, 5000);
-          }}>{$isSaving ? m.loading() : m.save_changes()}</Button
-        >
-      {:else}
-        {#if showSavesChangedNotice}
-          <p class="text-positive-stronger px-4" transition:fade>{m.all_changes_saved()}</p>
-        {/if}
-        <Button variant="primary" class="w-32" href={previousRoute}>{m.done()}</Button>
-      {/if}
-    </Page.Flex>
-  </Page.Header>
+  <EditorPageHeader
+    {editor}
+    resourceName={$resource.name}
+    backHref={`/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: data.assistant, tab: "chat" })}`}
+    beforeDiscard={cancelUploadsAndClearQueue}
+    beforeSave={() => {
+      cancelUploadsAndClearQueue();
+      $update.completion_model_kwargs = filterSupportedModelKwargs(
+        $update.completion_model_kwargs,
+        $update.completion_model
+      );
+    }}
+  />
 
   <Page.Main>
     <Settings.Page>
@@ -293,9 +206,6 @@
           title={m.name()}
           description={m.assistant_name_description()}
           hasChanges={$currentChanges.diff.name !== undefined}
-          revertFn={() => {
-            discardChanges("name");
-          }}
           let:aria
         >
           <input
@@ -310,9 +220,6 @@
           title={m.description()}
           description={m.assistant_description_description()}
           hasChanges={$currentChanges.diff.description !== undefined}
-          revertFn={() => {
-            discardChanges("description");
-          }}
           let:aria
         >
           <textarea
@@ -325,11 +232,11 @@
 
         <Settings.Row title={m.avatar()} description={m.avatar_description()}>
           <IconUpload
-            {iconUrl}
-            uploading={iconUploading}
-            error={iconError}
-            on:upload={handleIconUpload}
-            on:delete={handleIconDelete}
+            iconUrl={icon.url}
+            uploading={icon.uploading}
+            error={icon.error}
+            on:upload={(event) => icon.upload(event.detail)}
+            on:delete={icon.remove}
           />
         </Settings.Row>
       </Settings.Group>
@@ -339,29 +246,36 @@
           title={m.prompt()}
           description={m.describe_assistant_behavior()}
           hasChanges={$currentChanges.diff.prompt !== undefined}
-          revertFn={() => {
-            discardChanges("prompt");
-          }}
           fullWidth
           let:aria
         >
           <div slot="toolbar" class="text-secondary flex items-center gap-1">
             {#if promptGuideAvailability}
-              <Tooltip
-                text={promptGuideAvailability.available
-                  ? m.prompt_guide_button_tooltip()
-                  : promptGuideDisabledTooltip(promptGuideAvailability.disabled_reason)}
-              >
-                <Button
-                  variant="simple"
-                  padding="icon-leading"
-                  disabled={!promptGuideAvailability.available}
-                  on:click={() => (isModalOpen = true)}
-                >
-                  <IconSparkles />
-                  {m.prompt_guide_button()}
-                </Button>
-              </Tooltip>
+              {@const available = promptGuideAvailability.available}
+              <Tooltip.Root>
+                <Tooltip.Trigger onclick={available ? () => (isModalOpen = true) : undefined}>
+                  {#snippet child({ props })}
+                    {#if available}
+                      <Button {...props} variant="ghost">
+                        <IconSparkles />
+                        {m.prompt_guide_button()}
+                      </Button>
+                    {:else}
+                      <span {...props} class="inline-flex">
+                        <Button variant="ghost" disabled>
+                          <IconSparkles />
+                          {m.prompt_guide_button()}
+                        </Button>
+                      </span>
+                    {/if}
+                  {/snippet}
+                </Tooltip.Trigger>
+                <Tooltip.Content>
+                  {available
+                    ? m.prompt_guide_button_tooltip()
+                    : promptGuideDisabledTooltip(promptGuideAvailability.disabled_reason)}
+                </Tooltip.Content>
+              </Tooltip.Root>
             {/if}
             {#if !promptLocked}
               <PromptVersionDialog
@@ -370,7 +284,7 @@
                   return data.eneo.assistants.listPrompts({ id: data.assistant.id });
                 }}
                 onPromptSelected={(prompt) => {
-                  const restoredDate = dayjs(prompt.created_at).format("YYYY-MM-DD HH:mm");
+                  const restoredDate = formatDateTime(prompt.created_at);
                   $update.prompt.text = prompt.text;
                   $update.prompt.description = `Restored prompt from ${restoredDate}`;
                 }}
@@ -391,7 +305,7 @@
                 // apply-and-save path here.
                 $update.prompt.text = text;
                 $update.prompt.description = m.prompt_guide_apply_description({
-                  date: dayjs().format("YYYY-MM-DD HH:mm")
+                  date: formatDateTime(new Date())
                 });
                 isModalOpen = false;
                 // Mark the Q&A run completed — best-effort, must not block Apply.
@@ -429,7 +343,6 @@
               title={m.skills()}
               description={m.skills_editor_description()}
               hasChanges={$currentChanges.diff.skill_bindings !== undefined}
-              revertFn={() => discardChanges("skill_bindings")}
             >
               <SkillBindingsEditor
                 bind:bindings={$update.skill_bindings}
@@ -463,13 +376,18 @@
           title={m.attachments()}
           description={m.attach_further_instructions()}
           hasChanges={$currentChanges.diff.attachments !== undefined}
-          revertFn={() => {
-            cancelUploadsAndClearQueue();
-            discardChanges("attachments");
-          }}
         >
-          <AssistantSettingsAttachments bind:cancelUploadsAndClearQueue
-          ></AssistantSettingsAttachments>
+          <ConfigContextMeter
+            assistantId={$resource.id}
+            model={selectedCompletionModel}
+            prompt={$update.prompt.text}
+            attachments={$update.attachments}
+          />
+          <AttachmentsEditor
+            bind:attachments={$update.attachments}
+            allowedAttachments={$update.allowed_attachments}
+            bind:cancelUploadsAndClearQueue
+          />
         </Settings.Row>
 
         <Settings.Row
@@ -478,11 +396,6 @@
           hasChanges={$currentChanges.diff.groups !== undefined ||
             $currentChanges.diff.websites !== undefined ||
             $currentChanges.diff.integration_knowledge_list !== undefined}
-          revertFn={() => {
-            discardChanges("groups");
-            discardChanges("websites");
-            discardChanges("integration_knowledge_list");
-          }}
         >
           <div>
             <SelectKnowledge
@@ -500,11 +413,6 @@
           hasChanges={$currentChanges.diff.groups !== undefined ||
             $currentChanges.diff.websites !== undefined ||
             $currentChanges.diff.integration_knowledge_list !== undefined}
-          revertFn={() => {
-            discardChanges("groups");
-            discardChanges("websites");
-            discardChanges("integration_knowledge_list");
-          }}
         >
           <div>
             <SelectKnowledge
@@ -522,9 +430,6 @@
           title={m.completion_model()}
           description={m.this_model_will_be_used()}
           hasChanges={$currentChanges.diff.completion_model !== undefined}
-          revertFn={() => {
-            discardChanges("completion_model");
-          }}
           let:aria
         >
           {#if lockedModel}
@@ -549,9 +454,6 @@
           title={m.model_behaviour()}
           description={m.select_preset_behavior()}
           hasChanges={hasBehaviorChanges}
-          revertFn={() => {
-            discardChanges("completion_model_kwargs");
-          }}
           let:aria
         >
           <SelectBehaviourV2
@@ -567,9 +469,6 @@
             title={m.model_settings()}
             description={m.model_settings_description()}
             hasChanges={$currentChanges.diff.completion_model_kwargs !== undefined}
-            revertFn={() => {
-              discardChanges("completion_model_kwargs");
-            }}
           >
             <SelectModelSpecificSettings
               bind:kwArgs={$update.completion_model_kwargs}
@@ -579,41 +478,38 @@
         {/if}
 
         {#if data.settings.file_references_enabled}
+          <!-- Phrased as a capability, matching the personal-assistant policy:
+               "on" hands large files to the model as references it reads with a
+               tool, which the backend stores as inline_file_text = false. -->
           <Settings.Row
-            title={m.inline_file_text()}
-            description={m.inline_file_text_description()}
+            title={m.attachments_open_files_label()}
+            description=""
             hasChanges={$currentChanges.diff.inline_file_text !== undefined}
-            revertFn={() => {
-              discardChanges("inline_file_text");
-            }}
+            let:aria
           >
-            <svelte:fragment slot="title">
-              {#if objectStorageMissing}
-                <Badge variant="secondary" class="ml-2">{m.inline_file_text_locked()}</Badge>
-              {/if}
-            </svelte:fragment>
             <svelte:fragment slot="description">
-              {#if objectStorageMissing}
-                <p
-                  class="label-warning border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
-                >
-                  <span class="font-bold">{m.hint()}:&nbsp;</span
-                  >{m.inline_file_text_object_storage_hint()}
-                  {#if canConfigureStorage}
-                    <a href={resolve("/admin/storage")} class="underline"
-                      >{m.configure_object_storage()}</a
-                    >
-                  {/if}
-                </p>
-              {/if}
+              <OpenFilesHelp />
             </svelte:fragment>
             <div class="border-default flex h-14 border-b py-2">
-              <Input.RadioSwitch
-                bind:value={$update.inline_file_text}
-                disabled={objectStorageMissing}
-                labelTrue={m.enable()}
-                labelFalse={m.disable()}
-              ></Input.RadioSwitch>
+              <RadioGroup.Root
+                value={$update.inline_file_text ? "off" : "on"}
+                onValueChange={(v) => ($update.inline_file_text = v !== "on")}
+                class="grid w-full grid-cols-2 gap-2"
+                {...aria}
+              >
+                <Field.Label for={`${uid}-open-files-on`} class="font-normal">
+                  <Field.Field orientation="horizontal">
+                    <RadioGroup.Item value="on" id={`${uid}-open-files-on`} />
+                    <span>{m.enable()}</span>
+                  </Field.Field>
+                </Field.Label>
+                <Field.Label for={`${uid}-open-files-off`} class="font-normal">
+                  <Field.Field orientation="horizontal">
+                    <RadioGroup.Item value="off" id={`${uid}-open-files-off`} />
+                    <span>{m.disable()}</span>
+                  </Field.Field>
+                </Field.Label>
+              </RadioGroup.Root>
             </div>
           </Settings.Row>
         {/if}
@@ -622,33 +518,38 @@
           title={m.knowledge_mode()}
           description={m.knowledge_mode_description()}
           hasChanges={$currentChanges.diff.knowledge_mode !== undefined}
-          revertFn={() => {
-            discardChanges("knowledge_mode");
-          }}
+          let:aria
         >
           <div class="border-default flex h-14 border-b py-2">
-            <Input.RadioSwitch
-              bind:value={
-                () => $update.knowledge_mode !== "inject",
-                (v) => ($update.knowledge_mode = v ? "tool" : "inject")
-              }
-              labelTrue={m.knowledge_mode_tool()}
-              labelFalse={m.knowledge_mode_inject()}
-            ></Input.RadioSwitch>
+            <RadioGroup.Root
+              value={$update.knowledge_mode !== "inject" ? "on" : "off"}
+              onValueChange={(v) => ($update.knowledge_mode = v === "on" ? "tool" : "inject")}
+              class="grid w-full grid-cols-2 gap-2"
+              {...aria}
+            >
+              <Field.Label for={`${uid}-knowledge-mode-on`} class="font-normal">
+                <Field.Field orientation="horizontal">
+                  <RadioGroup.Item value="on" id={`${uid}-knowledge-mode-on`} />
+                  <span>{m.knowledge_mode_tool()}</span>
+                </Field.Field>
+              </Field.Label>
+              <Field.Label for={`${uid}-knowledge-mode-off`} class="font-normal">
+                <Field.Field orientation="horizontal">
+                  <RadioGroup.Item value="off" id={`${uid}-knowledge-mode-off`} />
+                  <span>{m.knowledge_mode_inject()}</span>
+                </Field.Field>
+              </Field.Label>
+            </RadioGroup.Root>
           </div>
         </Settings.Row>
       </Settings.Group>
 
-      <Settings.Group title={m.mcp_servers()}>
+      <Settings.Group title={m.tools()}>
         <Settings.Row
-          title={m.mcp_servers()}
+          title={m.tools()}
           description={m.select_mcp_servers_description()}
           hasChanges={$currentChanges.diff.mcp_servers !== undefined ||
             $currentChanges.diff.mcp_tools !== undefined}
-          revertFn={() => {
-            discardChanges("mcp_servers");
-            discardChanges("mcp_tools");
-          }}
         >
           {#if mcpEnforced}
             <!-- Policy GRANTs these servers to the personal assistant; they are
@@ -656,7 +557,11 @@
             {#if availableMCPServers && availableMCPServers.length > 0}
               <div class="border-default bg-secondary/30 divide-default divide-y rounded-lg border">
                 {#each availableMCPServers as server (server.id)}
-                  <p class="text-default px-3 py-2 text-sm font-medium">{server.name}</p>
+                  <!-- Capability providers are policy-granted capabilities, not
+                       servers: show the capability, never the provider. -->
+                  <p class="text-default px-3 py-2 text-sm font-medium">
+                    {getCapability(server.purpose)?.label() ?? server.name}
+                  </p>
                 {/each}
               </div>
             {:else}
@@ -678,6 +583,32 @@
         </Settings.Row>
       </Settings.Group>
 
+      {#if !mcpEnforced}
+        <Settings.Group title={m.capabilities()}>
+          <Settings.Row
+            title={m.capabilities()}
+            description={m.capabilities_row_description()}
+            hasChanges={$currentChanges.diff.enabled_capabilities !== undefined}
+          >
+            <div class="border-default overflow-hidden rounded-xl border">
+              {#each CAPABILITIES as capability (capability.purpose)}
+                <CapabilityToggle
+                  {capability}
+                  selectedModel={$update.completion_model}
+                  bind:enabledCapabilities={$update.enabled_capabilities}
+                />
+              {/each}
+            </div>
+          </Settings.Row>
+        </Settings.Group>
+      {:else if effectiveConfig}
+        <Settings.Group title={m.capabilities()}>
+          <Settings.Row title={m.capabilities()} description={m.functions_policy_description()}>
+            <PolicyFunctions config={effectiveConfig} selectedModel={$update.completion_model} />
+          </Settings.Row>
+        </Settings.Group>
+      {/if}
+
       <Settings.Group title={m.security_and_privacy()}>
         {#if isHelpAssistant}
           <p
@@ -688,9 +619,6 @@
         {/if}
         <Settings.Row
           hasChanges={$currentChanges.diff.data_retention_days !== undefined}
-          revertFn={() => {
-            discardChanges("data_retention_days");
-          }}
           title={m.conversation_retention_title()}
           description={m.conversation_retention_assistant_description()}
           let:labelId
@@ -738,26 +666,45 @@
 
           <Settings.Row
             hasChanges={$currentChanges.diff.insight_enabled !== undefined}
-            revertFn={() => {
-              discardChanges("insight_enabled");
-            }}
             title={m.insights()}
             description={m.insights_description()}
+            let:aria
           >
             <div class="border-default flex h-14 border-b py-2">
-              <Tooltip
-                text={data.assistant.permissions?.includes("insight_toggle")
-                  ? undefined
-                  : m.only_space_admins_toggle()}
-                class="w-full"
-              >
-                <Input.RadioSwitch
-                  bind:value={$update.insight_enabled}
-                  labelTrue={m.enable_insights()}
-                  labelFalse={m.disable_insights()}
+              {#snippet insightSwitch()}
+                <RadioGroup.Root
+                  value={$update.insight_enabled ? "on" : "off"}
+                  onValueChange={(v) => ($update.insight_enabled = v === "on")}
                   disabled={!data.assistant.permissions?.includes("insight_toggle")}
-                ></Input.RadioSwitch>
-              </Tooltip>
+                  class="grid w-full grid-cols-2 gap-2"
+                  {...aria}
+                >
+                  <Field.Label for={`${uid}-insights-on`} class="font-normal">
+                    <Field.Field orientation="horizontal">
+                      <RadioGroup.Item value="on" id={`${uid}-insights-on`} />
+                      <span>{m.enable_insights()}</span>
+                    </Field.Field>
+                  </Field.Label>
+                  <Field.Label for={`${uid}-insights-off`} class="font-normal">
+                    <Field.Field orientation="horizontal">
+                      <RadioGroup.Item value="off" id={`${uid}-insights-off`} />
+                      <span>{m.disable_insights()}</span>
+                    </Field.Field>
+                  </Field.Label>
+                </RadioGroup.Root>
+              {/snippet}
+              {#if data.assistant.permissions?.includes("insight_toggle")}
+                {@render insightSwitch()}
+              {:else}
+                <Tooltip.Root>
+                  <Tooltip.Trigger>
+                    {#snippet child({ props })}
+                      <div {...props} class="w-full">{@render insightSwitch()}</div>
+                    {/snippet}
+                  </Tooltip.Trigger>
+                  <Tooltip.Content>{m.only_space_admins_toggle()}</Tooltip.Content>
+                </Tooltip.Root>
+              {/if}
             </div>
           </Settings.Row>
         </Settings.Group>

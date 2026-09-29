@@ -242,8 +242,7 @@ describe("ChatService turn diagnostics", () => {
             files: [],
             generated_files: [],
             references: [],
-            tools: { assistants: [] },
-            web_search_references: []
+            tools: { assistants: [] }
           });
           callbacks.onToolCall({
             session_id: "session-1",
@@ -292,7 +291,8 @@ describe("ChatService turn diagnostics", () => {
         order: 1,
         serverName: "warehouse",
         toolName: "query",
-        status: "complete"
+        status: "complete",
+        usage: null
       }
     ]);
   });
@@ -390,5 +390,76 @@ describe("ChatService turn diagnostics", () => {
     await vi.waitFor(() => expect(chat.pendingDiagnosticsMessageIds).toEqual([]));
     expect(chat.currentConversation.messages.at(-1)?.answer).toBe("Live answer");
     expect(get).not.toHaveBeenCalled();
+  });
+});
+
+describe("ChatService independent capabilities", () => {
+  it("sends capability opt-outs separately from external server IDs", async () => {
+    const ask = completedAsk();
+    const chat = chatService(vi.fn(), { ask });
+    await chat.askQuestion("Hello", [], undefined, undefined, undefined, [
+      "ordinary-server",
+      "capability:image_generation"
+    ]);
+    expect(ask.mock.calls[0][0]).toMatchObject({
+      disabledMcpServerIds: ["ordinary-server"],
+      disabledCapabilities: ["image_generation"]
+    });
+  });
+
+  it("refreshes a partner when only capability availability changes", () => {
+    const chat = chatService();
+    chat.changeChatPartner(
+      assistantPartner({
+        enabled_capabilities: ["image_generation"],
+        available_capabilities: [
+          { purpose: "image_generation", available: false, reason: "no_provider" }
+        ]
+      })
+    );
+    expect(chat.partner).toMatchObject({
+      enabled_capabilities: ["image_generation"],
+      available_capabilities: [{ available: false }]
+    });
+  });
+});
+
+describe("ChatService citation withholding", () => {
+  it("shows a finished citation at once and holds only the unfinished one", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test double for the stream callbacks
+    let activeCallbacks: any;
+    let finishStream: () => void = () => {};
+    const ask = vi.fn().mockImplementationOnce(
+      ({ callbacks }) =>
+        new Promise<void>((resolve) => {
+          activeCallbacks = callbacks;
+          callbacks.onFirstChunk({
+            id: "message-1",
+            session_id: "session-1",
+            answer: "",
+            references: []
+          });
+          finishStream = resolve;
+        })
+    );
+    const chat = chatService(vi.fn(), { ask });
+    const request = chat.askQuestion("Hello");
+    await vi.waitFor(() => expect(activeCallbacks).toBeDefined());
+    const answer = () => chat.currentConversation.messages.at(-1)?.answer;
+
+    // One provider chunk carries a complete citation and the start of the next.
+    activeCallbacks.onText({
+      session_id: "session-1",
+      answer: 'Se <inref id="aaaaaaaa"/> och <inref id="bbbb',
+      references: []
+    });
+    expect(answer()).toBe('Se <inref id="aaaaaaaa"/> och ');
+
+    activeCallbacks.onText({ session_id: "session-1", answer: 'bbbb"/> för mer.', references: [] });
+    expect(answer()).toBe('Se <inref id="aaaaaaaa"/> och <inref id="bbbbbbbb"/> för mer.');
+
+    finishStream();
+    await request;
+    expect(answer()).toBe('Se <inref id="aaaaaaaa"/> och <inref id="bbbbbbbb"/> för mer.');
   });
 });

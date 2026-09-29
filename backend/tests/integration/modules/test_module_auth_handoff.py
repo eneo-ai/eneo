@@ -142,8 +142,8 @@ async def create_api_key(
     return response.json()
 
 
-def client_config_path(*, tenant_id, module_id) -> str:
-    return f"/api/v1/modules/{tenant_id}/{module_id}/client-config/"
+def module_installation_path(module_key: str) -> str:
+    return f"/api/v1/admin/modules/{module_key}/"
 
 
 @pytest.mark.asyncio
@@ -212,13 +212,12 @@ async def test_ticket_rejects_module_not_enabled_for_callers_tenant(
 
 
 @pytest.mark.asyncio
-async def test_partial_config_patch_preserves_key_and_full_handoff_succeeds(
+async def test_complete_reconfiguration_and_full_handoff_succeeds(
     app,
     client,
     admin_token,
     admin_user,
     enabled_module,
-    test_settings,
 ):
     service_key = await create_api_key(
         client,
@@ -227,33 +226,34 @@ async def test_partial_config_patch_preserves_key_and_full_handoff_succeeds(
         permission=ApiKeyPermission.WRITE,
     )
     service_key_id = service_key["api_key"]["id"]
-    config_path = client_config_path(
-        tenant_id=admin_user.tenant_id, module_id=enabled_module.id
-    )
-    sysadmin_headers = {"X-API-Key": test_settings.eneo_super_duper_api_key}
+    config_path = module_installation_path(enabled_module.name)
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
 
-    initial = await client.patch(
+    initial = await client.put(
         config_path,
         json={
             "redirect_uris": [REDIRECT_URI],
             "service_key_id": service_key_id,
         },
-        headers=sysadmin_headers,
+        headers=admin_headers,
     )
     assert initial.status_code == 200, initial.text
 
     partial = await _request_at_transaction_boundary(
         app,
-        method="PATCH",
+        method="PUT",
         path=config_path,
-        payload={"redirect_uris": [UPDATED_REDIRECT_URI]},
-        headers=sysadmin_headers,
+        payload={
+            "redirect_uris": [UPDATED_REDIRECT_URI],
+            "service_key_id": service_key_id,
+        },
+        headers=admin_headers,
     )
     assert partial.status_code == 200, partial.text
     assert partial.json()["service_key_id"] == service_key_id
 
     # This is a new HTTP request and therefore a separate database session. It
-    # must observe the PATCH commit immediately, before any response is exposed.
+    # must observe the PUT commit immediately, before any response is exposed.
     ticket_response = await _request_at_transaction_boundary(
         app,
         method="POST",
@@ -298,9 +298,7 @@ async def test_partial_config_patch_preserves_key_and_full_handoff_succeeds(
 async def test_token_refresh_slides_window_inside_fixed_session_ceiling(
     client,
     admin_token,
-    admin_user,
     enabled_module,
-    test_settings,
 ):
     service_key = await create_api_key(
         client,
@@ -308,13 +306,13 @@ async def test_token_refresh_slides_window_inside_fixed_session_ceiling(
         ownership=ApiKeyOwnership.SERVICE,
         permission=ApiKeyPermission.WRITE,
     )
-    config = await client.patch(
-        client_config_path(tenant_id=admin_user.tenant_id, module_id=enabled_module.id),
+    config = await client.put(
+        module_installation_path(enabled_module.name),
         json={
             "redirect_uris": [REDIRECT_URI],
             "service_key_id": service_key["api_key"]["id"],
         },
-        headers={"X-API-Key": test_settings.eneo_super_duper_api_key},
+        headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert config.status_code == 200, config.text
 
@@ -379,7 +377,6 @@ async def test_client_config_rejects_revoked_key_and_preserves_prior_binding(
     admin_token,
     admin_user,
     enabled_module,
-    test_settings,
 ):
     """A dead key must be refused at binding time, not discovered at login.
 
@@ -392,18 +389,16 @@ async def test_client_config_rejects_revoked_key_and_preserves_prior_binding(
         ownership=ApiKeyOwnership.SERVICE,
         permission=ApiKeyPermission.WRITE,
     )
-    config_path = client_config_path(
-        tenant_id=admin_user.tenant_id, module_id=enabled_module.id
-    )
-    sysadmin_headers = {"X-API-Key": test_settings.eneo_super_duper_api_key}
+    config_path = module_installation_path(enabled_module.name)
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
 
-    initial = await client.patch(
+    initial = await client.put(
         config_path,
         json={
             "redirect_uris": [REDIRECT_URI],
             "service_key_id": active_key["api_key"]["id"],
         },
-        headers=sysadmin_headers,
+        headers=admin_headers,
     )
     assert initial.status_code == 200, initial.text
 
@@ -420,10 +415,13 @@ async def test_client_config_rejects_revoked_key_and_preserves_prior_binding(
     )
     assert revoke.status_code == 200, revoke.text
 
-    rejected = await client.patch(
+    rejected = await client.put(
         config_path,
-        json={"service_key_id": revoked_key["api_key"]["id"]},
-        headers=sysadmin_headers,
+        json={
+            "redirect_uris": [REDIRECT_URI],
+            "service_key_id": revoked_key["api_key"]["id"],
+        },
+        headers=admin_headers,
     )
     assert rejected.status_code == 400, rejected.text
     assert "revoked" in rejected.json()["message"].lower()
@@ -461,37 +459,6 @@ async def test_client_config_rejects_revoked_key_and_preserves_prior_binding(
 
 
 @pytest.mark.asyncio
-async def test_legacy_non_url_safe_module_key_cannot_be_broker_enabled(
-    client,
-    db_container,
-    admin_user,
-    test_settings,
-):
-    """A pre-restriction row like 'reports/v2' can never reach the
-    path-segment session and refresh routes, so broker-enabling it must be
-    refused up front instead of failing at the first token renewal."""
-    legacy_key = f"reports/v2-{uuid4().hex[:6]}"
-    async with db_container() as container:
-        # model_construct skips validation, mirroring a row created before
-        # the URL-safe restriction existed.
-        legacy_module = await container.module_repo().add(
-            ModuleCreate.model_construct(name=legacy_key)
-        )
-        await container.tenant_repo().enable_module(
-            tenant_id=admin_user.tenant_id, module_id=legacy_module.id
-        )
-
-    response = await client.patch(
-        client_config_path(tenant_id=admin_user.tenant_id, module_id=legacy_module.id),
-        json={"redirect_uris": [REDIRECT_URI]},
-        headers={"X-API-Key": test_settings.eneo_super_duper_api_key},
-    )
-
-    assert response.status_code == 400, response.text
-    assert "url-safe" in response.json()["message"].lower()
-
-
-@pytest.mark.asyncio
 async def test_stale_module_token_rejected_after_email_moves_to_replacement_account(
     client,
     db_container,
@@ -499,7 +466,6 @@ async def test_stale_module_token_rejected_after_email_moves_to_replacement_acco
     admin_token,
     admin_user,
     enabled_module,
-    test_settings,
 ):
     """A module token must die with the account it was minted for.
 
@@ -513,13 +479,13 @@ async def test_stale_module_token_rejected_after_email_moves_to_replacement_acco
         ownership=ApiKeyOwnership.SERVICE,
         permission=ApiKeyPermission.WRITE,
     )
-    config = await client.patch(
-        client_config_path(tenant_id=admin_user.tenant_id, module_id=enabled_module.id),
+    config = await client.put(
+        module_installation_path(enabled_module.name),
         json={
             "redirect_uris": [REDIRECT_URI],
             "service_key_id": service_key["api_key"]["id"],
         },
-        headers={"X-API-Key": test_settings.eneo_super_duper_api_key},
+        headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert config.status_code == 200, config.text
 
@@ -592,12 +558,10 @@ async def test_stale_module_token_rejected_after_email_moves_to_replacement_acco
         (ApiKeyOwnership.SERVICE, ApiKeyPermission.READ),
     ],
 )
-async def test_client_config_rejects_key_that_cannot_exchange(
+async def test_module_installation_rejects_key_that_cannot_exchange(
     client,
     admin_token,
-    admin_user,
     enabled_module,
-    test_settings,
     ownership,
     permission,
 ):
@@ -608,22 +572,25 @@ async def test_client_config_rejects_key_that_cannot_exchange(
         permission=permission,
     )
 
-    response = await client.patch(
-        client_config_path(tenant_id=admin_user.tenant_id, module_id=enabled_module.id),
-        json={"service_key_id": api_key["api_key"]["id"]},
-        headers={"X-API-Key": test_settings.eneo_super_duper_api_key},
+    response = await client.put(
+        module_installation_path(enabled_module.name),
+        json={
+            "redirect_uris": [REDIRECT_URI],
+            "service_key_id": api_key["api_key"]["id"],
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
     )
 
     assert response.status_code == 400, response.text
 
 
 @pytest.mark.asyncio
-async def test_client_config_rejects_key_from_another_tenant(
+async def test_module_installation_rejects_key_from_another_tenant(
     client,
     db_container,
+    admin_token,
     admin_user,
     enabled_module,
-    test_settings,
 ):
     async with db_container() as container:
         other_tenant = await container.tenant_repo().add(
@@ -647,26 +614,28 @@ async def test_client_config_rejects_key_from_another_tenant(
             state=ApiKeyState.ACTIVE.value,
         )
 
-    response = await client.patch(
-        client_config_path(tenant_id=admin_user.tenant_id, module_id=enabled_module.id),
-        json={"service_key_id": str(other_key.id)},
-        headers={"X-API-Key": test_settings.eneo_super_duper_api_key},
+    response = await client.put(
+        module_installation_path(enabled_module.name),
+        json={
+            "redirect_uris": [REDIRECT_URI],
+            "service_key_id": str(other_key.id),
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
     )
 
     assert response.status_code == 400, response.text
 
 
 @pytest.mark.asyncio
-async def test_empty_client_config_patch_is_rejected(
+async def test_incomplete_module_installation_is_rejected(
     client,
-    admin_user,
+    admin_token,
     enabled_module,
-    test_settings,
 ):
-    response = await client.patch(
-        client_config_path(tenant_id=admin_user.tenant_id, module_id=enabled_module.id),
+    response = await client.put(
+        module_installation_path(enabled_module.name),
         json={},
-        headers={"X-API-Key": test_settings.eneo_super_duper_api_key},
+        headers={"Authorization": f"Bearer {admin_token}"},
     )
 
-    assert response.status_code == 400, response.text
+    assert response.status_code == 422, response.text

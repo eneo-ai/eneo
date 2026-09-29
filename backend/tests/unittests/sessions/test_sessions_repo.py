@@ -7,6 +7,45 @@ from sqlalchemy.dialects import postgresql
 from eneo.sessions.sessions_repo import OwnedChatPartner, SessionRepository
 
 
+async def test_hydrates_all_info_blobs_without_file_loader(monkeypatch):
+    blobs = [MagicMock(), MagicMock()]
+    hydrate = AsyncMock()
+    monkeypatch.setattr(
+        "eneo.sessions.sessions_repo.InfoBlobRepository.hydrate_original_availability",
+        hydrate,
+    )
+    repo = SessionRepository(AsyncMock())
+
+    await repo._hydrate_sessions(
+        [
+            SimpleNamespace(
+                questions=[SimpleNamespace(info_blobs=blobs, questions_files=[])]
+            )
+        ]
+    )
+
+    hydrate.assert_awaited_once_with(blobs)
+
+
+async def test_update_hydrates_info_blob_availability(monkeypatch):
+    blob = MagicMock()
+    updated = SimpleNamespace(
+        questions=[SimpleNamespace(info_blobs=[blob], questions_files=[])]
+    )
+    hydrate = AsyncMock()
+    monkeypatch.setattr(
+        "eneo.sessions.sessions_repo.InfoBlobRepository.hydrate_original_availability",
+        hydrate,
+    )
+    repo = SessionRepository(AsyncMock())
+    repo.delegate.update = AsyncMock(return_value=updated)
+
+    result = await repo.update(MagicMock())
+
+    assert result is updated
+    hydrate.assert_awaited_once_with([blob])
+
+
 async def test_owned_chat_partner_read_is_scalar_tenant_and_owner_scoped():
     session_id = uuid4()
     tenant_id = uuid4()

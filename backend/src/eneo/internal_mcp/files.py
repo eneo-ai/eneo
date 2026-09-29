@@ -24,19 +24,21 @@ from uuid import UUID
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import TextContent
 
-from eneo.authentication.signed_urls import (
-    parse_file_reference_url,
-    verify_file_original_download_token,
-)
-from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import FileType
 from eneo.internal_mcp.constants import FILES_SERVER_NAME
+from eneo.internal_mcp.file_references import (
+    INVALID_LINK_MESSAGE,
+    NOT_A_REFERENCE_MESSAGE,
+    NOT_FOUND_MESSAGE,
+    FileReferenceRejected,
+    load_referenced_file,
+    verify_reference_url,
+)
 from eneo.internal_mcp.foundation import (
     build_ephemeral_server,
     default_page_cap,
     internal_tool_context,
 )
-from eneo.main.exceptions import NotFoundException
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 
 logger = logging.getLogger(__name__)
@@ -51,15 +53,14 @@ mcp = FastMCP(
     ),
 )
 
-NOT_A_REFERENCE_MESSAGE = (
-    'That is not an Eneo attachment URL. Pass the exact "url" value from an '
-    "attached-file reference entry, without modifying it."
-)
-INVALID_LINK_MESSAGE = (
-    "The attachment link is invalid or has expired. Ask the user to attach "
-    "the file again to get a fresh link."
-)
-NOT_FOUND_MESSAGE = "No attached file matches that URL."
+__all__ = [
+    "INVALID_LINK_MESSAGE",
+    "NOT_A_REFERENCE_MESSAGE",
+    "NOT_FOUND_MESSAGE",
+    "build_files_mcp_server",
+    "mcp",
+    "read_file",
+]
 
 
 def _text(message: str) -> list[TextContent]:
@@ -134,38 +135,19 @@ async def read_file(
     pass it the same url; if it fails or no such tool exists, use this one
     rather than telling the user the file cannot be read.
     """
-    parsed = parse_file_reference_url(url)
-    if parsed is None:
-        return _text(NOT_A_REFERENCE_MESSAGE)
-    file_id, token = parsed
-
-    payload = verify_file_original_download_token(token)
-    if payload is None or payload.get("file_id") != str(file_id):
-        return _text(INVALID_LINK_MESSAGE)
+    try:
+        file_id, payload = verify_reference_url(url)
+    except FileReferenceRejected as exc:
+        return _text(str(exc))
 
     offset = max(0, offset)
     async with internal_tool_context(ctx) as tool_ctx:
         try:
-            metadata = await tool_ctx.container.file_repo().get_by_id(file_id)
-        except NotFoundException:
-            # Missing and inaccessible must be indistinguishable to the
-            # caller (no existence oracle).
-            logger.info("[FILES] read_file file=%s -> not found", file_id)
-            return _text(NOT_FOUND_MESSAGE)
-        if (
-            payload.get("tenant_id") != str(metadata.tenant_id)
-            or metadata.tenant_id != tool_ctx.user.tenant_id
-        ):
-            logger.info("[FILES] read_file file=%s -> tenant mismatch", file_id)
-            return _text(NOT_FOUND_MESSAGE)
-        # Bytes moved to object content; hydrate the extracted text the same
-        # way the completion layer does. Authorization happened above: the
-        # signed token plus tenant match gates access.
-        loader = FileContentLoader(
-            repo=tool_ctx.container.file_repo(),
-            object_content=tool_ctx.container.object_content_service(),
-        )
-        file = (await loader.load([metadata]))[metadata.id]
+            file = await load_referenced_file(
+                file_id, payload, tool_ctx, log_tag="[FILES] read_file"
+            )
+        except FileReferenceRejected as exc:
+            return _text(str(exc))
 
     logger.info(
         "[FILES] read_file file=%s type=%s offset=%d size=%d",

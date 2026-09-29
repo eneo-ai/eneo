@@ -126,6 +126,8 @@ from eneo.help_assistants.infrastructure.org_space_assistant_role_repo import (
 )
 from eneo.icons.icon_repo import IconRepository
 from eneo.icons.icon_service import IconService
+from eneo.image_models.application import ImageModelCRUDService
+from eneo.image_models.domain import ImageModelRepository
 from eneo.info_blobs.info_blob_chunk_repo import InfoBlobChunkRepo
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.info_blobs.info_blob_service import InfoBlobService
@@ -283,6 +285,7 @@ from eneo.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
 )
 from eneo.modules.module_auth import ModuleAuthBroker
+from eneo.modules.module_installation_service import ModuleInstallationService
 from eneo.modules.module_repo import ModuleRepository
 from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.runtime import object_content_runtime
@@ -393,6 +396,8 @@ from eneo.websites.infrastructure.update_website_size_service import (
     UpdateWebsiteSizeService,
 )
 from eneo.websites.infrastructure.website_cleaner_service import WebsiteCleanerService
+from eneo.whats_new.whats_new_repo import WhatsNewRepository
+from eneo.whats_new.whats_new_service import WhatsNewService
 from eneo.worker.task_manager import TaskManager
 from eneo.worker.tenant_concurrency import TenantConcurrencyLimiter
 from eneo.workflows.step_repo import StepRepository
@@ -646,6 +651,7 @@ class Container(containers.DeclarativeContainer):
         TenantRepository, session=session, encryption_service=encryption_service
     )
     settings_repo = providers.Factory(SettingsRepository, session=session)
+    whats_new_repo = providers.Factory(WhatsNewRepository, session=session)
     prompt_repo = providers.Factory(
         PromptRepository, session=session, factory=prompt_factory
     )
@@ -694,6 +700,9 @@ class Container(containers.DeclarativeContainer):
     )
     transcription_model_repo = providers.Factory(
         TranscriptionModelRepository, session=session, user=user
+    )
+    image_model_repo = providers.Factory(
+        ImageModelRepository, session=session, user=user
     )
     embedding_model_repo = providers.Factory(
         AdminEmbeddingModelsService, session=session
@@ -918,6 +927,12 @@ class Container(containers.DeclarativeContainer):
         transcription_model_repo=transcription_model_repo,
         security_classification_repo=security_classification_repo,
     )
+    image_model_crud_service = providers.Factory(
+        ImageModelCRUDService,
+        user=user,
+        image_model_repo=image_model_repo,
+        security_classification_repo=security_classification_repo,
+    )
     embedding_model_crud_service = providers.Factory(
         EmbeddingModelCRUDService,
         user=user,
@@ -1100,6 +1115,11 @@ class Container(containers.DeclarativeContainer):
         AllowedOriginService,
         user=user,
         repo=allowed_origin_repo,
+    )
+    whats_new_service = providers.Factory(
+        WhatsNewService,
+        user=user,
+        repo=whats_new_repo,
     )
     role_service = providers.Factory(
         RolesService, user=user, repo=role_repo, user_repo=user_repo
@@ -1348,6 +1368,14 @@ class Container(containers.DeclarativeContainer):
         auth_service=auth_service,
         audit_service=audit_service,
     )
+    module_installation_service = providers.Factory(
+        ModuleInstallationService,
+        user=user,
+        module_repo=module_repo,
+        tenant_service=tenant_service,
+        module_auth_broker=module_auth_broker,
+        audit_service=audit_service,
+    )
     admin_service = providers.Factory(
         AdminService,
         user=user,
@@ -1382,6 +1410,8 @@ class Container(containers.DeclarativeContainer):
         mcp_server_tool_repo=mcp_server_tool_repo,
         user=user,
         encryption_service=encryption_service,
+        user_groups_repo=user_groups_repo,
+        image_model_repo=image_model_repo,
     )
     tenant_integration_service = providers.Factory(
         TenantIntegrationService,

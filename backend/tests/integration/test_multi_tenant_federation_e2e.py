@@ -15,6 +15,7 @@ from httpx import AsyncClient
 from eneo.authentication.auth_service import AuthService
 from eneo.database.database import sessionmanager
 from eneo.database.tables.tenant_table import Tenants
+from eneo.main.config import get_settings
 from eneo.tenants.tenant_repo import TenantRepository
 
 
@@ -442,7 +443,9 @@ async def test_patch_federation_rejects_null_required_field(
     )
 
     assert response.status_code == 422
-    assert "PATCH does not allow null for: client_id" in response.text
+    assert response.json() == {
+        "detail": [{"loc": ["body"], "type": "value_error", "msg": "Invalid value"}]
+    }
 
 
 @pytest.mark.integration
@@ -559,7 +562,7 @@ async def test_federation_callback_enforces_allowed_domains(
         super_admin_token,
         tenant["id"],
         allowed_email,
-        password="ValidPassw0rd!",
+        password="ValidPassw0rd123!",
     )
 
     token_email_map = {
@@ -650,7 +653,7 @@ async def test_federation_callback_rejects_tampered_state(
         super_admin_token,
         tenant["id"],
         f"user@{slug}.gov",
-        password="ValidPassw0rd!",
+        password="ValidPassw0rd123!",
     )
 
     monkeypatch.setattr(
@@ -751,7 +754,7 @@ async def test_federation_callback_accepts_future_iat_within_leeway(
         super_admin_token,
         tenant["id"],
         allowed_email,
-        password="ValidPassw0rd!",
+        password="ValidPassw0rd123!",
     )
 
     state_payload = await _initiate(client, tenant["slug"])
@@ -840,7 +843,7 @@ async def test_federation_callback_rejects_future_iat_beyond_leeway(
         super_admin_token,
         tenant["id"],
         allowed_email,
-        password="ValidPassw0rd!",
+        password="ValidPassw0rd123!",
     )
 
     state_payload = await _initiate(client, tenant["slug"])
@@ -900,7 +903,7 @@ async def test_federation_callback_rejects_redirect_mismatch_without_grace(
         super_admin_token,
         tenant["id"],
         allowed_email,
-        password="ValidPassw0rd!",
+        password="ValidPassw0rd123!",
     )
 
     monkeypatch.setattr(
@@ -909,11 +912,15 @@ async def test_federation_callback_rejects_redirect_mismatch_without_grace(
         lambda *_, **__: {"email": allowed_email},
     )
 
-    original_grace = test_settings.oidc_redirect_grace_period_seconds
-    original_strict = test_settings.strict_oidc_redirect_validation
+    # Mutate the live singleton the app reads, not only the fixture object:
+    # if an earlier test left a copied Settings installed, the two differ.
+    live_settings = get_settings()
+    assert live_settings is test_settings
+    original_grace = live_settings.oidc_redirect_grace_period_seconds
+    original_strict = live_settings.strict_oidc_redirect_validation
     try:
-        test_settings.oidc_redirect_grace_period_seconds = 0
-        test_settings.strict_oidc_redirect_validation = True
+        live_settings.oidc_redirect_grace_period_seconds = 0
+        live_settings.strict_oidc_redirect_validation = True
 
         await _configure_federation(
             client,
@@ -988,8 +995,8 @@ async def test_federation_callback_rejects_redirect_mismatch_without_grace(
         assert response.status_code == 400
         assert "redirect" in response.json()["detail"].lower()
     finally:
-        test_settings.oidc_redirect_grace_period_seconds = original_grace
-        test_settings.strict_oidc_redirect_validation = original_strict
+        live_settings.oidc_redirect_grace_period_seconds = original_grace
+        live_settings.strict_oidc_redirect_validation = original_strict
 
 
 @pytest.mark.integration
@@ -1037,7 +1044,7 @@ async def test_federation_callback_allows_recent_config_change_within_grace(
         super_admin_token,
         tenant["id"],
         allowed_email,
-        password="ValidPassw0rd!",
+        password="ValidPassw0rd123!",
     )
 
     monkeypatch.setattr(

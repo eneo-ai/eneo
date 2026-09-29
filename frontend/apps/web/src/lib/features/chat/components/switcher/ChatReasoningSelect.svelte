@@ -4,7 +4,7 @@
   import { selectEffectiveChatModel } from "$lib/features/chat/selectEffectiveChatModel";
   import { getModelKwargOptionLabel } from "$lib/features/ai-models/ModelKwargCapabilities";
   import { m } from "$lib/paraglide/messages";
-  import Brain from "lucide-svelte/icons/brain";
+  import Brain from "@lucide/svelte/icons/brain";
 
   const DEFAULT_VALUE = "default";
   const VALUE_PREFIX = "reasoning:";
@@ -32,6 +32,12 @@
     if (storedEffort && options.includes(storedEffort)) return storedEffort;
     const policyDefault = effectiveConfig?.default_reasoning_effort;
     return policyDefault && options.includes(policyDefault) ? policyDefault : null;
+  });
+  const policyDefaultLabel = $derived.by(() => {
+    const policyDefault = effectiveConfig?.default_reasoning_effort;
+    return policyDefault && options.includes(policyDefault)
+      ? getModelKwargOptionLabel(policyDefault)
+      : null;
   });
   const selectedValue = $derived(
     storedEffort && options.includes(storedEffort)
@@ -67,6 +73,9 @@
         <Select.GroupHeading>{m.reasoning_effort()}</Select.GroupHeading>
         <Select.Item value={DEFAULT_VALUE} label={m.governance_reasoning_organization_default()}>
           {m.governance_reasoning_organization_default()}
+          {#if policyDefaultLabel}
+            <span class="text-muted-foreground">· {policyDefaultLabel}</span>
+          {/if}
         </Select.Item>
         {#each options as option (option)}
           <Select.Item value={`${VALUE_PREFIX}${option}`} label={getModelKwargOptionLabel(option)}>

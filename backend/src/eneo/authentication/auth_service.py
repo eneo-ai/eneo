@@ -1,6 +1,4 @@
 import base64
-import secrets
-import string
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
@@ -17,6 +15,7 @@ from eneo.authentication.auth_models import (
 from eneo.main.config import get_settings
 from eneo.main.exceptions import AuthenticationException
 from eneo.main.logging import get_logger
+from eneo.users.password import BCRYPT_MAX_PASSWORD_BYTES
 from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
@@ -37,21 +36,12 @@ class AuthService:
     # Even when user is not found, we verify against this to maintain consistent response times
     DUMMY_HASH = "$2b$12$CfZ8Z9V6o4d0B.3n4WGNBe4oANd8FjKc7t2rggx5xeW5c0p1sS2yW"
 
-    @staticmethod
-    def _generate_salt() -> bytes:
-        return bcrypt.gensalt()
-
-    @staticmethod
-    def _hash_password(password: str, salt: bytes) -> str:
-        pwd_bytes = password.encode("utf-8")
-        return bcrypt.hashpw(password=pwd_bytes, salt=salt).decode("utf-8")
-
     def create_salt_and_hashed_password(
-        self, plaintext_password: str | None
+        self, plaintext_password: str
     ) -> tuple[str, str]:
-        if plaintext_password is None:
-            plaintext_password = ""
         pwd_bytes = plaintext_password.encode("utf-8")
+        if len(pwd_bytes) > BCRYPT_MAX_PASSWORD_BYTES:
+            raise ValueError("Password exceeds bcrypt's maximum input size.")
         salt = bcrypt.gensalt()
         hashed_password = bcrypt.hashpw(password=pwd_bytes, salt=salt)
         return salt.decode(), hashed_password.decode("utf-8")
@@ -60,16 +50,18 @@ class AuthService:
     def verify_password(password: str, hashed_pw: str) -> bool:
         """Verify that incoming password+salt matches hashed pw"""
         password_byte_enc = password.encode("utf-8")
-        return bcrypt.checkpw(
-            password=password_byte_enc, hashed_password=hashed_pw.encode("utf-8")
-        )
-
-    @staticmethod
-    def generate_password(length: int) -> str:
-        alphabet = string.ascii_letters + string.digits
-        password = "".join(secrets.choice(alphabet) for _ in range(length))
-
-        return password
+        # Older bcrypt releases silently truncated inputs at 72 bytes. Preserve
+        # verification compatibility for historical hashes while all new
+        # writes reject overlong values in the local password policy.
+        password_byte_enc = password_byte_enc[:BCRYPT_MAX_PASSWORD_BYTES]
+        try:
+            return bcrypt.checkpw(
+                password=password_byte_enc, hashed_password=hashed_pw.encode("utf-8")
+            )
+        except ValueError:
+            # Malformed historical hashes and unsupported inputs authenticate as
+            # invalid credentials; neither should become a server error.
+            return False
 
     def create_access_token_for_user(
         self,
@@ -77,11 +69,11 @@ class AuthService:
         secret_key: str | None = None,
         audience: str = JWT_AUDIENCE,
         expires_in: float = JWT_EXPIRY_TIME_MINUTES,
-        extra_claims: dict[str, Any] | None = None,
+        extra_claims: dict[str, object] | None = None,
     ) -> str:
         """Mint an access token; ``expires_in`` is in minutes.
 
-        ``extra_claims`` follows the same contract as the MCP token above:
+        ``extra_claims`` is shared by module and scoped MCP tokens:
         unknown claims ride through ``JWTPayload`` on decode and are read out
         separately via :meth:`get_verified_claims`. Reserved JWT claims cannot
         be overridden through it.
@@ -92,6 +84,7 @@ class AuthService:
         secret_key = secret_key or str(JWT_SECRET)
 
         jwt_meta = JWTMeta(
+            iss=get_settings().jwt_issuer,
             aud=audience,
             iat=datetime.timestamp(
                 datetime.now(timezone.utc) - timedelta(seconds=2)
@@ -100,12 +93,19 @@ class AuthService:
                 datetime.now(timezone.utc) + timedelta(minutes=expires_in)
             ),
         )
-        jwt_creds = JWTCreds(sub=user.email, username=user.username)
+        jwt_creds = JWTCreds(
+            token_version=2,
+            user_id=user.id,
+            tenant_id=user.tenant_id,
+            sub=user.email,
+            username=user.username,
+            credential_version=user.credential_version,
+        )
         token_payload = JWTPayload(
             **jwt_meta.model_dump(),
             **jwt_creds.model_dump(),
         )
-        payload = token_payload.model_dump()
+        payload = token_payload.model_dump(mode="json")
         if extra_claims:
             reserved = set(extra_claims) & set(payload)
             if reserved:
@@ -123,6 +123,7 @@ class AuthService:
         user: UserInDB,
         *,
         assistant_id: UUID,
+        mcp_server_id: UUID | None = None,
         expires_in: int = 15,
     ) -> str:
         """Mint a short-lived access token for a loopback MCP server.
@@ -135,28 +136,27 @@ class AuthService:
         another assistant. Unknown claims ride through ``JWTPayload`` (which
         ignores them on decode) and are read out separately by the loopback
         endpoint.
+
+        ``mcp_server_id`` is set for a built-in provider: the loopback tool
+        reads its configuration from that ``mcp_servers`` row, so the row
+        cannot be chosen by the caller.
         """
-        secret_key = str(JWT_SECRET)
-
-        jwt_meta = JWTMeta(
-            aud=JWT_AUDIENCE,
-            iat=datetime.timestamp(datetime.now(timezone.utc) - timedelta(seconds=2)),
-            exp=datetime.timestamp(
-                datetime.now(timezone.utc) + timedelta(minutes=expires_in)
-            ),
+        claims: dict[str, object] = {"assistant_id": str(assistant_id)}
+        if mcp_server_id is not None:
+            claims["mcp_server_id"] = str(mcp_server_id)
+        return self.create_access_token_for_user(
+            user, expires_in=expires_in, extra_claims=claims
         )
-        jwt_creds = JWTCreds(sub=user.email, username=user.username)
-        payload = {
-            **JWTPayload(
-                **jwt_meta.model_dump(),
-                **jwt_creds.model_dump(),
-            ).model_dump(),
-            "assistant_id": str(assistant_id),
-        }
-        return jwt.encode(payload, secret_key, algorithm=JWT_ALGORITHM)
 
-    def get_username_from_token(self, token: str, secret_key: str) -> str | None:
-        return self.get_jwt_payload(token, key=str(secret_key)).username
+    @staticmethod
+    def validate_local_credential_version(raw_version: object, user: UserInDB) -> None:
+        """Strictly compare a local token or ticket version with live state."""
+
+        if isinstance(raw_version, bool) or not isinstance(raw_version, int):
+            raise AuthenticationException("Could not validate token credentials.")
+
+        if raw_version != user.credential_version:
+            raise AuthenticationException("Could not validate token credentials.")
 
     def get_verified_claims(
         self,
@@ -164,11 +164,24 @@ class AuthService:
         key: str,
         aud: str = JWT_AUDIENCE,
         algs: list[str] | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """Verified raw claims, including ones ``JWTPayload`` does not model."""
         algs = algs or [JWT_ALGORITHM]
         try:
-            return jwt.decode(token, key=key, audience=aud, algorithms=algs)
+            return jwt.decode(
+                token,
+                key=key,
+                audience=aud,
+                issuer=get_settings().jwt_issuer,
+                algorithms=algs,
+                options={
+                    "require": [
+                        name
+                        for name, field in JWTPayload.model_fields.items()
+                        if field.is_required()
+                    ]
+                },
+            )
         except jwt.PyJWTError:
             raise AuthenticationException("Could not validate token credentials.")
 
@@ -179,14 +192,27 @@ class AuthService:
         aud: str = JWT_AUDIENCE,
         algs: list[str] | None = None,
     ) -> JWTPayload:
+        payload, _ = self.get_jwt_payload_with_claims(
+            token, key=key, aud=aud, algs=algs
+        )
+        return payload
+
+    def get_jwt_payload_with_claims(
+        self,
+        token: str,
+        key: str,
+        aud: str = JWT_AUDIENCE,
+        algs: list[str] | None = None,
+    ) -> tuple[JWTPayload, dict[str, object]]:
+        """Validate the session contract and retain extra module/MCP claims."""
+
+        claims = self.get_verified_claims(token, key=key, aud=aud, algs=algs)
         try:
-            payload = JWTPayload(
-                **self.get_verified_claims(token, key=key, aud=aud, algs=algs)
-            )
+            payload = JWTPayload.model_validate(claims)
         except ValidationError:
             raise AuthenticationException("Could not validate token credentials.")
 
-        return payload
+        return payload, claims
 
     def get_payload_from_openid_jwt(
         self,

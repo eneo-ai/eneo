@@ -1,4 +1,6 @@
-from datetime import datetime, timedelta, timezone
+import base64
+import binascii
+from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Literal, Optional
 from uuid import UUID
@@ -14,32 +16,33 @@ from pydantic import (
 )
 
 from eneo.audit.domain.actor_types import ActorType
-from eneo.main.config import get_settings
 
 if TYPE_CHECKING:
     from eneo.users.user import UserInDB
 
 
 class JWTMeta(BaseModel):
-    iss: str = get_settings().jwt_issuer  # who issued it
-    aud: str = get_settings().jwt_audience  # who it's intended for
-    iat: float = datetime.timestamp(datetime.now(timezone.utc))  # issued at time
-    exp: float = datetime.timestamp(
-        datetime.now(timezone.utc) + timedelta(minutes=get_settings().jwt_expiry_time)
-    )  # expiry time
+    # Received tokens must carry their own metadata; never invent missing claims.
+    iss: str
+    aud: str
+    iat: float
+    exp: float
 
 
 class JWTCreds(BaseModel):
-    """How we'll identify users"""
+    """Immutable Eneo session identity, shared by API, MCP and module tokens."""
 
+    token_version: Literal[2]
+    user_id: UUID
+    tenant_id: UUID
+    credential_version: int = Field(ge=0, strict=True)
+    # Retained as descriptive claims for clients; never used to resolve a user.
     sub: EmailStr
     username: Optional[str] = None
 
 
 class JWTPayload(JWTMeta, JWTCreds):
-    """
-    JWT Payload right before it's encoded - combine meta and username
-    """
+    """Verified Eneo session claims, including the required identity version."""
 
     pass
 
@@ -381,6 +384,7 @@ class ApiKeyV2InDB(ApiKeyV2):
 class ApiKeyPolicyUpdate(BaseModel):
     max_delegation_depth: Optional[int] = None
     revocation_cascade_enabled: Optional[bool] = None
+    require_tenant_allowed_origin: bool = True
     require_expiration: Optional[bool] = None
     max_expiration_days: Optional[int] = None
     auto_expire_unused_days: Optional[int] = None
@@ -420,6 +424,7 @@ class ApiKeyPolicyUpdate(BaseModel):
 class ApiKeyPolicyResponse(BaseModel):
     max_delegation_depth: Optional[int] = None
     revocation_cascade_enabled: Optional[bool] = None
+    require_tenant_allowed_origin: bool = True
     require_expiration: Optional[bool] = None
     max_expiration_days: Optional[int] = None
     auto_expire_unused_days: Optional[int] = None
@@ -544,7 +549,6 @@ class ApiKeyNotificationPolicyUpdate(BaseModel):
 
 class SuperApiKeyStatus(BaseModel):
     super_api_key_configured: bool
-    super_duper_api_key_configured: bool
 
     model_config = ConfigDict(extra="forbid")
 
@@ -555,13 +559,61 @@ class ApiKeyListResponse(BaseModel):
 
     items: list[ApiKeyV2]
     limit: Optional[int] = None
-    next_cursor: Optional[datetime] = None
-    previous_cursor: Optional[datetime] = None
+    next_cursor: Optional[str] = None
+    previous_cursor: Optional[str] = None
     total_count: Optional[int] = None
 
     @property
     def count(self) -> int:
         return len(self.items)
+
+
+class ApiKeyListCursor(BaseModel):
+    """Opaque, total-order position in the API-key list.
+
+    ``created_at`` alone is not unique. Pairing it with the primary key makes
+    forward and backward keyset pagination deterministic even when several
+    keys were created in the same transaction. Legacy timestamp cursors remain
+    readable during rollout, while every newly emitted cursor uses this v1
+    representation.
+    """
+
+    created_at: datetime
+    key_id: UUID | None = None
+
+    model_config = ConfigDict(frozen=True)
+
+    @field_validator("created_at")
+    @classmethod
+    def normalize_created_at(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+
+    def serialize(self) -> str:
+        encoded = base64.urlsafe_b64encode(self.model_dump_json().encode()).decode()
+        return f"v1.{encoded.rstrip('=')}"
+
+    @classmethod
+    def deserialize(cls, value: str) -> "ApiKeyListCursor":
+        if not value.startswith("v1."):
+            try:
+                legacy_timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError("Invalid API key cursor.") from exc
+            return cls(created_at=legacy_timestamp)
+
+        encoded = value.removeprefix("v1.")
+        padding = "=" * (-len(encoded) % 4)
+        try:
+            payload = base64.b64decode(
+                encoded + padding,
+                altchars=b"-_",
+                validate=True,
+            )
+            return cls.model_validate_json(payload)
+        except (ValueError, binascii.Error) as exc:
+            raise ValueError("Invalid API key cursor.") from exc
 
 
 class ApiKeyCreationConstraints(BaseModel):

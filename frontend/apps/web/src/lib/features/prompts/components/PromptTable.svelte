@@ -5,20 +5,14 @@
 -->
 
 <script lang="ts">
-  import { Table } from "@eneo/ui";
-  import { createRender } from "svelte-headless-table";
+  import { formatDateTime, formatDateMedium } from "$lib/core/formatting/dateTime";
+  import * as Table from "$lib/components/resource-table/index.js";
   import PromptActions from "./PromptActions.svelte";
   import { getPromptManager } from "../PromptManager";
-  import dayjs from "dayjs";
-  import relativeTime from "dayjs/plugin/relativeTime";
-  import utc from "dayjs/plugin/utc";
   import { onMount } from "svelte";
   import PromptTimestamp from "./PromptTimestamp.svelte";
   import PromptCreator from "./PromptCreator.svelte";
   import { m } from "$lib/paraglide/messages";
-
-  dayjs.extend(relativeTime);
-  dayjs.extend(utc);
 
   const {
     state: { allPrompts },
@@ -36,7 +30,7 @@
       header: m.created(),
       accessor: (item) => item,
       cell: (item) => {
-        return createRender(PromptTimestamp, {
+        return Table.renderComponent(PromptTimestamp, {
           prompt: item.value
         });
       },
@@ -44,12 +38,12 @@
       plugins: {
         tableFilter: {
           getFilterValue(item) {
-            return dayjs(item.created_at).format("YYYY-MM-DD HH:mm");
+            return formatDateTime(item.created_at);
           }
         },
         sort: {
           getSortValue(item) {
-            return dayjs(item.created_at).format("YYYY-MM-DD HH:mm");
+            return formatDateTime(item.created_at);
           }
         }
       }
@@ -59,7 +53,7 @@
       header: m.author(),
       value: (item) => item.user.email,
       cell: (item) => {
-        return createRender(PromptCreator, {
+        return Table.renderComponent(PromptCreator, {
           user: item.value.user
         });
       }
@@ -67,7 +61,7 @@
 
     table.columnActions({
       cell: (item) => {
-        return createRender(PromptActions, {
+        return Table.renderComponent(PromptActions, {
           prompt: item.value
         });
       }
@@ -77,7 +71,7 @@
   let allUniqueDates = new Set($allPrompts.map((prompt) => getUniqueDate(prompt.created_at)));
 
   function getUniqueDate(date: string | undefined | null) {
-    return date ? dayjs(date).format("MMM D, YYYY") : m.prompts_without_date();
+    return date ? formatDateMedium(date) : m.prompts_without_date();
   }
 
   function createDateFilter(date: string) {

@@ -7,9 +7,11 @@
   import { IconCheck } from "@eneo/icons/check";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { type Eneo, type SecurityClassification } from "@eneo/eneo-js";
-  import { Button, Dialog } from "@eneo/ui";
-  import { writable } from "svelte/store";
+  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { m } from "$lib/paraglide/messages";
+  import { getCapability } from "$lib/features/mcp/capabilities";
   import { toastError } from "$lib/core/errors";
 
   type Props = { classifications: SecurityClassification[]; onUpdateDone: () => void };
@@ -22,7 +24,7 @@
   } = getSpacesManager();
 
   const eneo = getEneo();
-  const showDryRunDialog = writable(false);
+  let showDryRunDialog = $state(false);
 
   let classification = $state($currentSpace.security_classification);
   let result = $state<Awaited<
@@ -50,7 +52,14 @@
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (result.mcp_servers ?? []).map((s: any) => ({ name: s.name }));
   });
-  let hasAnyImpact = $derived(affectedModels.length > 0 || affectedMcpServers.length > 0);
+  const affectedCapabilities = $derived(
+    (result?.capabilities ?? []).map((purpose) => ({
+      name: getCapability(purpose)?.label() ?? purpose
+    }))
+  );
+  let hasAnyImpact = $derived(
+    affectedModels.length > 0 || affectedMcpServers.length > 0 || affectedCapabilities.length > 0
+  );
 
   const check = createAsyncState(async () => {
     if (!classification) {
@@ -68,7 +77,7 @@
     try {
       await updateSpace({ security_classification: classification });
       onUpdateDone?.();
-      $showDryRunDialog = false;
+      showDryRunDialog = false;
     } catch (error) {
       toastError(error);
     }
@@ -85,7 +94,7 @@
       {classifications}
       onSelectedChange={async ({ next }) => {
         classification = next ?? null;
-        $showDryRunDialog = true;
+        showDryRunDialog = true;
         check();
       }}
       dryrun={true}
@@ -108,49 +117,54 @@
   {/if}
 {/snippet}
 
-<Dialog.Root openController={showDryRunDialog}>
-  <Dialog.Content width="medium">
-    <Dialog.Title>{m.change_security_classification()}</Dialog.Title>
-    <Dialog.Description
-      >{m.you_are_about_to_change_security_classification()}<br
-      />{m.do_you_want_to_proceed()}</Dialog.Description
-    >
-    <Dialog.Section class="flex flex-col gap-4 p-4">
-      <div class="border-default flex flex-col gap-2 border-b">
-        <span class="font-bold">{m.selected_classification()}</span>
-        <span class="font-mono">{classification?.name ?? m.no_classification()}</span>
-      </div>
-      <div class="border-default flex flex-col gap-2 border-b">
-        <span class="font-bold">{m.affected_resources()}</span>
+<Dialog.Root bind:open={showDryRunDialog}>
+  <Dialog.Content class={dialogLayout.content("medium")} closeLabel={m.close()}>
+    <Dialog.Header class={dialogLayout.header}>
+      <Dialog.Title>{m.change_security_classification()}</Dialog.Title>
+      <Dialog.Description
+        >{m.you_are_about_to_change_security_classification()}<br
+        />{m.do_you_want_to_proceed()}</Dialog.Description
+      >
+    </Dialog.Header>
+    <div class={dialogLayout.body}>
+      <div class="{dialogLayout.section} gap-4 p-4">
+        <div class="border-default flex flex-col gap-2 border-b">
+          <span class="font-bold">{m.selected_classification()}</span>
+          <span class="font-mono">{classification?.name ?? m.no_classification()}</span>
+        </div>
+        <div class="border-default flex flex-col gap-2 border-b">
+          <span class="font-bold">{m.affected_resources()}</span>
 
-        {#if check.isLoading}
-          <div class="flex gap-2">
-            <IconLoadingSpinner class="animate-spin"></IconLoadingSpinner>
-            {m.loading_results()}
-          </div>
-        {:else if hasAnyImpact}
-          <div class="flex flex-col gap-2">
-            {@render access(m.models(), affectedModels)}
-            {@render access(m.mcp_servers(), affectedMcpServers)}
-            {@render access(m.assistants(), result?.assistants)}
-            {@render access(m.group_chats(), result?.group_chats)}
-            {@render access(m.apps(), result?.apps)}
-            {@render access(m.services(), result?.services)}
-          </div>
-        {:else}
-          <div
-            class="bg-positive-dimmer border-positive-default text-positive-stronger flex items-center gap-2 border-l-4 p-2"
-          >
-            <IconCheck></IconCheck>
-            {m.no_changes_in_functionality()}
-          </div>
-        {/if}
+          {#if check.isLoading}
+            <div class="flex gap-2">
+              <IconLoadingSpinner class="animate-spin"></IconLoadingSpinner>
+              {m.loading_results()}
+            </div>
+          {:else if hasAnyImpact}
+            <div class="flex flex-col gap-2">
+              {@render access(m.models(), affectedModels)}
+              {@render access(m.capabilities(), affectedCapabilities)}
+              {@render access(m.mcp_servers(), affectedMcpServers)}
+              {@render access(m.assistants(), result?.assistants)}
+              {@render access(m.group_chats(), result?.group_chats)}
+              {@render access(m.apps(), result?.apps)}
+              {@render access(m.services(), result?.services)}
+            </div>
+          {:else}
+            <div
+              class="bg-positive-dimmer border-positive-default text-positive-stronger flex items-center gap-2 border-l-4 p-2"
+            >
+              <IconCheck></IconCheck>
+              {m.no_changes_in_functionality()}
+            </div>
+          {/if}
+        </div>
       </div>
-    </Dialog.Section>
+    </div>
 
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button onclick={update} variant="primary">{m.confirm()}</Button>
-    </Dialog.Controls>
+    <Dialog.Footer class={dialogLayout.footer}>
+      <Dialog.Close class={buttonVariants({ variant: "outline" })}>{m.cancel()}</Dialog.Close>
+      <Button onclick={update}>{m.confirm()}</Button>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

@@ -1,11 +1,12 @@
 <script lang="ts">
+  import { intlLocale } from "$lib/core/formatting/dateTime";
   import type {
     SkillRevisionPublic,
     SkillRevisionRestorePublic,
     SkillRevisionSummaryPage,
     SkillRevisionSummaryPublic
   } from "@eneo/eneo-js";
-  import { Eye, LoaderCircle, RotateCcw } from "lucide-svelte";
+  import { Eye, LoaderCircle, RotateCcw } from "@lucide/svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
@@ -14,7 +15,6 @@
   import * as Table from "$lib/components/ui/table/index.js";
   import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
   import { tick, untrack } from "svelte";
 
   type Props = {
@@ -75,7 +75,7 @@
   }
 
   function formatCreatedAt(value: string): string {
-    return new Date(value).toLocaleString(getLocale() === "sv" ? "sv-SE" : "en-US", {
+    return new Date(value).toLocaleString(intlLocale(), {
       dateStyle: "short",
       timeStyle: "short"
     });
@@ -218,52 +218,52 @@
 {#snippet revisionPreview(
   revision: SkillRevisionPublic,
   comparison: SkillRevisionPublic | null,
-  isCurrent = false
+  isCurrent = false,
+  showHeader = true
 )}
   <section class="min-w-0">
-    <header class="mb-5">
-      <div class="flex flex-wrap items-center gap-2">
-        <h3 class="text-base font-semibold">{revisionTitle(revision)}</h3>
-        {#if isCurrent}
-          <Badge variant="secondary">{m.skills_library_current_revision()}</Badge>
-        {/if}
-      </div>
-      <p class="text-muted-foreground mt-1 text-sm">{formatCreatedAt(revision.created_at)}</p>
-    </header>
-    <dl class="flex flex-col gap-4">
+    {#if showHeader}
+      <header class="mb-4">
+        <div class="flex flex-wrap items-center gap-2">
+          <h3 class="text-sm font-semibold">{revisionTitle(revision)}</h3>
+          {#if isCurrent}
+            <Badge variant="secondary">{m.skills_library_current_revision()}</Badge>
+          {/if}
+        </div>
+        <p class="text-muted-foreground mt-1 text-sm tabular-nums">
+          {formatCreatedAt(revision.created_at)}
+        </p>
+      </header>
+    {/if}
+    <dl class="flex flex-col gap-3">
       <div class="flex flex-col gap-1">
-        <dt
-          class="text-muted-foreground flex items-baseline justify-between gap-3 text-xs font-medium"
-        >
+        <dt class="text-muted-foreground flex flex-wrap items-baseline gap-2 text-xs font-medium">
           {m.name()}
           {#if fieldChanged(revision, comparison, "display_name")}
-            <span class="text-accent-stronger font-normal">{m.skills_library_changed_field()}</span>
+            <Badge variant="outline" class="font-normal">{m.skills_library_changed_field()}</Badge>
           {/if}
         </dt>
         <dd class="text-sm">{revision.display_name}</dd>
       </div>
       <div class="flex flex-col gap-1">
-        <dt
-          class="text-muted-foreground flex items-baseline justify-between gap-3 text-xs font-medium"
-        >
+        <dt class="text-muted-foreground flex flex-wrap items-baseline gap-2 text-xs font-medium">
           {m.description()}
           {#if fieldChanged(revision, comparison, "description")}
-            <span class="text-accent-stronger font-normal">{m.skills_library_changed_field()}</span>
+            <Badge variant="outline" class="font-normal">{m.skills_library_changed_field()}</Badge>
           {/if}
         </dt>
         <dd class="text-sm">{revision.description}</dd>
       </div>
       <div class="flex flex-col gap-1">
-        <dt
-          class="text-muted-foreground flex items-baseline justify-between gap-3 text-xs font-medium"
-        >
+        <dt class="text-muted-foreground flex flex-wrap items-baseline gap-2 text-xs font-medium">
           <span>{m.skills_instructions_label()}</span>
           {#if fieldChanged(revision, comparison, "instructions")}
-            <span class="text-accent-stronger font-normal">{m.skills_library_changed_field()}</span>
+            <Badge variant="outline" class="font-normal">{m.skills_library_changed_field()}</Badge>
           {/if}
         </dt>
-        <dd class="text-sm break-words whitespace-pre-wrap">
-          {revision.instructions}
+        <dd>
+          <pre
+            class="border-border bg-muted/40 rounded-md border p-3 font-mono text-xs leading-5 whitespace-pre-wrap [overflow-wrap:anywhere]">{revision.instructions}</pre>
         </dd>
       </div>
     </dl>
@@ -281,7 +281,7 @@
         <Table.Head class="hidden w-48 @3xl:table-cell">
           {m.skills_library_created_column()}
         </Table.Head>
-        <Table.Head class="w-16 text-right">{m.actions()}</Table.Head>
+        <Table.Head class="w-24 text-right">{m.actions()}</Table.Head>
       </Table.Row>
     </Table.Header>
     <Table.Body>
@@ -300,14 +300,14 @@
             <p class="text-foreground mt-1 line-clamp-2 break-words @lg:hidden">
               {revision.display_name}
             </p>
-            <p class="text-muted-foreground mt-1 text-xs @3xl:hidden">
+            <p class="text-muted-foreground mt-1 text-xs tabular-nums @3xl:hidden">
               {formatCreatedAt(revision.created_at)}
             </p>
           </Table.Cell>
           <Table.Cell class="hidden break-words whitespace-normal @lg:table-cell">
             {revision.display_name}
           </Table.Cell>
-          <Table.Cell class="text-muted-foreground hidden text-sm @3xl:table-cell">
+          <Table.Cell class="text-muted-foreground hidden text-sm tabular-nums @3xl:table-cell">
             {formatCreatedAt(revision.created_at)}
           </Table.Cell>
           <Table.Cell class="text-right">
@@ -315,20 +315,20 @@
               <Button
                 id={viewTriggerId(revision.id)}
                 variant="ghost"
-                size="icon-sm"
-                class="size-11 md:size-7"
+                size="sm"
+                class="min-h-11 md:min-h-7"
                 disabled={viewingRevisionId !== null}
-                title={m.view()}
                 aria-label={m.skills_library_view_revision_aria({
                   revision: String(revision.revision_number)
                 })}
                 onclick={() => void viewRevision(revision, viewTriggerId(revision.id))}
               >
                 {#if viewingRevisionId === revision.id}
-                  <LoaderCircle class="animate-spin" aria-hidden="true" />
+                  <LoaderCircle data-icon="inline-start" class="animate-spin" aria-hidden="true" />
                 {:else}
-                  <Eye aria-hidden="true" />
+                  <Eye data-icon="inline-start" aria-hidden="true" />
                 {/if}
+                {m.view()}
               </Button>
             </div>
           </Table.Cell>
@@ -363,21 +363,29 @@
   onOpenChange={(open) => !open && (viewedRevision = null)}
 >
   <Dialog.Content
-    class="grid max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-2xl has-[.skill-revision-comparison]:sm:max-w-4xl"
+    class="grid max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-xl has-[.skill-revision-comparison]:sm:max-w-4xl"
     closeLabel={m.close()}
     onCloseAutoFocus={handlePreviewCloseAutoFocus}
   >
-    <Dialog.Header class="border-b px-6 py-5 pr-12">
-      <Dialog.Title>
-        {viewedRevision?.id === comparisonCurrentRevision.id
-          ? m.skills_library_view_revision_title({
+    <Dialog.Header class="border-border border-b px-6 py-5 pr-12">
+      {#if viewedRevision && viewedRevision.id === comparisonCurrentRevision.id}
+        <div class="flex flex-wrap items-center gap-2">
+          <Dialog.Title>
+            {m.skills_library_view_revision_title({
               revision: String(viewedRevision.revision_number)
-            })
-          : m.skills_library_compare_revision_title({
-              revision: String(viewedRevision?.revision_number ?? "")
             })}
-      </Dialog.Title>
-      {#if viewedRevision?.id !== comparisonCurrentRevision.id}
+          </Dialog.Title>
+          <Badge variant="secondary">{m.skills_library_current_revision()}</Badge>
+        </div>
+        <Dialog.Description class="tabular-nums">
+          {formatCreatedAt(viewedRevision.created_at)}
+        </Dialog.Description>
+      {:else}
+        <Dialog.Title>
+          {m.skills_library_compare_revision_title({
+            revision: String(viewedRevision?.revision_number ?? "")
+          })}
+        </Dialog.Title>
         <Dialog.Description>{m.skills_library_compare_revision_description()}</Dialog.Description>
       {/if}
     </Dialog.Header>
@@ -398,7 +406,7 @@
       {/if}
       {#if viewedRevision}
         {#if viewedRevision.id === comparisonCurrentRevision.id}
-          <div class="p-6">{@render revisionPreview(viewedRevision, null, true)}</div>
+          <div class="p-6">{@render revisionPreview(viewedRevision, null, true, false)}</div>
         {:else}
           <div
             class="skill-revision-comparison divide-border grid divide-y md:grid-cols-2 md:divide-x md:divide-y-0"
@@ -413,14 +421,14 @@
         {/if}
       {/if}
     </div>
-    <Dialog.Footer class="mx-0 mb-0 border-t px-6 py-4">
+    <Dialog.Footer class="border-border mx-0 mb-0 border-t px-6 py-4">
       {#if canRestore && viewedRevision && viewedRevision.id !== comparisonCurrentRevision.id}
-        <Button variant="outline" onclick={() => viewedRevision && requestRestore(viewedRevision)}>
+        <Button onclick={() => viewedRevision && requestRestore(viewedRevision)}>
           <RotateCcw aria-hidden="true" />
           {m.skills_library_restore_revision_from_preview()}
         </Button>
       {/if}
-      <Button onclick={() => (viewedRevision = null)}>{m.close()}</Button>
+      <Button variant="outline" onclick={() => (viewedRevision = null)}>{m.close()}</Button>
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

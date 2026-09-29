@@ -24,7 +24,6 @@ env:
   BACKEND_IMAGE: ghcr.io/eneo-ai/eneo-backend
   FRONTEND_IMAGE: ghcr.io/eneo-ai/eneo-frontend
   SEAWEEDFS_IMAGE: ghcr.io/eneo-ai/eneo-seaweedfs
-  SEAWEEDFS_VERSION: 4.40-eneo.2
   PLATFORM: linux/amd64
   PLATFORM_OS: linux
   PLATFORM_ARCH: amd64
@@ -83,6 +82,25 @@ jobs:
           ref: ${{ steps.release.outputs.tag }}
           persist-credentials: false
 
+      - name: Resolve the bundled store version this release was verified against
+        id: seaweedfs
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # The bundled store is versioned independently of Eneo releases; the
+          # release checkout names the exact published image version. A
+          # `release` event runs the workflow file at the tag, so releases cut
+          # before this file existed produce their SBOMs with their own
+          # workflow; this version only supports checkouts that ship it.
+          if [[ ! -f docker/seaweedfs/VERSION ]]; then
+            echo "::error::$RELEASE_TAG ships no docker/seaweedfs/VERSION, so it never published a versioned bundled-store image. Generate its SBOMs with the release workflow at that tag instead." >&2
+            exit 1
+          fi
+          version="$(tr -d '[:space:]' <docker/seaweedfs/VERSION)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+-eneo\.[0-9]+$ ]]
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         with:
@@ -116,6 +134,7 @@ jobs:
           SYFT_CMD: ${{ steps.syft.outputs.cmd }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           IMAGE_TAG: ${{ steps.release.outputs.image-tag }}
+          SEAWEEDFS_VERSION: ${{ steps.seaweedfs.outputs.version }}
         run: |
           set -euo pipefail
 
@@ -341,8 +360,7 @@ jobs:
           generate_component_sbom "backend" "$BACKEND_IMAGE"
           generate_backend_python_runtime_sbom "$backend_digest_ref"
           generate_component_sbom "frontend" "$FRONTEND_IMAGE"
-          source_sha="$(git rev-parse HEAD)"
-          seaweedfs_tag="${SEAWEEDFS_VERSION}-${source_sha}"
+          seaweedfs_tag="$SEAWEEDFS_VERSION"
           generate_component_sbom \
             "seaweedfs" "$SEAWEEDFS_IMAGE" "$seaweedfs_tag" \
             "linux/amd64" "linux" "amd64"
@@ -391,15 +409,14 @@ jobs:
             echo "Generated SeaweedFS SBOMs for both published Linux platform digests."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Verify SeaweedFS provenance and platform SBOM attestations
+      - name: Verify SeaweedFS provenance, version labels, and platform SBOM attestations
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          SEAWEEDFS_VERSION: ${{ steps.seaweedfs.outputs.version }}
         run: |
           set -euo pipefail
 
-          source_sha="$(git rev-parse HEAD)"
-          image_ref="${SEAWEEDFS_IMAGE}:${SEAWEEDFS_VERSION}-${source_sha}"
+          image_ref="${SEAWEEDFS_IMAGE}:${SEAWEEDFS_VERSION}"
           manifest_digest="$(docker buildx imagetools inspect "$image_ref" \
             --format '{{json .Manifest}}' | jq -r '.digest')"
           recorded_manifest_ref="$(awk '
@@ -409,12 +426,14 @@ jobs:
             echo "::error::Recorded SeaweedFS manifest does not match the published image." >&2
             exit 1
           fi
-          signer_workflow="${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}/.github/workflows/build_and_push_images.yml"
+          # The image is published from develop by its own workflow whenever its
+          # pinned inputs change, so provenance is bound to that workflow and
+          # branch plus the exact digests resolved above, not to the release SHA.
+          signer_workflow="${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}/.github/workflows/seaweedfs_image.yml"
           common_flags=(
             --repo "$GITHUB_REPOSITORY"
             --signer-workflow "$signer_workflow"
-            --source-digest "$source_sha"
-            --source-ref "refs/tags/$RELEASE_TAG"
+            --source-ref refs/heads/develop
             --deny-self-hosted-runners
             --bundle-from-oci
           )
@@ -423,8 +442,29 @@ jobs:
             "oci://${SEAWEEDFS_IMAGE}@${manifest_digest}" \
             "${common_flags[@]}" \
             --predicate-type https://slsa.dev/provenance/v1
+          # Platform digests were resolved through the mutable tag earlier;
+          # prove each one is a child of the manifest verified above.
+          docker buildx imagetools inspect "${SEAWEEDFS_IMAGE}@${manifest_digest}" --raw \
+            >/tmp/seaweedfs-manifest.json
           while read -r component target _ digest_ref; do
             if [[ "$component" == "seaweedfs" && "$target" == linux/* ]]; then
+              jq -e --arg digest "${digest_ref#*@}" --arg arch "${target#linux/}" '
+                any(.manifests[];
+                  .digest == $digest
+                  and .platform.os == "linux"
+                  and .platform.architecture == $arch)
+              ' /tmp/seaweedfs-manifest.json >/dev/null || {
+                echo "::error::$digest_ref is not the $target child of the verified manifest ${manifest_digest}." >&2
+                exit 1
+              }
+              # The label binds each attested platform digest to the version
+              # this release names.
+              docker buildx imagetools inspect "$digest_ref" --format '{{json .Image}}' \
+                | jq -e --arg version "$SEAWEEDFS_VERSION" \
+                  '.config.Labels["org.opencontainers.image.version"] == $version' >/dev/null || {
+                echo "::error::$digest_ref is not labeled as SeaweedFS image version $SEAWEEDFS_VERSION." >&2
+                exit 1
+              }
               gh attestation verify "oci://$digest_ref" \
                 "${common_flags[@]}" \
                 --predicate-type https://slsa.dev/provenance/v1

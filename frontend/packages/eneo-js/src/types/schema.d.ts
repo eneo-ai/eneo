@@ -533,6 +533,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/users/password-policy/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the local password policy
+     * @description Return the policy enforced when creating or changing passwords stored in Eneo. Available to authenticated users regardless of their own login provider, so administrators can manage local accounts. Provider-managed passwords use their provider's policy instead.
+     */
+    get: operations["get_local_password_policy_api_v1_users_password_policy__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/users/me/": {
     parameters: {
       query?: never;
@@ -544,6 +564,46 @@ export interface paths {
     get: operations["Get_current_user_api_v1_users_me__get"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/users/me/password/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Change Current User'S Local Password
+     * @description Change the authenticated user's local Eneo password and invalidate previously issued Eneo sessions.
+     */
+    post: operations["Change_current_user_s_local_password_api_v1_users_me_password__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/users/me/sessions/invalidate/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Invalidate Current User'S Eneo Sessions
+     * @description Invalidate previously issued Eneo sessions at the authenticated user's request.
+     */
+    post: operations["Invalidate_current_user_s_Eneo_sessions_api_v1_users_me_sessions_invalidate__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -629,6 +689,46 @@ export interface paths {
      * @description Deletes an info-blob by id. Returns the deleted object.
      */
     delete: operations["delete_info_blob_api_v1_info_blobs__id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/info-blobs/{id}/original/signed-url/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Generate a signed URL for an uploaded knowledge original
+     * @description Checks knowledge read access and original availability, then returns a short-lived URL for the exact uploaded bytes.
+     */
+    post: operations["generate_original_signed_url_api_v1_info_blobs__id__original_signed_url__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/info-blobs/{id}/original/download/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Download an uploaded knowledge original
+     * @description Streams the exact uploaded bytes using a short-lived, purpose-separated signed token.
+     */
+    get: operations["download_original_api_v1_info_blobs__id__original_download__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -1117,6 +1217,33 @@ export interface paths {
      *     - Change takes effect immediately
      */
     patch: operations["update_api_key_expiry_notifications_setting_api_v1_settings_api_key_expiry_notifications_patch"];
+    trace?: never;
+  };
+  "/api/v1/settings/whats-new": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Toggle the What's new feature
+     * @description Toggle the What's new page, release announcement and menu indicator for your tenant.
+     *
+     *     **Admin Only:** Requires admin permissions.
+     *
+     *     **Behavior:**
+     *     - Updates the `whats_new_enabled` feature flag for your tenant
+     *     - When disabled: the page, the one-time release announcement and the menu indicator are hidden for every user in the tenant
+     *     - Change takes effect on the next page load
+     */
+    patch: operations["update_whats_new_setting_api_v1_settings_whats_new_patch"];
     trace?: never;
   };
   "/api/v1/assistants/": {
@@ -2245,7 +2372,7 @@ export interface paths {
     };
     /**
      * Get super API key status
-     * @description Return whether super and super-duper API keys are configured in environment settings.
+     * @description Return whether the sysadmin API key is configured in environment settings.
      */
     get: operations["get_super_api_key_status_api_v1_admin_super_api_key_status_get"];
     put?: never;
@@ -3500,6 +3627,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/image-models/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Image Models
+     * @description List all image models for the tenant.
+     */
+    get: operations["get_image_models_api_v1_image_models__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/image-models/{id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Update Image Model
+     * @description Update org settings for an image model.
+     */
+    post: operations["update_image_model_api_v1_image_models__id___post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/model-providers/": {
     parameters: {
       query?: never;
@@ -3803,6 +3970,50 @@ export interface paths {
      * @description Delete a tenant-specific transcription model.
      */
     delete: operations["delete_tenant_transcription_model_api_v1_admin_tenant_models_transcription__model_id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/tenant-models/image/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create Tenant Image Model
+     * @description Create a new tenant-specific image model.
+     */
+    post: operations["create_tenant_image_model_api_v1_admin_tenant_models_image__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/tenant-models/image/{model_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Update Tenant Image Model
+     * @description Update a tenant-specific image model.
+     */
+    put: operations["update_tenant_image_model_api_v1_admin_tenant_models_image__model_id___put"];
+    post?: never;
+    /**
+     * Delete Tenant Image Model
+     * @description Delete a tenant-specific image model.
+     */
+    delete: operations["delete_tenant_image_model_api_v1_admin_tenant_models_image__model_id___delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -5335,6 +5546,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/integrations/sharepoint/fixtures/{scenario}/preview/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Sharepoint Fixture Preview
+     * @description Return development-only SharePoint preview fixtures. No Microsoft Graph request is made. Requires SHAREPOINT_FIXTURE_MODE_ENABLED=true.
+     */
+    get: operations["get_sharepoint_fixture_preview_api_v1_integrations_sharepoint_fixtures__scenario__preview__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/integrations/sharepoint/fixtures/{scenario}/tree/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Sharepoint Fixture Tree
+     * @description Return a development-only SharePoint folder fixture. No Microsoft Graph request is made. Requires SHAREPOINT_FIXTURE_MODE_ENABLED=true.
+     */
+    get: operations["get_sharepoint_fixture_tree_api_v1_integrations_sharepoint_fixtures__scenario__tree__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/integrations/": {
     parameters: {
       query?: never;
@@ -5564,7 +5815,7 @@ export interface paths {
     };
     /**
      * Get Mcp Servers
-     * @description Get all MCP servers from global catalog with optional tag filtering.
+     * @description Get all MCP servers from global catalog with optional tag/purpose filtering.
      */
     get: operations["get_mcp_servers_api_v1_mcp_servers__get"];
     put?: never;
@@ -5675,6 +5926,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/mcp-servers/{id}/activate/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Activate Capability Provider
+     * @description Activate this server as the tenant's provider for its capability purpose (admin only).
+     */
+    post: operations["activate_capability_provider_api_v1_mcp_servers__id__activate__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-servers/{id}/deactivate/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Deactivate Capability Provider
+     * @description Deactivate this capability provider (admin only).
+     */
+    post: operations["deactivate_capability_provider_api_v1_mcp_servers__id__deactivate__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/mcp-servers/{id}/tools/": {
     parameters: {
       query?: never;
@@ -5769,6 +6060,26 @@ export interface paths {
      * @description Approve all pending tool changes for an MCP server (admin only).
      */
     post: operations["approve_all_tool_changes_api_v1_mcp_servers__id__tools_review_approve_all__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-servers/{id}/tools/{tool_id}/display-name/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Update Tool Display Name
+     * @description Set or clear the admin display name for a tool (admin only).
+     */
+    put: operations["update_tool_display_name_api_v1_mcp_servers__id__tools__tool_id__display_name__put"];
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -6345,7 +6656,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Organization Skill
-     * @description Delete an eligible organisation Skill draft.
+     * @description Remove an organisation Skill while retaining its history. With detach_bindings, its Assistant, App and Personal Chat bindings are deleted in the same transaction.
      */
     delete: operations["delete_organization_skill_api_v1_skills_organization__skill_id___delete"];
     options?: never;
@@ -6531,6 +6842,110 @@ export interface paths {
      * @description Remove an organisation Skill from new catalogue use.
      */
     post: operations["unpublish_organization_skill_api_v1_skills_organization__skill_id__unpublish__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/detach/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Detach Organization Skill Bindings
+     * @description Detach an organisation Skill from up to 100 selected Assistants and Apps in one transaction. Personal Chat keeps its binding.
+     */
+    post: operations["detach_organization_skill_bindings_api_v1_skills_organization__skill_id__detach__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/remove/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Remove Organization Skills
+     * @description Remove up to 100 organisation Skills atomically, retaining history. With detach_bindings, their Assistant, App and Personal Chat bindings are deleted in the same transaction; otherwise a bound Skill refuses the whole batch.
+     */
+    post: operations["remove_organization_skills_api_v1_skills_organization_remove__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/whats-new/state/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Whats New State
+     * @description Get which releases the current user has seen and been told about.
+     */
+    get: operations["get_whats_new_state_api_v1_whats_new_state__get"];
+    put?: never;
+    post?: never;
+    /**
+     * Reset Whats New State
+     * @description Development only: forget the current user's What's new markers so the announcement and dot return.
+     */
+    delete: operations["reset_whats_new_state_api_v1_whats_new_state__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/whats-new/seen/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Mark Whats New Seen
+     * @description Record that the current user has opened the What's new page for a release.
+     */
+    put: operations["mark_whats_new_seen_api_v1_whats_new_seen__put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/whats-new/announced/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Mark Whats New Announced
+     * @description Record that the current user has been shown the announcement for a release.
+     */
+    put: operations["mark_whats_new_announced_api_v1_whats_new_announced__put"];
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -6912,7 +7327,7 @@ export interface paths {
     };
     /**
      * Get all AI models
-     * @description Get all completion, embedding, and transcription models.
+     * @description Get all completion, embedding, transcription and image models.
      */
     get: operations["get_models_api_v1_ai_models__get"];
     put?: never;
@@ -7597,7 +8012,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/modules/": {
+  "/api/v1/admin/modules/": {
     parameters: {
       query?: never;
       header?: never;
@@ -7605,63 +8020,19 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Get Modules
-     * @description List all globally registered modules.
+     * List Module Installations
+     * @description List modules installed for the authenticated user's organization. The tenant identity is derived from the session and is never accepted from the client.
      */
-    get: operations["get_modules_api_v1_modules__get"];
+    get: operations["list_module_installations_api_v1_admin_modules__get"];
     put?: never;
-    /**
-     * Add Module
-     * @description Register a new global module. The module key is immutable, case-sensitive and restricted to a URL-safe slug: letters and digits plus '.', '_' or '-', starting with a letter or digit.
-     */
-    post: operations["add_module_api_v1_modules__post"];
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  "/api/v1/modules/{tenant_id}/{module_id}/client-config/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    /**
-     * Update Module Client Config
-     * @description Set a tenant module's auth-broker client config: the exact-match redirect URI allowlist and the sk_ service key allowed to exchange that tenant's login tickets.
-     */
-    patch: operations["update_module_client_config_api_v1_modules__tenant_id___module_id__client_config__patch"];
-    trace?: never;
-  };
-  "/api/v1/modules/{tenant_id}/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Add Module To Tenant
-     * @description Replace the tenant's complete module set. Prefer the targeted PUT and DELETE routes when enabling or disabling one module.
-     */
-    post: operations["add_module_to_tenant_api_v1_modules__tenant_id___post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/modules/{tenant_id}/{module_id}/": {
+  "/api/v1/admin/modules/{module_key}/": {
     parameters: {
       query?: never;
       header?: never;
@@ -7670,16 +8041,16 @@ export interface paths {
     };
     get?: never;
     /**
-     * Enable Module For Tenant
-     * @description Enable one module without changing the tenant's other modules.
+     * Install Module
+     * @description Idempotently register, enable and fully configure one module for the authenticated user's organization. The service key must already exist in that organization and be an active, service-owned sk_ key with write or admin permission. An explicit null service_key_id keeps the module installed but severs ticket exchange until a key is bound again.
      */
-    put: operations["enable_module_for_tenant_api_v1_modules__tenant_id___module_id___put"];
+    put: operations["install_module_api_v1_admin_modules__module_key___put"];
     post?: never;
     /**
-     * Disable Module For Tenant
-     * @description Disable one module and delete its tenant-specific callback and service-key binding.
+     * Uninstall Module
+     * @description Uninstall one module from the authenticated user's organization. Removing the assignment also deletes its callback and service-key binding. A module that is not installed for the organization returns 404 whether or not the key exists elsewhere; concurrent retries are safe and report changed=false.
      */
-    delete: operations["disable_module_for_tenant_api_v1_modules__tenant_id___module_id___delete"];
+    delete: operations["uninstall_module_api_v1_admin_modules__module_key___delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -8116,6 +8487,8 @@ export interface components {
       mimetype: string;
       /** Size Limit */
       size_limit: number;
+      /** Extensions */
+      extensions: string[];
     };
     /**
      * AccessJustificationRequest
@@ -8278,6 +8651,9 @@ export interface components {
       | "module_auth_ticket_issued"
       | "module_auth_token_exchanged"
       | "module_auth_token_refreshed"
+      | "password_changed"
+      | "password_change_failed"
+      | "sessions_invalidated"
       | "assistant_created"
       | "assistant_deleted"
       | "assistant_updated"
@@ -8301,6 +8677,7 @@ export interface components {
       | "skill_published"
       | "skill_unpublished"
       | "skill_bindings_advanced"
+      | "skill_bindings_detached"
       | "skill_deleted"
       | "session_started"
       | "session_ended"
@@ -8308,7 +8685,9 @@ export interface components {
       | "file_uploaded"
       | "file_deleted"
       | "file_original_download_link_created"
+      | "file_original_downloaded"
       | "file_signed_url_minted"
+      | "info_blob_original_download_link_created"
       | "website_created"
       | "website_updated"
       | "website_deleted"
@@ -8336,6 +8715,9 @@ export interface components {
       | "transcription_model_updated"
       | "transcription_model_deleted"
       | "transcription_model_migrated"
+      | "image_model_created"
+      | "image_model_updated"
+      | "image_model_deleted"
       | "template_created"
       | "template_updated"
       | "template_deleted"
@@ -8553,13 +8935,6 @@ export interface components {
        */
       rotation_grace_hours?: number;
     };
-    /** ApiKeyErrorResponse */
-    ApiKeyErrorResponse: {
-      /** Code */
-      code: string;
-      /** Message */
-      message: string;
-    };
     /** ApiKeyExactLookupRequest */
     ApiKeyExactLookupRequest: {
       /** Secret */
@@ -8697,6 +9072,11 @@ export interface components {
       max_delegation_depth?: number | null;
       /** Revocation Cascade Enabled */
       revocation_cascade_enabled?: boolean | null;
+      /**
+       * Require Tenant Allowed Origin
+       * @default true
+       */
+      require_tenant_allowed_origin?: boolean;
       /** Require Expiration */
       require_expiration?: boolean | null;
       /** Max Expiration Days */
@@ -8714,6 +9094,11 @@ export interface components {
       max_delegation_depth?: number | null;
       /** Revocation Cascade Enabled */
       revocation_cascade_enabled?: boolean | null;
+      /**
+       * Require Tenant Allowed Origin
+       * @default true
+       */
+      require_tenant_allowed_origin?: boolean;
       /** Require Expiration */
       require_expiration?: boolean | null;
       /** Max Expiration Days */
@@ -9050,6 +9435,11 @@ export interface components {
       expected_published_revision_id: string;
       /** Cursor */
       cursor?: string | null;
+      /**
+       * App Ids
+       * @description Restrict the update to these Apps (one chunk, no cursor). Apps already on the published revision are skipped.
+       */
+      app_ids?: string[] | null;
     };
     /** AppInTemplatePublic */
     AppInTemplatePublic: {
@@ -9454,6 +9844,10 @@ export interface components {
     };
     /** AskAssistant */
     AskAssistant: {
+      /** Disabled Capabilities */
+      disabled_capabilities?: ("web_search" | "image_generation")[];
+      /** Disabled Mcp Server Ids */
+      disabled_mcp_server_ids?: string[];
       /** Question */
       question: string;
       /** Session Id */
@@ -9492,8 +9886,6 @@ export interface components {
       /** References */
       references: components["schemas"]["InfoBlobAskAssistantPublic"][];
       tools: components["schemas"]["UseTools"];
-      /** Web Search References */
-      web_search_references: components["schemas"]["WebSearchResultPublic"][];
       /**
        * Mcp Tool References
        * @default []
@@ -9530,6 +9922,8 @@ export interface components {
        * @description This field is deprecated and will be ignored
        */
       logging_enabled?: boolean | null;
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
       /**
        * Space Id
        * Format: uuid
@@ -9606,6 +10000,11 @@ export interface components {
       expected_published_revision_id: string;
       /** Cursor */
       cursor?: string | null;
+      /**
+       * Assistant Ids
+       * @description Restrict the update to these Assistants (one chunk, no cursor). Assistants already on the published revision are skipped.
+       */
+      assistant_ids?: string[] | null;
     };
     /** AssistantGuard */
     AssistantGuard: {
@@ -9705,6 +10104,10 @@ export interface components {
        * Format: uuid
        */
       id: string;
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[];
+      /** Available Capabilities */
+      available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Name */
       name: string;
       prompt?: components["schemas"]["PromptPublic"] | null;
@@ -10372,6 +10775,30 @@ export interface components {
       state: string;
       /** Code Verifier */
       code_verifier?: string | null;
+    };
+    /**
+     * CapabilityActivationResponse
+     * @description Response after activating a capability provider.
+     */
+    CapabilityActivationResponse: {
+      server: components["schemas"]["MCPServerPublic"];
+      /**
+       * Deactivated Server Ids
+       * @default []
+       */
+      deactivated_server_ids?: string[];
+    };
+    /** CapabilityAvailability */
+    CapabilityAvailability: {
+      /**
+       * Purpose
+       * @enum {string}
+       */
+      purpose: "web_search" | "image_generation";
+      /** Available */
+      available: boolean;
+      /** Reason */
+      reason?: string | null;
     };
     /** CapabilityPublic */
     CapabilityPublic: {
@@ -11060,11 +11487,6 @@ export interface components {
       stream?: boolean;
       tools?: components["schemas"]["UseTools"] | null;
       /**
-       * Use Web Search
-       * @default false
-       */
-      use_web_search?: boolean;
-      /**
        * Require Tool Approval
        * @default false
        */
@@ -11074,6 +11496,8 @@ export interface components {
        * @default []
        */
       disabled_mcp_server_ids?: string[];
+      /** Disabled Capabilities */
+      disabled_capabilities?: ("web_search" | "image_generation")[];
     };
     /** Counts */
     Counts: {
@@ -11352,6 +11776,8 @@ export interface components {
     CreateSpaceAssistantRequest: {
       /** Name */
       name: string;
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
       from_template?: components["schemas"]["TemplateCreate"] | null;
     };
     /** CreateSpaceGroupsRequest */
@@ -11662,6 +12088,10 @@ export interface components {
        * Format: uuid
        */
       id: string;
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[];
+      /** Available Capabilities */
+      available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Name */
       name: string;
       prompt?: components["schemas"]["PromptPublic"] | null;
@@ -11865,15 +12295,14 @@ export interface components {
       /** Transcription Audio Limit Bytes */
       transcription_audio_limit_bytes: number;
     };
-    /**
-     * EffectiveConfigPublic
-     * @description Frontend hint surface for personal-assistant governance.
-     *
-     *     Only meaningful on default assistants in personal spaces. `prompt_locked`
-     *     is exposed as a boolean — we never leak the admin-prompt text to the
-     *     user-facing API.
-     */
+    /** EffectiveConfigPublic */
     EffectiveConfigPublic: {
+      /** Available Capabilities */
+      available_capabilities?: components["schemas"]["CapabilityAvailability"][];
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[];
+      /** Default Disabled Capabilities */
+      default_disabled_capabilities?: ("web_search" | "image_generation")[];
       /** Models Enforced */
       models_enforced: boolean;
       /** Available Models */
@@ -12235,6 +12664,15 @@ export interface components {
        */
       is_org_enabled?: boolean | null;
     };
+    /** EneoPasswordChangeCapabilityPublic */
+    EneoPasswordChangeCapabilityPublic: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      source: "eneo";
+      policy?: components["schemas"]["LocalPasswordPolicy"];
+    };
     /**
      * EntityType
      * @description Categorize what type of entity was affected
@@ -12247,6 +12685,7 @@ export interface components {
       | "app"
       | "skill"
       | "file"
+      | "info_blob"
       | "website"
       | "tenant_settings"
       | "governance_policy"
@@ -12266,6 +12705,7 @@ export interface components {
       | "completion_model"
       | "embedding_model"
       | "transcription_model"
+      | "image_model"
       | "audit_log"
       | "session"
       | "mcp_server"
@@ -12332,7 +12772,13 @@ export interface components {
       | 9053
       | 9054
       | 9055
-      | 9056;
+      | 9056
+      | 9057
+      | 9058
+      | 9059
+      | 9060
+      | 9061
+      | 9062;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -12512,6 +12958,16 @@ export interface components {
        */
       expires_at: string;
     };
+    /** ExternalPasswordChangeCapabilityPublic */
+    ExternalPasswordChangeCapabilityPublic: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      source: "external";
+      /** Policy */
+      policy?: null;
+    };
     /**
      * FavoriteProvidersUpdate
      * @description Request model for updating tenant's favorite provider types.
@@ -12600,6 +13056,18 @@ export interface components {
       /** Blockers */
       blockers: components["schemas"]["FileUsageSummary"][];
     };
+    /** FilePolicyInput */
+    FilePolicyInput: {
+      /** Inline File Text */
+      inline_file_text: boolean;
+    };
+    /** FilePolicyPublic */
+    FilePolicyPublic: {
+      /** Configured */
+      configured: boolean;
+      /** Inline File Text */
+      inline_file_text: boolean | null;
+    };
     /** FilePublic */
     FilePublic: {
       /** Created At */
@@ -12686,6 +13154,7 @@ export interface components {
       mcp_restriction: components["schemas"]["McpRestrictionPublic"];
       prompt_enforcement: components["schemas"]["PromptEnforcementPublic"];
       reasoning_policy: components["schemas"]["ReasoningPolicyPublic"];
+      file_policy: components["schemas"]["FilePolicyPublic"];
       skills: components["schemas"]["SkillsPolicyPublic"];
       /** Updated At */
       updated_at: string | null;
@@ -12698,6 +13167,7 @@ export interface components {
       mcp_restriction?: components["schemas"]["McpRestrictionInput"] | null;
       prompt_enforcement?: components["schemas"]["PromptEnforcementInput"] | null;
       reasoning_policy?: components["schemas"]["ReasoningPolicyInput"] | null;
+      file_policy?: components["schemas"]["FilePolicyInput"] | null;
       skills?: components["schemas"]["SkillsPolicyInput"] | null;
     };
     /** GroupChatAssistantPublic */
@@ -13053,6 +13523,192 @@ export interface components {
        */
       id: string;
     };
+    /** ImageModelPublic */
+    ImageModelPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname: string;
+      /** Family */
+      family?: string | null;
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /** Stability */
+      stability?: string | null;
+      /** Hosting */
+      hosting?: string | null;
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Description */
+      description?: string | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      /** Org */
+      org?: string | null;
+      /** Cost Per Image */
+      cost_per_image?: string | null;
+      /**
+       * Default Size
+       * @default auto
+       */
+      default_size?: string;
+      /**
+       * Default Quality
+       * @default auto
+       */
+      default_quality?: string;
+      /**
+       * Can Access
+       * @default false
+       */
+      can_access?: boolean;
+      /**
+       * Is Locked
+       * @default true
+       */
+      is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
+      /**
+       * Is Org Enabled
+       * @default false
+       */
+      is_org_enabled?: boolean;
+      /**
+       * Is Org Default
+       * @default false
+       */
+      is_org_default?: boolean;
+      /** Credential Provider */
+      credential_provider?: string | null;
+      security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
+      /**
+       * Used By Mcp Servers
+       * @default []
+       */
+      used_by_mcp_servers?: components["schemas"]["ImageModelUsedByPublic"][];
+    };
+    /** ImageModelSecurityStatus */
+    ImageModelSecurityStatus: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname: string;
+      /** Family */
+      family?: string | null;
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /** Stability */
+      stability?: string | null;
+      /** Hosting */
+      hosting?: string | null;
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Description */
+      description?: string | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      /** Org */
+      org?: string | null;
+      /** Cost Per Image */
+      cost_per_image?: string | null;
+      /**
+       * Default Size
+       * @default auto
+       */
+      default_size?: string;
+      /**
+       * Default Quality
+       * @default auto
+       */
+      default_quality?: string;
+      /**
+       * Can Access
+       * @default false
+       */
+      can_access?: boolean;
+      /**
+       * Is Locked
+       * @default true
+       */
+      is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
+      /**
+       * Is Org Enabled
+       * @default false
+       */
+      is_org_enabled?: boolean;
+      /**
+       * Is Org Default
+       * @default false
+       */
+      is_org_default?: boolean;
+      /** Credential Provider */
+      credential_provider?: string | null;
+      security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
+      /**
+       * Used By Mcp Servers
+       * @default []
+       */
+      used_by_mcp_servers?: components["schemas"]["ImageModelUsedByPublic"][];
+      /** Meets Security Classification */
+      meets_security_classification?: boolean | null;
+    };
+    /** ImageModelUpdate */
+    ImageModelUpdate: {
+      /** Is Org Enabled */
+      is_org_enabled?: boolean | null;
+      /** Is Org Default */
+      is_org_default?: boolean | null;
+      /** Security Classification */
+      security_classification?: components["schemas"]["ModelId"] | null;
+    };
+    /**
+     * ImageModelUsedByPublic
+     * @description A capability provider that runs on the model.
+     */
+    ImageModelUsedByPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Purpose */
+      purpose: string;
+    };
     /** InfoBlobAddPublic */
     InfoBlobAddPublic: {
       /** Text */
@@ -13075,6 +13731,8 @@ export interface components {
       group_id?: string | null;
       /** Website Id */
       website_id?: string | null;
+      /** Original Available */
+      original_available: boolean;
       /** Score */
       score: number;
     };
@@ -13120,6 +13778,8 @@ export interface components {
       group_id?: string | null;
       /** Website Id */
       website_id?: string | null;
+      /** Original Available */
+      original_available: boolean;
       /** Text */
       text: string;
     };
@@ -13139,6 +13799,8 @@ export interface components {
       group_id?: string | null;
       /** Website Id */
       website_id?: string | null;
+      /** Original Available */
+      original_available: boolean;
     };
     /** InfoBlobUpdatePublic */
     InfoBlobUpdatePublic: {
@@ -13426,6 +14088,39 @@ export interface components {
       info_blobs: components["schemas"]["InfoBlobLimits"];
       attachments: components["schemas"]["AttachmentLimits"];
     };
+    /** LocalPasswordPolicy */
+    LocalPasswordPolicy: {
+      /**
+       * Min Length
+       * @default 12
+       */
+      min_length?: number;
+      /**
+       * Max Bytes
+       * @default 72
+       */
+      max_bytes?: number;
+      /**
+       * Requires Uppercase
+       * @default false
+       */
+      requires_uppercase?: boolean;
+      /**
+       * Requires Lowercase
+       * @default false
+       */
+      requires_lowercase?: boolean;
+      /**
+       * Requires Number
+       * @default false
+       */
+      requires_number?: boolean;
+      /**
+       * Requires Symbol
+       * @default false
+       */
+      requires_symbol?: boolean;
+    };
     /** LoggingDetailsPublic */
     LoggingDetailsPublic: {
       /** Context */
@@ -13452,30 +14147,66 @@ export interface components {
       /** Error Message */
       error_message?: string | null;
     };
-    /**
-     * MCPServerCreate
-     * @description DTO for creating an MCP server (admin only, uses Streamable HTTP transport).
-     */
-    MCPServerCreate: {
+    /** MCPServerAudienceGroupPublic */
+    MCPServerAudienceGroupPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
       /** Name */
       name: string;
+    };
+    /**
+     * MCPServerBackingModelPublic
+     * @description The catalog image model a built-in provider runs on (read-only).
+     */
+    MCPServerBackingModelPublic: {
       /**
-       * Http Url
-       * Format: uri
+       * Id
+       * Format: uuid
        */
-      http_url: string;
+      id: string;
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname: string;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Is Enabled */
+      is_enabled: boolean;
+    };
+    /** MCPServerCreate */
+    MCPServerCreate: {
+      /**
+       * Activate
+       * @default false
+       */
+      activate?: boolean;
+      /** Name */
+      name: string;
+      /** Http Url */
+      http_url?: string | null;
       /**
        * Http Auth Type
        * @default none
        * @enum {string}
        */
-      http_auth_type?: "none" | "bearer";
+      http_auth_type?: "none" | "bearer" | "api_key_header" | "internal";
+      /**
+       * Purpose
+       * @default general
+       * @enum {string}
+       */
+      purpose?: "general" | "web_search" | "image_generation";
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
       http_auth_config_schema?: {
         [key: string]: unknown;
       } | null;
+      /** Image Model Id */
+      image_model_id?: string | null;
       /**
        * Forward Identity
        * @default false
@@ -13503,6 +14234,22 @@ export interface components {
       /** Documentation Url */
       documentation_url?: string | null;
       security_classification?: components["schemas"]["ModelId"] | null;
+      /**
+       * Audience
+       * @default everyone
+       * @enum {string}
+       */
+      audience?: "everyone" | "groups";
+      /**
+       * Audience Priority
+       * @default 100
+       */
+      audience_priority?: number;
+      /**
+       * User Group Ids
+       * @default []
+       */
+      user_group_ids?: string[];
     };
     /**
      * MCPServerCreateResponse
@@ -13530,6 +14277,38 @@ export interface components {
       http_url: string;
       /** Http Auth Type */
       http_auth_type: string;
+      /**
+       * Purpose
+       * @default general
+       * @enum {string}
+       */
+      purpose?: "general" | "web_search" | "image_generation";
+      /** Image Model Id */
+      image_model_id?: string | null;
+      image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
+      /**
+       * Is Enabled
+       * @default true
+       */
+      is_enabled?: boolean;
+      /** Readiness Reason */
+      readiness_reason?: string | null;
+      /**
+       * Audience
+       * @default everyone
+       * @enum {string}
+       */
+      audience?: "everyone" | "groups";
+      /**
+       * Audience Priority
+       * @default 100
+       */
+      audience_priority?: number;
+      /**
+       * User Groups
+       * @default []
+       */
+      user_groups?: components["schemas"]["MCPServerAudienceGroupPublic"][];
       /** Has Credentials */
       has_credentials: boolean;
       /** Credential Preview */
@@ -13574,6 +14353,12 @@ export interface components {
       http_url: string | null;
       /** Http Auth Type */
       http_auth_type: string | null;
+      /** Purpose */
+      purpose: string;
+      /** Is Enabled */
+      is_enabled: boolean;
+      /** Readiness Reason */
+      readiness_reason: string | null;
       /** Tags */
       tags: string[] | null;
       /** Icon Url */
@@ -13615,6 +14400,38 @@ export interface components {
       http_url: string;
       /** Http Auth Type */
       http_auth_type: string;
+      /**
+       * Purpose
+       * @default general
+       * @enum {string}
+       */
+      purpose?: "general" | "web_search" | "image_generation";
+      /** Image Model Id */
+      image_model_id?: string | null;
+      image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
+      /**
+       * Is Enabled
+       * @default true
+       */
+      is_enabled?: boolean;
+      /** Readiness Reason */
+      readiness_reason?: string | null;
+      /**
+       * Audience
+       * @default everyone
+       * @enum {string}
+       */
+      audience?: "everyone" | "groups";
+      /**
+       * Audience Priority
+       * @default 100
+       */
+      audience_priority?: number;
+      /**
+       * User Groups
+       * @default []
+       */
+      user_groups?: components["schemas"]["MCPServerAudienceGroupPublic"][];
       /** Has Credentials */
       has_credentials: boolean;
       /** Credential Preview */
@@ -13707,6 +14524,8 @@ export interface components {
       name: string;
       /** Title */
       title?: string | null;
+      /** Display Name */
+      display_name?: string | null;
       /** Description */
       description: string | null;
       /** Input Schema */
@@ -13731,6 +14550,16 @@ export interface components {
        * @default false
        */
       removed_from_remote?: boolean;
+    };
+    /**
+     * MCPServerToolRename
+     * @description DTO for setting an admin display name on a tool.
+     *
+     *     None clears the override, falling back to the remote-synced title.
+     */
+    MCPServerToolRename: {
+      /** Display Name */
+      display_name?: string | null;
     };
     /**
      * MCPServerToolSyncResponse
@@ -13779,13 +14608,17 @@ export interface components {
       /** Http Url */
       http_url?: string | null;
       /** Http Auth Type */
-      http_auth_type?: ("none" | "bearer") | null;
+      http_auth_type?: ("none" | "bearer" | "api_key_header" | "internal") | null;
+      /** Purpose */
+      purpose?: ("general" | "web_search" | "image_generation") | null;
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
       http_auth_config_schema?: {
         [key: string]: unknown;
       } | null;
+      /** Image Model Id */
+      image_model_id?: string | null;
       /** Forward Identity */
       forward_identity?: boolean | null;
       /** Tool Catalog Max Count */
@@ -13802,6 +14635,12 @@ export interface components {
       documentation_url?: string | null;
       /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
+      /** Audience */
+      audience?: ("everyone" | "groups") | null;
+      /** Audience Priority */
+      audience_priority?: number | null;
+      /** User Group Ids */
+      user_group_ids?: string[] | null;
     };
     /**
      * MCPToolSetting
@@ -13818,6 +14657,8 @@ export interface components {
     };
     /** McpRestrictionInput */
     McpRestrictionInput: {
+      /** Capabilities */
+      capabilities?: components["schemas"]["PolicyCapabilityInput"][];
       /** Enabled */
       enabled: boolean;
       /**
@@ -13833,6 +14674,8 @@ export interface components {
     };
     /** McpRestrictionPublic */
     McpRestrictionPublic: {
+      /** Capabilities */
+      capabilities?: components["schemas"]["PolicyCapabilityInput"][];
       /** Enabled */
       enabled: boolean;
       /** Servers */
@@ -13897,8 +14740,6 @@ export interface components {
       tools: components["schemas"]["UseTools"];
       /** Generated Files */
       generated_files: components["schemas"]["FilePublic"][];
-      /** Web Search References */
-      web_search_references: components["schemas"]["WebSearchResultPublic"][];
       /**
        * Mcp Tool References
        * @default []
@@ -13961,8 +14802,6 @@ export interface components {
       tools: components["schemas"]["UseTools"];
       /** Generated Files */
       generated_files: components["schemas"]["FilePublic"][];
-      /** Web Search References */
-      web_search_references: components["schemas"]["WebSearchResultPublic"][];
       /**
        * Mcp Tool References
        * @default []
@@ -14461,6 +15300,8 @@ export interface components {
       embedding_models: components["schemas"]["EmbeddingModelSecurityStatus"][];
       /** Transcription Models */
       transcription_models: components["schemas"]["TranscriptionModelSecurityStatus"][];
+      /** Image Models */
+      image_models: components["schemas"]["ImageModelSecurityStatus"][];
     };
     /** ModelsRestrictionInput */
     ModelsRestrictionInput: {
@@ -14486,29 +15327,10 @@ export interface components {
       /** Provider Ids */
       provider_ids: string[];
     };
-    /**
-     * ModuleClientConfig
-     * @description Auth-broker client config for a module: which callback URLs are allowed
-     *     and which sk_ key alone may exchange the module's login tickets.
-     */
-    ModuleClientConfig: {
-      /** Redirect Uris */
-      redirect_uris?: string[] | null;
-      /** Service Key Id */
-      service_key_id?: string | null;
-    };
-    /**
-     * ModuleCreate
-     * @description Registration contract for a new stable module key.
-     */
-    ModuleCreate: {
-      /** Name */
-      name: components["schemas"]["Modules"] | string;
-    };
     /** ModuleInDB */
     ModuleInDB: {
       /** Name */
-      name: components["schemas"]["Modules"] | string;
+      name: string;
       /** Created At */
       created_at?: string | null;
       /** Updated At */
@@ -14518,6 +15340,62 @@ export interface components {
        * Format: uuid
        */
       id: string;
+    };
+    /**
+     * ModuleInstallation
+     * @description One module installed for the authenticated user's organization.
+     *
+     *     The tenant id is intentionally absent. It is derived from the session and
+     *     remains an internal data-partition key rather than an admin-UI concept.
+     *     Older assignments may be incomplete, so reads retain nullable config while
+     *     the new installation command only accepts a complete configuration.
+     */
+    ModuleInstallation: {
+      /**
+       * Module Id
+       * Format: uuid
+       */
+      module_id: string;
+      /** Module Key */
+      module_key: string;
+      /** Redirect Uris */
+      redirect_uris?: string[];
+      /** Service Key Id */
+      service_key_id?: string | null;
+      /** Configured */
+      readonly configured: boolean;
+    };
+    /**
+     * ModuleInstallationChange
+     * @description Tenant-free result for an idempotent installation state change.
+     */
+    ModuleInstallationChange: {
+      /**
+       * Module Id
+       * Format: uuid
+       */
+      module_id: string;
+      /** Module Key */
+      module_key: string;
+      /** Enabled */
+      enabled: boolean;
+      /** Changed */
+      changed: boolean;
+    };
+    /**
+     * ModuleInstallationConfig
+     * @description Complete, tenant-implicit configuration accepted by the admin UI.
+     *
+     *     ``service_key_id`` must be present but may be an explicit ``null``: that
+     *     severs ticket exchange (no key can trade the module's login tickets) while
+     *     keeping the module installed and its callbacks intact — the incident
+     *     response step between "working installation" and "full uninstall".
+     */
+    ModuleInstallationConfig: {
+      /** Redirect Uris */
+      redirect_uris: string[];
+      /** Service Key Id */
+      service_key_id: string | null;
     };
     /**
      * ModuleResourceSessionResponse
@@ -14532,45 +15410,6 @@ export interface components {
        */
       tenant_id: string;
       user: components["schemas"]["ModuleTokenUser"];
-    };
-    /**
-     * ModuleTenantAssignment
-     * @description Narrow result for enabling or disabling one tenant module.
-     */
-    ModuleTenantAssignment: {
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      /**
-       * Module Id
-       * Format: uuid
-       */
-      module_id: string;
-      /** Module Key */
-      module_key: string;
-      /** Enabled */
-      enabled: boolean;
-      /** Changed */
-      changed: boolean;
-    };
-    /** ModuleTenantClientConfig */
-    ModuleTenantClientConfig: {
-      /** Redirect Uris */
-      redirect_uris?: string[] | null;
-      /** Service Key Id */
-      service_key_id?: string | null;
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      /**
-       * Module Id
-       * Format: uuid
-       */
-      module_id: string;
     };
     /** ModuleTicketRequest */
     ModuleTicketRequest: {
@@ -14642,12 +15481,6 @@ export interface components {
       /** Username */
       username?: string | null;
     };
-    /**
-     * Modules
-     * @description Any change to these enums will result in database changes
-     * @enum {string}
-     */
-    Modules: "eneo-applications";
     /** MovePausePublic */
     MovePausePublic: {
       /** Policy Revision */
@@ -14889,6 +15722,9 @@ export interface components {
       publication_state: components["schemas"]["SkillPublicationState"];
       /** Execution Blocked */
       execution_blocked: boolean;
+      /** Removed At */
+      removed_at: string | null;
+      usage: components["schemas"]["SkillUsageCountsPublic"];
       current_revision: components["schemas"]["SkillRevisionPublic"];
     };
     /** OrganizationSkillSummaryPagePublic */
@@ -14959,6 +15795,9 @@ export interface components {
       publication_state: components["schemas"]["SkillPublicationState"];
       /** Execution Blocked */
       execution_blocked: boolean;
+      /** Removed At */
+      removed_at: string | null;
+      usage: components["schemas"]["SkillUsageCountsPublic"];
     };
     /** OriginalSignedURLRequest */
     OriginalSignedURLRequest: {
@@ -15297,6 +16136,19 @@ export interface components {
        */
       readonly count: number;
     };
+    /** PaginatedResponse[ImageModelPublic] */
+    PaginatedResponse_ImageModelPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["ImageModelPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** PaginatedResponse[InfoBlobPublicNoText] */
     PaginatedResponse_InfoBlobPublicNoText_: {
       /**
@@ -15375,13 +16227,13 @@ export interface components {
        */
       readonly count: number;
     };
-    /** PaginatedResponse[ModuleInDB] */
-    PaginatedResponse_ModuleInDB_: {
+    /** PaginatedResponse[ModuleInstallation] */
+    PaginatedResponse_ModuleInstallation_: {
       /**
        * Items
        * @description List of items returned in the response
        */
-      items: components["schemas"]["ModuleInDB"][];
+      items: components["schemas"]["ModuleInstallation"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -15684,7 +16536,7 @@ export interface components {
       total_count: number;
       /**
        * Total Pages
-       * @description Total number of pages (calculated from total_count and page_size)
+       * @description Number of reachable pages (calculated from total_count and page_size, capped at 100)
        * @example 6
        */
       total_pages: number;
@@ -15727,6 +16579,8 @@ export interface components {
        * @description This field is deprecated and will be ignored
        */
       logging_enabled?: boolean | null;
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
       /** Space Id */
       space_id?: string | null;
       prompt?: components["schemas"]["PromptCreate"] | null;
@@ -15894,6 +16748,8 @@ export interface components {
     };
     /** PartialUpdateSpaceRequest */
     PartialUpdateSpaceRequest: {
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
       /** Name */
       name?: string | null;
       /** Description */
@@ -15923,6 +16779,21 @@ export interface components {
        * @description Number of days to retain conversation history for this space. Applies to all assistants and apps in the space that don't have their own retention policy. Set to null to disable space-level retention. Omit to keep the current retention policy unchanged. Valid range: 1-2555 days (1 day to 7 years).
        */
       data_retention_days?: number | null;
+    };
+    /** PasswordChangeRequest */
+    PasswordChangeRequest: {
+      /**
+       * Current Password
+       * Format: password
+       * @description Current local Eneo password.
+       */
+      current_password: string;
+      /**
+       * New Password
+       * Format: password
+       * @description New local password. The active constraints are returned in UserPublic.password_change.policy.
+       */
+      new_password: string;
     };
     /**
      * PatchFederationRequest
@@ -16046,7 +16917,10 @@ export interface components {
       | "shared_spaces"
       | "api_keys"
       | "storage"
-      | "assistant_debug";
+      | "modules"
+      | "assistant_debug"
+      | "web_search"
+      | "image_generation";
     /** PermissionPublic */
     PermissionPublic: {
       name: components["schemas"]["Permission"];
@@ -16085,6 +16959,19 @@ export interface components {
      * @enum {string}
      */
     PolicyActor: "migration" | "storage_admin";
+    /** PolicyCapabilityInput */
+    PolicyCapabilityInput: {
+      /**
+       * Purpose
+       * @enum {string}
+       */
+      purpose: "web_search" | "image_generation";
+      /**
+       * Is Default Enabled
+       * @default true
+       */
+      is_default_enabled?: boolean;
+    };
     /** PolicyCompletionModelInput */
     PolicyCompletionModelInput: {
       /**
@@ -17344,6 +18231,11 @@ export interface components {
       api_key_expiry_notifications?: boolean;
       chunking: components["schemas"]["ChunkingPolicyPublic"];
       /**
+       * Whats New Enabled
+       * @default true
+       */
+      whats_new_enabled?: boolean;
+      /**
        * File References Enabled
        * @default false
        */
@@ -17353,6 +18245,55 @@ export interface components {
        * @default false
        */
       object_store_configured?: boolean;
+      /**
+       * Sharepoint Fixture Mode Available
+       * @default false
+       */
+      sharepoint_fixture_mode_available?: boolean;
+      /**
+       * Developer Tools Available
+       * @default false
+       */
+      developer_tools_available?: boolean;
+    };
+    /** SharePointFixturePreviewResponse */
+    SharePointFixturePreviewResponse: {
+      /** Items */
+      items: components["schemas"]["IntegrationPreviewData"][];
+      /**
+       * Fixture
+       * @default true
+       * @constant
+       */
+      fixture?: true;
+      scenario: components["schemas"]["SharePointFixtureScenario"];
+      /** Count */
+      readonly count: number;
+    };
+    /**
+     * SharePointFixtureScenario
+     * @enum {string}
+     */
+    SharePointFixtureScenario: "representative" | "large_tenant" | "empty";
+    /** SharePointFixtureTreeResponse */
+    SharePointFixtureTreeResponse: {
+      /** Items */
+      items: components["schemas"]["SharePointTreeItem"][];
+      /** Current Path */
+      current_path: string;
+      /** Parent Id */
+      parent_id?: string | null;
+      /** Drive Id */
+      drive_id: string;
+      /** Site Id */
+      site_id?: string | null;
+      /**
+       * Fixture
+       * @default true
+       * @constant
+       */
+      fixture?: true;
+      scenario: components["schemas"]["SharePointFixtureScenario"];
     };
     /**
      * SharePointSubscriptionPublic
@@ -17630,6 +18571,11 @@ export interface components {
       limit: number;
       /** Next Cursor */
       next_cursor?: string | null;
+      /**
+       * Matched Count
+       * @description Resources matching the filters across all pages; first page only.
+       */
+      matched_count?: number | null;
     };
     /**
      * SkillAdoptionResourceKind
@@ -17661,6 +18607,17 @@ export interface components {
       /** Revision Number */
       revision_number: number;
       drift: components["schemas"]["SkillAdoptionDrift"];
+      /**
+       * Owner Name
+       * @description Owner of the personal space, when personal.
+       */
+      owner_name?: string | null;
+      /**
+       * Can Open
+       * @description False for another user's personal space, which admins cannot open.
+       * @default true
+       */
+      can_open?: boolean;
     };
     /** SkillAdoptionRevisionCountPublic */
     SkillAdoptionRevisionCountPublic: {
@@ -17691,6 +18648,16 @@ export interface components {
       personal_chat: components["schemas"]["SkillAdoptionPersonalChatPublic"] | null;
       /** Revision Counts */
       revision_counts: components["schemas"]["SkillAdoptionRevisionCountPublic"][];
+    };
+    /**
+     * SkillBindingDetachRequest
+     * @description Assistants and Apps to detach one Skill from; at most 100 in total.
+     */
+    SkillBindingDetachRequest: {
+      /** Assistant Ids */
+      assistant_ids?: string[];
+      /** App Ids */
+      app_ids?: string[];
     };
     /** SkillBindingReferenceInput */
     SkillBindingReferenceInput: {
@@ -17754,6 +18721,21 @@ export interface components {
       instructions: string;
       /** Slug */
       slug: string;
+    };
+    /**
+     * SkillDetachmentTotalsPublic
+     * @description Distinct resources that lost a binding in one removal batch.
+     */
+    SkillDetachmentTotalsPublic: {
+      /** Assistant Count */
+      assistant_count: number;
+      /** App Count */
+      app_count: number;
+      /**
+       * Personal Chat Count
+       * @description Personal Chat policies that lost at least one selected Skill.
+       */
+      personal_chat_count: number;
     };
     /** SkillExecutionBlockPublic */
     SkillExecutionBlockPublic: {
@@ -17881,6 +18863,26 @@ export interface components {
        * Format: uuid
        */
       expected_revision_id: string;
+    };
+    /** SkillRemovalPublic */
+    SkillRemovalPublic: {
+      /**
+       * Removed Ids
+       * @description Selected Skills confirmed removed, including previously removed Skills.
+       */
+      removed_ids: string[];
+      detached: components["schemas"]["SkillDetachmentTotalsPublic"];
+    };
+    /** SkillRemovalRequest */
+    SkillRemovalRequest: {
+      /** Skill Ids */
+      skill_ids: string[];
+      /**
+       * Detach Bindings
+       * @description Also delete every Assistant, App and Personal Chat binding of the selected Skills in the same transaction. Without it, a bound Skill refuses the whole batch.
+       * @default false
+       */
+      detach_bindings?: boolean;
     };
     /** SkillRevisionCreateRequest */
     SkillRevisionCreateRequest: {
@@ -18086,6 +19088,17 @@ export interface components {
      * @enum {string}
      */
     SkillTurnEffectiveMode: "eager" | "always_only" | "selective";
+    /** SkillUsageCountsPublic */
+    SkillUsageCountsPublic: {
+      /** Assistant Count */
+      assistant_count: number;
+      /** App Count */
+      app_count: number;
+      /** Distinct Space Count */
+      distinct_space_count: number;
+      /** Personal Chat Pinned */
+      personal_chat_pinned: boolean;
+    };
     /** SkillsPolicyInput */
     SkillsPolicyInput: {
       /** Bindings */
@@ -18222,6 +19235,10 @@ export interface components {
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[];
+      /** Available Capabilities */
+      available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Embedding Models */
       embedding_models: components["schemas"]["EmbeddingModelPublic"][];
       /** Completion Models */
@@ -18421,8 +19438,6 @@ export interface components {
     SuperApiKeyStatus: {
       /** Super Api Key Configured */
       super_api_key_configured: boolean;
-      /** Super Duper Api Key Configured */
-      super_duper_api_key_configured: boolean;
     };
     /** SupportedModelKwargs */
     SupportedModelKwargs: {
@@ -18854,6 +19869,125 @@ export interface components {
       /** @description Security classification reference (null clears it) */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
+    /** TenantImageModelCreate */
+    TenantImageModelCreate: {
+      /**
+       * Provider Id
+       * Format: uuid
+       * @description Model provider ID
+       */
+      provider_id: string;
+      /**
+       * Name
+       * @description Model identifier as served by the provider (e.g. 'gpt-image-1', 'imagen-4.0-generate-001', or the name a vLLM endpoint serves)
+       */
+      name: string;
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name: string;
+      /**
+       * Hosting
+       * @description Hosting location (swe, eu, usa)
+       * @default swe
+       */
+      hosting?: string;
+      /**
+       * Family
+       * @description Model family (e.g., 'openai', 'google')
+       * @default openai
+       */
+      family?: string;
+      /**
+       * Is Active
+       * @description Enable in organization
+       * @default true
+       */
+      is_active?: boolean;
+      /**
+       * Is Default
+       * @description Set as default model
+       * @default false
+       */
+      is_default?: boolean;
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /**
+       * Cost Per Image
+       * @description Indicative USD per generated image
+       */
+      cost_per_image?: number | string | null;
+      /**
+       * Default Size
+       * @description Size used when the assistant does not ask
+       * @default auto
+       * @enum {string}
+       */
+      default_size?: "auto" | "1024x1024" | "1536x1024" | "1024x1536";
+      /**
+       * Default Quality
+       * @description Quality used when the assistant does not ask
+       * @default auto
+       * @enum {string}
+       */
+      default_quality?: "auto" | "low" | "medium" | "high";
+      /** @description Security classification */
+      security_classification?: components["schemas"]["ModelId"] | null;
+    };
+    /** TenantImageModelUpdate */
+    TenantImageModelUpdate: {
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name?: string | null;
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /**
+       * Hosting
+       * @description Hosting location (swe, eu, usa)
+       */
+      hosting?: string | null;
+      /**
+       * Open Source
+       * @description Is the model open source
+       */
+      open_source?: boolean | null;
+      /**
+       * Stability
+       * @description Model stability (stable, experimental)
+       */
+      stability?: string | null;
+      /**
+       * Cost Per Image
+       * @description Indicative USD per generated image
+       */
+      cost_per_image?: number | string | null;
+      /**
+       * Default Size
+       * @description Size used when the assistant does not ask
+       */
+      default_size?: ("auto" | "1024x1024" | "1536x1024" | "1024x1536") | null;
+      /**
+       * Default Quality
+       * @description Quality used when the assistant does not ask
+       */
+      default_quality?: ("auto" | "low" | "medium" | "high") | null;
+      /**
+       * Is Default
+       * @description Set as tenant default
+       */
+      is_default?: boolean | null;
+      /** @description Security classification reference (null clears it) */
+      security_classification?: components["schemas"]["ModelId"] | null;
+    };
     /** TenantInDB */
     TenantInDB: {
       /** Created At */
@@ -19029,6 +20163,11 @@ export interface components {
       show_model_pricing?: boolean;
       /** Privacy Policy */
       privacy_policy?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
       /** Default Role Id */
       default_role_id?: string | null;
     };
@@ -19419,6 +20558,14 @@ export interface components {
       result?: string | null;
       /** Mcp Tool Name */
       mcp_tool_name?: string | null;
+      /** Purpose */
+      purpose?: string | null;
+      /** Meta */
+      meta?: {
+        [key: string]: unknown;
+      } | null;
+      /** Generated File Ids */
+      generated_file_ids?: string[] | null;
     };
     /**
      * ToolCallResultPublic
@@ -19740,6 +20887,8 @@ export interface components {
     UpdateInterval: "never" | "daily" | "every_other_day" | "weekly";
     /** UpdateSpaceDryRunResponse */
     UpdateSpaceDryRunResponse: {
+      /** Capabilities */
+      capabilities?: ("web_search" | "image_generation")[];
       /** Assistants */
       assistants: components["schemas"]["AssistantSparse"][];
       /** Group Chats */
@@ -19816,8 +20965,8 @@ export interface components {
       username?: string | null;
       /**
        * Password
-       * @description User password (minimum 7 characters)
-       * @example SecurePassword123!
+       * @description New local password. Must satisfy the policy returned by GET /api/v1/users/password-policy/.
+       * @example Correct horse battery staple
        */
       password?: string | null;
       /**
@@ -19851,8 +21000,8 @@ export interface components {
       username?: string | null;
       /**
        * Password
-       * @description User password (minimum 7 characters)
-       * @example SecurePassword123!
+       * @description New local password. Must satisfy the policy returned by GET /api/v1/users/password-policy/.
+       * @example Correct horse battery staple
        */
       password?: string | null;
       /**
@@ -19969,6 +21118,11 @@ export interface components {
       /** Quota Limit */
       quota_limit?: number | null;
       /**
+       * Credential Version
+       * @default 0
+       */
+      credential_version?: number;
+      /**
        * User Groups
        * @default []
        */
@@ -19991,8 +21145,6 @@ export interface components {
        */
       deleted_at?: string | null;
       access_token?: components["schemas"]["AccessToken"] | null;
-      /** Modules */
-      readonly modules: string[];
       /** User Groups Ids */
       readonly user_groups_ids: string[];
       /** Permissions */
@@ -20144,6 +21296,11 @@ export interface components {
       /** Quota Limit */
       quota_limit?: number | null;
       /**
+       * Credential Version
+       * @default 0
+       */
+      credential_version?: number;
+      /**
        * User Groups
        * @default []
        */
@@ -20165,8 +21322,6 @@ export interface components {
        * @description Timestamp when user was soft-deleted (null for active users)
        */
       deleted_at?: string | null;
-      /** Modules */
-      readonly modules: string[];
       /** User Groups Ids */
       readonly user_groups_ids: string[];
       /** Permissions */
@@ -20253,6 +21408,10 @@ export interface components {
       roles: components["schemas"]["RolePublic"][];
       /** User Groups */
       user_groups: components["schemas"]["UserGroupRead"][];
+      /** Password Change */
+      password_change:
+        | components["schemas"]["EneoPasswordChangeCapabilityPublic"]
+        | components["schemas"]["ExternalPasswordChangeCapabilityPublic"];
     };
     /** UserPublicBase */
     UserPublicBase: {
@@ -20446,8 +21605,8 @@ export interface components {
       username?: string | null;
       /**
        * Password
-       * @description New password (minimum 7 characters)
-       * @example NewSecurePassword456!
+       * @description New local password. Must satisfy the policy returned by GET /api/v1/users/password-policy/.
+       * @example Another correct horse battery staple
        */
       password?: string | null;
       /**
@@ -20480,7 +21639,7 @@ export interface components {
       model_name: string;
       /**
        * Model Type
-       * @description Model type: completion, embedding, or transcription
+       * @description Model type: completion, embedding, transcription, or image
        * @default completion
        */
       model_type?: string;
@@ -20557,18 +21716,6 @@ export interface components {
        * @default 0
        */
       slots_released?: number;
-    };
-    /** WebSearchResultPublic */
-    WebSearchResultPublic: {
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Title */
-      title: string;
-      /** Url */
-      url: string;
     };
     /** WebsiteCreate */
     WebsiteCreate: {
@@ -20749,6 +21896,28 @@ export interface components {
        * @description Password for HTTP Basic Authentication. Set to null to remove auth. Must be provided with username.
        */
       http_auth_password?: string | null;
+    };
+    /** WhatsNewStatePublic */
+    WhatsNewStatePublic: {
+      /**
+       * Seen Version
+       * @description Newest release the user has opened the What's new page for; null before the first visit.
+       */
+      seen_version: string | null;
+      /**
+       * Announced Version
+       * @description Newest release the user has been shown the announcement for; null before the first one.
+       */
+      announced_version: string | null;
+    };
+    /** WhatsNewVersionUpdate */
+    WhatsNewVersionUpdate: {
+      /**
+       * Version
+       * @description A release id as written in releases.json.
+       * @example 2.2.0
+       */
+      version: string;
     };
     /**
      * WizardType
@@ -21253,8 +22422,6 @@ export interface components {
       /** References */
       references: components["schemas"]["InfoBlobAskAssistantPublic"][];
       tools: components["schemas"]["UseTools"];
-      /** Web Search References */
-      web_search_references: components["schemas"]["WebSearchResultPublic"][];
       /**
        * Mcp Tool References
        * @default []
@@ -21824,7 +22991,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Too Many Requests */
@@ -21833,7 +23000,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -21862,7 +23029,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Too Many Requests */
@@ -21871,7 +23038,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -21904,7 +23071,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -21913,7 +23080,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -21922,7 +23089,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -21940,7 +23107,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -21969,7 +23136,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Too Many Requests */
@@ -21978,7 +23145,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -22010,7 +23177,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -22019,7 +23186,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -22028,7 +23195,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -22037,7 +23204,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -22055,7 +23222,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -22087,7 +23254,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -22096,7 +23263,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -22114,7 +23281,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -22148,7 +23315,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -22166,7 +23333,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -22200,7 +23367,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -22209,7 +23376,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -22218,7 +23385,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -22236,7 +23403,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -22246,7 +23413,7 @@ export interface operations {
       query?: {
         /** @description Keys per page */
         limit?: number | null;
-        /** @description Current cursor */
+        /** @description Opaque current cursor */
         cursor?: string | null;
         /** @description Show previous page */
         previous?: boolean;
@@ -22297,11 +23464,20 @@ export interface operations {
            *         }
            *       ],
            *       "limit": 50,
-           *       "next_cursor": "2026-02-05T12:00:00Z",
+           *       "next_cursor": "v1.eyJjcmVhdGVkX2F0IjoiMjAyNi0wMi0wNVQxMjowMDowMFoiLCJrZXlfaWQiOiIxMTExMTExMS0xMTExLTExMTEtMTExMS0xMTExMTExMTExMTEifQ",
            *       "total_count": 1
            *     }
            */
           "application/json": components["schemas"]["ApiKeyListResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -22310,7 +23486,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -22328,7 +23504,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -22385,7 +23561,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -22394,7 +23570,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -22403,7 +23579,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -22421,7 +23597,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -22473,7 +23649,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -22482,7 +23658,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -22491,7 +23667,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -22509,7 +23685,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -22538,7 +23714,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -22547,7 +23723,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -22556,7 +23732,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -22574,7 +23750,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -22630,7 +23806,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -22639,7 +23815,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -22648,7 +23824,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -22657,7 +23833,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -22675,7 +23851,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -22731,7 +23907,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -22740,7 +23916,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -22749,7 +23925,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -22758,7 +23934,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -22776,7 +23952,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -22835,7 +24011,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -22844,7 +24020,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -22853,7 +24029,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -22862,7 +24038,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -22880,7 +24056,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -22936,7 +24112,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -22945,7 +24121,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -22954,7 +24130,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -22963,7 +24139,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -22981,7 +24157,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -23010,7 +24186,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -23019,7 +24195,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -23028,7 +24204,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -23037,7 +24213,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23055,7 +24231,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -23111,7 +24287,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -23120,7 +24296,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -23129,7 +24305,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -23138,7 +24314,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23156,7 +24332,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -23208,7 +24384,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -23217,7 +24393,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -23226,7 +24402,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -23235,7 +24411,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23253,7 +24429,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -23594,6 +24770,44 @@ export interface operations {
       };
     };
   };
+  get_local_password_policy_api_v1_users_password_policy__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalPasswordPolicy"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   Get_current_user_api_v1_users_me__get: {
     parameters: {
       query?: never;
@@ -23611,6 +24825,127 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["UserPublic"];
         };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  Change_current_user_s_local_password_api_v1_users_me_password__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PasswordChangeRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  Invalidate_current_user_s_Eneo_sessions_api_v1_users_me_sessions_invalidate__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Forbidden */
       403: {
@@ -23888,6 +25223,143 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  generate_original_signed_url_api_v1_info_blobs__id__original_signed_url__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OriginalSignedURLRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SignedURLResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  download_original_api_v1_info_blobs__id__original_download__get: {
+    parameters: {
+      query: {
+        token: string;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Exact uploaded bytes */
+      200: {
+        headers: {
+          /** @description Requested inline or attachment disposition */
+          "Content-Disposition"?: string;
+          /** @description Original size in bytes */
+          "Content-Length"?: number;
+          /** @description SHA-256 digest of the original representation */
+          "Repr-Digest"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "*/*": string;
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -25021,6 +26493,48 @@ export interface operations {
       };
     };
   };
+  update_whats_new_setting_api_v1_settings_whats_new_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_assistants_api_v1_assistants__get: {
     parameters: {
       query?: {
@@ -25390,8 +26904,6 @@ export interface operations {
             /** References */
             references: components["schemas"]["InfoBlobAskAssistantPublic"][];
             tools: components["schemas"]["UseTools"];
-            /** Web Search References */
-            web_search_references: components["schemas"]["WebSearchResultPublic"][];
             /**
              * Mcp Tool References
              * @default []
@@ -25538,6 +27050,8 @@ export interface operations {
                 group_id?: string | null;
                 /** Website Id */
                 website_id?: string | null;
+                /** Original Available */
+                original_available: boolean;
                 /** Score */
                 score: number;
               };
@@ -25655,18 +27169,6 @@ export interface operations {
               UseTools: {
                 /** Assistants */
                 assistants: components["schemas"]["ToolAssistant"][];
-              };
-              /** WebSearchResultPublic */
-              WebSearchResultPublic: {
-                /**
-                 * Id
-                 * Format: uuid
-                 */
-                id: string;
-                /** Title */
-                title: string;
-                /** Url */
-                url: string;
               };
             };
           };
@@ -25818,8 +27320,6 @@ export interface operations {
             /** References */
             references: components["schemas"]["InfoBlobAskAssistantPublic"][];
             tools: components["schemas"]["UseTools"];
-            /** Web Search References */
-            web_search_references: components["schemas"]["WebSearchResultPublic"][];
             /**
              * Mcp Tool References
              * @default []
@@ -25966,6 +27466,8 @@ export interface operations {
                 group_id?: string | null;
                 /** Website Id */
                 website_id?: string | null;
+                /** Original Available */
+                original_available: boolean;
                 /** Score */
                 score: number;
               };
@@ -26083,18 +27585,6 @@ export interface operations {
               UseTools: {
                 /** Assistants */
                 assistants: components["schemas"]["ToolAssistant"][];
-              };
-              /** WebSearchResultPublic */
-              WebSearchResultPublic: {
-                /**
-                 * Id
-                 * Format: uuid
-                 */
-                id: string;
-                /** Title */
-                title: string;
-                /** Url */
-                url: string;
               };
             };
           };
@@ -26841,6 +28331,8 @@ export interface operations {
                     group_id?: string | null;
                     /** Website Id */
                     website_id?: string | null;
+                    /** Original Available */
+                    original_available: boolean;
                     /** Score */
                     score: number;
                   };
@@ -26968,6 +28460,14 @@ export interface operations {
                     result?: string | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
+                    /** Purpose */
+                    purpose?: string | null;
+                    /** Meta */
+                    meta?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** Generated File Ids */
+                    generated_file_ids?: string[] | null;
                   };
                 };
               }
@@ -27019,6 +28519,14 @@ export interface operations {
                     result?: string | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
+                    /** Purpose */
+                    purpose?: string | null;
+                    /** Meta */
+                    meta?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** Generated File Ids */
+                    generated_file_ids?: string[] | null;
                   };
                 };
               }
@@ -27070,6 +28578,14 @@ export interface operations {
                     result?: string | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
+                    /** Purpose */
+                    purpose?: string | null;
+                    /** Meta */
+                    meta?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** Generated File Ids */
+                    generated_file_ids?: string[] | null;
                   };
                 };
               }
@@ -27135,8 +28651,6 @@ export interface operations {
                 /** References */
                 references: components["schemas"]["InfoBlobAskAssistantPublic"][];
                 tools: components["schemas"]["UseTools"];
-                /** Web Search References */
-                web_search_references: components["schemas"]["WebSearchResultPublic"][];
                 /**
                  * Mcp Tool References
                  * @default []
@@ -27283,6 +28797,8 @@ export interface operations {
                     group_id?: string | null;
                     /** Website Id */
                     website_id?: string | null;
+                    /** Original Available */
+                    original_available: boolean;
                     /** Score */
                     score: number;
                   };
@@ -27400,18 +28916,6 @@ export interface operations {
                   UseTools: {
                     /** Assistants */
                     assistants: components["schemas"]["ToolAssistant"][];
-                  };
-                  /** WebSearchResultPublic */
-                  WebSearchResultPublic: {
-                    /**
-                     * Id
-                     * Format: uuid
-                     */
-                    id: string;
-                    /** Title */
-                    title: string;
-                    /** Url */
-                    url: string;
                   };
                 };
               }
@@ -29146,6 +30650,7 @@ export interface operations {
         sort_by?: components["schemas"]["SortField"];
         sort_order?: components["schemas"]["SortOrder"];
         state_filter?: components["schemas"]["StateFilter"] | null;
+        role_id?: string | null;
       };
       header?: never;
       path?: never;
@@ -29785,6 +31290,7 @@ export interface operations {
            *       "auto_expire_unused_days": 180,
            *       "max_delegation_depth": 3,
            *       "revocation_cascade_enabled": true,
+           *       "require_tenant_allowed_origin": true,
            *       "max_rate_limit_override": 10000
            *     }
            */
@@ -29797,7 +31303,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -29806,7 +31312,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Too Many Requests */
@@ -29815,7 +31321,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -29842,6 +31348,7 @@ export interface operations {
           /**
            * @example {
            *       "require_expiration": true,
+           *       "require_tenant_allowed_origin": true,
            *       "max_expiration_days": 90,
            *       "auto_expire_unused_days": 180
            *     }
@@ -29855,7 +31362,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -29864,7 +31371,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -29873,7 +31380,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -29891,7 +31398,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -29920,7 +31427,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -29929,7 +31436,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Too Many Requests */
@@ -29938,7 +31445,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -29971,7 +31478,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -29980,7 +31487,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -29989,7 +31496,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -30007,7 +31514,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -30040,7 +31547,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -30049,7 +31556,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -30058,7 +31565,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -30076,7 +31583,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -30098,8 +31605,7 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "super_api_key_configured": true,
-           *       "super_duper_api_key_configured": false
+           *       "super_api_key_configured": true
            *     }
            */
           "application/json": components["schemas"]["SuperApiKeyStatus"];
@@ -30111,7 +31617,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -30120,7 +31626,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Too Many Requests */
@@ -30129,7 +31635,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -30149,6 +31655,9 @@ export interface operations {
         user_relation?: components["schemas"]["ApiKeyUserRelation"];
         search?: string | null;
         expires_within_days?: number | null;
+        ownership?: components["schemas"]["ApiKeyOwnership"] | null;
+        min_permission?: components["schemas"]["ApiKeyPermission"] | null;
+        eligible_for_module_binding?: boolean;
       };
       header?: never;
       path?: never;
@@ -30187,11 +31696,20 @@ export interface operations {
            *         }
            *       ],
            *       "limit": 50,
-           *       "next_cursor": "2026-02-05T12:00:00Z",
+           *       "next_cursor": "v1.eyJjcmVhdGVkX2F0IjoiMjAyNi0wMi0wNVQxMjowMDowMFoiLCJrZXlfaWQiOiIxMTExMTExMS0xMTExLTExMTEtMTExMS0xMTExMTExMTExMTEifQ",
            *       "total_count": 1
            *     }
            */
           "application/json": components["schemas"]["CursorPaginatedResponse_ApiKeyV2_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -30200,7 +31718,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -30209,7 +31727,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -30227,7 +31745,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -30258,7 +31776,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -30267,7 +31785,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -30285,7 +31803,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -30343,7 +31861,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -30352,7 +31870,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -30361,7 +31879,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -30370,7 +31888,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -30388,7 +31906,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -30422,7 +31940,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -30431,7 +31949,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -30440,7 +31958,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -30458,7 +31976,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -30511,7 +32029,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -30520,7 +32038,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -30529,7 +32047,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -30547,7 +32065,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -30576,7 +32094,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -30585,7 +32103,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -30594,7 +32112,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -30612,7 +32130,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -30669,7 +32187,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -30678,7 +32196,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -30687,7 +32205,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -30696,7 +32214,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -30714,7 +32232,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -30771,7 +32289,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -30780,7 +32298,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -30789,7 +32307,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -30798,7 +32316,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -30816,7 +32334,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -30873,7 +32391,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -30882,7 +32400,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -30891,7 +32409,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -30900,7 +32418,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -30918,7 +32436,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -30971,7 +32489,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -30980,7 +32498,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -30989,7 +32507,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -30998,7 +32516,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -31016,7 +32534,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -31076,7 +32594,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -31085,7 +32603,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -31094,7 +32612,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -31103,7 +32621,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -31121,7 +32639,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -31156,7 +32674,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -31165,7 +32683,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -31174,7 +32692,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -31183,7 +32701,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -31201,7 +32719,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -31230,7 +32748,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
@@ -31239,7 +32757,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -31248,7 +32766,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -31257,7 +32775,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -31275,7 +32793,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -33948,6 +35466,88 @@ export interface operations {
       };
     };
   };
+  get_image_models_api_v1_image_models__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_ImageModelPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_image_model_api_v1_image_models__id___post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ImageModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ImageModelPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   list_providers_api_v1_admin_model_providers__get: {
     parameters: {
       query?: never;
@@ -34371,7 +35971,7 @@ export interface operations {
     parameters: {
       query?: {
         /** @description Filter response to a single mode. */
-        mode?: ("completion" | "embedding" | "transcription") | null;
+        mode?: ("completion" | "embedding" | "transcription" | "image") | null;
       };
       header?: never;
       path: {
@@ -34390,6 +35990,15 @@ export interface operations {
           "application/json": {
             [key: string]: unknown;
           }[];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -34441,6 +36050,15 @@ export interface operations {
           "application/json": {
             [key: string]: unknown;
           };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -34496,6 +36114,15 @@ export interface operations {
           "application/json": {
             [key: string]: unknown;
           };
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -35028,6 +36655,195 @@ export interface operations {
     };
   };
   delete_tenant_transcription_model_api_v1_admin_tenant_models_transcription__model_id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_tenant_image_model_api_v1_admin_tenant_models_image__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantImageModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ImageModelPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_tenant_image_model_api_v1_admin_tenant_models_image__model_id___put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantImageModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ImageModelPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_tenant_image_model_api_v1_admin_tenant_models_image__model_id___delete: {
     parameters: {
       query?: never;
       header?: never;
@@ -38245,6 +40061,15 @@ export interface operations {
           "application/json": components["schemas"]["StorageModel"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   get_spaces_api_v1_storage_spaces__get: {
@@ -38263,6 +40088,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["StorageInfoModel"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -38324,7 +40158,9 @@ export interface operations {
         /** @description Field to sort by. */
         sort_by?: components["schemas"]["UserSortBy"];
         /** @description Sort order (asc or desc). */
-        sort_order?: string;
+        sort_order?: "asc" | "desc";
+        /** @description Search username or email across all users before pagination. */
+        search?: string | null;
       };
       header?: never;
       path?: never;
@@ -39569,6 +41405,100 @@ export interface operations {
       };
     };
   };
+  get_sharepoint_fixture_preview_api_v1_integrations_sharepoint_fixtures__scenario__preview__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        scenario: components["schemas"]["SharePointFixtureScenario"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SharePointFixturePreviewResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_sharepoint_fixture_tree_api_v1_integrations_sharepoint_fixtures__scenario__tree__get: {
+    parameters: {
+      query?: {
+        site_id?: string | null;
+        drive_id?: string | null;
+        folder_id?: string | null;
+        folder_path?: string;
+      };
+      header?: never;
+      path: {
+        scenario: components["schemas"]["SharePointFixtureScenario"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SharePointFixtureTreeResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_integrations_api_v1_integrations__get: {
     parameters: {
       query?: never;
@@ -40003,6 +41933,7 @@ export interface operations {
     parameters: {
       query?: {
         tags?: string[] | null;
+        purpose?: ("general" | "web_search" | "image_generation") | null;
       };
       header?: never;
       path?: never;
@@ -40101,7 +42032,9 @@ export interface operations {
   };
   get_tenant_mcp_settings_api_v1_mcp_servers_settings__get: {
     parameters: {
-      query?: never;
+      query?: {
+        purpose?: ("general" | "web_search" | "image_generation") | null;
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -40124,6 +42057,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -40510,6 +42452,122 @@ export interface operations {
       };
     };
   };
+  activate_capability_provider_api_v1_mcp_servers__id__activate__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CapabilityActivationResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  deactivate_capability_provider_api_v1_mcp_servers__id__deactivate__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPServerPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_mcp_server_tools_api_v1_mcp_servers__id__tools__get: {
     parameters: {
       query?: never;
@@ -40750,6 +42808,69 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ToolReviewResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_tool_display_name_api_v1_mcp_servers__id__tools__tool_id__display_name__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        tool_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServerToolRename"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPServerToolPublic"];
         };
       };
       /** @description Bad Request */
@@ -42696,6 +44817,7 @@ export interface operations {
         limit?: number;
         cursor?: string | null;
         search?: string | null;
+        removed?: boolean;
       };
       header?: never;
       path?: never;
@@ -42843,7 +44965,9 @@ export interface operations {
   };
   delete_organization_skill_api_v1_skills_organization__skill_id___delete: {
     parameters: {
-      query?: never;
+      query?: {
+        detach_bindings?: boolean;
+      };
       header?: never;
       path: {
         skill_id: string;
@@ -42902,6 +45026,10 @@ export interface operations {
       query?: {
         limit?: number;
         cursor?: string | null;
+        /** @description Matches resource, space or owner name. */
+        query?: string | null;
+        kind?: components["schemas"]["SkillAdoptionResourceKind"] | null;
+        drift?: components["schemas"]["SkillAdoptionDrift"] | null;
       };
       header?: never;
       path: {
@@ -43500,6 +45628,297 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  detach_organization_skill_bindings_api_v1_skills_organization__skill_id__detach__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillBindingDetachRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillDetachmentTotalsPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  remove_organization_skills_api_v1_skills_organization_remove__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillRemovalRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRemovalPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_whats_new_state_api_v1_whats_new_state__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WhatsNewStatePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  reset_whats_new_state_api_v1_whats_new_state__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WhatsNewStatePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  mark_whats_new_seen_api_v1_whats_new_seen__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WhatsNewVersionUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WhatsNewStatePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mark_whats_new_announced_api_v1_whats_new_announced__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WhatsNewVersionUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WhatsNewStatePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -44398,6 +46817,8 @@ export interface operations {
                 group_id?: string | null;
                 /** Website Id */
                 website_id?: string | null;
+                /** Original Available */
+                original_available: boolean;
                 /** Score */
                 score: number;
               };
@@ -44550,6 +46971,8 @@ export interface operations {
                 group_id?: string | null;
                 /** Website Id */
                 website_id?: string | null;
+                /** Original Available */
+                original_available: boolean;
                 /** Score */
                 score: number;
               };
@@ -47148,7 +49571,7 @@ export interface operations {
       };
     };
   };
-  get_modules_api_v1_modules__get: {
+  list_module_installations_api_v1_admin_modules__get: {
     parameters: {
       query?: never;
       header?: never;
@@ -47163,7 +49586,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["PaginatedResponse_ModuleInDB_"];
+          "application/json": components["schemas"]["PaginatedResponse_ModuleInstallation_"];
         };
       };
       /** @description Unauthorized */
@@ -47175,32 +49598,8 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-    };
-  };
-  add_module_api_v1_modules__post: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ModuleCreate"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ModuleInDB"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -47208,39 +49607,20 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Conflict */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
     };
   };
-  update_module_client_config_api_v1_modules__tenant_id___module_id__client_config__patch: {
+  install_module_api_v1_admin_modules__module_key___put: {
     parameters: {
       query?: never;
       header?: never;
       path: {
-        tenant_id: string;
-        module_id: string;
+        module_key: string;
       };
       cookie?: never;
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["ModuleClientConfig"];
+        "application/json": components["schemas"]["ModuleInstallationConfig"];
       };
     };
     responses: {
@@ -47250,7 +49630,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ModuleTenantClientConfig"];
+          "application/json": components["schemas"]["ModuleInstallation"];
         };
       };
       /** @description Bad Request */
@@ -47271,8 +49651,8 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Not Found */
-      404: {
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -47291,66 +49671,12 @@ export interface operations {
       };
     };
   };
-  add_module_to_tenant_api_v1_modules__tenant_id___post: {
+  uninstall_module_api_v1_admin_modules__module_key___delete: {
     parameters: {
       query?: never;
       header?: never;
       path: {
-        tenant_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ModelId"][];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["TenantInDB"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  enable_module_for_tenant_api_v1_modules__tenant_id___module_id___put: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        tenant_id: string;
-        module_id: string;
+        module_key: string;
       };
       cookie?: never;
     };
@@ -47362,7 +49688,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ModuleTenantAssignment"];
+          "application/json": components["schemas"]["ModuleInstallationChange"];
         };
       };
       /** @description Unauthorized */
@@ -47374,49 +49700,8 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  disable_module_for_tenant_api_v1_modules__tenant_id___module_id___delete: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        tenant_id: string;
-        module_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ModuleTenantAssignment"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

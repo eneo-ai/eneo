@@ -1,11 +1,14 @@
 <script lang="ts">
-  import { Button, Input } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import { getEneo } from "$lib/core/Eneo";
   import * as m from "$lib/paraglide/messages";
   import type { components } from "@eneo/eneo-js";
   import { getActionLabel, getActionDescription } from "./audit-action-labels";
   import { getCategoryLabel, getCategoryDescription } from "./audit-category-labels";
-  import { ChevronRight, Search, Check, X } from "lucide-svelte";
+  import { ChevronRight, Search, Check, X } from "@lucide/svelte";
   import { onMount } from "svelte";
   import { slide, fly } from "svelte/transition";
   import { SvelteSet } from "svelte/reactivity";
@@ -275,27 +278,18 @@
         <Search
           class="text-muted pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2"
         />
-        <Input.Text
+        <Input
           bind:value={searchQuery}
           placeholder={m.audit_config_search_placeholder()}
+          aria-label={m.search()}
           class="h-11 pl-10 text-sm"
         />
       </div>
       <div class="flex gap-2">
-        <Button
-          variant="simple"
-          onclick={expandAll}
-          size="sm"
-          class="h-11 px-4 text-sm font-medium"
-        >
+        <Button variant="ghost" onclick={expandAll} class="h-11 px-4 text-sm font-medium">
           {m.audit_config_expand_all()}
         </Button>
-        <Button
-          variant="simple"
-          onclick={collapseAll}
-          size="sm"
-          class="h-11 px-4 text-sm font-medium"
-        >
+        <Button variant="ghost" onclick={collapseAll} class="h-11 px-4 text-sm font-medium">
           {m.audit_config_collapse_all()}
         </Button>
       </div>
@@ -323,7 +317,7 @@
                 class="hover:text-accent-default group flex min-w-0 flex-1 items-center gap-3 text-left transition-colors"
               >
                 <div
-                  class="group-hover:bg-hover flex-shrink-0 rounded-md p-1 transition-all duration-200"
+                  class="group-hover:bg-hover-default flex-shrink-0 rounded-md p-1 transition-all duration-200"
                 >
                   <ChevronRight
                     class={`h-4 w-4 transition-transform duration-200 ${isExpanded ? "text-default rotate-90" : "text-muted"}`}
@@ -341,9 +335,10 @@
                 </span>
               </button>
               <div class="flex flex-shrink-0 items-center gap-3">
-                <Input.Switch
-                  value={category.enabled}
-                  sideEffect={() => toggleAllInCategory(category.category, !category.enabled)}
+                <Switch
+                  checked={category.enabled}
+                  onCheckedChange={(next) => toggleAllInCategory(category.category, next)}
+                  aria-label={getCategoryLabel(category.category)}
                 />
               </div>
             </div>
@@ -358,7 +353,7 @@
           {#if isExpanded && actions.length > 0}
             <div transition:slide={{ duration: 200 }} class="divide-default bg-primary divide-y">
               {#each actions as action (action.action)}
-                <div class="hover:bg-hover/50 px-6 py-5 transition-colors duration-150">
+                <div class="hover:bg-hover-default/50 px-6 py-5 transition-colors duration-150">
                   <div class="flex items-start justify-between gap-6">
                     <div class="min-w-0 flex-1">
                       <div class="mb-1.5 flex flex-wrap items-center gap-2.5">
@@ -385,13 +380,14 @@
                       >
                     </div>
                     <div class="flex-shrink-0 pt-0.5">
-                      <Input.Checkbox
+                      <Checkbox
                         checked={action.enabled}
                         onCheckedChange={(next) => {
                           if (next !== action.enabled) {
                             toggleAction(action.action, action.category);
                           }
                         }}
+                        aria-label={getActionLabel(action.action)}
                       />
                     </div>
                   </div>
@@ -423,19 +419,12 @@
             </div>
           </div>
           <div class="flex items-center gap-2">
-            <Button
-              variant="simple"
-              onclick={resetChanges}
-              size="sm"
-              class="h-10 px-4 text-sm font-medium"
-            >
+            <Button variant="ghost" onclick={resetChanges} class="h-10 px-4 text-sm font-medium">
               {m.audit_config_reset()}
             </Button>
             <Button
-              variant="primary"
               onclick={saveConfig}
               disabled={isSaving}
-              size="sm"
               class="h-10 px-5 text-sm font-semibold"
             >
               {#if isSaving}

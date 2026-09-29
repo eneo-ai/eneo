@@ -1,12 +1,9 @@
 <script lang="ts">
-  import { getContentTabs } from "./ctx";
-  export let id: string;
+  import { Tabs } from "bits-ui";
 
-  const {
-    elements: { content }
-  } = getContentTabs();
+  export let id: string;
 </script>
 
-<div {...$content(id)} use:content class="relative min-h-full w-full">
+<Tabs.Content value={id} class="relative min-h-full w-full">
   <slot />
-</div>
+</Tabs.Content>

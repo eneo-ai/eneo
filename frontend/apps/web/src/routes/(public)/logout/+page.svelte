@@ -1,55 +1,23 @@
 <script lang="ts">
-  import { Button } from "@eneo/ui";
-  import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
+  import { Button } from "$lib/components/ui/button";
+  import AuthPageShell from "$lib/features/auth/components/AuthPageShell.svelte";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
+  import type { PageData } from "./$types";
 
-  export let data;
+  let { data }: { data: PageData } = $props();
 
-  const messages: Record<string, { label: string; colour: string }> = {
-    logout: { label: m.successfully_logged_out(), colour: "green" },
-    expired: { label: m.session_expired(), colour: "amber" }
-  };
-
-  let message = messages.logout;
-  if (data.message && data.message in messages) {
-    message = messages[data.message];
-  }
+  const expired = $derived(data.message === "expired");
 </script>
 
 <svelte:head>
   <title>Eneo.ai – {m.logout()}</title>
 </svelte:head>
 
-<div class="relative flex h-[100vh] w-[100vw] items-center justify-center">
-  <div class="box w-[400px] justify-center">
-    <h1 class="flex justify-center">
-      <EneoWordMark class="text-brand-eneo h-16 w-20"></EneoWordMark>
-      <span class="hidden">{m.eneo()}</span>
-    </h1>
-
-    <div aria-live="polite">
-      <div class="mb-2 flex flex-col gap-3 p-4 shadow-lg {message.colour}">{message.label}</div>
-    </div>
-
-    <div class="shadowed border-default bg-primary flex flex-col gap-3 p-4">
-      <Button href={localizeHref("/login")} variant="primary">{m.login_again()}</Button>
-    </div>
-  </div>
-</div>
-
-<style lang="postcss">
-  @reference "@eneo/ui/styles";
-  .shadowed {
-    box-shadow: 0px 8px 20px 4px rgba(0, 0, 0, 0.1);
-    border: 0.5px solid rgba(54, 54, 54, 0.3);
-  }
-
-  .green {
-    @apply bg-positive-dimmer text-positive-default;
-  }
-
-  .amber {
-    @apply bg-warning-dimmer text-warning-default;
-  }
-</style>
+<AuthPageShell
+  tone={expired ? "warning" : "success"}
+  title={expired ? m.session_expired() : m.logout_success()}
+  description={expired ? m.session_expired_description() : m.logout_description()}
+>
+  <Button href={localizeHref("/login")} size="lg" class="w-full">{m.login_again()}</Button>
+</AuthPageShell>

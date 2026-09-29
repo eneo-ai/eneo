@@ -60,21 +60,23 @@ The server advertises the following in `ServiceProviderConfig`:
 
 SCIM tokens are issued per tenant through the sysadmin API. They are required to authenticate any request to `/scim/v2`.
 
-A token is shown **only once** on creation. Eneo stores only a SHA-256 hash of the token — there is no way to retrieve it later. If a token is lost, revoke it and issue a new one.
+A token is shown **only once** on creation. Eneo stores only a SHA-256 hash of the token — there is no way to retrieve it later. If a token is lost, issue a new one; creating a token replaces the existing one.
+
+The sysadmin endpoints are authenticated with the super admin API key in the `X-API-Key` header (`ENEO_SUPER_API_KEY` in the backend `.env`).
 
 ### Create a token
 
 ```bash
 curl -X POST https://your-domain.com/api/v1/sysadmin/tenants/{tenant-id}/scim-token \
-  -H "Authorization: Bearer ${ENEO_SUPER_API_KEY}"
+  -H "X-API-Key: ${ENEO_SUPER_API_KEY}"
 ```
 
-The response (`201 Created`) contains the raw token:
+The response (`201 Created`) contains the raw token, a 43-character URL-safe random string with no prefix:
 
 ```json
 {
   "tenant_id": "f1e2d3c4-...",
-  "token": "scim_4f9c8a2b1d7e3..."
+  "token": "kY0v3nZ8QwF1bT9eL2mN7pR4sU6xA0cD5gH8jK1lM3o"
 }
 ```
 
@@ -84,7 +86,7 @@ Store this token securely. Configure it in your IdP as described below.
 
 ```bash
 curl https://your-domain.com/api/v1/sysadmin/tenants/{tenant-id}/scim-token \
-  -H "Authorization: Bearer ${ENEO_SUPER_API_KEY}"
+  -H "X-API-Key: ${ENEO_SUPER_API_KEY}"
 ```
 
 Returns `{ "tenant_id": "...", "is_active": true }` (or `"is_active": false`). The actual token is never returned.
@@ -93,10 +95,10 @@ Returns `{ "tenant_id": "...", "is_active": true }` (or `"is_active": false`). T
 
 ```bash
 curl -X DELETE https://your-domain.com/api/v1/sysadmin/tenants/{tenant-id}/scim-token \
-  -H "Authorization: Bearer ${ENEO_SUPER_API_KEY}"
+  -H "X-API-Key: ${ENEO_SUPER_API_KEY}"
 ```
 
-After revocation, all SCIM requests to that tenant return `401 Unauthorized`. To rotate a token, revoke the old one and create a new one.
+The response is `204 No Content`. After revocation, all SCIM requests to that tenant return `401 Unauthorized`. To rotate a token, simply call the create endpoint again — the new token replaces the old one immediately, so update the IdP configuration right away.
 
 ---
 
@@ -139,7 +141,7 @@ Entra's default User mappings work for Eneo. The minimum required attributes are
 - `externalId` — Entra's immutable object ID
 - `active` — controls deprovisioning
 
-For Group mappings, the defaults also work. Members are referenced by their `externalId`.
+For Group mappings, the defaults also work. Members are referenced by the user's SCIM resource `id` (the Eneo user UUID returned when the user was provisioned) in `members[].value`, not by `externalId`.
 
 ---
 
@@ -427,7 +429,7 @@ See [Provisioning scope and deprovisioning triggers](#provisioning-scope-and-dep
 
 ### Group members are missing
 
-Group members are referenced by `externalId`. A user must have been synced and have an `externalId` set before they can be added to a group. Check the user provisioning log first — group sync runs after user sync.
+Group members are referenced by the user's SCIM resource `id` (the Eneo user UUID) in `members[].value`. A user must therefore have been provisioned through SCIM — so the IdP knows their Eneo `id` — before they can be added to a group, and every member must belong to the same tenant (`400 Bad Request` otherwise). Check the user provisioning log first — group sync runs after user sync.
 
 ### A group is missing, or its members have no access
 
@@ -455,7 +457,7 @@ SCIM-specific log entries are tagged with `scim.user.*` or `scim.group.*`.
 
 ## Security considerations
 
-- **Token rotation**: SCIM tokens do not expire. Rotate them periodically using the revoke + create flow.
+- **Token rotation**: SCIM tokens do not expire. Rotate them periodically by creating a new token — it replaces the old one — and updating the IdP.
 - **Storage**: tokens are stored as SHA-256 hashes only. Treat the raw token as a long-lived credential.
 - **Transport**: always use HTTPS. The token is sent in the `Authorization` header on every request.
 - **Scope**: a SCIM token is scoped to a single tenant. It cannot access `/api/v1/`.
@@ -465,7 +467,7 @@ SCIM-specific log entries are tagged with `scim.user.*` or `scim.group.*`.
 
 ## Need Help?
 
-- See the [Authentication & OIDC guide](/guides/authentication) for SSO setup that pairs with SCIM
+- See the [Authentication & OIDC guides](/guides/oidc-federation) for SSO setup that pairs with SCIM
 - Check the [Audit Logging guide](/guides/audit-logging) to monitor SCIM activity
 - Visit [GitHub Issues](https://github.com/eneo-ai/eneo/issues)
 - Contact us at digitalisering@sundsvall.se (public sector organizations)

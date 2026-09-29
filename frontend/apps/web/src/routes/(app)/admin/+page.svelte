@@ -6,13 +6,16 @@
 
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout/index.js";
-  import { Input } from "@eneo/ui";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { getAppContext } from "$lib/core/AppContext.js";
+  import { getWhatsNewStore } from "$lib/features/whats-new/whatsNewStore";
   import { getEneo } from "$lib/core/Eneo.js";
+  import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { invalidate, invalidateAll } from "$app/navigation";
 
   const { tenant, updateTenant } = getAppContext();
+  const { setEnabled: setWhatsNewEnabled } = getWhatsNewStore();
   const eneo = getEneo();
   let { data } = $props();
 
@@ -20,10 +23,13 @@
   let usingTemplates = $state<boolean | undefined>(undefined);
   let auditLoggingEnabled = $state<boolean | undefined>(undefined);
   let provisioningEnabled = $state(false);
+  let whatsNewEnabled = $state(true);
+  let savingWhatsNew = $state(false);
   $effect.pre(() => {
     usingTemplates = data.settings.using_templates;
     auditLoggingEnabled = data.settings.audit_logging_enabled;
     provisioningEnabled = data.settings.provisioning ?? false;
+    whatsNewEnabled = data.settings.whats_new_enabled ?? true;
   });
 
   // Org-wide model pricing visibility lives on the tenant (not settings).
@@ -104,6 +110,27 @@
     }
   }
 
+  // Opt-out of the What's new page, announcement and menu indicator.
+  async function handleToggleWhatsNew({ current, next }: { current: boolean; next: boolean }) {
+    savingWhatsNew = true;
+    whatsNewEnabled = next;
+    let saved = false;
+
+    try {
+      const updatedSettings = await eneo.settings.updateWhatsNew(next);
+      whatsNewEnabled = updatedSettings.whats_new_enabled ?? true;
+      setWhatsNewEnabled(whatsNewEnabled);
+      saved = true;
+      await invalidateAll();
+    } catch (error) {
+      // A failed refresh must not undo a setting the server already saved.
+      if (!saved) whatsNewEnabled = current;
+      toastError(error);
+    } finally {
+      savingWhatsNew = false;
+    }
+  }
+
   // Toggle whether model input/output prices are shown to regular users.
   async function handleToggleModelPricing({ next }: { current: boolean; next: boolean }) {
     const previousValue = showModelPricing;
@@ -132,28 +159,63 @@
   <Page.Main>
     <Settings.Page>
       <Settings.Group title={m.features()}>
-        <Settings.Row title={m.enable_templates()} description={m.enable_templates_description()}>
-          <Input.Switch bind:value={usingTemplates} sideEffect={handleToggleTemplates} />
+        <Settings.Row
+          title={m.enable_templates()}
+          description={m.enable_templates_description()}
+          let:aria
+        >
+          <Switch
+            {...aria}
+            checked={usingTemplates}
+            onCheckedChange={(next) => handleToggleTemplates({ current: !next, next })}
+          />
         </Settings.Row>
         <Settings.Row
           title={m.enable_audit_logging()}
           description={m.enable_audit_logging_description()}
+          let:aria
         >
-          <Input.Switch bind:value={auditLoggingEnabled} sideEffect={handleToggleAuditLogging} />
+          <Switch
+            {...aria}
+            checked={auditLoggingEnabled}
+            onCheckedChange={(next) => handleToggleAuditLogging({ current: !next, next })}
+          />
         </Settings.Row>
         <Settings.Row
           title={m.enable_provisioning()}
           description={m.enable_provisioning_description()}
+          let:aria
         >
-          <Input.Switch bind:value={provisioningEnabled} sideEffect={handleToggleProvisioning} />
+          <Switch
+            {...aria}
+            checked={provisioningEnabled}
+            onCheckedChange={(next) => handleToggleProvisioning({ current: !next, next })}
+          />
+        </Settings.Row>
+        <Settings.Row
+          title={m.enable_whats_new()}
+          description={m.enable_whats_new_description()}
+          let:aria
+        >
+          <Switch
+            {...aria}
+            checked={whatsNewEnabled}
+            disabled={savingWhatsNew}
+            onCheckedChange={(next) => handleToggleWhatsNew({ current: !next, next })}
+          />
         </Settings.Row>
       </Settings.Group>
       <Settings.Group title={m.model_pricing()}>
         <Settings.Row
           title={m.show_model_pricing()}
           description={m.show_model_pricing_description()}
+          let:aria
         >
-          <Input.Switch bind:value={showModelPricing} sideEffect={handleToggleModelPricing} />
+          <Switch
+            {...aria}
+            checked={showModelPricing}
+            onCheckedChange={(next) => handleToggleModelPricing({ current: !next, next })}
+          />
         </Settings.Row>
       </Settings.Group>
     </Settings.Page>

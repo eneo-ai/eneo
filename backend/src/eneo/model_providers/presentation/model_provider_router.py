@@ -11,7 +11,11 @@ from eneo.authentication.auth_dependencies import get_current_active_user
 from eneo.database.database import AsyncSession, get_session_with_transaction
 from eneo.main.config import get_settings
 from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
-from eneo.model_providers.domain.model_provider_service import ModelProviderService
+from eneo.model_providers.domain.model_provider_service import (
+    LITELLM_MODE_TO_OUR_MODE,
+    ModelProviderService,
+    per_image_cost,
+)
 from eneo.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
 )
@@ -61,6 +65,9 @@ class ModelCostInfo(TypedDict, total=False):
     output_cost_per_token: float | None
     input_cost_per_second: float | None
     output_cost_per_second: float | None
+    # Per-image for image_generation entries (Imagen: output_, DALL-E: input_).
+    input_cost_per_image: float | None
+    output_cost_per_image: float | None
 
 
 class ModelCapabilityBase(TypedDict):
@@ -77,10 +84,11 @@ class ModelCapability(ModelCapabilityBase, total=False):
     # Indicative pricing — surfaced so that picking a suggestion in the wizard
     # populates the cost fields without a second `/model-defaults/` round-trip.
     # Token-priced for completion + embedding; per-minute for transcription
-    # (derived from LiteLLM's per-second value × 60).
+    # (derived from LiteLLM's per-second value × 60); per-image for image.
     input_cost_per_token: float | None
     output_cost_per_token: float | None
     cost_per_minute: float | None
+    cost_per_image: float | None
 
 
 class ProviderCapabilities(TypedDict):
@@ -151,12 +159,7 @@ async def get_provider_capabilities(
     import litellm
 
     # Mode mapping: LiteLLM mode -> our model type
-    mode_map = {
-        "chat": "completion",
-        "completion": "completion",
-        "embedding": "embedding",
-        "audio_transcription": "transcription",
-    }
+    mode_map = LITELLM_MODE_TO_OUR_MODE
 
     # Date extraction for sorting by release date (newest first).
     # LiteLLM has no release_date field, so we extract from model names.
@@ -246,6 +249,10 @@ async def get_provider_capabilities(
                 input_per_second = info.get("input_cost_per_second")
                 if isinstance(input_per_second, (int, float)):
                     model_info["cost_per_minute"] = input_per_second * 60
+            elif mode == "image":
+                model_info["cost_per_image"] = per_image_cost(
+                    cast(dict[str, Any], info)
+                )
             raw[provider][mode][model_key] = model_info
 
     # Build response sorted by release date (newest first)
@@ -350,7 +357,8 @@ async def get_model_defaults(
 
     # Cost fields differ by mode. Frontend asks for both shapes; we surface
     # whichever the model actually has so the wizard/edit dialog can write the
-    # right column. cost_per_minute is derived from per-second when present.
+    # right column. cost_per_minute is derived from per-second when present;
+    # cost_per_image from the flat per-image price image models carry.
     input_cost_per_token = info.get("input_cost_per_token")
     output_cost_per_token = info.get("output_cost_per_token")
     input_per_second = info.get("input_cost_per_second")
@@ -368,6 +376,7 @@ async def get_model_defaults(
         "input_cost_per_token": input_cost_per_token,
         "output_cost_per_token": output_cost_per_token,
         "cost_per_minute": cost_per_minute,
+        "cost_per_image": per_image_cost(info),
     }
 
 
@@ -441,13 +450,14 @@ async def update_provider(
     description=(
         "List available models from the provider's API using its credentials."
     ),
-    responses=responses.get_responses([404, 503]),
+    responses=responses.get_responses([403, 404, 503]),
 )
 async def list_provider_models(
     provider_id: UUID,
+    user: CurrentUser,
     service: ServiceDep,
     mode: Annotated[
-        Literal["completion", "embedding", "transcription"] | None,
+        Literal["completion", "embedding", "transcription", "image"] | None,
         Query(description="Filter response to a single mode."),
     ] = None,
 ) -> list[dict[str, Any]]:
@@ -459,6 +469,7 @@ async def list_provider_models(
     ``output_vector_size``. When ``mode`` is supplied the server returns
     only matching entries — consumers don't need to filter client-side.
     """
+    validate_permission(user, Permission.ADMIN)
     return await service.list_available_models(provider_id, mode=mode)
 
 
@@ -466,13 +477,15 @@ async def list_provider_models(
     "/{provider_id}/test/",
     response_model=dict[str, Any],
     description="Test connectivity to a model provider.",
-    responses=responses.get_responses([404, 503]),
+    responses=responses.get_responses([403, 404, 503]),
 )
 async def test_provider(
     provider_id: UUID,
+    user: CurrentUser,
     service: ServiceDep,
 ) -> dict[str, Any]:
     """Test connectivity to a model provider."""
+    validate_permission(user, Permission.ADMIN)
     return await service.test_connection(provider_id)
 
 
@@ -482,14 +495,16 @@ async def test_provider(
     description=(
         "Validate that a model works with this provider by making a minimal API call."
     ),
-    responses=responses.get_responses([404, 503]),
+    responses=responses.get_responses([403, 404, 503]),
 )
 async def validate_model(
     provider_id: UUID,
     body: ValidateModelRequest,
+    user: CurrentUser,
     service: ServiceDep,
 ) -> dict[str, Any]:
     """Validate that a model works with this provider by making a minimal API call."""
+    validate_permission(user, Permission.ADMIN)
     return await service.validate_model(provider_id, body.model_name, body.model_type)
 
 

@@ -8,7 +8,8 @@
   import { IconAssistant } from "@eneo/icons/assistant";
   import { IconTrash } from "@eneo/icons/trash";
   import type { GroupChat } from "@eneo/eneo-js";
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { m } from "$lib/paraglide/messages";
   import GroupChatAssistantListAddDialog from "./GroupChatAssistantListAddDialog.svelte";
   import GroupChatAssistantListEditDialog from "./GroupChatAssistantListEditDialog.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -67,8 +68,9 @@
       ></GroupChatAssistantListEditDialog>
       <Button
         variant="destructive"
-        padding="icon"
-        on:click={() => {
+        size="icon"
+        aria-label={m.remove()}
+        onclick={() => {
           removeFromGroup(assistant);
         }}><IconTrash /></Button
       >

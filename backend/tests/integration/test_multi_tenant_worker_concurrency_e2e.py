@@ -93,7 +93,7 @@ async def _create_user(
         "email": email,
         "username": email.split("@")[0],
         "tenant_id": tenant_id,
-        "password": "TestPass123!",
+        "password": "TestPassword123!",
     }
     response = await client.post(
         "/api/v1/sysadmin/users/",

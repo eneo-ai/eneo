@@ -8,13 +8,16 @@
 -->
 
 <script lang="ts">
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
+  import type {
+    CompletionModel,
+    EmbeddingModel,
+    ImageModel,
+    TranscriptionModel
+  } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
 
-  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel;
+  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
 
-  // Rendered via svelte-headless-table's `createRender`, which requires the
-  // legacy `export let` API. Keep this file on Svelte 4 component syntax.
   export let model: AnyModel;
 
   $: classification = model.security_classification ?? null;

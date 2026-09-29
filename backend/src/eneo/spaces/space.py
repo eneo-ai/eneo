@@ -14,6 +14,11 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
+from eneo.mcp_servers.domain.capabilities import (
+    CapabilityAvailability,
+    CapabilityPurpose,
+)
+from eneo.mcp_servers.domain.entities.mcp_server import is_capability_purpose
 from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
@@ -74,6 +79,7 @@ class Space:
         security_classification: Optional[SecurityClassification] = None,
         data_retention_days: Optional[int] = None,
         icon_id: Optional[UUID] = None,
+        enabled_capabilities: list[CapabilityPurpose] | None = None,
         group_members: dict[UUID, SpaceGroupMember] | None = None,
         default_assistant_load_failed: bool = False,
     ):
@@ -106,6 +112,10 @@ class Space:
         self.updated_at = updated_at
         self.security_classification = security_classification
         self.data_retention_days = data_retention_days
+        self.enabled_capabilities: list[CapabilityPurpose] = list(
+            enabled_capabilities or []
+        )
+        self.available_capabilities: list[CapabilityAvailability] = []
         self.icon_id = icon_id
         self.group_members = group_members if group_members is not None else {}
 
@@ -374,10 +384,13 @@ class Space:
                         model.security_classification
                     )
                 ]
+                # Capability markers stay: the provider resolved at ask time
+                # is what gets checked, not the marker's own classification.
                 self._mcp_servers = [
                     server
                     for server in self._mcp_servers
-                    if not self.security_classification.is_greater_than(
+                    if is_capability_purpose(server.purpose)
+                    or not self.security_classification.is_greater_than(
                         server.security_classification
                     )
                 ]
@@ -548,13 +561,20 @@ class Space:
 
         return True
 
-    def can_ask_assistant(self, assistant: "Assistant"):
-        if assistant.completion_model is None:
+    def can_ask_assistant(
+        self,
+        assistant: "Assistant",
+        completion_model: "CompletionModel | None" = None,
+    ):
+        # `completion_model` is the policy-resolved model for a personal default
+        # assistant, which may have no stored model of its own.
+        completion_model = completion_model or assistant.completion_model
+        if completion_model is None:
             raise NoModelSelectedException(
                 "No AI model is configured for this assistant. "
                 "Please select a model in the assistant settings."
             )
-        if not self.is_completion_model_available(assistant.completion_model.id):
+        if not self.is_completion_model_available(completion_model.id):
             raise ModelNotAvailableException(
                 "The selected AI model is not available in this space. "
                 "Please choose a different model or contact your administrator."
@@ -570,7 +590,7 @@ class Space:
             )
         if self.security_classification is not None:
             if self.security_classification.is_greater_than(
-                assistant.completion_model.security_classification
+                completion_model.security_classification
             ):
                 raise SecurityClassificationMismatchException(
                     "The assistant's model does not meet this space's "
@@ -678,6 +698,11 @@ class Space:
         self, mcp_server: "MCPServer"
     ) -> None:
         if not self.security_classification:
+            return
+        # A capability marker is not the provider that will be called; the
+        # service validates the active providers and the ask path enforces
+        # the classification on the resolved provider.
+        if is_capability_purpose(mcp_server.purpose):
             return
         if self.security_classification.is_greater_than(
             mcp_server.security_classification

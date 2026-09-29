@@ -7,15 +7,17 @@
 <script lang="ts">
   import { IconTrash } from "@eneo/icons/trash";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
-  import { Button, Dialog, Dropdown, Tooltip } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { getPromptManager } from "../PromptManager";
   import type { PromptSparse } from "@eneo/eneo-js";
   import { IconInfo } from "@eneo/icons/info";
   import { m } from "$lib/paraglide/messages";
 
   export let prompt: PromptSparse;
-  let showDeleteDialog: Dialog.OpenState;
-  let isProcessing = false;
+  let showDeleteDialog = false;
 
   const {
     state: { previewedPrompt },
@@ -40,50 +42,44 @@
 
 <div class="flex w-full items-center justify-end gap-2">
   {#if description}
-    <Tooltip text={description} class="text-accent-stronger pointer-events-auto z-[1000]">
-      <IconInfo></IconInfo>
-    </Tooltip>
+    <Tooltip.Root>
+      <Tooltip.Trigger class="text-accent-stronger pointer-events-auto z-[1000] cursor-default">
+        <IconInfo></IconInfo>
+        <span class="sr-only">{description}</span>
+      </Tooltip.Trigger>
+      <Tooltip.Content>{description}</Tooltip.Content>
+    </Tooltip.Root>
   {/if}
-  <Dropdown.Root>
-    <Dropdown.Trigger let:trigger asFragment>
-      <Button is={trigger} disabled={false} padding="icon">
-        <IconEllipsis />
-      </Button>
-    </Dropdown.Trigger>
-    <Dropdown.Menu let:item>
-      <Button
-        is={item}
+  <DropdownMenu.Root>
+    <DropdownMenu.Trigger>
+      {#snippet child({ props })}
+        <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
+          <IconEllipsis />
+        </Button>
+      {/snippet}
+    </DropdownMenu.Trigger>
+    <DropdownMenu.Content align="end">
+      <DropdownMenu.Item
         variant="destructive"
         disabled={prompt.is_selected}
-        on:click={() => {
-          $showDeleteDialog = true;
+        onSelect={() => {
+          showDeleteDialog = true;
         }}
-        padding="icon-leading"
-        label={m.delete_prompt()}
-        class="relative"
+        aria-label={m.delete_prompt()}
       >
         <IconTrash size="sm" />{m.delete()}
-      </Button>
-    </Dropdown.Menu>
-  </Dropdown.Root>
+      </DropdownMenu.Item>
+    </DropdownMenu.Content>
+  </DropdownMenu.Root>
 
-  <Dialog.Root alert bind:isOpen={showDeleteDialog}>
-    <Dialog.Content>
-      <Dialog.Title>{m.delete_prompt()}</Dialog.Title>
-      <Dialog.Description>{m.do_you_really_want_to_delete_this_version()}</Dialog.Description>
-
-      <Dialog.Controls let:close>
-        <Button is={close}>{m.cancel()}</Button>
-        <Button
-          is={close}
-          variant="destructive"
-          on:click={() => {
-            deletePrompt(prompt);
-          }}>{isProcessing ? m.deleting() : m.delete()}</Button
-        >
-      </Dialog.Controls>
-    </Dialog.Content>
-  </Dialog.Root>
+  <ConfirmDialog
+    bind:open={showDeleteDialog}
+    title={m.delete_prompt()}
+    description={m.do_you_really_want_to_delete_this_version()}
+    confirmLabel={m.delete()}
+    pendingLabel={m.deleting()}
+    onConfirm={() => deletePrompt(prompt)}
+  />
 </div>
 
 <style lang="postcss">

@@ -60,3 +60,27 @@ def test_api_key_schema_fields(openapi_spec: dict):
     props = schemas["ApiKeyV2"].get("properties", {})
     for field in REQUIRED_SCHEMA_FIELDS:
         assert field in props, f"Missing ApiKeyV2.{field} in schema"
+
+
+def test_api_key_list_uses_opaque_cursor_and_exposes_module_eligibility_filter(
+    openapi_spec: dict,
+):
+    paths = openapi_spec["paths"]
+
+    user_parameters = {
+        parameter["name"]: parameter
+        for parameter in paths["/api/v1/api-keys"]["get"]["parameters"]
+    }
+    assert user_parameters["cursor"]["schema"] == {
+        "anyOf": [{"type": "string"}, {"type": "null"}],
+        "description": "Opaque current cursor",
+        "title": "Cursor",
+    }
+
+    admin_parameters = {
+        parameter["name"]: parameter
+        for parameter in paths["/api/v1/admin/api-keys"]["get"]["parameters"]
+    }
+    eligibility = admin_parameters["eligible_for_module_binding"]["schema"]
+    assert eligibility["type"] == "boolean"
+    assert eligibility["default"] is False

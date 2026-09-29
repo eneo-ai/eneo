@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { fade, fly } from "svelte/transition";
   import { quadInOut } from "svelte/easing";
   import { onMount } from "svelte";
@@ -66,13 +66,11 @@
       </h1>
     </a>
     <Button
-      variant="primary"
-      on:click={() => {
+      onclick={() => {
         activeTab = "run";
       }}
-      class="!rounded-lg !border-b-2 !border-[var(--color-ui-blue-700)] !px-5 !py-1"
-      >{m.new_run()}
-    </Button>
+      class="px-5">{m.new_run()}</Button
+    >
   </div>
 
   <div class="border-default flex border-b px-3.5">

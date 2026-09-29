@@ -1,12 +1,14 @@
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import replace
-from typing import TypeVar
+from typing import Any, TypeVar
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
+from sqlalchemy import Result
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import aliased
+from sqlalchemy.sql import Executable
 from sqlalchemy.sql.elements import ColumnElement
 
 from eneo.assistants.assistant_repo import AssistantRepository
@@ -24,7 +26,8 @@ from eneo.database.tables.skill_table import (
     SkillRuntimePolicies,
     Skills,
 )
-from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.spaces_table import Spaces, SpacesUserGroups, SpacesUsers
+from eneo.database.tables.users_table import Users
 from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.main.models import Status
 from eneo.skills.domain.skill import (
@@ -49,6 +52,7 @@ from eneo.skills.domain.skill import (
     SkillActivationMode,
     SkillAdoptionCursor,
     SkillAdoptionDrift,
+    SkillAdoptionFilter,
     SkillAdoptionPersonalChat,
     SkillAdoptionProjectionPage,
     SkillAdoptionResource,
@@ -59,6 +63,7 @@ from eneo.skills.domain.skill import (
     SkillBindingSource,
     SkillBlockedForBindingError,
     SkillCatalogEntry,
+    SkillDetachment,
     SkillExecutionBlock,
     SkillExecutionBlockChange,
     SkillExecutionBlockConflictError,
@@ -66,6 +71,8 @@ from eneo.skills.domain.skill import (
     SkillHasBindingsError,
     SkillNotPublishedForBindingError,
     SkillPublicationChange,
+    SkillRemovalBusyError,
+    SkillRemovalOutcome,
     SkillRevision,
     SkillRevisionChange,
     SkillRevisionConflictError,
@@ -77,6 +84,7 @@ from eneo.skills.domain.skill import (
     SkillSlugConflictError,
     SkillStatusChange,
     SkillSummary,
+    SkillUsageCounts,
 )
 
 _BindingRow = TypeVar(
@@ -192,6 +200,7 @@ class SkillRepoImpl:
             current_revision=cls._to_revision(revision),
             published_revision_number=row.published_revision_number,
             first_published_at=row.first_published_at,
+            removed_at=row.removed_at,
         )
 
     @staticmethod
@@ -218,6 +227,7 @@ class SkillRepoImpl:
             updated_at=skill.updated_at,
             published_revision_number=skill.published_revision_number,
             first_published_at=skill.first_published_at,
+            removed_at=skill.removed_at,
         )
 
     @staticmethod
@@ -236,7 +246,10 @@ class SkillRepoImpl:
         space_id: UUID,
         query: str | None,
     ) -> list[ColumnElement[bool]]:
-        predicates: list[ColumnElement[bool]] = [Skills.space_id == space_id]
+        predicates: list[ColumnElement[bool]] = [
+            Skills.space_id == space_id,
+            Skills.removed_at.is_(None),
+        ]
         if query is not None:
             predicates.append(
                 sa.or_(
@@ -259,27 +272,30 @@ class SkillRepoImpl:
     def _organization_adoption_facts(
         *,
         tenant_id: UUID,
-        skill_id: UUID,
+        skill_ids: Sequence[UUID],
     ):
         empty_space_id = sa.cast(sa.null(), AssistantSkillBindings.space_id.type)
         return sa.union_all(
             sa.select(
+                AssistantSkillBindings.skill_id.label("skill_id"),
                 sa.literal(SkillAdoptionResourceKind.ASSISTANT.value).label("kind"),
                 AssistantSkillBindings.skill_revision_id.label("revision_id"),
                 AssistantSkillBindings.space_id.label("space_id"),
             ).where(
                 AssistantSkillBindings.tenant_id == tenant_id,
-                AssistantSkillBindings.skill_id == skill_id,
+                AssistantSkillBindings.skill_id.in_(skill_ids),
             ),
             sa.select(
+                AppSkillBindings.skill_id.label("skill_id"),
                 sa.literal(SkillAdoptionResourceKind.APP.value).label("kind"),
                 AppSkillBindings.skill_revision_id.label("revision_id"),
                 AppSkillBindings.space_id.label("space_id"),
             ).where(
                 AppSkillBindings.tenant_id == tenant_id,
-                AppSkillBindings.skill_id == skill_id,
+                AppSkillBindings.skill_id.in_(skill_ids),
             ),
             sa.select(
+                GovernancePolicySkillBindings.skill_id.label("skill_id"),
                 sa.literal("personal_chat").label("kind"),
                 GovernancePolicySkillBindings.skill_revision_id.label("revision_id"),
                 empty_space_id.label("space_id"),
@@ -290,12 +306,34 @@ class SkillRepoImpl:
             )
             .where(
                 GovernancePolicySkillBindings.tenant_id == tenant_id,
-                GovernancePolicySkillBindings.skill_id == skill_id,
+                GovernancePolicySkillBindings.skill_id.in_(skill_ids),
                 GovernancePolicies.tenant_id == tenant_id,
                 GovernancePolicies.scope
                 == PolicyScope.PERSONAL_DEFAULT_ASSISTANT.value,
             ),
         ).cte("organization_skill_adoption_facts")
+
+    async def get_usage_counts(
+        self, *, tenant_id: UUID, skill_ids: Sequence[UUID]
+    ) -> dict[UUID, SkillUsageCounts]:
+        if not skill_ids:
+            return {}
+        facts = self._organization_adoption_facts(
+            tenant_id=tenant_id, skill_ids=skill_ids
+        )
+        rows = await self.session.execute(
+            sa.select(
+                facts.c.skill_id,
+                sa.func.count().filter(facts.c.kind == "assistant"),
+                sa.func.count().filter(facts.c.kind == "app"),
+                sa.func.count(sa.distinct(facts.c.space_id)),
+                sa.func.bool_or(facts.c.kind == "personal_chat"),
+            ).group_by(facts.c.skill_id)
+        )
+        return {
+            skill_id: SkillUsageCounts(assistants, apps, spaces, personal_chat)
+            for skill_id, assistants, apps, spaces, personal_chat in rows.tuples()
+        }
 
     @staticmethod
     def _adoption_drift(
@@ -384,7 +422,9 @@ class SkillRepoImpl:
 
     async def get(self, *, skill_id: UUID) -> Skill | None:
         result = await self.session.execute(
-            self._skill_query().where(Skills.id == skill_id)
+            self._skill_query().where(
+                Skills.id == skill_id, Skills.removed_at.is_(None)
+            )
         )
         row = result.one_or_none()
         if row is None:
@@ -486,11 +526,18 @@ class SkillRepoImpl:
         limit: int,
         after_slug: str | None,
         search: str | None = None,
+        removed: bool = False,
+        after_id: UUID | None = None,
     ) -> list[SkillSummary]:
         statement = (
             self._summary_query(published=False)
             .where(*self._organization_scope(tenant_id))
-            .order_by(Skills.slug)
+            .where(
+                Skills.removed_at.is_not(None)
+                if removed
+                else Skills.removed_at.is_(None)
+            )
+            .order_by(Skills.slug, Skills.id)
             .limit(limit)
         )
         if search:
@@ -503,7 +550,11 @@ class SkillRepoImpl:
                 )
             )
         if after_slug is not None:
-            statement = statement.where(Skills.slug > after_slug)
+            statement = statement.where(
+                sa.tuple_(Skills.slug, Skills.id) > (after_slug, after_id)
+                if after_id is not None
+                else Skills.slug > after_slug
+            )
         rows = await self.session.execute(statement)
         return [
             self._to_summary(
@@ -539,13 +590,30 @@ class SkillRepoImpl:
         row = result.one_or_none()
         return self._to_skill(row[0], row[1]) if row is not None else None
 
+    @staticmethod
+    def _adoption_drift_condition(
+        drift: SkillAdoptionDrift, published_revision_number: ColumnElement[int | None]
+    ) -> ColumnElement[bool]:
+        if drift is SkillAdoptionDrift.UNPUBLISHED:
+            return published_revision_number.is_(None)
+        comparison = (
+            SkillRevisions.revision_number == published_revision_number
+            if drift is SkillAdoptionDrift.CURRENT
+            else SkillRevisions.revision_number != published_revision_number
+        )
+        return sa.and_(published_revision_number.is_not(None), comparison)
+
     async def get_organization_adoption_projection_page(
         self,
         *,
         tenant_id: UUID,
         skill_id: UUID,
+        actor_user_id: UUID,
+        actor_group_ids: Collection[UUID],
+        readable_kinds: Collection[SkillAdoptionResourceKind],
         limit: int,
         after: SkillAdoptionCursor | None,
+        filters: SkillAdoptionFilter,
     ) -> SkillAdoptionProjectionPage | None:
         scope = (
             sa.select(
@@ -559,6 +627,51 @@ class SkillRepoImpl:
             )
             .cte("organization_skill_adoption_scope")
         )
+        # A personal space names its owner; shared spaces have none.
+        owner_name = sa.func.coalesce(Users.username, Users.email).label("owner_name")
+        group_ids = list(actor_group_ids)
+
+        def membership(*, non_viewer: bool) -> ColumnElement[bool]:
+            direct = [
+                SpacesUsers.space_id == Spaces.id,
+                SpacesUsers.user_id == actor_user_id,
+            ]
+            via_group = [
+                SpacesUserGroups.space_id == Spaces.id,
+                SpacesUserGroups.user_group_id.in_(group_ids),
+            ]
+            if non_viewer:
+                direct.append(SpacesUsers.role != "viewer")
+                via_group.append(SpacesUserGroups.role != "viewer")
+            return sa.or_(
+                sa.exists().where(*direct),
+                sa.exists().where(*via_group) if group_ids else sa.false(),
+            )
+
+        def can_open_column(
+            kind: SkillAdoptionResourceKind, published: ColumnElement[bool]
+        ) -> ColumnElement[bool]:
+            # Mirrors SpaceActor.can_perform_action(READ) for a signed-in user:
+            # the tenant permission for the kind, then owner of the personal
+            # space or a member of the shared space, where a viewer only reads
+            # published resources. API-key scope does not apply to this page.
+            if kind not in readable_kinds:
+                return sa.false().label("can_open")
+            return sa.case(
+                (Spaces.user_id.is_not(None), Spaces.user_id == actor_user_id),
+                else_=sa.and_(
+                    membership(non_viewer=False),
+                    sa.or_(published, membership(non_viewer=True)),
+                ),
+            ).label("can_open")
+
+        resource_filters: list[ColumnElement[bool]] = []
+        if filters.drift is not None:
+            resource_filters.append(
+                self._adoption_drift_condition(
+                    filters.drift, scope.c.published_revision_number
+                )
+            )
         assistant_resources = (
             sa.select(
                 sa.literal(0).label("kind_rank"),
@@ -569,6 +682,10 @@ class SkillRepoImpl:
                 Spaces.name.label("space_name"),
                 SkillRevisions.id.label("revision_id"),
                 SkillRevisions.revision_number.label("revision_number"),
+                owner_name,
+                can_open_column(
+                    SkillAdoptionResourceKind.ASSISTANT, Assistants.published.is_(True)
+                ),
             )
             .select_from(AssistantSkillBindings)
             .join(scope, sa.true())
@@ -577,6 +694,7 @@ class SkillRepoImpl:
                 Assistants.id == AssistantSkillBindings.assistant_id,
             )
             .join(Spaces, Spaces.id == AssistantSkillBindings.space_id)
+            .outerjoin(Users, Users.id == Spaces.user_id)
             .join(
                 SkillRevisions,
                 sa.and_(
@@ -588,6 +706,7 @@ class SkillRepoImpl:
                 AssistantSkillBindings.tenant_id == tenant_id,
                 AssistantSkillBindings.skill_id == skill_id,
                 Spaces.tenant_id == tenant_id,
+                *resource_filters,
             )
         )
         app_resources = (
@@ -600,11 +719,16 @@ class SkillRepoImpl:
                 Spaces.name.label("space_name"),
                 SkillRevisions.id.label("revision_id"),
                 SkillRevisions.revision_number.label("revision_number"),
+                owner_name,
+                can_open_column(
+                    SkillAdoptionResourceKind.APP, Apps.published.is_(True)
+                ),
             )
             .select_from(AppSkillBindings)
             .join(scope, sa.true())
             .join(Apps, Apps.id == AppSkillBindings.app_id)
             .join(Spaces, Spaces.id == AppSkillBindings.space_id)
+            .outerjoin(Users, Users.id == Spaces.user_id)
             .join(
                 SkillRevisions,
                 sa.and_(
@@ -617,7 +741,44 @@ class SkillRepoImpl:
                 AppSkillBindings.skill_id == skill_id,
                 Apps.tenant_id == tenant_id,
                 Spaces.tenant_id == tenant_id,
+                *resource_filters,
             )
+        )
+        if filters.query:
+            query = filters.query
+            assistant_resources = assistant_resources.where(
+                sa.or_(
+                    Assistants.name.icontains(query, autoescape=True),
+                    Spaces.name.icontains(query, autoescape=True),
+                    owner_name.icontains(query, autoescape=True),
+                )
+            )
+            app_resources = app_resources.where(
+                sa.or_(
+                    Apps.name.icontains(query, autoescape=True),
+                    Spaces.name.icontains(query, autoescape=True),
+                    owner_name.icontains(query, autoescape=True),
+                )
+            )
+        if filters.kind is SkillAdoptionResourceKind.ASSISTANT:
+            app_resources = app_resources.where(sa.false())
+        elif filters.kind is SkillAdoptionResourceKind.APP:
+            assistant_resources = assistant_resources.where(sa.false())
+        # Counted before the cursor narrows the branches: the whole filtered
+        # result, in the same statement snapshot as the page. First page only,
+        # so continuations stay bounded index seeks.
+        matched = (
+            (
+                sa.select(sa.func.count().label("matched_count"))
+                .select_from(
+                    sa.union_all(assistant_resources, app_resources).subquery(
+                        "organization_skill_adoption_matches"
+                    )
+                )
+                .cte("organization_skill_adoption_matched")
+            )
+            if after is None
+            else None
         )
         if after is not None:
             if after.kind is SkillAdoptionResourceKind.ASSISTANT:
@@ -667,13 +828,15 @@ class SkillRepoImpl:
             null_uuid.label("space_id"),
             null_string.label("space_name"),
             null_integer.label("kind_rank"),
+            null_string.label("owner_name"),
+            null_boolean.label("can_open"),
         ).select_from(scope)
 
         branches = [scope_row]
         if after is None:
             facts = self._organization_adoption_facts(
                 tenant_id=tenant_id,
-                skill_id=skill_id,
+                skill_ids=[skill_id],
             )
             facts_with_revision = (
                 sa.select(
@@ -777,6 +940,8 @@ class SkillRepoImpl:
                 null_uuid.label("space_id"),
                 null_string.label("space_name"),
                 null_integer.label("kind_rank"),
+                null_string.label("owner_name"),
+                null_boolean.label("can_open"),
             ).select_from(totals)
             branches.append(
                 sa.select(
@@ -795,6 +960,8 @@ class SkillRepoImpl:
                     null_uuid.label("space_id"),
                     null_string.label("space_name"),
                     null_integer.label("kind_rank"),
+                    null_string.label("owner_name"),
+                    null_boolean.label("can_open"),
                 )
                 .select_from(revision_counts)
                 .join(scope, sa.true())
@@ -817,10 +984,36 @@ class SkillRepoImpl:
                 resource_page.c.space_id,
                 resource_page.c.space_name,
                 resource_page.c.kind_rank,
+                resource_page.c.owner_name,
+                resource_page.c.can_open,
             )
             .select_from(resource_page)
             .join(scope, sa.true())
         )
+        if matched is not None:
+            branches.append(
+                sa.select(
+                    sa.literal(3).label("row_kind"),
+                    scope.c.published_revision_number,
+                    matched.c.matched_count.label("assistant_count"),
+                    null_count.label("app_count"),
+                    null_count.label("distinct_space_count"),
+                    null_count.label("behind_published_count"),
+                    null_uuid.label("revision_id"),
+                    null_integer.label("revision_number"),
+                    null_boolean.label("personal_chat_pinned"),
+                    null_string.label("resource_kind"),
+                    null_uuid.label("resource_id"),
+                    null_string.label("resource_name"),
+                    null_uuid.label("space_id"),
+                    null_string.label("space_name"),
+                    null_integer.label("kind_rank"),
+                    null_string.label("owner_name"),
+                    null_boolean.label("can_open"),
+                )
+                .select_from(matched)
+                .join(scope, sa.true())
+            )
         projection_rows = sa.union_all(*branches).subquery(
             "organization_skill_adoption_projection"
         )
@@ -847,6 +1040,7 @@ class SkillRepoImpl:
         personal_chat: SkillAdoptionPersonalChat | None = None
         adoption_resources: list[SkillAdoptionResource] = []
         summary: SkillAdoptionSummary | None = None
+        matched_count: int | None = None
         for row in rows:
             row_kind = row[0]
             if row_kind == 0 and after is None:
@@ -890,8 +1084,12 @@ class SkillRepoImpl:
                             revision_number=row[7],
                             published_revision_number=published_revision_number,
                         ),
+                        owner_name=row[15],
+                        can_open=bool(row[16]),
                     )
                 )
+            elif row_kind == 3:
+                matched_count = int(row[2])
 
         if summary is not None:
             summary = SkillAdoptionSummary(
@@ -916,6 +1114,7 @@ class SkillRepoImpl:
             items=tuple(visible),
             limit=limit,
             next_cursor=next_cursor,
+            matched_count=matched_count,
         )
 
     async def list_assistant_pin_advance_targets(
@@ -926,6 +1125,7 @@ class SkillRepoImpl:
         expected_published_revision_id: UUID,
         after_assistant_id: UUID | None,
         limit: int,
+        only_ids: Sequence[UUID] | None = None,
     ) -> tuple[list[AssistantPinAdvanceTarget], UUID | None]:
         organization_space = aliased(Spaces, name="organization_skill_space")
         statement = (
@@ -987,6 +1187,10 @@ class SkillRepoImpl:
                     AssistantSkillBindings.assistant_id,
                 )
                 > (skill_id, after_assistant_id)
+            )
+        if only_ids is not None:
+            statement = statement.where(
+                AssistantSkillBindings.assistant_id.in_(list(only_ids))
             )
         rows = (await self.session.execute(statement)).all()
         visible = rows[:limit]
@@ -1189,6 +1393,7 @@ class SkillRepoImpl:
         expected_published_revision_id: UUID,
         after_app_id: UUID | None,
         limit: int,
+        only_ids: Sequence[UUID] | None = None,
     ) -> tuple[list[AppPinAdvanceTarget], UUID | None]:
         organization_space = aliased(Spaces, name="organization_skill_space")
         statement = (
@@ -1229,6 +1434,8 @@ class SkillRepoImpl:
         )
         if after_app_id is not None:
             statement = statement.where(AppSkillBindings.app_id > after_app_id)
+        if only_ids is not None:
+            statement = statement.where(AppSkillBindings.app_id.in_(list(only_ids)))
         rows = (await self.session.execute(statement)).all()
         visible = rows[:limit]
         targets = [
@@ -1554,7 +1761,9 @@ class SkillRepoImpl:
         expected_current_revision_id: UUID | None = None,
     ) -> SkillRevisionChange | None:
         skill_row = await self.session.scalar(
-            sa.select(Skills).where(Skills.id == skill_id).with_for_update()
+            sa.select(Skills)
+            .where(Skills.id == skill_id, Skills.removed_at.is_(None))
+            .with_for_update()
         )
         if skill_row is None:
             return None
@@ -1966,7 +2175,7 @@ class SkillRepoImpl:
             tenant_id=tenant_id,
             skill_id=skill_id,
         )
-        if skill_row is None:
+        if skill_row is None or skill_row.removed_at is not None:
             return None
         current_revision_id = await self.session.scalar(
             sa.select(SkillRevisions.id).where(
@@ -2014,7 +2223,7 @@ class SkillRepoImpl:
             tenant_id=tenant_id,
             skill_id=skill_id,
         )
-        if skill_row is None:
+        if skill_row is None or skill_row.removed_at is not None:
             return None
         previous = skill_row.published_revision_number
         previous_is_active = skill_row.is_active
@@ -2049,29 +2258,225 @@ class SkillRepoImpl:
         skill = self._to_skill(row[0], row[1])
         return await self._delete_locked_skill(skill=skill)
 
-    async def delete_organization(
+    async def _execute_nowait(self, statement: Executable) -> Result[Any]:
+        """Run a NOWAIT lock statement, mapping lock contention to a retryable refusal."""
+        try:
+            return await self.session.execute(statement)
+        except DBAPIError as error:
+            if _is_lock_not_available(error):
+                raise SkillRemovalBusyError from error
+            raise
+
+    async def _refuse_active_app_runs(self, skill_ids: Sequence[UUID]) -> None:
+        active_runs = await self.session.scalars(
+            sa.select(Skills.id).where(
+                Skills.id.in_(skill_ids),
+                sa.exists()
+                .where(
+                    AppRuns.job_id == Jobs.id,
+                    Jobs.status.in_((Status.QUEUED.value, Status.IN_PROGRESS.value)),
+                    AppRuns.skill_provenance.contains(
+                        sa.func.jsonb_build_array(
+                            sa.func.jsonb_build_object(
+                                "skill_id", sa.cast(Skills.id, sa.Text)
+                            )
+                        )
+                    ),
+                )
+                .correlate(Skills),
+            )
+        )
+        active_run_ids = list(active_runs)
+        if active_run_ids:
+            raise SkillHasActiveAppRunsError(skill_ids=active_run_ids)
+
+    async def _detach_skill_bindings(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_ids: Sequence[UUID],
+        only: SkillDetachment | None = None,
+    ) -> dict[UUID, SkillDetachment]:
+        """Delete Assistant, App and Personal Chat bindings of the given Skills.
+
+        Without ``only`` every binding goes; with it, only the listed parents
+        of each kind (an empty kind means none of that kind).
+
+        The caller already holds ``FOR UPDATE`` on the Skill rows. Binding saves
+        lock their parent first and then share-lock the Skill rows, so each
+        affected parent is locked here with NOWAIT before any delete: a save
+        that already holds its parent fails us fast (retryable 409) instead of
+        waiting on our Skill lock while we wait on its parent. Parents are
+        touched once so their row versions invalidate staged pin updates.
+        """
+        detached: dict[UUID, dict[str, list[UUID]]] = {
+            skill_id: {"assistant_ids": [], "app_ids": [], "policy_ids": []}
+            for skill_id in skill_ids
+        }
+        kinds = (
+            (
+                "assistant_ids",
+                Assistants,
+                AssistantSkillBindings,
+                AssistantSkillBindings.assistant_id,
+            ),
+            ("app_ids", Apps, AppSkillBindings, AppSkillBindings.app_id),
+            (
+                "policy_ids",
+                GovernancePolicies,
+                GovernancePolicySkillBindings,
+                GovernancePolicySkillBindings.policy_id,
+            ),
+        )
+        for key, parent, binding, parent_column in kinds:
+            scope = (binding.tenant_id == tenant_id, binding.skill_id.in_(skill_ids))
+            if only is not None:
+                selected: tuple[UUID, ...] = getattr(only, key)
+                if not selected:
+                    continue
+                scope = (*scope, parent_column.in_(selected))
+            # Parents are selected in SQL, never expanded into bind parameters:
+            # fan-out is unbounded and asyncpg caps a statement at 32 767 of them.
+            affected_parents = sa.select(parent_column).where(*scope)
+            await self._execute_nowait(
+                sa.select(parent.id)
+                .where(parent.id.in_(affected_parents))
+                .with_for_update(nowait=True)
+            )
+            # Rewrite the parents before their bindings go, while the subquery
+            # still finds them; readers key their version guards on this row.
+            touched = await self.session.execute(
+                sa.update(parent)
+                .where(parent.id.in_(affected_parents))
+                .values(updated_at=sa.func.now())
+                .returning(parent.id)
+            )
+            if not touched.scalars().first():
+                continue
+            deleted = await self.session.execute(
+                sa.delete(binding)
+                .where(*scope)
+                .returning(binding.skill_id, parent_column)
+            )
+            for skill_id, parent_id in deleted.tuples():
+                detached[skill_id][key].append(parent_id)
+        return {
+            skill_id: SkillDetachment(
+                assistant_ids=tuple(ids["assistant_ids"]),
+                app_ids=tuple(ids["app_ids"]),
+                policy_ids=tuple(ids["policy_ids"]),
+            )
+            for skill_id, ids in detached.items()
+        }
+
+    async def detach_organization_bindings(
         self,
         *,
         tenant_id: UUID,
         skill_id: UUID,
-    ) -> Skill | None:
-        skill_row = await self._lock_organization_skill(
-            tenant_id=tenant_id,
-            skill_id=skill_id,
-        )
-        if skill_row is None:
-            return None
-        revision_row = await self.session.scalar(
-            sa.select(SkillRevisions).where(
-                SkillRevisions.skill_id == skill_id,
-                SkillRevisions.revision_number == skill_row.current_revision_number,
+        selection: SkillDetachment,
+    ) -> SkillDetachment | None:
+        """Delete the selected Assistant and App bindings of one organisation Skill.
+
+        Same locks as removal (Skill FOR UPDATE NOWAIT, then each parent), so a
+        concurrent binding save is refused fast instead of deadlocking. Ids
+        that no longer hold a binding are simply absent from the result.
+        """
+        locked = await self._execute_nowait(
+            sa.select(Skills.id)
+            .join(Spaces, Spaces.id == Skills.space_id)
+            .where(
+                Skills.id == skill_id,
+                Skills.removed_at.is_(None),
+                *self._organization_scope(tenant_id),
             )
+            .with_for_update(of=Skills, nowait=True)
         )
-        if revision_row is None:
-            raise RuntimeError("Skill current revision is missing")
-        return await self._delete_locked_skill(
-            skill=self._to_skill(skill_row, revision_row)
+        if locked.scalar_one_or_none() is None:
+            return None
+        detached = await self._detach_skill_bindings(
+            tenant_id=tenant_id, skill_ids=[skill_id], only=selection
         )
+        return detached[skill_id]
+
+    async def remove_organization_many(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_ids: Sequence[UUID],
+        detach_bindings: bool = False,
+    ) -> list[SkillRemovalOutcome] | None:
+        """Remove the entire reviewed batch, retaining revisions and audit history.
+
+        NOWAIT avoids lock cycles with binding saves, which resolve retained and
+        new references in separate steps. With ``detach_bindings`` the batch
+        also deletes every binding of the selected Skills in the same
+        transaction; without it, a bound Skill refuses the whole batch. Queued or
+        running App jobs refuse either way. The request transaction rolls back
+        on any refusal; callers may retry after the concurrent operation finishes.
+        """
+        rows = await self._execute_nowait(
+            self._summary_query(published=False)
+            .where(*self._organization_scope(tenant_id), Skills.id.in_(skill_ids))
+            .order_by(Skills.id)
+            .with_for_update(of=Skills, nowait=True)
+        )
+        summaries = [
+            self._to_summary(
+                skill=skill,
+                revision_id=revision_id,
+                display_name=name,
+                description=description,
+                content_digest=digest,
+            )
+            for skill, revision_id, name, description, digest in rows.tuples()
+        ]
+        if len(summaries) != len(set(skill_ids)):
+            return None
+        current_ids = [skill.id for skill in summaries if skill.removed_at is None]
+        detached: dict[UUID, SkillDetachment] = {}
+        if current_ids:
+            if detach_bindings:
+                await self._refuse_active_app_runs(current_ids)
+                detached = await self._detach_skill_bindings(
+                    tenant_id=tenant_id, skill_ids=current_ids
+                )
+            else:
+                bound = await self.session.scalars(
+                    sa.union(
+                        *[
+                            sa.select(binding.skill_id).where(
+                                binding.skill_id.in_(current_ids)
+                            )
+                            for binding in (
+                                AssistantSkillBindings,
+                                AppSkillBindings,
+                                GovernancePolicySkillBindings,
+                            )
+                        ]
+                    )
+                )
+                bound_ids = list(bound)
+                if bound_ids:
+                    raise SkillHasBindingsError(skill_ids=bound_ids)
+                await self._refuse_active_app_runs(current_ids)
+
+            await self.session.execute(
+                sa.update(Skills)
+                .where(Skills.id.in_(current_ids))
+                .values(
+                    removed_at=sa.func.now(),
+                    is_active=False,
+                    published_revision_number=None,
+                    updated_at=sa.func.now(),
+                )
+            )
+        return [
+            SkillRemovalOutcome(
+                skill=skill, detached=detached.get(skill.id, SkillDetachment())
+            )
+            for skill in summaries
+        ]
 
     async def get_active_execution_block(
         self,
@@ -2120,7 +2525,11 @@ class SkillRepoImpl:
             tenant_id=tenant_id,
             skill_id=skill_id,
         )
-        if skill is None or skill.first_published_at is None:
+        if (
+            skill is None
+            or skill.first_published_at is None
+            or skill.removed_at is not None
+        ):
             return None
         existing = await self.session.scalar(
             sa.select(SkillExecutionBlocks).where(
@@ -2202,6 +2611,8 @@ class SkillRepoImpl:
         )
 
     async def _delete_locked_skill(self, *, skill: Skill) -> Skill:
+        # Protect published history even if a direct repository caller bypasses
+        # the service's restriction of hard deletion to local Space Skills.
         if skill.first_published_at is not None:
             raise PublishedSkillDeletionError
         if await self._is_bound(skill_id=skill.id):
@@ -2383,7 +2794,9 @@ class SkillRepoImpl:
             )
         )
         if lock_active_state:
-            statement = statement.with_for_update(read=True, of=Skills)
+            statement = statement.where(Skills.removed_at.is_(None)).with_for_update(
+                read=True, of=Skills
+            )
         rows = await self.session.execute(statement)
         by_reference = {
             SkillBindingReference(
@@ -2725,7 +3138,7 @@ class SkillRepoImpl:
     ) -> list[ResolvedSkillBinding]:
         rows = await self.session.execute(
             self._resolved_query(AppSkillBindings)
-            .where(AppSkillBindings.app_id == app_id)
+            .where(AppSkillBindings.app_id == app_id, Skills.removed_at.is_(None))
             .order_by(AppSkillBindings.position)
             .with_for_update(read=True, of=Skills)
         )

@@ -9,6 +9,8 @@ from urllib.parse import urlparse
 from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from eneo.main.removed_env import check_removed_variables
+
 # Version manifest lookup:
 # - Docker: Package is installed with --no-editable, so __file__ points to site-packages.
 #   The manifest is placed at /app/.release-please-manifest.json by inject-backend-version.sh
@@ -204,6 +206,10 @@ def _set_app_version():
         return "DEV"
 
 
+_DEVELOPMENT_ENVIRONMENTS = frozenset({"development", "local", "dev"})
+_SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS = _DEVELOPMENT_ENVIRONMENTS | {"test"}
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -212,6 +218,25 @@ class Settings(BaseSettings):
     # Environment setting (development, staging, production)
     # Controls error detail exposure in API responses
     environment: str = "production"
+
+    @property
+    def is_development(self) -> bool:
+        """Local development or test: verbose errors and developer tools."""
+        return self.environment.strip().lower() in _DEVELOPMENT_ENVIRONMENTS
+
+    # Explicit opt-in for the development-only SharePoint fixture API. Runtime
+    # environment checks provide a second guard so fixture data cannot be
+    # enabled in staging or production by setting this flag alone.
+    sharepoint_fixture_mode_enabled: bool = False
+
+    @property
+    def sharepoint_fixture_mode_active(self) -> bool:
+        """Whether every safety guard for SharePoint fixture data is active."""
+        return (
+            self.sharepoint_fixture_mode_enabled
+            and self.environment.strip().lower()
+            in _SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS
+        )
 
     # OpenAPI-only mode flag
     openapi_only_mode: bool = False
@@ -223,11 +248,8 @@ class Settings(BaseSettings):
     anthropic_api_key: Optional[str] = None
     ovhcloud_api_key: Optional[str] = None
     mistral_api_key: Optional[str] = None
-    flux_api_key: Optional[str] = None
-    tavily_api_key: Optional[str] = None
     vllm_api_key: Optional[str] = None
     eneo_super_api_key: Optional[str] = None
-    eneo_super_duper_api_key: Optional[str] = None
 
     # Infrastructure dependencies
     postgres_user: str
@@ -253,7 +275,16 @@ class Settings(BaseSettings):
     mcp_client_connect_timeout_seconds: int = 30
     mcp_client_list_tools_timeout_seconds: int = 30
     mcp_client_call_timeout_seconds: int = 60
+    # Tool-call budget for the built-in image generation provider. Image
+    # models routinely take longer than a general MCP tool call.
+    image_generation_timeout_seconds: int = 240
     mcp_tool_output_max_chars: int = 32768
+    # Decoded size cap for a single MCP image content block; larger images
+    # are dropped before they can be persisted as generated files.
+    mcp_tool_image_max_bytes: int = 10 * 1024 * 1024
+    # Image content blocks admitted from a single tool result; the rest are
+    # dropped with a notice so one call cannot flood the file store.
+    mcp_tool_image_max_count: int = 4
     mcp_circuit_breaker_failure_threshold: int = 5
     mcp_circuit_breaker_cooldown_seconds: int = 60
 
@@ -389,7 +420,6 @@ class Settings(BaseSettings):
     # Feature flags
     using_access_management: bool = True
     using_iam: bool = False
-    using_image_generation: bool = False
 
     # Max concurrent embedding API calls across all crawls (module-level semaphore)
     # Controls parallelism during page batch persistence to avoid overwhelming embedding APIs
@@ -473,6 +503,11 @@ class Settings(BaseSettings):
     obey_robots: bool = True  # Respect robots.txt rules
     autothrottle_enabled: bool = True  # Enable automatic request throttling
     using_crawl: bool = True  # Enable/disable crawling feature globally
+    # The website crawler never reaches loopback, link-local (cloud metadata),
+    # unspecified or multicast addresses. Private (intranet) ranges are allowed
+    # by default; set to True to refuse them too. Operator-only, never
+    # tenant-configurable.
+    crawler_block_private_networks: bool = False
 
     # Crawl retry configuration
     crawl_page_max_retries: int = 3  # Maximum retries for failed pages during crawl
@@ -635,6 +670,12 @@ class Settings(BaseSettings):
                     f"Legacy variables will be removed in v3.0"
                 )
 
+        return values
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_variables(cls, values: dict[str, object]) -> dict[str, object]:
+        check_removed_variables(os.environ, values)
         return values
 
     @model_validator(mode="after")
@@ -808,10 +849,32 @@ class Settings(BaseSettings):
             )
             sys.exit(1)
 
+        if self.image_generation_timeout_seconds <= 0:
+            logging.error(
+                "IMAGE_GENERATION_TIMEOUT_SECONDS must be greater than zero. "
+                "Current value: %s",
+                self.image_generation_timeout_seconds,
+            )
+            sys.exit(1)
+
         if self.mcp_tool_output_max_chars <= 0:
             logging.error(
                 "MCP_TOOL_OUTPUT_MAX_CHARS must be greater than zero. Current value: %s",
                 self.mcp_tool_output_max_chars,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_image_max_bytes <= 0:
+            logging.error(
+                "MCP_TOOL_IMAGE_MAX_BYTES must be greater than zero. Current value: %s",
+                self.mcp_tool_image_max_bytes,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_image_max_count <= 0:
+            logging.error(
+                "MCP_TOOL_IMAGE_MAX_COUNT must be greater than zero. Current value: %s",
+                self.mcp_tool_image_max_count,
             )
             sys.exit(1)
 

@@ -930,8 +930,8 @@ class TestModelProvidersBearerRoleContract:
         assert response.name == "Provider"
 
 
-class TestSuperKeyIsolationContract:
-    """Lock sysadmin/modules auth separation by dependency and auth function behavior."""
+class TestPrivilegedRouteAuthenticationContract:
+    """Lock sysadmin API-key auth and module session auth separation."""
 
     def _route_has_dependency(self, route, dep_name: str) -> bool:
         return route_has_dependency_named(route, dep_name)
@@ -947,52 +947,18 @@ class TestSuperKeyIsolationContract:
             assert self._route_has_dependency(route, "authenticate_super_api_key"), (
                 f"{route.path} missing authenticate_super_api_key"
             )
-            assert not self._route_has_dependency(
-                route, "authenticate_super_duper_api_key"
-            ), f"{route.path} should not use authenticate_super_duper_api_key"
 
-    def test_module_routes_use_super_duper_key_only(self):
+    def test_module_admin_routes_use_session_auth_not_super_key(self):
         module_routes = [
             route
             for route in runtime_router_routes()
-            if getattr(route, "path", "").startswith("/modules")
+            if getattr(route, "path", "").startswith("/admin/modules")
         ]
-        assert module_routes, "No /modules routes found"
+        assert module_routes, "No /admin/modules routes found"
         for route in module_routes:
-            assert self._route_has_dependency(
-                route, "authenticate_super_duper_api_key"
-            ), f"{route.path} missing authenticate_super_duper_api_key"
+            assert self._route_has_dependency(route, "require_session_auth"), (
+                f"{route.path} missing require_session_auth"
+            )
             assert not self._route_has_dependency(
                 route, "authenticate_super_api_key"
             ), f"{route.path} should not use authenticate_super_api_key"
-
-    def test_super_and_super_duper_keys_are_not_interchangeable(self, monkeypatch):
-        from eneo.authentication import auth
-        from eneo.main.exceptions import AuthenticationException
-
-        settings = SimpleNamespace(
-            eneo_super_api_key="super-key",
-            eneo_super_duper_api_key="super-duper-key",
-            api_key_header_name="X-API-Key",
-        )
-        monkeypatch.setattr("eneo.authentication.auth.get_settings", lambda: settings)
-
-        request_super = SimpleNamespace(headers={"X-API-Key": "super-key"})
-        request_super_duper = SimpleNamespace(headers={"X-API-Key": "super-duper-key"})
-
-        # In real requests, Security(APIKeyHeader) provides the header value directly.
-        assert (
-            auth.authenticate_super_api_key(request_super, "super-key") == "super-key"
-        )
-        assert (
-            auth.authenticate_super_duper_api_key(
-                request_super_duper, "super-duper-key"
-            )
-            == "super-duper-key"
-        )
-
-        with pytest.raises(AuthenticationException):
-            auth.authenticate_super_duper_api_key(request_super, "super-key")
-
-        with pytest.raises(AuthenticationException):
-            auth.authenticate_super_api_key(request_super_duper, "super-duper-key")

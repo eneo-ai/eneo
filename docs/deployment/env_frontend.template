@@ -35,8 +35,8 @@ ORIGIN=https://your-domain.com
 # ----------------------------------------------------------------------------
 # Security (REQUIRED)
 # ----------------------------------------------------------------------------
-# Cookie signing key (must match backend JWT_SECRET)
-# Generate with: python -c 'import secrets; print(secrets.token_hex(32))'
+# Kept for parity with backend JWT_SECRET; the web app does not read it.
+# Tokens are issued and verified by the backend only.
 JWT_SECRET=
 
 # ----------------------------------------------------------------------------
@@ -68,7 +68,9 @@ PUBLIC_ORIGIN=https://your-domain.com
 
 # FEDERATION MODE
 # ----------------------------------------------------------------------------
-# Must match backend setting. Controls how OIDC/IdP configuration is managed:
+# Keep in sync with FEDERATION_ENABLED in env_backend.env (the backend reads
+# that setting; FEDERATION_PER_TENANT_ENABLED is its deprecated alias).
+# Controls how OIDC/IdP configuration is managed:
 #   FALSE (default): Single-tenant via OIDC_* environment variables
 #   TRUE: Federation via sysadmin API (multi-tenant or single-tenant with API management)
 # See backend env_backend.template for detailed documentation.

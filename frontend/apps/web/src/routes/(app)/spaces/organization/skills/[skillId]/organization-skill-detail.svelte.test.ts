@@ -75,6 +75,13 @@ function updatePendingSkill(): OrganizationSkillPublic {
     first_published_at: "2026-07-19T09:00:00Z",
     publication_state: "update_pending",
     execution_blocked: false,
+    removed_at: null,
+    usage: {
+      assistant_count: 0,
+      app_count: 0,
+      distinct_space_count: 0,
+      personal_chat_pinned: false
+    },
     current_revision: currentRevision
   };
 }
@@ -206,6 +213,98 @@ describe("organisation Skill detail page", () => {
   beforeEach(() => {
     invalidate.mockReset();
     invalidate.mockResolvedValue(undefined);
+  });
+
+  test("removal keeps the current instructions and history read-only even when refreshing fails", async () => {
+    const data = publicationLifecycleData();
+    const removeMany = vi.fn(async () => ({
+      removed_ids: [data.skill.id],
+      detached: { assistant_count: 0, app_count: 0, personal_chat_count: 0 }
+    }));
+    const renderedData = {
+      ...data,
+      eneo: {
+        ...data.eneo,
+        skills: {
+          organization: { ...data.eneo.skills.organization, removeMany }
+        }
+      }
+    };
+    invalidate.mockRejectedValueOnce(new Error("Refresh failed"));
+    render(OrganizationSkillDetailPage, { data: renderedData as never });
+    await page
+      .getByRole("button", { name: m.organization_skills_remove_action(), exact: true })
+      .click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: m.organization_skills_remove_action(), exact: true })
+      .click();
+    await vi.waitFor(() =>
+      expect(removeMany).toHaveBeenCalledWith({
+        skill_ids: [data.skill.id],
+        detach_bindings: false
+      })
+    );
+    await expect.element(page.getByText(m.organization_skills_removed_description())).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: m.save(), exact: true }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.organization_skills_publish_update_action(),
+          exact: true
+        })
+      )
+      .not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("button", { name: m.organization_skills_remove_action(), exact: true })
+      )
+      .not.toBeInTheDocument();
+    await expect
+      .element(page.getByText(m.organization_skills_refresh_after_mutation_warning()))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("heading", { name: m.skills_library_history_heading() }))
+      .toHaveFocus();
+  });
+
+  test("a removed skill can close its existing execution block without becoming editable", async () => {
+    const data = publicationLifecycleData();
+    data.skill = {
+      ...data.skill,
+      removed_at: "2026-09-18T08:00:00Z",
+      is_active: false,
+      published_revision_number: null
+    };
+    const block: SkillExecutionBlockState = {
+      skill_id: data.skill.id,
+      block: {
+        id: "block-removed",
+        skill_id: data.skill.id,
+        blocked_at: "2026-09-17T08:00:00Z",
+        blocked_by_user_id: "user-1",
+        reason: "Incident investigation"
+      }
+    };
+    render(OrganizationSkillDetailPage, {
+      data: { ...data, published: null, executionBlock: block } as never
+    });
+    await expect
+      .element(page.getByRole("button", { name: m.organization_skills_execution_unblock_action() }))
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.organization_skills_execution_block_action(),
+          exact: true
+        })
+      )
+      .not.toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: m.save(), exact: true }))
+      .not.toBeInTheDocument();
   });
 
   test("keeps a created revision saved when refreshing the page data fails", async () => {
@@ -1665,6 +1764,212 @@ describe("organisation Skill detail page", () => {
     await expect
       .element(page.getByRole("button", { name: m.organization_skills_rollout_restart() }))
       .toBeVisible();
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
+  });
+
+  test("keeps a refused selected update readable through the refresh it triggers", async () => {
+    // A refusal is a normal response: no error, so the page refreshes its data.
+    const advanceAssistants = vi.fn().mockResolvedValueOnce({
+      run_id: "run-1",
+      next_cursor: null,
+      counts: { advanced: 0, concurrent_change: 0, incompatible: 1 },
+      outcomes: [{ assistant_id: "assistant-1", outcome: "incompatible", reason: "context_window" }]
+    });
+    const behindAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        assistant_count: 1,
+        distinct_space_count: 1,
+        behind_published_count: 1
+      },
+      matched_count: 1,
+      items: [
+        {
+          kind: "assistant" as const,
+          resource_id: "assistant-1",
+          name: "HR Assistant",
+          space_id: "space-1",
+          space_name: "People and culture",
+          revision_id: "revision-0",
+          revision_number: 0,
+          drift: "behind" as const
+        }
+      ]
+    };
+    const refreshed = Promise.withResolvers<typeof behindAdoption>();
+
+    const rendered = render(OrganizationSkillDetailPage, {
+      data: publicationLifecycleData({
+        adoption: Promise.resolve(behindAdoption),
+        advanceAssistants,
+        getAdoption: vi.fn(async () => behindAdoption)
+      }) as never
+    });
+
+    await page
+      .getByRole("checkbox", {
+        name: m.organization_skills_adoption_select_resource({ name: "HR Assistant" })
+      })
+      .click();
+    await page
+      .getByRole("button", { name: m.organization_skills_adoption_advance_selected() })
+      .click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: m.organization_skills_adoption_advance_selected() })
+      .click();
+
+    const receipt = page.getByText(
+      m.organization_skills_adoption_advanced_success({
+        advanced: "0",
+        unprocessed: "0",
+        concurrent: "0",
+        incompatible: "1"
+      })
+    );
+    await expect.element(receipt).toBeVisible();
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
+
+    // The refresh the page asked for is still in flight.
+    await rendered.rerender({
+      data: publicationLifecycleData({
+        adoption: refreshed.promise,
+        advanceAssistants,
+        getAdoption: vi.fn(async () => behindAdoption)
+      }) as never
+    });
+    // The section really is reloading, and the receipt survives it.
+    await expect
+      .element(page.getByText(m.organization_skills_adoption_loading()).first())
+      .toBeInTheDocument();
+    await expect.element(page.getByText("HR Assistant")).not.toBeInTheDocument();
+    await expect.element(receipt).toBeVisible();
+    await expect.element(receipt).not.toHaveClass(/sr-only/);
+
+    refreshed.resolve(behindAdoption);
+    await expect.element(page.getByText("HR Assistant")).toBeVisible();
+    await expect.element(receipt).toBeVisible();
+    await expect.element(receipt).not.toHaveClass(/sr-only/);
+  });
+
+  test("keeps a committed selected Assistant update visible when the App request fails", async () => {
+    const advanceAssistants = vi.fn().mockResolvedValueOnce({
+      run_id: "run-1",
+      next_cursor: null,
+      counts: { advanced: 1, concurrent_change: 0, incompatible: 0 },
+      outcomes: [{ assistant_id: "assistant-1", outcome: "advanced" }]
+    });
+    const advanceApps = vi.fn().mockRejectedValueOnce(new Error("Apps unavailable"));
+    const behindAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        assistant_count: 1,
+        app_count: 1,
+        distinct_space_count: 1,
+        behind_published_count: 2
+      },
+      matched_count: 2,
+      items: [
+        {
+          kind: "assistant" as const,
+          resource_id: "assistant-1",
+          name: "HR Assistant",
+          space_id: "space-1",
+          space_name: "People and culture",
+          revision_id: "revision-0",
+          revision_number: 0,
+          drift: "behind" as const
+        },
+        {
+          kind: "app" as const,
+          resource_id: "app-1",
+          name: "Onboarding App",
+          space_id: "space-1",
+          space_name: "People and culture",
+          revision_id: "revision-0",
+          revision_number: 0,
+          drift: "behind" as const
+        }
+      ]
+    };
+
+    render(OrganizationSkillDetailPage, {
+      data: publicationLifecycleData({
+        adoption: Promise.resolve(behindAdoption),
+        advanceAssistants,
+        advanceApps,
+        getAdoption: vi.fn(async () => behindAdoption)
+      }) as never
+    });
+
+    await page
+      .getByRole("checkbox", {
+        name: m.organization_skills_adoption_select_shown({ count: "2" })
+      })
+      .click();
+    await page
+      .getByRole("button", { name: m.organization_skills_adoption_advance_selected() })
+      .click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: m.organization_skills_adoption_advance_selected() })
+      .click();
+
+    await vi.waitFor(() =>
+      expect(advanceAssistants).toHaveBeenCalledWith(
+        expect.objectContaining({ assistant_ids: ["assistant-1"], cursor: null })
+      )
+    );
+    await vi.waitFor(() =>
+      expect(advanceApps).toHaveBeenCalledWith(expect.objectContaining({ app_ids: ["app-1"] }))
+    );
+    await expect.element(page.getByRole("alertdialog")).not.toBeInTheDocument();
+    await expect.element(page.getByRole("alert")).toBeVisible();
+    await expect
+      .element(
+        page.getByText(
+          m.organization_skills_adoption_advanced_success({
+            advanced: "1",
+            unprocessed: "0",
+            concurrent: "0",
+            incompatible: "0"
+          })
+        )
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("checkbox", {
+          name: m.organization_skills_adoption_select_resource({ name: "Onboarding App" })
+        })
+      )
+      .toBeChecked();
+    // The recovery selection survives because this path does not invalidate
+    // the page data, which would hand over a fresh adoption page and clear it.
+    expect(invalidate).not.toHaveBeenCalledWith("organization:skills");
+
+    advanceApps.mockResolvedValueOnce({
+      run_id: "run-2",
+      next_cursor: null,
+      counts: { advanced: 1, concurrent_change: 0, incompatible: 0 },
+      outcomes: [{ app_id: "app-1", outcome: "advanced" }]
+    });
+    await page
+      .getByRole("button", { name: m.organization_skills_adoption_advance_selected() })
+      .click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: m.organization_skills_adoption_advance_selected() })
+      .click();
+
+    // The retry carries only the App that failed, and then refreshes.
+    await vi.waitFor(() => expect(advanceApps).toHaveBeenCalledTimes(2));
+    expect(advanceApps).toHaveBeenLastCalledWith(
+      expect.objectContaining({ app_ids: ["app-1"], cursor: null })
+    );
+    expect(advanceAssistants).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
   });
 

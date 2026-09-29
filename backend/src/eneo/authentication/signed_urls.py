@@ -4,7 +4,7 @@ import hmac
 import json
 import re
 import time
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
@@ -22,32 +22,37 @@ def _get_signing_key():
 
 SIGNING_KEY = _get_signing_key()
 FILE_ORIGINAL_DOWNLOAD_AUDIENCE = "file_original_download"
+INFO_BLOB_ORIGINAL_DOWNLOAD_AUDIENCE = "info_blob_original_download"
 _FILE_ORIGINAL_DOWNLOAD_KEY = hmac.new(
     SIGNING_KEY,
     b"eneo:file-original-download:v1",
     hashlib.sha256,
 ).digest()
+_INFO_BLOB_ORIGINAL_DOWNLOAD_KEY = hmac.new(
+    SIGNING_KEY,
+    b"eneo:info-blob-original-download:v1",
+    hashlib.sha256,
+).digest()
 
 
 def _generate_token(
-    file_id: UUID,
+    resource_id: UUID,
     expires_at: int,
     content_disposition: ContentDisposition,
     *,
     signing_key: bytes,
     audience: str | None,
     tenant_id: UUID | None = None,
+    resource_claim: str = "file_id",
 ) -> str:
     payload: dict[str, Any] = {
-        "file_id": str(file_id),
+        resource_claim: str(resource_id),
         "expires_at": expires_at,
         "content_disposition": content_disposition.value,
     }
     if audience is not None:
         payload["aud"] = audience
-    # tenant_id is covered by the HMAC, so the download handler can refuse
-    # tokens whose signing-time tenant does not match the file being requested,
-    # defending against cross-tenant replay if a URL leaks.
+    # Bind leaked download credentials to the tenant that minted them.
     if tenant_id is not None:
         payload["tenant_id"] = str(tenant_id)
 
@@ -148,6 +153,34 @@ def verify_file_original_download_token(token: str) -> dict[str, Any] | None:
     return payload
 
 
+def generate_info_blob_original_download_token(
+    info_blob_id: UUID,
+    expires_at: int,
+    content_disposition: ContentDisposition,
+    tenant_id: UUID,
+) -> str:
+    """Generate a purpose-separated token for an InfoBlob original."""
+    return _generate_token(
+        info_blob_id,
+        expires_at,
+        content_disposition,
+        signing_key=_INFO_BLOB_ORIGINAL_DOWNLOAD_KEY,
+        audience=INFO_BLOB_ORIGINAL_DOWNLOAD_AUDIENCE,
+        tenant_id=tenant_id,
+        resource_claim="info_blob_id",
+    )
+
+
+def verify_info_blob_original_download_token(token: str) -> dict[str, Any] | None:
+    """Verify an InfoBlob original token and its explicit audience."""
+    payload = _verify_token(token, signing_key=_INFO_BLOB_ORIGINAL_DOWNLOAD_KEY)
+    if payload is None or payload.get("aud") != INFO_BLOB_ORIGINAL_DOWNLOAD_AUDIENCE:
+        return None
+    if "info_blob_id" not in payload:
+        return None
+    return payload
+
+
 # Path suffix of a signed original-download URL (the shape minted by
 # build_signed_original_download_url); matched host-agnostically because the
 # HMAC token is the sole authorizer.
@@ -180,6 +213,34 @@ def parse_file_reference_url(url: str) -> tuple[UUID, str] | None:
     except ValueError:
         return None
     return file_id, tokens[0]
+
+
+_REFERENCE_TOKEN = re.compile(
+    r"(?P<prefix>/original/download/?\?(?:[^\s\"'<>]*?&)?token=)"
+    r"[A-Za-z0-9_\-=.]+"
+)
+REDACTED_TOKEN = "REDACTED"
+
+
+def redact_reference_tokens(value: object) -> object:
+    """Replace the signed token in every reference URL found in ``value``.
+
+    Strings are scanned for original-download links; dicts and lists are
+    walked; other values pass through untouched. Applied to tool-call
+    arguments and results before they are persisted or shown, so the
+    bearer credential lives only in the request that used it. The URL keeps
+    its shape (a placeholder token remains) so later readers can still tell
+    a reference apart from a web link.
+    """
+    if isinstance(value, str):
+        return _REFERENCE_TOKEN.sub(rf"\g<prefix>{REDACTED_TOKEN}", value)
+    if isinstance(value, dict):
+        mapping = cast(dict[object, object], value)
+        return {key: redact_reference_tokens(item) for key, item in mapping.items()}
+    if isinstance(value, list):
+        entries = cast(list[object], value)
+        return [redact_reference_tokens(item) for item in entries]
+    return value
 
 
 def looks_like_reference_url(url: str) -> bool:

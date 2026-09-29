@@ -91,9 +91,9 @@ Eneo is licensed under **AGPL v3**, ensuring:
 ### Model Agnostic
 
 **Freedom to choose:**
-- Support for multiple AI providers (OpenAI, Anthropic, Azure, Google)
-- Ability to use local models (Ollama, LM Studio)
-- Easy switching between providers
+- Support for many AI providers through LiteLLM (OpenAI, Anthropic, Azure OpenAI, Google Gemini, Mistral and more)
+- Self-hosted models through any OpenAI-compatible endpoint (for example vLLM)
+- Providers and models configured per tenant in the admin UI, so switching needs no redeploy
 - No vendor lock-in
 
 ### Governance and Compliance
@@ -113,7 +113,7 @@ Eneo is licensed under **AGPL v3**, ensuring:
 Create and customize AI assistants for specific organizational needs with support for multiple AI providers and customizable system prompts.
 
 ### 🏢 Collaborative Spaces
-Team collaboration within organizations with role-based access control and production management capabilities.
+Spaces are team workspaces within an organization where members share assistants and knowledge bases under role-based access control.
 
 ### 📚 Knowledge Management
 Process documents (PDF, Word, PowerPoint, Excel), crawl websites, and enable semantic search using PostgreSQL with pgvector.
@@ -132,34 +132,33 @@ Audit logging, role-based access, self-hosting options, provider controls, and s
 ## Technology Stack
 
 ### Backend
-- **Framework**: FastAPI (Python 3.11+)
+- **Framework**: FastAPI (Python 3.11, managed with uv)
 - **ORM**: SQLAlchemy
 - **API**: RESTful with OpenAPI documentation
 - **Task Queue**: ARQ (async Redis queue)
 
 ### Frontend
-- **Framework**: SvelteKit
+- **Framework**: SvelteKit (Svelte 5)
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS
-- **State Management**: Svelte stores
+- **Tooling**: Vite, Bun workspaces
 
 ### Database
-- **Primary**: PostgreSQL 13+
+- **Primary**: PostgreSQL (the reference deployment runs `pgvector/pgvector:pg16`)
 - **Vector Extension**: pgvector for semantic search
 - **Migrations**: Alembic
 
 ### Infrastructure
 - **Containerization**: Docker
-- **Orchestration**: Docker Compose (Kubernetes support planned)
-- **Reverse Proxy**: Traefik (Nginx/Caddy also supported)
+- **Orchestration**: Docker Compose
+- **Reverse Proxy**: Traefik with Let's Encrypt in the reference stack; the deployment guide also covers nginx
 - **Cache/Queue**: Redis 7
 
 ### AI Integration
-- **OpenAI**: GPT-4, GPT-3.5
-- **Anthropic**: Claude 3 (Opus, Sonnet, Haiku)
-- **Azure OpenAI**: Enterprise deployment
-- **Google**: Gemini models
-- **Local**: Ollama, LM Studio
+- **Routing**: all model calls go through LiteLLM
+- **Cloud providers**: OpenAI, Anthropic, Azure OpenAI, Google Gemini, Mistral and other LiteLLM-supported providers
+- **Self-hosted**: any OpenAI-compatible endpoint (for example vLLM)
+- **Configuration**: providers, credentials and models are managed per tenant in Admin → Models
 
 ---
 
@@ -272,19 +271,7 @@ GNU Affero General Public License for more details.
 
 ## Roadmap
 
-### Current Development
-- Enhanced multi-organization support
-- Improved knowledge base management
-- Additional AI provider integrations
-- Kubernetes Helm charts
-
-### Planned Features
-- Mobile application
-- Advanced workflow automation
-- Plugin system for extensibility
-- Enhanced analytics and reporting
-
-See the [GitHub project board](https://github.com/eneo-ai/eneo/projects) for detailed roadmap.
+Planning happens in the public GitHub project [eneo-ai/5](https://github.com/orgs/eneo-ai/projects/5). The [Project Roadmap](/contributing/project-roadmap) page explains how epics, tasks and findings are tracked there and how the roadmap export is produced.
 
 ---
 

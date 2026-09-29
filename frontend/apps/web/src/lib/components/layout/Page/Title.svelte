@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { Button } from "@eneo/ui";
   import { onMount } from "svelte";
   import { quadInOut } from "svelte/easing";
   import { fly } from "svelte/transition";
@@ -7,6 +6,8 @@
   export let parent: { title?: string; href: string } | null = null;
   export let title: string | undefined = undefined;
   export let truncate = false;
+  /** Anchor for the What's new "Show me" spotlight (rendered as data-tour). */
+  export let tour: string | undefined = undefined;
 
   let titleContainer: HTMLDivElement;
   let originalTitleWidth: number | null = null;
@@ -43,14 +44,15 @@
 
 <div
   bind:this={titleContainer}
+  data-tour={tour}
   class:max-w-[40%]={isOverflowing}
   class="grid translate-y-[0.02rem] flex-col overflow-hidden transition-all"
 >
   <div class="overflow-hidden pl-2 text-[1.4rem]">
     <div class="flex w-full items-baseline gap-2">
       {#if parent}
-        <Button
-          unstyled
+        <!-- eslint-disable svelte/no-navigation-without-resolve -- href is a typed prop passed from caller -->
+        <a
           href={parent.href}
           class="text-muted hover:border-dimmer hover:bg-hover-default hover:text-primary -mx-2 inline-block rounded-lg border border-transparent px-2 py-0.5 text-[1.35rem] tracking-[-0.01rem] whitespace-nowrap"
           >←
@@ -59,7 +61,8 @@
               &nbsp;{parent.title}
             </span>
           {/if}
-        </Button>
+        </a>
+        <!-- eslint-enable svelte/no-navigation-without-resolve -->
         {#if parent.title}
           <div class="text-muted" class:hidden={isOverflowing}>/</div>
         {/if}

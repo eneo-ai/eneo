@@ -19,7 +19,7 @@
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
-  import { Loader2, AlertTriangle, ShieldAlert, Info } from "lucide-svelte";
+  import { LoaderCircle, TriangleAlert, ShieldAlert, Info } from "@lucide/svelte";
 
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
@@ -305,10 +305,19 @@
     <div class="min-h-0 flex-1 overflow-y-auto px-6 py-4">
       <div class="flex flex-col gap-5">
         <p class="text-muted-foreground text-sm">
-          {m.migrate_model_description({
-            name: sourceModel.nickname ? sourceModel.nickname : sourceModel.name
-          })}
+          {modelType === "transcriptionModel"
+            ? m.migrate_transcription_model_description({ name: labelFor(sourceModel) })
+            : m.migrate_model_description({ name: labelFor(sourceModel) })}
         </p>
+
+        {#if !sourceModel.is_org_enabled && sourceModel.provider_id != null && !sourceAlreadyMigrated}
+          <div
+            class="border-border bg-muted/30 text-muted-foreground flex items-start gap-2 rounded-lg border px-4 py-3 text-sm"
+          >
+            <Info size={16} class="mt-0.5 flex-shrink-0" aria-hidden="true" />
+            <span>{m.migrate_model_source_inactive()}</span>
+          </div>
+        {/if}
 
         {#if sourceAlreadyMigrated}
           <div
@@ -322,7 +331,7 @@
         <!-- 1. Impact preview -->
         {#if !sourceAlreadyMigrated && isLoadingImpact}
           <div class="text-muted-foreground flex items-center gap-2 py-3 text-sm">
-            <Loader2 class="size-4 animate-spin" aria-hidden="true" />
+            <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
             <span>{m.loading()}</span>
           </div>
         {:else if !sourceAlreadyMigrated && impactLoadError}
@@ -379,7 +388,7 @@
         <!-- 3. Validation results — split by severity -->
         {#if isValidating}
           <div class="text-muted-foreground flex items-center gap-2 py-2 text-sm">
-            <Loader2 class="size-4 animate-spin" aria-hidden="true" />
+            <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
             <span>{m.loading()}</span>
           </div>
         {:else if anyValidationSection}
@@ -412,7 +421,7 @@
                 <ul class="space-y-1.5">
                   {#each warningMsgs as w, i (i)}
                     <li class="text-warning-stronger flex items-start gap-2">
-                      <AlertTriangle size={14} class="mt-0.5 flex-shrink-0" aria-hidden="true" />
+                      <TriangleAlert size={14} class="mt-0.5 flex-shrink-0" aria-hidden="true" />
                       <span>{w}</span>
                     </li>
                   {/each}
@@ -483,7 +492,7 @@
       <Button variant="outline" onclick={() => (dialogOpen = false)}>{m.cancel()}</Button>
       <Button onclick={handleMigrate} disabled={isSubmitting || !canMigrate}>
         {#if isSubmitting}
-          <Loader2 class="size-4 animate-spin" aria-hidden="true" />
+          <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
           {m.migrating()}
         {:else}
           {m.migrate_model_usage()}

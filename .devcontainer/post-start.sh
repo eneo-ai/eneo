@@ -37,7 +37,7 @@ else
 fi
 
 # A development deployment gets its own random key so credential features in
-# Admin > Models and Admin > Storage work without manual setup. Never fires
+# Admin > Models and Admin > File storage work without manual setup. Never fires
 # once a key is present.
 if [ -f "/workspace/backend/.env" ] && ! grep -Eq '^[[:space:]]*ENCRYPTION_KEY=[^[:space:]]+' "/workspace/backend/.env"; then
     VENV_PYTHON="/workspace/backend/.venv/bin/python"
@@ -53,7 +53,7 @@ if [ -f "/workspace/backend/.env" ] && ! grep -Eq '^[[:space:]]*ENCRYPTION_KEY=[
         fi
         echo -e "${GREEN}Generated a development ENCRYPTION_KEY in backend/.env.${NC}"
     else
-        echo -e "${YELLOW}${BOLD}ENCRYPTION_KEY is empty.${NC} Saving credentials in Admin > Models or Admin > Storage will fail until it is configured."
+        echo -e "${YELLOW}${BOLD}ENCRYPTION_KEY is empty.${NC} Saving credentials in Admin > Models or Admin > File storage will fail until it is configured."
         echo "Generate one with: cd backend && uv run python -m eneo.cli.generate_encryption_key"
         echo "Add the generated value to backend/.env, then restart the backend."
     fi
@@ -64,7 +64,7 @@ fi
 if getent hosts object-content >/dev/null 2>&1; then
     echo ""
     echo -e "${GREEN}Local object storage (SeaweedFS) is running ---------${NC}"
-    echo "Connect it in Admin > Storage:"
+    echo "Connect it in Admin > File storage:"
     echo "  Endpoint:   http://object-content:8333"
     echo "  Region:     local"
     echo "  Bucket:     eneo-object-content-dev"

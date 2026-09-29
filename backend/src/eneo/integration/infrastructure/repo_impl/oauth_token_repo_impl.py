@@ -6,6 +6,7 @@ from eneo.database.tables.integration_table import (
     OauthToken as OauthTokenDBModel,
 )
 from eneo.database.tables.integration_table import (
+    TenantIntegration,
     UserIntegration,
 )
 from eneo.integration.domain.entities.oauth_token import OauthToken
@@ -28,7 +29,7 @@ class OauthTokenRepoImpl(
     def __init__(self, session: "AsyncSession", mapper: OauthTokenMapper):
         super().__init__(session=session, model=OauthTokenDBModel, mapper=mapper)
         self._options = [
-            selectinload(self._db_model.user_integration).selectinload(
-                UserIntegration.tenant_integration
-            )
+            selectinload(self._db_model.user_integration)
+            .selectinload(UserIntegration.tenant_integration)
+            .selectinload(TenantIntegration.integration)
         ]

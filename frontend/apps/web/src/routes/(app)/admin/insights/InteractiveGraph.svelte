@@ -5,10 +5,10 @@
 -->
 
 <script lang="ts">
-  import { IconSession } from "@eneo/icons/session";
+  import { IconSpeechBubble } from "@eneo/icons/speech-bubble";
   import { IconQuestionMark } from "@eneo/icons/question-mark";
-  import { Chart } from "@eneo/ui";
-  import { Info, BarChart3 } from "lucide-svelte";
+  import * as Chart from "$lib/components/chart/index.js";
+  import { Info, ChartColumn } from "@lucide/svelte";
   import type { AnalyticsAggregatedData } from "@eneo/eneo-js";
   import { getConfig, prepareData } from "./prepareData";
   import { m } from "$lib/paraglide/messages";
@@ -64,7 +64,7 @@
           filter = "sessions";
         }}
       >
-        <IconSession
+        <IconSpeechBubble
           class="h-4 w-4 transition-opacity duration-200
                            {filter === 'sessions'
             ? 'opacity-100'
@@ -140,7 +140,7 @@
       <div class="flex h-full flex-col items-center justify-center gap-6 text-center">
         <!-- Floating icon - no container, just opacity -->
         <div class="relative">
-          <BarChart3 class="h-14 w-14 text-[var(--text-muted)] opacity-20" strokeWidth={1.25} />
+          <ChartColumn class="h-14 w-14 text-[var(--text-muted)] opacity-20" strokeWidth={1.25} />
         </div>
         <div class="space-y-2">
           <h3 class="text-sm font-medium tracking-tight text-[var(--text-primary)]">

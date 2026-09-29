@@ -69,6 +69,7 @@ class TokenUsageService:
         per_page: int = 15,
         sort_by: str = "total_tokens",
         sort_order: str = "desc",
+        search: str | None = None,
     ) -> UserTokenUsageSummary:
         """
         Get token usage statistics aggregated by user for the specified date range.
@@ -98,6 +99,7 @@ class TokenUsageService:
             per_page=per_page,
             sort_by=sort_by,
             sort_order=sort_order,
+            search=search,
         )
 
     @validate_permissions(permission=Permission.ADMIN)

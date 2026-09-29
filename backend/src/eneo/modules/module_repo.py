@@ -3,6 +3,7 @@ from typing import Optional, cast
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,9 +12,9 @@ from eneo.database.tables.module_table import Modules
 from eneo.database.tables.tenant_table import tenants_modules_table
 from eneo.main.exceptions import NameCollisionException
 from eneo.modules.module import (
-    ModuleClientConfig,
     ModuleCreate,
     ModuleInDB,
+    ModuleInstallation,
     ModuleTenantClientConfig,
 )
 
@@ -62,6 +63,28 @@ class ModuleRepository:
                 ) from exc
             raise
 
+    async def get_or_add(self, module: ModuleCreate) -> ModuleInDB:
+        """Return the stable global identity, creating it race-safely.
+
+        Installation is idempotent and may be retried concurrently. PostgreSQL
+        owns the unique-name arbitration so a retry never leaves the session in
+        the failed-transaction state produced by catching ``IntegrityError``.
+        """
+        insert = (
+            postgresql.insert(Modules)
+            .values(name=module.name)
+            .on_conflict_do_nothing(index_elements=[Modules.name])
+            .returning(Modules)
+        )
+        record = await self.session.scalar(insert)
+        if record is not None:
+            return ModuleInDB.model_validate(record)
+
+        existing = await self.get_module_by_key(module.name)
+        if existing is None:
+            raise RuntimeError("Module upsert did not create or resolve its identity.")
+        return existing
+
     async def get_all_modules(self) -> list[ModuleInDB]:
         stmt = sa.select(Modules).order_by(Modules.created_at)
         modules = await self.session.scalars(stmt)
@@ -87,20 +110,47 @@ class ModuleRepository:
 
         return ModuleInDB.model_validate(module)
 
-    async def update_client_config(
-        self, tenant_id: UUID, module_id: UUID, config: ModuleClientConfig
-    ) -> Optional[ModuleTenantClientConfig]:
-        updates = config.update_values()
-        if not updates:
-            raise ValueError("Module client config PATCH requires at least one field.")
+    async def get_installations(self, tenant_id: UUID) -> list[ModuleInstallation]:
+        stmt = (
+            sa.select(
+                Modules.id.label("module_id"),
+                Modules.name.label("module_key"),
+                tenants_modules_table.c.redirect_uris,
+                tenants_modules_table.c.service_key_id,
+            )
+            .join(
+                tenants_modules_table,
+                tenants_modules_table.c.module_id == Modules.id,
+            )
+            .where(tenants_modules_table.c.tenant_id == tenant_id)
+            .order_by(Modules.created_at, Modules.name)
+        )
+        rows = (await self.session.execute(stmt)).mappings().all()
+        return [
+            ModuleInstallation(
+                module_id=row["module_id"],
+                module_key=row["module_key"],
+                redirect_uris=row["redirect_uris"] or [],
+                service_key_id=row["service_key_id"],
+            )
+            for row in rows
+        ]
 
+    async def update_client_config(
+        self,
+        *,
+        tenant_id: UUID,
+        module_id: UUID,
+        redirect_uris: list[str],
+        service_key_id: Optional[UUID],
+    ) -> Optional[ModuleTenantClientConfig]:
         stmt = (
             sa.update(tenants_modules_table)
             .where(
                 tenants_modules_table.c.tenant_id == tenant_id,
                 tenants_modules_table.c.module_id == module_id,
             )
-            .values(**updates)
+            .values(redirect_uris=redirect_uris, service_key_id=service_key_id)
             .returning(
                 tenants_modules_table.c.tenant_id,
                 tenants_modules_table.c.module_id,

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { Page } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { onMount } from "svelte";
@@ -55,12 +55,16 @@
 
     <Page.Flex>
       {#if data.app.permissions?.includes("edit")}
-        <Button href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${data.app.id}/edit`)}
+        <Button
+          variant="ghost"
+          href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${data.app.id}/edit`)}
           >{m.edit()}</Button
         >
       {/if}
-      <Page.TabTrigger asFragment let:trigger tab="run">
-        <Button is={trigger} variant="primary" class="!line-clamp-1">{m.new_run()}</Button>
+      <Page.TabTrigger asFragment tab="run">
+        {#snippet children({ trigger })}
+          <Button {...trigger}>{m.new_run()}</Button>
+        {/snippet}
       </Page.TabTrigger>
     </Page.Flex>
   </Page.Header>

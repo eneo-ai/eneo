@@ -26,14 +26,10 @@ def _file(*, stored=True):
     )
 
 
-def _enable_references(monkeypatch, *, object_store=True):
+def _enable_references(monkeypatch):
     monkeypatch.setattr(
         "eneo.files.file_reference.file_reference_base_url",
         lambda settings=None: "https://eneo.example",
-    )
-    monkeypatch.setattr(
-        "eneo.files.file_reference.object_store_configured",
-        lambda: object_store,
     )
 
 
@@ -101,15 +97,21 @@ def test_no_referenced_files_means_no_files_server(monkeypatch):
     assert not availability.referenced_file_ids
 
 
-def test_files_server_requires_object_store(monkeypatch):
-    _enable_references(monkeypatch, object_store=False)
+def test_files_server_follows_the_per_file_original_flag_only(monkeypatch):
+    # Storage is not a gate here: ``original_available`` already reflects
+    # whether the deployment can serve the bytes (inline PostgreSQL content
+    # always, object-store content only while a store is connected), so a
+    # deployment without any object store attaches the server for its
+    # PostgreSQL-backed originals and nothing else is consulted.
+    _enable_references(monkeypatch)
+    stored_file = _file()
 
     availability = resolve_internal_mcp_availability(
         assistant=_assistant(),
         completion_model=_model(),
-        conversation_files=[_file()],
+        conversation_files=[stored_file, _file(stored=False)],
     )
 
-    assert not availability.files
-    assert not availability.referenced_file_ids
-    assert not availability.url_only_file_ids
+    assert availability.files
+    assert availability.referenced_file_ids == {stored_file.id}
+    assert availability.url_only_file_ids == {stored_file.id}

@@ -1,7 +1,7 @@
 import logging
 from typing import TYPE_CHECKING
 
-from sqlalchemy import asc, desc, exists, func, select, union_all
+from sqlalchemy import asc, desc, exists, func, or_, select, union_all
 
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.app_table import AppRuns
@@ -143,6 +143,7 @@ class UserTokenUsageAnalyzer:
         start_date: "datetime",
         end_date: "datetime",
         user_id: "UUID | None" = None,
+        search: str | None = None,
     ):
         """
         Build the combined usage query that merges questions and app runs data.
@@ -162,6 +163,15 @@ class UserTokenUsageAnalyzer:
         app_runs_query = self._build_app_runs_query(
             tenant_id, start_date, end_date, user_id
         )
+
+        if search and search.strip():
+            term = search.strip().lower()
+            identity_filter = or_(
+                func.lower(Users.username).contains(term, autoescape=True),
+                func.lower(Users.email).contains(term, autoescape=True),
+            )
+            questions_query = questions_query.where(identity_filter)
+            app_runs_query = app_runs_query.where(identity_filter)
 
         # Combine the results from both queries using union_all
         combined_usage_query = union_all(questions_query, app_runs_query).alias(
@@ -207,6 +217,7 @@ class UserTokenUsageAnalyzer:
         per_page: int = 15,
         sort_by: str = "total_tokens",
         sort_order: str = "desc",
+        search: str | None = None,
     ) -> UserTokenUsageSummary:
         """
         Get token usage statistics aggregated by user.
@@ -228,7 +239,9 @@ class UserTokenUsageAnalyzer:
         )
 
         # Build the base query using the helper method
-        base_query = self._build_combined_usage_query(tenant_id, start_date, end_date)
+        base_query = self._build_combined_usage_query(
+            tenant_id, start_date, end_date, search=search
+        )
 
         # Get the total count of users
         count_query = select(func.count()).select_from(base_query.alias("count_query"))
@@ -239,9 +252,13 @@ class UserTokenUsageAnalyzer:
         sort_column = self._get_sort_column(sort_by)
         logger.info(f"Sorting by column: {sort_column}")
         if sort_order == "desc":
-            sorted_query = base_query.order_by(desc(sort_column))
+            sorted_query = base_query.order_by(
+                desc(sort_column), desc(base_query.selected_columns.user_id)
+            )
         else:
-            sorted_query = base_query.order_by(asc(sort_column))
+            sorted_query = base_query.order_by(
+                asc(sort_column), asc(base_query.selected_columns.user_id)
+            )
 
         # Add pagination to the query
         paginated_query = sorted_query.limit(per_page).offset((page - 1) * per_page)
@@ -258,7 +275,7 @@ class UserTokenUsageAnalyzer:
                 user_token_usages.append(
                     UserTokenUsage(
                         user_id=row.user_id,
-                        username=row.username,
+                        username=row.username or row.email,
                         email=row.email,
                         total_input_tokens=row.input_tokens or 0,
                         total_output_tokens=row.output_tokens or 0,

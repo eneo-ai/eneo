@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { cva } from "class-variance-authority";
   import { integrationData, type IntegrationType } from "../IntegrationData";
 
   type Props = {
@@ -11,15 +10,6 @@
   const logoUrl = $derived.by(() => {
     return integrationData[type].logo;
   });
-
-  const image = cva(null, {
-    variants: {
-      size: {
-        sm: ["w-6"],
-        lg: ["w-12"]
-      }
-    }
-  });
 </script>
 
-<img src={logoUrl} alt="" class={image({ size })} />
+<img src={logoUrl} alt="" class={size === "sm" ? "w-6" : "w-12"} />

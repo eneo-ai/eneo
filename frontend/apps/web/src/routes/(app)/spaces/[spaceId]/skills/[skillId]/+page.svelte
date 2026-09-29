@@ -9,7 +9,7 @@
   import type { SkillRevisionFormValue } from "$lib/features/skills/skillBindings";
   import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
-  import { Info } from "lucide-svelte";
+  import { Info } from "@lucide/svelte";
   import { tick } from "svelte";
 
   const EDIT_SKILL_PERMISSION: ResourcePermission = "edit";
@@ -220,7 +220,7 @@
                   {m.skills_instructions_label()}
                 </dt>
                 <dd
-                  class="border-border bg-muted/20 max-w-[75ch] border-l-2 px-4 py-3 text-sm break-words whitespace-pre-wrap"
+                  class="border-border bg-muted max-w-[75ch] rounded-md border px-4 py-3 font-mono text-xs leading-5 break-words whitespace-pre-wrap"
                 >
                   {data.skill.current_revision.instructions}
                 </dd>

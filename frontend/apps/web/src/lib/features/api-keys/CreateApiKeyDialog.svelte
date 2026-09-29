@@ -21,6 +21,7 @@
   import { getEneo } from "$lib/core/Eneo";
   import { getAppContext } from "$lib/core/AppContext";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
+  import { createCopyState } from "$lib/core/helpers/clipboard.svelte";
   import { m } from "$lib/paraglide/messages";
   import {
     Key,
@@ -29,7 +30,7 @@
     ChevronRight,
     ChevronLeft,
     Check,
-    AlertCircle,
+    CircleAlert,
     Globe,
     Lock,
     Building2,
@@ -41,10 +42,10 @@
     ShieldCheck,
     Sparkles,
     Copy,
-    CheckCircle2,
+    CircleCheck,
     Ban,
     Link2
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { fly, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import ScopeResourceSelector from "$lib/features/api-keys/ScopeResourceSelector.svelte";
@@ -119,7 +120,7 @@
   let errorMessage = $state<string | null>(null);
   let createdSecret = $state<string | null>(null);
   let createdResponse = $state<ApiKeyCreatedResponse | null>(null);
-  let secretCopied = $state(false);
+  const clipboard = createCopyState();
 
   // Wizard step state
   let currentStep = $state(1);
@@ -739,7 +740,6 @@
       const response = await eneo.apiKeys.create(request);
       createdSecret = response.secret;
       createdResponse = response;
-      secretCopied = false;
       currentStep = 4;
     } catch (error: unknown) {
       console.error(error);
@@ -828,14 +828,8 @@
   }
 
   async function copySecret() {
-    if (!createdSecret) return;
-    try {
-      await navigator.clipboard.writeText(createdSecret);
-      secretCopied = true;
+    if (createdSecret && (await clipboard.copy(createdSecret))) {
       toast.success(m.api_keys_copied_message());
-      setTimeout(() => (secretCopied = false), 2000);
-    } catch {
-      toast.error(m.something_went_wrong());
     }
   }
 
@@ -867,7 +861,6 @@
     rateLimit = "";
     createdSecret = null;
     createdResponse = null;
-    secretCopied = false;
     errorMessage = null;
   }
 
@@ -1407,7 +1400,7 @@
           transition:fly={{ y: -8, duration: 180, easing: cubicOut }}
         >
           <Alert.Root variant="destructive" aria-live="assertive">
-            <AlertCircle />
+            <CircleAlert />
             <Alert.Description>{errorMessage}</Alert.Description>
           </Alert.Root>
         </div>
@@ -1661,7 +1654,7 @@
                         class="border-warning-default/40 bg-warning-dimmer/40 text-warning-stronger dark:bg-warning-dimmer/20 rounded-lg border p-3 text-xs"
                       >
                         <span class="inline-flex items-center gap-1.5">
-                          <AlertCircle class="h-3.5 w-3.5" />
+                          <CircleAlert class="h-3.5 w-3.5" />
                           {m.api_keys_ownership_service_guardrail_hint()}
                         </span>
                       </div>
@@ -2184,7 +2177,7 @@
               <div
                 class="bg-positive-default/15 ring-positive-default/10 relative flex h-14 w-14 items-center justify-center rounded-full ring-4"
               >
-                <CheckCircle2 class="text-positive-stronger h-7 w-7" strokeWidth={2.5} />
+                <CircleCheck class="text-positive-stronger h-7 w-7" strokeWidth={2.5} />
               </div>
             </div>
 
@@ -2206,7 +2199,7 @@
           <!-- Warning banner -->
           <div class="mt-5" in:fly={{ y: 10, duration: 300, delay: 100, easing: cubicOut }}>
             <Alert.Root class="border-caution/40 bg-caution/8 dark:bg-caution/12">
-              <AlertCircle class="text-caution" />
+              <CircleAlert class="text-caution" />
               <Alert.Title class="text-caution">{m.api_keys_important()}</Alert.Title>
               <Alert.Description>{m.api_keys_copy_warning()}</Alert.Description>
             </Alert.Root>
@@ -2228,11 +2221,11 @@
 
             <div class="mt-3 flex items-center gap-3">
               <Button
-                variant={secretCopied ? "outline" : "default"}
+                variant={clipboard.copied ? "outline" : "default"}
                 onclick={copySecret}
                 aria-label={m.api_keys_copy_to_clipboard()}
               >
-                {#if secretCopied}
+                {#if clipboard.copied}
                   <Check class="text-positive-stronger" />
                   {m.api_keys_copied()}
                 {:else}

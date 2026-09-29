@@ -5,6 +5,7 @@
     EneoError,
     type CompletionModel,
     type EmbeddingModel,
+    type ImageModel,
     type TranscriptionModel
   } from "@eneo/eneo-js";
   import { getEneo } from "$lib/core/Eneo";
@@ -13,11 +14,11 @@
   import {
     Pencil,
     Trash2,
-    AlertTriangle,
-    Loader2,
+    TriangleAlert,
+    LoaderCircle,
     ArrowRight,
-    MoreHorizontal
-  } from "lucide-svelte";
+    Ellipsis
+  } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { getErrorMessage } from "$lib/core/errors";
 
@@ -32,12 +33,9 @@
    *  Mirrors `ErrorCodes.MODEL_IN_USE` in `backend/src/eneo/main/exceptions.py`. */
   const MODEL_IN_USE_CODE = 9039;
 
-  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel;
-  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel";
+  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
+  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
 
-  // svelte-headless-table's `createRender` expects a class-based component,
-  // so we keep this file on the legacy `export let` API. Shadcn primitives
-  // below work just fine inside a non-runes parent.
   export let model: AnyModel;
   export let type: ModelTypeKey;
   export let completionModels: CompletionModel[] = [];
@@ -66,6 +64,15 @@
   $: modelLabel = "nickname" in model && model.nickname ? model.nickname : model.name;
   $: isMigratedModel =
     supportsMigration && "migrated_to_model_id" in model && !!model.migrated_to_model_id;
+  // An image model that a capability provider runs on cannot be deleted; the
+  // backend refuses with 9039, so the menu says why instead of letting the
+  // admin find out after the fact.
+  $: usedBy =
+    type === "imageModel" && "used_by_mcp_servers" in model
+      ? (model.used_by_mcp_servers ?? [])
+      : [];
+  $: deleteBlocked = usedBy.length > 0;
+  $: deleteBlockedNames = usedBy.map((u) => u.name).join(", ");
 
   function openDelete() {
     deleteError = null;
@@ -83,6 +90,8 @@
         await eneo.tenantModels.deleteCompletion({ id: model.id });
       } else if (type === "embeddingModel") {
         await eneo.tenantModels.deleteEmbedding({ id: model.id });
+      } else if (type === "imageModel") {
+        await eneo.tenantModels.deleteImage({ id: model.id });
       } else {
         await eneo.tenantModels.deleteTranscription({ id: model.id });
       }
@@ -106,7 +115,7 @@
   <DropdownMenu.Trigger>
     {#snippet child({ props })}
       <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
-        <MoreHorizontal />
+        <Ellipsis />
       </Button>
     {/snippet}
   </DropdownMenu.Trigger>
@@ -126,9 +135,16 @@
 
     <DropdownMenu.Separator />
 
-    <DropdownMenu.Item variant="destructive" onclick={openDelete}>
+    <DropdownMenu.Item variant="destructive" disabled={deleteBlocked} onclick={openDelete}>
       <Trash2 />
-      {m.delete_model()}
+      <span class="flex flex-col">
+        <span>{m.delete_model()}</span>
+        {#if deleteBlocked}
+          <span class="text-muted-foreground text-xs whitespace-normal">
+            {m.model_delete_blocked_used_by({ names: deleteBlockedNames })}
+          </span>
+        {/if}
+      </span>
     </DropdownMenu.Item>
   </DropdownMenu.Content>
 </DropdownMenu.Root>
@@ -153,7 +169,7 @@
           <div class="bg-negative-default absolute inset-y-0 left-0 w-1" aria-hidden="true"></div>
           <div class="flex items-start gap-3 p-4 pl-5">
             <div class="bg-negative-default/10 flex-shrink-0 rounded-full p-1.5">
-              <AlertTriangle class="text-negative-default size-4" aria-hidden="true" />
+              <TriangleAlert class="text-negative-default size-4" aria-hidden="true" />
             </div>
             <div class="min-w-0 flex-1">
               <p class="text-negative-stronger text-sm font-medium">
@@ -193,7 +209,7 @@
       <Button variant="outline" onclick={() => (deleteOpen = false)}>{m.cancel()}</Button>
       <Button variant="destructive" onclick={handleDelete} disabled={isDeleting}>
         {#if isDeleting}
-          <Loader2 class="size-4 animate-spin" aria-hidden="true" />
+          <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
           {m.deleting()}
         {:else}
           {m.delete_model()}

@@ -98,6 +98,7 @@ class AdminService:
         search = SearchFilters(
             email=query_params.search_email,
             name=query_params.search_name,
+            role_id=query_params.role_id,
             state_filter=query_params.state_filter.value
             if query_params.state_filter
             else None,

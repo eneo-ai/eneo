@@ -370,6 +370,15 @@ class SettingService:
             )
         )
 
+        whats_new_enabled = (
+            overrides["whats_new_enabled"]
+            if "whats_new_enabled" in overrides
+            else await self.feature_flag_service.check_is_feature_enabled(
+                feature_name="whats_new_enabled",
+                tenant_id=self.user.tenant_id,
+            )
+        )
+
         tenant = await self.tenant_repo.get(self.user.tenant_id)
         provisioning = (
             overrides["provisioning"]
@@ -391,8 +400,13 @@ class SettingService:
             provisioning=provisioning,
             api_key_expiry_notifications=api_key_expiry_notifications,
             chunking=ChunkingPolicyPublic.from_platform(),
+            whats_new_enabled=whats_new_enabled,
             file_references_enabled=bool(file_reference_base_url(app_settings)),
             object_store_configured=self.object_content.object_store_configured,
+            sharepoint_fixture_mode_available=(
+                app_settings.sharepoint_fixture_mode_active
+            ),
+            developer_tools_available=app_settings.is_development,
         )
 
     async def get_settings(self) -> SettingsPublic:
@@ -599,4 +613,35 @@ class SettingService:
         return await self._build_settings_public(
             settings_in_db=settings,
             overrides={"api_key_expiry_notifications": enabled},
+        )
+
+    @validate_permissions(Permission.ADMIN)
+    async def update_whats_new_setting(self, enabled: bool) -> SettingsPublic:
+        """Toggle the What's new page, announcement and indicator for tenant."""
+        old_enabled = await self.feature_flag_service.check_is_feature_enabled(
+            feature_name="whats_new_enabled",
+            tenant_id=self.user.tenant_id,
+        )
+        await self._set_feature_flag_for_tenant(
+            name="whats_new_enabled", enabled=enabled
+        )
+
+        settings = await self.repo.get(self.user.id)
+
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            user=self.user,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description=f"Toggled whats_new_enabled to {enabled}",
+            metadata={
+                "setting": "whats_new_enabled",
+                "changes": {"whats_new_enabled": {"old": old_enabled, "new": enabled}},
+            },
+        )
+
+        return await self._build_settings_public(
+            settings_in_db=settings,
+            overrides={"whats_new_enabled": enabled},
         )

@@ -8,19 +8,22 @@
   import { IconCopy } from "@eneo/icons/copy";
   import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { IconChevronRight } from "@eneo/icons/chevron-right";
-  import { Button, Dropdown, Tooltip } from "@eneo/ui";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import BlobPreview from "$lib/features/knowledge/components/BlobPreview.svelte";
   import LinkReference from "$lib/features/knowledge/components/LinkReference.svelte";
   import McpResourceSnippetModal from "./McpResourceSnippetModal.svelte";
   import { getFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
   import { citedTextDocumentReferences, dedupeByDocument } from "../../mcpReferenceDocs";
-  import type { InfoBlob } from "@eneo/eneo-js";
 
   const { settings } = getAppContext();
   const { current, isLast } = getMessageContext();
   const message = $derived(current());
   const preferredCopyFormat = $derived(getPreferredAssistantCopyFormat(settings));
+  const copyLabel = $derived(
+    preferredCopyFormat === "richtext" ? m.copy_as_richtext() : m.copy_as_markdown()
+  );
 
   let referencesExpanded = $state(false);
   let showCopiedMessage = $state(false);
@@ -65,13 +68,11 @@
 
   // A reference that points at an eneo document can open the full document
   // viewer (lazy fetch by id) instead of the stored snippet capture.
-  function blobForRef(infoBlobId: string, title: string): InfoBlob {
-    return { id: infoBlobId, metadata: { title } } as unknown as InfoBlob;
+  function blobForRef(infoBlobId: string, title: string) {
+    return { id: infoBlobId, metadata: { title } };
   }
 
-  const totalRefs = $derived(
-    message.references.length + message.web_search_references.length + mcpRefDocs.length
-  );
+  const totalRefs = $derived(message.references.length + mcpRefDocs.length);
 
   async function handleCopy(format: AssistantCopyFormat = preferredCopyFormat) {
     await copyAssistantAnswer(message.answer, format);
@@ -89,47 +90,47 @@
 >
   <div class="flex gap-2">
     <div class="flex gap-[1px]">
-      <Tooltip
-        text={preferredCopyFormat === "richtext" ? m.copy_as_richtext() : m.copy_as_markdown()}
-      >
-        <Button
-          on:click={() => handleCopy()}
-          unstyled
-          class="border-default hover:bg-hover-stronger flex gap-2 rounded-l-lg border p-1.5 shadow-sm"
-          padding="icon"
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          onclick={() => handleCopy()}
+          class="border-default hover:bg-hover-stronger flex cursor-pointer gap-2 rounded-l-lg border p-1.5 shadow-sm"
           ><IconCopy />
+          <span class="sr-only">{copyLabel}</span>
           {#if showCopiedMessage}
             <span class="pr-2">{m.copied()}</span>
           {/if}
-        </Button>
-      </Tooltip>
-      <Dropdown.Root gutter={2} arrowSize={0} placement="bottom-end">
-        <Dropdown.Trigger asFragment let:trigger>
-          <Button
-            is={trigger}
-            unstyled
-            class="border-default hover:bg-hover-stronger rounded-r-lg border p-1.5 shadow-sm"
-            padding="icon"
-            aria-label={m.copy_response_options()}
-          >
-            <IconChevronDown />
-          </Button>
-        </Dropdown.Trigger>
-        <Dropdown.Menu let:item>
-          <Button is={item} onclick={() => handleCopy("markdown")}>
+        </Tooltip.Trigger>
+        <Tooltip.Content>{copyLabel}</Tooltip.Content>
+      </Tooltip.Root>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger>
+          {#snippet child({ props })}
+            <button
+              {...props}
+              type="button"
+              class="border-default hover:bg-hover-stronger cursor-pointer rounded-r-lg border p-1.5 shadow-sm"
+              aria-label={m.copy_response_options()}
+            >
+              <IconChevronDown />
+            </button>
+          {/snippet}
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="end">
+          <DropdownMenu.Item onSelect={() => handleCopy("markdown")}>
             {m.copy_as_markdown()}
-          </Button>
-          <Button is={item} onclick={() => handleCopy("richtext")}>
+          </DropdownMenu.Item>
+          <DropdownMenu.Item onSelect={() => handleCopy("richtext")}>
             {m.copy_as_richtext()}
-          </Button>
-        </Dropdown.Menu>
-      </Dropdown.Root>
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
 
       {#if totalRefs > 0}
-        <Button
-          unstyled
-          class="border-default hover:bg-hover-dimmer flex gap-1 rounded-lg border p-1.5 pr-2.5 shadow-sm"
-          on:click={() => {
+        <button
+          type="button"
+          class="border-default hover:bg-hover-dimmer flex cursor-pointer gap-1 rounded-lg border p-1.5 pr-2.5 shadow-sm"
+          aria-expanded={referencesExpanded}
+          onclick={() => {
             referencesExpanded = !referencesExpanded;
           }}
         >
@@ -138,7 +139,7 @@
           />
           {totalRefs}
           {m.references()}
-        </Button>
+        </button>
       {/if}
     </div>
   </div>
@@ -162,19 +163,6 @@
         {/if}
       {/each}
 
-      {#each message.web_search_references as searchResult (searchResult.id)}
-        <!-- eslint-disable svelte/no-navigation-without-resolve -- external web search result URL -->
-        <a class="hover:bg-hover-default flex items-center gap-2" href={searchResult.url}>
-          <span
-            class="favicon-bg border-default inline-block h-6 w-6 rounded-md border p-0.5"
-            style:background-image="url({faviconService.getFavicon(searchResult.url)})"
-            aria-hidden="true"
-          ></span>
-          {searchResult.title}
-        </a>
-        <!-- eslint-enable svelte/no-navigation-without-resolve -->
-      {/each}
-
       {#each mcpRefDocs as ref, docIndex (ref.id)}
         {@const info = readMeta(ref)}
         {@const docNumber = docIndex + 1}
@@ -189,8 +177,10 @@
               {info.title}
             </button>
           </BlobPreview>
-        {:else if info.sourceType === "crawl-page" && /^https?:\/\//i.test(ref.uri)}
-          <!-- eslint-disable svelte/no-navigation-without-resolve -- external MCP crawl-page URL -->
+        {:else if (info.sourceType === "crawl-page" || info.sourceType === "web-search") && /^https?:\/\//i.test(ref.uri)}
+          <!-- Web pages the answer cites: crawled pages and web-search results
+               both link out to the source URL with a favicon chip. -->
+          <!-- eslint-disable svelte/no-navigation-without-resolve -- external source URL from MCP reference -->
           <a class="hover:bg-hover-default flex items-center gap-2" href={ref.uri}>
             {@render docBadge(docNumber)}
             <span

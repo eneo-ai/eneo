@@ -5,12 +5,16 @@
 -->
 
 <script lang="ts">
-  import { Button, Input, Tooltip } from "@eneo/ui";
-  import { RefreshCw, AlertTriangle, Trash2, Check, X, ShieldAlert } from "lucide-svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
+  import { RefreshCw, TriangleAlert, Trash2, Check, Pencil, X, ShieldAlert } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
+  import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { invalidate } from "$app/navigation";
   import { untrack } from "svelte";
   import type { Eneo, components } from "@eneo/eneo-js";
+  import { builtinToolCatalogLabels } from "$lib/features/chat/internalToolLabels";
 
   type MCPTool = components["schemas"]["MCPServerToolPublic"];
 
@@ -19,14 +23,76 @@
     serverName: string;
     tools: MCPTool[];
     eneoClient: Eneo;
+    /** Purpose and auth type of the server; a built-in provider's tools get localized labels. */
+    server?: { purpose?: string | null; http_auth_type?: string | null };
   };
 
-  const { mcpServerId, serverName: _serverName, tools: initialTools, eneoClient }: Props = $props();
+  const {
+    mcpServerId,
+    serverName: _serverName,
+    tools: initialTools,
+    eneoClient,
+    server = {}
+  }: Props = $props();
 
   let tools: MCPTool[] = $state(untrack(() => initialTools));
   let syncing = $state(false);
   let bulkUpdating = $state(false);
   let reviewingToolId = $state<string | null>(null);
+
+  // Inline display-name editing (admin-owned rename; sync never touches it).
+  let renamingToolId = $state<string | null>(null);
+  let renameDraft = $state("");
+  let renameSaving = $state(false);
+  let renameError = $state("");
+
+  function startRename(tool: MCPTool) {
+    renamingToolId = tool.id;
+    renameDraft = tool.display_name ?? "";
+    renameError = "";
+  }
+
+  function cancelRename() {
+    renamingToolId = null;
+    renameDraft = "";
+    renameError = "";
+  }
+
+  async function saveRename(tool: MCPTool) {
+    if (renameSaving) return;
+    renameSaving = true;
+    renameError = "";
+    try {
+      const trimmed = renameDraft.trim();
+      const updated = await eneoClient.mcpServers.updateToolDisplayName({
+        mcp_server_id: mcpServerId,
+        tool_id: tool.id,
+        // Blank clears the override so the tool's own title/name shows again.
+        display_name: trimmed === "" ? null : trimmed
+      });
+      tools = tools.map((t) => (t.id === tool.id ? updated : t));
+      await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
+      cancelRename();
+    } catch (error) {
+      renameError = getErrorMessage(error);
+    } finally {
+      renameSaving = false;
+    }
+  }
+
+  /** Admin-facing label: rename override, then the tool's own title, then the protocol name. */
+  function toolLabel(tool: MCPTool): string {
+    return (
+      tool.display_name ??
+      builtinToolCatalogLabels(server, tool.name)?.title ??
+      tool.title ??
+      tool.name
+    );
+  }
+
+  function toolDescription(tool: MCPTool): string | null {
+    return builtinToolCatalogLabels(server, tool.name)?.description ?? tool.description ?? null;
+  }
 
   // Derived: tools needing review
   let pendingTools = $derived(tools.filter((t) => t.requires_approval));
@@ -38,7 +104,7 @@
       await eneoClient.mcpServers.syncTools({ mcp_server_id: mcpServerId });
       const response = await eneoClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
       tools = response.items || [];
-      await invalidate("spaces:data");
+      await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
       console.error("Failed to sync tools:", error);
     } finally {
@@ -54,7 +120,7 @@
       });
 
       tools = tools.map((t) => (t.id === tool.id ? updated : t));
-      await invalidate("spaces:data");
+      await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
       console.error("Failed to update tool:", error);
     }
@@ -81,7 +147,7 @@
         console.error(`${failures.length} tools failed to enable`);
       }
     } finally {
-      await invalidate("spaces:data");
+      await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
       bulkUpdating = false;
     }
   }
@@ -98,7 +164,7 @@
         console.error(`${failures.length} tools failed to disable`);
       }
     } finally {
-      await invalidate("spaces:data");
+      await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
       bulkUpdating = false;
     }
   }
@@ -112,7 +178,7 @@
       });
       const response = await eneoClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
       tools = response.items || [];
-      await invalidate("spaces:data");
+      await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
       console.error("Failed to approve tool:", error);
     } finally {
@@ -129,7 +195,7 @@
       });
       const response = await eneoClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
       tools = response.items || [];
-      await invalidate("spaces:data");
+      await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
       console.error("Failed to reject tool:", error);
     } finally {
@@ -145,7 +211,7 @@
       });
       const response = await eneoClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
       tools = response.items || [];
-      await invalidate("spaces:data");
+      await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
       console.error("Failed to approve all:", error);
     } finally {
@@ -163,7 +229,7 @@
       });
       const response = await eneoClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
       tools = response.items || [];
-      await invalidate("spaces:data");
+      await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
       console.error("Failed to reject all:", error);
     } finally {
@@ -211,8 +277,8 @@
         {/if}
       </div>
     </div>
-    <Button variant="outlined" size="sm" onclick={syncTools} disabled={syncing} class="gap-1.5">
-      <RefreshCw class="h-3.5 w-3.5 {syncing ? 'animate-spin' : ''}" aria-hidden="true" />
+    <Button variant="outline" size="sm" onclick={syncTools} disabled={syncing} class="gap-1.5">
+      <RefreshCw class="size-3.5 {syncing ? 'animate-spin' : ''}" aria-hidden="true" />
       <span>{syncing ? m.syncing() : m.sync_tools()}</span>
     </Button>
   </div>
@@ -230,23 +296,23 @@
         </div>
         <div class="flex items-center gap-1.5">
           <Button
-            variant="outlined"
+            variant="outline"
             size="sm"
             onclick={approveAll}
             disabled={bulkUpdating}
             class="gap-1 text-xs"
           >
-            <Check class="h-3 w-3" />
+            <Check class="size-3" />
             {m.approve_all()}
           </Button>
           <Button
-            variant="outlined"
+            variant="outline"
             size="sm"
             onclick={rejectAll}
             disabled={bulkUpdating}
             class="gap-1 text-xs"
           >
-            <X class="h-3 w-3" />
+            <X class="size-3" />
             {m.reject_all()}
           </Button>
         </div>
@@ -299,7 +365,7 @@
             >
               {m.mcp_all_on()}
             </button>
-            <span class="text-dimmer">|</span>
+            <span class="text-muted">|</span>
             <button
               type="button"
               class="text-muted hover:text-default hover:bg-hover-dimmer disabled:hover:text-muted rounded px-2 py-1 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
@@ -337,7 +403,7 @@
                           <span
                             class="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600"
                           >
-                            <AlertTriangle class="h-2.5 w-2.5" />
+                            <TriangleAlert class="h-2.5 w-2.5" />
                             {m.pending_description_change()}
                           </span>
                         {/if}
@@ -376,32 +442,43 @@
 
                     <!-- Approve/Reject buttons -->
                     <div class="flex shrink-0 items-center gap-1">
-                      <Tooltip text={m.approve()} placement="top">
-                        <button
-                          type="button"
-                          class="flex h-7 w-7 items-center justify-center rounded-md text-green-600 transition-colors hover:bg-green-500/10 disabled:opacity-50"
-                          onclick={() => approveTool(tool.id)}
-                          disabled={reviewingToolId === tool.id}
-                          aria-label="{m.approve()} {tool.name}"
-                        >
-                          <Check class="h-4 w-4" />
-                        </button>
-                      </Tooltip>
-                      <Tooltip text={m.reject()} placement="top">
-                        <button
-                          type="button"
-                          class="flex h-7 w-7 items-center justify-center rounded-md text-red-500 transition-colors hover:bg-red-500/10 disabled:opacity-50"
-                          onclick={() => rejectTool(tool.id)}
-                          disabled={reviewingToolId === tool.id}
-                          aria-label="{m.reject()} {tool.name}"
-                        >
-                          <X class="h-4 w-4" />
-                        </button>
-                      </Tooltip>
+                      <Tooltip.Root>
+                        <Tooltip.Trigger onclick={() => approveTool(tool.id)}>
+                          {#snippet child({ props })}
+                            <button
+                              {...props}
+                              type="button"
+                              class="flex h-7 w-7 items-center justify-center rounded-md text-green-600 transition-colors hover:bg-green-500/10 disabled:opacity-50"
+                              disabled={reviewingToolId === tool.id}
+                              aria-label="{m.approve()} {tool.name}"
+                            >
+                              <Check class="h-4 w-4" />
+                            </button>
+                          {/snippet}
+                        </Tooltip.Trigger>
+                        <Tooltip.Content>{m.approve()}</Tooltip.Content>
+                      </Tooltip.Root>
+                      <Tooltip.Root>
+                        <Tooltip.Trigger onclick={() => rejectTool(tool.id)}>
+                          {#snippet child({ props })}
+                            <button
+                              {...props}
+                              type="button"
+                              class="flex h-7 w-7 items-center justify-center rounded-md text-red-500 transition-colors hover:bg-red-500/10 disabled:opacity-50"
+                              disabled={reviewingToolId === tool.id}
+                              aria-label="{m.reject()} {tool.name}"
+                            >
+                              <X class="h-4 w-4" />
+                            </button>
+                          {/snippet}
+                        </Tooltip.Trigger>
+                        <Tooltip.Content>{m.reject()}</Tooltip.Content>
+                      </Tooltip.Root>
                     </div>
                   </div>
                 </div>
               {:else}
+                {@const description = toolDescription(tool)}
                 <!-- Normal tool -->
                 <div
                   class="hover:bg-hover-dimmer flex items-center gap-3 px-3 py-2.5 transition-all {tool.is_enabled_by_default
@@ -410,23 +487,121 @@
                   role="listitem"
                 >
                   <div class="min-w-0 flex-1">
-                    <span class="text-default block truncate font-mono text-xs font-medium"
-                      >{tool.name}</span
-                    >
-                    {#if tool.description}
-                      <Tooltip text={tool.description} placement="bottom">
-                        <p class="text-muted cursor-help truncate text-xs leading-snug">
-                          {tool.description}
-                        </p>
-                      </Tooltip>
+                    {#if renamingToolId === tool.id}
+                      <div class="flex items-center gap-1.5">
+                        <!-- The input appears on an explicit rename action, so
+                             focusing it is expected rather than disorienting. -->
+                        <!-- svelte-ignore a11y_autofocus -->
+                        <input
+                          type="text"
+                          bind:value={renameDraft}
+                          maxlength={100}
+                          autofocus
+                          placeholder={tool.title ?? tool.name}
+                          aria-label={m.mcp_display_name()}
+                          class="border-default bg-primary ring-accent-default focus:border-accent-default w-full max-w-xs rounded-md border px-2 py-1 text-xs focus:ring-1 focus:outline-none"
+                          onkeydown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              saveRename(tool);
+                            } else if (event.key === "Escape") {
+                              cancelRename();
+                            }
+                          }}
+                        />
+                        <Tooltip.Root>
+                          <Tooltip.Trigger onclick={() => saveRename(tool)}>
+                            {#snippet child({ props })}
+                              <button
+                                {...props}
+                                type="button"
+                                class="text-positive-default hover:bg-positive-dimmer flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors disabled:opacity-50"
+                                disabled={renameSaving}
+                                aria-label={m.save()}
+                              >
+                                <Check class="h-3.5 w-3.5" />
+                              </button>
+                            {/snippet}
+                          </Tooltip.Trigger>
+                          <Tooltip.Content>{m.save()}</Tooltip.Content>
+                        </Tooltip.Root>
+                        <Tooltip.Root>
+                          <Tooltip.Trigger onclick={cancelRename}>
+                            {#snippet child({ props })}
+                              <button
+                                {...props}
+                                type="button"
+                                class="text-muted hover:bg-hover-dimmer flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors disabled:opacity-50"
+                                disabled={renameSaving}
+                                aria-label={m.cancel()}
+                              >
+                                <X class="h-3.5 w-3.5" />
+                              </button>
+                            {/snippet}
+                          </Tooltip.Trigger>
+                          <Tooltip.Content>{m.cancel()}</Tooltip.Content>
+                        </Tooltip.Root>
+                      </div>
+                      <p class="text-muted mt-1 text-xs leading-snug">
+                        {m.mcp_display_name_hint()}
+                      </p>
+                      {#if renameError}
+                        <p class="text-negative-default mt-1 text-xs">{renameError}</p>
+                      {/if}
+                    {:else}
+                      <div class="flex items-center gap-1.5">
+                        <span
+                          class="text-default block truncate text-xs font-medium {toolLabel(
+                            tool
+                          ) === tool.name
+                            ? 'font-mono'
+                            : ''}">{toolLabel(tool)}</span
+                        >
+                        {#if tool.display_name}
+                          <!-- Keep the raw protocol name visible so admins can
+                               still identify the renamed tool. -->
+                          <span class="text-muted shrink-0 truncate font-mono text-[10px]"
+                            >{tool.name}</span
+                          >
+                        {/if}
+                        <Tooltip.Root>
+                          <Tooltip.Trigger onclick={() => startRename(tool)}>
+                            {#snippet child({ props })}
+                              <button
+                                {...props}
+                                type="button"
+                                class="text-muted hover:text-default hover:bg-hover-dimmer flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors"
+                                aria-label="{m.mcp_rename_tool()}: {tool.name}"
+                              >
+                                <Pencil class="h-3 w-3" />
+                              </button>
+                            {/snippet}
+                          </Tooltip.Trigger>
+                          <Tooltip.Content>{m.mcp_rename_tool()}</Tooltip.Content>
+                        </Tooltip.Root>
+                      </div>
+                      {#if description}
+                        <Tooltip.Root>
+                          <Tooltip.Trigger>
+                            {#snippet child({ props })}
+                              <p
+                                {...props}
+                                class="text-muted cursor-help truncate text-xs leading-snug"
+                              >
+                                {description}
+                              </p>
+                            {/snippet}
+                          </Tooltip.Trigger>
+                          <Tooltip.Content side="bottom">{description}</Tooltip.Content>
+                        </Tooltip.Root>
+                      {/if}
                     {/if}
                   </div>
-                  <Input.Switch
-                    value={tool.is_enabled_by_default}
-                    sideEffect={() => toggleToolEnabled(tool)}
-                    ><span class="sr-only">{m.mcp_activate_tool({ name: tool.name })}</span
-                    ></Input.Switch
-                  >
+                  <Switch
+                    checked={tool.is_enabled_by_default}
+                    onCheckedChange={() => toggleToolEnabled(tool)}
+                    aria-label={m.mcp_activate_tool({ name: tool.name })}
+                  />
                 </div>
               {/if}
             {/each}

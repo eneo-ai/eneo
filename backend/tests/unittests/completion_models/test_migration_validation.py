@@ -34,7 +34,6 @@ class _MockUser:
         self.id = uuid4()
         self.tenant_id = uuid4()
         self.tenant = None
-        self.modules = []
 
 
 def _make_model(

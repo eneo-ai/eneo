@@ -8,6 +8,9 @@ from eneo.data_retention.infrastructure.data_retention_worker import (
 from eneo.embedding_models.infrastructure.embedding_model_cleanup_worker import (
     worker as embedding_model_cleanup_worker,
 )
+from eneo.image_models.infrastructure.image_model_cleanup_worker import (
+    worker as image_model_cleanup_worker,
+)
 from eneo.integration.infrastructure.sharepoint_subscription_worker import (
     worker as sharepoint_subscription_worker,
 )
@@ -27,6 +30,7 @@ worker.include_subworker(sharepoint_subscription_worker)
 worker.include_subworker(model_cleanup_worker)
 worker.include_subworker(transcription_model_cleanup_worker)
 worker.include_subworker(embedding_model_cleanup_worker)
+worker.include_subworker(image_model_cleanup_worker)
 
 
 class WorkerSettings:

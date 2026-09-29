@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 
 from eneo.ai_models.completion_models.completion_model import (
+    FunctionDefinition,
     Message,
     MessageToolCall,
 )
@@ -586,7 +587,19 @@ def test_history_images_increase_token_count(context_builder: ContextBuilder):
 def test_tool_definitions_increase_token_count(context_builder: ContextBuilder):
     without_tools = context_builder.build_context(input_str=QUESTION, max_tokens=10000)
     with_function = context_builder.build_context(
-        input_str=QUESTION, max_tokens=10000, use_image_generation=True
+        input_str=QUESTION,
+        max_tokens=10000,
+        mcp_tools=[
+            FunctionDefinition(
+                name="lookup_record",
+                description="Look up a record in the registry by id.",
+                schema={
+                    "type": "object",
+                    "properties": {"record_id": {"type": "string"}},
+                    "required": ["record_id"],
+                },
+            )
+        ],
     )
     with_extra_dicts = context_builder.build_context(
         input_str=QUESTION,
@@ -771,3 +784,26 @@ def test_truncate_knowledge_if_too_many_chunks(context_builder: ContextBuilder):
     )
 
     assert context.token_count < 10000
+
+
+def test_skill_activation_call_is_not_replayed(context_builder: ContextBuilder):
+    # The activation tool is rebuilt per turn from the Skill runtime and may
+    # not be registered later, so a persisted activation step must not become
+    # a tool_use in history.
+    tc = ToolCallInfo(
+        server_name="skills",
+        tool_name="skill-1",
+        arguments={"skill_key": "skill-1"},
+        tool_call_id="activate-1",
+        approved=True,
+        result_status="completed",
+        result='{"activated": true}',
+        mcp_tool_name="eneo_activate_skill",
+    )
+    session = MagicMock(questions=[_question_mock("Q?", "A.", [tc])])
+
+    context = context_builder.build_context(
+        input_str=QUESTION, session=session, max_tokens=10000
+    )
+
+    assert context.messages[0].tool_calls == []

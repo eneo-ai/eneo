@@ -25,6 +25,18 @@ const ACTION_MESSAGES = {
     name: m.audit_action_user_updated,
     description: m.audit_action_user_updated_description
   },
+  password_changed: {
+    name: m.audit_action_password_changed,
+    description: m.audit_action_password_changed_description
+  },
+  password_change_failed: {
+    name: m.audit_action_password_change_failed,
+    description: m.audit_action_password_change_failed_description
+  },
+  sessions_invalidated: {
+    name: m.audit_action_sessions_invalidated,
+    description: m.audit_action_sessions_invalidated_description
+  },
   role_created: {
     name: m.audit_action_role_created,
     description: m.audit_action_role_created_description
@@ -289,6 +301,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_skill_bindings_advanced,
     description: m.audit_action_skill_bindings_advanced_description
   },
+  skill_bindings_detached: {
+    name: m.audit_action_skill_bindings_detached,
+    description: m.audit_action_skill_bindings_detached_description
+  },
   skill_deleted: {
     name: m.audit_action_skill_deleted,
     description: m.audit_action_skill_deleted_description
@@ -316,6 +332,14 @@ const ACTION_MESSAGES = {
   file_original_download_link_created: {
     name: m.audit_action_file_original_download_link_created,
     description: m.audit_action_file_original_download_link_created_description
+  },
+  file_original_downloaded: {
+    name: m.audit_action_file_original_downloaded,
+    description: m.audit_action_file_original_downloaded_description
+  },
+  info_blob_original_download_link_created: {
+    name: m.audit_action_info_blob_original_download_link_created,
+    description: m.audit_action_info_blob_original_download_link_created_description
   },
   file_signed_url_minted: {
     name: m.audit_action_file_signed_url_minted,
@@ -428,6 +452,18 @@ const ACTION_MESSAGES = {
   transcription_model_migrated: {
     name: m.audit_action_transcription_model_migrated,
     description: m.audit_action_transcription_model_migrated_description
+  },
+  image_model_created: {
+    name: m.audit_action_image_model_created,
+    description: m.audit_action_image_model_created_description
+  },
+  image_model_updated: {
+    name: m.audit_action_image_model_updated,
+    description: m.audit_action_image_model_updated_description
+  },
+  image_model_deleted: {
+    name: m.audit_action_image_model_deleted,
+    description: m.audit_action_image_model_deleted_description
   },
   template_created: {
     name: m.audit_action_template_created,

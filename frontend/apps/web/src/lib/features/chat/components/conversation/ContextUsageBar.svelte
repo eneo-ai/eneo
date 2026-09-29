@@ -3,7 +3,7 @@
   import { browser } from "$app/environment";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import ContextMeterFill from "$lib/components/ContextMeterFill.svelte";
-  import { Info, AlertTriangle, Eye, EyeOff } from "lucide-svelte";
+  import { Info, TriangleAlert, Eye, EyeOff } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { getChatService } from "../../ChatService.svelte";
 
@@ -183,7 +183,7 @@
       </div>
       <span class="flex items-center gap-1.5 whitespace-nowrap tabular-nums {summaryTone}">
         {#if willExceed}
-          <AlertTriangle class="h-3 w-3" aria-hidden="true" />
+          <TriangleAlert class="h-3 w-3" aria-hidden="true" />
         {/if}
         ≈ {fmt(projectedTotal)} / {fmt(chat.contextLimit)} ({projectedPercent.toFixed(
           projectedPercent >= 10 ? 0 : 1
@@ -346,7 +346,7 @@
             class="bg-negative-dimmer/30 text-negative-stronger flex flex-col gap-2 rounded-md px-2 py-1.5"
           >
             <div class="flex items-start gap-2">
-              <AlertTriangle class="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+              <TriangleAlert class="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
               <span class="text-[11px] leading-snug">
                 {m.context_usage_will_exceed_estimate()}
               </span>

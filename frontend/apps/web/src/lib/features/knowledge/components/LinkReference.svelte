@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { InfoBlob } from "@eneo/eneo-js";
   import { IconLinkExternal } from "@eneo/icons/link-external";
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   export let blob: InfoBlob;
   export let index: number | undefined = undefined;
 </script>
@@ -9,9 +9,8 @@
 <Button
   href={blob.metadata.url ?? ""}
   target="_blank"
-  variant="simple"
-  class="!border-default bg-primary max-w-[30ch] border shadow-sm"
-  padding="icon-leading"
+  variant="ghost"
+  class="bg-primary border-default max-w-[30ch] shadow-sm"
 >
   {#if index}
     <span

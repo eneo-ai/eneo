@@ -1,5 +1,6 @@
+import asyncio
 import json
-from typing import Any, Awaitable, Callable, Optional, cast
+from typing import Any, Awaitable, Callable, Optional, Sequence, cast
 from urllib.parse import ParseResult, parse_qs, urlparse
 from uuid import UUID
 
@@ -12,6 +13,7 @@ from eneo.integration.infrastructure.content_service.utils import (
 from eneo.libs.clients import BaseClient
 from eneo.libs.clients.throttle_retry import (
     THROTTLE_AND_OVERLOAD_STATUS_CODES,
+    parse_retry_after,
     retry_on_throttle,
 )
 from eneo.main.config import get_settings
@@ -42,6 +44,11 @@ class DeltaTokenExpiredException(Exception):
 
 class SharePointContentClient(BaseClient):
     DEFAULT_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024  # 50 MB safety limit
+    BATCH_SIZE = 20  # Microsoft Graph JSON-batching maximum
+    BATCH_CONCURRENCY = 4
+    BATCH_MAX_RETRY_ROUNDS = 3
+    BATCH_MIN_RETRY_SLEEP_SECONDS = 2.0
+    BATCH_MAX_RETRY_SLEEP_SECONDS = 60.0
 
     def __init__(
         self,
@@ -60,6 +67,8 @@ class SharePointContentClient(BaseClient):
         self.token_id = token_id
         # Used to do token refresh when token is expired
         self.token_refresh_callback = token_refresh_callback
+        # Serializes refreshes when concurrent requests hit 401 simultaneously.
+        self._refresh_lock = asyncio.Lock()
         if max_download_bytes is None:
             self.max_download_bytes = get_settings().sharepoint_max_download_bytes
         else:
@@ -80,12 +89,18 @@ class SharePointContentClient(BaseClient):
                 "Cannot refresh token: missing token_refresh_callback or token_id"
             )
 
-        token_data = await self.token_refresh_callback(self.token_id)
-        if not token_data or "access_token" not in token_data:
-            raise ValueError("Token refresh callback returned invalid token data")
+        token_before = self.api_token
+        async with self._refresh_lock:
+            if self.api_token != token_before:
+                # Another concurrent caller already refreshed.
+                return None
 
-        self.update_token(token_data["access_token"])
-        return token_data
+            token_data = await self.token_refresh_callback(self.token_id)
+            if not token_data or "access_token" not in token_data:
+                raise ValueError("Token refresh callback returned invalid token data")
+
+            self.update_token(token_data["access_token"])
+            return token_data
 
     async def _get_all_paged_items(self, endpoint: str) -> list[SharePointItem]:
         """Follow @odata.nextLink pagination and collect all items across pages."""
@@ -184,7 +199,7 @@ class SharePointContentClient(BaseClient):
         )
 
     async def get_sites(self) -> dict[str, Any]:
-        endpoint = "v1.0/sites?search=*"
+        endpoint = "v1.0/sites?search=*&$select=id,displayName,webUrl"
         try:
             return {"value": await self._get_all_paged_items(endpoint)}
         except aiohttp.ClientResponseError as e:
@@ -213,45 +228,126 @@ class SharePointContentClient(BaseClient):
                 return [cast(str, g.get("id")) for g in groups if g.get("id")]
             raise
 
-    async def get_m365_groups(self) -> list[SharePointItem]:
-        """List Microsoft 365 (Unified) groups, including Teams-backed groups."""
-        endpoint = (
-            "v1.0/groups?"
-            "$filter=groupTypes/any(c:c eq 'Unified')&"
-            "$select=id,displayName,visibility"
-        )
-        try:
-            return await self._get_all_paged_items(endpoint)
-        except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
-                logger.info(
-                    "SharePoint token expired while listing M365 groups, refreshing..."
-                )
-                await self.refresh_token()
-                return await self._get_all_paged_items(endpoint)
-            raise
+    async def get_group_root_sites_batched(
+        self, group_ids: Sequence[str]
+    ) -> dict[str, dict[str, str]]:
+        """Resolve root sites for many groups via Graph $batch (20 GETs per POST).
 
-    async def get_group_root_site(self, group_id: str) -> Optional[dict[str, Any]]:
-        """Get root SharePoint site for a Microsoft 365 group."""
-        endpoint = f"v1.0/groups/{group_id}/sites/root?$select=id,webUrl"
-        try:
-            return await self.client.get(endpoint, headers=self.headers)
-        except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
-                logger.info(
-                    "SharePoint token expired while getting group root site, refreshing..."
-                )
-                await self.refresh_token()
-                return await self.client.get(endpoint, headers=self.headers)
+        Returns group_id -> {"id": site_id, "webUrl": web_url}. Groups whose root
+        site is inaccessible (403/404) are omitted. Sub-requests throttled inside
+        the batch envelope are retried for up to BATCH_MAX_RETRY_ROUNDS extra
+        rounds, honoring the largest inner Retry-After; anything still throttled
+        after that is dropped, so the result may be partial.
+        """
+        results: dict[str, dict[str, str]] = {}
+        pending = list(dict.fromkeys(gid for gid in group_ids if gid))
+        semaphore = asyncio.Semaphore(self.BATCH_CONCURRENCY)
 
-            # Not all groups have an accessible site in all tenants; treat as non-fatal.
-            if e.status in (403, 404):
-                logger.debug(
-                    "Could not fetch group root site",
-                    extra={"group_id": group_id, "status": e.status},
+        async def post_batch(chunk: list[str]) -> dict[str, Any]:
+            body = {
+                "requests": [
+                    {
+                        "id": gid,
+                        "method": "GET",
+                        "url": f"/groups/{gid}/sites/root?$select=id,webUrl",
+                    }
+                    for gid in chunk
+                ]
+            }
+            async with semaphore:
+                try:
+                    return await self.client.post(
+                        "v1.0/$batch",
+                        data=body,
+                        headers=self.headers,
+                        retryable_status_codes=THROTTLE_AND_OVERLOAD_STATUS_CODES,
+                    )
+                except aiohttp.ClientResponseError as e:
+                    if (
+                        e.status == 401
+                        and self.token_refresh_callback
+                        and self.token_id
+                    ):
+                        logger.info(
+                            "SharePoint token expired during $batch, refreshing..."
+                        )
+                        await self.refresh_token()
+                        return await self.client.post(
+                            "v1.0/$batch",
+                            data=body,
+                            headers=self.headers,
+                            retryable_status_codes=THROTTLE_AND_OVERLOAD_STATUS_CODES,
+                        )
+                    raise
+
+        for round_index in range(self.BATCH_MAX_RETRY_ROUNDS + 1):
+            if not pending:
+                break
+
+            chunks = [
+                pending[i : i + self.BATCH_SIZE]
+                for i in range(0, len(pending), self.BATCH_SIZE)
+            ]
+            envelopes = await asyncio.gather(*(post_batch(c) for c in chunks))
+
+            retry_ids: list[str] = []
+            max_retry_after = 0.0
+            for envelope in envelopes:
+                sub_responses = cast(
+                    list[dict[str, Any]], envelope.get("responses") or []
                 )
-                return None
-            raise
+                for sub in sub_responses:
+                    gid = sub.get("id")
+                    status = sub.get("status")
+                    if not isinstance(gid, str) or not gid:
+                        continue
+                    if status == 200:
+                        body: dict[str, Any] = sub.get("body") or {}
+                        site_id = body.get("id")
+                        web_url = body.get("webUrl")
+                        if isinstance(site_id, str) and site_id:
+                            results[gid] = {
+                                "id": site_id,
+                                "webUrl": web_url if isinstance(web_url, str) else "",
+                            }
+                    elif status in (403, 404):
+                        # Not all groups have an accessible site; non-fatal.
+                        logger.debug(
+                            "Could not fetch group root site in batch",
+                            extra={"group_id": gid, "status": status},
+                        )
+                    elif status in THROTTLE_AND_OVERLOAD_STATUS_CODES:
+                        retry_ids.append(gid)
+                        raw_headers: dict[str, Any] = sub.get("headers") or {}
+                        headers = {
+                            str(k).lower(): str(v) for k, v in raw_headers.items()
+                        }
+                        retry_after = parse_retry_after(headers.get("retry-after"))
+                        if retry_after is not None:
+                            max_retry_after = max(max_retry_after, retry_after)
+                    else:
+                        logger.warning(
+                            "Unexpected status in group root site batch",
+                            extra={"group_id": gid, "status": status},
+                        )
+
+            pending = retry_ids
+            if pending and round_index < self.BATCH_MAX_RETRY_ROUNDS:
+                await asyncio.sleep(
+                    min(
+                        max(max_retry_after, self.BATCH_MIN_RETRY_SLEEP_SECONDS),
+                        self.BATCH_MAX_RETRY_SLEEP_SECONDS,
+                    )
+                )
+
+        if pending:
+            logger.warning(
+                "Gave up on %d throttled group root site lookups after %d retry rounds",
+                len(pending),
+                self.BATCH_MAX_RETRY_ROUNDS,
+            )
+
+        return results
 
     async def get_my_drive(self) -> dict[str, Any]:
         """Get current user's OneDrive drive info (requires delegated auth)."""

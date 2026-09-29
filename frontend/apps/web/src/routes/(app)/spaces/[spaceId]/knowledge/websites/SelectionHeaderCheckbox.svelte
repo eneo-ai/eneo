@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Input } from "@eneo/ui";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
+  import { m } from "$lib/paraglide/messages";
   import type { Writable } from "svelte/store";
 
   export let selectedWebsiteIds: Writable<Set<string>>;
@@ -10,9 +11,9 @@
   $: isSomeSelected = $selectedWebsiteIds.size > 0 && $selectedWebsiteIds.size < websites.length;
 </script>
 
-<Input.Checkbox
+<Checkbox
   checked={isAllSelected}
   indeterminate={isSomeSelected}
   onCheckedChange={onToggleAll}
-  ariaLabel="Select all websites"
+  aria-label={m.websites_select_all()}
 />

@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { Paperclip } from "lucide-svelte";
+  import { Paperclip } from "@lucide/svelte";
   import { buttonVariants } from "$lib/components/ui/button/index.js";
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import { m } from "$lib/paraglide/messages";

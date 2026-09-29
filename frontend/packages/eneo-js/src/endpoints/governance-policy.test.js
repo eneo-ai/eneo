@@ -3,6 +3,30 @@ import test from "node:test";
 
 import { initGovernancePolicy } from "./governance-policy.js";
 
+test("governance policy update forwards the file policy", async () => {
+  const calls = [];
+  const governancePolicy = initGovernancePolicy({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return {};
+    }
+  });
+
+  await governancePolicy.update({ file_policy: { inline_file_text: false } });
+
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/admin/governance-policy/",
+      request: {
+        method: "put",
+        requestBody: {
+          "application/json": { file_policy: { inline_file_text: false } }
+        }
+      }
+    }
+  ]);
+});
+
 test("governance policy update forwards the reasoning policy", async () => {
   const calls = [];
   const governancePolicy = initGovernancePolicy({

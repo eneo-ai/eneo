@@ -17,6 +17,7 @@ from eneo.skills.domain.skill import (
     PublishedSkillSummaryProjection,
     Skill,
     SkillAdoptionDrift,
+    SkillAdoptionFilter,
     SkillAdoptionPersonalChat,
     SkillAdoptionProjectionPage,
     SkillAdoptionResource,
@@ -151,6 +152,9 @@ async def test_adoption_route_projects_structural_metadata_without_skill_content
         skill_id=skill_id,
         limit=25,
         cursor=None,
+        query=None,
+        kind=None,
+        drift=None,
         container=container,
     )
 
@@ -158,6 +162,7 @@ async def test_adoption_route_projects_structural_metadata_without_skill_content
         skill_id=skill_id,
         limit=25,
         cursor=None,
+        filters=SkillAdoptionFilter(),
     )
     assert response.summary is not None
     assert response.summary.assistant_count == 1

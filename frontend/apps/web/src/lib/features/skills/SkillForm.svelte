@@ -1,6 +1,6 @@
 <script lang="ts">
   import { useId } from "bits-ui";
-  import { ChevronDown, ChevronRight, CircleAlert } from "lucide-svelte";
+  import { ChevronDown, ChevronRight, CircleAlert } from "@lucide/svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
@@ -12,6 +12,7 @@
   import type { SkillFormValue, SkillRevisionFormValue } from "./skillBindings";
 
   type SharedProps = {
+    class?: string;
     submitLabel?: string;
     submittingLabel?: string;
     showDiscardAction?: boolean;
@@ -191,7 +192,7 @@
 </script>
 
 <form
-  class="flex w-full max-w-[80ch] flex-col gap-5"
+  class={["flex w-full max-w-[80ch] flex-col gap-5", props.class]}
   onsubmit={handleSubmit}
   aria-busy={isSubmitting}
   novalidate
@@ -227,6 +228,7 @@
         aria-invalid={descriptionInvalid || undefined}
         aria-describedby={`${descriptionId}-description`}
         disabled={isSubmitting}
+        class="max-h-64 min-h-24 overflow-y-auto"
         rows={3}
         maxlength={1024}
         required
@@ -248,7 +250,7 @@
         aria-invalid={instructionsInvalid || undefined}
         aria-describedby={`${instructionsId}-description`}
         disabled={isSubmitting}
-        class="max-h-[min(50dvh,32rem)] overflow-y-auto"
+        class={["max-h-[min(50dvh,32rem)] overflow-y-auto", isCreateMode ? "min-h-48" : "min-h-72"]}
         rows={isCreateMode ? 8 : 12}
         required
       />

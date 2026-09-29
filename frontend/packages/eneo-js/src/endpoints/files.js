@@ -78,7 +78,7 @@ export function initFiles(client) {
      * @throws {EneoError}
      * */
     delete: async ({ fileId }) => {
-      client.fetch(`/api/v1/files/{id}/`, {
+      await client.fetch(`/api/v1/files/{id}/`, {
         method: "delete",
         params: { path: { id: fileId } }
       });

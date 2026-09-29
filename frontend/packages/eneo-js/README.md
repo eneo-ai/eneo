@@ -19,7 +19,7 @@ Create an `eneo` object with the `createEneo()` function. It provides convenienc
 
 ### Errors
 
-All Eneo functions can throw an `EneoError`, providing a `stage: "JSON" | "HTTP"` and a `request: { endpoint: string; payload?: object; }`, during which the error occured on top of the error's `message`.
+All Eneo functions can throw an `EneoError`, providing a `stage: "CONNECTION" | "SERVER" | "RESPONSE" | "UNKNOWN"` and a `request: { endpoint: string; }` identifying the failed request, alongside the error's `message`. Request bodies are excluded so that passwords and other submitted data are not retained in diagnostic errors.
 
 ## Advanced usage
 

@@ -5,7 +5,7 @@ import time
 from collections.abc import AsyncGenerator
 from hashlib import sha256
 from typing import TYPE_CHECKING, cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
@@ -162,6 +162,61 @@ async def test_original_text_download_does_not_fall_back_to_extracted_text(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_uploaded_document_is_referenceable_and_downloadable_without_object_store(
+    client,
+    db_container,
+    admin_user_api_key,
+) -> None:
+    """The full signed-reference flow on a deployment with no object store.
+
+    An ordinary upload lands in PostgreSQL. The public projection advertises
+    the original (the chat UI's cue that the files tool applies), the loader
+    marks it ``original_available`` (the send path's cue to reference instead
+    of inline), and the signed original-download URL, the capability an
+    assistant or MCP tool receives, returns the exact uploaded bytes.
+    """
+    from eneo.files.file_content_loader import FileContentLoader
+
+    payload = b"id,amount\n1,10\n2,20\n"
+    headers = {"X-API-Key": admin_user_api_key.key}
+
+    uploaded = await client.post(
+        "/api/v1/files/",
+        files={"upload_file": ("ledger.csv", payload, "text/csv")},
+        headers=headers,
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    file_id = UUID(uploaded.json()["id"])
+
+    # The public projection (what the chat composer reads) advertises the
+    # stored original; the upload response itself is the plain file info.
+    fetched = await client.get(f"/api/v1/files/{file_id}/", headers=headers)
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json()["has_download_reference"] is True
+
+    async with db_container() as container:
+        object_content = container.object_content_service()
+        assert object_content.object_store_configured is False
+        repository = FileRepository(container.session())
+        metadata = await repository.get_by_id(file_id=file_id)
+        references = await repository.get_content_references([file_id])
+        assert {reference.storage_kind for reference in references} == {
+            StorageKind.POSTGRES_INLINE
+        }
+        loaded = await FileContentLoader(repository, object_content).load([metadata])
+        assert loaded[file_id].original_available is True
+
+    downloaded = await _signed_download(client, headers, file_id, original=True)
+
+    assert downloaded.status_code == 200
+    assert downloaded.content == payload
+    assert downloaded.headers["content-type"].startswith("text/csv")
+    digest = base64.b64encode(sha256(payload).digest()).decode("ascii")
+    assert downloaded.headers["repr-digest"] == f"sha-256=:{digest}:"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_original_image_and_audio_ranges_preserve_exact_bytes(
     client,
     db_container,
@@ -297,6 +352,143 @@ async def test_missing_original_is_typed_and_never_falls_back(
     )
     assert download.status_code == 404
     assert download.json()["code"] == "file_original_not_found"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_legacy_image_is_not_exposed_as_an_exact_original(
+    client,
+    db_container,
+    admin_user_api_key,
+) -> None:
+    payload = b"legacy processing image"
+    file_id = uuid4()
+    async with db_container() as container:
+        user = container.user()
+        session = container.session()
+        await session.execute(sa.text("SET LOCAL session_replication_role = replica"))
+        await session.execute(
+            sa.text(
+                """
+                INSERT INTO files (
+                    id, name, text, blob, checksum, size, mimetype, file_type,
+                    transcription, user_id, tenant_id, parent_file_id
+                ) VALUES (
+                    :id, 'legacy.png', NULL, :payload, :checksum, :size,
+                    'image/png', 'image', NULL, :user_id, :tenant_id, NULL
+                )
+                """
+            ),
+            {
+                "id": file_id,
+                "payload": payload,
+                "checksum": sha256(payload).hexdigest(),
+                "size": len(payload),
+                "user_id": user.id,
+                "tenant_id": user.tenant_id,
+            },
+        )
+
+    headers = {"X-API-Key": admin_user_api_key.key}
+    processing = await _signed_download(
+        client,
+        headers,
+        file_id,
+        original=False,
+    )
+    signed_original = await client.post(
+        f"/api/v1/files/{file_id}/original/signed-url/",
+        json={},
+        headers=headers,
+    )
+    forged_original_token = generate_file_original_download_token(
+        file_id=file_id,
+        expires_at=int(time.time()) + 60,
+        content_disposition=ContentDisposition.ATTACHMENT,
+    )
+    original_download = await client.get(
+        f"/api/v1/files/{file_id}/original/download/",
+        params={"token": forged_original_token},
+    )
+
+    assert processing.status_code == 200
+    assert processing.content == payload
+    assert signed_original.status_code == 404
+    assert signed_original.json()["code"] == "file_original_not_found"
+    assert original_download.status_code == 404
+    assert original_download.json()["code"] == "file_original_not_found"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_legacy_original_mint_does_not_read_payload(
+    client,
+    db_container,
+    admin_user_api_key,
+) -> None:
+    payload = b"legacy exact original"
+    file_id = uuid4()
+    async with db_container() as container:
+        user = container.user()
+        session = container.session()
+        await session.execute(sa.text("SET LOCAL session_replication_role = replica"))
+        await session.execute(
+            sa.text(
+                """
+                INSERT INTO files (
+                    id, name, text, blob, checksum, size, mimetype, file_type,
+                    transcription, user_id, tenant_id, parent_file_id
+                ) VALUES (
+                    :id, 'legacy.pdf', 'legacy text', :payload, :checksum,
+                    :size, 'application/pdf', 'text', NULL,
+                    :user_id, :tenant_id, NULL
+                )
+                """
+            ),
+            {
+                "id": file_id,
+                "payload": payload,
+                "checksum": sha256(payload).hexdigest(),
+                "size": len(payload),
+                "user_id": user.id,
+                "tenant_id": user.tenant_id,
+            },
+        )
+        assert session.bind is not None
+        engine = session.bind.sync_engine
+
+    payload_queries: list[str] = []
+
+    def capture_payload_query(
+        _connection,
+        _cursor,
+        statement,
+        _parameters,
+        _context,
+        _executemany,
+    ) -> None:
+        normalized = " ".join(statement.lower().split())
+        if "select files.id, files.mimetype, files.blob" in normalized:
+            payload_queries.append(statement)
+
+    sa.event.listen(engine, "before_cursor_execute", capture_payload_query)
+    try:
+        signed = await client.post(
+            f"/api/v1/files/{file_id}/original/signed-url/",
+            json={},
+            headers={"X-API-Key": admin_user_api_key.key},
+        )
+    finally:
+        sa.event.remove(engine, "before_cursor_execute", capture_payload_query)
+
+    assert signed.status_code == 200, signed.text
+    assert payload_queries == []
+
+    parsed = urlsplit(signed.json()["url"])
+    download = await client.get(f"{parsed.path}?{parsed.query}")
+
+    assert download.status_code == 200
+    assert download.content == payload
 
 
 @pytest.mark.integration
@@ -556,6 +748,14 @@ async def test_original_audio_range_reads_only_verified_chunks_from_real_store(
                 def file_service(*, user):
                     assert user is None
                     return service
+
+                @staticmethod
+                def session():
+                    return session
+
+                @staticmethod
+                def audit_service():
+                    return AsyncMock()
 
             token = generate_file_original_download_token(
                 file_id=file_id,

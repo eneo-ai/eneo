@@ -38,7 +38,7 @@ async def second_tenant_user(db_container, test_settings):
         quota_limit=1000000,
         user_name="test_user_2",
         user_email="test2@example.com",
-        user_password="test_password",
+        user_password="TenantFixturePass123!",
     )
     conn.close()
 

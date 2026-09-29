@@ -34,6 +34,34 @@ export function initInfoBlobs(client) {
     },
 
     /**
+     * Generate a short-lived signed URL for the exact original bytes of an InfoBlob.
+     * @param {{infoBlobId: string, expiresIn?: number, contentDisposition?: "attachment" | "inline"}} params
+     * @returns {Promise<{url: string, expires_at: number}>}
+     * @throws {EneoError}
+     */
+    generateOriginalSignedUrl: async ({ infoBlobId, expiresIn, contentDisposition }) => {
+      const res = await client.fetch("/api/v1/info-blobs/{id}/original/signed-url/", {
+        method: "post",
+        params: { path: { id: infoBlobId } },
+        requestBody: {
+          "application/json": {
+            content_disposition: contentDisposition,
+            expires_in: expiresIn
+          }
+        }
+      });
+
+      const signedUrl = new URL(res.url);
+      return {
+        url: new URL(
+          `${signedUrl.pathname}${signedUrl.search}${signedUrl.hash}`,
+          client.baseUrl
+        ).toString(),
+        expires_at: res.expires_at
+      };
+    },
+
+    /**
      * Create a new `InfoBlob` by submitting raw text. Requires a parent `group_id` to be set
      * @param {{group_id: string, text: string; metadata?: { url?: string; title?: string}}} blob The `InfoBlob` to add
      * @returns {Promise<InfoBlob[]>}

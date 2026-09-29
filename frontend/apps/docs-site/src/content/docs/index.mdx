@@ -8,12 +8,12 @@ New to Eneo? Start here:
 
 ### [Getting Started](/docs/getting-started)
 
-Quick start guide to set up your Eneo instance:
+Set up a development instance and find your way around:
 
-- Installation and setup
-- First-time configuration
-- Creating your first AI assistant
-- Basic usage examples
+- DevContainer setup (recommended) and manual setup with uv and Bun
+- Starting the backend, frontend, and worker
+- Default login and where each service listens
+- Common issues and where to get help
 
 ## Technical Documentation
 
@@ -22,10 +22,27 @@ Quick start guide to set up your Eneo instance:
 Understand how Eneo is built:
 
 - System architecture overview
-- Technology stack (FastAPI, Next.js, PostgreSQL)
+- Technology stack (FastAPI, SvelteKit, PostgreSQL with pgvector, Redis)
 - Database schema and migrations
 - Authentication and authorization
 - Real-time communication (SSE, WebSockets)
+
+### [Authentication Architecture](/docs/authentication-architecture)
+
+Technical reference for the OIDC authentication system:
+
+- OIDC protocol flow, step by step
+- State tokens, Redis state cache, and redirect URI handling
+- Token auth method selection and tenant state validation
+
+### [Module Authentication](/docs/module-authentication)
+
+How optional module applications reuse the Eneo session:
+
+- The module auth broker and its trust boundaries
+- Login handoff through one-time tickets
+- Credential lifetimes, refresh, and failure modes
+- Registration and binding model
 
 ### [Knowledge Retrieval and MCP Interoperability](/docs/knowledge-retrieval-and-mcp)
 
@@ -54,11 +71,20 @@ Audit trails for compliance and security:
 - Viewing, exporting, and configuring audit logs
 - Adding audit logging to new features
 
+### [API Key Management](/docs/api-key-management)
+
+Programmatic access with scoped keys:
+
+- User and service key ownership models
+- Scope levels (tenant, space, assistant, app) and permission tiers
+- Authentication flow, rate limiting, and guardrails
+- Key lifecycle: creation and rotation
+
 ### [Token Counting](/docs/token-counting)
 
 How Eneo tracks token usage for LLM requests:
 
-- Accurate counts from major providers (OpenAI, Anthropic, Azure)
+- Accurate counts from major providers
 - Estimation for self-hosted models
 - How token data flows to Insights dashboards
 
@@ -73,18 +99,17 @@ Downloadable SBOMs and attestations for released artifacts:
 
 ### [API Reference](/docs/api)
 
-Complete API documentation for developers:
+API documentation for developers:
 
-- REST API endpoints
-- Authentication and API keys
-- Request/response formats
-- WebSocket events
-- Error handling
+- Interactive OpenAPI documentation
+- Authentication with API keys and session JWTs
+- Common endpoints (users, spaces, assistants, conversations, documents, web crawling)
+- SDK examples, rate limits, and error handling
 
 ## Core Concepts
 
 - **Assistants**: AI agents with customizable system prompts and provider configurations
-- **Productions**: Collaborative workspaces within organizations
+- **Spaces**: Collaborative workspaces within organizations
 - **Knowledge**: Document collections for RAG (Retrieval-Augmented Generation)
 - **Organizations**: Multi-tenant structure with role-based access control
 
@@ -93,8 +118,8 @@ Complete API documentation for developers:
 For development setup and contributing guidelines, visit:
 
 - [GitHub Repository](https://github.com/eneo-ai/eneo)
+- [Contributing overview](/contributing) and [Security for Contributors](/contributing/security)
 - [Contributing Guide](https://github.com/eneo-ai/eneo/blob/develop/docs/CONTRIBUTING.md)
-- [Security for Contributors](/contributing/security)
 - [Installation Guide](https://github.com/eneo-ai/eneo/blob/develop/docs/INSTALLATION.md)
 
 ## Need Help?

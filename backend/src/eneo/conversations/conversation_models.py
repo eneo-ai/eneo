@@ -8,6 +8,9 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from eneo.main.models import ModelId
+from eneo.mcp_servers.domain.capabilities import (
+    CapabilityPurpose,
+)
 from eneo.questions.question import UseTools
 from eneo.skills.domain.skill import SkillActivationEvidenceV1
 
@@ -145,12 +148,14 @@ class ConversationRequest(_ConversationTarget):
     files: list[ModelId] = Field(default=[])
     stream: bool = False
     tools: Optional[UseTools] = None
-    use_web_search: bool = False
     require_tool_approval: bool = False
     # MCP servers the user turned off in the composer for this message. Narrows
     # the otherwise-active set (assistant's own servers, or policy-granted ones
     # for a personal assistant); it can never enable a server that isn't active.
     disabled_mcp_server_ids: list[UUID] = Field(default=[])
+    disabled_capabilities: list[CapabilityPurpose] = Field(
+        default_factory=list[CapabilityPurpose]
+    )
 
 
 class ConversationRenameRequest(BaseModel):

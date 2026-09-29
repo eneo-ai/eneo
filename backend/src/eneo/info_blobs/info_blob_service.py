@@ -1,10 +1,12 @@
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, TypeVar
 from uuid import UUID
 
-from eneo.actors import SpaceAction
+from eneo.actors import SpaceAction, SpaceResourceType
 from eneo.admin.quota_service import QuotaService
+from eneo.authentication.auth_models import ApiKeyScopeType
 from eneo.embedding_models.domain.chunking import (
     chunking_is_unchanged,
     resolve_chunk_config,
@@ -17,10 +19,14 @@ from eneo.info_blobs.info_blob import (
     InfoBlobInDBNoText,
     InfoBlobMetadataFilter,
     InfoBlobMetadataFilterPublic,
+    InfoBlobOriginalUnavailableError,
     InfoBlobUpdate,
     PreparedKnowledgeOriginal,
 )
-from eneo.info_blobs.info_blob_repo import InfoBlobPublication, InfoBlobRepository
+from eneo.info_blobs.info_blob_repo import (
+    InfoBlobPublication,
+    InfoBlobRepository,
+)
 from eneo.main.exceptions import (
     BadRequestException,
     NameCollisionException,
@@ -30,15 +36,20 @@ from eneo.main.exceptions import (
 from eneo.object_content.content import (
     ContentAccessClass,
     ContentIntent,
+    ContentReadGrant,
     StorageKind,
 )
 from eneo.object_content.content_repository import PreparedContent
-from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.content_service import (
+    ObjectContentService,
+    detach_content_read,
+)
 from eneo.spaces.utils.space_utils import effective_space_ids
 from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
     from eneo.actors import ActorManager
+    from eneo.actors.actors.space_actor import SpaceActor
     from eneo.embedding_models.domain.embedding_model import EmbeddingModel
     from eneo.embedding_models.infrastructure.datastore import Datastore
     from eneo.spaces.space_repo import SpaceRepository
@@ -48,11 +59,80 @@ if TYPE_CHECKING:
     )
 
 
+InfoBlobT = TypeVar("InfoBlobT", bound=InfoBlobInDBNoText)
+
+
 @dataclass(frozen=True, slots=True)
 class _PublicationMatch:
     publication: InfoBlobPublication | None
     same_searchable_content: bool
     same_original: bool
+
+
+@dataclass(frozen=True, slots=True)
+class InfoBlobDownload:
+    chunks: AsyncGenerator[bytes, None]
+    content_length: int
+    media_type: str
+    filename: str
+    sha256: bytes
+    _close: Callable[[], Awaitable[None]]
+
+    async def aclose(self) -> None:
+        await self._close()
+
+
+async def open_info_blob_original_download(
+    *,
+    repo: InfoBlobRepository,
+    object_content: ObjectContentService,
+    info_blob_id: UUID,
+    expected_tenant_id: UUID,
+) -> InfoBlobDownload:
+    session = repo.session
+    if session.in_transaction():
+        raise RuntimeError("InfoBlob downloads require a non-ambient transaction")
+    async with session.begin():
+        reference = await repo.get_original(info_blob_id)
+        if reference is None or not reference.usable:
+            raise InfoBlobOriginalUnavailableError()
+        if reference.tenant_id != expected_tenant_id:
+            raise UnauthorizedException("Token not valid for this InfoBlob")
+    opened = await detach_content_read(
+        object_content.open_content(
+            ContentReadGrant(
+                content_id=reference.content_id,
+                tenant_id=reference.tenant_id,
+                access_class=reference.access_class,
+            )
+        )
+    )
+
+    return InfoBlobDownload(
+        chunks=opened.chunks,
+        content_length=opened.content_length,
+        media_type=opened.media_type,
+        filename=reference.original_filename,
+        sha256=reference.sha256,
+        _close=opened.aclose,
+    )
+
+
+def _can_read_source_in(actor: "SpaceActor", info_blob: InfoBlobInDB) -> bool:
+    """A space grants a fallback read only if the tenant permission for the
+    blob's source type allows reading it, so a permission an administrator
+    removed (``collections``) is not bypassed by reading a document by id.
+    The space role is already covered by ``can_read_info_blobs``; website and
+    integration reads need no tenant permission by existing design."""
+    if info_blob.group_id is not None:
+        resource_type = SpaceResourceType.COLLECTION
+    elif info_blob.website_id is not None:
+        resource_type = SpaceResourceType.WEBSITE
+    elif info_blob.integration_knowledge_id is not None:
+        resource_type = SpaceResourceType.INTEGRATION_KNOWLEDGE
+    else:
+        return False
+    return actor.tenant_permits(action=SpaceAction.READ, resource_type=resource_type)
 
 
 class InfoBlobService:
@@ -323,8 +403,23 @@ class InfoBlobService:
         actor = await self._get_actor(info_blob=info_blob, group_id=group_id)
         match action:
             case SpaceAction.READ:
-                if not actor.can_read_info_blobs():
-                    raise UnauthorizedException()
+                if actor.can_read_info_blobs():
+                    return
+                # Match UserService._enforce_api_key_scope: scoped blob requests
+                # are bound to the source's owning space.
+                key = self.user.active_api_key
+                if info_blob is not None and (
+                    key is None or key.scope_type == ApiKeyScopeType.TENANT
+                ):
+                    for access in await self.space_repo.get_info_blob_read_access(
+                        info_blob
+                    ):
+                        candidate = self.actor_manager.get_space_actor(access)
+                        if candidate.can_read_info_blobs() and _can_read_source_in(
+                            candidate, info_blob
+                        ):
+                            return
+                raise UnauthorizedException()
             case SpaceAction.CREATE:
                 if not actor.can_create_info_blobs():
                     raise UnauthorizedException()
@@ -432,7 +527,7 @@ class InfoBlobService:
     ) -> list[InfoBlobInDB]:
         await self._can_perform_action(group_id=group_id, action=SpaceAction.CREATE)
 
-        return [
+        published = [
             await self.publish_info_blob_without_validation(
                 blob,
                 embedding_model=embedding_model,
@@ -441,6 +536,7 @@ class InfoBlobService:
             )
             for blob in info_blobs
         ]
+        return await self._project_original_availability(published)
 
     async def update_info_blob(self, info_blob: InfoBlobUpdate):
         current_info_blob = await self.repo.get(info_blob.id)
@@ -464,7 +560,7 @@ class InfoBlobService:
 
         await self._validate(info_blob_updated, action=SpaceAction.EDIT)
 
-        return info_blob_updated
+        return (await self._project_original_availability([info_blob_updated]))[0]
 
     async def update_info_blob_size(self, info_blob_id: UUID):
         updated_info_blob = await self.repo.update_size(info_blob_id=info_blob_id)
@@ -484,6 +580,17 @@ class InfoBlobService:
 
         await self._validate(blob)
 
+        return (await self._project_original_availability([blob]))[0]
+
+    async def _project_original_availability(
+        self, blobs: list[InfoBlobT]
+    ) -> list[InfoBlobT]:
+        return await self.repo.hydrate_original_availability(blobs)
+
+    async def ensure_original_available(self, info_blob_id: UUID) -> InfoBlobInDB:
+        blob = await self.get_by_id(info_blob_id)
+        if not blob.original_available:
+            raise InfoBlobOriginalUnavailableError()
         return blob
 
     async def get_by_user(
@@ -499,15 +606,15 @@ class InfoBlobService:
             info_blobs = await self.repo.get_by_user(user_id=self.user.id)
 
         if metadata_filter:
+            filter_dict = metadata_filter.model_dump(exclude_none=True)
 
             def filter_func(item: InfoBlobInDBNoText) -> bool:
-                filter_dict = metadata_filter.model_dump(exclude_none=True)
                 item_dict = item.model_dump()
                 return filter_dict.items() <= item_dict.items()
 
             info_blobs = [blob for blob in info_blobs if filter_func(blob)]
 
-        return [blob for blob in info_blobs]
+        return await self._project_original_availability(info_blobs)
 
     async def get_by_filter(
         self,
@@ -520,7 +627,9 @@ class InfoBlobService:
 
     async def get_by_group(self, id: UUID) -> list[InfoBlobInDB]:
         group = await self.group_service.get_group(id)
-        return await self.repo.get_by_group(group.id)
+        return await self._project_original_availability(
+            await self.repo.get_by_group(group.id)
+        )
 
     async def get_by_website(self, id: UUID) -> list[InfoBlobInDB]:
         space = await self.space_service.get_space_by_website(website_id=id)
@@ -529,7 +638,9 @@ class InfoBlobService:
         if not actor.can_read_info_blobs():
             raise UnauthorizedException()
 
-        return await self.repo.get_by_website(website_id=id)
+        return await self._project_original_availability(
+            await self.repo.get_by_website(website_id=id)
+        )
 
     async def delete(self, id: UUID):
         # Fetch the blob first to validate authorization BEFORE deleting
@@ -540,8 +651,7 @@ class InfoBlobService:
 
         # Only delete if authorization check passes
         info_blob_deleted = await self.repo.delete(id)
-
-        return info_blob_deleted
+        return (await self._project_original_availability([info_blob_deleted]))[0]
 
     async def get_for_space(
         self, space_id: UUID, *, limit: int | None = None
@@ -554,11 +664,13 @@ class InfoBlobService:
 
         space_ids = effective_space_ids(space)
 
-        return await self.repo.list_by_space_ids(  # type: ignore[attr-defined]
-            space_ids=space_ids,
-            include_groups=True,
-            include_websites=True,
-            include_integrations=True,
-            limit=limit,
-            order_desc=True,
+        return await self._project_original_availability(
+            await self.repo.list_by_space_ids(  # type: ignore[attr-defined]
+                space_ids=space_ids,
+                include_groups=True,
+                include_websites=True,
+                include_integrations=True,
+                limit=limit,
+                order_desc=True,
+            )
         )

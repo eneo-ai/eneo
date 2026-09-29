@@ -5,8 +5,8 @@
 -->
 
 <script lang="ts">
-  import { Button, Table } from "@eneo/ui";
-  import { createRender } from "svelte-headless-table";
+  import * as Table from "$lib/components/resource-table/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { getInsightsService } from "../InsightsService.svelte";
   import { toStore } from "svelte/store";
   import InsightsConversationPrimaryCell from "./InsightsConversationPrimaryCell.svelte";
@@ -37,7 +37,7 @@
       header: m.question(),
       value: (item) => item.name,
       cell: (item) => {
-        return createRender(InsightsConversationPrimaryCell, {
+        return Table.renderComponent(InsightsConversationPrimaryCell, {
           conversation: item.value
         });
       }
@@ -47,7 +47,7 @@
       header: m.created(),
       accessor: (item) => item,
       cell: (item) => {
-        return createRender(Table.FormattedCell, {
+        return Table.renderComponent(Table.FormattedCell, {
           value: formatDate(item.value.created_at ?? ""),
           monospaced: true
         });
@@ -56,12 +56,12 @@
       plugins: {
         tableFilter: {
           getFilterValue(item) {
-            return formatDate(item.created_at);
+            return formatDate(item.created_at ?? "");
           }
         },
         sort: {
           getSortValue(item) {
-            return new Date(item.created_at).getTime();
+            return new Date(item.created_at ?? 0).getTime();
           }
         }
       }
@@ -108,8 +108,9 @@
         <p role="status" aria-live="polite">{m.loading_ellipsis()}</p>
       {:else if insights.hasMoreConversations}
         <Button
-          variant="primary-outlined"
-          on:click={() => insights.loadMoreConversations()}
+          variant="outline"
+          class="border-accent-default text-accent-default"
+          onclick={() => insights.loadMoreConversations()}
           aria-label={m.load_more_conversations()}
           disabled={insights.loadMoreConversations.isLoading ||
             insights.searchConversations.isLoading}

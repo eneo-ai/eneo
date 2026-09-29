@@ -26,6 +26,7 @@ from eneo.database.tables.object_content_table import (
     ObjectContentHolds,
     ObjectContentMoves,
     ObjectContentOrphanCandidates,
+    ObjectContentReconciliationState,
     ObjectContents,
     ObjectStoreObjects,
 )
@@ -41,6 +42,7 @@ from eneo.object_content.configuration import (
 from eneo.object_content.content import (
     CapturedContent,
     ContentAccessClass,
+    ContentFailureCode,
     ContentIntent,
     ContentRead,
     ContentState,
@@ -50,7 +52,10 @@ from eneo.object_content.content import (
     capture_content,
 )
 from eneo.object_content.content_service import ObjectContentService
-from eneo.object_content.deployment_policy import DeploymentPolicyPauseUpdate
+from eneo.object_content.deployment_policy import (
+    DeploymentPolicyPauseUpdate,
+    DeploymentPolicyRepository,
+)
 from eneo.object_content.deployment_policy_router import MoveQueueRequest
 from eneo.object_content.lease import OperationCheckpoint
 from eneo.object_content.move_executor import ObjectContentMoveExecutor
@@ -60,7 +65,10 @@ from eneo.object_content.move_repository import (
 )
 from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.reconciliation import ObjectContentReconciler
-from eneo.object_content.reconciliation_repository import PublicationReservation
+from eneo.object_content.reconciliation_repository import (
+    ObjectContentReconciliationRepository,
+    PublicationReservation,
+)
 from eneo.object_content.runtime import (
     ObjectContentReadinessCode,
     ObjectContentRuntime,
@@ -236,6 +244,146 @@ async def _expire_crashed_operation(
             )
 
 
+async def _publish_object_store_move(
+    database: DatabaseSessionManager,
+    *,
+    content_id: UUID,
+    actor_id: UUID,
+    payload: bytes,
+) -> str:
+    """Supply verified upload facts at the move executor's publication boundary."""
+    await _queue_move(
+        database,
+        target_kind=StorageKind.OBJECT_STORE,
+        actor_id=actor_id,
+        target_maximum_bytes=max(1, len(payload)),
+    )
+    reservation = PublicationReservation(
+        object_key=f"test/object-content/{uuid4().hex}",
+        size_bytes=len(payload),
+    )
+    async with database.session() as session, session.begin():
+        moves = ObjectContentMoveRepository(session)
+        work = await moves.claim(lease_owner="move-test", lease_seconds=300)
+        assert work is not None and work.content_id == content_id
+        await ObjectContentReconciliationRepository(
+            session
+        ).reserve_publication_objects(
+            (reservation,),
+            lease_owner="move-test",
+            lease_seconds=300,
+            orphan_grace_seconds=300,
+        )
+        await moves.record_object_target(
+            content_id=content_id,
+            lease_owner="move-test",
+            object_key=reservation.object_key,
+        )
+        await moves.record_target_verified(
+            content_id=content_id,
+            lease_owner="move-test",
+            object_key=reservation.object_key,
+            verification_chunk_size_bytes=max(1, len(payload)),
+            verification_chunk_sha256=sha256(payload).digest(),
+        )
+        await moves.complete_to_object_store(
+            content_id=content_id,
+            lease_owner="move-test",
+            reservation=reservation,
+            publication_lease_owner="move-test",
+        )
+    return reservation.object_key
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("inventory_boundary", ["completed", "partway", "equal"])
+async def test_completed_inventory_cannot_fail_a_new_remote_placement(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    inventory_boundary: str,
+) -> None:
+    database = object_content_database
+    provider = ObjectStoreProvider.fixed(
+        real_object_store.settings, real_object_store.store
+    )
+    reconciler = ObjectContentReconciler(
+        real_object_store.settings, database, object_store_provider=provider
+    )
+    payload = b"verified bytes moved after the inventory"
+    content_id, actor_id = await _create_inline_content(
+        database,
+        payload=payload,
+        idempotency_key=f"inventory-move-{uuid4().hex}",
+    )
+    # The fixture's initial cycle predates content availability. Complete a
+    # later cycle as well so the content's age cannot mask placement's age.
+    for _ in range(2):
+        async with database.session() as session, session.begin():
+            repository = ObjectContentReconciliationRepository(session)
+            cursor = await repository.object_inventory_cursor()
+            page = await repository.record_object_page(
+                cursor=cursor,
+                objects=(),
+                next_token=None,
+                orphan_grace_seconds=300,
+            )
+            assert page.completed
+
+    await _publish_object_store_move(
+        database,
+        content_id=content_id,
+        actor_id=actor_id,
+        payload=payload,
+    )
+
+    async with database.session() as session, session.begin():
+        if inventory_boundary == "partway":
+            repository = ObjectContentReconciliationRepository(session)
+            cursor = await repository.object_inventory_cursor()
+            page = await repository.record_object_page(
+                cursor=cursor,
+                objects=(),
+                next_token="next-page",
+                orphan_grace_seconds=300,
+            )
+            assert not page.completed
+        elif inventory_boundary == "equal":
+            descriptor = await session.get(ObjectStoreObjects, content_id)
+            state = await session.scalar(select(ObjectContentReconciliationState))
+            assert descriptor is not None and state is not None
+            state.last_completed_object_cycle_started_at = descriptor.created_at
+            await session.flush()
+    async with provider.acquire(refresh=False) as lease:
+        missing = await reconciler._mark_missing_from_completed_inventory(lease)
+    async with database.session() as session, session.begin():
+        content = await session.get(ObjectContents, content_id)
+        assert content is not None
+        assert missing == 0
+        assert content.state == ContentState.AVAILABLE.value
+
+    # A later complete cycle really omitting this placement must still fail it.
+    for _ in range(2):
+        async with database.session() as session, session.begin():
+            repository = ObjectContentReconciliationRepository(session)
+            cursor = await repository.object_inventory_cursor()
+            page = await repository.record_object_page(
+                cursor=cursor,
+                objects=(),
+                next_token=None,
+                orphan_grace_seconds=300,
+            )
+            assert page.completed
+    async with provider.acquire(refresh=False) as lease:
+        missing = await reconciler._mark_missing_from_completed_inventory(lease)
+    async with database.session() as session, session.begin():
+        content = await session.get(ObjectContents, content_id)
+        assert content is not None
+        assert missing == 1
+        assert content.state == ContentState.FAILED.value
+        assert content.failure_code == ContentFailureCode.BACKEND_MISSING.value
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_queue_creates_only_bounded_per_content_intents(
@@ -374,9 +522,13 @@ async def test_admin_command_requires_readiness_before_queueing(
             request,
             container,
         )
+        # The policy row survives the per-test reset, so earlier tests on this
+        # worker may already have advanced its revision.
+        async with session.begin():
+            revision = (await DeploymentPolicyRepository(session).get()).revision
         paused = await deployment_policy_router.set_object_content_moves_paused(
             DeploymentPolicyPauseUpdate(
-                expected_revision=1,
+                expected_revision=revision,
                 moves_paused=True,
             ),
             container,
@@ -384,7 +536,7 @@ async def test_admin_command_requires_readiness_before_queueing(
         projection = await deployment_policy_router._read_moves(session)
         resumed = await deployment_policy_router.set_object_content_moves_paused(
             DeploymentPolicyPauseUpdate(
-                expected_revision=2,
+                expected_revision=paused.policy_revision,
                 moves_paused=False,
             ),
             container,
@@ -392,9 +544,9 @@ async def test_admin_command_requires_readiness_before_queueing(
 
     assert queued.queued_count == 1
     assert queued.target_too_large_count == 0
-    assert paused.policy_revision == 2
+    assert paused.policy_revision == revision + 1
     assert paused.paused is True
-    assert resumed.policy_revision == 3
+    assert resumed.policy_revision == revision + 2
     assert resumed.paused is False
     assert projection.paused is True
     assert len(projection.moves) == 1
@@ -1595,6 +1747,10 @@ async def test_move_candidate_query_uses_bounded_ordered_index(
         )
         session.add(owner)
         await session.flush()
+        # The plan under test only needs 20k available, referenced rows. Skip the
+        # per-row reference triggers while generating them and set the count
+        # directly; with triggers on this fixture alone takes ~40 s in CI.
+        await session.execute(text("SET LOCAL session_replication_role = replica"))
         await session.execute(
             text(
                 """
@@ -1603,7 +1759,7 @@ async def test_move_candidate_query_uses_bounded_ordered_index(
                         id, tenant_id, storage_kind, state, access_class,
                         sha256, size_bytes, declared_media_type,
                         verified_media_type, idempotency_key,
-                        request_fingerprint, available_at
+                        request_fingerprint, available_at, reference_count
                     )
                     SELECT
                         gen_random_uuid(), :tenant_id, 'postgres_inline',
@@ -1611,7 +1767,7 @@ async def test_move_candidate_query_uses_bounded_ordered_index(
                         decode(repeat('00', 32), 'hex'), 0,
                         'application/octet-stream', 'application/octet-stream',
                         'move-plan-' || candidate::text,
-                        decode(repeat('00', 32), 'hex'), now()
+                        decode(repeat('00', 32), 'hex'), now(), 1
                     FROM generate_series(1, 20000) AS candidate
                     RETURNING id
                 ), stored AS (

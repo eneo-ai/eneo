@@ -12,7 +12,7 @@ from pydantic import (
 )
 
 from eneo.ai_models.completion_models.completion_model import CompletionModel
-from eneo.completion_models.infrastructure.web_search import WebSearchResult
+from eneo.authentication.signed_urls import redact_reference_tokens
 from eneo.files.file_models import File, FileMetadata, FilePublic
 from eneo.info_blobs.info_blob import InfoBlobInDB, InfoBlobPublicNoText
 from eneo.logging.logging import (
@@ -49,12 +49,6 @@ class QuestionsFiles(BaseModel):
     file: FileMetadata
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class WebSearchResultPublic(BaseModel):
-    id: UUID
-    title: str
-    url: str
 
 
 class McpToolReferencePublic(InDB):
@@ -97,11 +91,40 @@ class ToolCallInfo(BaseModel):
     # on later turns. Absent on rows persisted before this field was introduced;
     # such rows fall back to text-only replay (the model won't see the tool use).
     result: Optional[str] = None
+
+    @field_validator("arguments", "result", mode="after")
+    @classmethod
+    def _redact_reference_tokens(cls, value: Any) -> Any:
+        """Strip signed download tokens from persisted and displayed tool data.
+
+        Reference URLs reach tools as bearer capabilities. The tool already
+        used them by the time this record exists, and later turns receive
+        freshly minted links in their reference entries, so keeping the token
+        here would only extend its exposure (conversation history, the tool
+        panel, the tool-result endpoint, provider replay).
+        """
+        return redact_reference_tokens(value)
+
     # The prefixed tool identifier the LLM sees when calling (e.g.
     # `server__tool`). Needed for replay so the tool_use name matches the
     # currently-registered tools. `tool_name` above is the unprefixed/display
     # form used by the UI.
     mcp_tool_name: Optional[str] = None
+    # Capability the call serves ("web_search", "image_generation") when the
+    # server is a capability provider, whichever server backs it; None for
+    # general MCP servers and Eneo's own loopback servers. Clients render
+    # capability calls by purpose, not by the provider's name.
+    purpose: Optional[str] = None
+    # The tool result's MCP `_meta`, as sent by the server (size-capped by the
+    # client). Model-backed tools report their own usage here under the
+    # OpenTelemetry GenAI attribute names, e.g. `gen_ai.usage.input_tokens`,
+    # `gen_ai.usage.output_tokens`, `gen_ai.request.model`.
+    meta: Optional[dict[str, Any]] = None
+    # Generated files this call produced (MCP `image` blocks), in the order of
+    # the "[Image N ...]" placeholders in `result`. Lets a later turn hand the
+    # model a fresh reference URL per image so it can pass the image back to
+    # an image tool. Absent on rows persisted before this field existed.
+    generated_file_ids: Optional[list[UUID]] = None
 
 
 class QuestionAdd(QuestionBase):
@@ -143,7 +166,6 @@ class Question(QuestionAdd, InDB):
         validation_alias=AliasPath("assistant", "name"), default=None
     )
     questions_files: list[QuestionsFiles] = []
-    web_search_results: list[WebSearchResult] = []
     mcp_tool_references: list[McpToolReferencePublic] = []
     tool_calls: Optional[list[ToolCallInfo]] = None
 
@@ -168,7 +190,6 @@ class Message(QuestionBase, InDB):
     files: list[FilePublic]
     tools: UseTools
     generated_files: list[FilePublic]
-    web_search_references: list[WebSearchResultPublic]
     mcp_tool_references: list[McpToolReferencePublic] = []
     tool_calls: list[ToolCallInfo] = []
     skill_provenance: Optional[list[SkillExecutionReference]] = None

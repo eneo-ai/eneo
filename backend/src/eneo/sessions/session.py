@@ -15,7 +15,6 @@ from eneo.questions.question import (
     Question,
     ToolCallInfo,
     UseTools,
-    WebSearchResultPublic,
 )
 
 if TYPE_CHECKING:
@@ -96,7 +95,6 @@ class AskChatResponse(BaseModel):
     generated_files: list[FilePublic]
     references: list[InfoBlobAskAssistantPublic]
     tools: UseTools
-    web_search_references: list[WebSearchResultPublic]
     mcp_tool_references: list[McpToolReferencePublic] = []
 
 

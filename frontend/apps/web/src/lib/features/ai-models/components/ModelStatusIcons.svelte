@@ -1,7 +1,13 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script context="module" lang="ts">
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
+  import type {
+    CompletionModel,
+    EmbeddingModel,
+    ImageModel,
+    TranscriptionModel
+  } from "@eneo/eneo-js";
+  import { getDeprecationStatus } from "$lib/features/ai-models/formatModelStats";
   import { m } from "$lib/paraglide/messages";
 
   export type StatusIcon = {
@@ -12,25 +18,25 @@
   };
 
   export function getStatusIcons(
-    model: CompletionModel | EmbeddingModel | TranscriptionModel
+    model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel
   ): StatusIcon[] {
     const icons: StatusIcon[] = [];
 
-    if ("deprecation_date" in model && model.deprecation_date) {
-      const today = new Date().toISOString().slice(0, 10);
-      if (model.deprecation_date <= today) {
+    if ("deprecation_date" in model) {
+      const deprecation = getDeprecationStatus(model);
+      if (deprecation.kind === "deprecated") {
         icons.push({
           icon: "deprecated",
-          tooltip: m.model_tooltip_deprecated({ date: model.deprecation_date }),
+          tooltip: m.model_tooltip_deprecated({ date: deprecation.date }),
           color: "text-negative-default",
           ariaLabel: m.model_label_deprecated()
         });
-      } else {
+      } else if (deprecation.kind === "retiring") {
         icons.push({
           icon: "retiring",
-          tooltip: m.model_tooltip_retiring({ date: model.deprecation_date }),
+          tooltip: m.model_tooltip_retiring({ date: deprecation.date }),
           color: "text-warning-stronger",
-          ariaLabel: m.model_label_retiring({ date: model.deprecation_date })
+          ariaLabel: m.model_label_retiring({ date: deprecation.date })
         });
       }
     }
@@ -67,11 +73,11 @@
 </script>
 
 <script lang="ts">
-  import { Tooltip } from "@eneo/ui";
-  import { TriangleAlert, Brain, Eye, Wrench, Clock } from "lucide-svelte";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
+  import { TriangleAlert, Brain, Eye, Wrench, Clock } from "@lucide/svelte";
   import ModelCostBadge from "./ModelCostBadge.svelte";
 
-  export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
+  export let model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
   /** Suppress the cost badge — used by surfaces where cost is shown elsewhere. */
   export let showCost: boolean = true;
 
@@ -88,18 +94,21 @@
 
 <div class="flex items-center gap-2" role="list" aria-label={m.model_capabilities_label()}>
   {#each icons as icon (icon.icon)}
-    <Tooltip text={icon.tooltip} asFragment let:trigger>
-      {@const tooltipTrigger = trigger[0]}
-      <span
-        {...tooltipTrigger}
-        use:tooltipTrigger.action
-        class="{icon.color} cursor-default"
-        role="listitem"
-        aria-label={icon.ariaLabel}
-      >
-        <svelte:component this={iconComponents[icon.icon]} size={16} strokeWidth={2} />
-      </span>
-    </Tooltip>
+    <Tooltip.Root>
+      <Tooltip.Trigger>
+        {#snippet child({ props })}
+          <span
+            {...props}
+            class="{icon.color} cursor-default"
+            role="listitem"
+            aria-label={icon.ariaLabel}
+          >
+            <svelte:component this={iconComponents[icon.icon]} size={16} strokeWidth={2} />
+          </span>
+        {/snippet}
+      </Tooltip.Trigger>
+      <Tooltip.Content>{icon.tooltip}</Tooltip.Content>
+    </Tooltip.Root>
   {/each}
   {#if showCost}
     <ModelCostBadge {model} dense />

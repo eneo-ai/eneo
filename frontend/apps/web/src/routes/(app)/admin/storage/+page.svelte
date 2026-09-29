@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { intlLocale } from "$lib/core/formatting/dateTime";
   import { onMount, tick } from "svelte";
   import { invalidate } from "$app/navigation";
   import {
@@ -19,21 +20,21 @@
     type UploadLimitUseCase
   } from "@eneo/eneo-js";
   import {
-    AlertCircle,
+    CircleAlert,
     ArrowRightLeft,
-    CheckCircle2,
+    CircleCheck,
     ChevronDown,
     Database,
     ExternalLink,
     Gauge,
     HardDrive,
     Info,
-    Loader2,
+    LoaderCircle,
     RefreshCw
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { Page, Settings } from "$lib/components/layout";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
@@ -49,7 +50,6 @@
   import PolicySection from "$lib/features/admin/PolicySection.svelte";
   import { hasPermission } from "$lib/core/hasPermission.js";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
   import { toast } from "svelte-sonner";
   import ByteLimitField from "./ByteLimitField.svelte";
   import StorageConnectionSection from "./StorageConnectionSection.svelte";
@@ -514,12 +514,8 @@
     return labels[actor]();
   }
 
-  function storageLocale(): string {
-    return getLocale() === "sv" ? "sv-SE" : "en-US";
-  }
-
   function storageCount(value: number): string {
-    return new Intl.NumberFormat(storageLocale()).format(value);
+    return new Intl.NumberFormat(intlLocale()).format(value);
   }
 
   function policyBytes(value: number): string {
@@ -542,7 +538,7 @@
       { bytes: 1, label: m.storage_unit_b }
     ];
     const unit = units.find((candidate) => value >= candidate.bytes) ?? units[units.length - 1];
-    return `${new Intl.NumberFormat(storageLocale(), { maximumFractionDigits }).format(
+    return `${new Intl.NumberFormat(intlLocale(), { maximumFractionDigits }).format(
       value / unit.bytes
     )} ${unit.label()}`;
   }
@@ -551,7 +547,7 @@
     if (value === null) return m.storage_inventory_not_available();
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return m.storage_inventory_not_available();
-    return new Intl.DateTimeFormat(storageLocale(), {
+    return new Intl.DateTimeFormat(intlLocale(), {
       dateStyle: "medium"
     }).format(date);
   }
@@ -559,7 +555,7 @@
   function storageDateTime(value: string): string {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return m.storage_inventory_not_available();
-    return new Intl.DateTimeFormat(storageLocale(), {
+    return new Intl.DateTimeFormat(intlLocale(), {
       dateStyle: "long",
       timeStyle: "short"
     }).format(date);
@@ -585,7 +581,7 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title={m.storage_settings_title()} />
+    <Page.Title title={m.storage_settings_title()} tour="admin-storage" />
   </Page.Header>
 
   <Page.Main>
@@ -608,7 +604,7 @@
             variant="destructive"
             aria-live="assertive"
           >
-            <AlertCircle />
+            <CircleAlert />
             <Alert.Title>{m.storage_settings_load_error_title()}</Alert.Title>
             <Alert.Description>
               <p>{m.storage_settings_load_error_description()}</p>
@@ -687,7 +683,7 @@
 
               {#if selectedObjectStoreDegraded}
                 <Alert.Root variant="destructive">
-                  <AlertCircle />
+                  <CircleAlert />
                   <Alert.Title>{m.storage_settings_selected_target_degraded_title()}</Alert.Title>
                   <Alert.Description>
                     {m.storage_settings_selected_target_degraded_description()}
@@ -714,7 +710,7 @@
                   variant="destructive"
                   aria-live="assertive"
                 >
-                  <AlertCircle />
+                  <CircleAlert />
                   <Alert.Title>{m.storage_settings_stale_title()}</Alert.Title>
                   <Alert.Description>
                     <p>{m.storage_settings_stale_description()}</p>
@@ -725,7 +721,7 @@
                       onclick={() => requestPolicyRefresh()}
                     >
                       {#if reloading}
-                        <Loader2 data-icon="inline-start" class="animate-spin" />
+                        <LoaderCircle data-icon="inline-start" class="animate-spin" />
                         {m.storage_settings_reloading()}
                       {:else}
                         {m.storage_settings_reload_latest()}
@@ -741,7 +737,7 @@
                   variant="destructive"
                   aria-live="assertive"
                 >
-                  <AlertCircle />
+                  <CircleAlert />
                   <Alert.Title>{m.storage_settings_reload_error_title()}</Alert.Title>
                   <Alert.Description>
                     {m.storage_settings_reload_error_description()}
@@ -757,7 +753,7 @@
                   variant="destructive"
                   aria-live="assertive"
                 >
-                  <AlertCircle />
+                  <CircleAlert />
                   <Alert.Title>{m.storage_settings_target_unavailable_title()}</Alert.Title>
                   <Alert.Description>
                     {m.storage_settings_target_unavailable_description()}
@@ -773,7 +769,7 @@
                   variant="destructive"
                   aria-live="assertive"
                 >
-                  <AlertCircle />
+                  <CircleAlert />
                   <Alert.Title>{m.storage_settings_save_outcome_unknown_title()}</Alert.Title>
                   <Alert.Description>
                     <p>{m.storage_settings_save_outcome_unknown_description()}</p>
@@ -784,7 +780,7 @@
                       onclick={() => requestPolicyRefresh()}
                     >
                       {#if reloading}
-                        <Loader2 data-icon="inline-start" class="animate-spin" />
+                        <LoaderCircle data-icon="inline-start" class="animate-spin" />
                         {m.storage_settings_reloading()}
                       {:else}
                         {m.storage_settings_reload_latest()}
@@ -1092,7 +1088,7 @@
                     </Button>
                     <Button type="submit" disabled={saveUnavailable} aria-busy={saving}>
                       {#if saving}
-                        <Loader2 data-icon="inline-start" class="animate-spin" />
+                        <LoaderCircle data-icon="inline-start" class="animate-spin" />
                         {m.storage_settings_saving()}
                       {:else}
                         {m.storage_settings_save()}
@@ -1132,7 +1128,7 @@
                   variant="destructive"
                   aria-live="assertive"
                 >
-                  <AlertCircle />
+                  <CircleAlert />
                   <Alert.Title>{m.storage_moves_stale_title()}</Alert.Title>
                   <Alert.Description>
                     <p>{m.storage_moves_stale_description()}</p>
@@ -1154,7 +1150,7 @@
                   variant="destructive"
                   aria-live="assertive"
                 >
-                  <AlertCircle />
+                  <CircleAlert />
                   <Alert.Title>{m.storage_moves_action_error_title()}</Alert.Title>
                   <Alert.Description>
                     {m.storage_moves_action_error_description()}
@@ -1170,7 +1166,7 @@
                 </Alert.Root>
               {:else if moveQueueResult}
                 <Alert.Root aria-live="polite">
-                  <CheckCircle2 />
+                  <CircleCheck />
                   <Alert.Title>
                     {m.storage_moves_queue_result({
                       queued: storageCount(moveQueueResult.queued_count),
@@ -1271,7 +1267,7 @@
                   onclick={() => (moveConfirmationOpen = true)}
                 >
                   {#if moveActionPending === "queue"}
-                    <Loader2 data-icon="inline-start" class="animate-spin" />
+                    <LoaderCircle data-icon="inline-start" class="animate-spin" />
                   {/if}
                   {m.storage_moves_queue()}
                 </Button>
@@ -1288,7 +1284,7 @@
                     onclick={setMovesPaused}
                   >
                     {#if moveActionPending === "pause"}
-                      <Loader2 data-icon="inline-start" class="animate-spin" />
+                      <LoaderCircle data-icon="inline-start" class="animate-spin" />
                     {/if}
                     {contentMoves?.paused ? m.storage_moves_resume() : m.storage_moves_pause()}
                   </Button>
@@ -1303,7 +1299,7 @@
                   variant="destructive"
                   aria-live="assertive"
                 >
-                  <AlertCircle />
+                  <CircleAlert />
                   <Alert.Title>{m.storage_moves_load_error_title()}</Alert.Title>
                   <Alert.Description>
                     <p>{m.storage_moves_load_error_description()}</p>
@@ -1316,7 +1312,7 @@
 
               {#if contentMoves?.moves.length === 0}
                 <Alert.Root>
-                  <CheckCircle2 />
+                  <CircleCheck />
                   <Alert.Title>{m.storage_overview_move_idle()}</Alert.Title>
                   <Alert.Description>{m.storage_moves_empty()}</Alert.Description>
                 </Alert.Root>
@@ -1352,7 +1348,7 @@
                 </div>
               {:else if moveStatus === "loading"}
                 <p class="text-secondary flex items-center gap-2 text-sm" aria-live="polite">
-                  <Loader2 class="size-4 animate-spin" />
+                  <LoaderCircle class="size-4 animate-spin" />
                   {m.storage_moves_loading()}
                 </p>
               {/if}
@@ -1364,52 +1360,26 @@
   </Page.Main>
 </Page.Root>
 
-<AlertDialog.Root bind:open={targetConfirmationOpen}>
-  <AlertDialog.Content>
-    <AlertDialog.Header>
-      <AlertDialog.Title>{m.storage_settings_confirm_target_title()}</AlertDialog.Title>
-      <AlertDialog.Description>
-        {m.storage_settings_confirm_target_description()}
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-    <AlertDialog.Footer>
-      <AlertDialog.Cancel disabled={saving}>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action disabled={saving} onclick={() => void savePolicy()}>
-        {#if saving}
-          <Loader2 data-icon="inline-start" class="animate-spin" />
-          {m.storage_settings_saving()}
-        {:else if storageTarget === "object_store"}
-          {m.storage_settings_confirm_object_store()}
-        {:else}
-          {m.storage_settings_confirm_postgres()}
-        {/if}
-      </AlertDialog.Action>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={targetConfirmationOpen}
+  title={m.storage_settings_confirm_target_title()}
+  description={m.storage_settings_confirm_target_description()}
+  confirmLabel={storageTarget === "object_store"
+    ? m.storage_settings_confirm_object_store()
+    : m.storage_settings_confirm_postgres()}
+  pendingLabel={m.storage_settings_saving()}
+  variant="default"
+  onConfirm={savePolicy}
+/>
 
-<AlertDialog.Root bind:open={moveConfirmationOpen}>
-  <AlertDialog.Content>
-    <AlertDialog.Header>
-      <AlertDialog.Title>{m.storage_moves_confirm_title()}</AlertDialog.Title>
-      <AlertDialog.Description>
-        {m.storage_moves_confirm_description({
-          count: storageCount(moveLimit),
-          target: storageTargetLabel(moveTarget)
-        })}
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-    <AlertDialog.Footer>
-      <AlertDialog.Cancel disabled={moveActionPending === "queue"}>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action
-        disabled={moveActionPending === "queue"}
-        onclick={() => void queueContentMoves()}
-      >
-        {#if moveActionPending === "queue"}
-          <Loader2 data-icon="inline-start" class="animate-spin" />
-        {/if}
-        {m.storage_moves_confirm_action()}
-      </AlertDialog.Action>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+<ConfirmDialog
+  bind:open={moveConfirmationOpen}
+  title={m.storage_moves_confirm_title()}
+  description={m.storage_moves_confirm_description({
+    count: storageCount(moveLimit),
+    target: storageTargetLabel(moveTarget)
+  })}
+  confirmLabel={m.storage_moves_confirm_action()}
+  variant="default"
+  onConfirm={queueContentMoves}
+/>

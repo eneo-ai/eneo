@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { Table } from "@eneo/ui";
+  import * as Table from "$lib/components/resource-table/index.js";
   import WebsiteActions from "./WebsiteActions.svelte";
-  import { createRender } from "svelte-headless-table";
   import WebsiteStatus from "./WebsiteStatus.svelte";
   import WebsiteSync from "./WebsiteSync.svelte";
   import SelectionHeaderCheckbox from "./SelectionHeaderCheckbox.svelte";
@@ -72,14 +71,14 @@
       accessor: (item) => item,
       id: "select",
       header: () => {
-        return createRender(SelectionHeaderCheckbox, {
+        return Table.renderComponent(SelectionHeaderCheckbox, {
           selectedWebsiteIds,
           websites: $websites,
           onToggleAll: toggleSelectAll
         });
       },
       cell: (item) => {
-        return createRender(SelectionCellCheckbox, {
+        return Table.renderComponent(SelectionCellCheckbox, {
           websiteId: item.value.id,
           websiteName: formatWebsiteName(item.value),
           selectedWebsiteIds,
@@ -97,7 +96,7 @@
       accessor: (item) => item,
       header: m.website(),
       cell: (item) => {
-        return createRender(Table.PrimaryCell, {
+        return Table.renderComponent(Table.PrimaryCell, {
           link: `/spaces/${$currentSpace.routeId}/knowledge/websites/${item.value.id}`,
           label: formatWebsiteName(item.value),
           tooltip: item.value.url,
@@ -123,7 +122,7 @@
       accessor: "url",
       header: m.link(),
       cell: (item) => {
-        return createRender(Table.ButtonCell, {
+        return Table.renderComponent(Table.ButtonCell, {
           link: item.value,
           label: m.go_to_website(),
           linkIsExternal: true
@@ -135,7 +134,7 @@
       accessor: (item) => item,
       header: m.status(),
       cell: (item) => {
-        return createRender(WebsiteStatus, {
+        return Table.renderComponent(WebsiteStatus, {
           website: item.value
         });
       },
@@ -157,7 +156,7 @@
       accessor: (item) => item,
       header: m.auto_updates(),
       cell: (item) => {
-        return createRender(WebsiteSync, {
+        return Table.renderComponent(WebsiteSync, {
           website: item.value
         });
       },
@@ -172,7 +171,7 @@
 
     table.columnActions({
       cell: (item) => {
-        return createRender(WebsiteActions, { website: item.value });
+        return Table.renderComponent(WebsiteActions, { website: item.value });
       }
     })
   ]);

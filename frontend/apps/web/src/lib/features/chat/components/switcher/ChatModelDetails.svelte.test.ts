@@ -1,9 +1,9 @@
+import { intlLocale } from "$lib/core/formatting/dateTime";
 import type { CompletionModel } from "@eneo/eneo-js";
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
-import { getLocale } from "$lib/paraglide/runtime";
 
 // ChatModelDetails reads the tenant from the app-wide Svelte context to decide
 // whether to show pricing. That context is only set by the app shell, so expose
@@ -65,9 +65,7 @@ describe("ChatModelDetails", () => {
 
     await expect.element(page.getByRole("heading", { name: "GPT Test" })).toBeVisible();
     await expect.element(page.getByText("Best for careful analysis.")).toBeVisible();
-    const formattedTokens = new Intl.NumberFormat(getLocale() === "sv" ? "sv-SE" : "en-US").format(
-      model.max_input_tokens
-    );
+    const formattedTokens = new Intl.NumberFormat(intlLocale()).format(model.max_input_tokens);
     await expect
       .element(page.getByText(m.model_selector_context_value({ tokens: formattedTokens })))
       .toBeVisible();

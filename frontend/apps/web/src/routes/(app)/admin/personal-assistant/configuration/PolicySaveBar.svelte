@@ -7,7 +7,7 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { AlertCircle, CheckCircle2 } from "lucide-svelte";
+  import { CircleAlert, CircleCheck } from "@lucide/svelte";
 
   type Props = {
     dirty: boolean;
@@ -30,13 +30,13 @@
     <div class="mx-auto flex max-w-[1100px] items-center justify-between gap-4 px-6 py-3">
       <div class="flex items-center gap-2 text-sm">
         {#if saveError}
-          <AlertCircle class="text-destructive h-4 w-4 shrink-0" aria-hidden="true" />
+          <CircleAlert class="text-destructive h-4 w-4 shrink-0" aria-hidden="true" />
           <span class="text-destructive" role="alert">{saveError}</span>
         {:else if !canSave}
-          <AlertCircle class="text-warning-stronger h-4 w-4 shrink-0" aria-hidden="true" />
+          <CircleAlert class="text-warning-stronger h-4 w-4 shrink-0" aria-hidden="true" />
           <span class="text-secondary">{m.governance_fix_validation()}</span>
         {:else}
-          <CheckCircle2 class="text-accent-default h-4 w-4 shrink-0" aria-hidden="true" />
+          <CircleCheck class="text-accent-default h-4 w-4 shrink-0" aria-hidden="true" />
           <span class="text-secondary">{m.governance_unsaved_changes()}</span>
         {/if}
       </div>

@@ -1,11 +1,20 @@
-import { dev } from "$app/environment";
+import { building, dev } from "$app/environment";
+import { env as privateEnv } from "$env/dynamic/private";
+import { env as publicEnv } from "$env/dynamic/public";
 import { DASHBOARD_URL } from "$lib/core/constants";
+import { assertDeploymentEnv } from "$lib/core/deploymentEnv.server";
 import { detectMobile } from "$lib/core/detectMobile";
 import { getFeatureFlags } from "$lib/core/flags.server";
 import { authenticateUser, clearFrontendCookies } from "$lib/features/auth/auth.server";
 import { ENEO_RESPONSE_HEADERS } from "@eneo/eneo-js";
 import { toAppError } from "$lib/core/errors";
-import { redirect, type Handle, type HandleFetch, type HandleServerError } from "@sveltejs/kit";
+import {
+  redirect,
+  type Handle,
+  type HandleFetch,
+  type HandleServerError,
+  type ServerInit
+} from "@sveltejs/kit";
 import {
   getEnvironmentConfig,
   getBackendUrl,
@@ -14,6 +23,12 @@ import {
 import { fetchWithTransientRetry } from "./lib/core/transientFetch.server";
 import { sequence } from "@sveltejs/kit/hooks";
 import { paraglideMiddleware } from "$lib/paraglide/server";
+
+export const init: ServerInit = () => {
+  // Builds and prerendering run without the deployment environment.
+  if (building) return;
+  assertDeploymentEnv({ ...privateEnv, ...publicEnv });
+};
 
 function routeRequiresLogin(route: { id: string | null }): boolean {
   const routeIsPublic = route.id?.includes("(public)") ?? false;
@@ -70,7 +85,13 @@ const paraglideHandle: Handle = ({ event, resolve }) =>
 
 export const headerFilterHandle: Handle = async ({ event, resolve }) => {
   const response = await resolve(event, {
-    preload: () => false,
+    // SvelteKit's default predicate: preload the page's JS and CSS so the
+    // browser fetches everything the page needs in parallel instead of
+    // discovering it import by import. With the "preload-mjs" strategy
+    // (svelte.config.js) the preloads are emitted as tags in the HTML; the
+    // same list is also set as a Link response header, which grew past what
+    // the reverse proxy accepts (#112) and is removed below.
+    preload: ({ type }) => type === "js" || type === "css",
     // Responses fetched inside a load function have their headers stripped
     // unless listed here. The Eneo client reads the trace id and error code off
     // failed responses (see ENEO_RESPONSE_HEADERS); without this, every API
@@ -78,6 +99,7 @@ export const headerFilterHandle: Handle = async ({ event, resolve }) => {
     // that hides the real one.
     filterSerializedResponseHeaders: (name) => ENEO_RESPONSE_HEADERS.includes(name)
   });
+  response.headers.delete("link");
   return response;
 };
 

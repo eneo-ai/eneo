@@ -14,6 +14,8 @@ test("chat recovers after the provider returns an error", async ({ page }) => {
   await askChatQuestion(page, recoveryQuestion);
 
   await expect(page.getByRole("alert")).toHaveCount(0);
-  await expect(page.getByText(recoveryQuestion, { exact: true })).toBeVisible();
-  await expect(page.getByText(MOCK_REPLY)).toBeVisible({ timeout: 20_000 });
+  // Scope to the conversation: the reloaded history table also holds the question text.
+  const conversation = page.locator("#session-message-container");
+  await expect(conversation.getByText(recoveryQuestion, { exact: true })).toBeVisible();
+  await expect(conversation.getByText(MOCK_REPLY)).toBeVisible({ timeout: 20_000 });
 });

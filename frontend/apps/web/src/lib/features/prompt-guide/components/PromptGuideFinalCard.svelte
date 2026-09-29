@@ -5,8 +5,9 @@
 -->
 
 <script lang="ts">
-  import { Check, Copy, Sparkles } from "lucide-svelte";
+  import { Sparkles } from "@lucide/svelte";
   import { fade } from "svelte/transition";
+  import CopyButton from "$lib/components/CopyButton.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
 
@@ -20,19 +21,6 @@
   };
 
   let { prompt, disabled = false, onApply }: Props = $props();
-  let copied = $state(false);
-
-  async function copyToClipboard() {
-    if (!prompt) return;
-    try {
-      await navigator.clipboard.writeText(prompt);
-      copied = true;
-      setTimeout(() => (copied = false), 2000);
-    } catch {
-      // Clipboard can be unavailable (insecure context / permissions); the
-      // Apply button is the primary path, so silently no-op here.
-    }
-  }
 </script>
 
 <div
@@ -46,15 +34,7 @@
     <div class="text-default text-sm font-medium">{m.prompt_guide_final_prompt_label()}</div>
     <div class="text-muted text-xs">{m.prompt_guide_final_prompt_hint()}</div>
   </div>
-  <Button variant="outline" size="sm" onclick={copyToClipboard}>
-    {#if copied}
-      <Check class="size-3.5" />
-      {m.copied()}
-    {:else}
-      <Copy class="size-3.5" />
-      {m.copy()}
-    {/if}
-  </Button>
+  <CopyButton text={prompt} label={m.copy()} showLabel variant="outline" size="sm" />
   <Button size="sm" {disabled} onclick={() => onApply(prompt)}>
     {m.prompt_guide_apply_button()}
   </Button>

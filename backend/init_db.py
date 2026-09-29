@@ -8,6 +8,11 @@ import psycopg2
 from psycopg2 import sql
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from eneo.server.dependencies.predefined_roles import (
+    load_predefined_roles_from_config,
+)
+from eneo.users.password import validate_new_local_password
+
 
 # Configuration
 class Settings(BaseSettings):
@@ -48,6 +53,7 @@ def run_alembic_migrations():
 
 # Password hashing
 def create_salt_and_hashed_password(plaintext_password: str):
+    validate_new_local_password(plaintext_password)
     pwd_bytes = plaintext_password.encode("utf-8")
     salt = bcrypt.gensalt()
     hashed_password = bcrypt.hashpw(password=pwd_bytes, salt=salt)
@@ -84,6 +90,24 @@ def add_tenant_user(
         user = cur.fetchone()
 
         if user is None:
+            # A different account already using DEFAULT_USER_NAME (typically a
+            # changed DEFAULT_USER_EMAIL) is a configuration error: never
+            # create a second user with that name, and never pick the existing
+            # one by name.
+            cur.execute(
+                sql.SQL(
+                    "SELECT email FROM users WHERE username = %s AND tenant_id = %s"
+                ),
+                (user_name, tenant_id),
+            )
+            clash = cur.fetchone()
+            if clash is not None:
+                raise SystemExit(
+                    f"Refusing to create default user {user_email}: username "
+                    f"'{user_name}' is already used by {clash[0]} in tenant "
+                    f"{tenant_name}. Set DEFAULT_USER_EMAIL to that address or "
+                    "choose another DEFAULT_USER_NAME."
+                )
             salt, hashed_pass = create_salt_and_hashed_password(user_password)
             add_user_query = sql.SQL(
                 "INSERT INTO users (username, email, password, salt, tenant_id, used_tokens, state) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id"
@@ -105,25 +129,12 @@ def add_tenant_user(
         role = cur.fetchone()
 
         if role is None:
-            owner_permissions = [
-                "admin",
-                "personal_chat",
-                "assistants",
-                "skills",
-                "skills_management",
-                "group_chats",
-                "apps",
-                "services",
-                "collections",
-                "insights",
-                "AI",
-                "websites",
-                "integrations",
-                "shared_spaces",
-                "api_keys",
-                "assistant_debug",
-                "storage",
-            ]
+            owner_template = next(
+                role
+                for role in load_predefined_roles_from_config()
+                if role["name"] == "Owner"
+            )
+            owner_permissions = owner_template["permissions"]
             add_role_query = sql.SQL(
                 "INSERT INTO roles (name, permissions, tenant_id, predefined_source) "
                 "VALUES (%s, %s, %s, %s) RETURNING id"

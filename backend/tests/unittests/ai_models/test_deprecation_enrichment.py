@@ -30,7 +30,6 @@ class MockUser:
         self.id = uuid4()
         self.tenant_id = uuid4()
         self.tenant = None
-        self.modules = []
 
 
 MOCK_MODEL_COST = {

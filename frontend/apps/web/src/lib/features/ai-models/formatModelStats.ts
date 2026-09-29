@@ -44,6 +44,11 @@ export function formatCostPerMillionTokens(value: CostFieldValue): string | null
   return `$${perMillion.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}`;
 }
 
+/** "$0.04" per generated image — used by image model rows. */
+export function formatCostPerImage(value: CostFieldValue): string | null {
+  return formatCostPerMinute(value);
+}
+
 /** "$0.006/min" — used by transcription rows. */
 export function formatCostPerMinute(value: CostFieldValue): string | null {
   const n = toNumber(value);
@@ -107,11 +112,35 @@ export type DeprecationStatus =
   | { kind: "retiring"; date: string }
   | { kind: "deprecated"; date: string };
 
+const DEPRECATION_WARNING_MONTHS = 6;
+
+function getWarningStartDate(deprecationDate: string): string | null {
+  const date = new Date(`${deprecationDate}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const dayOfMonth = date.getUTCDate();
+  date.setUTCDate(1);
+  date.setUTCMonth(date.getUTCMonth() - DEPRECATION_WARNING_MONTHS);
+
+  const lastDayOfTargetMonth = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)
+  ).getUTCDate();
+  date.setUTCDate(Math.min(dayOfMonth, lastDayOfTargetMonth));
+
+  return date.toISOString().slice(0, 10);
+}
+
 export function getDeprecationStatus(model: {
   deprecation_date?: string | null;
 }): DeprecationStatus {
   const date = model.deprecation_date ?? null;
   if (!date) return { kind: "active", date: null };
+
   const today = new Date().toISOString().slice(0, 10);
-  return date <= today ? { kind: "deprecated", date } : { kind: "retiring", date };
+  if (date <= today) return { kind: "deprecated", date };
+
+  const warningStartDate = getWarningStartDate(date);
+  return warningStartDate && today >= warningStartDate
+    ? { kind: "retiring", date }
+    : { kind: "active", date: null };
 }

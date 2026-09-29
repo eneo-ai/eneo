@@ -7,6 +7,7 @@
 <script lang="ts">
   import { IconStar } from "@eneo/icons/star";
   import { getAppContext } from "$lib/core/AppContext";
+  import { getEneo } from "$lib/core/Eneo";
   import { dynamicColour } from "$lib/core/colours";
 
   export let space: {
@@ -16,10 +17,10 @@
     icon_id?: string | null;
   };
 
-  const { user, environment } = getAppContext();
+  const { user } = getAppContext();
+  const eneo = getEneo();
 
-  // Generate icon URL from icon_id
-  $: iconUrl = space.icon_id ? `${environment.baseUrl}/api/v1/icons/${space.icon_id}/` : null;
+  $: iconUrl = space.icon_id ? eneo.icons.url({ id: space.icon_id }) : null;
 </script>
 
 {#if space.personal}

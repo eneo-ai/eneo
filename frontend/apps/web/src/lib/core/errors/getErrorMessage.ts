@@ -25,6 +25,7 @@ import { m } from "$lib/paraglide/messages";
  * state — is a decision, not just a message.
  */
 export const SKILL_EXECUTION_BLOCK_CONFLICT: EneoErrorCode = 9052;
+export const SKILL_STILL_ATTACHED: EneoErrorCode = 9051;
 
 // Keyed on the generated code union, so a code the backend does not define
 // fails to compile instead of mapping a message nothing can ever reach.
@@ -34,6 +35,10 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9005: () => m.eneo_error_9005(), // AUTHENTICATION_ERROR
   9019: () => m.eneo_error_9019(), // USER_INACTIVE
   9025: () => m.eneo_error_9025(), // TENANT_SUSPENDED
+  9061: () => m.eneo_error_9061(), // CURRENT_PASSWORD_INCORRECT
+  9058: () => m.eneo_error_9058(), // PASSWORD_REUSE
+  9059: () => m.eneo_error_9059(), // PASSWORD_POLICY_VIOLATION
+  9060: () => m.eneo_error_9060(), // LOCAL_PASSWORD_CHANGE_UNAVAILABLE
 
   // --- Model & provider issues ---
   9002: () => m.eneo_error_9002(), // UNSUPPORTED_MODEL
@@ -59,6 +64,7 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
 
   // --- File uploads ---
   9056: () => m.eneo_error_9056(), // INVALID_FILENAME
+  9057: () => m.eneo_error_9057(), // INFO_BLOB_ORIGINAL_UNAVAILABLE
 
   // --- Model lifecycle ---
   9039: () => m.eneo_error_9039(), // MODEL_IN_USE
@@ -74,7 +80,8 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9050: () => m.eneo_error_9050(), // SKILL_IN_USE_BY_APP_RUN
   9051: () => m.eneo_error_9051(), // SKILL_STILL_ATTACHED
   9053: () => m.eneo_error_9053(), // SKILL_NOT_PUBLISHED_FOR_BINDING
-  9054: () => m.eneo_error_9054() // SKILL_BLOCKED_FOR_BINDING
+  9054: () => m.eneo_error_9054(), // SKILL_BLOCKED_FOR_BINDING
+  9062: () => m.eneo_error_9062() // SKILL_REMOVAL_BUSY
 };
 
 /**

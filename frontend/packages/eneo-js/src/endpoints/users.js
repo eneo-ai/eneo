@@ -9,6 +9,15 @@
 export function initUser(client) {
   return {
     /**
+     * Get the backend policy for passwords stored in Eneo, regardless of the caller's login provider.
+     * @returns {Promise<import('../types/schema').components["schemas"]["LocalPasswordPolicy"]>}
+     * @throws {EneoError}
+     */
+    passwordPolicy: async () => {
+      return await client.fetch("/api/v1/users/password-policy/", { method: "get" });
+    },
+
+    /**
      * Get info about the currently logged in user.
      * @returns {Promise<import('../types/schema').components["schemas"]["UserPublic"]>}
      * @throws {EneoError}
@@ -33,14 +42,14 @@ export function initUser(client) {
     /**
      * Lists all users on this tenant.
      * @overload `{includeDetails: true}` requires super user privileges.
-     * @param {{includeDetails: true, search_email?: string, search_name?: string, page?: number, page_size?: number, state_filter?: "active" | "inactive"}} options
-     * @return {Promise<import('../types/resources').Paginated<User>>}
+     * @param {{includeDetails: true, search_email?: string, search_name?: string, page?: number, page_size?: number, state_filter?: "active" | "inactive", role_id?: string}} options
+     * @return {Promise<import('../types/schema').components["schemas"]["PaginatedUsersResponse_UserAdminView_"]>}
      *
      * @overload
      * @param {{includeDetails?: false, filter?: string, limit?: number, cursor?: string}} [options]
      * @return {Promise<import('../types/resources').Paginated<UserSparse>> }
      *
-     * @param {{includeDetails: boolean, filter?: string, limit?: number, cursor?: string, search_email?: string, search_name?: string, page?: number, page_size?: number, state_filter?: "active" | "inactive"}} [options]
+     * @param {{includeDetails: boolean, filter?: string, limit?: number, cursor?: string, search_email?: string, search_name?: string, page?: number, page_size?: number, state_filter?: "active" | "inactive", role_id?: string}} [options]
      * @throws {EneoError}
      * */
     list: async (options) => {
@@ -54,7 +63,8 @@ export function initUser(client) {
               page_size: options.page_size,
               search_email: options.search_email,
               search_name: options.search_name,
-              state_filter: options.state_filter
+              state_filter: options.state_filter,
+              role_id: options.role_id
             }
           }
         });

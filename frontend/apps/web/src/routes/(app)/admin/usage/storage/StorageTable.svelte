@@ -6,10 +6,10 @@
 
 <script lang="ts">
   import type { StorageSpaceList } from "@eneo/eneo-js";
-  import { createRender } from "svelte-headless-table";
-  import { Button, Table } from "@eneo/ui";
+  import * as Table from "$lib/components/resource-table/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
-  import SpaceMembersChips from "$lib/features/spaces/components/SpaceMembersChips.svelte";
+  import MemberChipStack from "$lib/features/spaces/components/MemberChipStack.svelte";
   import StorageSpaceName from "./StorageSpaceName.svelte";
   import { m } from "$lib/paraglide/messages";
 
@@ -17,16 +17,14 @@
 
   let showAllSpaces = false;
 
-  $: visibleSpaces = showAllSpaces ? spaces : spaces.slice(0, 10);
-
-  const table = Table.createWithResource(visibleSpaces);
+  const table = Table.createWithResource(spaces, 10);
 
   const viewModel = table.createViewModel([
     table.columnPrimary({
       header: m.name(),
       value: (item) => item.name,
       cell: (item) => {
-        return createRender(StorageSpaceName, {
+        return Table.renderComponent(StorageSpaceName, {
           space: item.value
         });
       }
@@ -35,7 +33,7 @@
       header: m.members(),
       accessor: "members",
       cell: (item) => {
-        return createRender(SpaceMembersChips, {
+        return Table.renderComponent(MemberChipStack, {
           members: item.value
         });
       },
@@ -54,15 +52,16 @@
     })
   ]);
 
-  $: table.update(visibleSpaces);
+  $: table.update(spaces);
+  $: viewModel.pluginStates.page.pageSize.set(showAllSpaces ? Math.max(spaces.length, 10) : 10);
 </script>
 
 <Table.Root {viewModel} resourceName={m.resource_spaces()} displayAs="list"></Table.Root>
 {#if spaces.length > 10}
   <Button
-    variant="outlined"
+    variant="outline"
     class="h-12"
-    on:click={() => {
+    onclick={() => {
       showAllSpaces = !showAllSpaces;
     }}
     >{showAllSpaces ? m.show_only_10_spaces() : m.show_all_spaces({ count: spaces.length })}</Button

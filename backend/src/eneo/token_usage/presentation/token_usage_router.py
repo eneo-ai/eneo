@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime
-from typing import Annotated, Optional
+from typing import Annotated, Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -77,12 +77,23 @@ async def get_user_token_usage(
     container: ContainerDep,
     start_date: StartDateQuery = None,
     end_date: EndDateQuery = None,
-    page: Annotated[int, Query(description="Page number for pagination.")] = 1,
-    per_page: Annotated[int, Query(description="Number of items per page.")] = 15,
+    page: Annotated[int, Query(ge=1, description="Page number for pagination.")] = 1,
+    per_page: Annotated[
+        int, Query(ge=1, le=100, description="Number of items per page.")
+    ] = 15,
     sort_by: Annotated[
         UserSortBy, Query(description="Field to sort by.")
     ] = UserSortBy.total_tokens,
-    sort_order: Annotated[str, Query(description="Sort order (asc or desc).")] = "desc",
+    sort_order: Annotated[
+        Literal["asc", "desc"], Query(description="Sort order (asc or desc).")
+    ] = "desc",
+    search: Annotated[
+        str | None,
+        Query(
+            max_length=200,
+            description="Search username or email across all users before pagination.",
+        ),
+    ] = None,
 ):
     """
     Get token usage statistics aggregated by user for the specified date range.
@@ -98,6 +109,7 @@ async def get_user_token_usage(
         per_page=per_page,
         sort_by=sort_by.value,
         sort_order=sort_order,
+        search=search,
     )
 
     return UserTokenUsageSummary.from_domain(user_usage_summary)

@@ -218,19 +218,26 @@ class CompletionModelMigrationService(BaseModelMigrationService):
 
     # ------------------------------------------------------------- after-hook
     async def _after_execute(
-        self, migration_id: UUID, migrated_count: int, tenant_id: UUID
+        self,
+        migration_id: UUID,
+        migrated_count: int,
+        tenant_id: UUID,
+        from_model_id: UUID,
     ) -> tuple[bool, bool]:
         threshold = self.settings.migration_auto_recalc_threshold
-        if migrated_count <= threshold:
-            try:
+        try:
+            await self.usage_service.update_usage_stats_incremental(
+                tenant_id, from_model_id
+            )
+            if migrated_count <= threshold:
                 await self.usage_service.recalculate_all_usage_stats_in_transaction(
                     tenant_id
                 )
                 return (True, False)
-            except Exception as e:
-                self.logger.error(
-                    "Auto-recalculation failed, manual recalculation required",
-                    extra={"migration_id": str(migration_id), "error": str(e)},
-                )
-                return (False, True)
-        return (False, True)
+            return (False, True)
+        except Exception as e:
+            self.logger.error(
+                "Usage-stats recalculation failed, manual recalculation required",
+                extra={"migration_id": str(migration_id), "error": str(e)},
+            )
+            return (False, True)

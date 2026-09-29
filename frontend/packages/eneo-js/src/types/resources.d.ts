@@ -24,6 +24,13 @@ export type SkillRuntimePolicy = components["schemas"]["SkillRuntimePolicyPublic
 export type SkillRuntimePolicyUpdate = components["schemas"]["SkillRuntimePolicyUpdate"];
 export type SkillRuntimeModelProjections = components["schemas"]["SkillRuntimeModelProjections"];
 export type OrganizationSkillPublic = components["schemas"]["OrganizationSkillPublic"];
+export type SkillUsageCounts = components["schemas"]["SkillUsageCountsPublic"];
+export type SkillRemovalRequest = components["schemas"]["SkillRemovalRequest"];
+export type SkillRemovalResult = components["schemas"]["SkillRemovalPublic"];
+export type SkillBindingDetachRequest = components["schemas"]["SkillBindingDetachRequest"];
+export type SkillDetachmentTotals = components["schemas"]["SkillDetachmentTotalsPublic"];
+export type SkillAdoptionResourceKind = components["schemas"]["SkillAdoptionResourceKind"];
+export type SkillAdoptionDrift = components["schemas"]["SkillAdoptionDrift"];
 export type OrganizationSkillSummaryPublic =
   components["schemas"]["OrganizationSkillSummaryPublic"];
 export type OrganizationSkillSummaryPagePublic =
@@ -60,10 +67,11 @@ export type GroupSparse = components["schemas"]["GroupPublicWithMetadata"];
 export type InfoBlob = Omit<components["schemas"]["InfoBlobPublic"], "text"> & {
   text?: string | undefined;
 };
-export type Widget = components["schemas"]["WidgetPublic"];
 export type CompletionModel = components["schemas"]["CompletionModelPublic"];
 export type EmbeddingModel = components["schemas"]["EmbeddingModelPublic"];
 export type TranscriptionModel = components["schemas"]["TranscriptionModelPublic"];
+export type ImageModel = components["schemas"]["ImageModelPublic"];
+export type MCPServerBackingModel = components["schemas"]["MCPServerBackingModelPublic"];
 export type SecurityClassification = components["schemas"]["SecurityClassificationPublic"];
 export type Job = components["schemas"]["JobPublic"];
 export type JobFailureCode = components["schemas"]["JobFailureCode"];
@@ -112,6 +120,7 @@ export type Limits = components["schemas"]["Limits"];
 export type UploadedFile = components["schemas"]["FilePublic"];
 export type Website = components["schemas"]["WebsitePublic"];
 export type Settings = components["schemas"]["SettingsPublic"];
+export type WhatsNewState = components["schemas"]["WhatsNewStatePublic"];
 export type SkillExecutionBlockPublic = components["schemas"]["SkillExecutionBlockPublic"];
 export type SkillExecutionBlockState = components["schemas"]["SkillExecutionBlockState"];
 export type WebsiteSparse = components["schemas"]["WebsiteSparse"];
@@ -137,6 +146,10 @@ export type ApiKeyStateChangeRequest = components["schemas"]["ApiKeyStateChangeR
 export type ApiKeyCreatedResponse = components["schemas"]["ApiKeyCreatedResponse"];
 export type ApiKeyPolicy = components["schemas"]["ApiKeyPolicyResponse"];
 export type SuperApiKeyStatus = components["schemas"]["SuperApiKeyStatus"];
+export type ModuleInstallation = components["schemas"]["ModuleInstallation"];
+export type ModuleInstallationConfig = components["schemas"]["ModuleInstallationConfig"];
+export type ModuleInstallationChange = components["schemas"]["ModuleInstallationChange"];
+export type ModuleInstallationList = components["schemas"]["PaginatedResponse_ModuleInstallation_"];
 
 export type CursorPaginated<T> = {
   items: T[];
@@ -249,6 +262,8 @@ export type TenantCompletionModelUpdate = components["schemas"]["TenantCompletio
 export type TenantEmbeddingModelUpdate = components["schemas"]["TenantEmbeddingModelUpdate"];
 export type TenantTranscriptionModelUpdate =
   components["schemas"]["TenantTranscriptionModelUpdate"];
+export type TenantImageModelCreate = components["schemas"]["TenantImageModelCreate"];
+export type TenantImageModelUpdate = components["schemas"]["TenantImageModelUpdate"];
 
 // Federation types
 export type TenantInfo = {

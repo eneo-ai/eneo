@@ -19,15 +19,18 @@ from eneo.main.exceptions import BadRequestException
 from eneo.main.models import NOT_PROVIDED, NotProvided, PaginatedResponse
 from eneo.mcp_servers.application.mcp_server_service import ToolChange
 from eneo.mcp_servers.presentation.models import (
+    CapabilityActivationResponse,
     MCPConnectionStatus,
     MCPServerCreate,
     MCPServerCreateResponse,
     MCPServerPublic,
+    MCPServerPurpose,
     MCPServerSettingsCreate,
     MCPServerSettingsPublic,
     MCPServerSettingsUpdate,
     MCPServerToolList,
     MCPServerToolPublic,
+    MCPServerToolRename,
     MCPServerToolSyncResponse,
     MCPServerToolUpdate,
     MCPServerUpdate,
@@ -56,13 +59,14 @@ _TAGS_QUERY = Query(None)
 )
 async def get_mcp_servers(
     tags: list[str] | None = _TAGS_QUERY,
+    purpose: MCPServerPurpose | None = None,
     container: Container = _WITH_USER,
 ):
-    """Get all MCP servers from global catalog with optional tag filtering."""
+    """Get all MCP servers from global catalog with optional tag/purpose filtering."""
     service = container.mcp_server_service()
     assembler = container.mcp_server_assembler()
 
-    mcp_servers = await service.get_mcp_servers(tags=tags)
+    mcp_servers = await service.get_mcp_servers(tags=tags, purpose=purpose)
     return assembler.to_paginated_response(mcp_servers)
 
 
@@ -77,6 +81,7 @@ async def get_mcp_servers(
     responses=responses.get_responses([404]),
 )
 async def get_tenant_mcp_settings(
+    purpose: MCPServerPurpose | None = None,
     container: Container = _WITH_USER,
 ):
     """Get all available MCP servers with tenant enablement status."""
@@ -84,6 +89,8 @@ async def get_tenant_mcp_settings(
     assembler = container.mcp_server_settings_assembler()
 
     settings = await service.get_available_mcp_servers()
+    if purpose is not None:
+        settings = [server for server in settings if server.purpose == purpose]
     return assembler.to_paginated_response(settings)
 
 
@@ -283,8 +290,9 @@ async def create_mcp_server(
 
     result = await service.create_mcp_server(
         name=data.name,
-        http_url=str(data.http_url),
+        http_url=str(data.http_url) if data.http_url else "",
         http_auth_type=data.http_auth_type,
+        purpose=data.purpose,
         description=data.description,
         http_auth_config_schema=data.http_auth_config_schema,
         forward_identity=data.forward_identity,
@@ -297,6 +305,11 @@ async def create_mcp_server(
         if data.documentation_url
         else None,
         security_classification=security_classification,
+        audience=data.audience,
+        audience_priority=data.audience_priority,
+        user_group_ids=data.user_group_ids,
+        image_model_id=data.image_model_id,
+        activate=data.activate,
     )
 
     # If connection failed, return 400 error with message
@@ -317,6 +330,26 @@ async def create_mcp_server(
         description=f"Created MCP server '{result.server.name}'",
         metadata=AuditMetadata.standard(actor=user, target=result.server),
     )
+
+    if data.activate:
+        await audit_service.log_async(
+            tenant_id=user.tenant_id,
+            user=user,
+            action=ActionType.MCP_SERVER_ENABLED,
+            entity_type=EntityType.MCP_SERVER,
+            entity_id=result.server.id,
+            description=f"Activated {result.server.purpose} provider",
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=result.server,
+                extra={
+                    "purpose": result.server.purpose,
+                    "deactivated_server_ids": [
+                        str(i) for i in result.deactivated_server_ids or []
+                    ],
+                },
+            ),
+        )
 
     return MCPServerCreateResponse(
         server=assembler.from_domain_to_model(result.server),
@@ -375,6 +408,11 @@ async def update_mcp_server(
         if data.documentation_url
         else None,
         security_classification=security_classification,
+        purpose=data.purpose,
+        audience=data.audience,
+        audience_priority=data.audience_priority,
+        user_group_ids=data.user_group_ids,
+        image_model_id=data.image_model_id,
     )
 
     # If connection validation failed, return 400 error with message
@@ -389,6 +427,8 @@ async def update_mcp_server(
     changes: dict[str, Any] = {}
     if data.name is not None and data.name != old_server.name:
         changes["name"] = {"old": old_server.name, "new": data.name}
+    if data.purpose is not None and data.purpose != old_server.purpose:
+        changes["purpose"] = {"old": old_server.purpose, "new": data.purpose}
     if data.http_url is not None and str(data.http_url) != old_server.http_url:
         changes["http_url"] = {"old": old_server.http_url, "new": str(data.http_url)}
     if data.description is not None and data.description != old_server.description:
@@ -406,6 +446,16 @@ async def update_mcp_server(
         }
     if data.tags is not None and data.tags != old_server.tags:
         changes["tags"] = {"old": old_server.tags, "new": data.tags}
+    if (
+        not isinstance(data.image_model_id, NotProvided)
+        and data.image_model_id != old_server.image_model_id
+    ):
+        changes["image_model_id"] = {
+            "old": str(old_server.image_model_id)
+            if old_server.image_model_id
+            else None,
+            "new": str(data.image_model_id) if data.image_model_id else None,
+        }
     if (
         data.forward_identity is not None
         and data.forward_identity != old_server.forward_identity
@@ -487,6 +537,101 @@ async def delete_mcp_server(
         description=f"Deleted MCP server '{mcp_server.name}'",
         metadata=AuditMetadata.standard(actor=user, target=mcp_server),
     )
+
+
+# ============================================================================
+# Capability Provider Activation Endpoints
+# ============================================================================
+
+
+@router.post(
+    "/{id}/activate/",
+    description=(
+        "Activate this server as the tenant's provider for its capability "
+        "purpose (admin only)."
+    ),
+    response_model=CapabilityActivationResponse,
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def activate_capability_provider(
+    id: UUID,
+    container: Container = _WITH_USER,
+):
+    """Activate this server as the tenant's provider for its capability
+    purpose (admin only).
+
+    Atomic switch: deactivates the previously active provider for the same
+    purpose in the same transaction. Rejects general-purpose servers and
+    servers that are unreachable or have no enabled tools.
+    """
+    service = container.mcp_server_service()
+    assembler = container.mcp_server_assembler()
+
+    result = await service.activate_capability_server(id)
+
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.MCP_SERVER_ENABLED,
+        entity_type=EntityType.MCP_SERVER,
+        entity_id=result.server.id,
+        description=(
+            f"Activated {result.server.purpose} provider '{result.server.name}'"
+        ),
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=result.server,
+            extra={
+                "purpose": result.server.purpose,
+                "deactivated_server_ids": [
+                    str(server_id) for server_id in result.deactivated_server_ids
+                ],
+            },
+        ),
+    )
+
+    return CapabilityActivationResponse(
+        server=assembler.from_domain_to_model(result.server),
+        deactivated_server_ids=result.deactivated_server_ids,
+    )
+
+
+@router.post(
+    "/{id}/deactivate/",
+    description="Deactivate this capability provider (admin only).",
+    response_model=MCPServerPublic,
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def deactivate_capability_provider(
+    id: UUID,
+    container: Container = _WITH_USER,
+):
+    """Deactivate this capability provider, leaving the tenant without one
+    for its purpose."""
+    service = container.mcp_server_service()
+    assembler = container.mcp_server_assembler()
+
+    server = await service.deactivate_capability_server(id)
+
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.MCP_SERVER_DISABLED,
+        entity_type=EntityType.MCP_SERVER,
+        entity_id=server.id,
+        description=f"Deactivated {server.purpose} provider '{server.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=server,
+            extra={"purpose": server.purpose},
+        ),
+    )
+
+    return assembler.from_domain_to_model(server)
 
 
 # ============================================================================
@@ -691,6 +836,58 @@ async def approve_all_tool_changes(
 
 
 @router.put(
+    "/{id}/tools/{tool_id}/display-name/",
+    description="Set or clear the admin display name for a tool (admin only).",
+    response_model=MCPServerToolPublic,
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def update_tool_display_name(
+    id: UUID,
+    tool_id: UUID,
+    data: MCPServerToolRename,
+    container: Container = _WITH_USER,
+):
+    """Set or clear the admin display name for a tool (admin only).
+
+    Display-only: the protocol-level tool name is untouched. Null clears the
+    override, falling back to the remote-synced title.
+    """
+    service = container.mcp_server_service()
+    assembler = container.mcp_server_tool_assembler()
+
+    mcp_server = await service.get_mcp_server(id)
+    tool = await service.update_tool_display_name(id, tool_id, data.display_name)
+
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.MCP_SERVER_UPDATED,
+        entity_type=EntityType.MCP_SERVER_TOOL,
+        entity_id=tool.id,
+        description=(
+            f"Renamed tool '{tool.name}' on MCP server '{mcp_server.name}' to "
+            f"'{tool.display_name}'"
+            if tool.display_name
+            else f"Cleared display name for tool '{tool.name}' on MCP server "
+            f"'{mcp_server.name}'"
+        ),
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=tool,
+            extra={
+                "mcp_server_id": str(mcp_server.id),
+                "mcp_server_name": mcp_server.name,
+                "display_name": tool.display_name,
+            },
+        ),
+    )
+
+    return assembler.from_domain_to_model(tool)
+
+
+@router.put(
     "/{id}/tools/{tool_id}/",
     description="Update global default enabled status for a tool (admin only).",
     response_model=MCPServerToolPublic,
@@ -710,7 +907,7 @@ async def update_tool_default_enabled(
     mcp_server = await service.get_mcp_server(id)
 
     # Update tool's default enabled status
-    tool = await service.update_tool_default_enabled(tool_id, data.is_enabled)
+    tool = await service.update_tool_default_enabled(id, tool_id, data.is_enabled)
 
     # Audit logging
     user = container.user()

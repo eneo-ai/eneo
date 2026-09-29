@@ -483,6 +483,7 @@ def governed_reasoning_config(
         prompt_enforced=False,
         enforced_prompt_text=None,
         reasoning_policy_configured=True,
+        inline_file_text=None,
         reasoning_effort_user_configurable=user_configurable,
     )
 
@@ -533,6 +534,7 @@ async def test_personal_chat_can_change_reasoning_effort_when_policy_allows(
         prompt_enforced=False,
         enforced_prompt_text=None,
         reasoning_policy_configured=True,
+        inline_file_text=None,
         reasoning_effort_user_configurable=True,
     )
     kwargs = ModelKwargs(reasoning_effort="high")
@@ -769,6 +771,7 @@ async def test_personal_chat_cannot_store_unsupported_reasoning_effort(
         prompt_enforced=False,
         enforced_prompt_text=None,
         reasoning_policy_configured=True,
+        inline_file_text=None,
         reasoning_effort_user_configurable=True,
     )
 
@@ -940,7 +943,7 @@ async def test_update_allows_mcp_alongside_knowledge(setup: Setup):
     mcp_id = uuid4()
     # Mock DB to return the MCP server as tenant-enabled and space-assigned
     mock_result = MagicMock()
-    mock_result.fetchall.return_value = [(mcp_id,)]
+    mock_result.fetchall.return_value = [(mcp_id, "general")]
     setup.service.repo.session.execute = AsyncMock(return_value=mock_result)
 
     await setup.service.update_assistant(

@@ -6,10 +6,10 @@
 
 <script lang="ts">
   import { IconAssistants } from "@eneo/icons/assistants";
-  import { IconSession } from "@eneo/icons/session";
+  import { IconSpeechBubble } from "@eneo/icons/speech-bubble";
   import { IconQuestionMark } from "@eneo/icons/question-mark";
   import { Page, Settings } from "$lib/components/layout";
-  import { Input } from "@eneo/ui";
+  import DateRangePicker from "$lib/components/DateRangePicker.svelte";
   import { CalendarDate } from "@internationalized/date";
   import { getEneo } from "$lib/core/Eneo";
   import type { AnalyticsAggregatedData } from "@eneo/eneo-js";
@@ -23,7 +23,7 @@
     ExternalLink,
     Users,
     Activity
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { formatNumber } from "$lib/core/formatting/formatNumber";
 
   import InteractiveGraph from "./InteractiveGraph.svelte";
@@ -552,7 +552,7 @@
             >
               <!-- Date Range Picker Toolbar -->
               <div slot="toolbar" class="flex items-center gap-4">
-                <Input.DateRange bind:value={dateRange} />
+                <DateRangePicker bind:value={dateRange} />
                 <!-- Quick preset chips -->
                 <div class="flex gap-1.5">
                   {#each presets as preset (preset.days)}
@@ -560,7 +560,7 @@
                       class="rounded-full border px-2.5 py-1 text-xs transition-all duration-150
                              {activePresetDays === preset.days
                         ? 'bg-accent-dimmer border-accent-default text-accent-default font-medium'
-                        : 'border-default text-secondary hover:bg-hover-dimmer hover:border-border-stronger'}"
+                        : 'border-default text-secondary hover:bg-hover-dimmer hover:border-stronger'}"
                       onclick={() => setPreset(preset.days)}
                     >
                       {preset.label}
@@ -585,7 +585,7 @@
 
               <div class="h-[600px]">
                 <div
-                  class="border-default hover:border-border-stronger relative flex h-full w-full items-stretch overflow-clip rounded-lg border
+                  class="border-default hover:border-stronger relative flex h-full w-full items-stretch overflow-clip rounded-lg border
                          shadow-sm transition-all duration-200 hover:shadow"
                 >
                   {#if !analyticsData}
@@ -712,7 +712,7 @@
                           style="--delay: 50ms"
                         >
                           <div class="relative mb-2 flex items-center gap-2.5">
-                            <IconSession
+                            <IconSpeechBubble
                               class="h-4 w-4 shrink-0 text-[var(--text-muted)] opacity-50 transition-all duration-200 group-hover:text-[var(--accent-default)] group-hover:opacity-100"
                             />
                             <span

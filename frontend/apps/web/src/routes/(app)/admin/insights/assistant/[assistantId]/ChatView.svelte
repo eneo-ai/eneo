@@ -8,7 +8,9 @@
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { IconSparkles } from "@eneo/icons/sparkles";
   import { IconSendArrow } from "@eneo/icons/send-arrow";
-  import { Button, Markdown } from "@eneo/ui";
+  import { Markdown } from "$lib/components/markdown/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import CopyButton from "$lib/components/CopyButton.svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
   import { getEneo } from "$lib/core/Eneo";
@@ -24,7 +26,6 @@
 
   let question = "";
   let loadingAnswer = false;
-  let copiedAnswer = false;
 
   const NOT_ANSWERED = "_NO_QUESTION_ASKED_";
   let message = { question: "", answer: NOT_ANSWERED };
@@ -62,16 +63,6 @@
       message.answer = m.error_connecting_to_server();
     }
     loadingAnswer = false;
-  }
-
-  async function copyAnswer() {
-    if (!message.answer || message.answer === NOT_ANSWERED) return;
-    if (!navigator?.clipboard) return;
-    await navigator.clipboard.writeText(message.answer);
-    copiedAnswer = true;
-    setTimeout(() => {
-      copiedAnswer = false;
-    }, 1500);
   }
 
   async function openQuestionHistory() {
@@ -173,19 +164,19 @@
           <span class="truncate">{message.question}</span>
         </div>
         <div class="flex shrink-0 items-center gap-2">
-          <Button variant="outlined" on:click={copyAnswer}>
-            {copiedAnswer ? m.copied() : m.copy()}
-          </Button>
+          <CopyButton
+            text={message.answer}
+            label={m.copy()}
+            showLabel
+            variant="outline"
+            disabled={!message.answer}
+          />
           <div class="border-dimmer h-5 w-px border-l" aria-hidden="true"></div>
-          <Button variant="outlined" on:click={openQuestionHistory}>
+          <Button variant="outline" onclick={openQuestionHistory}>
             {m.question_history()}
           </Button>
-          <Button
-            variant="outlined"
-            on:click={() => {
-              message.answer = NOT_ANSWERED;
-              copiedAnswer = false;
-            }}>{m.new_questions()}</Button
+          <Button variant="outline" onclick={() => (message.answer = NOT_ANSWERED)}
+            >{m.new_questions()}</Button
           >
         </div>
       </div>

@@ -17,11 +17,13 @@ from eneo.authentication.auth_dependencies import (
     ASSISTANTS_READ_OVERRIDES,
     CONVERSATIONS_READ_OVERRIDES,
     FILES_READ_OVERRIDES,
+    INFO_BLOBS_READ_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
     require_api_key_permission,
     require_api_key_scope_check,
     require_file_delete_scope_guard,
     require_resource_permission_for_method,
+    require_session_auth,
 )
 from eneo.authentication.auth_models import ApiKeyPermission
 from eneo.authentication.federation_router import router as federation_router
@@ -53,6 +55,12 @@ from eneo.help_assistants.api.run_router import (
     router as help_assistants_run_router,
 )
 from eneo.icons.api.icon_router import router as icons_router
+from eneo.image_models.presentation.image_models_router import (
+    router as image_models_router,
+)
+from eneo.image_models.presentation.tenant_image_models_router import (
+    router as tenant_image_models_router,
+)
 from eneo.info_blobs.info_blobs_router import router as info_blobs_router
 from eneo.integration.presentation.admin_sharepoint_router import (
     router as admin_sharepoint_router,
@@ -65,6 +73,9 @@ from eneo.integration.presentation.integration_router import (
 )
 from eneo.integration.presentation.sharepoint_webhook_router import (
     router as sharepoint_webhook_router,
+)
+from eneo.integration.sharepoint_fixture.router import (
+    router as sharepoint_fixture_router,
 )
 from eneo.jobs.job_router import router as jobs_router
 from eneo.limits.limit_router import router as limit_router
@@ -144,6 +155,7 @@ from eneo.user_groups.user_groups_router import router as user_groups_router
 from eneo.users.user_router import router as users_router
 from eneo.users.user_router import users_admin_router
 from eneo.websites.presentation.website_router import router as website_router
+from eneo.whats_new.whats_new_router import router as whats_new_router
 
 router = APIRouter()
 
@@ -212,7 +224,11 @@ router.include_router(
     prefix="/info-blobs",
     tags=["info-blobs"],
     dependencies=[
-        Depends(require_resource_permission_for_method("knowledge")),
+        Depends(
+            require_resource_permission_for_method(
+                "knowledge", read_override_endpoints=INFO_BLOBS_READ_OVERRIDES
+            )
+        ),
         Depends(
             require_api_key_scope_check(resource_type="info_blob", path_param=None)
         ),
@@ -377,6 +393,12 @@ router.include_router(
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
+    image_models_router,
+    prefix="/image-models",
+    tags=["image-models"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
     model_providers_router,
     prefix="/admin/model-providers",
     tags=["admin", "model-providers"],
@@ -397,6 +419,12 @@ router.include_router(
 router.include_router(
     tenant_transcription_models_router,
     prefix="/admin/tenant-models/transcription",
+    tags=["admin", "tenant-models"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    tenant_image_models_router,
+    prefix="/admin/tenant-models/image",
     tags=["admin", "tenant-models"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
@@ -491,6 +519,12 @@ router.include_router(
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
+    sharepoint_fixture_router,
+    prefix="/integrations/sharepoint/fixtures",
+    tags=["integrations", "development-fixtures"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
     integration_router,
     prefix="/integrations",
     tags=["integrations"],
@@ -536,6 +570,13 @@ router.include_router(
     ],
 )
 router.include_router(organization_skill_router)
+# "Seen" is personal UI state, so API keys (user-owned or service) are rejected.
+router.include_router(
+    whats_new_router,
+    prefix="/whats-new",
+    tags=["whats-new"],
+    dependencies=[Depends(require_session_auth)],
+)
 router.include_router(
     sharepoint_webhook_router, prefix="/integrations", tags=["integrations"]
 )
@@ -568,7 +609,7 @@ router.include_router(
     tenant_crawler_settings_router, prefix="/sysadmin", tags=["sysadmin"]
 )
 router.include_router(tenant_federation_router, prefix="/sysadmin", tags=["sysadmin"])
-router.include_router(module_router, prefix="/modules", tags=["modules"])
+router.include_router(module_router, prefix="/admin/modules", tags=["modules"])
 router.include_router(module_auth_router, prefix="/module-auth", tags=["module-auth"])
 router.include_router(
     federation_router, prefix="", tags=["authentication"]

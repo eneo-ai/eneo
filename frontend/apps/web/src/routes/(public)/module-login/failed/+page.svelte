@@ -3,7 +3,7 @@
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
 
   const { data } = $props();
 
@@ -33,7 +33,7 @@
     </div>
 
     <div class="border-default bg-primary flex flex-col gap-3 p-4">
-      <Button href={localizeHref(DEFAULT_LANDING_PAGE)} variant="primary">
+      <Button href={localizeHref(DEFAULT_LANDING_PAGE)}>
         {m.module_login_back_to_eneo()}
       </Button>
     </div>

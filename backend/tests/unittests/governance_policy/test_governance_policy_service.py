@@ -144,6 +144,40 @@ async def test_update_policy_accepts_reasoning_default_supported_by_a_model():
     repo.save.assert_awaited_once()
 
 
+async def test_update_policy_stores_file_policy_without_touching_other_facets():
+    tenant_id = uuid4()
+    policy = GovernancePolicy(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT,
+        reasoning_policy_configured=True,
+        default_reasoning_effort="high",
+    )
+    repo = AsyncMock()
+    repo.get_by_tenant_for_update.return_value = policy
+    repo.save.return_value = policy
+    completion_models = AsyncMock()
+    service = GovernancePolicyService(
+        user=_admin(tenant_id),
+        repo=repo,
+        completion_model_crud_service=completion_models,
+        mcp_server_settings_service=AsyncMock(),
+        prompt_library_service=AsyncMock(),
+        model_provider_repository=AsyncMock(),
+        skill_service=AsyncMock(),
+        space_service=AsyncMock(),
+    )
+
+    result = await service.update_policy(inline_file_text=False)
+
+    assert result is policy
+    assert policy.inline_file_text is False
+    assert policy.default_reasoning_effort == "high"
+    # A file-only update never re-validates the reasoning default.
+    completion_models.get_available_completion_models.assert_not_awaited()
+    repo.save.assert_awaited_once()
+
+
 async def test_update_policy_rejects_reasoning_default_unsupported_by_models():
     tenant_id = uuid4()
     policy = GovernancePolicy(

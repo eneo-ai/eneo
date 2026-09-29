@@ -6,8 +6,8 @@
 
 <script lang="ts">
   import type { UserTokenUsage, UserSortBy } from "@eneo/eneo-js";
-  import { createRender } from "svelte-headless-table";
-  import { Button, Table } from "@eneo/ui";
+  import * as Table from "$lib/components/ui/table/index.js";
+  import { Button } from "$lib/components/ui/button";
   import { formatNumber } from "$lib/core/formatting/formatNumber";
   import { m } from "$lib/paraglide/messages";
   import UsageBadgeWrapper from "./UsageBadgeWrapper.svelte";
@@ -30,22 +30,34 @@
     onSortChange: (sortBy: UserSortBy, sortOrder: "asc" | "desc") => void;
   }
 
-  const {
+  let {
     users,
     totalUsers,
     page,
     perPage,
+    sortBy,
+    sortOrder,
     highThreshold,
     mediumThreshold,
     costRates,
     onUserClick,
-    onPageChange
+    onPageChange,
+    onSortChange
   }: Props = $props();
 
-  // Sum the per-model estimated cost for one user. A user's models_used array
-  // already breaks down tokens per model, so we look up the rate for each and
-  // accumulate. Returns null if every model is missing rates so callers can
-  // render a neutral chip rather than a misleading "$0".
+  function sort(field: UserSortBy) {
+    onSortChange(
+      field,
+      sortBy === field
+        ? sortOrder === "asc"
+          ? "desc"
+          : "asc"
+        : field === "username"
+          ? "asc"
+          : "desc"
+    );
+  }
+
   function estimateUserCost(user: UserTokenUsage): number | null {
     let total = 0;
     let anyKnown = false;
@@ -59,116 +71,92 @@
     }
     return anyKnown ? total : null;
   }
-
-  const table = Table.createWithResource<UserTokenUsage>([]);
-
-  const viewModel = table.createViewModel([
-    table.columnPrimary({
-      header: m.user(),
-      value: (item) => item.username,
-      cell: (item) => {
-        return createRender(Table.ButtonCell, {
-          label: item.value.username,
-          onclick: () => {
-            onUserClick(item.value);
-          }
-        });
-      }
-    }),
-
-    table.column({
-      header: m.usage_level(),
-      accessor: (item) => item.total_tokens,
-      id: "usage_level",
-      cell: (item) => {
-        return createRender(UsageBadgeWrapper, {
-          tokens: item.value,
-          highThreshold,
-          mediumThreshold
-        });
-      }
-    }),
-
-    table.column({
-      header: m.input_tokens(),
-      accessor: "total_input_tokens",
-      id: "input_tokens",
-      cell: (item) => formatNumber(item.value)
-    }),
-
-    table.column({
-      header: m.output_tokens(),
-      accessor: "total_output_tokens",
-      id: "output_tokens",
-      cell: (item) => formatNumber(item.value)
-    }),
-
-    table.column({
-      header: m.total_tokens(),
-      accessor: "total_tokens",
-      id: "total_tokens",
-      cell: (item) => formatNumber(item.value)
-    }),
-
-    table.column({
-      header: m.requests(),
-      accessor: "total_requests",
-      id: "requests",
-      cell: (item) => formatNumber(item.value),
-      plugins: {
-        sort: {
-          getSortValue(item) {
-            return item;
-          }
-        }
-      }
-    }),
-
-    table.column({
-      header: m.estimated_cost(),
-      accessor: (user) => user,
-      id: "estimated_cost",
-      cell: (item) =>
-        createRender(EstimatedCostCell, { label: formatCostUSD(estimateUserCost(item.value)) }),
-      plugins: {
-        sort: {
-          getSortValue(value) {
-            return estimateUserCost(value) ?? -1;
-          }
-        }
-      }
-    })
-  ]);
-
-  $effect(() => {
-    table.update(users);
-  });
 </script>
 
-<Table.Root {viewModel} resourceName={m.resource_users()} displayAs="list"></Table.Root>
+{#snippet sortHeader(field: UserSortBy, label: string)}
+  <Table.Head
+    aria-sort={sortBy === field ? (sortOrder === "asc" ? "ascending" : "descending") : "none"}
+  >
+    <Button variant="ghost" class="-ml-2" onclick={() => sort(field)}>
+      {label}<span aria-hidden="true"
+        >{sortBy === field ? (sortOrder === "asc" ? "↑" : "↓") : "↕"}</span
+      >
+    </Button>
+  </Table.Head>
+{/snippet}
 
-{#if totalUsers > perPage}
-  <div class="mt-4 flex items-center justify-center">
-    <Button variant="outlined" disabled={page === 1} onclick={() => onPageChange(1)}>
-      {m.first()}
-    </Button>
-    <Button variant="outlined" disabled={page === 1} onclick={() => onPageChange(page - 1)}>
-      {m.previous()}
-    </Button>
-    <div class="px-4 py-2">{page} / {Math.ceil(totalUsers / perPage)}</div>
-    <Button
-      variant="outlined"
-      disabled={page * perPage >= totalUsers}
-      onclick={() => onPageChange(page + 1)}
+<div class="border-default bg-primary overflow-hidden rounded-lg border">
+  <Table.Root class="[&_td]:px-4 [&_td]:py-3 [&_th]:px-4">
+    <Table.Caption class="sr-only">{m.usage_by_user()}</Table.Caption>
+    <Table.Header
+      ><Table.Row>
+        {@render sortHeader("username", m.user())}
+        <Table.Head>{m.usage_level()}</Table.Head>
+        {@render sortHeader("input_tokens", m.input_tokens())}
+        {@render sortHeader("output_tokens", m.output_tokens())}
+        {@render sortHeader("total_tokens", m.total_tokens())}
+        {@render sortHeader("requests", m.requests())}
+        <Table.Head>{m.estimated_cost()}</Table.Head>
+      </Table.Row></Table.Header
     >
-      {m.next()}
-    </Button>
-    <Button
-      variant="outlined"
-      disabled={page * perPage >= totalUsers}
-      onclick={() => onPageChange(Math.ceil(totalUsers / perPage))}
+    <Table.Body>
+      {#each users as user (user.user_id)}
+        <Table.Row>
+          <Table.Cell>
+            <Button variant="link" class="h-auto p-0" onclick={() => onUserClick(user)}
+              >{user.username}</Button
+            >
+            {#if user.email !== user.username}<div class="text-muted-foreground text-xs">
+                {user.email}
+              </div>{/if}
+          </Table.Cell>
+          <Table.Cell
+            ><UsageBadgeWrapper
+              tokens={user.total_tokens}
+              {highThreshold}
+              {mediumThreshold}
+            /></Table.Cell
+          >
+          <Table.Cell class="tabular-nums">{formatNumber(user.total_input_tokens)}</Table.Cell>
+          <Table.Cell class="tabular-nums">{formatNumber(user.total_output_tokens)}</Table.Cell>
+          <Table.Cell class="tabular-nums">{formatNumber(user.total_tokens)}</Table.Cell>
+          <Table.Cell class="tabular-nums">{formatNumber(user.total_requests)}</Table.Cell>
+          <Table.Cell
+            ><EstimatedCostCell label={formatCostUSD(estimateUserCost(user))} /></Table.Cell
+          >
+        </Table.Row>
+      {:else}
+        <Table.Row
+          ><Table.Cell colspan={7} class="h-24 text-center">{m.no_results()}</Table.Cell></Table.Row
+        >
+      {/each}
+    </Table.Body>
+  </Table.Root>
+</div>
+
+{#if totalUsers > perPage || page > 1}
+  <nav
+    class="mt-4 flex flex-wrap items-center justify-center gap-2"
+    aria-label={m.admin_users_pagination()}
+  >
+    <Button variant="outline" disabled={page === 1} onclick={() => onPageChange(1)}
+      >{m.first()}</Button
     >
-      {m.last()}
-    </Button>
-  </div>
+    <Button variant="outline" disabled={page === 1} onclick={() => onPageChange(page - 1)}
+      >{m.previous()}</Button
+    >
+    <span class="px-2 text-sm tabular-nums"
+      >{page} / {Math.max(1, Math.ceil(totalUsers / perPage))}</span
+    >
+    <Button
+      variant="outline"
+      disabled={page * perPage >= totalUsers}
+      onclick={() => onPageChange(page + 1)}>{m.next()}</Button
+    >
+    <Button
+      variant="outline"
+      disabled={page * perPage >= totalUsers}
+      onclick={() => onPageChange(Math.ceil(totalUsers / perPage))}>{m.last()}</Button
+    >
+  </nav>
 {/if}

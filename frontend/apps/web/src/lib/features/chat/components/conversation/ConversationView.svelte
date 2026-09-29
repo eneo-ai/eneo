@@ -5,14 +5,17 @@
   import { toStore } from "svelte/store";
   import AttachmentDropArea from "$lib/features/attachments/components/AttachmentDropArea.svelte";
   import { IconArrowDownToLine } from "@eneo/icons/arrow-down-to-line";
-  import { Markdown } from "@eneo/ui";
+  import { Markdown } from "$lib/components/markdown/index.js";
   import Message from "./Message.svelte";
   import ChatComposer from "./ChatComposer.svelte";
   import { fade } from "svelte/transition";
   import { browser } from "$app/environment";
-  import { Tooltip } from "@eneo/ui";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { getChatService } from "../../ChatService.svelte";
-  import type { Snippet } from "svelte";
+  import { chatCapabilityAvailable } from "../../chatCapabilities";
+  import { getAppContext } from "$lib/core/AppContext";
+  import { untrack, type Snippet } from "svelte";
+  import { track } from "$lib/core/helpers/track";
   import { m } from "$lib/paraglide/messages";
 
   type Props = {
@@ -23,17 +26,25 @@
   let { children, onNewConversation }: Props = $props();
 
   const chat = getChatService();
+  const { user } = getAppContext();
 
   // Validate uploads client-side against the backend's per-format size limits
   // (and the partner model's vision support) so oversized or unsupported files
   // are rejected instantly with a clear message instead of silently failing the
   // server-side request. Group-chat partners have no completion_model, so vision
-  // formats are simply omitted from the accepted set.
+  // formats are simply omitted from the accepted set. Images are also accepted
+  // when image generation is available: the model can hand them to the image
+  // tool as reference images even without seeing them itself.
   const attachmentRules = getAttachmentRulesStore(
     toStore(() => {
       const partner = chat.partner;
+      const completion_model =
+        partner && "completion_model" in partner ? partner.completion_model : null;
       return {
-        completion_model: partner && "completion_model" in partner ? partner.completion_model : null
+        completion_model,
+        acceptsImageAttachments:
+          completion_model?.vision === true ||
+          chatCapabilityAvailable(partner, user, "image_generation")
       };
     })
   );
@@ -71,6 +82,23 @@
 
   $effect(() => {
     updateScroll(chat.currentConversation);
+  });
+
+  // Keep the streaming answer in view and settle on the finished result,
+  // unless the reader has scrolled up (then the "scroll to bottom" button
+  // stays as the opt-in).
+  $effect(() => {
+    const last = chat.currentConversation.messages?.at(-1);
+    const streaming = chat.askQuestion.isLoading;
+    track(last?.answer?.length ?? 0);
+    untrack(() => {
+      if (!scrollContainer || showScrollToBottom) return;
+      if (streaming) {
+        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      } else {
+        scrollToBottom();
+      }
+    });
   });
 
   let isDragging = $state(false);
@@ -129,12 +157,14 @@
   >
     {#if showScrollToBottom}
       <div transition:fade={{ duration: 150 }} class="absolute -top-12">
-        <Tooltip text={m.scroll_to_bottom()}>
-          <button
+        <Tooltip.Root>
+          <Tooltip.Trigger
             class="border-stronger bg-primary ring-default hover:bg-secondary flex gap-1 rounded-full border px-1.5 py-1.5 shadow-lg ring-offset-0 hover:ring-2"
-            onclick={scrollToBottom}><IconArrowDownToLine></IconArrowDownToLine></button
+            aria-label={m.scroll_to_bottom()}
+            onclick={scrollToBottom}><IconArrowDownToLine></IconArrowDownToLine></Tooltip.Trigger
           >
-        </Tooltip>
+          <Tooltip.Content>{m.scroll_to_bottom()}</Tooltip.Content>
+        </Tooltip.Root>
       </div>
     {/if}
     <ChatComposer {scrollToBottom} {onNewConversation}></ChatComposer>

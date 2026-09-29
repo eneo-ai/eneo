@@ -33,7 +33,7 @@ export function initAssistants(client) {
      * */
     create: async (assistant) => {
       if ("spaceId" in assistant) {
-        const { spaceId: id, name, from_template } = assistant;
+        const { spaceId: id, ...configuration } = assistant;
         const res = await client.fetch("/api/v1/spaces/{id}/applications/assistants/", {
           method: "post",
           params: {
@@ -42,7 +42,7 @@ export function initAssistants(client) {
             }
           },
           requestBody: {
-            "application/json": { name, from_template }
+            "application/json": configuration
           }
         });
         return res;
@@ -138,10 +138,22 @@ export function initAssistants(client) {
      * @param {(partialResponse: AssistantResponse, controller: AbortController) => void} [params.onAnswer] Callback to run when a new token/word of the answer is received
      * @param {(response: Response) => Promise<void>} [params.onOpen] Callback to run once the initial response of the backend is received
      * @param {AbortController} [params.abortController] Optionally pass in an AbortController that can abort the stream
+     * @param {("web_search" | "image_generation")[]} [params.disabledCapabilities] Purpose-based opt-outs
+     * @param {string[]} [params.disabledMcpServerIds] Ordinary server opt-outs
      * @returns {Promise<AssistantResponse>} Once the full answer is received it will be returned
      * @throws {EneoError}
      * */
-    ask: async ({ assistant, session, question, files, onAnswer, onOpen, abortController }) => {
+    ask: async ({
+      assistant,
+      session,
+      question,
+      files,
+      onAnswer,
+      onOpen,
+      abortController,
+      disabledCapabilities,
+      disabledMcpServerIds
+    }) => {
       const { id } = assistant;
       const session_id = session?.id ?? undefined;
 
@@ -165,7 +177,13 @@ export function initAssistants(client) {
         {
           params: { path: streamArgs.path, query: { version: 2 } },
           requestBody: {
-            "application/json": { question, files, stream: true }
+            "application/json": {
+              question,
+              files,
+              stream: true,
+              disabled_capabilities: disabledCapabilities,
+              disabled_mcp_server_ids: disabledMcpServerIds
+            }
           }
         },
         {

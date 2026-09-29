@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Button } from "@eneo/ui";
+  import { formatRelativeTime } from "$lib/core/formatting/dateTime";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { pushState } from "$app/navigation";
   import ConversationView from "$lib/features/chat/components/conversation/ConversationView.svelte";
   import { fade, fly, slide } from "svelte/transition";
@@ -8,9 +9,6 @@
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
   import { untrack } from "svelte";
-  import dayjs from "dayjs";
-  import relativeTime from "dayjs/plugin/relativeTime";
-  dayjs.extend(relativeTime);
 
   let { data } = $props();
 
@@ -76,12 +74,7 @@
         {chat.partner.name}
       </h1>
     </a>
-    <Button
-      variant="primary"
-      on:click={startNewConversation}
-      class="!rounded-lg !border-b-2 !border-[var(--color-ui-blue-700)] !px-5 !py-1"
-      >{m.new_chat()}
-    </Button>
+    <Button onclick={startNewConversation} class="px-5">{m.new_chat()}</Button>
   </div>
 
   {#if chat.loadedConversations.length > 0}
@@ -105,7 +98,7 @@
                 {conversation.name || m.untitled()}
               </div>
               <div class="text-secondary text-xs">
-                {dayjs(conversation.created_at).fromNow()}
+                {formatRelativeTime(conversation.created_at)}
               </div>
             </button>
           {/each}

@@ -8,6 +8,7 @@ from uuid import UUID
 
 from eneo.governance_policy.domain.governance_policy import (
     GovernancePolicy,
+    PolicyCapability,
     PolicyCompletionModel,
     PolicyMcpServer,
     PolicyScope,
@@ -113,8 +114,10 @@ class GovernancePolicyService:
             tuple[bool, list[PolicyCompletionModel], list[UUID]] | None
         ) = None,
         mcp_restriction: (tuple[bool, list[PolicyMcpServer], list[UUID]] | None) = None,
+        capabilities: list[PolicyCapability] | None = None,
         prompt_enforcement: tuple[bool, UUID | None] | None = None,
         reasoning_policy: tuple[str | None, bool] | None = None,
+        inline_file_text: bool | None = None,
         skill_intents: list[SkillBindingIntent] | None = None,
     ) -> GovernancePolicy:
         policy = await self.get_policy_for_update()
@@ -134,7 +137,25 @@ class GovernancePolicyService:
             enabled, servers, disabled_tool_ids = mcp_restriction
             if enabled and servers:
                 await self._validate_mcp_servers_and_tools(servers, disabled_tool_ids)
+            if capabilities is not None:
+                purposes = [c.purpose for c in capabilities]
+                if len(purposes) != len(set(purposes)) or set(purposes) - {
+                    "web_search",
+                    "image_generation",
+                }:
+                    raise BadRequestException("Invalid capability selection")
+                added = set(purposes) - {c.purpose for c in policy.capabilities}
+                if enabled and added:
+                    providers = await self.mcp_server_settings_service.get_available_mcp_servers()
+                    available = {
+                        s.purpose
+                        for s in providers
+                        if s.is_enabled and s.readiness_reason is None
+                    }
+                    if added - available:
+                        raise BadRequestException("Selected capability is unavailable")
             policy.set_mcp_restriction(
+                capabilities=capabilities,
                 enabled=enabled,
                 servers=servers,
                 disabled_tool_ids=disabled_tool_ids,
@@ -152,6 +173,9 @@ class GovernancePolicyService:
                 default_effort=default_effort,
                 allow_user_override=allow_user_override,
             )
+
+        if inline_file_text is not None:
+            policy.set_file_policy(inline_file_text=inline_file_text)
 
         if (
             models_restriction is not None or reasoning_policy is not None
@@ -234,7 +258,9 @@ class GovernancePolicyService:
         tenant_servers = (
             await self.mcp_server_settings_service.get_available_mcp_servers()
         )
-        enabled_servers = [s for s in tenant_servers if s.is_enabled]
+        enabled_servers = [
+            s for s in tenant_servers if s.is_enabled and s.purpose == "general"
+        ]
         enabled_ids = {s.id for s in enabled_servers}
         selected_ids: set[UUID] = set()
         for entry in servers:

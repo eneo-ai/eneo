@@ -7,7 +7,7 @@ from fastapi import UploadFile
 
 from eneo.files.file_size_service import FileSizeService
 from eneo.icons.icon import IconMetadata, IconMetadataCreate
-from eneo.icons.icon_repo import IconRepository
+from eneo.icons.icon_repo import IconRepository, LegacyIconContentRecord
 from eneo.main.exceptions import (
     BadRequestException,
     FileTooLargeException,
@@ -19,7 +19,10 @@ from eneo.object_content.content import (
     ContentReadGrant,
     StorageKind,
 )
-from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.content_service import (
+    ObjectContentService,
+    detach_content_read,
+)
 from eneo.object_content.deployment_policy import (
     UploadAdmissionSnapshot,
     UploadLimitUseCase,
@@ -189,53 +192,50 @@ class IconService:
             if metadata is None:
                 raise NotFoundException(f"Icon with id {icon_id} not found")
             reference = await self.icon_repo.get_primary_reference(icon_id)
-            if reference is None:
+            legacy = (
+                await self.icon_repo.get_legacy_primary(icon_id)
+                if reference is None
+                else None
+            )
+            if reference is None and legacy is None:
                 raise NotFoundException(
                     f"Icon with id {icon_id} has no durable content"
                 )
 
-        read_context = self.object_content.open_content(
-            ContentReadGrant(
-                content_id=reference.content_id,
-                tenant_id=metadata.tenant_id,
-                access_class=reference.access_class,
+        if legacy is not None:
+            return self._legacy_download(legacy)
+
+        assert reference is not None
+
+        opened = await detach_content_read(
+            self.object_content.open_content(
+                ContentReadGrant(
+                    content_id=reference.content_id,
+                    tenant_id=metadata.tenant_id,
+                    access_class=reference.access_class,
+                )
             )
         )
-        opened = await read_context.__aenter__()
-        closed = False
 
-        async def exit_read_context(
-            error: BaseException | None = None,
-        ) -> bool | None:
-            nonlocal closed
-            if closed:
-                return None
-            closed = True
-            if error is None:
-                return await read_context.__aexit__(None, None, None)
-            return await read_context.__aexit__(
-                type(error),
-                error,
-                error.__traceback__,
-            )
+        return IconDownload(
+            chunks=opened.chunks,
+            content_length=opened.content_length,
+            media_type=opened.media_type,
+            _close=opened.aclose,
+        )
 
+    @staticmethod
+    def _legacy_download(content: LegacyIconContentRecord) -> IconDownload:
         async def stream() -> AsyncGenerator[bytes]:
-            try:
-                async for chunk in opened.chunks:
-                    yield chunk
-            except BaseException as error:
-                if not await exit_read_context(error):
-                    raise
-            else:
-                await exit_read_context()
+            yield content.payload
 
         async def close() -> None:
-            await exit_read_context()
+            return None
 
         return IconDownload(
             chunks=stream(),
-            content_length=opened.content_length,
-            media_type=opened.media_type,
+            content_length=len(content.payload),
+            media_type=content.media_type,
             _close=close,
         )
 

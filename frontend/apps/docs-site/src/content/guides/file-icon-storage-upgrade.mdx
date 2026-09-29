@@ -1,0 +1,1121 @@
+# Upgrade File and Icon Storage (Eneo 2.2)
+
+import { Callout, Steps } from "nextra/components";
+
+Eneo 2.2 moves uploaded files and icons out of old database columns and into
+Eneo's shared content store: new tables in the same PostgreSQL database. Every
+installation with files or icons from Eneo 2.1 or earlier does this once,
+**including installations that only use PostgreSQL**. You do not need S3.
+
+## TL;DR
+
+- **One-time, and it can be paused.** Eneo copies each old file and icon into
+  the content store and checks every copy with a SHA-256 checksum, so it only
+  uses a copy that is identical. The old data is not changed or deleted.
+- **Short downtime, then back online.** Eneo is stopped while `db-init`
+  upgrades the database. After that, users work as usual while a background
+  worker copies the old content. Old files stay readable the whole time.
+- **Check disk space first.** The old content is stored twice until you clean
+  up. Keep at least 1.1 × the size of the old content free, plus room for WAL
+  (PostgreSQL's change log) and the backup. [Check free disk space](#check-free-disk-space).
+- **Back up and rehearse.** The backup is your only way back. Run the whole
+  upgrade on a restored copy of production before you do it for real.
+- **Start at a quiet time.** The copy adds database load and runs in small
+  batches, one per minute. 1 GiB in 1,639 files took 16 minutes in a test, and
+  10 GiB in 16,384 files 2 hours 42 minutes. Many small files take
+  longer; preflight gives you an estimate.
+- **Over 5 GiB, you approve the copy.** Eneo waits until you confirm the disk
+  capacity with one setting. Eneo stays available while it waits.
+- **Cleanup is optional and comes later.** When you have verified the result,
+  you can remove the old columns. That needs a second maintenance window, is
+  permanent, and does not free disk space on its own.
+
+## At a glance
+
+| Phase | Is Eneo available? | How long | What you do |
+| --- | --- | --- | --- |
+| 1. Prepare | Yes, still 2.1 | Your pace | Rehearsal on a copy, preflight, disk check |
+| 2. Maintenance window | **No** | Minutes; measure it in the rehearsal | Stop Eneo, let jobs finish, back up, run `db-init` |
+| 3. Background copy | Yes, on 2.2 | Depends on size; preflight estimates it | Watch `status`, approve capacity above 5 GiB |
+| 4. Verify | Yes | Your pace | Check downloads, test a backup restore |
+| 5. Cleanup (optional) | **No** | Seconds to minutes; measure it in the rehearsal | Stop Eneo, run `cleanup`, start Eneo |
+| 6. Reclaim disk (optional) | **No** with `VACUUM FULL` | Seconds to minutes | Rewrite two tables |
+
+The background copy takes about 1 minute per 100 items or per 128 MiB,
+whichever is longer.
+
+## Why this migration is needed
+
+Before 2.2, files and icons kept their bytes in their own database columns,
+with their own code paths and environment settings. Integrity checks, upload
+limits, deletion, and storage location had to be changed in several places.
+
+In 2.2, one shared module owns all stored content: the bytes, their SHA-256
+checksum and exact size, deletion, and where they are stored. Files and icons
+keep only their product meaning, such as name and access. Administrators set
+upload limits and the storage target in **Admin > File storage** without
+restarting Eneo, and optional S3-compatible storage uses the same verified path.
+
+The migration moves existing content into that model once, so Eneo does not
+maintain two storage models side by side. New uploads already use the new model
+and never write to the old columns. For the design, see [Object Content
+Architecture](/docs/object-content-architecture).
+
+## Before you start
+
+- [ ] **You run Eneo 2.1.** This guide was tested from 2.1.1. From an older
+      release, rehearse especially carefully.
+- [ ] **You can restore a backup.** You have restored an Eneo database dump at
+      least once; the rehearsal counts.
+- [ ] **You rehearsed on a copy.** On a test server with the same Compose files,
+      you restored a recent production backup, followed this whole guide, and
+      noted how long each step took.
+- [ ] **Disk space is enough.** Free space covers the copy, WAL growth, and the
+      backups. See [step 2](#check-free-disk-space).
+- [ ] **The window is booked.** Plan the stop, backup, and `db-init` for an
+      evening, so that the copy runs outside office hours, and tell users that
+      Eneo will be unavailable. Book about twice your rehearsal time for
+      letting jobs finish, the backup, `db-init`, and the checks. In the Eneo
+      test these took 30 seconds (backup of a 0.4 GB database) and 15 seconds
+      (`db-init` for 1,400 items); both grow with your data.
+- [ ] **You know the image tag.** Eneo images have no `v` prefix, for example
+      `ghcr.io/eneo-ai/eneo-backend:2.2.0`.
+- [ ] **`jq` is installed** (for example `sudo apt install jq`) for the preflight
+      summary, or you read the JSON report directly.
+- [ ] **Backup jobs will still reach the database.** If you take the new
+      reference `docker-compose.yml`, its containers move to new networks. Read
+      [Review network changes](/guides/deployment#review-network-changes) if an
+      external backup job or admin tool connects to `db:5432` or `redis:6379`.
+
+The commands below use the reference Docker Compose deployment from
+[Deploy Eneo](/guides/deployment): run them in the directory that holds
+`docker-compose.yml`, with the services `backend`, `worker`, `db`, `redis`, and
+`db-init`. If your deployment uses other service names, more worker replicas,
+extra Compose files, or an external database, adapt each command in the same
+way. The `docker compose exec db ...` commands assume the bundled PostgreSQL
+container; with an external database, run the same SQL with `psql`.
+
+## Upgrade step by step
+
+<Steps>
+
+### Run preflight while Eneo 2.1 is running
+
+Preflight is a read-only check that uses the new image against your current
+database. It reports how much old content will be copied and whether anything
+blocks the upgrade. It does not change data.
+
+1. Save the current configuration. You need it for a rollback:
+
+   ```bash
+   cp docker-compose.yml docker-compose.yml.before-2.2
+   cp env_backend.env env_backend.env.before-2.2
+   ```
+
+2. In `docker-compose.yml`, change the image tag of `backend`, `worker`,
+   `db-init`, and `frontend` to the 2.2 release, for example
+   `ghcr.io/eneo-ai/eneo-backend:2.2.0`.
+
+   <Callout type="warning">
+     From now until the maintenance window, nobody may run `docker compose up`.
+     It would upgrade production at once, without letting jobs finish or taking
+     a backup. Tell colleagues, and pause any automation that runs it.
+   </Callout>
+
+3. Download the new images, so the maintenance window is shorter, and run
+   preflight. Pulling does not restart anything:
+
+   ```bash
+   docker compose pull
+   docker compose run --rm --no-deps -T --entrypoint python worker \
+     -m eneo.object_content.file_icon_migration preflight > file-icon-preflight.json
+   echo "exit code: $?"
+   ```
+
+`run` starts a one-off container from the new image, so the old worker keeps
+running untouched. The command writes one JSON report to
+`file-icon-preflight.json`:
+
+| Exit code | `outcome` | What to do |
+| --- | --- | --- |
+| `0` | `ready` | Continue with the disk check. |
+| `2` | `blocked` | Fix each item in `blockers`, for example an unsupported schema or encoding, or an item larger than `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`. |
+| `3` | `incomplete` | The check did not finish. Check the database connection and permissions. For a very large database, add `--timeout-seconds 300`. |
+
+Summarize the report with `jq`:
+
+```bash
+jq '([.variants[].remaining_count] | add // 0) as $items
+  | ((.capacity.remaining_logical_bytes // 0) / 1048576) as $mib
+  | ($items / 200 | ceil) as $preparing_runs
+  | ([($mib / 128 | ceil), $preparing_runs] | max) as $copy_runs
+  | {outcome, blockers, items: $items,
+     old_content_gib: ($mib / 1024 * 100 | round / 100),
+     estimated_minutes: ([$preparing_runs + $copy_runs - 2, 0] | max)}' \
+  file-icon-preflight.json
+```
+
+Example output:
+
+```json
+{
+  "outcome": "ready",
+  "blockers": [],
+  "items": 1427,
+  "old_content_gib": 0.4,
+  "estimated_minutes": 14
+}
+```
+
+- `items` counts stored parts, so a file with both extracted text and an
+  original counts twice.
+- `old_content_gib` is the amount that will be copied. You need it for the disk
+  check in the next step.
+- `estimated_minutes` is the time for the background copy at the normal pace.
+  It excludes `db-init`, and large files take longer. See [Duration in
+  detail](#duration-in-detail).
+- If `old_content_gib` is above 5, the copy will wait for your approval after
+  the upgrade. Plan to do [step 7](#approve-disk-capacity-only-above-5-gib) the
+  same evening, or the copy waits all night.
+
+Users keep adding and deleting files until the maintenance window, so treat the
+numbers as an estimate.
+
+### Check free disk space
+
+The copy grows the database by about 1.05 × `old_content_gib` (1.02–1.04 × in
+the Eneo tests). The old content stays where it is until you clean up and
+rewrite the tables. Run these commands in the directory with
+`docker-compose.yml`:
+
+```bash
+# Free space where PostgreSQL stores its data
+docker compose exec db df -h /var/lib/postgresql/data
+
+# Free space where the backup files will be written (this directory)
+df -h .
+
+# Database size, and whether WAL is kept for a replica or an archive
+docker compose exec db psql -U postgres -d eneo -c "
+SELECT pg_size_pretty(pg_database_size(current_database())) AS database_size,
+       current_setting('archive_mode') AS archive_mode,
+       (SELECT count(*) FROM pg_replication_slots) AS replication_slots;"
+```
+
+If both `df` commands show the same filesystem, one budget must cover
+everything below. Make sure that **Avail** covers, together:
+
+- **the copy:** 1.1 × `old_content_gib`, which includes a margin;
+- **WAL, PostgreSQL's change log in the `pg_wal` folder:** about 1 GB extra
+  when `archive_mode` is `off` and there are no replication slots, as in the
+  reference setup. Otherwise WAL can grow much more; follow [Disk space in
+  detail](#disk-space-in-detail);
+- **the backups:** about the database size before the upgrade, about twice
+  that after it (for the verification backup and the one before cleanup), and
+  one more database copy if you test a restore on this server;
+- **your normal safety margin** for everyday use.
+
+For example, with 20 GiB of old content in a 30 GB database and no replica,
+the database volume needs about 22 GiB + 1 GB + margin free. If the backups go
+to the same disk, add about 30 GB for the first backup.
+
+### Stop Eneo and let old jobs finish
+
+The maintenance window starts here. Old knowledge jobs must finish before the
+upgrade, because the new version cannot run jobs queued by the old one.
+
+1. Stop the API so that no new work arrives:
+
+   ```bash
+   docker compose stop backend
+   ```
+
+2. Let the old worker finish its queue. Repeat these two commands every
+   minute until the first shows `queued=0` and `j_ongoing=0` and the second
+   shows a number above 0. That number is the age check: `-2` or an empty
+   first line means the worker is not reporting.
+
+   ```bash
+   docker compose exec -T redis redis-cli --raw GET arq:queue:health-check
+   docker compose exec -T redis redis-cli --raw TTL arq:queue:health-check
+   ```
+
+   Example output of a drained worker:
+
+   ```text
+   Sep-23 21:42:13 j_complete=5 j_failed=0 j_retried=0 j_ongoing=0 queued=0
+   54
+   ```
+
+   **If you run more than one worker:** keep them all running until the value
+   shows `queued=0`. Then check that every worker is idle, stop all but one,
+   and repeat the two commands.
+
+3. Stop the worker:
+
+   ```bash
+   docker compose stop worker
+   ```
+
+4. Check that no knowledge job is left:
+
+   ```bash
+   docker compose exec -T db psql -U postgres -d eneo -c "
+   SELECT task, status,
+          to_jsonb(jobs) ->> 'dispatch_envelope' IS NULL AS pre_durable,
+          count(*)
+   FROM jobs
+   WHERE task IN ('upload_info_blob', 'transcription')
+     AND status IN ('queued', 'in progress')
+   GROUP BY task, status, pre_durable;"
+   ```
+
+   | Result | Meaning | What to do |
+   | --- | --- | --- |
+   | `(0 rows)` | No old job is left. | Continue with the backup. |
+   | `queued`, `pre_durable` = `t` | An old leftover that was never queued. | Nothing. `db-init` marks it as failed. |
+   | `queued`, `pre_durable` = `f` | A job is still waiting. | `docker compose start worker` (not `up`, which would start the new image), then repeat items 2 to 4 of this step. |
+   | `in progress`, and every worker has been stopped for 15 minutes | The job can never finish (see below). | Mark it as failed with the commands below. |
+
+   Any row other than the `t` leftovers makes `db-init` stop with
+   `found N active legacy knowledge job(s)`.
+
+   If a worker stops in the middle of a job, Eneo 2.1 leaves the job
+   `in progress` forever; Eneo 2.2 marks such jobs as failed automatically.
+   First see which files and users are affected, so that you can ask them to
+   upload again, then mark the jobs as failed:
+
+   ```bash
+   docker compose exec -T db psql -U postgres -d eneo -c "
+   SELECT jobs.task, jobs.name AS file_name, users.email, jobs.updated_at
+   FROM jobs JOIN users ON users.id = jobs.user_id
+   WHERE jobs.task IN ('upload_info_blob', 'transcription')
+     AND jobs.status = 'in progress'
+     AND jobs.updated_at < now() - interval '15 minutes';"
+
+   docker compose exec -T db psql -U postgres -d eneo -c "
+   UPDATE jobs
+   SET status = 'failed', result_location = NULL,
+       finished_at = now(), updated_at = now()
+   WHERE task IN ('upload_info_blob', 'transcription')
+     AND status = 'in progress'
+     AND updated_at < now() - interval '15 minutes';"
+   ```
+
+   Do not change any other job rows.
+
+### Take a backup
+
+```bash
+set -o pipefail
+docker compose exec -T db pg_dump -U postgres eneo \
+  | gzip > backup-before-2.2.sql.gz && echo "backup written"
+
+# Check the backup: this must print 1
+gunzip -c backup-before-2.2.sql.gz | grep -c "PostgreSQL database dump complete"
+ls -lh backup-before-2.2.sql.gz
+```
+
+Continue only if the check prints `1` and the file is roughly as large as the
+database from [step 2](#check-free-disk-space). `set -o pipefail` makes a failed
+dump show up as an error; without it, a failed dump still leaves a small file
+behind.
+
+This is your rollback point. Keep it until the upgrade is verified and your
+retention rules allow removing it. Until then, do not remove the Redis and
+`eneo_temp_files` volumes (never run `docker compose down -v`). In the Eneo
+test, the dump of a 430 MB database took about 30 seconds, and `ls -lh`
+showed `457M`: larger than the database, because stored files hardly
+compress.
+
+### Deploy Eneo 2.2
+
+If you use the bundled object store, add the overlay files and profile to each
+command, as shown in [Deploy Eneo](/guides/deployment#updating-eneo).
+
+First upgrade the database:
+
+```bash
+docker compose pull
+docker compose run --rm db-init
+echo "exit code: $?"
+```
+
+`db-init` upgrades the schema and registers the old files and icons for the
+copy. It reads only metadata and copies nothing, but its duration grows with
+the number of rows: in the Eneo test with about 1,400 items it took 15
+seconds. A good run prints `Alembic migrations ran successfully.`
+
+- **Exit code 0:** continue below.
+- **`found N active legacy knowledge job(s)`:** keep Eneo stopped and go back
+  to [the previous step](#stop-eneo-and-let-old-jobs-finish).
+- **Any other error:** keep Eneo stopped. Fix the cause and run `db-init`
+  again, or [roll back](#roll-back-the-upgrade).
+
+Only when `db-init` has succeeded, start Eneo 2.2:
+
+```bash
+docker compose up -d
+docker compose ps -a
+```
+
+`up -d` runs `db-init` once more before the backend; it finds nothing left to
+do. `ps -a` also lists stopped containers. The step is done when `db-init`
+shows `Exited (0)`, `backend` and `worker` show `Up`, and you can log in and
+download an old file.
+
+### Follow the background copy
+
+Eneo is now online. Old files stay readable from the old columns until their
+copy is verified, and new uploads go straight to the content store. Check the
+migration status:
+
+```bash
+docker compose exec worker python -m eneo.object_content.file_icon_migration status
+```
+
+Example output while the copy runs:
+
+```json
+{
+  "state": "active",
+  "paused": false,
+  "target_kind": "postgres_inline",
+  "detail": null,
+  "capacity_required_bytes": null,
+  "capacity_admitted_bytes": 432470286,
+  "configured_auto_inline_max_bytes": 5368709120,
+  "configured_capacity_ack_bytes": 0,
+  "configured_resume_revision": 0,
+  "campaign_resume_revision": 0,
+  "legacy_cleaned": false
+}
+```
+
+Read `state`, `paused`, and `detail`; the other fields help when you
+troubleshoot. `state` moves through these values:
+
+| `state` | Meaning | What to do |
+| --- | --- | --- |
+| `preparing` | The worker is preparing the registered items, 200 per minute. | Wait. |
+| `waiting_for_capacity` | More than 5 GiB must be copied. | [Approve the disk capacity](#approve-disk-capacity-only-above-5-gib). |
+| `waiting_for_object_store` | Object storage is selected as the target. | Select **PostgreSQL** in **Admin > File storage**. See [the FAQ](#can-we-migrate-straight-to-s3). |
+| `active` | Batches are being copied. | Watch disk, WAL, and response times. |
+| `halted` | An item or setting needs attention. `detail` says why. | See [Recover a halted migration](#recover-a-halted-migration). |
+| `complete` | Every item is copied or was deleted by its owner. | [Verify the result](#verify-the-result). |
+
+`paused: true` means that someone ran the `pause` command. The `state` still
+shows the underlying condition. See [Pause and resume](#pause-and-resume).
+
+To follow progress, run this query on demand. It reads metadata only:
+
+```bash
+docker compose exec -T db psql -U postgres -d eneo -c "
+SELECT count(*) FILTER (WHERE state = 'pending')   AS pending,
+       count(*) FILTER (WHERE state = 'ready')     AS ready,
+       count(*) FILTER (WHERE state = 'leased')    AS leased,
+       count(*) FILTER (WHERE state = 'failed')    AS failed,
+       count(*) FILTER (WHERE state = 'done')      AS done,
+       count(*) FILTER (WHERE state = 'cancelled') AS cancelled,
+       round(100.0 * count(*) FILTER (WHERE state IN ('done', 'cancelled'))
+             / nullif(count(*), 0), 1)            AS finished_percent,
+       pg_size_pretty(coalesce(sum(payload_size_estimate)
+             FILTER (WHERE state NOT IN ('done', 'cancelled')), 0)::bigint)
+                                                  AS remaining
+FROM file_icon_backfill_items;"
+```
+
+While the worker prepares items, `pending` falls and `ready` rises. While it
+copies, `ready` falls and `done` rises. `cancelled` items belonged to files or
+icons that were deleted meanwhile. A `failed` count above zero needs attention.
+
+The worker also logs every batch:
+
+```bash
+docker compose logs --since=30m worker | grep "File/Icon legacy backfill"
+```
+
+While items are prepared, the log line says `"state": "active"` even though
+`status` says `preparing`. Trust `status`. After completion the worker logs
+nothing more, so an empty result then is normal.
+
+Messages and logs use a few internal words. **Backfill**, **adoption**, and
+**campaign** all mean this background copy. The **ledger** is the table
+`file_icon_backfill_items`, with one row per item. **Inline** means stored
+inside PostgreSQL. A **variant** is one stored part of a file, such as the
+original or its extracted text.
+
+**Before you end the maintenance window**, check that:
+
+- `state` is `preparing` or `active`. If it is `waiting_for_capacity`, do
+  [step 7](#approve-disk-capacity-only-above-5-gib) now.
+- The progress query shows `failed` = 0.
+- You can download an old file in Eneo.
+
+The copy then continues on its own. If it is still running when users arrive,
+let it run, or `pause` it and `resume` it in the evening. Do not change the
+storage target in **Admin > File storage** until `state` is `complete`:
+changing it stops the copy.
+
+### Approve disk capacity (only above 5 GiB)
+
+When more than 5 GiB must be copied, the copy waits with
+`state: waiting_for_capacity`. Eneo works normally while it waits. `status`
+gives the exact number of bytes, and the worker logs the same message as a
+warning every minute. For example, with 7 GiB of old content:
+
+```json
+{
+  "state": "waiting_for_capacity",
+  "detail": "The upgrade is complete and existing File/Icon content remains readable, but legacy adoption is waiting for an inline capacity decision. The backfill requires 7516192768 cumulative logical bytes; set FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK to at least that value after reserving payload, WAL, and safety headroom",
+  "capacity_required_bytes": 7516192768
+}
+```
+
+1. Check [free disk space](#check-free-disk-space) again with this number.
+2. Add the number to `env_backend.env`:
+
+   ```dotenv
+   FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK=7516192768
+   ```
+
+3. Recreate only the worker, so that it reads the new setting:
+
+   ```bash
+   docker compose up -d --force-recreate --no-deps worker
+   ```
+
+   Keep `--no-deps`. Without it, Compose also recreates the backend, which
+   interrupts users, and runs `db-init` again.
+
+Within a minute, `status` shows `active`. The setting records your decision;
+Eneo does not measure or reserve disk.
+
+### Verify the result
+
+When `status` shows `state: complete`, check the result before you rely on it:
+
+1. `status` shows `"state": "complete"` and `"paused": false`, and the progress
+   query shows zero `pending`, `ready`, `leased`, and `failed` items.
+2. In Eneo, open and download a few old files of each kind: a text document, a
+   PDF, an image, an audio file with its transcription, and an icon. Upload a
+   new file and download it. Upload one document and one audio file to a
+   knowledge collection and check that both are processed.
+3. Take a new backup. Until cleanup it holds the old content twice, so it is
+   about twice as large as the first one (`914M` against `457M` in the Eneo
+   test):
+
+   ```bash
+   set -o pipefail
+   docker compose exec -T db pg_dump -U postgres eneo \
+     | gzip > backup-after-2.2.sql.gz && echo "backup written"
+   gunzip -c backup-after-2.2.sql.gz | grep -c "PostgreSQL database dump complete"
+   ```
+
+4. Test that the backup can be restored, preferably on a test server. For a
+   quick check on the same server, restore it into a scratch database. This
+   loads the database server and needs free space for one more copy of the
+   database, so do it in the evening:
+
+   ```bash
+   docker compose exec -T db createdb -U postgres eneo_restore_test
+   gunzip -c backup-after-2.2.sql.gz \
+     | docker compose exec -T db psql -U postgres -d eneo_restore_test \
+         -v ON_ERROR_STOP=1 -q
+   docker compose exec -T db dropdb -U postgres eneo_restore_test
+   ```
+
+   The restore succeeded if `psql` printed no `ERROR`.
+
+The upgrade is done. Keep the backup from before the upgrade until the restore
+test has succeeded and your retention rules allow removing it. The old columns
+stay as a safety net until you [clean them up](#clean-up-the-old-columns-optional).
+
+</Steps>
+
+## Clean up the old columns (optional)
+
+After the migration, the old columns still hold a copy of every old file and
+icon. Eneo no longer reads them, except as a fallback. The `cleanup` command
+removes them.
+
+- **Optional in 2.2.** Eneo 2.2 runs fine with the old columns in place. Before
+  you upgrade past 2.2, read that version's release notes: they say whether
+  cleanup must be done first.
+- **Permanent.** After cleanup, the old bytes exist only in your backups.
+- **Needs downtime.** Every backend and worker must be stopped for the whole
+  cleanup.
+- **Does not free disk space by itself.** That needs a separate [table
+  rewrite](#reclaim-disk-space-optional).
+
+### Plan the cleanup window
+
+Cleanup checks every old file against its copy before it removes anything: it
+reads and hashes both inside PostgreSQL. It therefore takes at least as long as
+reading all old content twice. The background copy's duration tells you
+nothing here, because the copy was paced to one batch per minute. Measure
+cleanup on a restored copy and book a window with a good margin. In the Eneo
+test, cleanup of 0.4 GiB took 4 seconds; a large database on slower disks
+takes longer.
+
+Before the window:
+
+- The migration has passed [verification](#verify-the-result), including the
+  restore test.
+- You have disk space for one more backup, about twice as large as the one
+  from before the upgrade. If any content is in S3-compatible storage, cleanup
+  checks the verification data recorded in the database but does not read the
+  objects: make sure the bucket is reachable and back it up together with the
+  database.
+- No backup job, report, or other tool holds a long transaction on Eneo's
+  tables at the same time. Cleanup waits at most five seconds for its locks.
+
+<Steps>
+
+### Stop Eneo
+
+Keep the database running. Stop every backend and worker; if you run more than
+one worker, stop all of them:
+
+```bash
+docker compose stop backend worker
+```
+
+### Back up again
+
+Anything users saved since your last backup exists only in the database now.
+Take a backup, the same way as [before the upgrade](#take-a-backup):
+
+```bash
+set -o pipefail
+docker compose exec -T db pg_dump -U postgres eneo \
+  | gzip > backup-before-cleanup.sql.gz && echo "backup written"
+gunzip -c backup-before-cleanup.sql.gz | grep -c "PostgreSQL database dump complete"
+```
+
+Continue only if the check prints `1`. This backup holds the old content twice,
+so it is about twice as large as the one from before the upgrade.
+
+### Run the cleanup
+
+Use the same 2.2 image that runs the deployment:
+
+```bash
+docker compose run --rm --no-deps -T --entrypoint python worker \
+  -m eneo.object_content.file_icon_migration cleanup
+echo "exit code: $?"
+```
+
+A successful run prints:
+
+```json
+{
+  "legacy_cleaned": true,
+  "changed": true,
+  "detail": "Legacy columns removed"
+}
+```
+
+Running it again is harmless: it prints `"changed": false` and
+`"detail": "Legacy columns were already cleaned"`.
+
+| Exit code | Result | What to do |
+| --- | --- | --- |
+| `0` | Cleanup finished, or had already been done. | Start Eneo and check. |
+| `2` | `"outcome": "blocked"`. A check failed and **nothing was changed**. `detail` names the reason. | Fix the reason and run cleanup again. See [the FAQ](#what-if-cleanup-says-blocked). |
+| `3` | `"outcome": "incomplete"`. The database could not be reached, the settings are invalid, or a lock was not free within five seconds. | Check that every backend and worker is stopped and the database is up. Then [check the outcome](#if-the-cleanup-result-is-unclear). |
+
+**Never drop the columns by hand in `psql`.** The command also removes the
+database triggers that protect the old columns and records the cleanup, all
+in one transaction.
+
+### Start Eneo and check
+
+```bash
+docker compose start backend worker
+```
+
+Compose runs `db-init` once more before the backend; it finds nothing to do.
+`status` now shows `"legacy_cleaned": true`. Download an old file and upload a
+new one. `preflight` now reports `"schema_state": "cleaned"`.
+
+</Steps>
+
+### If the cleanup result is unclear
+
+After exit code `3`, an interrupted command, or no output, run `status`:
+
+```bash
+docker compose run --rm --no-deps -T --entrypoint python worker \
+  -m eneo.object_content.file_icon_migration status
+```
+
+If it shows `"legacy_cleaned": true`, cleanup finished. This can happen if the
+connection dropped just as PostgreSQL committed. Otherwise nothing was changed.
+The error printed above the JSON names the cause, for example
+`canceling statement due to lock timeout` when another session held a lock.
+Fix the cause and run cleanup again. Running it again is always safe.
+
+While Eneo is stopped, use this `docker compose run` form for `status`,
+`pause`, and `resume`: `docker compose exec` needs a running worker.
+
+<Callout type="info">
+**How cleanup protects your data.** Cleanup runs in one database transaction.
+It locks the affected tables and refuses to continue while the migration is
+paused or unfinished. It compares the size and SHA-256 of every remaining old
+file with its copy; for copies in object storage it checks the recorded
+verification data. It removes the columns only if every file matches. If a
+check fails or the command is interrupted before the commit, the database stays
+exactly as it was.
+</Callout>
+
+### After cleanup
+
+- Eneo reads all content from the content store. The `status`, `pause`, and
+  `resume` commands still work in 2.2.
+- A file that later fails its integrity check can no longer be repaired from
+  the old columns. Ask the owner to upload the file again, or restore the
+  backup from before cleanup, which loses everything written after it.
+- An Alembic downgrade refuses to run after cleanup. The backup is the only way
+  back.
+
+## Reclaim disk space (optional)
+
+Removing columns does not shrink the table files. The old bytes stay on disk
+until the tables are rewritten, and a normal `VACUUM` does not return that
+space to the operating system. This query shows the current size of the two
+tables. After a rewrite they take a few megabytes, so this is about what you
+get back:
+
+```bash
+docker compose exec db psql -U postgres -d eneo -c "
+SELECT pg_size_pretty(pg_total_relation_size('files')) AS files_total,
+       pg_size_pretty(pg_total_relation_size('icons')) AS icons_total;"
+```
+
+If it is worth it, choose one method and test it on a restored copy first:
+
+- **`VACUUM FULL` (simpler, needs downtime).** Stop Eneo, rewrite each table,
+  and start Eneo again. Right after cleanup, while Eneo is still stopped, you
+  can skip the stop:
+
+  ```bash
+  docker compose stop backend worker
+  docker compose exec db psql -U postgres -d eneo -c "VACUUM (FULL, ANALYZE) files;"
+  docker compose exec db psql -U postgres -d eneo -c "VACUUM (FULL, ANALYZE) icons;"
+  docker compose start backend worker
+  ```
+
+  Each command locks its table completely and writes a new, compact copy
+  before it removes the old one. Without the old columns that copy is small,
+  so it needs little free space. In the Eneo test, `files` shrank from 416 MB
+  to 304 kB and the database from 853 MB to 436 MB in under a second.
+- **[`pg_repack`](https://github.com/reorg/pg_repack/blob/master/doc/pg_repack.rst)
+  (less downtime, more setup).** Eneo can stay up during most of the rewrite.
+  pg_repack must be installed on the database server, and by default it
+  cancels queries that block its short locks: use `--no-kill-backend` and a
+  tested `--wait-timeout` while Eneo runs.
+
+Eneo never rewrites tables for you, because acceptable downtime and free disk
+differ between installations.
+
+## Troubleshooting and recovery
+
+### Pause and resume
+
+Pausing stops new migration batches. It is useful when disk space or load
+needs attention:
+
+```bash
+docker compose exec worker python -m eneo.object_content.file_icon_migration pause
+docker compose exec worker python -m eneo.object_content.file_icon_migration resume
+```
+
+A batch that has already started may finish. The pause survives restarts, and
+copied items stay copied. Other background jobs keep running. `resume` only
+clears the pause; capacity approval and halt recovery still apply.
+
+To stop the worker immediately, use `docker compose stop worker`. That also
+stops its other background jobs. While the worker is stopped, run `status`,
+`pause`, and `resume` with `docker compose run --rm --no-deps -T --entrypoint
+python worker -m eneo.object_content.file_icon_migration <command>`.
+
+### If disk space runs low
+
+1. Pause the migration.
+2. If disk still fills up because users add content, stop Eneo as well.
+3. Add disk space, or restore the backup.
+
+Do not delete ledger rows, old columns, copied content, or the database
+triggers to free space.
+
+### Recover a halted migration
+
+A `halted` state means an item failed, or the storage target changed after
+the copy started. `detail` tells you which. List the failed items:
+
+```bash
+docker compose exec -T db psql -U postgres -d eneo -c "
+SELECT owner_kind, owner_id, variant, attempts, last_error_code, last_error_detail
+FROM file_icon_backfill_items
+WHERE state = 'failed'
+ORDER BY id
+LIMIT 100;"
+```
+
+1. Fix the cause. If the storage target was changed, select **PostgreSQL** in
+   **Admin > File storage** again. If an item is larger than
+   `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`, raise that limit for both backend and
+   worker after checking capacity.
+2. Read `campaign_resume_revision` from `status`.
+3. Set `FILE_ICON_BACKFILL_RESUME_REVISION` in `env_backend.env` to a higher
+   number. Never reuse or lower an earlier value.
+4. Recreate the worker (after an inline-limit change, recreate `backend worker`):
+
+   ```bash
+   docker compose up -d --force-recreate --no-deps worker
+   ```
+
+The worker then retries the failed items in normal batches. An item that fails
+again waits for the next higher revision. If the retried copies raise the total
+above your capacity approval, the migration stays `halted` and `detail` shows
+the new total: raise `FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK` to it and
+recreate the worker again. See the
+[deployment runbook](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#bound-throughput-and-recover-a-halted-campaign)
+for the details.
+
+### Roll back the upgrade
+
+A rollback means restoring the backup from before the upgrade, not an Alembic
+downgrade. It discards everything written after the backup.
+
+1. Stop the API:
+
+   ```bash
+   docker compose stop backend
+   ```
+
+   Let the 2.2 worker finish its queue, so that no 2.2 job is left for the old
+   worker. Repeat this until it shows `queued=0` and `j_ongoing=0`:
+
+   ```bash
+   docker compose exec -T redis redis-cli --raw GET arq:queue:health-check
+   ```
+
+   Then stop the worker and put the saved configuration back:
+
+   ```bash
+   docker compose stop worker
+   cp docker-compose.yml.before-2.2 docker-compose.yml
+   cp env_backend.env.before-2.2 env_backend.env
+   ```
+
+2. Replace the database with the backup from before the upgrade:
+
+   ```bash
+   docker compose exec -T db dropdb -U postgres eneo
+   docker compose exec -T db createdb -U postgres eneo
+   gunzip -c backup-before-2.2.sql.gz \
+     | docker compose exec -T db psql -U postgres -d eneo -v ON_ERROR_STOP=1 -q
+   ```
+
+   If you use object storage, also restore the matching bucket snapshot.
+
+3. Start the old version:
+
+   ```bash
+   docker compose up -d
+   ```
+
+In the Eneo test, rolling back from 2.2 to 2.1.1 took under a minute for a
+430 MB database, and every old file downloaded unchanged. Once users have
+worked in 2.2, prefer fixing forward unless losing that data is acceptable. Do not use
+`alembic stamp`, remove the database triggers, or start an old version against
+the upgraded schema.
+
+### Get help
+
+Report problems as a [GitHub issue](https://github.com/eneo-ai/eneo/issues), or
+email digitalisering@sundsvall.se if you are a public sector organization.
+Attach:
+
+- the Eneo version (image tag) you upgraded from and to;
+- `file-icon-preflight.json` and the output of `status`;
+- the worker log: `docker compose logs --since=2h worker > worker.log`;
+- the output of the failed-items query in [Recover a halted
+  migration](#recover-a-halted-migration), if any.
+
+They should not contain passwords or file contents, but review them before you
+post them publicly.
+
+## Planning in detail
+
+### Disk space in detail
+
+Use these values, all in bytes:
+
+- `L`: old content to copy (`capacity.remaining_logical_bytes` from preflight,
+  or `capacity_required_bytes` from `status`).
+- `D`: database growth from the copy. Measured at 1.04 × `L` for random
+  640 KiB files; use `D = 1.05 × L` as a first estimate and confirm it in your
+  rehearsal. Many small files or other PostgreSQL storage settings can change it.
+- `W_now`: WAL on the volume now.
+- `W_peak`: the most WAL you expect on the volume at one time during the copy.
+- `M`: the free space you always want to keep for normal operation.
+
+The requirement is:
+
+```text
+free space now >= D + max(W_peak - W_now, 0) + M
+```
+
+There is no fixed multiplier for WAL when retention is unknown or unbounded. In
+the 10 GiB test the copy generated about 11 GiB of WAL over the whole run, but
+PostgreSQL recycles WAL as it goes; the test did not measure how much was kept
+at one time. With replication slots or archiving, check retention:
+
+```sql
+SELECT current_setting('max_wal_size') AS max_wal_size,
+       pg_size_pretty(
+           coalesce((SELECT sum(size) FROM pg_ls_waldir()), 0)::bigint
+       ) AS current_pg_wal_size;
+
+SELECT slot_name,
+       active,
+       pg_size_pretty(
+           pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)::bigint
+       ) AS retained_wal
+FROM pg_replication_slots
+WHERE restart_lsn IS NOT NULL
+ORDER BY slot_name;
+
+SELECT failed_count, last_failed_time, last_archived_time, stats_reset
+FROM pg_stat_archiver;
+```
+
+`max_wal_size` is a checkpoint target, not a limit. The archiver counters count
+from `stats_reset`: compare the last failure with the last success to see
+whether archiving recovered. A large or growing slot, an unresolved archive
+failure, or unknown WAL retention must be fixed or included in `W_peak`.
+`pg_ls_waldir()` needs superuser or `pg_monitor` rights. These queries do not
+measure an external archive or a replica's disk; plan those separately.
+
+After the worker has prepared all items, this query shows `L` and the
+`1.05 × L` estimate from the ledger. Wait until `pending_items` is zero:
+
+```sql
+WITH capacity AS (
+    SELECT count(*) FILTER (WHERE state = 'pending') AS pending_items,
+           count(*) FILTER (WHERE state = 'ready') AS ready_items,
+           coalesce(sum(payload_size_estimate)
+               FILTER (WHERE state = 'ready'), 0)::bigint
+               AS ready_payload_bytes
+    FROM file_icon_backfill_items
+)
+SELECT pending_items,
+       ready_items,
+       ready_payload_bytes,
+       pg_size_pretty(ready_payload_bytes) AS ready_payload_size,
+       pg_size_pretty(
+           ceil(ready_payload_bytes::numeric * 1.05)::bigint
+       ) AS estimated_db_growth
+FROM capacity;
+```
+
+The number in `status` stays authoritative for the approval. While a
+migration runs, this query no longer shows the original total.
+
+### Duration in detail
+
+There are two separate clocks:
+
+- **`db-init`** changes the schema and registers every old item while Eneo is
+  stopped. It copies nothing, but it reads every row, so measure it on a
+  restored copy.
+- **The background copy** runs once at worker start and then once per minute.
+  Each run first prepares up to 200 items, then copies up to 200 items or
+  128 MiB, whichever limit comes first.
+
+```text
+preparing runs = ceil(items / 200)
+copy runs      = max(ceil(MiB / 128), ceil(items / 200))
+runs           = preparing runs + copy runs - 1
+minutes        ≈ runs - 1
+```
+
+The last preparing run also copies the first batch, and the first run starts
+when the worker starts. Examples:
+
+| Old content | Items | Runs | Estimate |
+| --- | --- | --- | --- |
+| 0.4 GiB | 1,427 | 15 | 14 minutes |
+| 1 GiB | 1,639 | 17 | 16 minutes |
+| 5 GiB | about 8,000 | 79 | 1 hour 18 minutes |
+| 10 GiB | 16,384 | 163 | 2 hours 42 minutes |
+| 2 GiB | 100,000 small files | 999 | 16 hours 38 minutes |
+
+The formula is a lower bound. A batch stops before the item that would take
+it over 128 MiB, so files over 64 MiB are copied one per minute, and a mix of
+large and small files needs a few extra runs: in the Eneo test, the 0.4 GiB
+example needed 9 copy runs instead of 8. Slow storage, retries, checkpoints,
+and heavy use also add time.
+
+Most batches finish in a few seconds, so the schedule, not the hardware, sets
+the pace. Do not add CPU or memory for the copy alone: PostgreSQL hashes and
+copies each item itself, and the worker never loads file contents. Keep the
+batch limits at their defaults unless a rehearsal with representative traffic
+shows that larger batches keep response times, memory, disk I/O, and WAL
+acceptable.
+
+### What to record in the rehearsal
+
+- **Content:** number of items and old content size from preflight.
+- **Duration:** `db-init`, preparing, copy, and cleanup.
+- **Database host:** free disk before and at its lowest, database growth, and
+  WAL at its highest.
+- **Load:** database CPU and I/O, worker memory, API response times, and errors.
+- **Files:** downloads of each kind of old file, and a new upload and download.
+- **Completion:** final `status` and progress counts.
+- **Recovery:** the result of restoring a backup taken after the migration.
+
+A fast workstation is good for finding problems but does not predict the
+duration on your database server.
+
+<details>
+<summary>Measured results from the Eneo test runs</summary>
+
+The Eneo benchmarks used PostgreSQL 13 on a shared development machine and
+the default batch limits.
+
+- **10 GiB in 16,384 items:** 310 seconds of active work, which projects to
+  2 hours 42 minutes at the normal schedule. Database growth 1.041 × `L`, about
+  11 GiB of WAL generated over the run, worker memory about 141 MiB, no
+  PostgreSQL temporary files, and no mismatched file.
+- **1 GiB in 1,639 items (7 September 2026):** 36.5 seconds of active work in
+  17 runs, about 16 minutes at the normal schedule. Database growth 1.04 GiB,
+  1.08 GiB WAL generated, worker memory 140 MiB, and every file matched. The
+  [recorded
+  results](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/benchmarks/file-icon-migration-pg13-20260907.json)
+  include the pinned image and source hashes.
+- **API during the copy:** a small test uploaded and downloaded files through
+  the production API routes while 20 old items were copied. All 19 rounds and
+  the final byte checks passed. This proves correctness, not response times
+  under real load.
+- **Full upgrade from 2.1.1 to 2.2.0-rc.3 (23 September 2026):** 1,427 items
+  and 412 MiB, uploaded through the 2.1.1 API and by SQL, upgraded with the
+  commands on this page on PostgreSQL 16. `db-init` took 15 seconds, preparing
+  8 runs, and the copy 9 runs (7.5 minutes). The database grew by 1.02 × `L`,
+  and WAL on disk stayed at 465 MiB, below the default `max_wal_size`. Old
+  files downloaded byte-identical before, during, and after the copy, and
+  after cleanup. Cleanup took 4 seconds, and `VACUUM FULL` returned the
+  database to its size before the upgrade. A second run on 24 September with
+  the final commands and default settings copied everything in 14 minutes, as
+  the preflight estimate predicted.
+
+None of the tests measured `db-init` at production size, document processing
+or model load, replicas, backup retention, or a production-size restore.
+Qualify those in your own rehearsal.
+
+</details>
+
+## FAQ
+
+### Why is this needed when we do not use S3?
+
+The migration is about one content model, not about S3: one identity, one
+integrity check, and one way to clean up for every stored file. The target is
+PostgreSQL, the same database as before. Keeping the old columns as a second,
+permanent model would keep the split that made changes slow and risky.
+
+### Is this one-time work?
+
+Yes. It moves content written by older versions. New uploads already use the
+content store and never enter the old columns. Moving content to object storage
+later is a separate, optional operation.
+
+### Does Eneo stay available?
+
+Yes, except during the maintenance window for `db-init` and, if you run it,
+during cleanup. While the copy runs, old files are served from the old columns
+until their copy is verified. The copy adds database I/O and WAL, so start it
+at a quiet time and watch response times.
+
+### Can we pause and continue tomorrow?
+
+Yes. Run `pause`, and `resume` when you are ready. Copied items stay copied,
+and the pause survives worker restarts. See [Pause and
+resume](#pause-and-resume).
+
+### Can we migrate straight to S3?
+
+No. This release copies old content into PostgreSQL only. Keep **PostgreSQL**
+selected in **Admin > File storage** until the status is `complete`; changing
+the target during the copy halts it. Afterwards you can connect
+S3-compatible storage and [move existing
+content](/guides/object-content-storage#move-existing-content) with verified
+moves.
+
+### Why does Eneo wait above 5 GiB, and can we change it?
+
+Eneo cannot see how much disk the database has, or whether WAL is kept for
+replicas or archiving. Above 5 GiB it therefore waits for an operator to
+confirm the capacity. The wait is not an error, and Eneo stays available.
+Approve it with `FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK` as described in
+[step 7](#approve-disk-capacity-only-above-5-gib).
+
+To require approval for every copy, however small, set
+`FILE_ICON_BACKFILL_AUTO_INLINE_MAX_BYTES=0` in `env_backend.env` before you
+start the new worker. The other tuning settings are described in the
+[deployment runbook](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#bound-throughput-and-recover-a-halted-campaign).
+
+### Does the copy load all files into memory?
+
+No. PostgreSQL hashes and copies one item at a time inside the database. The
+worker coordinates the batches but never receives the file contents, so its
+memory stays around 140 MiB. PostgreSQL needs memory headroom for the largest
+item, which `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` limits.
+
+### Do we have to run cleanup?
+
+No. Eneo 2.2 works with the old columns in place. Cleanup, followed by a table
+rewrite, gives the disk space back and removes the fallback. Run it when you
+trust the migrated content and have a tested backup. Check the release notes
+before you upgrade past 2.2.
+
+### Can Eneo keep running during cleanup?
+
+No. Cleanup takes exclusive locks on the affected tables. A running backend or
+worker would block it, or keep using the old table layout until it restarts.
+
+### What if cleanup says "blocked"?
+
+Nothing was changed. `detail` names the reason:
+
+- `adoption has unfinished or leased items`: the copy is not finished. Wait
+  for `state: complete`.
+- `admission state is missing or paused`: run `resume`.
+- `the adoption campaign is not complete`: the copy is halted or still running.
+- `... lacks matching available bytes`: an old file and its copy differ. Keep
+  the old columns, and [get help](#get-help) with the file ID from `detail`.
+
+### Why are the old bytes not deleted right away?
+
+They are your recovery source while you verify the migrated content. Cleanup
+removes them only after checking every remaining file against its copy. The
+disk space comes back separately, because rewriting a table has its own
+downtime and disk cost.
+
+### We tested a development build before the release candidates
+
+A test or development database that ran an early, unreleased form of the
+`202607231700` or `202607231745` migration (before 28 August 2026) must be
+restored from a backup taken before that migration. Databases upgraded with
+2.2.0-rc.1 or later are not affected. Do not use `alembic stamp` to skip these
+revisions.
+
+## Related guides
+
+- [Deploy Eneo](/guides/deployment)
+- [Choose Content Storage](/guides/object-content-storage)
+- [Object Content Architecture](/docs/object-content-architecture)
+- [Detailed deployment runbook](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#upgrade-and-rollback)

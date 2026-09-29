@@ -93,19 +93,6 @@ function SpacesManager(data: SpacesManagerParams) {
     }
   }
 
-  /** Will create a new space and return it on success. Will return null on failure and show an alert */
-  async function createSpace(space: { name: string }) {
-    try {
-      const newSpace = await eneo.spaces.create({ name: space.name });
-      refreshSpaces();
-      return newSpace;
-    } catch (e) {
-      toastError(e);
-      console.error(e);
-    }
-    return null;
-  }
-
   /** Will update a given space. If no space is specified will update the current space. */
   async function updateSpace(
     update: Parameters<typeof eneo.spaces.update>[0]["update"],
@@ -146,7 +133,27 @@ function SpacesManager(data: SpacesManagerParams) {
     }
   }
 
-  async function updateDefaultAssistant({
+  // Model and reasoning changes are applied optimistically, so a message sent
+  // right after a switch must not race the update: sends wait for this chain
+  // (see awaitDefaultAssistantUpdates) and updates run one at a time so a
+  // quick A → B → C never lets an older response win.
+  let pendingDefaultAssistantUpdate: Promise<void> = Promise.resolve();
+
+  function updateDefaultAssistant(update: {
+    completionModel?: { id: string };
+    modelKwargs?: ModelKwargs;
+  }): Promise<void> {
+    const run = () => applyDefaultAssistantUpdate(update);
+    pendingDefaultAssistantUpdate = pendingDefaultAssistantUpdate.then(run, run);
+    return pendingDefaultAssistantUpdate;
+  }
+
+  /** Resolves once every queued default-assistant update has settled. */
+  function awaitDefaultAssistantUpdates(): Promise<void> {
+    return pendingDefaultAssistantUpdate;
+  }
+
+  async function applyDefaultAssistantUpdate({
     completionModel,
     modelKwargs
   }: {
@@ -156,6 +163,20 @@ function SpacesManager(data: SpacesManagerParams) {
     const defaultAssistant = get(currentSpace).default_assistant;
     if (!defaultAssistant) return;
     const id = defaultAssistant.id;
+    // Optimistic: the picker label and chat partner follow the store, so
+    // reflect the choice immediately and let the server response confirm it.
+    const optimisticModel = completionModel
+      ? get(currentSpace).completion_models.find((model) => model.id === completionModel.id)
+      : undefined;
+    if (optimisticModel) {
+      currentSpace.update(($currentSpace) => {
+        $currentSpace.default_assistant = {
+          ...defaultAssistant,
+          completion_model: optimisticModel
+        };
+        return $currentSpace;
+      });
+    }
     try {
       const updatedAssistant = await eneo.assistants.update({
         assistant: { id },
@@ -169,6 +190,12 @@ function SpacesManager(data: SpacesManagerParams) {
         return $currentSpace;
       });
     } catch (e) {
+      if (optimisticModel) {
+        currentSpace.update(($currentSpace) => {
+          $currentSpace.default_assistant = defaultAssistant;
+          return $currentSpace;
+        });
+      }
       toastError(e);
       console.error(e);
     }
@@ -183,11 +210,11 @@ function SpacesManager(data: SpacesManagerParams) {
     },
     refreshSpaces,
     refreshCurrentSpace,
-    createSpace,
     updateSpace,
     deleteSpace,
     watchPageData,
-    updateDefaultAssistant
+    updateDefaultAssistant,
+    awaitDefaultAssistantUpdates
   });
 }
 
@@ -195,7 +222,8 @@ function isOrganizationSpace(space: SpaceSparse) {
   return space.organization === true;
 }
 
-export { initSpacesManager, getSpacesManager };
+// SpacesManager is exported for unit tests; components use initSpacesManager.
+export { initSpacesManager, getSpacesManager, SpacesManager };
 
 function derivedCurrentSpace(space: Readable<Space>) {
   return derived(space, ($space) => {

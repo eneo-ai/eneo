@@ -85,13 +85,6 @@
             href="/spaces/{$currentSpace.routeId}/apps"
           />
         {/if}
-        {#if $currentSpace.hasPermission("read", "service")}
-          <OverviewTile
-            title={m.services()}
-            count={$currentSpace.applications.services.length}
-            href="/spaces/{$currentSpace.routeId}/services"
-          />
-        {/if}
         {#if $currentSpace.hasPermission("read", "collection")}
           <OverviewTile
             title={m.collections()}

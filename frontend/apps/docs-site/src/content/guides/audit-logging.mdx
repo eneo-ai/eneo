@@ -22,8 +22,8 @@ Logs are stored in PostgreSQL and are scoped to your tenant.
 
 Audit logging can be turned on or off globally in the admin UI.
 
-- Go to **Organization → Granskningsloggar (Audit Logs)**
-- Use the global toggle to enable or disable logging for your tenant
+- Go to **Admin** and use the **Audit logging** toggle on the admin overview page to enable or disable logging for your tenant
+- The logs themselves, the per-category and per-action configuration, exports, and the retention setting live under **Admin → Analytics & logs → Audit Logs**
 
 When disabled, no new audit logs are created.
 
@@ -51,12 +51,11 @@ The access event itself is logged and included in the audit trail.
 
 You can filter logs by:
 
-- **Entity** (e.g., user, assistant, app)
 - **Action** (multi-select)
 - **Date range**
-- **Actor** (user search)
+- **User** (the actor, found by searching on email)
 
-Free-text search matches the log description. If you want a name or identifier to be searchable, include it in the log description or metadata.
+The search box has two scopes: **User** searches for an actor by email, and **Entity** is a free-text search (at least three characters) that matches the log description. If you want a name or identifier to be searchable, include it in the log description or metadata.
 
 ### Log details and JSON
 
@@ -70,24 +69,9 @@ This metadata includes actor and target snapshots for reliable investigation eve
 
 ## Retention policies
 
-### Audit log retention
+Audit log retention is configured per tenant, in days, on the Audit Logs page and enforced by a daily purge job. Logs older than the retention period are permanently deleted.
 
-Audit log retention is configured per tenant and enforced by a daily purge job. Logs older than the retention period are permanently deleted.
-
-### Conversation retention hierarchy
-
-Conversation data (questions and app runs) follows a hierarchy that can be tuned per space, assistant, or app:
-
-1. Assistant or App `data_retention_days` (if set)
-2. Space `data_retention_days`
-3. Tenant-level conversation retention (if enabled internally)
-4. `null` means keep forever
-
-**How to use it:**
-
-- Set retention at the **space** level to give all new assistants/apps a default policy.
-- Override retention at the **assistant** or **app** level when a specific workflow needs shorter retention.
-- Set `data_retention_days` to `null` to remove an override.
+Conversation data (questions and app runs) has its own retention hierarchy, set per space, assistant, or app. See [Retention](/docs/audit-logging#retention) on the technical page for the hierarchy, its limits, and the API.
 
 ## Exporting audit logs
 
@@ -208,10 +192,6 @@ Exported files are retained for 24 hours before cleanup.
 - Set retention policies that align with regulatory requirements.
 - Use async exports for large time ranges.
 
-## Roadmap
-
-We plan to support external audit sinks (e.g., SIEM or analytics pipelines) so long-term storage can be moved out of the primary database when needed.
-
 <Callout type="info">
-  Need developer details? See the [Audit Logging (Technical)](/docs/audit-logging) documentation.
+  Need developer details, or the plans for external audit sinks? See the [Audit Logging (Technical)](/docs/audit-logging) documentation and its [Roadmap](/docs/audit-logging#roadmap).
 </Callout>

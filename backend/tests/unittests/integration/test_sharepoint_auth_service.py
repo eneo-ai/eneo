@@ -49,7 +49,7 @@ def mock_token_response():
         "expires_in": 3600,
         "access_token": "mock-access-token-xyz",
         "refresh_token": "mock-refresh-token-abc",
-        "scope": "Files.Read.All Sites.Read.All User.Read Group.Read.All",
+        "scope": "Files.Read.All Sites.Read.All User.Read",
     }
 
 
@@ -171,7 +171,7 @@ class TestGenAuthUrl:
         assert "Files.Read.All" in auth_url
         assert "Sites.Read.All" in auth_url
         assert "User.Read" in auth_url
-        assert "Group.Read.All" in auth_url
+        assert "Group.Read.All" not in auth_url
 
     async def test_includes_state_parameter(self, service):
         """Auth URL includes the state parameter for CSRF protection."""

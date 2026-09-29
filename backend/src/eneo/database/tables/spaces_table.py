@@ -10,6 +10,7 @@ from eneo.database.tables.ai_models_table import (
     TranscriptionModels,
 )
 from eneo.database.tables.base_class import BaseCrossReference, BasePublic
+from eneo.database.tables.capabilities_table import SpaceCapabilities
 from eneo.database.tables.icons_table import Icons
 from eneo.database.tables.mcp_server_table import MCPServers
 from eneo.database.tables.security_classifications_table import SecurityClassification
@@ -27,6 +28,9 @@ if TYPE_CHECKING:
 
 
 class Spaces(BasePublic):
+    capabilities: Mapped[list[SpaceCapabilities]] = relationship(
+        lazy="selectin", cascade="all, delete-orphan"
+    )
     name: Mapped[str] = mapped_column()
     description: Mapped[Optional[str]] = mapped_column()
     data_retention_days: Mapped[Optional[int]] = mapped_column()

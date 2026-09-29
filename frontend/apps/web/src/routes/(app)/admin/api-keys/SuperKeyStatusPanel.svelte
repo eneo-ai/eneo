@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { AlertCircle } from "lucide-svelte";
+  import { CircleAlert } from "@lucide/svelte";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
@@ -36,13 +36,12 @@
 <div class="flex flex-col gap-4">
   {#if errorMessage}
     <Alert.Root variant="destructive">
-      <AlertCircle />
+      <CircleAlert />
       <Alert.Description>{errorMessage}</Alert.Description>
     </Alert.Root>
   {/if}
   {#if loading}
     <div class="flex flex-col gap-3">
-      <Skeleton class="h-12 w-full" />
       <Skeleton class="h-12 w-full" />
     </div>
   {/if}
@@ -54,16 +53,6 @@
           <div class="text-sm font-medium">ENEO_SUPER_API_KEY</div>
           <Badge variant={status.super_api_key_configured ? "default" : "destructive"}>
             {status.super_api_key_configured
-              ? m.api_keys_admin_status_configured()
-              : m.api_keys_admin_status_not_configured()}
-          </Badge>
-        </div>
-      </div>
-      <div class="flex flex-col gap-1">
-        <div class="flex items-center justify-between">
-          <div class="text-sm font-medium">ENEO_SUPER_DUPER_API_KEY</div>
-          <Badge variant={status.super_duper_api_key_configured ? "default" : "destructive"}>
-            {status.super_duper_api_key_configured
               ? m.api_keys_admin_status_configured()
               : m.api_keys_admin_status_not_configured()}
           </Badge>

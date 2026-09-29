@@ -14,6 +14,7 @@ from eneo.object_content.content import (
     ObjectContentBusyError,
     ObjectContentStateError,
     ObjectContentUnavailableError,
+    StorageKind,
 )
 from eneo.object_content.content_repository import ObjectContentRepository
 from eneo.object_content.content_service import retry_delay_seconds
@@ -186,20 +187,9 @@ class ObjectContentReconciler:
                     "Object-store generation changed during reconciliation"
                 )
             object_cycle_completed = await self._reconcile_object_page(store_lease)
-            async with self._database.session() as session, session.begin():
-                # Missing-marking consumes a completed inventory of one
-                # destination, so like every other remote-derived transition
-                # it must not commit after that destination was switched away.
-                await require_store_generation(
-                    session,
-                    slot=store_lease.slot,
-                    revision=store_lease.revision,
-                )
-                missing_objects = await ObjectContentReconciliationRepository(
-                    session
-                ).mark_missing_from_completed_inventory(
-                    limit=settings.reconciliation_batch_size
-                )
+            missing_objects = await self._mark_missing_from_completed_inventory(
+                store_lease
+            )
             multipart_aborted = await self._reconcile_multipart_page(store_lease)
             orphan_objects_deleted = await self._delete_orphans(
                 lease_owner,
@@ -465,7 +455,7 @@ class ObjectContentReconciler:
                 slot=store_lease.slot,
                 revision=store_lease.revision,
             )
-            return await ObjectContentReconciliationRepository(
+            result = await ObjectContentReconciliationRepository(
                 session
             ).record_object_page(
                 cursor=cursor,
@@ -473,6 +463,60 @@ class ObjectContentReconciler:
                 next_token=page.next_token,
                 orphan_grace_seconds=settings.orphan_grace_seconds,
             )
+        # Page writes lock content/descriptor rows. Commit them before entering
+        # recovery, whose admission/campaign/item locks must come first.
+        for mismatch in result.size_mismatches:
+            try:
+                async with self._database.session() as session, session.begin():
+                    await require_store_generation(
+                        session, slot=store_lease.slot, revision=store_lease.revision
+                    )
+                    await ObjectContentRepository(session).mark_backend_failure(
+                        content_id=mismatch.content_id,
+                        failure_code=ContentFailureCode.BACKEND_CORRUPT,
+                        observed_storage_kind=StorageKind.OBJECT_STORE,
+                        observed_object_key=mismatch.object_key,
+                        observed_at=mismatch.observed_at,
+                        observed_size_bytes=mismatch.size_bytes,
+                    )
+            except ObjectContentUnavailableError:
+                # The page already committed; preserve its completion result.
+                break
+        return result.completed
+
+    async def _mark_missing_from_completed_inventory(
+        self, store_lease: ObjectStoreLease
+    ) -> int:
+        async with self._database.session() as session, session.begin():
+            await require_store_generation(
+                session, slot=store_lease.slot, revision=store_lease.revision
+            )
+            candidates = await ObjectContentReconciliationRepository(
+                session
+            ).missing_object_candidates(
+                limit=store_lease.settings.reconciliation_batch_size
+            )
+        changed = 0
+        for candidate in candidates:
+            try:
+                async with self._database.session() as session, session.begin():
+                    await require_store_generation(
+                        session, slot=store_lease.slot, revision=store_lease.revision
+                    )
+                    marked = await ObjectContentRepository(
+                        session
+                    ).mark_backend_failure(
+                        content_id=candidate.content_id,
+                        failure_code=ContentFailureCode.BACKEND_MISSING,
+                        observed_storage_kind=StorageKind.OBJECT_STORE,
+                        observed_object_key=candidate.object_key,
+                        missing_before=candidate.cutoff,
+                    )
+                changed += marked
+            except ObjectContentUnavailableError:
+                # Earlier item transactions remain durable after a rotation.
+                break
+        return changed
 
     async def _reconcile_multipart_page(
         self,

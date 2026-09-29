@@ -32,11 +32,10 @@ class MockTenant:
 class MockUser:
     """Mock UserInDB object for testing."""
 
-    def __init__(self, tenant: MockTenant | None = None, modules: list = None):
+    def __init__(self, tenant: MockTenant | None = None):
         self.id = uuid4()
         self.tenant = tenant
         self.tenant_id = tenant.id if tenant else None
-        self.modules = modules or []
 
 
 class TestModelCredentialLocking:

@@ -68,6 +68,27 @@ class ObjectInventoryCursor:
 
 
 @dataclass(frozen=True, slots=True)
+class ObjectSizeMismatch:
+    content_id: UUID
+    object_key: str
+    size_bytes: int
+    observed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectInventoryPageResult:
+    completed: bool
+    size_mismatches: tuple[ObjectSizeMismatch, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class MissingObjectCandidate:
+    content_id: UUID
+    object_key: str
+    cutoff: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class MultipartInventoryCursor:
     cycle_id: UUID
     key_marker: str | None
@@ -612,13 +633,13 @@ class ObjectContentReconciliationRepository:
         objects: Sequence[RemoteObject],
         next_token: str | None,
         orphan_grace_seconds: int,
-    ) -> bool:
+    ) -> ObjectInventoryPageResult:
         state = await self._state_for_update()
         if (
             state.object_cycle_id != cursor.cycle_id
             or state.object_continuation_token != cursor.continuation_token
         ):
-            return False
+            return ObjectInventoryPageResult(completed=False)
 
         now = await self._database_now()
         keys = tuple(item.key for item in objects)
@@ -641,17 +662,22 @@ class ObjectContentReconciliationRepository:
             }
         else:
             known_by_key = {}
+        mismatches: list[ObjectSizeMismatch] = []
         for item in objects:
             known = known_by_key.get(item.key)
             if known is None:
                 continue
             row, descriptor = known
             descriptor.remote_observed_at = now
-            if row.size_bytes != item.size_bytes:
-                if row.state == ContentState.AVAILABLE.value:
-                    row.state = ContentState.FAILED.value
-                row.failure_code = ContentFailureCode.BACKEND_CORRUPT.value
-                row.failure_detail = "object inventory length differs from PostgreSQL"
+            if row.size_bytes != item.size_bytes and row.state in {
+                ContentState.AVAILABLE.value,
+                ContentState.RETAINED.value,
+            }:
+                mismatches.append(
+                    ObjectSizeMismatch(
+                        row.id, descriptor.object_key, item.size_bytes, now
+                    )
+                )
 
         live_known_keys = tuple(
             key
@@ -699,7 +725,9 @@ class ObjectContentReconciliationRepository:
         state.object_continuation_token = next_token
         if next_token is not None:
             await self._session.flush()
-            return False
+            return ObjectInventoryPageResult(
+                completed=False, size_mismatches=tuple(mismatches)
+            )
 
         await self._session.execute(
             delete(ObjectContentOrphanCandidates).where(
@@ -728,16 +756,20 @@ class ObjectContentReconciliationRepository:
         state.object_cycle_started_at = now
         state.object_continuation_token = None
         await self._session.flush()
-        return True
+        return ObjectInventoryPageResult(
+            completed=True, size_mismatches=tuple(mismatches)
+        )
 
-    async def mark_missing_from_completed_inventory(self, *, limit: int) -> int:
+    async def missing_object_candidates(
+        self, *, limit: int
+    ) -> tuple[MissingObjectCandidate, ...]:
         state = await self._state_for_update()
         cutoff = state.last_completed_object_cycle_started_at
         if cutoff is None:
-            return 0
+            return ()
         rows = (
             await self._session.execute(
-                select(ObjectContents, ObjectStoreObjects)
+                select(ObjectContents.id, ObjectStoreObjects.object_key)
                 .join(
                     ObjectStoreObjects,
                     ObjectStoreObjects.content_id == ObjectContents.id,
@@ -756,6 +788,7 @@ class ObjectContentReconciliationRepository:
                         ),
                     ),
                     ObjectContents.available_at < cutoff,
+                    ObjectStoreObjects.created_at < cutoff,
                     or_(
                         ObjectStoreObjects.remote_observed_at.is_(None),
                         ObjectStoreObjects.remote_observed_at < cutoff,
@@ -763,16 +796,12 @@ class ObjectContentReconciliationRepository:
                 )
                 .order_by(ObjectContents.available_at, ObjectContents.id)
                 .limit(limit)
-                .with_for_update(skip_locked=True)
             )
         ).all()
-        for row, _descriptor in rows:
-            if row.state == ContentState.AVAILABLE.value:
-                row.state = ContentState.FAILED.value
-            row.failure_code = ContentFailureCode.BACKEND_MISSING.value
-            row.failure_detail = "complete object inventory did not observe the object"
-        await self._session.flush()
-        return len(rows)
+        return tuple(
+            MissingObjectCandidate(content_id, object_key, cutoff)
+            for content_id, object_key in rows
+        )
 
     async def claim_orphan_deletes(
         self,

@@ -109,8 +109,6 @@ def user_factory(admin_user):
             user.user_groups_ids = set()
         if not hasattr(user, "permissions"):
             user.permissions = set()
-        if not hasattr(user, "modules"):
-            user.modules = []
         return user
 
     return _create_user

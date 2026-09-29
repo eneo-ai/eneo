@@ -13,6 +13,8 @@ from eneo.database.tables.object_content_table import (
 )
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
+from eneo.files.file_content_loader import FileContentLoader
+from eneo.files.file_repo import FileRepository
 from eneo.object_content.configuration import ObjectContentCoreSettings
 from eneo.object_content.content import (
     ContentAccessClass,
@@ -64,6 +66,7 @@ async def test_inline_create_read_range_and_final_delete_need_no_object_store(
             )
             session.add(owner)
             await session.flush()
+            owner_id = owner.id
             prepared = await service.prepare_in_transaction(
                 session,
                 intent=ContentIntent(
@@ -71,14 +74,14 @@ async def test_inline_create_read_range_and_final_delete_need_no_object_store(
                     created_by_user_id=user_id,
                     access_class=ContentAccessClass.PRIVATE_RESOURCE,
                     idempotency_key="inline-service-create",
-                    producer_receipt=f"file:{owner.id}:original:0",
+                    producer_receipt=f"file:{owner_id}:original:0",
                 ),
                 content=captured,
                 storage_kind=StorageKind.POSTGRES_INLINE,
             )
             session.add(
                 FileContentReferences(
-                    file_id=owner.id,
+                    file_id=owner_id,
                     content_id=prepared.id,
                     variant="original",
                     ordinal=0,
@@ -87,6 +90,16 @@ async def test_inline_create_read_range_and_final_delete_need_no_object_store(
 
         assert prepared.state is ContentState.AVAILABLE
         assert prepared.storage_kind is StorageKind.POSTGRES_INLINE
+        assert service.object_store_configured is False
+
+        # The file layer advertises the inline original as referenceable: the
+        # signed-download surface reads it through the same service, so no
+        # object store is needed for an assistant to receive it as a URL.
+        async with object_content_database.session() as session, session.begin():
+            repository = FileRepository(session)
+            metadata = await repository.get_by_id(file_id=owner_id)
+            loaded = await FileContentLoader(repository, service).load([metadata])
+        assert loaded[owner_id].original_available is True
 
         grant = ContentReadGrant(
             content_id=prepared.id,

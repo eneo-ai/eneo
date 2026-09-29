@@ -1,7 +1,10 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Tooltip } from "@eneo/ui";
-  import * as LucideIcons from "lucide-svelte";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
+  import {
+    loadLucideIconOrNull,
+    type LucideIconComponent
+  } from "$lib/features/templates/lucideIcons";
 
   interface Props {
     name: string;
@@ -15,26 +18,29 @@
   // Show tooltip only for long descriptions that would be truncated
   const showTooltip = $derived(description && description.length > 80);
 
-  // Convert kebab-case to PascalCase for icon lookup
-  function toPascalCase(str: string): string {
-    return (
-      str.charAt(0).toUpperCase() + str.slice(1).replace(/-([a-z])/g, (g) => g[1].toUpperCase())
-    );
-  }
-
-  const IconComponent = $derived.by(() => {
-    if (!iconName) return null;
-    const pascalName = toPascalCase(iconName);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (LucideIcons as any)[pascalName] || null;
+  // Icons resolve on demand from the lazily loaded registry (lucideIcons.ts).
+  let IconComponent = $state<LucideIconComponent | null>(null);
+  $effect(() => {
+    const name = iconName;
+    let stale = false;
+    void loadLucideIconOrNull(name).then((icon) => {
+      if (!stale) IconComponent = icon;
+    });
+    return () => {
+      stale = true;
+    };
   });
 </script>
 
 <div class="flex flex-col gap-1 py-1">
   <div class="flex items-center gap-2">
-    {#if IconComponent}
-      <div class="border-strong bg-subtle flex h-6 w-6 items-center justify-center rounded border">
-        {@render IconComponent({ class: "text-text h-4 w-4" })}
+    {#if iconName}
+      <div
+        class="border-stronger bg-subtle flex h-6 w-6 items-center justify-center rounded border"
+      >
+        {#if IconComponent}
+          <IconComponent class="text-default h-4 w-4" />
+        {/if}
       </div>
     {/if}
     <span class="text-default font-medium">{name}</span>
@@ -48,13 +54,18 @@
   </div>
   {#if description}
     {#if showTooltip}
-      <Tooltip text={description} placement="bottom">
-        <span class="text-dimmer line-clamp-1 max-w-[40ch] text-sm break-all">
-          {description}
-        </span>
-      </Tooltip>
+      <Tooltip.Root>
+        <Tooltip.Trigger>
+          {#snippet child({ props })}
+            <span {...props} class="text-muted line-clamp-1 max-w-[40ch] text-sm break-all">
+              {description}
+            </span>
+          {/snippet}
+        </Tooltip.Trigger>
+        <Tooltip.Content side="bottom">{description}</Tooltip.Content>
+      </Tooltip.Root>
     {:else}
-      <span class="text-dimmer line-clamp-1 text-sm break-all">
+      <span class="text-muted line-clamp-1 text-sm break-all">
         {description}
       </span>
     {/if}

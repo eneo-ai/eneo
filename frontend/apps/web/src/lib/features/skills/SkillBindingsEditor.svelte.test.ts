@@ -730,7 +730,7 @@ describe("SkillBindingsEditor", () => {
       .element(page.getByText(m.skills_execution_blocked_binding_explanation(), { exact: true }))
       .toBeVisible();
     expect(m.skills_execution_blocked_binding_explanation()).toContain(
-      "Appar stoppas innan någon modellförfrågan skickas"
+      "Appar stoppas innan modellen anropas"
     );
     expect(m.skills_execution_blocked_binding_explanation()).not.toContain(
       "men Skillen används inte vid körning"

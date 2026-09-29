@@ -73,6 +73,7 @@ CATEGORY_MAPPINGS = {
     ActionType.SKILL_PUBLISHED.value: "user_actions",
     ActionType.SKILL_UNPUBLISHED.value: "user_actions",
     ActionType.SKILL_BINDINGS_ADVANCED.value: "user_actions",
+    ActionType.SKILL_BINDINGS_DETACHED.value: "user_actions",
     ActionType.SKILL_DELETED.value: "user_actions",
     ActionType.COLLECTION_CREATED.value: "user_actions",
     ActionType.COLLECTION_UPDATED.value: "user_actions",
@@ -95,6 +96,9 @@ CATEGORY_MAPPINGS = {
     ActionType.TRANSCRIPTION_MODEL_UPDATED.value: "user_actions",
     ActionType.TRANSCRIPTION_MODEL_DELETED.value: "user_actions",
     ActionType.TRANSCRIPTION_MODEL_MIGRATED.value: "user_actions",
+    ActionType.IMAGE_MODEL_CREATED.value: "user_actions",
+    ActionType.IMAGE_MODEL_UPDATED.value: "user_actions",
+    ActionType.IMAGE_MODEL_DELETED.value: "user_actions",
     # Security Events
     ActionType.SECURITY_CLASSIFICATION_CREATED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_UPDATED.value: "security_events",
@@ -105,11 +109,16 @@ CATEGORY_MAPPINGS = {
     ActionType.MODULE_AUTH_TICKET_ISSUED.value: "security_events",
     ActionType.MODULE_AUTH_TOKEN_EXCHANGED.value: "security_events",
     ActionType.MODULE_AUTH_TOKEN_REFRESHED.value: "security_events",
-    # File Operations (4 actions)
+    ActionType.PASSWORD_CHANGED.value: "security_events",
+    ActionType.PASSWORD_CHANGE_FAILED.value: "security_events",
+    ActionType.SESSIONS_INVALIDATED.value: "security_events",
+    # File Operations (6 actions)
     ActionType.FILE_UPLOADED.value: "file_operations",
     ActionType.FILE_DELETED.value: "file_operations",
     ActionType.FILE_ORIGINAL_DOWNLOAD_LINK_CREATED.value: "file_operations",
+    ActionType.FILE_ORIGINAL_DOWNLOADED.value: "file_operations",
     ActionType.FILE_SIGNED_URL_MINTED.value: "file_operations",
+    ActionType.INFO_BLOB_ORIGINAL_DOWNLOAD_LINK_CREATED.value: "file_operations",
     # Integration Events (12 actions)
     ActionType.INTEGRATION_ADDED.value: "integration_events",
     ActionType.INTEGRATION_REMOVED.value: "integration_events",

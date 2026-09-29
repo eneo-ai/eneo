@@ -10,7 +10,8 @@ import pytest
 
 from eneo.authentication.api_key_resolver import ApiKeyValidationError
 from eneo.authentication.api_key_router import _collect_manageable_keys_for_page
-from eneo.authentication.auth_models import ApiKeyScopeType
+from eneo.authentication.api_key_router_helpers import api_key_cursor_for, paginate_keys
+from eneo.authentication.auth_models import ApiKeyListCursor, ApiKeyScopeType
 from tests.unit.api_key_test_utils import make_api_key
 
 
@@ -78,7 +79,7 @@ async def test_collect_manageable_keys_fetches_next_batch_when_first_batch_under
     ]
     assert repo.list_paginated.await_count == 2
     second_call = repo.list_paginated.await_args_list[1].kwargs
-    assert second_call["cursor"] == batch_one[-1].created_at
+    assert second_call["cursor"] == api_key_cursor_for(batch_one[-1])
 
 
 @pytest.mark.asyncio
@@ -109,3 +110,38 @@ async def test_collect_manageable_keys_stops_when_raw_batch_exhausted():
 
     assert [item.id for item in result] == [batch[0].id, batch[1].id]
     assert repo.list_paginated.await_count == 1
+
+
+def test_api_key_cursor_round_trips_total_order_and_accepts_legacy_timestamp():
+    created_at = datetime.now(timezone.utc)
+    key = _key("cursor-key", created_at)
+
+    cursor = api_key_cursor_for(key)
+    assert ApiKeyListCursor.deserialize(cursor.serialize()) == cursor
+    assert ApiKeyListCursor.deserialize(created_at.isoformat()) == ApiKeyListCursor(
+        created_at=created_at
+    )
+
+
+def test_previous_page_is_restored_in_descending_order_for_multi_item_pages():
+    now = datetime.now(timezone.utc)
+    page_two_boundary = _key("D", now - timedelta(seconds=4))
+    previous_query_rows = [
+        page_two_boundary,
+        _key("C", now - timedelta(seconds=3)),
+        _key("B", now - timedelta(seconds=2)),
+    ]
+
+    result = paginate_keys(
+        previous_query_rows,
+        total_count=6,
+        limit=2,
+        cursor=api_key_cursor_for(page_two_boundary),
+        previous=True,
+    )
+
+    assert [item.name for item in result["items"]] == ["C", "D"]
+    assert (
+        result["previous_cursor"]
+        == api_key_cursor_for(previous_query_rows[2]).serialize()
+    )

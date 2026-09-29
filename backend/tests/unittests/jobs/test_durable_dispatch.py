@@ -8,7 +8,7 @@ import pytest
 from arq.worker import Function
 from sqlalchemy.orm import Session
 
-from eneo.jobs.job_models import JobInDb, Task
+from eneo.jobs.job_models import KNOWLEDGE_TASKS, JobInDb, Task
 from eneo.jobs.job_service import JobService
 from eneo.jobs.task_models import (
     KnowledgeOriginalAdmission,
@@ -38,6 +38,7 @@ def _params() -> UploadInfoBlob:
 def _repo(session: Session, job_id: UUID) -> MagicMock:
     repo = MagicMock()
     repo.delegate.session.sync_session = session
+    repo.add_job = AsyncMock()
     repo.add_durable_knowledge_job = AsyncMock(
         return_value=JobInDb(
             id=job_id,
@@ -48,6 +49,21 @@ def _repo(session: Session, job_id: UUID) -> MagicMock:
         )
     )
     return repo
+
+
+@pytest.mark.parametrize("task", KNOWLEDGE_TASKS)
+async def test_generic_queue_rejects_knowledge_tasks(task: Task) -> None:
+    session = Session()
+    repo = _repo(session, uuid4())
+
+    with pytest.raises(ValueError, match="requires durable dispatch"):
+        await JobService(TEST_USER, repo).queue_job(
+            task,
+            name="document.txt",
+            task_params=_params(),
+        )
+
+    repo.add_job.assert_not_awaited()
 
 
 async def test_durable_dispatch_is_scheduled_only_after_commit(

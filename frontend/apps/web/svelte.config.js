@@ -14,6 +14,15 @@ const config = {
     outDir: process.env.SVELTE_KIT_OUT_DIR ?? ".svelte-kit",
     // Default build will generate a node version of the frontend
     adapter: adapter_node(),
+    output: {
+      // Server-rendered pages get their script preloads as <link rel="preload">
+      // tags in the HTML. SvelteKit's default "modulepreload" strategy only
+      // writes tags for prerendered pages and otherwise relies on a Link
+      // response header, which this app strips because it grew past what the
+      // reverse proxy accepts (#112, hooks.server.ts). ".mjs" avoids Chromium
+      // parsing each module twice; adapter-node serves .mjs as JavaScript.
+      preloadStrategy: "preload-mjs"
+    },
     csp: {
       directives: {
         "script-src": ["self"],

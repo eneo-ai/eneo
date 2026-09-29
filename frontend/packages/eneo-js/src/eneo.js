@@ -16,6 +16,7 @@ import { initSpaces } from "./endpoints/spaces.js";
 import { initUserGroups } from "./endpoints/user-groups.js";
 import { initUser } from "./endpoints/users.js";
 import { initVersion } from "./endpoints/version.js";
+import { initWhatsNew } from "./endpoints/whats-new.js";
 import { initWebsites } from "./endpoints/websites.js";
 import { initPrompts } from "./endpoints/prompts.js";
 import { initApps } from "./endpoints/apps.js";
@@ -39,6 +40,7 @@ import { initHelpAssistants } from "./endpoints/helpAssistants.js";
 import { initSkills } from "./endpoints/skills.js";
 import { initObjectContentPolicy } from "./endpoints/object-content-policy.js";
 import { initObjectStoreConnection } from "./endpoints/object-store-connection.js";
+import { initModules } from "./endpoints/modules.js";
 
 /**
  * Create an Eneo.js object to interact with the eneo backend.
@@ -62,6 +64,7 @@ export function createEneo(args) {
     assistants: initAssistants(client),
     services: initServices(client),
     version: initVersion(client),
+    whatsNew: initWhatsNew(client),
     analytics: initAnalytics(client),
     logging: initLogging(client),
     jobs: initJobs(client),
@@ -93,6 +96,7 @@ export function createEneo(args) {
     skills: initSkills(client),
     objectContentPolicy: initObjectContentPolicy(client),
     objectStoreConnection: initObjectStoreConnection(client),
+    modules: initModules(client),
     client
   };
 }
