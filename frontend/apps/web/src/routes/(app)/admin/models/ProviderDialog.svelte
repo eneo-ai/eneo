@@ -86,6 +86,37 @@
   let isActive = $state(true);
   let isEditingApiKey = $state(false);
   let fieldValues = $state<Record<string, string>>({});
+  // The endpoint the stored key was entered for, in comparable form.
+  let seededEndpoint = $state("");
+
+  /**
+   * Canonical form for deciding whether an endpoint edit changes the
+   * destination: scheme and host are case-insensitive, a default port equals
+   * no port, and trailing slashes are ignored. The backend applies the same
+   * rule and is authoritative.
+   */
+  function comparableEndpoint(value: string): string {
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+    try {
+      const url = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+      const path = url.pathname.replace(/\/+$/, "");
+      return `${url.protocol}//${url.host}${path}${url.search}`.toLowerCase();
+    } catch {
+      return trimmed.replace(/\/+$/, "").toLowerCase();
+    }
+  }
+
+  // A stored key is never sent to a destination it was not entered for, so
+  // changing the endpoint of a provider that has a key means typing the key
+  // again. Derived, not effect-driven, so the form cannot drift out of sync.
+  const endpointChanged = $derived(
+    comparableEndpoint(fieldValues.endpoint ?? "") !== seededEndpoint
+  );
+  const keyRequiredForEndpointChange = $derived(
+    Boolean(provider?.masked_api_key) && endpointChanged
+  );
+  const showApiKeyInput = $derived(isEditingApiKey || keyRequiredForEndpointChange);
 
   let isSubmitting = $state(false);
   let error = $state<string | null>(null);
@@ -117,6 +148,7 @@
       }
     }
     fieldValues = next;
+    seededEndpoint = comparableEndpoint(next.endpoint ?? "");
 
     lastSeededFor = { id: provider.id, open: true };
   });
@@ -136,8 +168,8 @@
       const value = (fieldValues[field.name] ?? "").trim();
 
       if (field.name === "api_key") {
-        // Only include the API key when the user is actively editing it.
-        if (!isEditingApiKey || !value) continue;
+        // Only include the API key when the user is entering a new one.
+        if (!showApiKeyInput || !value) continue;
         credentials[field.name] = value;
         continue;
       }
@@ -162,6 +194,10 @@
 
     if (!providerName.trim()) {
       error = m.provider_name_required();
+      return;
+    }
+    if (keyRequiredForEndpointChange && !(fieldValues.api_key ?? "").trim()) {
+      error = m.provider_endpoint_change_requires_key();
       return;
     }
 
@@ -237,7 +273,7 @@
                   {formatFieldLabel(field.name)}
                 </Field.Label>
 
-                {#if provider.masked_api_key && !isEditingApiKey}
+                {#if provider.masked_api_key && !showApiKeyInput}
                   <div
                     class="border-border bg-muted/40 hover:border-foreground/30 flex items-center justify-between rounded-lg border px-4 py-2.5 transition-colors duration-150"
                   >
@@ -259,9 +295,13 @@
                     type="password"
                     bind:value={fieldValues[field.name]}
                     placeholder={getFieldPlaceholder(field.name, provider.provider_type)}
-                    required={!provider.masked_api_key}
+                    required={!provider.masked_api_key || keyRequiredForEndpointChange}
                   />
-                  {#if provider.masked_api_key}
+                  {#if keyRequiredForEndpointChange}
+                    <Field.Description>
+                      {m.provider_endpoint_change_requires_key()}
+                    </Field.Description>
+                  {:else if provider.masked_api_key}
                     <button
                       type="button"
                       class="text-muted-foreground hover:text-primary text-left text-xs underline transition-colors"
