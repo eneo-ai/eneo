@@ -1675,7 +1675,10 @@ class SpaceRepository:
         return await self.one(id=entry_in_db.id)
 
     async def one_or_none(self, id: UUID) -> Optional[Space]:
-        query = sa.select(Spaces).where(Spaces.id == id)
+        query = sa.select(Spaces).where(
+            Spaces.id == id,
+            Spaces.tenant_id == self.user.tenant_id,
+        )
 
         return await self._get_from_query(query)
 

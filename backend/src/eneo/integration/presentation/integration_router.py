@@ -220,12 +220,12 @@ async def get_user_integrations(
     response_model=UserIntegrationList,
     status_code=200,
     description="List integrations available for a specific space.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Integration services enforce tenant, user and space access for this operation.",
+    reason="SpaceService checks current space read access before listing available integrations.",
 )
 async def get_available_integrations_for_space(
     space_id: UUID,
@@ -236,8 +236,7 @@ async def get_available_integrations_for_space(
     - Personal spaces: Only user OAuth integrations
     - Shared/Organization spaces: Both tenant app and user OAuth integrations
     """
-    space_repo = container.space_repo()
-    space = await space_repo.one(id=space_id)
+    space = await container.space_service().get_space(space_id)
     user = container.user()
 
     service = container.user_integration_service()

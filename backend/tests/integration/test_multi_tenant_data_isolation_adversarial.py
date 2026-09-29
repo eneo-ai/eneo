@@ -237,6 +237,70 @@ async def test_user_cannot_access_other_tenant_space_via_id_manipulation(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_available_integrations_requires_current_space_access(
+    client: AsyncClient,
+    super_admin_token: str,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+):
+    tenant_a = await _create_tenant(
+        client, super_admin_token, f"integrations-tenant-a-{uuid4().hex[:6]}"
+    )
+    tenant_b = await _create_tenant(
+        client, super_admin_token, f"integrations-tenant-b-{uuid4().hex[:6]}"
+    )
+    owner = await _create_user(
+        client,
+        super_admin_token,
+        tenant_a["id"],
+        f"integrations-owner-{uuid4().hex[:6]}@example.com",
+        "TenantAPassword123!",
+    )
+    nonmember = await _create_user(
+        client,
+        super_admin_token,
+        tenant_a["id"],
+        f"integrations-nonmember-{uuid4().hex[:6]}@example.com",
+        "TenantAPassword123!",
+    )
+    foreign_user = await _create_user(
+        client,
+        super_admin_token,
+        tenant_b["id"],
+        f"integrations-foreign-{uuid4().hex[:6]}@example.com",
+        "TenantBPassword123!",
+    )
+
+    owner_token = await _login_user(client, owner["email"], "TenantAPassword123!")
+    nonmember_token = await _login_user(
+        client, nonmember["email"], "TenantAPassword123!"
+    )
+    foreign_token = await _login_user(
+        client, foreign_user["email"], "TenantBPassword123!"
+    )
+    space = await _create_space(client, owner_token, f"integrations-{uuid4().hex[:6]}")
+    url = f"/api/v1/integrations/spaces/{space['id']}/available/"
+
+    owner_response = await client.get(
+        url, headers={"Authorization": f"Bearer {owner_token}"}
+    )
+    assert owner_response.status_code == 200, owner_response.text
+    assert isinstance(owner_response.json()["items"], list)
+
+    nonmember_response = await client.get(
+        url, headers={"Authorization": f"Bearer {nonmember_token}"}
+    )
+    assert nonmember_response.status_code == 403, nonmember_response.text
+
+    foreign_response = await client.get(
+        url, headers={"Authorization": f"Bearer {foreign_token}"}
+    )
+    assert foreign_response.status_code == 404, foreign_response.text
+    assert "tenant" not in foreign_response.text.lower()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_insights_logging_never_hydrates_another_tenants_message(
     client: AsyncClient,
     super_admin_token: str,
