@@ -50,7 +50,7 @@ from eneo.sessions.session_protocol import (
 
 _TENANT_ANALYTICS_ACCESS_REASON = "Tenant analytics require the insights permission."
 _RESOURCE_INSIGHTS_ACCESS_REASON = (
-    "AnalysisService authorizes insights for the requested assistant or space."
+    "AnalysisService checks insight access to the requested assistant or group chat."
 )
 
 logger = get_logger(__name__)
