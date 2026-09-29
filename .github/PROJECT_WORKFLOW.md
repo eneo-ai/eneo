@@ -15,7 +15,7 @@ The project should be easy enough that people actually use it.
 - Developers should mainly create or update normal GitHub issues and pull requests.
 - Product/project leads should mainly use GitHub Project views.
 - Committee views should show outcomes, status, sponsor/municipality, owner/lead, progress, and decisions without requiring people to read implementation detail.
-- Automation should keep labels and export metadata useful where practical, but it should not block normal development flow.
+- Pull requests must carry explicit change-type and area labels before merge. Missing planning links remain visible without blocking delivery.
 
 ## Canonical metadata model
 
@@ -37,6 +37,125 @@ Use one item kind per issue:
 - `Chore`: maintenance work without direct product behavior.
 
 Use native GitHub issue types where available. GitHub includes default `task`, `bug`, and `feature` issue types at the organization level. Custom types such as `Epic`, `Finding`, or `Initiative` can be added later if the organization wants them, but the current workflow does not require them.
+
+## Required labels
+
+Labels describe delivered work for filtering and reporting. The executable
+catalog and validation rules live in `.github/scripts/label-policy.mjs`.
+`ensure-labels.mjs` creates or updates that catalog without deleting other labels.
+Do not add synonymous labels such as `fix`, `feature`, or a second `chore`.
+
+### Pull requests
+
+Apply exactly one primary change type, based on the intent of the final diff:
+
+| Label | Meaning |
+| --- | --- |
+| `bug` | Correct existing behavior that does not meet its intended contract. |
+| `enhancement` | Introduce or improve product behavior. |
+| `dependencies` | Update dependencies, including runtime or container versions. |
+| `refactor` | Restructure code without an intended behavior change. |
+| `kind:chore` | Maintenance, tooling, or test-only work without direct product behavior. |
+
+Use `documentation` alone for documentation-only work. When documentation
+accompanies one of the primary types above, keep both labels; `documentation`
+then describes the documentation area and does not create a second primary type.
+A bug fix with matching tests and docs is still `bug`, not `bug` plus `kind:chore`.
+Split unrelated changes instead of assigning conflicting primary types.
+
+Also apply at least one affected area:
+`backend`, `frontend`, `infra`, `documentation`, `ci`, `github-actions`, `docker`,
+`devcontainer`, or `security`. Several areas can apply. `security` also serves as
+a cross-cutting signal; add the concrete subsystem when known.
+
+Additional signals do not replace a primary type:
+
+- `security`: security-sensitive behavior or vulnerability work.
+- `accessibility`: accessibility barriers or WCAG conformance work.
+- `breaking-change`: consumers or operators must adapt when upgrading. Explain
+  the required adaptation in the PR and the appropriate upgrade documentation.
+- `python:uv`: identifies the dependency ecosystem; pair it with `backend` or
+  another actual area.
+
+Examples:
+
+| Work | Labels |
+| --- | --- |
+| API bug fix with matching documentation | `bug`, `backend`, `documentation` |
+| Frontend restructuring | `refactor`, `frontend` |
+| Keyboard interaction fix | `bug`, `frontend`, `accessibility` |
+| Container dependency update | `dependencies`, `docker` |
+| CI maintenance | `kind:chore`, `ci` |
+| Documentation-only correction | `documentation` |
+
+Apply real GitHub labels through the sidebar or CLI, for example:
+
+```bash
+gh pr edit 123 --repo eneo-ai/eneo --add-label bug --add-label backend
+```
+
+Label names written in a PR body do not count. The **PR labels** check reads the
+current labels every time it runs, including manual reruns. It reruns after
+label changes, new commits, reopening, editing, and entering the merge queue.
+It validates all PRs in a merge-group candidate again. Drafts can remain
+unclassified while being written, but their check stays red until classified.
+Bots and backports have no exemption; Dependabot's configured labels already
+meet the policy. `needs:*`, `kind:task`, `kind:epic`, and `kind:finding` do not
+classify a PR's change type.
+
+### Issues and planning
+
+Issue kind answers what is being planned: epic, task, finding, bug, feature,
+or chore. It is distinct from the change type of each implementing PR. Keep the
+native issue type, Project `Kind`, and `kind:*` mirrors aligned. Do not put
+`kind:chore` on a `kind:task` issue merely because an implementing PR is maintenance.
+
+All issue forms require an explicit `Area` selection, with no preselected
+`Other`. Intake maps Backend, Frontend, Infra, Docs, and Security to their
+corresponding labels. Editing that selection removes the previous form area and
+adds the new one; unrelated labels are retained. Epic and task forms no longer
+claim that every item is an `enhancement`.
+
+`Other`, missing classification, and issues created outside the forms are kept
+visible with `needs:triage` when their kind/type or area is missing. Maintainers
+must classify those issues before treating them as ready. Issue creation through
+the API cannot be blocked by a PR status check. Completing labels does not remove
+`needs:triage` automatically: it may also represent outstanding human review.
+
+Project `Status`, `Priority`, and `Roadmap version` remain the planning owners.
+The existing `priority:P0` through `priority:P3` labels describe security response
+priority; they are not a second general-purpose planning priority.
+
+### Enforcement and recovery
+
+`pr-labels.yml` uses trusted default-branch code on `pull_request_target` so the
+same policy covers older release branches. It has read-only permissions and
+never executes a PR's code. `merge_group` runs the same trusted policy.
+Repository/organization Actions event policies must allow this metadata-only
+`pull_request_target` workflow; blocking that event also blocks the required check.
+
+Roll out in this order:
+
+1. Merge the workflow, catalog, tests, forms, and agent instructions into `develop`.
+2. Run `node .github/scripts/ensure-labels.mjs` with a token that can manage labels.
+3. Verify that **PR labels** reports success on a correctly labeled PR and fails
+   after removing a required label. Verify a merge-group candidate as well.
+4. Require **PR labels** from the GitHub Actions app in an active branch ruleset
+   for `develop`, `main`, and `release/**`. Preserve other required checks and
+   protections. Exempt branch creation so a release branch can be cut normally.
+
+Do not require a check before its workflow is available. If rollout causes a
+workflow failure, remove only the **PR labels** requirement from its dedicated
+ruleset while fixing the workflow; keep CI and dependency checks in force.
+
+### Reporting
+
+Use the policy's primary change type for mutually exclusive change counts;
+area and signal totals overlap. Keep issues, epics, and PRs as separate measures.
+Report PRs to `develop` separately from backports to release branches, using the
+target branch rather than another manually maintained label.
+Labels are mutable. Historical relabeling needs review and does not recreate the
+classification at merge time; use retained snapshots/events for that requirement.
 
 ## Versioned roadmap
 
@@ -225,13 +344,17 @@ When a finding becomes planned work:
 
 `.github/workflows/add-to-project.yml` handles project intake:
 
-- ensures planning labels exist;
+- ensures the classification and planning labels exist;
 - adds opened or reopened issues and PRs to project #5;
-- labels structured issues by kind;
+- labels structured issues by kind and their selected area, and marks incomplete classification for triage;
 - marks development tasks with `needs:epic` if their `Parent epic` field does not reference an epic issue.
 - marks non-draft PRs with `needs:task-link` if the PR body does not contain a closing task reference such as `Fixes #123`.
 
-The workflow is non-blocking for PRs. It uses labels to make missing planning links visible without making planning metadata a release gate. If this workflow is expanded later, keep privileged workflow code on the base branch and do not checkout/run PR head code in jobs that use `ADD_TO_PROJECT_PAT`.
+Planning links remain non-blocking; classification is enforced separately by
+**PR labels**. Issue classification runs before Project token validation, so a
+missing `ADD_TO_PROJECT_PAT` cannot prevent labeling. Keep privileged workflow
+code on the trusted default branch and do not checkout/run PR head code in jobs
+that use `ADD_TO_PROJECT_PAT`.
 
 When adding workflow inputs or untrusted issue/PR text to a `run:` step, pass the value through `env:` and reference the environment variable in shell. Do not interpolate GitHub contexts directly into shell commands in jobs that use `ADD_TO_PROJECT_PAT`. Checkout steps should keep `persist-credentials: false` unless the job must push back to the repository.
 
@@ -368,7 +491,9 @@ Run these checks after editing project workflow files:
 ```bash
 node --check .github/scripts/ensure-project-fields.mjs
 node --check .github/scripts/project-intake.mjs
-node --check .github/scripts/ensure-planning-labels.mjs
+node --check .github/scripts/ensure-labels.mjs
+node --check .github/scripts/check-pr-labels.mjs
+node --test --test-concurrency=1 .github/scripts/label-policy.test.mjs
 node --check scripts/export_github_roadmap.mjs
 node .github/scripts/ensure-project-fields.mjs --self-test
 node .github/scripts/project-intake.mjs --self-test

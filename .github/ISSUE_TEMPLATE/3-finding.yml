@@ -41,7 +41,6 @@ body:
         - Docs
         - Security
         - Other
-      default: 5
     validations:
       required: true
 
