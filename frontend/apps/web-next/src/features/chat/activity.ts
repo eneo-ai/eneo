@@ -1,4 +1,5 @@
 import type { Schema } from "@/lib/api/models";
+import { citedSourceIndices } from "@/lib/chat/inref";
 import { asString, hostOf } from "@/lib/chat/metadata";
 import type { EneoUIMessage, KnowledgeOrigin } from "@/lib/chat/types";
 import { mcpReferencesFromParts, mergeSources, type SourceChip } from "./message-parts";
@@ -169,10 +170,19 @@ export function modelName(message: EneoUIMessage): string | null {
 /** The sources of a message, numbered in citation order, with where they come from. */
 function activitySources(
   message: EneoUIMessage,
-  knowledge: KnowledgeOrigin[] = []
+  knowledge: KnowledgeOrigin[],
+  answerText: string
 ): ActivitySource[] {
   const mcpReferences = mcpReferencesFromParts(message.parts, message.metadata?.mcpToolReferences);
   const chips = mergeSources(message.parts, message.metadata?.webSearchReferences, mcpReferences);
+  const citedIndices = citedSourceIndices(
+    answerText,
+    chips.map((chip) => chip.sourceId)
+  );
+  // The stream includes every retrieved source; history stores only cited ones.
+  // Number both views by first citation, while still showing retrievals when
+  // the answer has no resolved citations yet.
+  const visibleChips = citedIndices.length > 0 ? citedIndices.map((index) => chips[index]!) : chips;
   const byId = new Map(knowledge.map((origin) => [origin.id, origin.name]));
   const documents = new Map(
     message.parts
@@ -182,7 +192,7 @@ function activitySources(
       )
       .map((part) => [part.sourceId, sourceDocumentOrigin(part)])
   );
-  return chips.map((chip) => {
+  return visibleChips.map((chip) => {
     const document = documents.get(chip.sourceId);
     const knowledgeName = document
       ? (byId.get(document.groupId ?? "") ?? byId.get(document.websiteId ?? "") ?? null)
@@ -276,7 +286,7 @@ export function deriveActivity(
     }
   }
 
-  const sources = activitySources(message, knowledge);
+  const sources = activitySources(message, knowledge, text);
   const meaningfulSteps = steps.filter((step) => step.kind !== "answer");
   const errorCount = steps.filter((step) => step.status === "error").length;
   return {

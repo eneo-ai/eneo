@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { resolveInrefs } from "@/lib/chat/inref";
 import {
   CitationSourcesProvider,
   citationComponents,
@@ -19,11 +20,12 @@ const SOURCES = [
   { title: "Upphandlingspolicy 2024", url: "https://intranat.kommun.se/policy" },
   { title: "LOU 19 kap." }
 ];
+const SOURCE_IDS = ["a5477f85-1111", "b3291cc0-2222"];
 
 const ANSWER = [
   "## Sammanfattning",
   "",
-  "Gränsen stämmer med tröskelvärdet[1], men efterannonsering saknas[2].",
+  'Gränsen stämmer med tröskelvärdet<inref id="a5477f85"/>, men efterannonsering saknas<inref id="b3291cc0"/>.',
   "",
   "| Kommun | Avvikelse |",
   "| --- | --- |",
@@ -50,7 +52,7 @@ function Answer({
   return (
     <CitationSourcesProvider value={SOURCES} prefix="msg-1" onOpenSource={onOpenSource}>
       <MessageResponse remarkPlugins={remarkPlugins} components={citationComponents}>
-        {text}
+        {resolveInrefs(text, SOURCE_IDS)}
       </MessageResponse>
     </CitationSourcesProvider>
   );
@@ -117,7 +119,24 @@ describe("MessageResponse", () => {
     expect(onOpenSource).toHaveBeenCalledWith(1, chip);
   });
 
-  // Security: a link in the model's output must never pose as a source.
+  it("leaves raw numeric brackets plain while rendering a validated inref as a chip", () => {
+    const { container } = renderAnswer(
+      vi.fn(),
+      'Literal [1] and [3]. Cited<inref id="a5477f85"/>.'
+    );
+    expect(container.textContent).toContain("Literal [1] and [3].");
+    const chips = screen.getAllByRole("button", { name: /^Källa \d+:/ });
+    expect(chips).toHaveLength(1);
+    expect(chips[0]?.textContent).toBe("1");
+  });
+
+  it("shows an out-of-range private marker as plain text", () => {
+    const { container } = renderAnswer(vi.fn(), "Out of range \uE0003\uE001.");
+    expect(container.textContent).toContain("Out of range [3].");
+    expect(screen.queryByRole("button", { name: /^Källa \d+:/ })).toBeNull();
+  });
+
+  // Links outside this message's numbered sources remain ordinary links.
   it("keeps other links plain, even when they look like citation markers", () => {
     renderAnswer(
       vi.fn(),

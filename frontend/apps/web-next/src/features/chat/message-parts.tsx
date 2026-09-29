@@ -28,6 +28,7 @@ export type McpSnippetSource = {
   content?: string | null;
   pageRange?: string | null;
   section?: string | null;
+  excerptNumber?: number;
 };
 
 export type SourceChip = {
@@ -66,6 +67,23 @@ function isMcpImageReference(ref: McpToolReference): boolean {
 
 function isHttpUrl(uri: string): boolean {
   return /^https?:\/\//i.test(uri);
+}
+
+/** Knowledge references identify excerpts by zero-based chunk number in their URI. */
+function knowledgeExcerptNumber(uri: string): number | undefined {
+  const match = /^eneo:\/\/info-blob\/[^#]+#chunk-(\d+)$/.exec(uri);
+  if (!match) return undefined;
+  const number = Number(match[1]);
+  return Number.isSafeInteger(number) ? number + 1 : undefined;
+}
+
+/** The MCP resource's title and internal document ID are tool context, not excerpt text. */
+function mcpSnippetContent(
+  uri: string,
+  content: string | null | undefined
+): string | null | undefined {
+  if (!content || !uri.startsWith("eneo://info-blob/")) return content;
+  return content.replace(/^Title:[^\r\n]*\r?\ndocument_id:[^\r\n]*\r?\n\r?\n/, "");
 }
 
 function safeImageSrc(src: string): string | undefined {
@@ -154,6 +172,7 @@ export function mergeSources(
       const pageRange = asString(meta.pageRange);
       const section = asString(meta.section);
       const externalUrl = sourceType === "crawl-page" && isHttpUrl(ref.uri) ? ref.uri : undefined;
+      const excerptNumber = knowledgeExcerptNumber(ref.uri);
       return {
         key: `mcp-${ref.id}`,
         title: mcpSourceLabel(ref),
@@ -163,9 +182,10 @@ export function mergeSources(
           ? undefined
           : {
               uri: ref.uri,
-              content: ref.content,
+              content: mcpSnippetContent(ref.uri, ref.content),
               pageRange,
-              section
+              section,
+              ...(excerptNumber === undefined ? {} : { excerptNumber })
             }
       };
     });
@@ -186,6 +206,9 @@ export function McpSnippetButton({
   className?: string;
 }) {
   const t = useTranslations();
+  const excerptLabel = snippet.excerptNumber
+    ? t("chat_source_excerpt", { number: snippet.excerptNumber })
+    : null;
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   // Astryx returns focus to what had it at open; this also covers a tap that
@@ -202,12 +225,13 @@ export function McpSnippetButton({
         className={className}
       >
         {source.title}
+        {excerptLabel && <span className="sr-only"> {excerptLabel}</span>}
       </button>
       <Dialog isOpen={open} onOpenChange={setOpen} width={672} maxHeight="85dvh">
         <Layout
           header={
             <DialogHeader
-              title={source.title}
+              title={excerptLabel ? `${source.title} · ${excerptLabel}` : source.title}
               subtitle={t("mcp_resource_snippet_description", { title: source.title })}
               onOpenChange={setOpen}
             />

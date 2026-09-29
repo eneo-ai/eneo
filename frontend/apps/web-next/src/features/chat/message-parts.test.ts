@@ -75,4 +75,27 @@ describe("message parts", () => {
       }
     ]);
   });
+
+  it("keeps separate knowledge excerpts and removes the MCP document header from their text", () => {
+    const references: Schema<"McpToolReferencePublic">[] = [0, 1, 2].map((chunk) => ({
+      id: `reference-${chunk}`,
+      uri: `eneo://info-blob/document-1#chunk-${chunk}`,
+      content: `Title: kaffe_tips\ndocument_id: document-1\n\nPassage ${chunk + 1}`,
+      meta: { title: "kaffe_tips", info_blob_id: "document-1" }
+    }));
+
+    const sources = mergeSources([], [], references);
+
+    expect(sources.map((source) => source.sourceId)).toEqual([
+      "reference-0",
+      "reference-1",
+      "reference-2"
+    ]);
+    expect(sources.map((source) => source.mcpSnippet?.excerptNumber)).toEqual([1, 2, 3]);
+    expect(sources.map((source) => source.mcpSnippet?.content)).toEqual([
+      "Passage 1",
+      "Passage 2",
+      "Passage 3"
+    ]);
+  });
 });

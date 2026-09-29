@@ -12,6 +12,16 @@ export function sourceAnchorId(messageId: string, number: number): string {
   return `${messageId}-source-${number}`;
 }
 
+function excerptPreview(source: ActivitySource): string | null {
+  const content = source.mcpSnippet?.excerptNumber
+    ? source.mcpSnippet.content?.replace(/\s+/g, " ").trim()
+    : null;
+  if (!content) return null;
+  if (content.length <= 180) return content;
+  const wordBoundary = content.lastIndexOf(" ", 180);
+  return `${content.slice(0, wordBoundary > 80 ? wordBoundary : 180).trimEnd()}…`;
+}
+
 /**
  * The Aktivitet panel's Källor tab: an answer's numbered sources with where
  * they come from. A citation that opened the panel focuses its source.
@@ -57,14 +67,19 @@ export function SourceList({
       {sources.map((source, index) => {
         const number = index + 1;
         const Icon = source.url ? Globe2 : FileText;
+        const excerpt = source.mcpSnippet?.excerptNumber
+          ? t("chat_source_excerpt", { number: source.mcpSnippet.excerptNumber })
+          : null;
         const meta = [
+          excerpt,
           source.origin,
           source.pageRange ? t("mcp_resource_page_range", { pageRange: source.pageRange }) : null
         ]
           .filter(Boolean)
           .join(" · ");
+        const preview = excerptPreview(source);
         const titleClass =
-          "focus-visible:outline-ring rounded-ax-inner text-left text-[13px] leading-snug font-medium break-words focus-visible:outline-2 focus-visible:outline-offset-2";
+          "focus-visible:outline-ring rounded-ax-inner min-h-6 text-left text-[13px] leading-snug font-medium break-words focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11";
         return (
           <li
             key={source.key}
@@ -110,6 +125,11 @@ export function SourceList({
                 )}
               </span>
               {meta && <span className="text-ax-text-secondary ps-[22px] text-xs">{meta}</span>}
+              {preview && (
+                <span className="text-ax-text-secondary ps-[22px] text-xs leading-relaxed break-words">
+                  {preview}
+                </span>
+              )}
             </span>
           </li>
         );

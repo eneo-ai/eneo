@@ -12,19 +12,19 @@ import {
 } from "react";
 
 import { Tooltip } from "@astryxdesign/core/Tooltip";
+import { RESOLVED_INREF } from "@/lib/chat/inref";
 import { hostOf } from "@/lib/chat/metadata";
 
 /**
- * Inline citations. A remark plugin rewrites `[N]` markers in the answer text
- * (N a 1-based index into the message's merged sources) into `#<prefix>-cite-N`
+ * Inline citations. A remark plugin rewrites private markers generated from
+ * validated `<inref>` tags (N a 1-based source index) into `#<prefix>-cite-N`
  * link nodes, and the `a` component override renders exactly those (the
  * message's own prefix, N within its sources) as small numbered chips named
- * "Källa N: <titel>". Any other link stays a plain link, so a link in the
- * model's output can never pose as a source. Operating on the markdown AST
- * (not a string regex) means code blocks and existing links are left untouched.
+ * "Källa N: <titel>". Other links stay plain links. Operating on the markdown
+ * AST (not a string regex) means code blocks and existing links are untouched.
  *
  * Real backend answers cite via `<inref id="…"/>` tags; lib/chat/inref.ts
- * rewrites those to `[N]` before the text reaches this plugin.
+ * rewrites those to private render markers before the text reaches this plugin.
  *
  * The chip is a real button (keyboard reachable, WCAG 2.1.1): it opens the
  * source in the activity panel instead of navigating. It has the look of the
@@ -41,18 +41,21 @@ type MdNode = {
 
 function splitCitations(value: string, sourceCount: number, prefix: string): MdNode[] {
   const out: MdNode[] = [];
-  const regex = /\[(\d{1,3})\]/g;
+  const regex = new RegExp(RESOLVED_INREF);
   let last = 0;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(value)) !== null) {
     const n = Number(match[1]);
-    if (n < 1 || n > sourceCount) continue;
     if (match.index > last) out.push({ type: "text", value: value.slice(last, match.index) });
-    out.push({
-      type: "link",
-      url: `#${prefix}-cite-${n}`,
-      children: [{ type: "text", value: String(n) }]
-    });
+    out.push(
+      n < 1 || n > sourceCount
+        ? { type: "text", value: `[${n}]` }
+        : {
+            type: "link",
+            url: `#${prefix}-cite-${n}`,
+            children: [{ type: "text", value: String(n) }]
+          }
+    );
     last = match.index + match[0].length;
   }
   if (out.length === 0) return [{ type: "text", value }];
@@ -64,7 +67,7 @@ function transform(node: MdNode, sourceCount: number, prefix: string) {
   if (!node.children) return;
   const next: MdNode[] = [];
   for (const child of node.children) {
-    if (child.type === "text" && child.value && /\[\d{1,3}\]/.test(child.value)) {
+    if (child.type === "text" && child.value?.includes("\uE000")) {
       next.push(...splitCitations(child.value, sourceCount, prefix));
     } else {
       // Don't descend into code/inline-code: a citation there would be noise.
@@ -77,11 +80,22 @@ function transform(node: MdNode, sourceCount: number, prefix: string) {
   node.children = next;
 }
 
-/** remark plugin factory: rewrites `[N]` (1 ≤ N ≤ sourceCount) into `#{prefix}-cite-N` links. */
-export function remarkCitations(sourceCount: number, prefix: string) {
-  return () => (tree: MdNode) => {
+type CitationRemarkOptions = { sourceCount: number; prefix: string };
+
+function citationRemark({ sourceCount, prefix }: CitationRemarkOptions) {
+  return (tree: MdNode) => {
     if (sourceCount > 0) transform(tree, sourceCount, prefix);
   };
+}
+
+/** Rewrites resolved inref markers (1 ≤ N ≤ sourceCount) into citation links. */
+export function remarkCitations(
+  sourceCount: number,
+  prefix: string
+): [typeof citationRemark, CitationRemarkOptions] {
+  // Streamdown caches processors by plugin name and serialized options. Passing
+  // sourceCount/prefix as options keeps different messages' numbering separate.
+  return [citationRemark, { sourceCount, prefix }];
 }
 
 /**
@@ -94,7 +108,11 @@ export function useCitationRemarkPlugins(sourceCount: number, prefix: string) {
 }
 
 /** The minimal source shape a citation needs to name and preview itself. */
-export type CitationSource = { title: string; url?: string };
+export type CitationSource = {
+  title: string;
+  url?: string;
+  mcpSnippet?: { excerptNumber?: number };
+};
 
 type CitationContextValue = {
   sources: CitationSource[];
@@ -165,12 +183,16 @@ function CitationChip({
   const ref = useRef<HTMLButtonElement>(null);
   const host = hostOf(source.url);
   const Icon = source.url ? Globe2 : FileText;
+  const excerpt = source.mcpSnippet?.excerptNumber;
+  const label = excerpt
+    ? `${source.title} · ${t("chat_source_excerpt", { number: excerpt })}`
+    : source.title;
   return (
     <>
       <button
         ref={ref}
         type="button"
-        aria-label={t("chat_citation_label", { number, title: source.title })}
+        aria-label={t("chat_citation_label", { number, title: label })}
         onClick={(event) => onOpen(number - 1, event.currentTarget)}
         className={CHIP_CLASS}
       >
@@ -183,7 +205,7 @@ function CitationChip({
         anchorRef={ref}
         content={
           <span className="flex max-w-xs flex-col gap-0.5">
-            <span className="font-medium">{source.title}</span>
+            <span className="font-medium">{label}</span>
             {host && <span className="text-ax-text-secondary text-xs">{host}</span>}
           </span>
         }

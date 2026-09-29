@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { resolveInrefs } from "@/lib/chat/inref";
 import type { EneoUIMessage } from "@/lib/chat/types";
 import { currentStep, deriveActivity } from "./activity";
 import { ActivityTimings } from "./activity-timings";
@@ -87,6 +88,105 @@ describe("deriveActivity", () => {
     const activity = deriveActivity(assistant([{ type: "text", text: "Hej!", state: "done" }]));
     expect(activity.hasActivity).toBe(false);
     expect(activity.sources).toEqual([]);
+  });
+
+  it("numbers only cited sources by first use in live and saved answers", () => {
+    const first = doc("aaaaaaaa-1111", "kaffe_tips", {});
+    const unused = doc("bbbbbbbb-2222", "kaffe_tips", {});
+    const third = doc("cccccccc-3333", "kaffe_tips", {});
+    const answer =
+      'Smak<inref id="aaaaaaaa"/>. Rostning<inref id="cccccccc"/>. Espresso<inref id="aaaaaaaa"/>.';
+    const live = deriveActivity(
+      assistant([first, unused, third, { type: "text", text: answer, state: "streaming" }]),
+      { streaming: true }
+    );
+    const saved = deriveActivity(
+      assistant([first, third, { type: "text", text: answer, state: "done" }])
+    );
+
+    expect(live.steps[0]).toMatchObject({ kind: "knowledge", hits: 3 });
+    expect(live.sources.map((source) => source.sourceId)).toEqual([
+      "aaaaaaaa-1111",
+      "cccccccc-3333"
+    ]);
+    expect(saved.sources.map((source) => source.sourceId)).toEqual(
+      live.sources.map((source) => source.sourceId)
+    );
+    expect(live.sources.map((source) => source.title)).toEqual(["kaffe_tips", "kaffe_tips"]);
+    expect(
+      resolveInrefs(
+        answer,
+        live.sources.map((source) => source.sourceId)
+      )
+    ).toBe("Smak\uE0001\uE001. Rostning\uE0002\uE001. Espresso\uE0001\uE001.");
+    expect(
+      resolveInrefs(
+        answer,
+        saved.sources.map((source) => source.sourceId)
+      )
+    ).toBe("Smak\uE0001\uE001. Rostning\uE0002\uE001. Espresso\uE0001\uE001.");
+  });
+
+  it("keeps distinct MCP excerpts from one document in citation order", () => {
+    const blobId = "11111111-1111-1111-1111-111111111111";
+    const references = [0, 1, 2].map((chunk) => ({
+      id: `${String(chunk + 1).repeat(8)}-aaaa-4aaa-8aaa-aaaaaaaaaaaa`,
+      uri: `eneo://info-blob/${blobId}#chunk-${chunk}`,
+      mime_type: "text/plain",
+      content: `Excerpt ${chunk}`,
+      meta: { title: "kaffe_tips", info_blob_id: blobId },
+      tool_call_id: "knowledge-call"
+    }));
+    const answer =
+      'Smak<inref id="11111111"/>. Rostning<inref id="33333333"/>. Espresso<inref id="11111111"/>.';
+    const live = deriveActivity(
+      assistant([
+        { type: "data-mcp-tool-references", data: { mcp_tool_references: references } },
+        { type: "text", text: answer, state: "streaming" }
+      ]),
+      { streaming: true }
+    );
+    const saved = deriveActivity(
+      assistant([{ type: "text", text: answer, state: "done" }], {
+        mcpToolReferences: [references[0]!, references[2]!]
+      })
+    );
+
+    expect(live.sources.map((source) => source.sourceId)).toEqual([
+      references[0]!.id,
+      references[2]!.id
+    ]);
+    expect(saved.sources.map((source) => source.sourceId)).toEqual(
+      live.sources.map((source) => source.sourceId)
+    );
+    expect(live.sources.map((source) => source.title)).toEqual(["kaffe_tips", "kaffe_tips"]);
+    expect(live.sources.map((source) => source.mcpSnippet?.uri)).toEqual([
+      references[0]!.uri,
+      references[2]!.uri
+    ]);
+    expect(
+      resolveInrefs(
+        answer,
+        live.sources.map((source) => source.sourceId)
+      )
+    ).toBe("Smak\uE0001\uE001. Rostning\uE0002\uE001. Espresso\uE0001\uE001.");
+  });
+
+  it("keeps retrieved sources visible until the answer cites one", () => {
+    const first = doc("aaaaaaaa-1111", "kaffe_tips", {});
+    const second = doc("bbbbbbbb-2222", "kaffe_tips", {});
+    const activity = deriveActivity(
+      assistant([
+        first,
+        second,
+        { type: "text", text: 'Smak<inref id="bbbbbbbb">', state: "streaming" }
+      ]),
+      { streaming: true }
+    );
+    expect(activity.sources.map((source) => source.sourceId)).toEqual([
+      "aaaaaaaa-1111",
+      "bbbbbbbb-2222"
+    ]);
   });
 
   it("records approvals from persisted calls and the stream's approval parts", () => {

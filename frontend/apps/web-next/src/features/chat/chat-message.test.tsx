@@ -92,6 +92,46 @@ describe("ChatMessage", () => {
     expect(onActivityToggle).toHaveBeenLastCalledWith(pill);
   });
 
+  it("numbers only cited MCP excerpts when several share one document title", () => {
+    const onActivityToggle = vi.fn();
+    const blobId = "11111111-1111-1111-1111-111111111111";
+    const references = [0, 1, 2].map((chunk) => ({
+      id: `${String(chunk + 1).repeat(8)}-aaaa-4aaa-8aaa-aaaaaaaaaaaa`,
+      uri: `eneo://info-blob/${blobId}#chunk-${chunk}`,
+      mime_type: "text/plain",
+      content: `Excerpt ${chunk}`,
+      meta: { title: "kaffe_tips", info_blob_id: blobId }
+    }));
+    const message: EneoUIMessage = {
+      id: "coffee-answer",
+      role: "assistant",
+      parts: [
+        { type: "data-mcp-tool-references", data: { mcp_tool_references: references } },
+        {
+          type: "text",
+          text: 'Smak<inref id="11111111"/>. Rostning<inref id="33333333"/>.',
+          state: "done"
+        }
+      ]
+    };
+
+    renderMessages(
+      <ChatMessage message={message} assistant={assistant} onActivityToggle={onActivityToggle} />
+    );
+    const citations = screen.getAllByRole("button", { name: /^Källa [12]: kaffe_tips/ });
+    expect(citations.map((citation) => citation.textContent)).toEqual(["1", "2"]);
+    expect(citations.map((citation) => citation.getAttribute("aria-label"))).toEqual([
+      "Källa 1: kaffe_tips · Utdrag 1",
+      "Källa 2: kaffe_tips · Utdrag 3"
+    ]);
+    expect(screen.getByRole("button", { name: /aktivitet: .*2 källor/i })).toBeTruthy();
+    fireEvent.click(citations[1]!);
+    expect(onActivityToggle).toHaveBeenCalledWith(citations[1], {
+      tab: "sources",
+      source: 1
+    });
+  });
+
   it("opens the activity from the more menu, even when it is already open", async () => {
     const onActivityToggle = vi.fn();
     renderMessages(

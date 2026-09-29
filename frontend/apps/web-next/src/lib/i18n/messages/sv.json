@@ -4672,6 +4672,7 @@
   "chat_activity_tokens": "{count, plural, one {# token} other {# tokens}}",
   "chat_activity_no_sources": "Svaret har inga källor.",
   "chat_source_number": "Källa {number}:",
+  "chat_source_excerpt": "Utdrag {number}",
   "chat_opens_in_new_tab": "(öppnas i en ny flik)",
   "chat_activity_steps": "{count, plural, one {# steg} other {# steg}}",
   "chat_activity_sources": "{count, plural, one {# källa} other {# källor}}",

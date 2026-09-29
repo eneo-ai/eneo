@@ -4672,6 +4672,7 @@
   "chat_activity_tokens": "{count, plural, one {# token} other {# tokens}}",
   "chat_activity_no_sources": "This answer has no sources.",
   "chat_source_number": "Source {number}:",
+  "chat_source_excerpt": "Excerpt {number}",
   "chat_opens_in_new_tab": "(opens in a new tab)",
   "chat_activity_steps": "{count, plural, one {# step} other {# steps}}",
   "chat_activity_sources": "{count, plural, one {# source} other {# sources}}",
