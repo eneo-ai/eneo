@@ -102,6 +102,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     FlowEditDiff,
     StepChange,
+    StepFieldChange,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
@@ -8956,6 +8957,15 @@ async def test_ai_builder_api_edit_apply_removes_a_step_and_its_assistant(
                         kind="modified",
                         step_name="Sammanfatta",
                         step_ref="existing_step_3",
+                        # The approval names what changes; the assistant is
+                        # written in exactly the fields it names.
+                        field_changes=[
+                            StepFieldChange(
+                                field="instructions",
+                                previous="Sammanfatta fakta kort.",
+                                current="Sammanfatta de utplockade fakta kort.",
+                            )
+                        ],
                     ),
                 ]
             ),

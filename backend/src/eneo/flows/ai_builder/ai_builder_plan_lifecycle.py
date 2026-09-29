@@ -26,6 +26,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     SessionStatus,
     TargetKind,
 )
+from eneo.flows.ai_builder.ai_builder_edit_preview_models import StepChange
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
@@ -50,6 +51,8 @@ from eneo.flows.application.flow_authoring_command import (
     TemplateAttachmentIntent,
 )
 from eneo.flows.application.flow_draft_materialization import (
+    ALL_ASSISTANT_FIELDS,
+    AssistantField,
     FlowDraftMaterializationProgress,
 )
 from eneo.flows.flow_authoring_spec import (
@@ -125,13 +128,14 @@ def _removed_existing_step_refs_for_apply(
     ).removed_existing_step_refs
 
 
-def _updated_existing_step_refs_for_apply(
+def _modified_step_changes_for_apply(
     *,
     session: BuilderSession,
     plan: BuilderPlan,
-) -> frozenset[str]:
-    if session.target_kind != TargetKind.EDIT:
-        return frozenset()
+) -> list[StepChange]:
+    """The approved plan's modified steps, each with the fields that changed.
+    A modified step names its fields, and never a model it picks."""
+
     modified_changes = [
         change
         for change in _edit_approval_for_apply(
@@ -145,8 +149,40 @@ def _updated_existing_step_refs_for_apply(
             code=AIBuilderErrorCode.BAD_REQUEST,
             context={"plan_id": str(plan.id), "session_id": str(session.id)},
         )
+    # A plan with no field changes on a modified step predates diffs that
+    # carried them; one that picks a model for a saved step predates edits
+    # that never choose one (the one model change left is a retype clearing
+    # it). Either would apply as a success that writes nothing it says. Not a
+    # conflict: reloading brings back this same plan, so the card shows this
+    # message and offers no refresh.
+    if any(
+        not change.field_changes
+        or any(
+            changed.field == "model_ref" and changed.current is not None
+            for changed in change.field_changes
+        )
+        for change in modified_changes
+    ):
+        raise AIBuilderBadRequestException(
+            "This plan was made before an update of the AI Builder and can no "
+            "longer be applied. Ask the Builder again for the change.",
+            code=AIBuilderErrorCode.BAD_REQUEST,
+            context={"plan_id": str(plan.id), "session_id": str(session.id)},
+        )
+    return modified_changes
+
+
+def _updated_existing_step_refs_for_apply(
+    *,
+    session: BuilderSession,
+    plan: BuilderPlan,
+) -> frozenset[str]:
+    if session.target_kind != TargetKind.EDIT:
+        return frozenset()
     modified_refs = frozenset(
-        change.step_ref for change in modified_changes if change.step_ref is not None
+        change.step_ref
+        for change in _modified_step_changes_for_apply(session=session, plan=plan)
+        if change.step_ref is not None
     )
     approval = _edit_approval_for_apply(session=session, plan=plan)
     scoped_target_ref = approval.scoped_target_existing_step_ref
@@ -161,6 +197,27 @@ def _updated_existing_step_refs_for_apply(
             },
         )
     return modified_refs
+
+
+def _updated_assistant_fields_for_apply(
+    *,
+    session: BuilderSession,
+    plan: BuilderPlan,
+) -> dict[str, frozenset[AssistantField]]:
+    """The assistant fields each modified step's approved changes name. The
+    approval's own diff is the statement of what changes: a step whose diff
+    names none of them (a rename) is left out and its assistant is not written."""
+
+    if session.target_kind != TargetKind.EDIT:
+        return {}
+    fields: dict[str, frozenset[AssistantField]] = {}
+    for change in _modified_step_changes_for_apply(session=session, plan=plan):
+        named = ALL_ASSISTANT_FIELDS & {
+            changed.field for changed in change.field_changes
+        }
+        if named and change.step_ref is not None:
+            fields[change.step_ref] = named
+    return fields
 
 
 def _edit_approval_for_apply(
@@ -687,6 +744,10 @@ class AIBuilderPlanLifecycle:
             spec=spec,
             removed_existing_step_refs=removed_existing_step_refs,
             updated_existing_step_refs=_updated_existing_step_refs_for_apply(
+                session=session,
+                plan=plan,
+            ),
+            updated_assistant_fields=_updated_assistant_fields_for_apply(
                 session=session,
                 plan=plan,
             ),

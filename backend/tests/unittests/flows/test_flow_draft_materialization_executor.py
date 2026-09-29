@@ -9,6 +9,7 @@ import pytest
 from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.flows.application.flow_authoring_command import TemplateAttachmentIntent
 from eneo.flows.application.flow_draft_materialization import (
+    ALL_ASSISTANT_FIELDS,
     FlowDraftAssistantToCreate,
     FlowDraftAssistantToUpdate,
     FlowDraftChangeSet,
@@ -29,6 +30,7 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotKind,
     ResourceSlotRef,
 )
+from eneo.flows.infrastructure.flow_repo import StoredAssistantPrompt
 from eneo.main.exceptions import BadRequestException
 
 
@@ -89,6 +91,7 @@ def _resource_binding(
 def _flow_service() -> AsyncMock:
     service = AsyncMock()
     service.list_flows.return_value = []
+    service.get_flow_assistant_prompts.return_value = {}
     return service
 
 
@@ -278,6 +281,8 @@ async def test_edit_mode_updates_assistants_before_flow_and_deletes_nothing() ->
             assistants_to_update=[
                 FlowDraftAssistantToUpdate(
                     existing_assistant_id=existing_assistant_id,
+                    fields=ALL_ASSISTANT_FIELDS - {"model_ref"},
+                    prompt_alias_renumbering={},
                     assistant_spec=AssistantSpec(instructions="Updated prompt"),
                 )
             ],
@@ -478,6 +483,8 @@ async def test_materializer_clears_completion_model_for_non_completion_update_ch
             assistants_to_update=[
                 FlowDraftAssistantToUpdate(
                     existing_assistant_id=assistant_id,
+                    fields=ALL_ASSISTANT_FIELDS,
+                    prompt_alias_renumbering={},
                     assistant_spec=AssistantSpec(
                         instructions="Run the step.",
                         model_ref="model.default",
@@ -691,4 +698,315 @@ async def test_a_retained_step_is_written_as_its_saved_row_with_the_authored_col
         None,
         None,
         None,
+    )
+
+
+async def _update_command(
+    fields: frozenset[str],
+    *,
+    spec: AssistantSpec,
+    output_mode: str = "pass_through",
+    bindings: tuple[LocalResourceBinding, ...] = (),
+    renumbering: dict[int, int] | None = None,
+    stored_prompt: str = "",
+    stored_description: str | None = None,
+) -> AssistantUpdateCommand | None:
+    """The assistant update an edit changeset makes for one step, if any; the
+    assistant holds `stored_prompt` when the apply runs."""
+
+    assistant_id = uuid4()
+    service = _flow_service()
+    service.update_flow.return_value = MagicMock(draft_revision=2)
+    service.get_flow_assistant_prompts.return_value = {
+        assistant_id: StoredAssistantPrompt(
+            text=stored_prompt, description=stored_description
+        )
+    }
+    await FlowDraftMaterializer().execute(
+        changeset=FlowDraftChangeSet(
+            flow_name="Flow",
+            flow_description="",
+            assistants_to_update=[
+                FlowDraftAssistantToUpdate(
+                    existing_assistant_id=assistant_id,
+                    fields=fields,  # type: ignore[arg-type]
+                    prompt_alias_renumbering=renumbering or {},
+                    assistant_spec=spec,
+                )
+            ],
+            compiled_steps=[
+                _compiled_step(
+                    change_kind=FlowDraftStepChangeKind.MODIFIED,
+                    assistant_id=assistant_id,
+                    output_mode=output_mode,
+                )
+            ],
+        ),
+        flow_service=service,
+        space_id=uuid4(),
+        flow_id=uuid4(),
+        expected_revision=1,
+        resource_bindings=bindings,
+        binding_source=FlowResourceBindingSource.AI_BUILDER,
+    )
+    if not service.update_flow_assistant.await_args_list:
+        return None
+    return service.update_flow_assistant.await_args.kwargs["update"]
+
+
+@pytest.mark.asyncio
+async def test_an_update_naming_no_assistant_field_makes_no_assistant_call() -> None:
+    assert (
+        await _update_command(frozenset(), spec=AssistantSpec(instructions="x")) is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_instruction_update_writes_the_prompt_and_no_other_field() -> None:
+    command = await _update_command(
+        frozenset({"instructions"}),
+        spec=AssistantSpec(instructions="Ny text", knowledge_refs=["knowledge.policy"]),
+        bindings=(
+            _resource_binding(
+                slot="policy",
+                slot_kind=ResourceSlotKind.KNOWLEDGE,
+                local_kind=LocalResourceKind.COLLECTION,
+            ),
+        ),
+    )
+
+    assert command is not None and command.prompt is not None
+    assert command.prompt.text == "Ny text"
+    assert command.model_fields_set == {"prompt"}
+
+
+@pytest.mark.asyncio
+async def test_a_knowledge_update_replaces_the_collections_and_keeps_other_kinds() -> (
+    None
+):
+    collection_id, website_id = uuid4(), uuid4()
+    only_collections = await _update_command(
+        frozenset({"knowledge_refs"}),
+        spec=AssistantSpec(instructions="x", knowledge_refs=["knowledge.policy"]),
+        bindings=(
+            _resource_binding(
+                slot="policy",
+                slot_kind=ResourceSlotKind.KNOWLEDGE,
+                local_kind=LocalResourceKind.COLLECTION,
+                local_id=collection_id,
+            ),
+        ),
+    )
+    naming_a_website = await _update_command(
+        frozenset({"knowledge_refs"}),
+        spec=AssistantSpec(instructions="x", knowledge_refs=["knowledge.site"]),
+        bindings=(
+            _resource_binding(
+                slot="site",
+                slot_kind=ResourceSlotKind.KNOWLEDGE,
+                local_kind=LocalResourceKind.WEBSITE,
+                local_id=website_id,
+            ),
+        ),
+    )
+    no_knowledge = await _update_command(
+        frozenset({"knowledge_refs"}), spec=AssistantSpec(instructions="x")
+    )
+
+    assert only_collections is not None and no_knowledge is not None
+    assert only_collections.model_fields_set == {"groups"}
+    assert only_collections.groups == [collection_id]
+    assert no_knowledge.model_fields_set == {"groups"} and no_knowledge.groups == []
+    assert naming_a_website is not None
+    assert naming_a_website.model_fields_set == {"groups", "websites"}
+    assert naming_a_website.websites == [website_id]
+
+
+@pytest.mark.asyncio
+async def test_a_model_update_clears_the_model_of_a_step_without_completion() -> None:
+    command = await _update_command(
+        frozenset({"model_ref"}),
+        spec=AssistantSpec(instructions="x"),
+        output_mode="render_verbatim",
+    )
+
+    assert command is not None
+    assert command.model_fields_set == {"completion_model_id"}
+    assert command.completion_model_id is None
+
+
+@pytest.mark.asyncio
+async def test_an_update_that_names_the_model_of_a_step_that_runs_one_is_refused() -> (
+    None
+):
+    """An edit never chooses a model, so nothing can carry it out: the apply
+    fails instead of reporting success without writing a model."""
+
+    with pytest.raises(BadRequestException, match="does not choose"):
+        await _update_command(
+            frozenset({"model_ref"}),
+            spec=AssistantSpec(instructions="x", model_ref="model.gpt"),
+            bindings=(
+                _resource_binding(
+                    slot="gpt",
+                    slot_kind=ResourceSlotKind.MODEL,
+                    local_kind=LocalResourceKind.COMPLETION_MODEL,
+                ),
+            ),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "written"),
+    [("instructions", {"prompt"}), ("knowledge_refs", {"groups"})],
+)
+async def test_an_update_of_another_field_leaves_the_model_of_a_step_without_completion(
+    field: str, written: set[str]
+) -> None:
+    """A step that runs no completion model may still hold one it was saved
+    with. Only an update that names `model_ref` clears it."""
+
+    command = await _update_command(
+        frozenset({field}),
+        spec=AssistantSpec(instructions="x"),
+        output_mode="render_verbatim",
+    )
+
+    assert command is not None
+    assert command.model_fields_set == written
+
+
+@pytest.mark.asyncio
+async def test_a_moved_step_renumbers_the_prompt_the_assistant_holds_and_nothing_else() -> (
+    None
+):
+    """Whatever the plan's copy of the prompt says, the prompt written is the
+    one the assistant holds at apply, with the moved aliases renumbered and
+    the author's spacing kept."""
+
+    command = await _update_command(
+        frozenset(),
+        spec=AssistantSpec(instructions="Planens text {{ step_3.output.text }}."),
+        renumbering={2: 3},
+        stored_prompt="Redigerad {{step_2.output.text}} och {{ step_1 }}.",
+    )
+
+    assert command is not None and command.prompt is not None
+    assert command.prompt.text == "Redigerad {{step_3.output.text}} och {{ step_1 }}."
+    assert command.model_fields_set == {"prompt"}
+
+
+@pytest.mark.asyncio
+async def test_a_moved_step_leaves_a_prompt_that_reads_no_moved_step_unwritten() -> (
+    None
+):
+    assert (
+        await _update_command(
+            frozenset(),
+            spec=AssistantSpec(instructions="x"),
+            renumbering={2: 3},
+            stored_prompt="Läs {{ step_1.output.text }}.",
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_named_field_beside_a_move_writes_the_field_and_the_renumbered_prompt() -> (
+    None
+):
+    command = await _update_command(
+        frozenset({"knowledge_refs"}),
+        spec=AssistantSpec(instructions="Planens text."),
+        renumbering={2: 3},
+        stored_prompt="Läs {{ step_2 }}.",
+    )
+
+    assert command is not None and command.prompt is not None
+    assert command.prompt.text == "Läs {{ step_3 }}."
+    assert command.model_fields_set == {"prompt", "groups"}
+
+
+@pytest.mark.asyncio
+async def test_the_prompts_to_renumber_are_read_once_per_apply() -> None:
+    """Three kept steps after a move: one read of the flow's prompts, no read
+    per assistant, and only the prompt that reads a moved step is written."""
+
+    ids = [uuid4(), uuid4(), uuid4()]
+    service = _flow_service()
+    service.update_flow.return_value = MagicMock(draft_revision=2)
+    prompts = ["Läs.", "Läs {{ step_2.output.text }}.", "Skriv."]
+    service.get_flow_assistant_prompts.return_value = {
+        assistant_id: StoredAssistantPrompt(text=prompt, description=None)
+        for assistant_id, prompt in zip(ids, prompts, strict=True)
+    }
+    await FlowDraftMaterializer().execute(
+        changeset=FlowDraftChangeSet(
+            flow_name="Flow",
+            flow_description="",
+            assistants_to_update=[
+                FlowDraftAssistantToUpdate(
+                    existing_assistant_id=assistant_id,
+                    fields=frozenset(),
+                    prompt_alias_renumbering={2: 3},
+                    assistant_spec=AssistantSpec(instructions="x"),
+                )
+                for assistant_id in ids
+            ],
+            compiled_steps=[
+                _compiled_step(
+                    change_kind=FlowDraftStepChangeKind.UNCHANGED,
+                    assistant_id=assistant_id,
+                )
+                for assistant_id in ids
+            ],
+        ),
+        flow_service=service,
+        space_id=uuid4(),
+        flow_id=uuid4(),
+        expected_revision=1,
+        binding_source=FlowResourceBindingSource.AI_BUILDER,
+    )
+
+    assert service.get_flow_assistant_prompts.await_count == 1
+    assert service.get_flow_assistant_snapshots.await_count == 0
+    assert service.get_flow_assistant.await_count == 0
+    ((_, call),) = [
+        (c.args, c.kwargs) for c in service.update_flow_assistant.await_args_list
+    ]
+    assert call["assistant_id"] == ids[1]
+    assert call["update"].prompt.text == "Läs {{ step_3.output.text }}."
+
+
+@pytest.mark.asyncio
+async def test_a_renumbered_prompt_is_the_stored_one_whitespace_and_description_kept() -> (
+    None
+):
+    command = await _update_command(
+        frozenset(),
+        spec=AssistantSpec(instructions="x"),
+        renumbering={2: 3},
+        stored_prompt="\nLäs {{ step_2.output.text }}\n",
+        stored_description="Skriven av Anna.",
+    )
+
+    assert command is not None and command.prompt is not None
+    assert command.prompt.text == "\nLäs {{ step_3.output.text }}\n"
+    assert command.prompt.description == "Skriven av Anna."
+
+
+@pytest.mark.asyncio
+async def test_an_instruction_update_keeps_the_stored_prompts_description() -> None:
+    command = await _update_command(
+        frozenset({"instructions"}),
+        spec=AssistantSpec(instructions="Ny text"),
+        stored_prompt="Gammal text",
+        stored_description="Skriven av Anna.",
+    )
+
+    assert command is not None and command.prompt is not None
+    assert (command.prompt.text, command.prompt.description) == (
+        "Ny text",
+        "Skriven av Anna.",
     )

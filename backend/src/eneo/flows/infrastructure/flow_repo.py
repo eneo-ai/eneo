@@ -76,6 +76,15 @@ class AssistantScopeRow:
     managing_flow_id: UUID | None
 
 
+@dataclass(frozen=True, slots=True)
+class StoredAssistantPrompt:
+    """The prompt an assistant has selected, as stored: text and description
+    unchanged, whitespace included."""
+
+    text: str
+    description: str | None
+
+
 @dataclass
 class _AssistantAuthoringSnapshotBuilder:
     instructions: str
@@ -594,6 +603,37 @@ class FlowRepository:
             .all()
         )
         return tuple(_resource_binding_from_row(row) for row in rows)
+
+    async def get_selected_prompts(
+        self,
+        *,
+        assistant_ids: list[UUID],
+        tenant_id: UUID,
+    ) -> dict[UUID, StoredAssistantPrompt]:
+        """Each assistant's selected prompt as stored, in one read. An
+        assistant without one is absent."""
+
+        if not assistant_ids:
+            return {}
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    PromptsAssistants.assistant_id,
+                    Prompts.text,
+                    Prompts.description,
+                )
+                .join(Prompts, Prompts.id == PromptsAssistants.prompt_id)
+                .where(PromptsAssistants.assistant_id.in_(assistant_ids))
+                .where(PromptsAssistants.is_selected.is_(True))
+                .where(Prompts.tenant_id == tenant_id)
+            )
+        ).all()
+        return {
+            row.assistant_id: StoredAssistantPrompt(
+                text=row.text, description=row.description
+            )
+            for row in rows
+        }
 
     async def get_assistant_snapshots(
         self,

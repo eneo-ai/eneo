@@ -60,6 +60,13 @@ _INVALID_EXISTING_STEP_REF_REASONS: tuple[InvalidExistingStepRefReason, ...] = g
 )
 
 
+# What an edit may change on a step's assistant: the assistant fields the
+# authoring spec carries. A step whose changes name none of them makes no
+# assistant update at all.
+AssistantField = Literal["instructions", "model_ref", "knowledge_refs"]
+ALL_ASSISTANT_FIELDS: frozenset[AssistantField] = frozenset(get_args(AssistantField))
+
+
 class FlowDraftStepChangeKind(str, enum.Enum):
     ADDED = "added"
     MODIFIED = "modified"
@@ -88,6 +95,14 @@ class FlowDraftAssistantToUpdate(BaseModel):
     existing_step_ref: str | None = None
     existing_assistant_id: UUID | None = None
     assistant_spec: AssistantSpec
+    # The assistant fields this update writes; every other field, and every
+    # kind of attachment the spec does not name, stays as the assistant has it.
+    fields: frozenset[AssistantField]
+    # Where the steps the prompt may read by alias moved, saved position to
+    # new, when the update does not write `instructions`: the prompt the
+    # assistant holds at apply is written with those aliases renumbered, and
+    # with nothing else changed. Empty when no step moved.
+    prompt_alias_renumbering: dict[int, int]
 
 
 class FlowDraftCompiledStep(BaseModel):
@@ -165,6 +180,7 @@ def compile_flow_draft_changeset(
     *,
     removed_existing_step_refs: frozenset[str] = frozenset(),
     updated_existing_step_refs: frozenset[str] | None = None,
+    updated_assistant_fields: Mapping[str, frozenset[AssistantField]] | None = None,
     default_transcription_model_id: UUID | None = None,
 ) -> FlowDraftChangeSet:
     existing_by_ref: dict[str, FlowStep] = {}
@@ -180,6 +196,7 @@ def compile_flow_draft_changeset(
         existing_by_ref=existing_by_ref,
         removed_existing_step_refs=removed_existing_step_refs,
         updated_existing_step_refs=updated_existing_step_refs,
+        updated_assistant_fields=updated_assistant_fields,
     )
     ref_to_order = build_ref_to_order(spec.steps)
     # Where each kept step's alias changes: a step that reads it by alias is
@@ -207,12 +224,27 @@ def compile_flow_draft_changeset(
                 updated_existing_step_refs is None
                 or existing_ref in updated_existing_step_refs
             )
+            named_fields: frozenset[AssistantField] = frozenset()
             if updates_step:
+                named_fields = (
+                    ALL_ASSISTANT_FIELDS
+                    if updated_assistant_fields is None
+                    else updated_assistant_fields.get(existing_ref or "", frozenset())
+                )
+            # A step whose instructions the edit does not write still reads its
+            # producers by alias: when any step moved, the prompt it holds is
+            # renumbered at apply, never replaced with the plan's copy of it.
+            prompt_alias_renumbering = (
+                {} if "instructions" in named_fields else alias_renumbering
+            )
+            if named_fields or prompt_alias_renumbering:
                 assistants_to_update.append(
                     FlowDraftAssistantToUpdate(
                         existing_step_ref=existing_ref,
                         existing_assistant_id=existing_step.assistant_id,
                         assistant_spec=rewritten_spec.assistant_spec,
+                        fields=named_fields,
+                        prompt_alias_renumbering=dict(prompt_alias_renumbering),
                     )
                 )
             compiled_steps.append(
@@ -248,7 +280,9 @@ def compile_flow_draft_changeset(
         flow_name=spec.flow_name,
         flow_description=spec.flow_description,
         assistants_to_create=assistants_to_create,
-        assistants_to_update=assistants_to_update,
+        assistants_to_update=_one_update_per_assistant(
+            assistants_to_update, compiled_steps
+        ),
         removed_existing_step_refs=removed_existing_step_refs,
         compiled_steps=compiled_steps,
         metadata_json=build_flow_draft_metadata_json(
@@ -256,6 +290,56 @@ def compile_flow_draft_changeset(
             current_flow=current_flow,
             default_transcription_model_id=default_transcription_model_id,
         ),
+    )
+
+
+def _one_update_per_assistant(
+    updates: list[FlowDraftAssistantToUpdate],
+    compiled_steps: list[FlowDraftCompiledStep],
+) -> list[FlowDraftAssistantToUpdate]:
+    """One update per assistant. Steps can share an assistant, and an update is
+    written to the assistant, so it changes every step that uses it: it is
+    kept only when each of those steps asks for that same update (the same
+    fields and text, or the same renumbering), and refused otherwise, before
+    anything is written."""
+
+    sharing: dict[UUID, list[str]] = {}
+    for step in compiled_steps:
+        if step.saved_step is not None and step.assistant_id is not None:
+            sharing.setdefault(step.assistant_id, []).append(
+                existing_step_ref_for_order(step.saved_step.step_order)
+            )
+    by_ref = {update.existing_step_ref: update for update in updates}
+    kept: list[FlowDraftAssistantToUpdate] = []
+    written: set[UUID | None] = set()
+    for update in updates:
+        if update.existing_assistant_id in written:
+            continue
+        written.add(update.existing_assistant_id)
+        refs = (
+            sharing.get(update.existing_assistant_id, [])
+            if update.existing_assistant_id is not None
+            else []
+        )
+        if any(_update_key(by_ref.get(ref)) != _update_key(update) for ref in refs):
+            raise BadRequestException(
+                "This change is to an assistant another step of the flow also "
+                "uses, so it would change that step too. Ask the Builder again "
+                "for the change.",
+                code="bad_request",
+                context={"shared_by": sorted(refs)},
+            )
+        kept.append(update)
+    return kept
+
+
+def _update_key(update: FlowDraftAssistantToUpdate | None) -> object:
+    if update is None:
+        return None
+    return (
+        update.fields,
+        update.prompt_alias_renumbering,
+        update.assistant_spec if update.fields else None,
     )
 
 
@@ -282,12 +366,14 @@ def _validate_updated_existing_step_refs(
     existing_by_ref: dict[str, FlowStep],
     removed_existing_step_refs: frozenset[str],
     updated_existing_step_refs: frozenset[str] | None,
+    updated_assistant_fields: Mapping[str, frozenset[AssistantField]] | None,
 ) -> None:
     if updated_existing_step_refs is None:
         return
     invalid_refs = sorted(
         (updated_existing_step_refs - set(existing_by_ref))
         | (updated_existing_step_refs & removed_existing_step_refs)
+        | (set(updated_assistant_fields or {}) - updated_existing_step_refs)
     )
     if not invalid_refs:
         return

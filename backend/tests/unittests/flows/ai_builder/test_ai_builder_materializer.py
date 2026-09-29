@@ -16,16 +16,17 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
 )
 from eneo.flows.application.flow_authoring_command import AIBuilderFlowAuthoringOrigin
 from eneo.flows.application.flow_draft_materialization import (
-    FlowDraftAssistantToCreate as AssistantToCreate,
-)
-from eneo.flows.application.flow_draft_materialization import (
-    FlowDraftAssistantToUpdate as AssistantToUpdate,
-)
-from eneo.flows.application.flow_draft_materialization import (
+    ALL_ASSISTANT_FIELDS,
     FlowDraftChangeSet,
     FlowDraftMaterializationProgress,
     FlowDraftMaterializationStage,
     compile_flow_draft_changeset,
+)
+from eneo.flows.application.flow_draft_materialization import (
+    FlowDraftAssistantToCreate as AssistantToCreate,
+)
+from eneo.flows.application.flow_draft_materialization import (
+    FlowDraftAssistantToUpdate as AssistantToUpdate,
 )
 from eneo.flows.application.flow_draft_materialization import (
     FlowDraftStepChangeKind as StepChangeKind,
@@ -1175,6 +1176,8 @@ class TestExecuteCreateFlow:
         assistant_id = uuid4()
 
         mock_flow_service = AsyncMock()
+
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         created_flow = _make_flow(
             flow_id=flow_id,
             space_id=space_id,
@@ -1240,6 +1243,8 @@ class TestExecuteCreateFlow:
         review_policy = FlowStepReviewPolicy(mode=FlowStepReviewMode.EDIT)
 
         mock_flow_service = AsyncMock()
+
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         mock_flow_service.create_flow.return_value = _make_flow(
             flow_id=flow_id,
             space_id=space_id,
@@ -1288,6 +1293,8 @@ class TestExecuteCreateFlow:
         assistant_ids = [uuid4(), uuid4(), uuid4()]
 
         mock_flow_service = AsyncMock()
+
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         created_flow = _make_flow(flow_id=flow_id, space_id=space_id)
         mock_flow_service.create_flow.return_value = created_flow
 
@@ -1346,6 +1353,8 @@ class TestExecuteCreateFlow:
         assistant_ids = [uuid4(), uuid4()]
 
         mock_flow_service = AsyncMock()
+
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         created_flow = _make_flow(flow_id=flow_id, space_id=space_id)
         mock_flow_service.create_flow.return_value = created_flow
 
@@ -1417,6 +1426,8 @@ class TestExecuteCreateFlow:
         assistant_id = uuid4()
 
         mock_flow_service = AsyncMock()
+
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         created_flow = _make_flow(flow_id=flow_id, space_id=space_id)
         mock_flow_service.create_flow.return_value = created_flow
         mock_assistant = MagicMock()
@@ -1473,6 +1484,8 @@ class TestExecuteCreateFlow:
         kb_id_2 = uuid4()
 
         mock_flow_service = AsyncMock()
+
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         created_flow = _make_flow(flow_id=flow_id, space_id=space_id)
         mock_flow_service.create_flow.return_value = created_flow
 
@@ -1552,6 +1565,8 @@ class TestExecuteCreateFlow:
         local_policy_id = uuid4()
 
         mock_flow_service = AsyncMock()
+
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         mock_flow_service.create_flow.return_value = _make_flow(
             flow_id=flow_id,
             space_id=space_id,
@@ -1604,6 +1619,8 @@ class TestExecuteCreateFlow:
         assistant_id = uuid4()
 
         mock_flow_service = AsyncMock()
+
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         mock_flow_service.create_flow.return_value = _make_flow(
             flow_id=flow_id,
             space_id=space_id,
@@ -1643,6 +1660,7 @@ class TestExecuteCreateFlow:
         first = _resource_binding(slot="default-model")
         second = _resource_binding(slot="default-model")
         mock_flow_service = AsyncMock()
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
 
         with pytest.raises(BadRequestException) as error:
             await execute_draft_materialization(
@@ -1665,6 +1683,8 @@ class TestExecuteCreateFlow:
         transcription_model_id = uuid4()
 
         mock_flow_service = AsyncMock()
+
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         mock_flow_service.create_flow.return_value = _make_flow(
             flow_id=flow_id,
             space_id=space_id,
@@ -1706,6 +1726,8 @@ class TestExecuteCreateFlow:
         website_id = uuid4()
 
         mock_flow_service = AsyncMock()
+
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         mock_flow_service.create_flow.return_value = _make_flow(
             flow_id=flow_id,
             space_id=space_id,
@@ -1749,6 +1771,8 @@ class TestExecuteCreateFlow:
         assistant_id = uuid4()
 
         mock_flow_service = AsyncMock()
+
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         mock_flow_service.create_flow.return_value = _make_flow(
             flow_id=flow_id,
             space_id=space_id,
@@ -1783,6 +1807,8 @@ class TestExecuteCreateFlow:
         assistant_id = uuid4()
 
         mock_flow_service = AsyncMock()
+
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         mock_flow_service.create_flow.return_value = _make_flow(
             flow_id=flow_id,
             space_id=space_id,
@@ -1833,6 +1859,8 @@ class TestExecuteCreateFlow:
         binding = _resource_binding()
 
         mock_flow_service = AsyncMock()
+
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         mock_flow_service.create_flow.return_value = _make_flow(
             flow_id=flow_id,
             space_id=space_id,
@@ -1891,6 +1919,8 @@ class TestExecuteEditFlow:
         assistant_id = uuid4()
 
         mock_flow_service = AsyncMock()
+
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         updated_flow = _make_flow(flow_id=flow_id, space_id=space_id)
         mock_flow_service.update_flow.return_value = updated_flow
         mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
@@ -1901,6 +1931,8 @@ class TestExecuteEditFlow:
             assistants_to_update=[
                 AssistantToUpdate(
                     existing_assistant_id=assistant_id,
+                    fields=ALL_ASSISTANT_FIELDS - {"model_ref"},
+                    prompt_alias_renumbering={},
                     assistant_spec=AssistantSpec(instructions="New prompt"),
                 ),
             ],
@@ -1941,6 +1973,8 @@ class TestExecuteEditFlow:
         new_assistant_id = uuid4()
 
         mock_flow_service = AsyncMock()
+
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         updated_flow = _make_flow(flow_id=flow_id, space_id=space_id)
         mock_flow_service.update_flow.return_value = updated_flow
 
@@ -1961,6 +1995,8 @@ class TestExecuteEditFlow:
             assistants_to_update=[
                 AssistantToUpdate(
                     existing_assistant_id=existing_assistant_id,
+                    fields=ALL_ASSISTANT_FIELDS - {"model_ref"},
+                    prompt_alias_renumbering={},
                     assistant_spec=AssistantSpec(instructions="Updated"),
                 ),
             ],
@@ -2004,6 +2040,8 @@ class TestExecuteEditFlow:
         binding = _resource_binding()
 
         mock_flow_service = AsyncMock()
+
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         mock_flow_service.update_flow.return_value = _make_flow(
             flow_id=flow_id,
             space_id=space_id,
@@ -2019,6 +2057,8 @@ class TestExecuteEditFlow:
             assistants_to_update=[
                 AssistantToUpdate(
                     existing_assistant_id=assistant_id,
+                    fields=ALL_ASSISTANT_FIELDS - {"model_ref"},
+                    prompt_alias_renumbering={},
                     assistant_spec=AssistantSpec(instructions="New prompt"),
                 ),
             ],
@@ -2053,6 +2093,8 @@ class TestExecuteEditFlow:
         assistant_id = uuid4()
 
         mock_flow_service = AsyncMock()
+
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         updated_flow = _make_flow(flow_id=flow_id, space_id=space_id)
         mock_flow_service.update_flow.return_value = updated_flow
         mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
@@ -2063,6 +2105,8 @@ class TestExecuteEditFlow:
             assistants_to_update=[
                 AssistantToUpdate(
                     existing_assistant_id=assistant_id,
+                    fields=ALL_ASSISTANT_FIELDS - {"model_ref"},
+                    prompt_alias_renumbering={},
                     assistant_spec=AssistantSpec(
                         instructions="Prompt",
                         model_ref=None,  # No model specified
@@ -2091,7 +2135,7 @@ class TestExecuteEditFlow:
         assert "completion_model_id" not in update_kwargs
 
     @pytest.mark.asyncio
-    async def test_update_without_external_resources_clears_stale_resources(
+    async def test_update_without_knowledge_clears_collections_and_leaves_other_kinds(
         self,
     ) -> None:
         flow_id = uuid4()
@@ -2099,6 +2143,8 @@ class TestExecuteEditFlow:
         assistant_id = uuid4()
 
         mock_flow_service = AsyncMock()
+
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         updated_flow = _make_flow(flow_id=flow_id, space_id=space_id)
         mock_flow_service.update_flow.return_value = updated_flow
         mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
@@ -2109,6 +2155,8 @@ class TestExecuteEditFlow:
             assistants_to_update=[
                 AssistantToUpdate(
                     existing_assistant_id=assistant_id,
+                    fields=ALL_ASSISTANT_FIELDS - {"model_ref"},
+                    prompt_alias_renumbering={},
                     assistant_spec=AssistantSpec(instructions="Pure text step"),
                 ),
             ],
@@ -2132,9 +2180,12 @@ class TestExecuteEditFlow:
         update = _update_command_from_call(
             mock_flow_service.update_flow_assistant.call_args
         )
+        # The spec lists collections only: the ones it no longer names are
+        # cleared; a website or integration knowledge the assistant has is not
+        # in the spec, and absence is not a request to clear it.
         assert update.groups == []
-        assert update.websites == []
-        assert update.integration_knowledge_ids == []
+        assert not update.is_set("websites")
+        assert not update.is_set("integration_knowledge_ids")
         assert not update.is_set("mcp_server_ids")
         assert not update.is_set("mcp_tools")
 
@@ -2147,6 +2198,8 @@ class TestExecuteEditFlow:
         assistant_id = uuid4()
 
         mock_flow_service = AsyncMock()
+
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         updated_flow = _make_flow(flow_id=flow_id, space_id=space_id)
         mock_flow_service.update_flow.return_value = updated_flow
 
@@ -2156,6 +2209,8 @@ class TestExecuteEditFlow:
             assistants_to_update=[
                 AssistantToUpdate(
                     existing_assistant_id=assistant_id,
+                    fields=ALL_ASSISTANT_FIELDS - {"model_ref"},
+                    prompt_alias_renumbering={},
                     assistant_spec=AssistantSpec(
                         instructions="Prompt",
                         knowledge_refs=["socio"],
@@ -2194,6 +2249,7 @@ class TestExecuteResultCounting:
     @pytest.mark.asyncio
     async def test_counts_created_steps(self) -> None:
         mock_flow_service = AsyncMock()
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         mock_flow_service.create_flow.return_value = _make_flow()
         mock_assistant = MagicMock()
         mock_assistant.id = uuid4()
@@ -2234,6 +2290,7 @@ class TestExecuteResultCounting:
     @pytest.mark.asyncio
     async def test_counts_all_change_kinds(self) -> None:
         mock_flow_service = AsyncMock()
+        mock_flow_service.get_flow_assistant_prompts.return_value = {}
         mock_flow_service.update_flow.return_value = _make_flow()
         mock_assistant = MagicMock()
         mock_assistant.id = uuid4()
@@ -2252,6 +2309,8 @@ class TestExecuteResultCounting:
             assistants_to_update=[
                 AssistantToUpdate(
                     existing_assistant_id=mod_assistant_id,
+                    fields=ALL_ASSISTANT_FIELDS - {"model_ref"},
+                    prompt_alias_renumbering={},
                     assistant_spec=AssistantSpec(instructions="y"),
                 ),
             ],

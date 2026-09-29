@@ -13,6 +13,7 @@ from eneo.flows.application.flow_authoring_origin_policy import (
     NoopFlowAuthoringOriginPolicy,
 )
 from eneo.flows.application.flow_draft_materialization import (
+    AssistantField,
     FlowDraftChangeSet,
     FlowDraftMaterializationProgress,
     FlowDraftStepChangeKind,
@@ -84,6 +85,9 @@ class EditFlowAuthoringCommand(BaseModel):
     spec: FlowDraftSpecCore
     removed_existing_step_refs: frozenset[str]
     updated_existing_step_refs: frozenset[str]
+    # Per updated step, the assistant fields the edit changes; a step absent
+    # here (a rename, say) makes no assistant update.
+    updated_assistant_fields: dict[str, frozenset[AssistantField]]
     origin: FlowAuthoringOrigin
     resource_bindings: tuple[LocalResourceBinding, ...] = ()
     default_transcription_model_id: UUID | None = None
@@ -162,6 +166,7 @@ class FlowAuthoringCommandService:
             current_flow,
             removed_existing_step_refs=_removed_existing_step_refs(command),
             updated_existing_step_refs=_updated_existing_step_refs(command),
+            updated_assistant_fields=_updated_assistant_fields(command),
             default_transcription_model_id=command.default_transcription_model_id,
         )
         changeset = policy.stamp_metadata(
@@ -342,6 +347,14 @@ def _updated_existing_step_refs(
     if command.kind == "create":
         return None
     return command.updated_existing_step_refs
+
+
+def _updated_assistant_fields(
+    command: FlowAuthoringCommand,
+) -> dict[str, frozenset[AssistantField]] | None:
+    if command.kind == "create":
+        return None
+    return command.updated_assistant_fields
 
 
 def _target_flow_id(command: FlowAuthoringCommand) -> UUID | None:

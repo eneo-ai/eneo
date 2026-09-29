@@ -1053,3 +1053,280 @@ def test_a_named_step_keeping_its_saved_output_config_reads_moved_steps_where_th
     assert changeset.compiled_steps[2].output_config == {
         "bindings": {"sammanfattning": "{{step_2.output.text}}"}
     }
+
+
+def _two_step_flow() -> Flow:
+    return _flow(_flow_step(step_order=1), _flow_step(step_order=2))
+
+
+def _two_step_spec() -> FlowDraftSpecCore:
+    return FlowDraftSpecCore(
+        flow_name="Updated flow",
+        steps=[
+            _step_spec(plan_step_ref="a", existing_step_ref="existing_step_1"),
+            _step_spec(plan_step_ref="b", existing_step_ref="existing_step_2"),
+        ],
+    )
+
+
+def test_a_modified_step_updates_its_assistant_only_in_the_fields_the_edit_names() -> (
+    None
+):
+    changeset = compile_flow_draft_changeset(
+        _two_step_spec(),
+        current_flow=_two_step_flow(),
+        updated_existing_step_refs=frozenset({"existing_step_1", "existing_step_2"}),
+        updated_assistant_fields={"existing_step_2": frozenset({"instructions"})},
+    )
+
+    # Step 1 is modified but names no assistant field: its assistant is not
+    # written. Step 2 names instructions and nothing more.
+    assert [step.change_kind for step in changeset.compiled_steps] == [
+        FlowDraftStepChangeKind.MODIFIED
+    ] * 2
+    assert [
+        (update.existing_step_ref, update.fields)
+        for update in changeset.assistants_to_update
+    ] == [("existing_step_2", frozenset({"instructions"}))]
+
+
+def test_an_update_without_a_field_map_writes_every_assistant_field() -> None:
+    changeset = compile_flow_draft_changeset(
+        _two_step_spec(), current_flow=_two_step_flow()
+    )
+
+    assert [update.fields for update in changeset.assistants_to_update] == [
+        frozenset({"instructions", "model_ref", "knowledge_refs"})
+    ] * 2
+
+
+def test_assistant_fields_naming_a_step_that_is_not_updated_are_refused() -> None:
+    with pytest.raises(BadRequestException) as refused:
+        compile_flow_draft_changeset(
+            _two_step_spec(),
+            current_flow=_two_step_flow(),
+            updated_existing_step_refs=frozenset({"existing_step_1"}),
+            updated_assistant_fields={"existing_step_2": frozenset({"instructions"})},
+        )
+
+    assert invalid_existing_step_ref_reason(refused.value) == (
+        "invalid_updated_existing_step_refs"
+    )
+
+
+def _consumer_flow_and_spec(*, producer_first: bool) -> tuple[Flow, FlowDraftSpecCore]:
+    """Saved: a producer at 2 and a consumer at 3 whose prompt reads it. The
+    edit adds a step before the producer (or not), and lists the consumer."""
+
+    saved = _flow(
+        _flow_step(step_order=1),
+        _flow_step(step_order=2),
+        _flow_step(step_order=3),
+    )
+    steps = [
+        _step_spec(
+            plan_step_ref="p1",
+            existing_step_ref="existing_step_1",
+            name="One",
+            instructions="Read.",
+        ),
+        _step_spec(
+            plan_step_ref="p2",
+            existing_step_ref="existing_step_2",
+            name="Two",
+            instructions="Analyze.",
+        ),
+        _step_spec(
+            plan_step_ref="p3",
+            existing_step_ref="existing_step_3",
+            name="Three",
+            instructions="Summarize {{ p2.output.text }} briefly.",
+        ),
+    ]
+    if producer_first:
+        steps.insert(
+            1,
+            _step_spec(plan_step_ref="new", name="Prep", instructions="Prepare."),
+        )
+    return saved, FlowDraftSpecCore(flow_name="Flow", steps=steps)
+
+
+def _updates(changeset) -> list[tuple[str | None, frozenset[str], dict[int, int]]]:
+    return [
+        (update.existing_step_ref, update.fields, update.prompt_alias_renumbering)
+        for update in changeset.assistants_to_update
+    ]
+
+
+def test_when_a_step_moves_every_kept_prompt_is_renumbered_never_replaced() -> None:
+    """No step is listed. Steps 2 and 3 moved down one, so each kept step's
+    prompt is renumbered at apply from what its assistant holds then; the
+    plan's copy of the prompt is written for none of them."""
+
+    saved, spec = _consumer_flow_and_spec(producer_first=True)
+
+    changeset = compile_flow_draft_changeset(
+        spec,
+        current_flow=saved,
+        updated_existing_step_refs=frozenset(),
+        updated_assistant_fields={},
+    )
+
+    moved = {2: 3, 3: 4}
+    assert _updates(changeset) == [
+        ("existing_step_1", frozenset(), moved),
+        ("existing_step_2", frozenset(), moved),
+        ("existing_step_3", frozenset(), moved),
+    ]
+    assert changeset.compiled_steps[3].change_kind is FlowDraftStepChangeKind.UNCHANGED
+
+
+def test_when_no_step_moves_a_step_that_names_no_assistant_field_is_not_written() -> (
+    None
+):
+    saved, spec = _consumer_flow_and_spec(producer_first=False)
+
+    changeset = compile_flow_draft_changeset(
+        spec,
+        current_flow=saved,
+        updated_existing_step_refs=frozenset({"existing_step_3"}),
+        updated_assistant_fields={},
+    )
+
+    assert changeset.assistants_to_update == []
+
+
+def test_a_step_whose_instructions_the_edit_writes_takes_the_plans_text() -> None:
+    """The approval names the instructions: the plan's text, at the steps'
+    new positions, is what the edit writes, so nothing is renumbered."""
+
+    saved, spec = _consumer_flow_and_spec(producer_first=True)
+
+    changeset = compile_flow_draft_changeset(
+        spec,
+        current_flow=saved,
+        updated_existing_step_refs=frozenset({"existing_step_3"}),
+        updated_assistant_fields={
+            "existing_step_3": frozenset({"instructions", "knowledge_refs"})
+        },
+    )
+
+    update = changeset.assistants_to_update[-1]
+    assert (update.existing_step_ref, update.fields) == (
+        "existing_step_3",
+        frozenset({"instructions", "knowledge_refs"}),
+    )
+    assert update.prompt_alias_renumbering == {}
+    assert update.assistant_spec.instructions == (
+        "Summarize {{ step_3.output.text }} briefly."
+    )
+
+
+def test_a_named_field_and_a_move_are_one_update_that_renumbers_the_prompt() -> None:
+    saved, spec = _consumer_flow_and_spec(producer_first=True)
+
+    changeset = compile_flow_draft_changeset(
+        spec,
+        current_flow=saved,
+        updated_existing_step_refs=frozenset({"existing_step_3"}),
+        updated_assistant_fields={"existing_step_3": frozenset({"knowledge_refs"})},
+    )
+
+    assert _updates(changeset)[-1] == (
+        "existing_step_3",
+        frozenset({"knowledge_refs"}),
+        {2: 3, 3: 4},
+    )
+
+
+def _shared_assistant_flow_and_spec(
+    *, step_first: bool
+) -> tuple[Flow, FlowDraftSpecCore]:
+    """Saved: steps 1 and 2 use one assistant, step 3 its own; the edit can
+    add a step first."""
+
+    shared = uuid4()
+    saved = _flow(
+        _flow_step(step_order=1, assistant_id=shared),
+        _flow_step(step_order=2, assistant_id=shared),
+        _flow_step(step_order=3),
+    )
+    steps = [
+        _step_spec(
+            plan_step_ref=f"p{order}",
+            existing_step_ref=f"existing_step_{order}",
+            name=f"Existing {order}",
+            instructions="Read.",
+            input_source=InputSource.FLOW_INPUT
+            if order == 1
+            else InputSource.PREVIOUS_STEP,
+        )
+        for order in (1, 2, 3)
+    ]
+    if step_first:
+        steps[0] = steps[0].model_copy(
+            update={"input_source": InputSource.PREVIOUS_STEP}
+        )
+        steps.insert(0, _step_spec(plan_step_ref="new", name="Ny", instructions="Ny."))
+    return saved, FlowDraftSpecCore(flow_name="Flow", steps=steps)
+
+
+def test_an_assistant_change_asked_for_one_of_the_steps_sharing_it_is_refused() -> None:
+    saved, spec = _shared_assistant_flow_and_spec(step_first=False)
+
+    with pytest.raises(BadRequestException, match="Ask the Builder again"):
+        compile_flow_draft_changeset(
+            spec,
+            current_flow=saved,
+            updated_existing_step_refs=frozenset({"existing_step_2"}),
+            updated_assistant_fields={"existing_step_2": frozenset({"instructions"})},
+        )
+
+
+def test_the_same_change_asked_for_every_step_sharing_an_assistant_is_one_update() -> (
+    None
+):
+    saved, spec = _shared_assistant_flow_and_spec(step_first=False)
+
+    changeset = compile_flow_draft_changeset(
+        spec,
+        current_flow=saved,
+        updated_existing_step_refs=frozenset({"existing_step_1", "existing_step_2"}),
+        updated_assistant_fields={
+            "existing_step_1": frozenset({"instructions"}),
+            "existing_step_2": frozenset({"instructions"}),
+        },
+    )
+
+    assert [u.existing_step_ref for u in changeset.assistants_to_update] == [
+        "existing_step_1"
+    ]
+
+
+def test_a_move_renumbers_a_shared_assistants_prompt_once() -> None:
+    saved, spec = _shared_assistant_flow_and_spec(step_first=True)
+
+    changeset = compile_flow_draft_changeset(
+        spec,
+        current_flow=saved,
+        updated_existing_step_refs=frozenset({"existing_step_1"}),
+        updated_assistant_fields={},
+    )
+
+    shared = saved.steps[0].assistant_id
+    assert [u.existing_assistant_id for u in changeset.assistants_to_update].count(
+        shared
+    ) == 1
+
+
+def test_a_rename_of_a_step_sharing_an_assistant_updates_no_assistant() -> None:
+    saved, spec = _shared_assistant_flow_and_spec(step_first=False)
+
+    changeset = compile_flow_draft_changeset(
+        spec,
+        current_flow=saved,
+        updated_existing_step_refs=frozenset({"existing_step_2"}),
+        updated_assistant_fields={},
+    )
+
+    assert changeset.assistants_to_update == []

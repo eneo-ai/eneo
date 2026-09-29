@@ -59,7 +59,10 @@ from eneo.flows.http_transport import (
     unprotected_persisted_secret_fields,
     unresolved_secret_sentinel_fields,
 )
-from eneo.flows.infrastructure.flow_repo import FlowRepository
+from eneo.flows.infrastructure.flow_repo import (
+    FlowRepository,
+    StoredAssistantPrompt,
+)
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.published_definition import (
     build_published_definition_json,
@@ -339,6 +342,16 @@ class FlowService:
         self._assert_flow_assistant_owned_by_flow(flow=flow, assistant=assistant)
         return assistant, permissions
 
+    async def get_flow_assistant_prompts(
+        self, flow: Flow
+    ) -> dict[UUID, StoredAssistantPrompt]:
+        """The prompt each of the flow's assistants has selected, as stored."""
+
+        return await self.flow_repo.get_selected_prompts(
+            assistant_ids=list(dict.fromkeys(step.assistant_id for step in flow.steps)),
+            tenant_id=self.user.tenant_id,
+        )
+
     async def get_flow_assistant_snapshots(
         self, flow: Flow
     ) -> AssistantAuthoringSnapshots:
@@ -364,7 +377,14 @@ class FlowService:
         flow_id: UUID,
         assistant_id: UUID,
         update: AssistantUpdateCommand,
+        classification_judged_by_flow_update: bool = False,
     ) -> tuple[Assistant, list[ResourcePermission]]:
+        """`classification_judged_by_flow_update`: the caller saves the flow's
+        steps with `update_flow` later in the same transaction, and that judges
+        every step's classification with its assistant as then saved. Judging
+        this assistant alone now would read a prompt written for the new step
+        positions against the steps as they are before the update."""
+
         if update.is_set("mcp_server_ids") or update.is_set("mcp_tools"):
             raise BadRequestException(
                 "Flow MCP is unsupported. MCP servers and tools cannot be configured on a Flow assistant."
@@ -373,11 +393,12 @@ class FlowService:
         self._ensure_flow_is_mutable(flow)
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
         self._assert_flow_assistant_owned_by_flow(flow=flow, assistant=assistant)
-        await self._validate_flow_assistant_security_change(
-            flow=flow,
-            assistant=assistant,
-            update=update,
-        )
+        if not classification_judged_by_flow_update:
+            await self._validate_flow_assistant_security_change(
+                flow=flow,
+                assistant=assistant,
+                update=update,
+            )
         return await self.assistant_service.update_assistant(
             assistant_id=assistant_id,
             update=update,

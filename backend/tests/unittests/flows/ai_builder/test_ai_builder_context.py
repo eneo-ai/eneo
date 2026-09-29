@@ -74,6 +74,19 @@ def test_serialize_space_kbs_keeps_local_id_for_catalog_input() -> None:
     ]
 
 
+def test_the_knowledge_the_builder_can_name_is_the_spaces_collections_only() -> None:
+    collection = SimpleNamespace(id=uuid4(), name="Policy", description="")
+    space = SimpleNamespace(
+        collections=[collection],
+        websites=[SimpleNamespace(id=uuid4(), name="Kommunen", description="")],
+        integration_knowledge_list=[
+            SimpleNamespace(id=uuid4(), name="Intranät", description="")
+        ],
+    )
+
+    assert [entry["id"] for entry in serialize_space_kbs(space)] == [str(collection.id)]
+
+
 class _Model(SimpleNamespace):
     @property
     def capacity(self):

@@ -128,6 +128,7 @@ async def assert_edit_spec_materializes_through_authoring_command_async(
             for step in edit_spec.steps
             if step.existing_step_ref is not None
         ),
+        updated_assistant_fields={},
         origin=_authoring_origin(edit_spec),
     )
 

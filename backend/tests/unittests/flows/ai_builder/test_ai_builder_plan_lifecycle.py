@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from typing import get_args
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -24,9 +26,12 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     SessionStatus,
     TargetKind,
 )
+from eneo.flows.ai_builder.ai_builder_edit_compiler import _ASSISTANT_SPEC_FIELDS
 from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     FlowEditDiff,
     StepChange,
+    StepChangeField,
+    StepFieldChange,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
@@ -34,11 +39,13 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_plan_lifecycle import (
     AIBuilderPlanLifecycle,
+    _updated_assistant_fields_for_apply,
     _updated_existing_step_refs_for_apply,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     MaterializerProgressSnapshot,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import ProposalReady
 from eneo.flows.ai_builder.planning_state import (
     CheckpointIntent,
     FileRoleEvidence,
@@ -54,10 +61,12 @@ from eneo.flows.application.flow_authoring_command import (
     TemplateAttachmentIntent,
 )
 from eneo.flows.application.flow_draft_materialization import (
+    ALL_ASSISTANT_FIELDS,
     FlowDraftChangeSet,
     FlowDraftMaterializationProgress,
     FlowDraftMaterializationStage,
 )
+from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshot
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -315,7 +324,12 @@ def _make_plan_edit_approval(
 ) -> FlowBuilderEditApproval:
     step_changes = [StepChange(kind="unchanged", step_name="Step A")]
     step_changes.extend(
-        StepChange(kind="modified", step_name=ref, step_ref=ref)
+        StepChange(
+            kind="modified",
+            step_name=ref,
+            step_ref=ref,
+            field_changes=[StepFieldChange(field="name")],
+        )
         for ref in sorted(updated_existing_step_refs)
     )
     step_changes.extend(
@@ -362,6 +376,209 @@ def test_modified_step_without_existing_reference_fails_before_authoring() -> No
         _updated_existing_step_refs_for_apply(session=session, plan=plan)
 
 
+def test_the_assistant_fields_of_an_apply_are_the_ones_the_approved_diff_names() -> (
+    None
+):
+    """A rename is a modified step that names no assistant field: it is left
+    out, so its assistant is not written. Only instructions, model and
+    knowledge are assistant fields."""
+
+    user = _make_user()
+    session = _make_session(
+        tenant_id=user.tenant_id,
+        actor_user_id=user.id,
+        flow_id=uuid4(),
+        target_kind=TargetKind.EDIT,
+    )
+
+    def modified(ref: str, *fields: str) -> StepChange:
+        return StepChange(
+            kind="modified",
+            step_name=ref,
+            step_ref=ref,
+            field_changes=[StepFieldChange(field=field) for field in fields],  # type: ignore[arg-type]
+        )
+
+    approval = FlowBuilderEditApproval(
+        base_flow_revision=1,
+        diff=FlowEditDiff(
+            step_changes=[
+                modified("existing_step_1", "name"),
+                modified("existing_step_2", "name", "instructions"),
+                modified(
+                    "existing_step_3", "knowledge_refs", "model_ref", "output_type"
+                ),
+                StepChange(
+                    kind="unchanged", step_name="Same", step_ref="existing_step_4"
+                ),
+            ]
+        ),
+    )
+    plan = _make_plan(
+        session_id=session.id,
+        tenant_id=session.tenant_id,
+        spec=_make_spec(),
+        edit=approval,
+    )
+
+    assert _updated_assistant_fields_for_apply(session=session, plan=plan) == {
+        "existing_step_2": frozenset({"instructions"}),
+        "existing_step_3": frozenset({"knowledge_refs", "model_ref"}),
+    }
+
+
+def _plan_changing_the_model(current: str | None) -> tuple[BuilderSession, BuilderPlan]:
+    user = _make_user()
+    session = _make_session(
+        tenant_id=user.tenant_id,
+        actor_user_id=user.id,
+        flow_id=uuid4(),
+        target_kind=TargetKind.EDIT,
+    )
+    approval = FlowBuilderEditApproval(
+        base_flow_revision=1,
+        diff=FlowEditDiff(
+            step_changes=[
+                StepChange(
+                    kind="modified",
+                    step_name="Skriv",
+                    step_ref="existing_step_1",
+                    field_changes=[
+                        StepFieldChange(
+                            field="model_ref", previous="model.gpt-4o", current=current
+                        ),
+                        StepFieldChange(
+                            field="output_type", previous="text", current="pdf"
+                        ),
+                    ],
+                )
+            ]
+        ),
+    )
+    plan = _make_plan(
+        session_id=session.id,
+        tenant_id=session.tenant_id,
+        spec=_make_spec(),
+        edit=approval,
+    )
+    return session, plan
+
+
+@pytest.mark.parametrize(
+    "derive",
+    [_updated_existing_step_refs_for_apply, _updated_assistant_fields_for_apply],
+)
+def test_a_plan_that_picks_another_model_for_a_saved_step_is_one_to_ask_for_again(
+    derive,
+) -> None:
+    """An edit never chooses a model: a stored plan from when the Builder did
+    is refused, not applied as a success that wrote no model."""
+
+    session, plan = _plan_changing_the_model("model.gpt-4o-mini")
+
+    with pytest.raises(AIBuilderBadRequestException) as refused:
+        derive(session=session, plan=plan)
+
+    assert refused.value.code == AIBuilderErrorCode.BAD_REQUEST
+    assert "Ask the Builder again for the change." in str(refused.value)
+
+
+def test_a_step_retyped_to_one_without_a_model_still_clears_it() -> None:
+    session, plan = _plan_changing_the_model(None)
+
+    assert _updated_assistant_fields_for_apply(session=session, plan=plan) == {
+        "existing_step_1": frozenset({"model_ref"})
+    }
+
+
+def test_the_assistant_fields_are_the_assistant_fields_a_diff_names() -> None:
+    """Both directions: a field the diff reads from the assistant spec that the
+    apply cannot write would be approved and silently dropped, and one the
+    apply writes that the diff never names could never be approved."""
+
+    assert ALL_ASSISTANT_FIELDS <= set(get_args(StepChangeField))
+    assert set(_ASSISTANT_SPEC_FIELDS) == ALL_ASSISTANT_FIELDS
+
+
+async def _real_approval_without_field_changes() -> tuple[BuilderSession, BuilderPlan]:
+    """A real compiled approval whose diff has lost `field_changes`, as a plan
+    persisted before diffs carried them loads."""
+
+    from tests.unittests.flows.ai_builder.test_ai_builder_edit_proposal import (
+        _flow,
+        _flow_step,
+        _process,
+    )
+
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Läs"),
+        _flow_step(
+            step_order=2, user_description="Skriv", input_source="previous_step"
+        ),
+    )
+    outcome = await _process(
+        flow=flow,
+        assistant_snapshots={
+            step.assistant_id: AssistantAuthoringSnapshot(
+                instructions=f"Saved {step.step_order}."
+            )
+            for step in flow.steps
+        },
+        arguments={
+            "plan_rationale": "x",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_2",
+                    "assistant_spec": {"instructions": "Skriv bättre."},
+                },
+            ],
+        },
+    )
+    assert isinstance(outcome, ProposalReady), outcome
+    content = outcome.compiled.content
+    assert content.edit is not None
+    raw = json.loads(content.edit.model_dump_json())
+    for change in raw["diff"]["step_changes"]:
+        change.pop("field_changes", None)
+    stripped = content.model_copy(
+        update={"edit": FlowBuilderEditApproval.model_validate_json(json.dumps(raw))}
+    )
+    user = _make_user()
+    session = _make_session(
+        tenant_id=user.tenant_id,
+        actor_user_id=user.id,
+        flow_id=uuid4(),
+        target_kind=TargetKind.EDIT,
+    )
+    plan = _make_plan(
+        session_id=session.id,
+        tenant_id=user.tenant_id,
+        spec=stripped.spec,
+        edit=stripped.edit,
+    )
+    return session, plan
+
+
+@pytest.mark.parametrize(
+    "derive",
+    [_updated_existing_step_refs_for_apply, _updated_assistant_fields_for_apply],
+)
+async def test_a_modified_step_that_names_no_field_is_a_plan_to_ask_for_again(
+    derive,
+) -> None:
+    session, plan = await _real_approval_without_field_changes()
+
+    with pytest.raises(AIBuilderBadRequestException) as refused:
+        derive(session=session, plan=plan)
+
+    # Not a conflict: refreshing loads the same plan, so the person is told to
+    # ask again, in the message the apply card shows.
+    assert refused.value.code == AIBuilderErrorCode.BAD_REQUEST
+    assert "Ask the Builder again for the change." in str(refused.value)
+
+
 def test_scoped_apply_updates_only_the_selected_step() -> None:
     user = _make_user()
     session = _make_session(
@@ -380,6 +597,7 @@ def test_scoped_apply_updates_only_the_selected_step() -> None:
                     kind="modified",
                     step_name="Selected step",
                     step_ref="existing_step_2",
+                    field_changes=[StepFieldChange(field="name")],
                 ),
             ]
         ),
@@ -414,6 +632,7 @@ def test_scoped_apply_rejects_modified_assistant_outside_selected_step() -> None
                     kind="modified",
                     step_name="Wrong step",
                     step_ref="existing_step_1",
+                    field_changes=[StepFieldChange(field="name")],
                 )
             ]
         ),

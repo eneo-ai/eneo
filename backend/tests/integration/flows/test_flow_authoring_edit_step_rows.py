@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
@@ -37,6 +37,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
 from eneo.flows.ai_builder.ai_builder_edit_proposal import process_edit_arguments
 from eneo.flows.ai_builder.ai_builder_plan_lifecycle import (
     _removed_existing_step_refs_for_apply,
+    _updated_assistant_fields_for_apply,
     _updated_existing_step_refs_for_apply,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import ProposalReady
@@ -67,6 +68,9 @@ from eneo.roles.role import RoleCreate
 from eneo.settings.encryption_service import EncryptionService
 from eneo.users.user import UserUpdate
 from tests.unittests.flows.ai_builder.proposal_turn_builders import _make_turn
+
+if TYPE_CHECKING:
+    from eneo.flows.application.flow_draft_materialization import AssistantField
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -279,6 +283,7 @@ async def _apply_spec(
     *,
     removed: frozenset[str],
     updated: frozenset[str],
+    assistant_fields: dict[str, frozenset[AssistantField]] | None = None,
     bindings: tuple[LocalResourceBinding, ...] = (),
 ) -> None:
     async with db_container() as container:
@@ -296,6 +301,7 @@ async def _apply_spec(
                 spec=spec,
                 removed_existing_step_refs=removed,
                 updated_existing_step_refs=updated,
+                updated_assistant_fields=assistant_fields or {},
                 resource_bindings=bindings,
                 origin=origin,
             ),
@@ -309,6 +315,7 @@ async def _apply(
     saved: Saved,
     edit: Edit,
     updated: frozenset[str] = frozenset(),
+    assistant_fields: dict[str, frozenset[AssistantField]] | None = None,
 ) -> None:
     """The edit laid over the saved flow's own authoring spec, applied with the
     step refs a plan's approval lists as modified."""
@@ -330,7 +337,14 @@ async def _apply(
                 ),
             )
         )
-    await _apply_spec(db_container, saved, spec, removed=removed, updated=updated)
+    await _apply_spec(
+        db_container,
+        saved,
+        spec,
+        removed=removed,
+        updated=updated,
+        assistant_fields=assistant_fields,
+    )
 
 
 def _keep(order: int, **changes: Any) -> dict[str, Any]:
@@ -390,6 +404,9 @@ async def _edit(
         content.spec,
         removed=_removed_existing_step_refs_for_apply(session=session, plan=plan),  # type: ignore[arg-type]
         updated=_updated_existing_step_refs_for_apply(session=session, plan=plan),  # type: ignore[arg-type]
+        assistant_fields=_updated_assistant_fields_for_apply(
+            session=session, plan=plan
+        ),  # type: ignore[arg-type]
         bindings=outcome.compiled.resource_bindings,
     )
 
@@ -572,8 +589,9 @@ async def test_a_step_that_reads_a_step_the_edit_moves_reads_it_where_it_now_is(
 async def test_a_modified_retained_step_is_patched_alone_through_the_apply(
     db_container, saved: Saved
 ) -> None:
-    """The step is marked modified, so its assistant is written too; at the
-    flow_steps level the row is patched in the changed columns only."""
+    """The step is marked modified and its assistant's instructions are
+    written too; at the flow_steps level the row is patched in the changed
+    columns only."""
 
     before = await _rows(db_container, saved.flow_id)
 
@@ -587,7 +605,11 @@ async def test_a_modified_retained_step_is_patched_alone_through_the_apply(
         return spec.model_copy(update={"steps": steps}), frozenset()
 
     await _apply(
-        db_container, saved, change_two_columns, updated=frozenset({"existing_step_2"})
+        db_container,
+        saved,
+        change_two_columns,
+        updated=frozenset({"existing_step_2"}),
+        assistant_fields={"existing_step_2": frozenset({"instructions"})},
     )
     after = await _rows(db_container, saved.flow_id)
 
@@ -805,14 +827,6 @@ async def _prompts(db_container, flow_id: UUID) -> list[str]:
         return [snapshots[step.assistant_id].instructions for step in flow.steps]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "The prompt belongs to the step's assistant, which the following slice "
-        "writes: here only the step rows are renumbered, so the reader's prompt "
-        "still reads the position its producer left."
-    ),
-)
 async def test_a_step_the_edit_leaves_reads_its_producer_in_its_prompt_after_a_removal(
     db_container, saved: Saved
 ) -> None:

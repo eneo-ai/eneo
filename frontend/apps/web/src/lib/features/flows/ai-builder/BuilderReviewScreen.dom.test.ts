@@ -1610,6 +1610,26 @@ describe("BuilderReviewScreen change requests", () => {
 });
 
 describe("BuilderReviewScreen recovery surfaces", () => {
+  it("tells the person to ask again for a plan the apply refuses, with no refresh to loop on", () => {
+    // A plan persisted before diffs listed each step's changes: reloading
+    // brings the same plan back, so this is not a conflict card.
+    const message =
+      "This plan was made before an update of the AI Builder and can no longer be applied. Ask the Builder again for the change.";
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: {
+        ...scopedStepEditState(),
+        applyError: { ...makeError("bad_request"), category: "bad_request", message }
+      }
+    });
+
+    expect(screen.getByText(m.ai_builder_apply_failed_title())).toBeTruthy();
+    expect(screen.getByText(message)).toBeTruthy();
+    expect(screen.queryByText(m.ai_builder_conflict_elsewhere_title())).toBeNull();
+    expect(screen.queryByRole("button", { name: m.ai_builder_conflict_refresh() })).toBeNull();
+    expect(screen.getByRole("button", { name: m.ai_builder_dismiss() })).toBeTruthy();
+  });
+
   it("renders one conflict card for a stream conflict and clears it when the reload succeeds", async () => {
     // The stale conflict is also persisted on the committed turn, so a
     // refresh alone would rehydrate it; recovery must end with the card gone
