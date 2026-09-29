@@ -8955,7 +8955,7 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
         dict.fromkeys(
             check.get("name")
             for check in _mapping_list(report.get("output_checks"))
-            if check.get("passed") is not True
+            if check.get("passed") is False
         )
     )
     return {

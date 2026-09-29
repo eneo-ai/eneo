@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import re
+import string
 import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from typing import Annotated, Any, Final, Literal, Self, cast, get_args
@@ -95,6 +96,8 @@ _EDGE = (
     r"(?: @(?P<placeholder>[\w.-]+))?$"
 )
 _DIGIT_GROUP = re.compile(r"(?<=\d) (?=\d{3}(?!\d))")
+# A CommonMark backslash escape: a backslash before ASCII punctuation.
+_MARKDOWN_ESCAPE = re.compile(r"\\([" + re.escape(string.punctuation) + r"])")
 # A preview names a model or knowledge by its portable slot ref and the flow
 # by resource id, so their displayed values are not comparable here; every
 # other field's displayed value must be the value the apply wrote.
@@ -139,6 +142,21 @@ def literal_list(
     return literals
 
 
+def literal_appears(literal: str, text: str) -> bool:
+    """Whether a normalized literal appears in normalized text.
+
+    The one comparison of every literal check: as written, or with each markdown
+    backslash escape (`\\*`, `\\-`) folded to the character it escapes on both
+    sides, so text delivered with escaping still holds the literal. The
+    as-written match is kept, so folding can only add hits, never remove one; a
+    backslash before anything but ASCII punctuation is no escape and stays.
+    """
+
+    return literal in text or (
+        _MARKDOWN_ESCAPE.sub(r"\1", literal) in _MARKDOWN_ESCAPE.sub(r"\1", text)
+    )
+
+
 def literal_checks(
     text: str,
     *,
@@ -146,7 +164,11 @@ def literal_checks(
     forbidden: Sequence[str],
     normalize: Callable[[str], str],
 ) -> list[JsonObject]:
-    """Each literal must (or must not) appear in the normalized text."""
+    """Each literal must (or must not) appear in the normalized text.
+
+    With no output to inspect, a required fact is missing but a forbidden literal
+    is `not_evaluated` (`passed` None): neither a leak nor a pass.
+    """
 
     normalized = normalize(text) if text else ""
     checks: list[JsonObject] = []
@@ -155,12 +177,24 @@ def literal_checks(
         ("forbidden_literal", "literal", forbidden, False),
     ):
         for literal in literals:
-            present = bool(normalized) and normalize(literal) in normalized
+            if not normalized and not must_appear:
+                checks.append(
+                    {
+                        "name": name,
+                        key: literal,
+                        "passed": None,
+                        "status": "not_evaluated",
+                        "reason": f"{literal!r} was not checked: the run delivered "
+                        "no output to inspect",
+                    }
+                )
+                continue
+            present = literal_appears(normalize(literal), normalized)
             checks.append(
                 {
                     "name": name,
                     key: literal,
-                    "passed": bool(normalized) and present == must_appear,
+                    "passed": present == must_appear,
                     "reason": f"{literal!r} "
                     + ("appears in" if present else "is missing from")
                     + " the final output",
@@ -885,11 +919,10 @@ def _step_output(
         forbidden=rule.forbidden,
         normalize=normalized_text,
     )
-    failed = [check for check in literals if not check["passed"]]
-    return rule.output_kind in {None, kind} and not failed, {
-        "kind": kind,
-        "failed": failed,
-    }
+    failed = [check for check in literals if check["passed"] is False]
+    return rule.output_kind in {None, kind} and all(
+        check["passed"] is True for check in literals
+    ), {"kind": kind, "failed": failed}
 
 
 def report(checks: list[JsonObject]) -> JsonObject:
