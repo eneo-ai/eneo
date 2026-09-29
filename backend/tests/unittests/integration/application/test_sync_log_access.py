@@ -260,6 +260,7 @@ async def test_service_key_reads_sync_history_within_its_tenant(
         scope_type="tenant",
         scope_id=None,
         permission=permission,
+        tenant_id=case.user.tenant_id,
     )
     knowledge_id, space_id = uuid4(), uuid4()
     connection.execute(
