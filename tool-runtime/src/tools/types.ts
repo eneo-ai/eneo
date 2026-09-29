@@ -9,12 +9,15 @@ export type CallContext = { tenantId: string; userId: string; fileOrigin?: strin
 
 /** A file a tool produced, returned as a standard MCP embedded resource (base64 blob). */
 export type EmbeddedFile = { uri: string; mimeType: string; blob: string };
+/** An image a tool produced, returned as a standard MCP image block (base64). */
+export type ImageBlock = { data: string; mimeType: string };
 
-/** A tool result that carries files next to its structured data. */
+/** A tool result that carries files or images next to its structured data. */
 export class RichResult {
   constructor(
     readonly structured: Record<string, unknown>,
     readonly files: EmbeddedFile[],
+    readonly images: ImageBlock[] = [],
   ) {}
 }
 

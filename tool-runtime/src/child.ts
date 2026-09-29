@@ -4,12 +4,14 @@ import type { ComputeConfig } from "./tools/compute/config";
 import type { ComputeJob } from "./tools/compute/ports";
 import type { IngestJob, QueryJob } from "./tools/tabular/ports";
 import type { RenderJob } from "./tools/documents/ports";
+import type { ChartJob } from "./tools/charts/ports";
 
 export type SandboxJob =
   | { job: ComputeJob; config: ComputeConfig }
   | { job: IngestJob }
   | { job: QueryJob }
   | { job: RenderJob }
+  | { job: ChartJob }
   | { job: { kind: "env" } };
 
 async function execute(input: SandboxJob): Promise<Record<string, unknown>> {
@@ -31,6 +33,10 @@ async function execute(input: SandboxJob): Promise<Record<string, unknown>> {
     case "render_document": {
       const { executeRender } = await import("./tools/documents/execute");
       return executeRender(input.job);
+    }
+    case "render_chart": {
+      const { executeChart } = await import("./tools/charts/execute");
+      return { ...(await executeChart(input.job)) };
     }
     case "env":
       // Test probe: the variable names the child inherited, never their values.

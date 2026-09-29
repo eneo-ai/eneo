@@ -3779,6 +3779,7 @@
   "mcp_auth_bundled": "Medföljande",
   "mcp_bundled_hint": "Servern körs i verktygsmiljön som följer med Eneo. Adress och inloggningsuppgift styrs av installationen och kan inte ändras här.",
   "tools_add_bundled_compute": "Lägg till medföljande beräkning",
+  "tools_add_bundled_charts": "Lägg till medföljande diagram",
   "tools_bundled_added": "Beräkning har lagts till. Granska verktygen och aktivera servern i de utrymmen som ska använda den.",
   "tools_bundled_add_failed": "Den medföljande beräkningsservern kunde inte läggas till.",
   "mcp_audience_no_groups": "Det finns inga användargrupper ännu. Skapa dem under Åtkomst → Användargrupper.",

@@ -3779,6 +3779,7 @@
   "mcp_auth_bundled": "Bundled",
   "mcp_bundled_hint": "This server runs in the tool runtime shipped with Eneo. Its address and credential are set by the deployment and cannot be changed here.",
   "tools_add_bundled_compute": "Add bundled compute",
+  "tools_add_bundled_charts": "Add bundled charts",
   "tools_bundled_added": "Compute was added. Review its tools and enable it in the spaces that should use it.",
   "tools_bundled_add_failed": "The bundled compute server could not be added.",
   "mcp_audience_no_groups": "No user groups exist yet. Create them under Access → User groups.",

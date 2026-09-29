@@ -118,14 +118,25 @@ export function createHandler(options: ServerOptions) {
               );
               const result = output instanceof RichResult ? output.structured : output;
               const files = output instanceof RichResult ? output.files : [];
+              const images = output instanceof RichResult ? output.images : [];
               const text = JSON.stringify(result);
               if (Buffer.byteLength(text) > MAX_RESULT_BYTES)
                 throw new ToolError("RESULT_TOO_LARGE", "Result exceeds the byte limit.");
-              if (files.reduce((n, f) => n + (f.blob.length * 3) / 4, 0) > MAX_FILE_BYTES)
+              if (
+                [...files.map((f) => f.blob), ...images.map((i) => i.data)].reduce(
+                  (n, data) => n + (data.length * 3) / 4,
+                  0,
+                ) > MAX_FILE_BYTES
+              )
                 throw new ToolError("RESULT_TOO_LARGE", "Produced files exceed the byte limit.");
               return {
                 content: [
                   { type: "text" as const, text },
+                  ...images.map((image) => ({
+                    type: "image" as const,
+                    data: image.data,
+                    mimeType: image.mimeType,
+                  })),
                   ...files.map((file) => ({
                     type: "resource" as const,
                     resource: { uri: file.uri, mimeType: file.mimeType, blob: file.blob },

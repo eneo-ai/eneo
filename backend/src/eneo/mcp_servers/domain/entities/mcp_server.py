@@ -126,6 +126,7 @@ class BundledToolSpec:
 
 BUNDLED_TOOLS: dict[str, BundledToolSpec] = {
     "compute": BundledToolSpec(purpose=GENERAL_PURPOSE, forward_identity=False),
+    "charts": BundledToolSpec(purpose=GENERAL_PURPOSE, forward_identity=False),
     "tabular": BundledToolSpec(purpose="tabular_analysis", forward_identity=True),
     "documents": BundledToolSpec(purpose="document_creation", forward_identity=False),
     "spreadsheets": BundledToolSpec(

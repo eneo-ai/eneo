@@ -14,6 +14,27 @@ It has two endpoints:
 - `/mcp/spreadsheets`: `create_spreadsheet`, which builds XLSX workbooks with
   named sheets and typed cells. It provides **Create spreadsheets**
   (`spreadsheet_creation`).
+- `/mcp/charts`: `create_chart`, which draws bar, line, pie and scatter charts
+  as PNG images. It is added as an ordinary MCP server (**Add bundled
+  charts**).
+
+## Chaining tools without copying data
+
+Large data moves between tools as Eneo files, never through the model:
+
+1. `query_table` with `export: true` writes its complete result (up to 200,000
+   rows) as a CSV file. Eneo saves it as a visible download and hands the model
+   a signed reference URL for it in the same answer.
+2. `create_spreadsheet` takes that URL as a sheet `source`, and `create_chart`
+   takes it as its `source` with a label column and value columns. Each
+   downloads the file with the same checks as the tabular tools: Eneo's origin
+   only, and access checked on every download.
+
+The providers share nothing but those Eneo-owned files and links, so any of
+them can be replaced by an external provider that follows the same MCP
+conventions. The same-turn reference needs a streaming chat; over the
+non-streaming API, the reference arrives on the next turn. Charts are PNG
+images; interactive MCP Apps widgets are not supported.
 
 ## TL;DR
 

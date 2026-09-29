@@ -8,6 +8,8 @@ documentation lives in `docs/deployment/TOOL_RUNTIME.md`.
 - `POST /mcp/tabular` exposes `inspect_table`, `query_table` and
   `assert_table` over signed Eneo attachment URLs. It fetches only from the
   origin Eneo sends in `X-Eneo-File-Origin`.
+- `POST /mcp/charts` (`create_chart`) returns PNG charts as MCP image blocks,
+  from inline series or a CSV/XLSX source file.
 - `POST /mcp/documents` (`create_document`, DOCX or PDF from Markdown) and
   `POST /mcp/spreadsheets` (`create_spreadsheet`, XLSX) return the file as an
   embedded resource that Eneo saves in the conversation.
@@ -24,6 +26,8 @@ documentation lives in `docs/deployment/TOOL_RUNTIME.md`.
 | `src/tools/compute/`         | QuickJS engine, limits and the tool definition           |
 | `src/tools/tabular/`         | Download policy, parsed-sheet cache, DuckDB/XLSX engines |
 | `src/tools/documents/`       | Markdown parser and DOCX, PDF and XLSX renderers         |
+| `src/tools/charts/`          | Chart spec, SVG drawing and resvg rasterization          |
+| `src/tools/files/`           | Signed Eneo file references shared by all file inputs    |
 
 The compute engine was ported from eneo-tools (`packages/compute`, commit
 `585b271`). The tabular engines were ported from `packages/tabular` and

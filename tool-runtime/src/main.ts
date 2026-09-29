@@ -8,6 +8,9 @@ import type { QueryJobResult, SheetMetadata } from "./tools/tabular/ports";
 import { tabularTools } from "./tools/tabular/tool";
 import type { RenderResult } from "./tools/documents/ports";
 import { documentTools, fileRenderer, spreadsheetTools } from "./tools/documents/tool";
+import { chartConfigSchema } from "./tools/charts/config";
+import type { ChartRendering } from "./tools/charts/ports";
+import { chartTools } from "./tools/charts/tool";
 
 const config = loadConfig(process.env);
 // The whole-job deadline covers child start-up (Bun plus the WASM engine) on top of the
@@ -69,6 +72,19 @@ endpoints.push(
       maxBytes: tabular.max_upload_bytes,
       timeoutMs: tabular.download_timeout_ms,
     }),
+  },
+  {
+    slug: "charts",
+    toolTimeoutMs: renderTimeoutMs + 5_000,
+    tools: chartTools(
+      chartConfigSchema.parse({}),
+      (job) => slot(async () => (await runIsolated({ job }, renderTimeoutMs)) as ChartRendering),
+      {
+        allowedFileOrigins: config.tabular.allowedFileOrigins,
+        maxBytes: tabular.max_upload_bytes,
+        timeoutMs: tabular.download_timeout_ms,
+      },
+    ),
   },
 );
 

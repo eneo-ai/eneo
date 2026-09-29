@@ -6,7 +6,14 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { ToolError } from "../../errors";
 import { convertXlsxToCsvSheets } from "../tabular/engine/xlsx-to-csv";
 import { assertZipWithinBounds } from "../tabular/zip-guard";
-import type { Cell, DocumentRequest, DocumentSpec, SheetRequest, SheetSpec } from "./ports";
+import type {
+  Cell,
+  DocumentRequest,
+  DocumentSpec,
+  SheetRequest,
+  SheetSource,
+  SheetSpec,
+} from "./ports";
 
 /** Rows one source sheet may contribute; Excel itself stops at 1,048,576. */
 export const SOURCE_ROW_LIMIT = 200_000;
@@ -22,8 +29,16 @@ export async function resolveSources(document: DocumentRequest): Promise<Documen
 async function resolveSheet(sheet: SheetRequest): Promise<SheetSpec> {
   if (!sheet.source)
     return { name: sheet.name, columns: sheet.columns ?? [], rows: sheet.rows ?? [] };
-  const { path, isXlsx } = sheet.source;
-  if (!path) throw new ToolError("RENDER_FAILED", "A sheet source was not downloaded.");
+  const { columns, rows } = await readSource(sheet.source);
+  return { name: sheet.name, columns, rows };
+}
+
+/** Reads a downloaded CSV or XLSX source (one sheet) as typed columns and rows. */
+export async function readSource(
+  source: SheetSource,
+): Promise<{ columns: string[]; rows: Cell[][] }> {
+  const { path, isXlsx } = source;
+  if (!path) throw new ToolError("RENDER_FAILED", "A source file was not downloaded.");
   const bytes = await readFile(path);
   let csvPath = path;
   if (isXlsx) {
@@ -31,7 +46,7 @@ async function resolveSheet(sheet: SheetRequest): Promise<SheetSpec> {
       throw new ToolError("INVALID_FILE", "The source is not an XLSX workbook.");
     assertZipWithinBounds(bytes, MAX_EXPANDED_BYTES);
     const workbook = await convertXlsxToCsvSheets(bytes);
-    const wanted = sheet.source.sheet;
+    const wanted = source.sheet;
     if (!wanted && workbook.length > 1)
       throw new ToolError(
         "SHEET_REQUIRED",
@@ -39,7 +54,7 @@ async function resolveSheet(sheet: SheetRequest): Promise<SheetSpec> {
       );
     const picked = wanted ? workbook.find((s) => s.name === wanted) : workbook[0];
     if (!picked) throw new ToolError("UNKNOWN_SHEET", "Unknown sheet in the source workbook.");
-    csvPath = join(dirname(path), `${sheet.source.index}.csv`);
+    csvPath = join(dirname(path), `${source.index}.csv`);
     await writeFile(csvPath, picked.csv, { mode: 0o600 });
   } else {
     if (bytes.includes(0))
@@ -50,8 +65,7 @@ async function resolveSheet(sheet: SheetRequest): Promise<SheetSpec> {
       throw new ToolError("INVALID_FILE", "CSV sources must use UTF-8 encoding.");
     }
   }
-  const { columns, rows } = await readTypedCsv(csvPath);
-  return { name: sheet.name, columns, rows };
+  return readTypedCsv(csvPath);
 }
 
 async function readTypedCsv(csvPath: string): Promise<{ columns: string[]; rows: Cell[][] }> {

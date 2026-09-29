@@ -162,11 +162,16 @@ class BundledTool:
 # both are ordinary editable fields afterwards.
 BUNDLED_TOOL_NAMES: dict[str, str] = {
     "compute": "Compute",
+    "charts": "Charts",
     "tabular": "Tabular analysis",
     "documents": "Documents",
     "spreadsheets": "Spreadsheets",
 }
 BUNDLED_TOOL_DESCRIPTIONS: dict[str, str] = {
+    "charts": (
+        "Draws bar, line, pie and scatter charts as images in an isolated "
+        "sandbox, from inline values or a CSV/XLSX file in the conversation."
+    ),
     "tabular": (
         "Inspects and queries attached CSV and Excel files with DuckDB in an "
         "isolated sandbox. Files are fetched through short-lived signed links."

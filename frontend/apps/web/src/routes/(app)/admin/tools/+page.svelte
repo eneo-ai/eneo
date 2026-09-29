@@ -10,6 +10,7 @@
   import { untrack } from "svelte";
   import {
     Calculator,
+    ChartColumn,
     Package,
     Plus,
     Wrench,
@@ -357,8 +358,13 @@
                 variant="outline"
                 disabled={addingBundled}
                 onclick={() => addBundled(bundled.tool)}
-                ><Calculator class="size-4" />{m.tools_add_bundled_compute()}</Button
               >
+                {#if bundled.tool === "charts"}
+                  <ChartColumn class="size-4" />{m.tools_add_bundled_charts()}
+                {:else}
+                  <Calculator class="size-4" />{m.tools_add_bundled_compute()}
+                {/if}
+              </Button>
             {/each}
             <Button size="sm" onclick={() => configure("general")}
               ><Wrench class="size-4" />{m.add_mcp_server()}</Button
