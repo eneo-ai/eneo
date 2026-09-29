@@ -119,6 +119,10 @@ class _FakeMCPProxy:
     def get_tool_info(self, prefixed_tool_name: str):
         return ("Server", "tool", "Tool title")
 
+    def is_internal_tool(self, prefixed_tool_name: str) -> bool:
+        del prefixed_tool_name
+        return False
+
     def get_tool_purpose(self, prefixed_tool_name: str) -> str | None:
         del prefixed_tool_name
         return None
@@ -159,6 +163,17 @@ class _InternalMCPProxy(_FakeMCPProxy):
     def get_tool_info(self, prefixed_tool_name: str):
         return ("knowledge", "search_knowledge", "Search knowledge")
 
+    def is_internal_tool(self, prefixed_tool_name: str) -> bool:
+        return prefixed_tool_name == "knowledge__search_knowledge"
+
+
+class _ExternalServerNamedKnowledgeProxy(_InternalMCPProxy):
+    """An admin-registered server whose name collides with the internal one."""
+
+    def is_internal_tool(self, prefixed_tool_name: str) -> bool:
+        del prefixed_tool_name
+        return False
+
 
 class _MixedMCPProxy(_FakeMCPProxy):
     def get_allowed_tool_names(self):
@@ -168,6 +183,9 @@ class _MixedMCPProxy(_FakeMCPProxy):
         if prefixed_tool_name == "knowledge__search_knowledge":
             return ("knowledge", "search_knowledge", "Search knowledge")
         return ("Server", "tool", "Tool title")
+
+    def is_internal_tool(self, prefixed_tool_name: str) -> bool:
+        return prefixed_tool_name == "knowledge__search_knowledge"
 
 
 def _make_adapter() -> TenantModelAdapter:
@@ -1004,6 +1022,56 @@ async def test_internal_tools_auto_execute_when_external_approval_is_required():
     approval_manager.request_approval.assert_not_awaited()
     approval_manager.wait_for_approval.assert_not_awaited()
     assert mcp_proxy.calls == [[("knowledge__search_knowledge", {"q": "x"})]]
+
+
+@pytest.mark.asyncio
+async def test_external_server_named_like_an_internal_one_still_needs_approval():
+    """Auto-execution follows the server entity's internal flag, not its
+    name: a tool reported under "knowledge" by an external server is held for
+    approval like any other external tool."""
+    adapter = _make_adapter()
+    mcp_proxy = _ExternalServerNamedKnowledgeProxy()
+    approval_manager = AsyncMock()
+    approval_manager.wait_for_approval.return_value = ToolApprovalWaitResult(
+        decisions=[ToolApprovalDecision(tool_call_id="call_1", approved=False)],
+        timed_out=False,
+    )
+    follow_up_stream = _AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+    mocked_acompletion = AsyncMock(return_value=follow_up_stream)
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk(tool_name="knowledge__search_knowledge")],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        mocked_acompletion,
+    ):
+        completions = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=True,
+            approval_manager=approval_manager,
+            approval_context={
+                "tenant_id": uuid4(),
+                "user_id": uuid4(),
+                "session_id": uuid4(),
+                "assistant_id": uuid4(),
+            },
+            pending_approval_ids=set(),
+        )
+
+    assert any(
+        completion.response_type == ResponseType.TOOL_APPROVAL_REQUIRED
+        for completion in completions
+    )
+    approval_manager.request_approval.assert_awaited_once()
+    assert mcp_proxy.calls == []
 
 
 @pytest.mark.asyncio

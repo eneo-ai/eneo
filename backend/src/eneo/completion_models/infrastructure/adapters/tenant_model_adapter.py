@@ -55,7 +55,6 @@ from eneo.completion_models.infrastructure.message_payload import (
 from eneo.completion_models.infrastructure.static_prompts import (
     MCP_TOOL_REFERENCES_INSTRUCTION,
 )
-from eneo.internal_mcp.constants import INTERNAL_MCP_SERVER_NAMES
 from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from eneo.main.logging import get_logger
@@ -2092,20 +2091,27 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 _tool_metadata_arguments(tm)
                             )
 
-                    # Approval flow
+                    # Approval flow. Tools of Eneo's own loopback servers
+                    # (knowledge, files, built-in providers) are core
+                    # capabilities: approval controls apply only to external
+                    # MCP servers, even when both kinds are called in one
+                    # round. Internal is a property of the server entity, not
+                    # of its name, so an external server named like an
+                    # internal one still goes through approval.
+                    internal_call_ids = {
+                        tm.tool_call_id
+                        for tm in tool_metadata
+                        if tm.tool_call_id is not None
+                        and tm.mcp_tool_name is not None
+                        and mcp_proxy.is_internal_tool(tm.mcp_tool_name)
+                    }
                     approval_metadata = [
                         tm
                         for tm in tool_metadata
-                        if tm.server_name not in INTERNAL_MCP_SERVER_NAMES
+                        if tm.tool_call_id not in internal_call_ids
                     ]
-                    # Eneo's internal knowledge/files tools are read-only core
-                    # capabilities. Approval controls apply only to external MCP
-                    # servers, even when both kinds are called in one round.
                     decision_map: dict[str, tuple[bool, str | None]] = {
-                        tm.tool_call_id: (True, None)
-                        for tm in tool_metadata
-                        if tm.tool_call_id is not None
-                        and tm.server_name in INTERNAL_MCP_SERVER_NAMES
+                        call_id: (True, None) for call_id in internal_call_ids
                     }
                     timed_out = False
                     if require_tool_approval and approval_manager and approval_metadata:
