@@ -22,13 +22,13 @@ There are two different use cases to consider:
 
 ### Access to connected content
 
-Enabling or removing an integration for the tenant requires Eneo administrator permission. Removing a tenant integration also deletes its users' connections, stored OAuth tokens and imported integration knowledge. Disconnecting a personal account is a separate operation.
+Enabling or removing an integration for the tenant requires Eneo administrator permission. Removing a tenant integration also deletes its users' connections, stored OAuth tokens and imported integration knowledge. Disconnecting a personal account is a separate operation. You can only disconnect your own personal connection.
 
-Your personal Microsoft connection belongs to you. Other Eneo users, including administrators, cannot use it to preview sites, browse folders or create imports. Starting and completing a personal connection requires an integration configured for your own Eneo tenant. Connections and destination spaces must belong to the same Eneo tenant as the person making the request.
+Your personal Microsoft connection belongs to you. Other Eneo users, including administrators, cannot use it to preview sites, browse folders or create imports. It can only be used to browse and import into your own personal space, never into shared or organization spaces. Starting and completing a personal connection requires an integration configured for your own Eneo tenant. Connections and destination spaces must belong to the same Eneo tenant as the person making the request.
 
 Organization connections, using either a service account or application permissions, require Eneo administrator permission and an active SharePoint configuration. They can be used in shared and organization spaces. To browse folders or create an import, you must also have permission to import integrations into the destination space, through direct membership or a group.
 
-The connection you select determines which Microsoft account or application is used. Changing the destination space does not switch a personal connection to organization credentials. Reading documents already imported into a space continues to follow that space's knowledge permissions; it does not grant permission to browse the connected SharePoint library.
+The connection you select determines which Microsoft account or application is used. Changing the destination space does not switch a personal connection to organization credentials; selecting a personal connection for a shared or organization space is rejected. Reading documents already imported into a space continues to follow that space's knowledge permissions; it does not grant permission to browse the connected SharePoint library.
 
 Sync history follows read access to the imported knowledge, including knowledge shared through an organization space or group membership. You do not need permission to create imports or use the Microsoft connection to read that history. Log entries and their counts are only available when you can read the corresponding knowledge in your Eneo tenant.
 
