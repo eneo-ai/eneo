@@ -69,6 +69,7 @@ def _observations(**edits: dict[str, Any]) -> list[SimpleNamespace]:
         for repetition in range(1, 6):
             verdict = {
                 "verdict": "pass",
+                "failed_checks": (),
                 "categories": (),
                 "seed": "edit_seed_g.json"
                 if case_id == "remove"

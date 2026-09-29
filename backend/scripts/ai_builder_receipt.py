@@ -302,6 +302,10 @@ class Observation:
     cohorts: tuple[str, ...] = ()
     # The edit capability gate's reading of an edit case; None elsewhere.
     edit: EditVerdict | None = None
+    # Why an observation is not valid evidence: the names of its failed evidence
+    # checks, and the Builder's own terminal error codes.
+    evidence_failed_check_names: tuple[str, ...] = ()
+    error_codes: tuple[str, ...] = ()
 
     @property
     def slot(self) -> tuple[str, int]:
@@ -313,6 +317,8 @@ class EditVerdict:
     """One edit observation's verdict, as the harness projected it."""
 
     verdict: str
+    # In the scorer's evaluation order: the first one is the first failure.
+    failed_checks: tuple[str, ...]
     categories: tuple[str, ...]
     seed: str
     seed_sha256: str
@@ -326,6 +332,9 @@ def _edit_verdict(value: object, *, where: str) -> EditVerdict | None:
     edit = _mapping(value, where=where, key="edit")
     return EditVerdict(
         verdict=_required_str(edit, "verdict", where=where),
+        failed_checks=_string_tuple(
+            edit.get("failed_checks"), where=where, key="failed_checks"
+        ),
         categories=_string_tuple(edit.get("categories"), where=where, key="categories"),
         seed=_required_str(edit, "seed", where=where),
         seed_sha256=_required_str(edit, "seed_sha256", where=where),
@@ -394,6 +403,15 @@ class Receipt:
         return tuple(replacement.slot for replacement in self.replacements)
 
 
+def _check_names(row: Mapping[str, Any], key: str, *, where: str) -> tuple[str, ...]:
+    return tuple(
+        _required_str(
+            _mapping(check, where=where, key=f"{key}[{position}]"), "name", where=where
+        )
+        for position, check in enumerate(_sequence(row.get(key), where=where, key=key))
+    )
+
+
 def observation_from_row(raw_row: Any, *, where: str) -> Observation:
     if not isinstance(raw_row, Mapping):
         raise ReceiptError(f"{where} must be an object; got {type(raw_row).__name__}.")
@@ -455,14 +473,6 @@ def observation_from_row(raw_row: Any, *, where: str) -> Observation:
         if raw_classifier_usage is not None
         else {}
     )
-    failed_check_names: list[str] = []
-    for position, check in enumerate(
-        _sequence(row.get("failed_checks"), where=where, key="failed_checks")
-    ):
-        key = f"failed_checks[{position}]"
-        failed_check_names.append(
-            _required_str(_mapping(check, where=where, key=key), "name", where=where)
-        )
     return Observation(
         case_id=case_id,
         repetition=repetition,
@@ -473,7 +483,7 @@ def observation_from_row(raw_row: Any, *, where: str) -> Observation:
         case_contract_sha256=_required_str(row, "case_contract_sha256", where=where),
         bundle_file=_required_str(row, BUNDLE_FILE_FIELD, where=where),
         bundle_sha256=_required_str(row, BUNDLE_SHA256_FIELD, where=where),
-        failed_check_names=tuple(failed_check_names),
+        failed_check_names=_check_names(row, "failed_checks", where=where),
         repair_attempts=_optional_int(
             plan_outcome.get("repair_attempts"), where=where, key="repair_attempts"
         ),
@@ -514,6 +524,12 @@ def observation_from_row(raw_row: Any, *, where: str) -> Observation:
         row=row,
         cohorts=_string_tuple(row.get("cohorts") or [], where=where, key="cohorts"),
         edit=_edit_verdict(row.get("edit"), where=where),
+        evidence_failed_check_names=_check_names(
+            row, "evidence_failed_checks", where=where
+        ),
+        error_codes=_string_tuple(
+            failure_summary.get("error_codes"), where=where, key="error_codes"
+        ),
     )
 
 
