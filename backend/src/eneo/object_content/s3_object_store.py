@@ -14,7 +14,6 @@ from time import monotonic
 from typing import TYPE_CHECKING, BinaryIO, Final, Mapping, TypeVar, cast
 from uuid import UUID
 
-from botocore.config import Config
 from botocore.exceptions import (
     BotoCoreError,
     ChecksumError,
@@ -25,8 +24,6 @@ from botocore.exceptions import (
     ReadTimeoutError,
     SSLError,
 )
-from botocore.response import StreamingBody
-from botocore.session import get_session
 
 from eneo.object_content.configuration import ObjectContentSettings
 from eneo.object_content.content import (
@@ -38,6 +35,7 @@ from eneo.object_content.content import (
 from eneo.object_content.lease import OperationCheckpoint
 
 if TYPE_CHECKING:
+    from botocore.response import StreamingBody
     from mypy_boto3_s3 import S3Client
     from mypy_boto3_s3.type_defs import (
         CompletedPartTypeDef,
@@ -240,6 +238,9 @@ def _create_client(
     read_timeout_seconds: float,
     max_attempts: int,
 ) -> S3Client:
+    from botocore.config import Config
+    from botocore.session import get_session
+
     return cast(
         "S3Client",
         get_session().create_client(
