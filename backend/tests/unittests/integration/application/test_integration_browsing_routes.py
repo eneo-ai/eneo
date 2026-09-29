@@ -1,7 +1,7 @@
 """HTTP contracts after authentication; real services and policy, no live servers."""
 
 from dataclasses import dataclass
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -19,6 +19,20 @@ from eneo.integration.infrastructure.preview_service.sharepoint_tree_service imp
 from eneo.main.container.container import Container
 from eneo.roles.permissions import Permission
 from eneo.spaces.api.space_models import SpaceMember, SpaceRoleValue
+from eneo.spaces.space_service import SpaceService
+
+SPACE_SERVICE_COLLABORATORS = (
+    "factory",
+    "user_repo",
+    "user_groups_repo",
+    "embedding_model_crud_service",
+    "completion_model_crud_service",
+    "completion_model_service",
+    "transcription_model_crud_service",
+    "transcription_model_service",
+    "security_classification_service",
+    "icon_repo",
+)
 
 
 @dataclass
@@ -77,6 +91,13 @@ def browsing_api(integration_access, monkeypatch, authenticated_integration_app)
         tenant_integration_repo=providers.Object(AsyncMock()),
         tenant_sharepoint_app_repo=providers.Object(case.app_repo),
         space_repo=providers.Object(space_repo),
+        space_service=providers.Factory(
+            SpaceService,
+            user=case.user,
+            repo=space_repo,
+            actor_manager=case.service.actor_manager,
+            **{name: MagicMock() for name in SPACE_SERVICE_COLLABORATORS},
+        ),
         oauth_token_repo=providers.Object(tokens),
         tenant_app_auth_service=providers.Object(app_tokens),
         service_account_auth_service=providers.Object(service_tokens),
@@ -180,7 +201,7 @@ async def test_tree_enforces_space_access(
     [
         ("viewer", 200),
         ("no_import_permission", 200),
-        ("nonmember", 404),
+        ("nonmember", 403),
         ("foreign_tenant", 404),
     ],
 )
