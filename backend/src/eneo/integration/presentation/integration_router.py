@@ -70,8 +70,8 @@ async def get_tenant_integrations(
     "/tenant/add/{integration_id}/",
     response_model=TenantIntegration,
     status_code=200,
-    description="Add an integration to the tenant.",
-    responses=responses.get_responses([400, 404]),
+    description="Add an integration to the tenant. Requires administrator permission.",
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def add_tenant_integration(
     integration_id: UUID,
@@ -108,8 +108,8 @@ async def add_tenant_integration(
 @router.delete(
     "/tenant/remove/{tenant_integration_id}/",
     status_code=204,
-    description="Remove an integration from the tenant.",
-    responses=responses.get_responses([404]),
+    description="Remove an integration from the tenant. Requires administrator permission.",
+    responses=responses.get_responses([403, 404]),
 )
 async def remove_tenant_integration(
     tenant_integration_id: UUID,
@@ -118,15 +118,9 @@ async def remove_tenant_integration(
     service = container.tenant_integration_service()
     user = container.user()
 
-    # Get tenant integration info BEFORE deletion (snapshot pattern)
-    # Use tenant_id filter to prevent cross-tenant deletion
-    tenant_integration_repo = container.tenant_integration_repo()
-    tenant_integration = await tenant_integration_repo.one(
-        id=tenant_integration_id, tenant_id=user.tenant_id
+    tenant_integration = await service.remove_tenant_integration(
+        tenant_integration_id=tenant_integration_id
     )
-
-    # Delete tenant integration
-    await service.remove_tenant_integration(tenant_integration_id=tenant_integration_id)
 
     # Audit logging
     audit_service = container.audit_service()
@@ -232,12 +226,9 @@ async def disconnect_user_integration(
     service = container.user_integration_service()
     user = container.user()
 
-    # Get user integration info BEFORE deletion (snapshot pattern)
-    user_integration_repo = container.user_integration_repo()
-    user_integration = await user_integration_repo.one(id=user_integration_id)
-
-    # Disconnect integration
-    await service.disconnect_integration(user_integration_id=user_integration_id)
+    user_integration = await service.disconnect_integration(
+        user_integration_id=user_integration_id
+    )
 
     # Audit logging
     audit_service = container.audit_service()
@@ -264,7 +255,7 @@ async def disconnect_user_integration(
     response_model=PaginatedSyncLogList,
     status_code=200,
     description="Get paginated sync history for an integration knowledge.",
-    responses=responses.get_responses([]),
+    responses=responses.get_responses([404]),
 )
 async def get_sync_logs(
     integration_knowledge_id: UUID,
@@ -275,16 +266,22 @@ async def get_sync_logs(
     ] = 10,
 ):
     """Get paginated sync history for an integration knowledge."""
+    service = container.integration_knowledge_service()
+    await service.require_sync_log_access(integration_knowledge_id)
     sync_log_repo = container.sync_log_repo()
+    tenant_id = container.user().tenant_id
 
     # Get total count
     total_count = await sync_log_repo.count_by_integration_knowledge(
-        integration_knowledge_id=integration_knowledge_id
+        integration_knowledge_id=integration_knowledge_id, tenant_id=tenant_id
     )
 
     # Get paginated logs
     sync_logs = await sync_log_repo.get_by_integration_knowledge(
-        integration_knowledge_id=integration_knowledge_id, limit=limit, offset=skip
+        integration_knowledge_id=integration_knowledge_id,
+        tenant_id=tenant_id,
+        limit=limit,
+        offset=skip,
     )
 
     # Convert domain entities to presentation models
@@ -313,7 +310,7 @@ async def get_sync_logs(
     response_model=IntegrationPreviewDataList,
     status_code=200,
     description="Get preview data for a user integration.",
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def get_integration_preview(
     user_integration_id: UUID,
@@ -334,11 +331,13 @@ async def get_integration_preview(
     response_model=SharePointTreeResponse,
     status_code=200,
     description="Get SharePoint/OneDrive folder tree for a user integration.",
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def get_sharepoint_folder_tree(
     user_integration_id: UUID,
-    space_id: Annotated[UUID, Query(description="Space ID (for auth routing)")],
+    space_id: Annotated[
+        UUID, Query(description="Space ID (requires integration import rights)")
+    ],
     container: Annotated[Container, Depends(get_container(with_user=True))],
     site_id: Annotated[
         Optional[str],
@@ -352,16 +351,18 @@ async def get_sharepoint_folder_tree(
     ] = None,
     folder_path: Annotated[str, Query(description="Current folder path")] = "",
 ):
-    """Get SharePoint/OneDrive folder tree with hybrid authentication support.
+    """Browse an authorized SharePoint/OneDrive connection in an importable space.
 
-    Authentication is determined by space type:
-    - Personal space: Uses user OAuth
-    - Shared/Org space with tenant app: Uses tenant app (no person-dependency)
-    - Shared/Org space without tenant app: Falls back to user OAuth
+    Uses the selected connection's identity after ownership, tenant and space
+    authorization. Organization connections additionally require admin permission.
 
     Provide site_id for SharePoint sites, or drive_id for OneDrive.
     """
-    from eneo.main.exceptions import BadRequestException, NotFoundException
+    from eneo.main.exceptions import (
+        BadRequestException,
+        NotFoundException,
+        UnauthorizedException,
+    )
     from eneo.main.logging import get_logger
 
     logger = get_logger(__name__)
@@ -385,7 +386,7 @@ async def get_sharepoint_folder_tree(
             folder_path=folder_path,
         )
         return SharePointTreeResponse(**tree_data)
-    except (NotFoundException, BadRequestException):
+    except (NotFoundException, BadRequestException, UnauthorizedException):
         # The service raises typed domain exceptions with the correct HTTP status;
         # let them propagate to the global handlers instead of remapping by string.
         raise
