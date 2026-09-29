@@ -26,14 +26,28 @@ class SyncLogRepoImpl(
     async def get_by_id(self, sync_log_id: UUID) -> SyncLog | None:
         return await self.one_or_none(id=sync_log_id)
 
+    def _owned_by(
+        self, integration_knowledge_id: UUID, tenant_id: UUID
+    ) -> sa.ColumnElement[bool]:
+        """Logs of one knowledge, only when that knowledge belongs to the tenant."""
+        return sa.and_(
+            self._db_model.integration_knowledge_id == integration_knowledge_id,
+            self._db_model.integration_knowledge.has(tenant_id=tenant_id),
+        )
+
     @override
     async def get_by_integration_knowledge(
-        self, integration_knowledge_id: UUID, limit: int = 50, offset: int = 0
+        self,
+        integration_knowledge_id: UUID,
+        *,
+        tenant_id: UUID,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[SyncLog]:
         """Get all sync logs for an integration, ordered by most recent first."""
         query = (
             select(self._db_model)
-            .where(self._db_model.integration_knowledge_id == integration_knowledge_id)
+            .where(self._owned_by(integration_knowledge_id, tenant_id))
             .order_by(self._db_model.created_at.desc())
             .limit(limit)
             .offset(offset)
@@ -44,22 +58,24 @@ class SyncLogRepoImpl(
 
     @override
     async def count_by_integration_knowledge(
-        self, integration_knowledge_id: UUID
+        self, integration_knowledge_id: UUID, *, tenant_id: UUID
     ) -> int:
         """Get the total count of sync logs for an integration."""
         query = (
             select(sa.func.count())
             .select_from(self._db_model)
-            .where(self._db_model.integration_knowledge_id == integration_knowledge_id)
+            .where(self._owned_by(integration_knowledge_id, tenant_id))
         )
         result = await self.session.scalar(query)
         return result or 0
 
     @override
     async def get_recent_by_integration_knowledge(
-        self, integration_knowledge_id: UUID, limit: int = 10
+        self, integration_knowledge_id: UUID, *, tenant_id: UUID, limit: int = 10
     ) -> list[SyncLog]:
         """Get the most recent sync logs for an integration."""
         return await self.get_by_integration_knowledge(
-            integration_knowledge_id=integration_knowledge_id, limit=limit
+            integration_knowledge_id=integration_knowledge_id,
+            tenant_id=tenant_id,
+            limit=limit,
         )

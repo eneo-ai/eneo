@@ -269,15 +269,19 @@ async def get_sync_logs(
     service = container.integration_knowledge_service()
     await service.require_sync_log_access(integration_knowledge_id)
     sync_log_repo = container.sync_log_repo()
+    tenant_id = container.user().tenant_id
 
     # Get total count
     total_count = await sync_log_repo.count_by_integration_knowledge(
-        integration_knowledge_id=integration_knowledge_id
+        integration_knowledge_id=integration_knowledge_id, tenant_id=tenant_id
     )
 
     # Get paginated logs
     sync_logs = await sync_log_repo.get_by_integration_knowledge(
-        integration_knowledge_id=integration_knowledge_id, limit=limit, offset=skip
+        integration_knowledge_id=integration_knowledge_id,
+        tenant_id=tenant_id,
+        limit=limit,
+        offset=skip,
     )
 
     # Convert domain entities to presentation models
