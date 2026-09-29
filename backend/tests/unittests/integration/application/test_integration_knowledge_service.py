@@ -874,8 +874,9 @@ class TestCreateSpaceIntegrationKnowledge:
         return space
 
     @pytest.fixture
-    def user_integration_user_oauth(self):
-        """Create a mock user_oauth integration."""
+    def user_integration_user_oauth(self, space_with_embedding_model):
+        """Create a mock user_oauth integration, used from a personal space."""
+        space_with_embedding_model.is_personal.return_value = True
         user_integration = MagicMock()
         user_integration.user_id = TEST_USER.id
         user_integration.tenant_integration.tenant_id = TEST_USER.tenant_id

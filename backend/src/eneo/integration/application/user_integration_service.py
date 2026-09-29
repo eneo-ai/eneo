@@ -112,6 +112,10 @@ class UserIntegrationService:
         if integration.auth_type == "user_oauth":
             if integration.user_id != self.user.id:
                 raise NotFoundException("Integration not found")
+            if space is not None and not space.is_personal():
+                raise BadRequestException(
+                    "Personal connections can only be used in your personal space"
+                )
         elif integration.auth_type == "tenant_app":
             if Permission.ADMIN not in self.user.permissions:
                 raise UnauthorizedException(

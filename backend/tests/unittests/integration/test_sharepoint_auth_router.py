@@ -8,6 +8,7 @@ import pytest
 from eneo.integration.application.sharepoint_auth_router import SharePointAuthRouter
 from eneo.integration.domain.entities.oauth_token import SharePointToken
 from eneo.integration.domain.value_objects import IntegrationType
+from eneo.main.exceptions import BadRequestException
 from eneo.spaces.api.space_models import SpaceMember, SpaceRoleValue
 
 
@@ -36,17 +37,10 @@ def token_router(integration_access):
     )
 
 
-@pytest.mark.parametrize("shared", [False, True])
 async def test_oauth_selection_never_switches_to_organization_credentials(
-    integration_access, token_router, shared
+    integration_access, token_router
 ):
     case = integration_access
-    if shared:
-        case.space.user_id = None
-        case.space.tenant_space_id = uuid4()
-        case.space.members[case.user.id] = SpaceMember(
-            id=case.user.id, email=case.user.email, role=SpaceRoleValue.EDITOR
-        )
     connection = await case.service.get_authorized_integration(
         case.integration.id, space=case.space
     )
@@ -55,6 +49,23 @@ async def test_oauth_selection_never_switches_to_organization_credentials(
     assert token.user_integration.id == case.integration.id
     token_router.tenant_app_auth_service.get_access_token.assert_not_awaited()
     token_router.tenant_app_service.get_active_app_for_tenant.assert_not_awaited()
+
+
+async def test_oauth_selection_in_shared_space_acquires_no_credentials(
+    integration_access, token_router
+):
+    case = integration_access
+    case.space.user_id = None
+    case.space.tenant_space_id = uuid4()
+    case.space.members[case.user.id] = SpaceMember(
+        id=case.user.id, email=case.user.email, role=SpaceRoleValue.EDITOR
+    )
+    with pytest.raises(BadRequestException):
+        await case.service.get_authorized_integration(
+            case.integration.id, space=case.space
+        )
+    token_router.oauth_token_service.get_oauth_token_by_user_integration.assert_not_awaited()
+    token_router.tenant_app_auth_service.get_access_token.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
