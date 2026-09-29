@@ -1,11 +1,13 @@
 "use client";
 
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { Button as AstryxButton } from "@astryxdesign/core/Button";
+import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo } from "react";
 import { PageHeader } from "@/components/composites/page-header";
+import { EmptyState } from "@/components/composites/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -19,6 +21,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
+import { EneoApiError, getErrorMessage } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
 import { adminModelsQueryOptions } from "@/features/admin/models/models";
 import {
@@ -42,9 +45,43 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
+function UsageLoadError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  const t = useTranslations();
+  const apiError = error instanceof EneoApiError ? error : null;
+  const reference = apiError?.errorId
+    ? { label: t("error_id"), value: apiError.errorId }
+    : apiError?.traceId
+      ? { label: t("trace_id"), value: apiError.traceId }
+      : null;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <EmptyState
+        title={t("something_went_wrong")}
+        description={
+          apiError?.status === 500 && apiError.code === undefined
+            ? t("error_occurred")
+            : getErrorMessage(error, t)
+        }
+        actions={<AstryxButton label={t("retry")} onClick={onRetry} />}
+      />
+      {reference && (
+        <p className="text-ax-text-secondary text-center font-mono text-xs">
+          {reference.label}: {reference.value}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function TokensTab() {
   const t = useTranslations();
-  const { data } = useSuspenseQuery(tokenUsageQueryOptions(browserApi));
+  const usage = useQuery(tokenUsageQueryOptions(browserApi));
+
+  if (usage.isPending) return <Skeleton className="h-64 w-full" />;
+  if (usage.isError)
+    return <UsageLoadError error={usage.error} onRetry={() => void usage.refetch()} />;
+  const data = usage.data;
 
   return (
     <div className="flex flex-col gap-6">
@@ -67,7 +104,7 @@ function TokensTab() {
           </TableHeader>
           <TableBody>
             {data.models.map((model) => (
-              <TableRow key={`${model.model_org}-${model.model_name}`}>
+              <TableRow key={model.model_id}>
                 <TableCell className="font-medium">{model.model_nickname}</TableCell>
                 <TableCell className="text-right tabular-nums">
                   {NUMBER.format(model.input_token_usage)}
@@ -90,17 +127,32 @@ function TokensTab() {
 function StorageTab() {
   const t = useTranslations();
   const locale = useLocale();
-  const { data: storage } = useSuspenseQuery(storageQueryOptions(browserApi));
-  const { data: spaces } = useSuspenseQuery(storageSpacesQueryOptions(browserApi));
+  const storage = useQuery(storageQueryOptions(browserApi));
+  const spaces = useQuery(storageSpacesQueryOptions(browserApi));
+
+  if (storage.isPending || spaces.isPending) return <Skeleton className="h-64 w-full" />;
+  if (storage.isError || spaces.isError) {
+    return (
+      <UsageLoadError
+        error={storage.error ?? spaces.error}
+        onRetry={() => {
+          if (storage.isError) void storage.refetch();
+          if (spaces.isError) void spaces.refetch();
+        }}
+      />
+    );
+  }
+  const storageData = storage.data;
+  const spacesData = spaces.data;
 
   return (
     <div className="flex flex-col gap-6">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Stat label={t("storage_used")} value={formatBytes(storage.total_used, locale)} />
-        <Stat label={t("personal")} value={formatBytes(storage.personal_used, locale)} />
-        <Stat label={t("shared")} value={formatBytes(storage.shared_used, locale)} />
+        <Stat label={t("storage_used")} value={formatBytes(storageData.total_used, locale)} />
+        <Stat label={t("personal")} value={formatBytes(storageData.personal_used, locale)} />
+        <Stat label={t("shared")} value={formatBytes(storageData.shared_used, locale)} />
       </div>
-      {spaces.items.length === 0 ? (
+      {spacesData.items.length === 0 ? (
         <p className="text-muted-foreground text-sm">{t("no_usage_data")}</p>
       ) : (
         <Table aria-label={t("storage")}>
@@ -111,8 +163,8 @@ function StorageTab() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {spaces.items.map((space) => (
-              <TableRow key={space.name}>
+            {spacesData.items.map((space) => (
+              <TableRow key={space.id}>
                 <TableCell className="font-medium">{space.name}</TableCell>
                 <TableCell className="text-right tabular-nums">
                   {formatBytes(space.size, locale)}
@@ -128,11 +180,14 @@ function StorageTab() {
 
 function UsersTab() {
   const t = useTranslations();
-  const { data, isPending } = useQuery(userTokenUsageQueryOptions(browserApi));
+  const usage = useQuery(userTokenUsageQueryOptions(browserApi));
   const { data: models } = useQuery(adminModelsQueryOptions(browserApi));
   const rates = useMemo(() => buildRateMap(models?.completion_models ?? []), [models]);
 
-  if (isPending || !data) return <Skeleton className="h-64 w-full" />;
+  if (usage.isPending) return <Skeleton className="h-64 w-full" />;
+  if (usage.isError)
+    return <UsageLoadError error={usage.error} onRetry={() => void usage.refetch()} />;
+  const data = usage.data;
 
   return (
     <div className="flex flex-col gap-6">

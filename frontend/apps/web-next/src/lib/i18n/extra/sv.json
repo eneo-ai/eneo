@@ -186,6 +186,7 @@
   "extracted_text": "Extraherad text",
   "no_extracted_text": "Ingen extraherad text tillgänglig",
   "trace_id": "Spårnings-ID",
+  "error_id": "Fel-ID",
   "try_again": "Försök igen",
   "back_to_home": "Tillbaka till start",
   "test": "Testa",

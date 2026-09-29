@@ -2,7 +2,7 @@
  * Normalized error handling for backend API calls. Every failed request — on
  * the server (eneoApi) or in the browser (browserApi) — is surfaced as an
  * EneoApiError carrying the HTTP status, the backend error code, a readable
- * message and the trace id of the failing request.
+ * message and the backend's correlation ids for the failing request.
  */
 
 /** A FastAPI validation error entry (422 responses). */
@@ -21,12 +21,21 @@ export class EneoApiError extends Error {
   readonly reason?: string;
   /** Trace id of the failing request, for correlation with backend logs. */
   readonly traceId?: string;
+  /** Backend error id for unexpected failures, for correlation with backend logs. */
+  readonly errorId?: string;
   /** Structured error payload (`details` on GeneralError), when present. */
   readonly details?: unknown;
 
   constructor(
     message: string,
-    options: { status: number; code?: number; reason?: string; traceId?: string; details?: unknown }
+    options: {
+      status: number;
+      code?: number;
+      reason?: string;
+      traceId?: string;
+      errorId?: string;
+      details?: unknown;
+    }
   ) {
     super(message);
     this.name = "EneoApiError";
@@ -34,6 +43,7 @@ export class EneoApiError extends Error {
     this.code = options.code;
     this.reason = options.reason;
     this.traceId = options.traceId;
+    this.errorId = options.errorId;
     this.details = options.details;
   }
 }
@@ -52,11 +62,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  *  1. GeneralError: `{ message, eneo_error_code, details?, ... }`
  *  2. HTTPException: `{ detail: string }` or `{ detail: { message?, code? } }`
  *  3. FastAPI validation (422): `{ detail: [{ loc, msg, type }, ...] }`
+ *  4. Unexpected failure (500): `{ message, error_id, ... }`
  */
 function parseErrorBody(body: unknown): {
   message?: string;
   code?: number;
   reason?: string;
+  errorId?: string;
   details?: unknown;
 } {
   if (!isRecord(body)) return {};
@@ -66,6 +78,7 @@ function parseErrorBody(body: unknown): {
       message: body.message,
       code: typeof body.eneo_error_code === "number" ? body.eneo_error_code : undefined,
       reason: typeof body.code === "string" ? body.code : undefined,
+      errorId: typeof body.error_id === "string" ? body.error_id : undefined,
       details: body.details ?? undefined
     };
   }
@@ -101,12 +114,13 @@ export async function errorCodeFromResponse(response: Response): Promise<number 
 }
 
 export function apiErrorFromResponse(response: Response, body: unknown): EneoApiError {
-  const { message, code, reason, details } = parseErrorBody(body);
+  const { message, code, reason, errorId, details } = parseErrorBody(body);
   return new EneoApiError(message ?? `Request failed with status ${response.status}`, {
     status: response.status,
     code,
     reason,
     traceId: extractTraceId(response.headers),
+    errorId,
     details
   });
 }

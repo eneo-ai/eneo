@@ -4395,6 +4395,7 @@
   "extracted_text": "Extracted text",
   "no_extracted_text": "No extracted text available",
   "trace_id": "Trace ID",
+  "error_id": "Error ID",
   "try_again": "Try again",
   "back_to_home": "Back to home",
   "test": "Test",

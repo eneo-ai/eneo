@@ -32,6 +32,17 @@ describe("apiErrorFromResponse", () => {
     expect(error.details).toEqual({ quota: 100 });
   });
 
+  it("keeps the backend error id on unexpected failures", () => {
+    const error = apiErrorFromResponse(errorResponse(500, { "x-trace-id": "trace-123" }), {
+      error: "Internal server error",
+      error_id: "8bc91e0a",
+      message: "An unexpected error occurred."
+    });
+
+    expect(error.errorId).toBe("8bc91e0a");
+    expect(error.traceId).toBe("trace-123");
+  });
+
   it("parses a string detail", () => {
     const error = apiErrorFromResponse(errorResponse(404), { detail: "Space not found" });
 
