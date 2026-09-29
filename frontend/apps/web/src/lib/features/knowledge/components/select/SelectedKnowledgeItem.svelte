@@ -11,6 +11,8 @@
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getEneo } from "$lib/core/Eneo";
+  import { PAGINATION } from "$lib/core/constants";
+  import { toastError } from "$lib/core/errors";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName";
   import KnowledgeBlobList from "./KnowledgeBlobList.svelte";
 
@@ -46,21 +48,51 @@
   let expanded = $state(false);
   let blobs = $state<InfoBlob[] | undefined>(undefined);
   let loading = $state(false);
+  let loadingMore = $state(false);
   let loaded = false;
+  let nextCursor = $state<string | null>(null);
+  let totalBlobCount = $state<number | undefined>(undefined);
 
   async function ensureBlobs() {
     if (loaded || loading) return;
     loading = true;
     try {
-      blobs =
-        kind === "collection"
-          ? await eneo.groups.listInfoBlobs(collection)
-          : await eneo.websites.indexedBlobs.list(website);
+      if (kind === "collection") {
+        blobs = await eneo.groups.listInfoBlobs(collection);
+      } else {
+        const page = await eneo.websites.indexedBlobs.listPage({
+          id: website.id,
+          limit: PAGINATION.PAGE_SIZE
+        });
+        blobs = page.items;
+        nextCursor = page.next_cursor ?? null;
+        totalBlobCount = page.total_count;
+      }
       loaded = true;
     } catch (error) {
       console.error(`Failed to fetch blobs for ${kind} ${item.id}:`, error);
     } finally {
       loading = false;
+    }
+  }
+
+  async function loadMoreBlobs() {
+    if (kind !== "website" || nextCursor === null || loadingMore) return;
+
+    loadingMore = true;
+    try {
+      const page = await eneo.websites.indexedBlobs.listPage({
+        id: website.id,
+        limit: PAGINATION.PAGE_SIZE,
+        cursor: nextCursor
+      });
+      blobs = [...(blobs ?? []), ...page.items];
+      nextCursor = page.next_cursor ?? null;
+      totalBlobCount = page.total_count;
+    } catch (error) {
+      toastError(error, m.website_indexed_content_load_more_failed());
+    } finally {
+      loadingMore = false;
     }
   }
 
@@ -141,6 +173,14 @@
   </div>
 
   <Collapsible.Content>
-    <KnowledgeBlobList {blobs} {loading} {emptyMessage} />
+    <KnowledgeBlobList
+      {blobs}
+      {loading}
+      {loadingMore}
+      hasMore={kind === "website" && nextCursor !== null}
+      totalCount={totalBlobCount}
+      onLoadMore={loadMoreBlobs}
+      {emptyMessage}
+    />
   </Collapsible.Content>
 </Collapsible.Root>

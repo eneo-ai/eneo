@@ -6,6 +6,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Body, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.admin import admin_crawler_router
 from eneo.admin.admin_models import (
     AdminApiKeysQueryParams,
     AdminApiKeyUsageQueryParams,
@@ -78,6 +79,7 @@ router = APIRouter()
 _ORGANIZATION_ADMIN_ACCESS_REASON = (
     "Organization administration requires the admin permission."
 )
+router.include_router(admin_crawler_router.router, prefix="/crawler", tags=["admin"])
 AdminContainer = Annotated[Container, Depends(get_container(with_user=True))]
 AdminApiKeyMutationContainer = Annotated[
     Container,

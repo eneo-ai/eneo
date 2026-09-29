@@ -1,20 +1,13 @@
 """The crawler never connects to loopback, link-local, unspecified, multicast or
 IPv4-in-IPv6 transition addresses. Private (intranet) ranges are allowed by
 default and refused only when the operator blocks them. Enforced in the
-reactor name resolver so it covers every connection the crawler makes."""
+crawler's name resolver so it covers every connection the crawler makes."""
 
 import ipaddress
 
 import pytest
-from twisted.internet.address import IPv4Address, IPv6Address
-from twisted.internet.interfaces import IHostnameResolver, IResolutionReceiver
-from zope.interface import implementer
 
-from eneo.crawler.destination_policy import (
-    DestinationPolicy,
-    GuardedNameResolver,
-    install_destination_guard,
-)
+from eneo.crawler.destination_policy import DestinationPolicy
 
 PUBLIC = ["8.8.8.8", "93.184.216.34", "2606:4700::1", "2a00:1450:400f:80d::200e"]
 PRIVATE = [
@@ -72,110 +65,20 @@ def test_public_stays_allowed_when_private_is_blocked(ip: str):
     assert policy.allows(ipaddress.ip_address(ip)) is True
 
 
-# --- resolver ---------------------------------------------------------------
+@pytest.mark.parametrize("block_private_networks", [False, True])
+def test_worker_crawl_engine_applies_the_operator_setting(
+    monkeypatch: pytest.MonkeyPatch, block_private_networks: bool
+):
+    from eneo.main.config import get_settings
+    from eneo.main.container import container
 
+    settings = get_settings().model_copy(
+        update={"crawler_block_private_networks": block_private_networks}
+    )
+    monkeypatch.setattr(container, "get_settings", lambda: settings)
 
-@implementer(IHostnameResolver)
-class _FakeInner:
-    def __init__(self, hosts: list[str]) -> None:
-        self.hosts = hosts
+    policy = container._build_crawl_engine()._destination_policy
 
-    def resolveHostName(
-        self,
-        receiver,
-        hostName,
-        portNumber=0,
-        addressTypes=None,
-        transportSemantics="TCP",
-    ):
-        receiver.resolutionBegan(None)
-        for host in self.hosts:
-            addr = (
-                IPv6Address("TCP", host, portNumber)
-                if ":" in host
-                else IPv4Address("TCP", host, portNumber)
-            )
-            receiver.addressResolved(addr)
-        receiver.resolutionComplete()
-
-
-@implementer(IResolutionReceiver)
-class _Collect:
-    def __init__(self) -> None:
-        self.hosts: list[str] = []
-        self.complete = False
-
-    def resolutionBegan(self, resolution):
-        pass
-
-    def addressResolved(self, address):
-        self.hosts.append(address.host)
-
-    def resolutionComplete(self):
-        self.complete = True
-
-
-def _resolve(answer: list[str], policy: DestinationPolicy | None = None) -> _Collect:
-    out = _Collect()
-    GuardedNameResolver(
-        _FakeInner(answer), policy or DestinationPolicy()
-    ).resolveHostName(out, "host.example", 80)
-    assert out.complete
-    return out
-
-
-def test_allowed_answer_is_released():
-    assert _resolve(["8.8.8.8", "10.0.0.5"]).hosts == ["8.8.8.8", "10.0.0.5"]
-
-
-def test_mixed_answer_releases_nothing():
-    # One denied address poisons the whole answer (DNS rebinding / split answers).
-    assert _resolve(["8.8.8.8", "127.0.0.1"]).hosts == []
-
-
-def test_refusal_is_recorded_on_the_guard():
-    out = _Collect()
-    guard = GuardedNameResolver(_FakeInner(["127.0.0.1"]), DestinationPolicy())
-    guard.resolveHostName(out, "host.example", 80)
-    assert out.hosts == []
-    assert guard.refused_addresses("host.example") == ["127.0.0.1"]
-    assert guard.refused_addresses("other.example") is None
-
-
-def test_loopback_answer_releases_nothing():
-    assert _resolve(["127.0.0.1"]).hosts == []
-
-
-def test_empty_answer_stays_empty():
-    assert _resolve([]).hosts == []
-
-
-def test_blocked_private_applies_in_resolver():
-    policy = DestinationPolicy(block_private_networks=True)
-    assert _resolve(["10.20.0.5"], policy).hosts == []
-    assert _resolve(["8.8.8.8"], policy).hosts == ["8.8.8.8"]
-
-
-class _FakeReactor:
-    def __init__(self) -> None:
-        self.nameResolver = _FakeInner([])
-        self.installs = 0
-
-    def installNameResolver(self, resolver):
-        self.nameResolver = resolver
-        self.installs += 1
-
-
-def test_guard_installs_once_and_swaps_policy():
-    reactor = _FakeReactor()
-    first = DestinationPolicy()
-    second = DestinationPolicy(block_private_networks=True)
-
-    install_destination_guard(reactor, first)
-    install_destination_guard(reactor, second)
-
-    assert reactor.installs == 1
-    guard = reactor.nameResolver
-    assert isinstance(guard, GuardedNameResolver)
-    assert guard.policy is second
-    assert not isinstance(guard._inner, GuardedNameResolver)
+    assert policy is not None
+    assert policy.allows(ipaddress.ip_address("10.0.0.1")) is not block_private_networks
+    assert policy.allows(ipaddress.ip_address("127.0.0.1")) is False

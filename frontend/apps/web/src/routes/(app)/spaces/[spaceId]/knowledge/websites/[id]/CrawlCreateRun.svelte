@@ -2,76 +2,85 @@
   import { invalidate } from "$app/navigation";
   import { getEneo } from "$lib/core/Eneo";
   import { IconRefresh } from "@eneo/icons/refresh";
-  import type { Website } from "@eneo/eneo-js";
-  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
-  import * as Dialog from "$lib/components/ui/dialog/index.js";
-  import { dialogLayout } from "$lib/components/dialogLayout.js";
-  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
+  import { IconStop } from "@eneo/icons/stop";
+  import type { CrawlRun, Website } from "@eneo/eneo-js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { toastError } from "$lib/core/errors";
+  import { toast } from "$lib/components/toast";
 
   export let website: Website;
-  export let isDisabled = false;
+  export let activeRun: CrawlRun | undefined;
+  export let hasHistory = false;
 
   const eneo = getEneo();
 
-  let isProcessing = false;
-  let showDialog = false;
+  let isStarting = false;
+  let isStopping = false;
+  export let startDialogOpen = false;
+  let stopDialogOpen = false;
+
+  $: isStopRequested = activeRun?.phase === "stopping" || isStopping;
+  $: websiteName = website.name ? `${website.name} (${website.url})` : website.url;
 
   async function createRun() {
-    isProcessing = true;
+    isStarting = true;
     try {
-      eneo.websites.crawlRuns.create(website).then(() => {
-        isProcessing = false;
-        invalidate("crawlruns:list");
-      });
-      showDialog = false;
-    } catch (error) {
-      console.error(error);
-      toastError(error, m.error_creating_crawl_run());
+      await eneo.websites.crawlRuns.create(website);
+      await invalidate("crawlruns:list");
+    } finally {
+      isStarting = false;
+    }
+  }
+
+  async function stopRun() {
+    if (!activeRun) return;
+
+    isStopping = true;
+    try {
+      await eneo.websites.crawlRuns.cancel(activeRun);
+      toast.success(m.crawl_stopped());
+      await invalidate("crawlruns:list");
+    } finally {
+      isStopping = false;
     }
   }
 </script>
 
-<Dialog.Root bind:open={showDialog}>
-  {#if isDisabled}
-    <Tooltip.Root>
-      <Tooltip.Trigger>
-        {#snippet child({ props })}
-          <span {...props} class="block">
-            <Button disabled>
-              <IconRefresh></IconRefresh>
-              {m.sync_now()}</Button
-            >
-          </span>
-        {/snippet}
-      </Tooltip.Trigger>
-      <Tooltip.Content>{m.cant_sync_while_crawl_running()}</Tooltip.Content>
-    </Tooltip.Root>
-  {:else}
-    <Dialog.Trigger>
-      {#snippet child({ props })}
-        <Button {...props}>
-          <IconRefresh></IconRefresh>
-          {m.sync_now()}</Button
-        >
-      {/snippet}
-    </Dialog.Trigger>
-  {/if}
-  <Dialog.Content class={dialogLayout.content()} closeLabel={m.close()}>
-    <Dialog.Header class={dialogLayout.header}>
-      <Dialog.Title>{m.sync_website()}</Dialog.Title>
-      <Dialog.Description>
-        {m.confirm_sync_website({
-          websiteName: website.name ? `${website.name} (${website.url})` : website.url
-        })}
-      </Dialog.Description>
-    </Dialog.Header>
-    <Dialog.Footer class={dialogLayout.footer}>
-      <Dialog.Close class={buttonVariants({ variant: "outline" })}>{m.cancel()}</Dialog.Close>
-      <Button onclick={createRun} disabled={isProcessing}
-        >{isProcessing ? m.starting() : m.start_crawl()}</Button
-      >
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>
+{#if activeRun}
+  <Button
+    variant="destructive"
+    disabled={isStopRequested}
+    aria-busy={isStopping}
+    onclick={() => (stopDialogOpen = true)}
+  >
+    <IconStop />
+    {isStopRequested ? m.stopping_crawl() : m.stop_crawl()}
+  </Button>
+{:else}
+  <Button disabled={isStarting} aria-busy={isStarting} onclick={() => (startDialogOpen = true)}>
+    <IconRefresh />
+    {isStarting ? m.starting() : hasHistory ? m.run_crawl_again() : m.sync_now()}
+  </Button>
+{/if}
+
+<ConfirmDialog
+  bind:open={startDialogOpen}
+  title={m.sync_website()}
+  description={m.confirm_sync_website({ websiteName })}
+  confirmLabel={m.start_crawl()}
+  pendingLabel={m.starting()}
+  variant="default"
+  errorContext={m.error_creating_crawl_run()}
+  onConfirm={createRun}
+/>
+
+<ConfirmDialog
+  bind:open={stopDialogOpen}
+  title={m.stop_crawl_title()}
+  description={m.stop_crawl_description({ websiteName })}
+  confirmLabel={m.stop_crawl()}
+  pendingLabel={m.stopping_crawl()}
+  errorContext={m.stop_crawl_failed()}
+  onConfirm={stopRun}
+/>

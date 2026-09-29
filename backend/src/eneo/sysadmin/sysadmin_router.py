@@ -1634,7 +1634,7 @@ async def create_embedding_model(
     "/embedding-models/{id}/metadata",
     response_model=EmbeddingModelSparse,
     description="Update global embedding model metadata (system-wide operation).",
-    responses=responses.get_responses([401, 404, 409]),
+    responses=responses.get_responses([400, 401, 404, 409]),
 )
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
