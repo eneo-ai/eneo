@@ -15,8 +15,18 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     missing_structured_output_path,
 )
+from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
+    reads_run_text,
+    rebind_run_text_read_to_field,
+)
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     MAX_COMPILED_STRUCTURED_FIELD_DEPTH,
+)
+from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
+    declared_main_text_field,
+    elect_main_text_field,
+    free_main_text_name,
+    main_text_beside_fields_detail,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     MAX_DIAGNOSTIC_NAME_LENGTH,
@@ -100,8 +110,14 @@ def apply_template_attachment_contract(
     existing_bindings: Mapping[str, str] | None = None,
     inherited_template_asset_id: UUID | None = None,
     drop_unused_predecessor: bool = True,
+    can_declare_main_text: bool = False,
+    ui_language: str | None = None,
 ) -> FlowDraftSpecCore:
     """Compile one selected DOCX's exact runtime contract before approval.
+
+    `can_declare_main_text` is create's: when the template adds run fields to a
+    text flow, the compiler declares the main-text field and rebinds the step
+    that read the run text to it; an edit refuses instead.
 
     `existing_bindings` are the mappings the edited flow's template step
     already carries: a placeholder among them keeps its mapping when it still
@@ -274,6 +290,32 @@ def apply_template_attachment_contract(
         *preparation_steps,
         terminal_step.model_copy(update=terminal_update),
     ]
+    if form_fields and not spec.form_fields and any(reads_run_text(s) for s in steps):
+        # The template asks the person for run fields, so the run dialog no
+        # longer shows the text box a step reads its main text from.
+        declared = [(field.name, field.type) for field in form_fields]
+        # The election the create compile makes: a text field the template
+        # already asks for on a main-text name is the main text; else one is
+        # declared on the first free name.
+        main_text_name = elect_main_text_field(declared)
+        if main_text_name is None and can_declare_main_text:
+            main_text_name = free_main_text_name(name for name, _ in declared)
+            if main_text_name is not None:
+                form_fields.insert(
+                    0,
+                    declared_main_text_field(
+                        name=main_text_name, ui_language=ui_language
+                    ),
+                )
+        if main_text_name is None or not can_declare_main_text:
+            raise _architecture_error(
+                failure_code="main_text_beside_form_fields",
+                repair_disposition="model_correctable",
+                detail=main_text_beside_fields_detail(
+                    can_declare_fields=False, fields=declared
+                ),
+            )
+        steps = [rebind_run_text_read_to_field(step, main_text_name) for step in steps]
     return spec.model_copy(update={"steps": steps, "form_fields": form_fields})
 
 

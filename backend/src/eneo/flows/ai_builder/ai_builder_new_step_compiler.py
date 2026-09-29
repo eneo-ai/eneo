@@ -37,7 +37,12 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
-from eneo.flows.flow_variable_definitions import form_field_reference_expression
+from eneo.flows.flow_variable_definitions import (
+    FLOW_INPUT_TEXT_ALIAS,
+    FlowRunInput,
+    form_field_reference_expression,
+    unreceived_flow_input_aliases,
+)
 from eneo.flows.input_binding_contract_rules import (
     InputBindingContractError,
     SourceRefBinding,
@@ -98,6 +103,7 @@ def compile_new_step_draft(
     step_draft: NewStepDraft,
     plan_step_ref: str,
     prior_steps: list[StepSpec],
+    run_input: FlowRunInput,
     source_capture_fields: tuple[SourceCaptureField, ...] = (),
     assistant_output_fields: list[StructuredFieldDraft] | None = None,
     ui_language: str | None = None,
@@ -124,6 +130,7 @@ def compile_new_step_draft(
     input_bindings = compile_input_bindings(
         binding_draft,
         prior_steps,
+        run_input=run_input,
         require_declared_previous_fields=require_declared_previous_fields,
     )
     effective_input_type = effective_input_type_for_bindings(
@@ -311,6 +318,7 @@ def compile_input_bindings(
     step_draft: NewStepDraft,
     prior_steps: list[StepSpec],
     *,
+    run_input: FlowRunInput,
     require_declared_previous_fields: bool = False,
 ) -> dict[str, Any] | None:
     """Compile explicit "Underlag till text" only when implicit input is insufficient.
@@ -328,6 +336,7 @@ def compile_input_bindings(
         uses_previous_fields=step_draft.uses_previous_fields,
         uses_previous_outputs=step_draft.uses_previous_outputs,
         prior_steps=prior_steps,
+        run_input=run_input,
         require_declared_previous_fields=require_declared_previous_fields,
     )
 
@@ -340,9 +349,14 @@ def compile_step_input_bindings(
     uses_previous_fields: list[PreviousFieldRef],
     uses_previous_outputs: list[PreviousOutputRef],
     prior_steps: list[StepSpec],
+    run_input: FlowRunInput,
     require_declared_previous_fields: bool = False,
 ) -> dict[str, Any] | None:
-    """Compile explicit "Underlag till text" for a step in plan-ref order."""
+    """Compile explicit "Underlag till text" for a step in plan-ref order.
+
+    ``run_input`` is what the flow's run form collects: a step reads the run's
+    text only when the run supplies it, else it reads the form fields it names
+    (or, naming none, the whole run input the runtime hands it)."""
     _require_resolvable_previous_refs(
         uses_previous_fields,
         ref_kind="uses_previous_fields",
@@ -382,6 +396,7 @@ def compile_step_input_bindings(
             input_source=input_source,
             input_type=input_type,
             prior_steps=prior_steps,
+            run_input=run_input,
         )
     )
     previous_field_refs = _compile_previous_field_source_refs(
@@ -749,11 +764,39 @@ def _structured_projection_error(detail: str) -> AIBuilderArchitectureError:
     )
 
 
+_RUN_TEXT_READ = "{{ " + FLOW_INPUT_TEXT_ALIAS + " }}"
+
+
+def reads_run_text(step: StepSpec) -> bool:
+    """Whether the step's input starts with the compiler's read of the run text."""
+
+    question = question_binding(step.input_bindings)
+    return question is not None and question.startswith(_RUN_TEXT_READ)
+
+
+def rebind_run_text_read_to_field(step: StepSpec, field_name: str) -> StepSpec:
+    """The step reading its main text from a form field, where the compiler had
+    it read the run text: the run has form fields now, so no text box."""
+
+    question = question_binding(step.input_bindings)
+    if step.input_bindings is None or question is None:
+        return step
+    if not question.startswith(_RUN_TEXT_READ):
+        return step
+    field_read = f"{field_name}: {form_field_reference_expression(field_name)}"
+    bindings = {
+        **step.input_bindings,
+        "question": field_read + question.removeprefix(_RUN_TEXT_READ),
+    }
+    return step.model_copy(update={"input_bindings": bindings})
+
+
 def _resolve_source_reference(
     *,
     input_source: InputSource,
     input_type: InputType,
     prior_steps: list[StepSpec],
+    run_input: FlowRunInput,
 ) -> str | None:
     input_source_value = input_source.value
     input_type_value = input_type.value
@@ -763,7 +806,9 @@ def _resolve_source_reference(
             return "{{ indata_json }}"
         if input_type_value in {"document", "file", "audio"}:
             return "{{ step_input.text }}"
-        return "{{ indata_text }}"
+        if FLOW_INPUT_TEXT_ALIAS in unreceived_flow_input_aliases(run_input):
+            return None
+        return _RUN_TEXT_READ
 
     if input_source_value == "previous_step":
         if not prior_steps:

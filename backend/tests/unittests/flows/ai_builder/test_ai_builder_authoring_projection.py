@@ -64,6 +64,7 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
+from eneo.flows.flow_variable_definitions import FlowRunInput
 from eneo.flows.input_binding_contract_rules import (
     lower_source_refs_to_question_binding,
 )
@@ -412,6 +413,45 @@ def test_edit_overlay_step_order_and_insertion() -> None:
     assert result.document_body_writer_step_refs == ("step_b",)
 
 
+@pytest.mark.parametrize(
+    ("form_fields", "question"),
+    [
+        pytest.param(
+            [FormFieldSpec(name="case_id", type="text", label="Case ID")],
+            "case_id: {{ flow_input.case_id }}",
+            id="form-run",
+        ),
+        pytest.param(
+            None,
+            "{{ indata_text }}\n\ncase_id: {{ flow_input.case_id }}",
+            id="free-text-run",
+        ),
+    ],
+)
+def test_edit_overlay_added_first_step_reads_the_run_text_only_when_the_run_takes_text(
+    form_fields: list[FormFieldSpec] | None, question: str
+) -> None:
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(
+            _step("step_a", "existing_step_1", "Remove"), form_fields=form_fields
+        ),
+        proposal=_edit_proposal(
+            steps=[
+                AddStep(
+                    step=_new_step(
+                        "Intake",
+                        input_source=InputSource.FLOW_INPUT,
+                        uses_form_fields=["case_id"],
+                    )
+                )
+            ],
+            removed_existing_step_refs=frozenset({"existing_step_1"}),
+        ),
+    )
+
+    assert _lowered_question(result.steps[0].input_bindings) == question
+
+
 def test_edit_overlay_add_first_step_derives_flow_input_when_omitted() -> None:
     result = compile_ordered_edit_proposal(
         base_spec=_base_spec(_step("step_a", "existing_step_1", "Remove")),
@@ -699,8 +739,48 @@ def test_edit_overlay_rejects_flow_input_json_with_previous_step_dependency() ->
     }
 
 
+@pytest.mark.parametrize(
+    ("run_input", "uses_form_fields", "expected"),
+    [
+        pytest.param(
+            FlowRunInput(), [], {"question": "{{ indata_text }}"}, id="free-text"
+        ),
+        pytest.param(
+            FlowRunInput(),
+            ["case_id"],
+            {"question": "{{ indata_text }}\n\ncase_id: {{ flow_input.case_id }}"},
+            id="free-text-with-a-field-read",
+        ),
+        pytest.param(FlowRunInput(form_fields=True), [], None, id="form-implicit"),
+        pytest.param(
+            FlowRunInput(form_fields=True),
+            ["case_id"],
+            {"question": "case_id: {{ flow_input.case_id }}"},
+            id="form-reads-its-fields",
+        ),
+    ],
+)
+def test_flow_input_text_step_reads_the_run_text_only_when_the_run_takes_text(
+    run_input: FlowRunInput,
+    uses_form_fields: list[str],
+    expected: dict[str, str] | None,
+) -> None:
+    bindings = compile_step_input_bindings(
+        run_input=run_input,
+        input_source=InputSource.FLOW_INPUT,
+        input_type=InputType.TEXT,
+        uses_form_fields=uses_form_fields,
+        uses_previous_fields=[],
+        uses_previous_outputs=[],
+        prior_steps=[],
+    )
+
+    assert bindings == expected
+
+
 def test_step_input_bindings_emit_source_refs_for_previous_output() -> None:
     bindings = compile_step_input_bindings(
+        run_input=FlowRunInput(),
         input_source=InputSource.PREVIOUS_STEP,
         input_type=InputType.TEXT,
         uses_form_fields=[],
@@ -719,6 +799,7 @@ def test_step_input_bindings_emit_source_refs_for_previous_output() -> None:
 
 def test_step_input_bindings_dedupe_source_refs_without_dropping_form_fields() -> None:
     bindings = compile_step_input_bindings(
+        run_input=FlowRunInput(),
         input_source=InputSource.PREVIOUS_STEP,
         input_type=InputType.TEXT,
         uses_form_fields=["case_id"],
@@ -740,6 +821,7 @@ def test_step_input_bindings_dedupe_source_refs_without_dropping_form_fields() -
 
 def test_step_input_bindings_emit_source_refs_for_implicit_structured_blob() -> None:
     bindings = compile_step_input_bindings(
+        run_input=FlowRunInput(),
         input_source=InputSource.PREVIOUS_STEP,
         input_type=InputType.TEXT,
         uses_form_fields=[],
@@ -757,6 +839,7 @@ def test_step_input_bindings_leave_flow_input_json_implicit(
     uses_form_fields: list[str],
 ) -> None:
     bindings = compile_step_input_bindings(
+        run_input=FlowRunInput(),
         input_source=InputSource.FLOW_INPUT,
         input_type=InputType.JSON,
         uses_form_fields=uses_form_fields,
@@ -770,6 +853,7 @@ def test_step_input_bindings_leave_flow_input_json_implicit(
 
 def test_step_input_bindings_keep_immediate_field_suppression() -> None:
     bindings = compile_step_input_bindings(
+        run_input=FlowRunInput(),
         input_source=InputSource.PREVIOUS_STEP,
         input_type=InputType.TEXT,
         uses_form_fields=[],
@@ -798,6 +882,7 @@ def test_step_input_bindings_keep_declared_fields_without_whole_object_expansion
     None
 ):
     bindings = compile_step_input_bindings(
+        run_input=FlowRunInput(),
         input_source=InputSource.PREVIOUS_STEP,
         input_type=InputType.TEXT,
         uses_form_fields=[],
@@ -861,6 +946,7 @@ def test_json_source_refs_compile_exact_projection_contract() -> None:
         )
     ]
     bindings = compile_step_input_bindings(
+        run_input=FlowRunInput(),
         input_source=InputSource.PREVIOUS_STEP,
         input_type=InputType.JSON,
         uses_form_fields=[],
@@ -1032,6 +1118,7 @@ def test_binding_input_type_recomputes_document_output_mode() -> None:
         },
     )
     compiled = compile_new_step_draft(
+        run_input=FlowRunInput(),
         step_draft=_new_step(
             "Render",
             input_type=InputType.JSON,
@@ -1055,6 +1142,7 @@ def test_binding_input_type_recomputes_document_output_mode() -> None:
 
 def test_step_input_bindings_keep_non_immediate_structured_source_ref() -> None:
     bindings = compile_step_input_bindings(
+        run_input=FlowRunInput(),
         input_source=InputSource.PREVIOUS_STEP,
         input_type=InputType.TEXT,
         uses_form_fields=[],
@@ -1084,6 +1172,7 @@ def test_step_input_bindings_keep_non_immediate_structured_source_ref() -> None:
 def test_step_input_bindings_reject_invalid_typed_source_ref() -> None:
     with pytest.raises(AIBuilderArchitectureError) as exc_info:
         compile_step_input_bindings(
+            run_input=FlowRunInput(),
             input_source=InputSource.PREVIOUS_STEP,
             input_type=InputType.TEXT,
             uses_form_fields=[],
@@ -1107,6 +1196,7 @@ def test_step_input_bindings_reject_invalid_typed_source_ref() -> None:
 def test_step_input_bindings_validate_source_refs_before_deduplication() -> None:
     with pytest.raises(AIBuilderArchitectureError) as exc_info:
         compile_step_input_bindings(
+            run_input=FlowRunInput(),
             input_source=InputSource.FLOW_INPUT,
             input_type=InputType.TEXT,
             uses_form_fields=[],

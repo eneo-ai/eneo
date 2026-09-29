@@ -68,8 +68,10 @@ from eneo.flows.flow_validators_template import (
     validate_template_fill_output_config,
 )
 from eneo.flows.flow_variable_definitions import (
+    FlowRunInput,
     VariableShape,
     flow_input_key_shape,
+    reads_unreceived_run_input,
     runtime_variable_shape,
 )
 from eneo.flows.input_binding_contract_rules import (
@@ -114,6 +116,7 @@ from eneo.flows.transcription_config import (
     parse_transcription_config,
 )
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES
+from eneo.flows.variable_resolver import iter_template_expressions
 from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 
 _STEP_REFERENCE_PATTERN = re.compile(r"^step_(\d+)$")
@@ -131,6 +134,9 @@ __all__ = [
     "FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED",
     "FLOW_AUDIO_TRANSCRIPTION_REQUIRED",
     "collect_step_graph_issues",
+    "flow_run_input",
+    "run_input_alias_refusal",
+    "takes_runtime_files",
     "validate_form_schema",
     "validate_step_graph",
     "validate_steps",
@@ -243,6 +249,10 @@ def collect_step_graph_issues(
         {field.name: field.type.value for field in form_schema.fields}
         if form_schema is not None
         else {}
+    )
+    run_input = flow_run_input(
+        form_fields=bool(form_field_names),
+        step_input_configs=[step.input_config for step in sorted_steps],
     )
     step_ref_mapping = build_step_ref_mapping(
         {
@@ -513,6 +523,11 @@ def collect_step_graph_issues(
                 ),
             )
         if require_complete_template_fill_config:
+            _capture_flow_step_validation(
+                issues,
+                FlowGraphIssueCode.FLOW_INPUT_ALIAS_NOT_RECEIVED,
+                lambda: _validate_run_input_alias_reads(step=step, run_input=run_input),
+            )
             _capture_flow_step_validation(
                 issues,
                 FlowGraphIssueCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION,
@@ -1801,6 +1816,95 @@ def _validate_runtime_input_publish_rules(*, step: FlowStepValidationView) -> No
                 step_order=step.step_order,
                 code=FlowGraphIssueCode.FLOW_INPUT_BINDING_RUNTIME_INPUT_UNUSED.value,
             )
+
+
+def takes_runtime_files(input_config: FlowPersistedJsonObject | None) -> bool:
+    """Whether a step's config asks the run for uploaded files (a malformed
+    config is reported by the step validation, so it takes none here)."""
+
+    try:
+        return build_runtime_input_config(input_config).enabled
+    except BadRequestException:
+        return False
+
+
+def flow_run_input(
+    *,
+    form_fields: bool,
+    step_input_configs: Sequence[FlowPersistedJsonObject | None],
+) -> FlowRunInput:
+    """What a flow's run form collects: the run contract's form fields and the
+    steps that take uploaded files."""
+
+    return FlowRunInput(
+        form_fields=form_fields,
+        runtime_files=any(takes_runtime_files(config) for config in step_input_configs),
+    )
+
+
+def run_input_alias_refusal(
+    expression: str, run_input: FlowRunInput, *, takes_upload: bool
+) -> str:
+    """The refusal of a read of free-text run input on a flow whose run form
+    collects only fields or uploads; ``takes_upload`` is whether the reading
+    step is the one taking the upload."""
+
+    if run_input.form_fields:
+        collects = "only its form fields"
+        instead = (
+            "Read a field with {{ flow_input.<field> }}, or remove the form fields "
+            "so the run takes free text."
+        )
+    else:
+        collects = "only uploaded files"
+        instead = (
+            "Read the upload with {{ step_input.text }}."
+            if takes_upload
+            else "Read an earlier step's output instead."
+        )
+    return (
+        f"'{{{{ {expression} }}}}' reads the run's free-text input, but this flow's "
+        f"run collects {collects}. The run dialog and the documented run contract "
+        "supply only the declared form fields (and uploads), so publish refuses a "
+        f"step that reads run text on such a flow. {instead}"
+    )
+
+
+def _validate_run_input_alias_reads(
+    *, step: FlowStepValidationView, run_input: FlowRunInput
+) -> None:
+    """Refuse at publish a read of free-text run input on a flow whose run form
+    declares only fields or uploads."""
+
+    if run_input.free_text:
+        return
+    sites = [
+        ("input_bindings.question", question_binding(step.input_bindings)),
+        ("prompt", step.prompt_template),
+        ("output_config", _template_text(step.output_config)),
+    ]
+    if step.input_source == "http_get":
+        # The fetch's URL, headers and body are interpolated with the run
+        # context like a question is.
+        sites.append(("input_config", _template_text(step.input_config)))
+    for field, template in sites:
+        for expression in iter_template_expressions(template or ""):
+            if reads_unreceived_run_input(expression, run_input):
+                raise FlowStepValidationError(
+                    f"Step {step.step_order}: "
+                    + run_input_alias_refusal(
+                        expression,
+                        run_input,
+                        takes_upload=takes_runtime_files(step.input_config),
+                    ),
+                    code=FlowGraphIssueCode.FLOW_INPUT_ALIAS_NOT_RECEIVED.value,
+                    context=_binding_reference_context(field, expression),
+                    step_order=step.step_order,
+                )
+
+
+def _template_text(config: FlowPersistedJsonObject | None) -> str | None:
+    return json.dumps(config, ensure_ascii=False) if config else None
 
 
 def _validate_section_source_reads(

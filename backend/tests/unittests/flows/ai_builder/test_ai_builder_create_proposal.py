@@ -1123,6 +1123,22 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
     await assert_create_spec_prepares_through_authoring_command_async(spec)
 
 
+def _main_text_field() -> ConfirmedRuntimeMetadataField:
+    """The main text of a text flow that collects other fields: the run dialog
+    shows its text box only for a run without form fields."""
+
+    return ConfirmedRuntimeMetadataField(
+        value=FlowInputFieldIntent(
+            variable_name="input",
+            label="Underlag",
+            required=True,
+            provenance="user_confirmed",
+        ),
+        purpose="interpret_input",
+        structured_answer_message_id="message-runtime-fields",
+    )
+
+
 @pytest.mark.asyncio
 async def test_outline_processing_uses_confirmed_planning_state_field() -> None:
     state = PlanningState.empty()
@@ -1143,7 +1159,8 @@ async def test_outline_processing_uses_confirmed_planning_state_field() -> None:
             ),
             purpose="whole_flow",
             structured_answer_message_id="message-runtime-fields",
-        )
+        ),
+        _main_text_field(),
     ]
 
     result = await process_create_intent_arguments(
@@ -1176,7 +1193,7 @@ async def test_outline_processing_uses_confirmed_planning_state_field() -> None:
     assert isinstance(result, ProposalReady)
     spec = result.compiled.content.spec
     assert spec.form_fields is not None
-    assert [field.name for field in spec.form_fields] == ["malgrupp"]
+    assert [field.name for field in spec.form_fields] == ["malgrupp", "input"]
     assert spec.steps[0].input_bindings is not None
     assert "{{ flow_input.malgrupp }}" in spec.steps[0].input_bindings["question"]
     await assert_create_spec_prepares_through_authoring_command_async(spec)
@@ -1224,6 +1241,54 @@ async def test_unstructured_field_text_does_not_create_hidden_server_contract() 
 
 
 @pytest.mark.asyncio
+async def test_a_text_flow_with_a_confirmed_field_gets_a_declared_main_text_field() -> (
+    None
+):
+    state = PlanningState.empty()
+    state.input_fields = [
+        ConfirmedRuntimeMetadataField(
+            value=FlowInputFieldIntent(
+                variable_name="priority",
+                label="Priority",
+                provenance="user_confirmed",
+            ),
+            purpose="interpret_input",
+            structured_answer_message_id="message-runtime-fields",
+        )
+    ]
+
+    result = await process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=[],
+        arguments={
+            "flow_name": "Priority response",
+            "plan_rationale": "Use the confirmed priority when drafting.",
+            "steps": [
+                {
+                    "name": "Draft response",
+                    "instructions": "Draft a response for the selected priority.",
+                }
+            ],
+        },
+        tool_call_id="call-declared-main-text",
+        available_model_refs=None,
+        available_kb_refs=None,
+        planning_state=state,
+    )
+
+    # No refusal, no repair: the run form leads with the declared main text.
+    assert isinstance(result, ProposalReady)
+    spec = result.compiled.content.spec
+    assert [(f.name, f.required) for f in spec.form_fields or ()] == [
+        ("input", True),
+        ("priority", False),
+    ]
+    assert spec.steps[0].input_bindings is not None
+    assert "{{ flow_input.input }}" in spec.steps[0].input_bindings["question"]
+    await assert_create_spec_prepares_through_authoring_command_async(spec)
+
+
+@pytest.mark.asyncio
 async def test_confirmed_create_field_preserves_options_and_provenance() -> None:
     state = PlanningState.empty()
     state.input_fields = [
@@ -1238,7 +1303,8 @@ async def test_confirmed_create_field_preserves_options_and_provenance() -> None
             ),
             purpose="interpret_input",
             structured_answer_message_id="message-runtime-fields",
-        )
+        ),
+        _main_text_field(),
     ]
 
     result = await process_create_intent_arguments(

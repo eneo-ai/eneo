@@ -27,11 +27,16 @@ from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     derive_output_mode,
     effective_input_type_for_bindings,
     make_plan_step_ref,
+    reads_run_text,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
     NewStepDraft,
     PreviousFieldRef,
+)
+from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
+    elect_main_text_field,
+    main_text_beside_fields_detail,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     AddStep as IntentAddStep,
@@ -67,6 +72,7 @@ from eneo.flows.flow_authoring_spec import (
     strip_inapplicable_completion_model,
 )
 from eneo.flows.flow_capability_manifest import supports_step_io_tuple
+from eneo.flows.flow_variable_definitions import FlowRunInput
 from eneo.flows.input_binding_contract_rules import (
     SOURCE_REFS_BINDING_KEY,
     InputBindingContractError,
@@ -199,6 +205,18 @@ def _new_step_draft_from_semantic_intent(
     )
 
 
+def edit_baseline_spec(
+    *, saved: FlowDraftSpecCore, revision: FlowDraftSpecCore | None
+) -> FlowDraftSpecCore:
+    """The spec an edit starts from, and its run-form fields are the edit's
+    baseline fields: those of the revision when a saved step is being revised
+    (it may carry an earlier turn's state), else the saved flow's. Preparing the
+    proposal, compiling it and judging the final run form all read this one
+    spec, so no stage sees a different form than another."""
+
+    return revision if revision is not None else saved
+
+
 def compile_ordered_edit_proposal(
     *,
     base_spec: FlowDraftSpecCore,
@@ -215,10 +233,12 @@ def compile_ordered_edit_proposal(
         if "form_fields" in proposal.model_fields_set
         else base_spec.form_fields
     )
+    # `base_spec` is the edit baseline (`edit_baseline_spec`): the saved flow's
+    # fields and steps, or the revision's on a saved-step revision.
     saved = _SavedFlow(
         steps=base_spec.steps,
         order_by_name=spec_step_refs(base_spec.steps),
-        form_field_names=[field.name for field in form_fields or []],
+        form_fields=[(field.name, field.type) for field in form_fields or []],
         saved_form_field_names=[field.name for field in base_spec.form_fields or []],
         removed_refs=proposal.removed_existing_step_refs,
     )
@@ -233,6 +253,7 @@ def compile_ordered_edit_proposal(
                     step_draft=item.step,
                     plan_step_ref=plan_ref,
                     prior_steps=compiled_steps,
+                    run_input=saved.run_input,
                     ui_language=ui_language,
                     require_declared_previous_fields=True,
                 )
@@ -345,6 +366,7 @@ def _compile_existing_step_modification(
             uses_previous_fields=uses_previous_fields,
             uses_previous_outputs=[],
             prior_steps=prior_steps,
+            run_input=saved.run_input,
             require_declared_previous_fields=True,
         )
         effective_input_type = effective_input_type_for_bindings(
@@ -411,9 +433,21 @@ class _SavedFlow:
 
     steps: Sequence[StepSpec]
     order_by_name: Mapping[str, int]
-    form_field_names: Sequence[str]
+    # The edited flow's declared run-form fields as (name, type); a type is None
+    # where only the names are known.
+    form_fields: Sequence[tuple[str, str | None]]
     saved_form_field_names: Sequence[str]
     removed_refs: frozenset[str]
+
+    @property
+    def form_field_names(self) -> list[str]:
+        return [name for name, _ in self.form_fields]
+
+    @property
+    def run_input(self) -> FlowRunInput:
+        """What the edited flow's run form collects."""
+
+        return FlowRunInput(form_fields=bool(self.form_field_names))
 
     def by_order(self, bindings: dict[str, Any] | None) -> dict[str, Any] | None:
         """Well-formed bindings with each source ref's step named by its saved
@@ -447,15 +481,26 @@ def _restated_lists(
             for ref in source_ref_bindings(step.input_bindings)
             if ref.field_path and ref.step_ref in saved.order_by_name
         ]
-        compiled = compile_step_input_bindings(
-            input_source=step.input_source,
-            input_type=step.input_type,
-            uses_form_fields=forms,
-            uses_previous_fields=fields,
-            uses_previous_outputs=[],
-            prior_steps=list(saved.steps[: own_order - 1]),
-            require_declared_previous_fields=True,
-        )
+        # The saved flow's run form, then the free-text run: a form flow saved
+        # while the compiler still wrote the run text into its first step's
+        # input restates as that, so a rebuild can drop the read the run
+        # never supplies.
+        for run_input in (
+            FlowRunInput(form_fields=bool(saved.saved_form_field_names)),
+            FlowRunInput(),
+        ):
+            compiled = compile_step_input_bindings(
+                input_source=step.input_source,
+                input_type=step.input_type,
+                uses_form_fields=forms,
+                uses_previous_fields=fields,
+                uses_previous_outputs=[],
+                prior_steps=list(saved.steps[: own_order - 1]),
+                run_input=run_input,
+                require_declared_previous_fields=True,
+            )
+            if saved.by_order(compiled) == saved.by_order(step.input_bindings):
+                return forms, fields
     except (
         AIBuilderArchitectureError,
         BadRequestException,
@@ -463,8 +508,7 @@ def _restated_lists(
         ValidationError,
     ):
         return None
-    exact = saved.by_order(compiled) == saved.by_order(step.input_bindings)
-    return (forms, fields) if exact else None
+    return None
 
 
 def _refuse_a_rebuild_that_drops_reads(
@@ -482,6 +526,19 @@ def _refuse_a_rebuild_that_drops_reads(
     own_order = saved.order_by_name.get(existing.existing_step_ref or "")
     if existing.input_bindings is None or own_order is None:
         return
+    if reads_run_text(existing) and not saved.run_input.free_text:
+        declared = list(saved.form_fields)
+        elected = elect_main_text_field(declared)
+        if elected is None or elected not in set(patch.uses_form_fields or []):
+            raise AIBuilderBadRequestException(
+                f'Step {own_order} "{display_value(existing.name)}" '
+                f"({existing.existing_step_ref}) reads the flow's main text, and a "
+                "rebuild would drop that read. "
+                + main_text_beside_fields_detail(
+                    can_declare_fields=True, fields=declared
+                ),
+                code=AIBuilderErrorCode.INVALID_PLAN_STEP_REF,
+            )
     position = len(prior_steps) + 1
     before = {
         step.existing_step_ref: order
@@ -603,7 +660,7 @@ def input_restates_exactly(
     saved = _SavedFlow(
         steps=steps,
         order_by_name=spec_step_refs(steps),
-        form_field_names=form_field_names,
+        form_fields=[(name, None) for name in form_field_names],
         saved_form_field_names=form_field_names,
         removed_refs=frozenset(),
     )

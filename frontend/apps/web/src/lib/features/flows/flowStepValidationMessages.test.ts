@@ -85,6 +85,7 @@ describe("server validation banner keys", () => {
     for (const code of [
       "flow_http_post_output_must_be_terminal",
       "flow_input_binding_runtime_input_unused",
+      "flow_input_alias_not_received",
       "flow_step_invalid"
     ]) {
       expect(getValidationIssueMessage(code)).not.toBe(code);

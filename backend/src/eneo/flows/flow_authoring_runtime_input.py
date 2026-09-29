@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject, clone_json_object
 from eneo.flows.flow_authoring_spec import (
+    FormFieldSpec,
     InputSource,
     InputType,
     StepSpec,
 )
+from eneo.flows.flow_validators import flow_run_input
+from eneo.flows.flow_variable_definitions import FlowRunInput
 
 _FILE_BASED_INPUT_TYPES = {
     InputType.AUDIO,
@@ -60,6 +63,18 @@ def resolve_runtime_input_config(
         )
     effective_config["runtime_input"] = runtime_input_config
     return effective_config
+
+
+def authoring_run_input(
+    steps: list[StepSpec], form_fields: list[FormFieldSpec] | None
+) -> FlowRunInput:
+    """What the run form of an authored flow collects, its steps' runtime input
+    taken as the apply persists it."""
+
+    return flow_run_input(
+        form_fields=bool(form_fields),
+        step_input_configs=[resolve_runtime_input_config(step_spec=s) for s in steps],
+    )
 
 
 def _requires_runtime_upload(step_spec: StepSpec) -> bool:

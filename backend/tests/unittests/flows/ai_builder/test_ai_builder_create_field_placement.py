@@ -101,6 +101,7 @@ def test_runtime_field_purpose_places_on_final_semantic_topology(
     compiled = compile_create_intent_to_spec(
         _two_step_intent(),
         context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
             runtime_input_fields=(_runtime_field("audience", purpose),),
         ),
     )
@@ -167,7 +168,11 @@ def test_whole_flow_excludes_terminal_fan_in_target() -> None:
         intent,
         context=CreateCompileContext(
             aggregation_intent="aggregate",
-            runtime_input_fields=(_runtime_field("audience", "whole_flow"),),
+            # A text flow that collects fields keeps its main text in one too.
+            runtime_input_fields=(
+                _runtime_field("audience", "whole_flow"),
+                _runtime_field("input", "interpret_input"),
+            ),
         ),
     )
 

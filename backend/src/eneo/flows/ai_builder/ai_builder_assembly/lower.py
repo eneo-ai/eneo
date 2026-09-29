@@ -35,6 +35,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputMode,
     StepSpec,
 )
+from eneo.flows.flow_variable_definitions import FlowRunInput
 from eneo.flows.source_identity import without_runtime_source_identity_draft_fields
 from eneo.main.logging import get_logger
 
@@ -90,6 +91,7 @@ def lower_assembly_plan(
             step_draft=step_draft,
             plan_step_ref=make_plan_step_ref(index),
             prior_steps=compiled_steps,
+            run_input=FlowRunInput(form_fields=bool(form_fields)),
             source_capture_fields=source_capture_fields_by_index.get(index, ()),
             assistant_output_fields=_assistant_output_fields_for_planned_step(
                 planned_step,

@@ -214,12 +214,14 @@ def _assert_validate_steps_rejects(
     step_order: int | None = None,
     metadata_json: dict | None = None,
     require_complete_template_fill_config: bool = False,
+    prompts: dict[int, str] | None = None,
 ) -> BadRequestException:
     with pytest.raises(BadRequestException, match=match) as exc_info:
         validate_steps(
             steps,
             metadata_json=metadata_json,
             require_complete_template_fill_config=require_complete_template_fill_config,
+            prompt_templates=prompts,
         )
 
     exc = exc_info.value
@@ -635,9 +637,7 @@ def test_validate_steps_rejects_forward_binding_reference_directly():
         "{{ case_id }}",
         "{{ flow_input.case_id }}",
         "{{ flow_input }}",
-        "{{ flow_input.text }}",
         "{{ datum }}",
-        "{{ indata_text }}",
         "{{ transkribering }}",
         "{{ flow_input.datum }}",
         "{{ flow_input.indata_text }}",
@@ -651,6 +651,186 @@ def test_validate_steps_publish_accepts_declared_and_runtime_input_names(
         metadata_json=_form_metadata("case_id", "datum", "indata_text"),
         require_complete_template_fill_config=True,
     )
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "{{ indata_text }}",
+        "{{ flow_input.text }}",
+        "{{ flow_input.json.rader }}",
+        "{{ flow.input.structured }}",
+    ],
+)
+def test_validate_steps_publish_refuses_the_run_text_a_form_run_never_collects(
+    question: str,
+) -> None:
+    step = _step(input_bindings={"question": question})
+    metadata_json = _form_metadata("case_id")
+
+    # A draft save is not refused: the form is still being edited.
+    validate_steps([step], metadata_json=metadata_json)
+
+    exc = _assert_validate_steps_rejects(
+        [step],
+        expected_type=FlowStepValidationError,
+        match="form fields",
+        code="flow_input_alias_not_received",
+        step_order=1,
+        metadata_json=metadata_json,
+        require_complete_template_fill_config=True,
+    )
+    assert exc.context == {
+        "field": "input_bindings.question",
+        "reference": question.strip("{} "),
+        "issue_code": "flow_input_alias_not_received",
+        "step_order": 1,
+    }
+
+
+_HTTP_AUTH = {"auth": {"mode": "none"}}
+_UPLOAD_RUN = {"runtime_input": {"enabled": True, "input_format": "document"}}
+
+
+@pytest.mark.parametrize(
+    ("updates", "field", "reference"),
+    [
+        pytest.param(
+            {
+                "input_source": "http_get",
+                "input_config": {
+                    "url": "https://example.com/?q={{ flow_input.text }}",
+                    **_HTTP_AUTH,
+                },
+            },
+            "input_config",
+            "flow_input.text",
+            id="http-get-url",
+        ),
+        pytest.param(
+            {
+                "input_source": "http_get",
+                "input_config": {
+                    "url": "https://example.com/",
+                    "custom_headers": [{"name": "X-Q", "value": "{{ indata_text }}"}],
+                    **_HTTP_AUTH,
+                },
+            },
+            "input_config",
+            "indata_text",
+            id="http-get-header",
+        ),
+        pytest.param(
+            {
+                "output_mode": "http_post",
+                "output_config": {
+                    "url": "https://example.org/hook/{{indata_text}}",
+                    "timeout_seconds": 25,
+                    **_HTTP_AUTH,
+                },
+            },
+            "output_config",
+            "indata_text",
+            id="http-post-url",
+        ),
+        pytest.param(
+            {
+                "output_mode": "http_post",
+                "output_config": {
+                    "url": "https://example.org/hook",
+                    "timeout_seconds": 25,
+                    "body": {
+                        "mode": "text_template",
+                        "template": '{"m": "{{ flow.input . text }}"}',
+                    },
+                    **_HTTP_AUTH,
+                },
+            },
+            "output_config",
+            "flow.input . text",
+            id="http-post-body-spaced-path",
+        ),
+    ],
+)
+def test_validate_steps_publish_refuses_run_text_read_in_an_http_config_of_a_form_run(
+    updates: dict, field: str, reference: str
+) -> None:
+    exc = _assert_validate_steps_rejects(
+        [_step(**updates)],
+        expected_type=FlowStepValidationError,
+        match="free-text input",
+        code="flow_input_alias_not_received",
+        step_order=1,
+        metadata_json=_form_metadata("case_id"),
+        require_complete_template_fill_config=True,
+    )
+
+    assert exc.context["field"] == field
+    assert exc.context["reference"] == reference
+
+
+def test_validate_steps_publish_accepts_run_text_in_a_free_text_runs_http_get() -> None:
+    validate_steps(
+        [
+            _step(
+                input_source="http_get",
+                input_config={
+                    "url": "https://example.com/?q={{ flow_input.text }}",
+                    **_HTTP_AUTH,
+                },
+            )
+        ],
+        require_complete_template_fill_config=True,
+    )
+
+
+def test_publish_advice_for_an_upload_run_fits_the_step_that_reads() -> None:
+    # The step taking the upload reads it as step_input.text; another step
+    # reads an earlier step's output.
+    taking_upload = _step(input_type="document", input_config=_UPLOAD_RUN)
+    other = _step(step_order=2, input_bindings={"question": "{{ indata_text }}"})
+
+    upload_exc = _assert_validate_steps_rejects(
+        [taking_upload],
+        expected_type=FlowStepValidationError,
+        match="free-text input",
+        step_order=1,
+        require_complete_template_fill_config=True,
+        prompts={1: "Sammanfatta {{ indata_text }}."},
+    )
+    other_exc = _assert_validate_steps_rejects(
+        [taking_upload, other],
+        expected_type=FlowStepValidationError,
+        match="free-text input",
+        step_order=2,
+        require_complete_template_fill_config=True,
+    )
+
+    assert "Read the upload with {{ step_input.text }}." in str(upload_exc)
+    assert "Read an earlier step's output instead." in str(other_exc)
+    assert "step_input.text" not in str(other_exc)
+
+
+def test_publish_refusal_states_what_the_run_form_declares_and_no_runtime_claim() -> (
+    None
+):
+    exc = _assert_validate_steps_rejects(
+        [_step(input_bindings={"question": "{{ indata_text }}"})],
+        expected_type=FlowStepValidationError,
+        match="free-text input",
+        metadata_json=_form_metadata("case_id"),
+        require_complete_template_fill_config=True,
+    )
+
+    message = str(exc)
+    assert (
+        "The run dialog and the documented run contract supply only the declared "
+        "form fields (and uploads), so publish refuses a step that reads run text "
+        "on such a flow."
+    ) in message
+    # No claim about what a runtime payload can hold.
+    for claim in ("never", "no client", "supplies it", "nothing else"):
+        assert claim not in message
 
 
 @pytest.mark.parametrize(
@@ -2322,12 +2502,32 @@ def test_template_fill_publish_accepts_scalar_contract_fields_and_form_values(
                         "date": "{{datum}}",
                         "author": "{{flow_input.author}}",
                         "author_alias": "{{author}}",
-                        "input": "{{flow_input.text}}",
                     },
                 },
             ),
         ],
         metadata_json=_form_metadata("author"),
+        require_complete_template_fill_config=True,
+    )
+
+
+def test_template_fill_publish_accepts_the_free_text_of_a_free_text_run() -> None:
+    validate_steps(
+        [
+            _step(),
+            _step(
+                step_order=2,
+                output_type="docx",
+                output_mode="template_fill",
+                output_config={
+                    "template_asset_id": str(uuid4()),
+                    "bindings": {
+                        "body": "{{step_1.output.text}}",
+                        "input": "{{flow_input.text}}",
+                    },
+                },
+            ),
+        ],
         require_complete_template_fill_config=True,
     )
 

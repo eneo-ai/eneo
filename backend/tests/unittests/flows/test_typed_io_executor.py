@@ -63,6 +63,7 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from eneo.flows.flow_input_limits import FlowInputLimits
+from eneo.flows.flow_variable_definitions import FlowRunInput
 from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from eneo.flows.runtime.executor import (
     FlowRunExecutor,
@@ -1193,6 +1194,7 @@ async def test_resolve_step_input_json_source_refs_build_exact_structured_projec
         ),
     ]
     input_bindings = compile_step_input_bindings(
+        run_input=FlowRunInput(),
         input_source=InputSource.PREVIOUS_STEP,
         input_type=InputType.JSON,
         uses_form_fields=[],

@@ -38,6 +38,7 @@ const CODE_TO_MESSAGE: Record<string, () => string> = {
   flow_input_binding_invalid_step_reference: () =>
     m.flow_validation_msg_input_binding_invalid_step(),
   flow_input_binding_unknown_step_order: () => m.flow_validation_msg_input_binding_unknown_step(),
+  flow_input_alias_not_received: () => m.flow_validation_msg_input_alias_not_received(),
   duplicate_step_name: () => m.flow_validation_msg_duplicate_step_name(),
   citation_mode_unsupported: () => m.flow_validation_msg_citation_mode_unsupported(),
   template_fill_requires_docx: () => m.flow_validation_msg_template_fill_requires_docx(),

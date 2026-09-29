@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, TypedDict
 
@@ -33,6 +35,15 @@ class VariableShape(str, Enum):
 FLOW_INPUT_TEXT_ALIAS = "indata_text"
 FLOW_INPUT_JSON_ALIAS = "indata_json"
 PREVIOUS_STEP_TEXT_ALIAS = "föregående_steg"
+
+# The run-payload keys each run-input alias is read from; the first key that
+# holds a value defines it. A run defines the alias only from a payload that
+# carries the key, so which flows can receive it is decided below.
+FLOW_INPUT_ALIAS_PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {
+    FLOW_INPUT_TEXT_ALIAS: ("text",),
+    FLOW_INPUT_JSON_ALIAS: ("json", "structured"),
+}
+FLOW_INPUT_ALIASES: frozenset[str] = frozenset(FLOW_INPUT_ALIAS_PAYLOAD_KEYS)
 
 
 RESERVED_RUNTIME_VARIABLES: frozenset[str] = frozenset(
@@ -100,6 +111,80 @@ STEP_INPUT_KEY_SHAPES: dict[str, VariableShape] = {
 SECTION_VARIABLE_SHAPES: dict[str, VariableShape] = {
     "section_index": VariableShape.SCALAR,
 }
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunInput:
+    """What the run form of a flow collects: the run contract's form fields and
+    the steps that take uploaded files.
+
+    The run dialog offers a free text box only when it collects neither, and
+    the documented run contract lists only the declared form fields and
+    uploads. A step that reads the run-input aliases on a flow that collects
+    fields or files is refused at publish (the frontend's
+    ``showFreeformTextInput`` is the same rule). This says what the run form
+    declares, not what a runtime payload can hold.
+    """
+
+    form_fields: bool = False
+    runtime_files: bool = False
+
+    @property
+    def free_text(self) -> bool:
+        return not (self.form_fields or self.runtime_files)
+
+
+def unreceived_flow_input_aliases(run_input: FlowRunInput) -> frozenset[str]:
+    """The run-input aliases this flow's run form does not declare."""
+
+    return frozenset() if run_input.free_text else FLOW_INPUT_ALIASES
+
+
+def variable_path_segments(path: str) -> list[str]:
+    """The segments the resolver walks a template path by: split at each dot,
+    each stripped (an empty one is the resolver's error to report)."""
+
+    return [segment.strip() for segment in path.split(".")]
+
+
+def reads_unreceived_run_input(expression: str, run_input: FlowRunInput) -> bool:
+    """Whether a template expression reads free-text run input this flow's run
+    form does not declare: a run-input alias (``indata_text``) or the payload key
+    behind one (``flow_input.text``, ``flow.input.json``)."""
+
+    unreceived = unreceived_flow_input_aliases(run_input)
+    if not unreceived:
+        return False
+    head, *path = variable_path_segments(expression)
+    if head in unreceived:
+        return True
+    if head == "flow" and path[:1] == ["input"]:
+        path = path[1:]
+    elif head != "flow_input":
+        return False
+    unreceived_keys = {
+        key for alias in unreceived for key in FLOW_INPUT_ALIAS_PAYLOAD_KEYS[alias]
+    }
+    return bool(path) and path[0] in unreceived_keys
+
+
+def flow_input_alias_source(
+    alias: str, payload: Mapping[str, Any]
+) -> tuple[str, Any] | None:
+    """The payload key and value a run defines ``alias`` from; None when it
+    defines none (the key is absent, a blank text, or a value of the wrong shape)."""
+
+    shape = RUNTIME_VARIABLE_SHAPES[alias]
+    for key in FLOW_INPUT_ALIAS_PAYLOAD_KEYS[alias]:
+        value = payload.get(key)
+        if value is None:
+            continue
+        if shape is VariableShape.SCALAR:
+            usable = isinstance(value, str) and bool(value.strip())
+        else:
+            usable = isinstance(value, (dict, list))
+        return (key, value) if usable else None
+    return None
 
 
 def runtime_variables_for_step(
@@ -192,9 +277,7 @@ def flow_variable_definition_manifest(
         "stepInputKeyShapes": {
             key: shape.value for key, shape in sorted(STEP_INPUT_KEY_SHAPES.items())
         },
-        "flowInputAliases": sorted(
-            {FLOW_INPUT_TEXT_ALIAS, FLOW_INPUT_JSON_ALIAS, FLOW_INPUT_TRANSCRIPTION_KEY}
-        ),
+        "flowInputAliases": sorted(FLOW_INPUT_ALIASES | {FLOW_INPUT_TRANSCRIPTION_KEY}),
         "previousStepAlias": PREVIOUS_STEP_TEXT_ALIAS,
         "formFieldNamespaceHeads": sorted(FORM_FIELD_NAMESPACE_HEADS),
         "primaryFlowInputKeys": sorted(PRIMARY_FLOW_INPUT_KEYS),

@@ -35,6 +35,7 @@ from eneo.flows.flow_run_provenance import (
     group_resolved_input_edges,
 )
 from eneo.flows.flow_validators import validate_steps
+from eneo.flows.flow_variable_definitions import FlowRunInput
 from eneo.flows.runtime import step_input_resolution
 from eneo.flows.runtime.http_orchestration import FlowHttpInputResolution
 from eneo.flows.runtime.step_definition_parser import parse_runtime_steps
@@ -552,6 +553,7 @@ def _depth_four_runtime_steps(
 
 def test_compiler_emits_publishable_depth_four_contract() -> None:
     producer = compile_new_step_draft(
+        run_input=FlowRunInput(),
         step_draft=NewStepDraft.model_validate(
             {
                 "name": "Group source material",

@@ -41,6 +41,54 @@ describe("VariablePicker", () => {
     expect(chip?.textContent).toBe("{{step_input.text}}");
   });
 
+  it("offers the submitted text only when the run collects neither fields nor an upload", async () => {
+    const uploadStep = {
+      step_order: 1,
+      input_config: { runtime_input: { enabled: true, input_format: "document" } }
+    };
+    const cases = [
+      { steps: [], uploadVariableAvailable: false, offered: true, formSchema: undefined },
+      { steps: [], uploadVariableAvailable: false, offered: true, formSchema: { fields: [] } },
+      { steps: [], uploadVariableAvailable: true, offered: false, formSchema: undefined },
+      {
+        steps: [uploadStep],
+        uploadVariableAvailable: false,
+        offered: false,
+        formSchema: undefined
+      },
+      // The backend's FlowRunInput counts every declared row, usable or not.
+      {
+        steps: [],
+        uploadVariableAvailable: false,
+        offered: false,
+        formSchema: { fields: [{ name: "", type: "text" }] }
+      },
+      {
+        steps: [],
+        uploadVariableAvailable: false,
+        offered: false,
+        formSchema: { fields: [{ name: "flow_input", type: "text" }] }
+      }
+    ];
+    for (const { steps, uploadVariableAvailable, offered, formSchema } of cases) {
+      const { unmount } = render(VariablePicker, {
+        steps: steps as never,
+        currentStepOrder: 2,
+        formSchema,
+        isAdvancedMode: true,
+        uploadVariableAvailable,
+        onInsert: vi.fn()
+      });
+      await fireEvent.click(
+        screen.getByRole("button", { name: /^(Infoga variabel|Insert variable)$/ })
+      );
+      await screen.findByRole("combobox", { name: /Sök variabler|Search variables/ });
+      const option = screen.queryByRole("option", { name: /Inskickad text|Submitted text/ });
+      expect(option !== null).toBe(offered);
+      unmount();
+    }
+  });
+
   it("inserts custom form fields through the canonical flow_input namespace", async () => {
     const onInsert = vi.fn();
 

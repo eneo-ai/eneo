@@ -56,6 +56,21 @@ describe("FlowValidationBanner server issues", () => {
     expect(onNavigateToStep).toHaveBeenCalledWith("step-3");
   });
 
+  it("says a read of free-text run input on a form or upload flow is not received, not that a step is unusable", async () => {
+    const raw =
+      "Step 3: '{{ indata_text }}' reads the run's free-text input, but this flow's run collects only its form fields, so publish refuses a step that reads run text on such a flow.";
+    const errors = new Map([["flow:server:flow_input_alias_not_received:3", [raw]]]);
+
+    render(FlowValidationBanner, { errors, steps: [makeStep()], isExpanded: true });
+
+    expect(screen.getByText(m.flow_validation_msg_input_alias_not_received())).toBeTruthy();
+    expect(screen.queryByText(m.flow_validation_msg_input_binding_invalid_step())).toBeNull();
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.flow_validation_technical_details() })
+    );
+    expect(screen.getAllByText(raw)).toHaveLength(1);
+  });
+
   it("keeps the raw detail for flow-scoped translated issues", async () => {
     const errors = new Map([["flow:server:flow_review_policy_invalid", [RAW_FLOW_SENTENCE]]]);
 

@@ -28,6 +28,7 @@
     type VariableCategory
   } from "$lib/features/flows/flowVariableTokens";
   import { fieldTypeLabel } from "$lib/features/flows/ai-builder/aiBuilderSummaryText";
+  import { getRuntimeInputConfig } from "$lib/features/flows/flowRuntimeInputConfig";
 
   let {
     steps,
@@ -105,7 +106,14 @@
       label: field.label?.trim() || field.name,
       description: isAdvancedMode ? fieldTypeLabel(field.type) : undefined
     }));
-    if (fieldEntries.length === 0 && isAdvancedMode) {
+    // The run dialog offers a free text box only when the run collects
+    // neither form fields nor an upload. Every declared field row counts, as
+    // the backend's rule does (FlowRunInput): a row too odd to insert still
+    // takes the text box away.
+    const runHasFormFields = (formSchema?.fields ?? []).length > 0;
+    const runTakesUpload =
+      uploadVariableAvailable || steps.some((step) => getRuntimeInputConfig(step).enabled);
+    if (!runHasFormFields && isAdvancedMode && !runTakesUpload) {
       fieldEntries.push({
         token: "flow_input.text",
         label: m.flow_variable_flow_input_text_label(),

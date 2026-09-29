@@ -11,7 +11,8 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
 from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
-    is_primary_runtime_input_shadow_field,
+    dropped_primary_field_names,
+    main_text_name_collision,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     ResultOutputFieldRole,
@@ -115,18 +116,32 @@ class CreateCompileContext:
 
     @property
     def incompatible_confirmed_form_field_names(self) -> tuple[str, ...]:
-        return tuple(
-            dict.fromkeys(
-                hint.variable_name
-                for hint in self.runtime_input_field_hints
-                if hint.provenance == "user_confirmed"
-                and is_primary_runtime_input_shadow_field(
-                    variable_name=hint.variable_name,
-                    field_type=hint.field_type,
-                    runtime_input_type=self.effective_runtime_input_type,
-                )
-            )
+        """The confirmed fields the person has to rename: those the primary input
+        already owns (dropped by the compile), and, when a text flow has to
+        declare its main text but every name for it is taken by fields the person
+        confirmed, those fields. A collision with a field the model proposed is
+        the model's to repair, not the person's."""
+
+        runtime_input_type = self.effective_runtime_input_type
+        hints = self.runtime_input_field_hints
+        dropped = dropped_primary_field_names(
+            runtime_input_type=runtime_input_type,
+            fields=[(hint.variable_name, hint.field_type) for hint in hints],
         )
+        names = [
+            hint.variable_name
+            for hint in hints
+            if hint.provenance == "user_confirmed" and hint.variable_name in dropped
+        ]
+        collision = main_text_name_collision(
+            runtime_input_type=runtime_input_type,
+            fields=[
+                (hint.variable_name, hint.field_type, hint.provenance) for hint in hints
+            ],
+        )
+        if collision is not None and collision.user_action:
+            names.extend(collision.names)
+        return tuple(dict.fromkeys(names))
 
     @property
     def is_pure_audio_transcription(self) -> bool:

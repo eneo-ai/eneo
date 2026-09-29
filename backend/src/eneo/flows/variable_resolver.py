@@ -35,8 +35,11 @@ from eneo.flows.flow_run_provenance import (
     merge_resolved_input_edges,
 )
 from eneo.flows.flow_variable_definitions import (
+    FLOW_INPUT_ALIAS_PAYLOAD_KEYS,
     can_expose_form_field_bare_alias,
+    flow_input_alias_source,
     runtime_variables_for_step,
+    variable_path_segments,
 )
 from eneo.main.exceptions import TypedIOValidationException
 
@@ -231,25 +234,16 @@ class FlowVariableResolver:
                 ),
             )
 
-        text_value = normalized_flow_input.get("text")
-        if isinstance(text_value, str) and text_value.strip():
-            context["indata_text"] = text_value
+        for alias in FLOW_INPUT_ALIAS_PAYLOAD_KEYS:
+            alias_source = flow_input_alias_source(alias, normalized_flow_input)
+            if alias_source is None:
+                continue
+            source_key, alias_value = alias_source
+            context[alias] = alias_value
             context.register_source(
-                ("indata_text",),
-                _VariableSourceDescriptor(kind="flow_input", selector_prefix=("text",)),
-            )
-
-        json_value = normalized_flow_input.get("json")
-        json_source_key = "json"
-        if json_value is None:
-            json_value = normalized_flow_input.get("structured")
-            json_source_key = "structured"
-        if isinstance(json_value, (dict, list)):
-            context["indata_json"] = json_value
-            context.register_source(
-                ("indata_json",),
+                (alias,),
                 _VariableSourceDescriptor(
-                    kind="flow_input", selector_prefix=(json_source_key,)
+                    kind="flow_input", selector_prefix=(source_key,)
                 ),
             )
 
@@ -403,8 +397,7 @@ class FlowVariableResolver:
     ) -> tuple[Any, tuple[_ResolvedPathSegment, ...]]:
         current: Any = context
         resolved_path: list[_ResolvedPathSegment] = []
-        for token in path.split("."):
-            token = token.strip()
+        for token in variable_path_segments(path):
             if not token:
                 raise _variable_resolution_error(
                     f"Unknown variable reference: '{path}'. Empty path segment is not allowed."

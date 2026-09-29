@@ -198,12 +198,21 @@ form, runtime names, earlier steps, and declared output contracts:
 
 - `{{ flow_input.<field> }}` accepts a declared form field. A declared field can
   also be bare, such as `{{ case_id }}`, only when the runtime exposes that safe
-  alias. Bare `flow_input` and its primary input keys are valid; undeclared
-  names and unknown `flow_input` keys are rejected.
+  alias. Bare `flow_input` and its primary input keys are valid where the run
+  supplies them (see the free-text rule below); undeclared names and unknown
+  `flow_input` keys are rejected.
 - In a valid publish graph, bare `datum`, `indata_text`, and `transkribering`
   keep their runtime meanings. Form fields named `datum` or `indata_text` are
   reached as `flow_input.datum` or `flow_input.indata_text`.
   `transkribering` is a primary runtime input key, not a custom form field.
+- Free-text run input (`indata_text`, `indata_json`, `flow_input.text`,
+  `flow_input.json`, `flow_input.structured`) is what the run dialog's text box
+  supplies, and the box appears only when the run form collects free text. The
+  run dialog and the documented run contract supply only a flow's declared form
+  fields (and uploads), so publish refuses a question, prompt, output mapping,
+  or HTTP step URL and header that reads run text on a flow with form fields or
+  uploaded files. A version published earlier that reads it keeps running as
+  before.
 - A question can use an earlier numeric reference (`step_N`) or the exact
   trimmed earlier display label, for example `{{ Collect intake }}`. A label is
   a complete text value: current, future, unknown, and dotted label paths are

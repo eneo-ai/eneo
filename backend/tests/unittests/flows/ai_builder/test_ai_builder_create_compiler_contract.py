@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import cast
+from unittest.mock import patch
 from uuid import UUID, uuid4
 
 import jsonschema
@@ -31,6 +33,7 @@ from eneo.flows.ai_builder.ai_builder_create_compile_context import (
     create_compile_context_from_planning_state,
 )
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
+    _compile_form_fields,
     compile_create_intent_to_spec,
 )
 from eneo.flows.ai_builder.ai_builder_critic_invariants import (
@@ -42,6 +45,7 @@ from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
 )
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import compile_output_contract
 from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
+from eneo.flows.ai_builder.ai_builder_non_plan_outcome import user_action_answer
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
     extract_requested_output_sections,
@@ -65,6 +69,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     ResultOutputFieldRole,
 )
+from eneo.flows.ai_builder.ai_builder_runtime_input_fields import RuntimeInputFieldHint
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_schema_evidence,
 )
@@ -224,6 +229,15 @@ def _slot(name: str, value: str) -> ResolvedSlot:
     )
 
 
+def _main_text_field() -> ConfirmedRuntimeMetadataField:
+    """The main text of a text flow that collects other fields: the run dialog
+    shows its text box only for a run without form fields."""
+
+    return _confirmed_runtime_field(
+        "input", "Underlag", purpose="interpret_input", required=True
+    )
+
+
 def _confirmed_runtime_field(
     variable_name: str,
     label: str,
@@ -337,7 +351,10 @@ def test_policy_default_does_not_override_confirmed_runtime_fields() -> None:
         source="policy_default",
         confidence="high",
     )
-    state.input_fields = [_confirmed_runtime_field("case_type", "Case type")]
+    state.input_fields = [
+        _confirmed_runtime_field("case_type", "Case type"),
+        _main_text_field(),
+    ]
     context = create_compile_context_from_planning_state(state)
     assert context is not None
     intent = parse_create_flow_intent_arguments(
@@ -355,8 +372,24 @@ def test_policy_default_does_not_override_confirmed_runtime_fields() -> None:
 
     compiled = compile_create_intent_to_spec(intent, context=context)
 
-    assert [field.name for field in compiled.form_fields or ()] == ["case_type"]
+    assert [field.name for field in compiled.form_fields or ()] == [
+        "case_type",
+        "input",
+    ]
     assert "{{ flow_input.case_type }}" in _question(compiled.steps[0].input_bindings)
+
+
+def test_a_confirmed_field_named_like_the_main_text_conflicts_only_when_alone() -> None:
+    main_text = _main_text_field()
+    tone = _confirmed_runtime_field("tone", "Tone")
+
+    alone = CreateCompileContext(runtime_input_fields=(main_text,))
+    beside_others = CreateCompileContext(runtime_input_fields=(tone, main_text))
+
+    # Alone it duplicates the run dialog's text box; beside other fields there
+    # is no text box, so it is the main text and stays.
+    assert alone.incompatible_confirmed_form_field_names == ("input",)
+    assert beside_others.incompatible_confirmed_form_field_names == ()
 
 
 def test_compile_context_binds_declared_output_schema_to_json_terminal() -> None:
@@ -1414,6 +1447,7 @@ def test_compiler_uses_assembly_path_for_single_step_linear_flow() -> None:
         context=CreateCompileContext(
             runtime_input_fields=(
                 _confirmed_runtime_field("tone", "Tone", required=True),
+                _main_text_field(),
             ),
         ),
     )
@@ -1421,17 +1455,280 @@ def test_compiler_uses_assembly_path_for_single_step_linear_flow() -> None:
     assert compiled.flow_name == "Quick answer"
     assert compiled.flow_description == "Answer with the requested tone."
     assert compiled.form_fields is not None
-    assert [field.name for field in compiled.form_fields] == ["tone"]
+    assert [field.name for field in compiled.form_fields] == ["tone", "input"]
+    assert [field.required for field in compiled.form_fields] == [True, True]
     assert len(compiled.steps) == 1
     step = compiled.steps[0]
     assert step.input_source == InputSource.FLOW_INPUT
     assert step.input_type == InputType.TEXT
     assert step.output_type == OutputType.TEXT
     assert step.output_mode == OutputMode.PASS_THROUGH
+    # The run form collects the tone and the main text as fields, so the step
+    # reads both from the form.
     assert _question(step.input_bindings) == (
-        "{{ indata_text }}\n\ntone: {{ flow_input.tone }}"
+        "tone: {{ flow_input.tone }}\ninput: {{ flow_input.input }}"
+    )
+    assert "indata" not in compiled.model_dump_json()
+    assert validate_spec(compiled).valid
+
+
+@pytest.mark.parametrize(
+    ("ui_language", "label"),
+    [
+        ("sv", "Text att bearbeta"),
+        ("en", "Text to process"),
+        (None, "Text att bearbeta"),
+    ],
+)
+def test_a_text_flow_with_form_fields_gets_a_declared_field_for_its_main_text(
+    ui_language: str | None, label: str
+) -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Quick answer",
+            "flow_description": "Answer with the requested tone.",
+            "plan_rationale": "One text step is enough.",
+            "steps": [
+                {
+                    "name": "Write answer",
+                    "instructions": "Write the answer in the requested tone.",
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            ui_language=ui_language,
+            runtime_input_fields=(
+                _confirmed_runtime_field("tone", "Tone", required=True),
+            ),
+        ),
+    )
+
+    # The run collects the tone, so the run dialog has no text box: the compiler
+    # declares the main text as a required field, first, and binds step 1 to it.
+    assert [(f.name, f.label, f.required) for f in compiled.form_fields or ()] == [
+        ("input", label, True),
+        ("tone", "Tone", True),
+    ]
+    assert _question(compiled.steps[0].input_bindings) == (
+        "input: {{ flow_input.input }}\ntone: {{ flow_input.tone }}"
+    )
+    assert "indata" not in compiled.model_dump_json()
+    assert validate_spec(compiled).valid
+
+
+def _quick_answer_intent() -> CreateFlowIntent:
+    return parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Quick answer",
+            "plan_rationale": "One text step is enough.",
+            "steps": [{"name": "Write answer", "instructions": "Write the answer."}],
+        }
+    )
+
+
+def test_a_confirmed_field_on_the_main_text_name_is_kept_exactly() -> None:
+    priority = _confirmed_runtime_field(
+        "input",
+        "Prioritet",
+        required=True,
+        field_type="select",
+        options=("Låg", "Hög"),
+    )
+    tone = _confirmed_runtime_field("tone", "Tone")
+
+    compiled = compile_create_intent_to_spec(
+        _quick_answer_intent(),
+        context=CreateCompileContext(runtime_input_fields=(priority, tone)),
+    )
+
+    # The confirmed select keeps its name, type, options and required flag; the
+    # main text is declared on the next free name, first, and step 1 reads both.
+    by_name = {field.name: field for field in compiled.form_fields or ()}
+    assert list(by_name) == ["indata_text", "input", "tone"]
+    assert by_name["input"].model_dump(exclude_none=True) == {
+        "name": "input",
+        "label": "Prioritet",
+        "type": "select",
+        "required": True,
+        "options": ["Låg", "Hög"],
+    }
+    assert (by_name["indata_text"].type, by_name["indata_text"].required) == (
+        "text",
+        True,
+    )
+    assert _question(compiled.steps[0].input_bindings) == (
+        "indata_text: {{ flow_input.indata_text }}\n"
+        "input: {{ flow_input.input }}\ntone: {{ flow_input.tone }}"
     )
     assert validate_spec(compiled).valid
+
+
+def test_exactly_one_main_text_field_is_elected_and_the_other_is_unchanged() -> None:
+    first = _confirmed_runtime_field("input", "Underlag")
+    second = _confirmed_runtime_field(
+        "indata_text", "Anteckning", required=False, field_type="text"
+    )
+
+    compiled = compile_create_intent_to_spec(
+        _quick_answer_intent(),
+        context=CreateCompileContext(
+            runtime_input_fields=(
+                _confirmed_runtime_field("tone", "Tone"),
+                second,
+                first,
+            )
+        ),
+    )
+
+    by_name = {field.name: field for field in compiled.form_fields or ()}
+    # `input` comes first in the fixed order: elected, required. `indata_text`
+    # keeps its declared contract, optional.
+    assert list(by_name) == ["tone", "indata_text", "input"]
+    assert by_name["input"].required is True
+    assert by_name["indata_text"].model_dump(exclude_none=True) == {
+        "name": "indata_text",
+        "label": "Anteckning",
+        "type": "text",
+        "required": False,
+    }
+    assert by_name["tone"].required is False
+    assert validate_spec(compiled).valid
+
+
+def test_a_text_flow_whose_main_text_names_are_all_taken_asks_for_a_rename() -> None:
+    taken = tuple(
+        _confirmed_runtime_field(
+            name, name.title(), field_type="select", options=("a", "b")
+        )
+        for name in ("input", "Indata_Text")
+    )
+    context = CreateCompileContext(
+        runtime_input_fields=(*taken, _confirmed_runtime_field("tone", "Tone"))
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as caught:
+        compile_create_intent_to_spec(_quick_answer_intent(), context=context)
+
+    # Nothing is replaced or retyped: the person is asked, naming the fields.
+    assert caught.value.repair_disposition == "user_action"
+    assert caught.value.failure_code == "confirmed_form_field_incompatible"
+    assert caught.value.affected == ("input", "Indata_Text")
+    answer = user_action_answer(caught.value, ui_language="en")
+    assert answer is not None and "`input` and `Indata_Text`" in answer.answer
+    assert context.incompatible_confirmed_form_field_names == ("input", "Indata_Text")
+
+
+def test_a_collision_with_fields_the_model_proposed_is_the_models_to_repair() -> None:
+    model_fields = tuple(
+        RuntimeInputFieldHint(
+            variable_name=name,
+            label=name,
+            field_type="select",
+            options=("a", "b"),
+            provenance="model_proposed",
+        )
+        for name in ("input", "indata_text")
+    )
+    context = SimpleNamespace(
+        runtime_input_field_hints=(
+            *model_fields,
+            RuntimeInputFieldHint(variable_name="tone", label="Tone"),
+        ),
+        ui_language="sv",
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as caught:
+        _compile_form_fields(
+            context=context,  # type: ignore[arg-type]
+            runtime_input_type=InputType.TEXT,
+            field_diagnostics=None,
+        )
+
+    # Never a user action: the model renames its own fields.
+    assert caught.value.repair_disposition == "model_correctable"
+    assert caught.value.failure_code == "main_text_name_taken"
+    assert caught.value.affected == ("input", "indata_text")
+    assert user_action_answer(caught.value, ui_language="en") is None
+
+
+def test_a_collision_the_person_confirmed_is_theirs_in_the_precheck_and_the_compile() -> (
+    None
+):
+    taken = tuple(
+        _confirmed_runtime_field(name, name, field_type="select", options=("a",))
+        for name in ("input", "indata_text")
+    )
+    context = CreateCompileContext(
+        runtime_input_fields=(*taken, _confirmed_runtime_field("tone", "Tone"))
+    )
+
+    assert context.incompatible_confirmed_form_field_names == ("input", "indata_text")
+    with pytest.raises(AIBuilderArchitectureError) as caught:
+        compile_create_intent_to_spec(_quick_answer_intent(), context=context)
+    assert caught.value.repair_disposition == "user_action"
+
+
+def test_a_confirmed_reserved_name_beside_other_fields_gets_a_rename_request() -> None:
+    context = CreateCompileContext(
+        runtime_input_fields=(
+            _confirmed_runtime_field("tone", "Tone"),
+            _confirmed_runtime_field("text", "Text"),
+        )
+    )
+
+    # `text` is a runtime payload key the form schema rejects, so it cannot be
+    # the main-text field: the person renames it, no repair can keep it.
+    assert context.incompatible_confirmed_form_field_names == ("text",)
+    with pytest.raises(AIBuilderArchitectureError) as caught:
+        compile_create_intent_to_spec(_quick_answer_intent(), context=context)
+    assert caught.value.repair_disposition == "user_action"
+    assert caught.value.affected == ("text",)
+    answer = user_action_answer(caught.value, ui_language="en")
+    assert answer is not None and "`text`" in answer.answer
+
+
+@pytest.mark.parametrize(
+    "runtime_input_type", [InputType.DOCUMENT, InputType.FILE, InputType.AUDIO]
+)
+def test_a_flow_that_takes_uploads_declares_no_main_text_field(
+    runtime_input_type: InputType,
+) -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Quick answer",
+            "plan_rationale": "Extract the facts, then write the answer.",
+            "steps": [
+                {
+                    "name": "Extract facts",
+                    "instructions": "Extract the relevant facts.",
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "Short summary.",
+                        }
+                    ],
+                },
+                {"name": "Write answer", "instructions": "Write the answer."},
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=runtime_input_type,
+            runtime_input_fields=(
+                _confirmed_runtime_field("tone", "Tone", required=True),
+            ),
+        ),
+    )
+
+    assert [field.name for field in compiled.form_fields or ()] == ["tone"]
 
 
 def test_single_text_report_translates_source_capture_into_writer_instructions() -> (
@@ -2194,6 +2491,7 @@ def test_compiler_derives_whole_object_underlag() -> None:
         context=CreateCompileContext(
             runtime_input_fields=(
                 _confirmed_runtime_field("case_id", "Case ID", required=True),
+                _main_text_field(),
             ),
         ),
     )
@@ -2204,7 +2502,7 @@ def test_compiler_derives_whole_object_underlag() -> None:
     assert extract_step.input_type == InputType.TEXT
     assert extract_step.output_type == OutputType.JSON
     assert _question(extract_step.input_bindings) == (
-        "{{ indata_text }}\n\ncase_id: {{ flow_input.case_id }}"
+        "case_id: {{ flow_input.case_id }}\ninput: {{ flow_input.input }}"
     )
     write_step = compiled.steps[1]
     assert write_step.input_source == InputSource.PREVIOUS_STEP
@@ -2899,12 +3197,15 @@ def test_single_text_step_terminal_fields_do_not_conflict_with_runtime_inputs(
             runtime_input_type=InputType.TEXT,
             final_output_type=final_output_type,
             final_output_mode=final_output_mode,
-            runtime_input_fields=(_confirmed_runtime_field("case_id", "Case id"),),
+            runtime_input_fields=(
+                _confirmed_runtime_field("case_id", "Case id"),
+                _main_text_field(),
+            ),
         ),
     )
 
     assert compiled.form_fields is not None
-    assert [field.name for field in compiled.form_fields] == ["case_id"]
+    assert [field.name for field in compiled.form_fields] == ["case_id", "input"]
     assert [step.output_type for step in compiled.steps] == expected_output_types
     assert compiled.steps[0].output_contract is None
     assert validate_spec(compiled).valid
@@ -3186,6 +3487,7 @@ def test_confirmed_field_definition_is_the_compiled_value_owner() -> None:
                     purpose="interpret_input",
                     structured_answer_message_id="message-1",
                 ),
+                _main_text_field(),
             ),
         ),
     )
@@ -4432,6 +4734,103 @@ def test_compiler_binds_human_named_placeholders_from_prepared_terminal(
     assert [(field.name, field.required) for field in compiled.form_fields or ()] == [
         ("diarienummer", True)
     ]
+
+
+_TEXT_TEMPLATE_INTENT = {
+    "flow_name": "Beslut",
+    "plan_rationale": "Prepare the summary and fill the template.",
+    "steps": [
+        {
+            "name": "Förbered",
+            "instructions": "Extract the summary.",
+            "output_fields": [
+                {
+                    "name": "summary",
+                    "field_type": "string",
+                    "description": "Sammanfattning.",
+                }
+            ],
+        }
+    ],
+}
+
+
+def _text_template_context() -> CreateCompileContext:
+    return CreateCompileContext(
+        ui_language="sv",
+        runtime_input_type=InputType.TEXT,
+        final_output_type=OutputType.DOCX,
+        final_output_mode=OutputMode.TEMPLATE_FILL,
+        selected_template_count=1,
+        selected_template_placeholders=("flow_input.diarienummer", "summary"),
+    )
+
+
+def test_template_run_field_added_to_a_text_flow_declares_the_main_text_field() -> None:
+    intent = parse_create_flow_intent_arguments(_TEXT_TEMPLATE_INTENT)
+
+    compiled = compile_create_intent_to_spec(intent, context=_text_template_context())
+
+    # The template asks the person for the case number, so the run dialog has no
+    # text box: the main text becomes a required first field, and the step that
+    # read the run text reads it.
+    assert [(f.name, f.required) for f in compiled.form_fields or ()] == [
+        ("input", True),
+        ("diarienummer", True),
+    ]
+    assert (
+        _question(compiled.steps[0].input_bindings) == "input: {{ flow_input.input }}"
+    )
+    assert "indata" not in compiled.model_dump_json()
+    assert validate_spec(compiled).valid
+
+
+def test_template_field_on_a_main_text_name_is_the_elected_main_text() -> None:
+    intent = parse_create_flow_intent_arguments(_TEXT_TEMPLATE_INTENT)
+    context = CreateCompileContext(
+        ui_language="sv",
+        runtime_input_type=InputType.TEXT,
+        final_output_type=OutputType.DOCX,
+        final_output_mode=OutputMode.TEMPLATE_FILL,
+        selected_template_count=1,
+        selected_template_placeholders=("flow_input.input", "summary"),
+    )
+
+    compiled = compile_create_intent_to_spec(intent, context=context)
+
+    # The template already asks for a text field named `input`: it is the one
+    # main text, the step reads it, and no second field is declared.
+    assert [f.name for f in compiled.form_fields or ()] == ["input"]
+    assert (
+        _question(compiled.steps[0].input_bindings) == "input: {{ flow_input.input }}"
+    )
+    assert validate_spec(compiled).valid
+
+
+def test_template_run_field_added_to_a_text_flow_is_refused_where_only_a_model_can_declare() -> (
+    None
+):
+    intent = parse_create_flow_intent_arguments(_TEXT_TEMPLATE_INTENT)
+    real = apply_template_attachment_contract
+
+    def edit_side(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        # An edit passes neither: the compiler does not declare the field there.
+        kwargs.pop("can_declare_main_text", None)
+        return real(*args, **kwargs)  # type: ignore[arg-type]
+
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_create_compiler."
+            "apply_template_attachment_contract",
+            edit_side,
+        ),
+        pytest.raises(AIBuilderArchitectureError) as caught,
+    ):
+        compile_create_intent_to_spec(intent, context=_text_template_context())
+
+    assert caught.value.repair_disposition == "model_correctable"
+    assert caught.value.failure_code == "main_text_beside_form_fields"
+    assert "main text cannot be collected beside form fields" in caught.value.detail
 
 
 def test_compiler_drops_template_form_field_when_flow_prepares_it() -> None:

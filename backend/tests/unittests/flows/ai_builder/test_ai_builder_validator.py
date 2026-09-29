@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from eneo.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationError,
     SpecValidationResult,
@@ -22,7 +24,12 @@ from eneo.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
     StepSpec,
+    metadata_json_from_authoring_form_fields,
 )
+from eneo.flows.flow_authoring_variable_rewriting import (
+    flow_step_validation_views_from_draft_spec,
+)
+from eneo.flows.flow_validators import collect_step_graph_issues
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1039,6 +1046,173 @@ class TestProductionParityValidation:
             and "LLM-backed text step" in e.message
             for e in result.errors
         )
+
+
+ALIAS_NOT_RECEIVED = FlowGraphIssueCode.FLOW_INPUT_ALIAS_NOT_RECEIVED.value
+
+_DIARIENUMMER_FIELD = FormFieldSpec(
+    name="diarienummer", type="text", label="Diarienummer", required=True
+)
+
+
+class TestRunInputAliasReads:
+    """A read of run text is refused where the run form never collects text."""
+
+    @staticmethod
+    def _flow(
+        *steps: StepSpec, form_fields: list[FormFieldSpec] | None = None
+    ) -> FlowDraftSpecCore:
+        return FlowDraftSpecCore(
+            flow_name="Run input", steps=list(steps), form_fields=form_fields
+        )
+
+    @pytest.mark.parametrize(
+        ("site", "reference"),
+        [
+            pytest.param(
+                {"input_bindings": {"question": "{{ indata_text }}"}},
+                "indata_text",
+                id="question-text",
+            ),
+            pytest.param(
+                {"instructions": "Sammanfatta {{ indata_text }}."},
+                "indata_text",
+                id="instructions-text",
+            ),
+            pytest.param(
+                {"input_bindings": {"question": "{{ indata_json.rader }}"}},
+                "indata_json.rader",
+                id="question-json",
+            ),
+            pytest.param(
+                {"input_bindings": {"question": "{{ flow_input.text }}"}},
+                "flow_input.text",
+                id="question-payload-text",
+            ),
+            pytest.param(
+                {"instructions": "Läs {{ flow.input.structured.rader }}."},
+                "flow.input.structured.rader",
+                id="instructions-payload-structured",
+            ),
+        ],
+    )
+    def test_form_run_refuses_a_read_of_run_text_with_the_repair(
+        self, site: dict[str, object], reference: str
+    ) -> None:
+        result = validate_spec(
+            self._flow(_step(**site), form_fields=[_DIARIENUMMER_FIELD])
+        )
+
+        errors = _errors_with_code(result, ALIAS_NOT_RECEIVED)
+        assert [error.step_ref for error in errors] == ["step_a"]
+        # The model reads the step as it knows it, why, and what repairs it.
+        assert errors[0].message.startswith('Step 1 "Test step": ')
+        assert reference in errors[0].message
+        assert "main text cannot be collected beside form fields" in errors[0].message
+        assert "ask the person" in errors[0].message.lower()
+        assert not result.valid
+
+    @pytest.mark.parametrize(
+        "first",
+        [
+            pytest.param(
+                {"input_config": {"runtime_input": {"enabled": True}}},
+                id="explicit-runtime-input",
+            ),
+            pytest.param({}, id="upload-step-resolves-its-runtime-input"),
+        ],
+    )
+    def test_upload_run_refuses_a_read_of_run_text(
+        self, first: dict[str, object]
+    ) -> None:
+        result = validate_spec(
+            self._flow(
+                _step(
+                    ref="step_a",
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.TEXT,
+                    **first,
+                ),
+                _step(
+                    ref="step_b",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    instructions="Jämför med {{ indata_text }}.",
+                ),
+            )
+        )
+
+        errors = _errors_with_code(result, ALIAS_NOT_RECEIVED)
+        assert [error.step_ref for error in errors] == ["step_b"]
+        # Advice valid for the step: it takes no upload, so it reads an earlier step.
+        assert "Read an earlier step's output instead." in errors[0].message
+        assert "step_input.text" not in errors[0].message
+
+    def test_the_step_taking_the_upload_is_told_to_read_the_upload(self) -> None:
+        result = validate_spec(
+            self._flow(
+                _step(
+                    ref="step_a",
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.TEXT,
+                    instructions="Sammanfatta {{ indata_text }}.",
+                )
+            )
+        )
+
+        errors = _errors_with_code(result, ALIAS_NOT_RECEIVED)
+        assert [error.step_ref for error in errors] == ["step_a"]
+        assert "Read the upload with {{ step_input.text }}." in errors[0].message
+
+    @pytest.mark.parametrize(
+        ("question", "form_fields"),
+        [
+            pytest.param("{{ indata_text }}", None, id="free-text-run"),
+            pytest.param("{{ indata_json.rader }}", None, id="free-json-run"),
+            pytest.param("{{ flow_input.text }}", None, id="free-payload-text"),
+            pytest.param(
+                "diarienummer: {{ flow_input.diarienummer }}",
+                [_DIARIENUMMER_FIELD],
+                id="form-run-reads-its-field",
+            ),
+        ],
+    )
+    def test_reads_the_run_collects_are_accepted(
+        self, question: str, form_fields: list[FormFieldSpec] | None
+    ) -> None:
+        result = validate_spec(
+            self._flow(
+                _step(input_bindings={"question": question}), form_fields=form_fields
+            )
+        )
+
+        assert not _errors_with_code(result, ALIAS_NOT_RECEIVED)
+
+    @pytest.mark.parametrize(
+        "form_fields", [None, [_DIARIENUMMER_FIELD]], ids=["free-text", "form"]
+    )
+    def test_builder_and_publish_refuse_the_same_reads(
+        self, form_fields: list[FormFieldSpec] | None
+    ) -> None:
+        spec = self._flow(
+            _step(input_bindings={"question": "{{ indata_text }}"}),
+            form_fields=form_fields,
+        )
+        published = collect_step_graph_issues(
+            flow_step_validation_views_from_draft_spec(spec.steps),
+            metadata_json=metadata_json_from_authoring_form_fields(spec.form_fields),
+            require_complete_template_fill_config=True,
+        )
+
+        refused_by_builder = bool(
+            _errors_with_code(validate_spec(spec), ALIAS_NOT_RECEIVED)
+        )
+        refused_by_publish = any(
+            issue.context is not None
+            and issue.context.get("reference") == "indata_text"
+            for issue in published
+        )
+
+        assert refused_by_builder is refused_by_publish is (form_fields is not None)
 
 
 class TestOutputContractValidation:

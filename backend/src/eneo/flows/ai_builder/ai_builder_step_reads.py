@@ -18,8 +18,7 @@ from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.flow_authoring_spec import InputSource, InputType, OutputMode, StepSpec
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
 from eneo.flows.flow_variable_definitions import (
-    FLOW_INPUT_JSON_ALIAS,
-    FLOW_INPUT_TEXT_ALIAS,
+    FLOW_INPUT_ALIASES,
     PREVIOUS_STEP_TEXT_ALIAS,
 )
 from eneo.flows.input_binding_contract_rules import (
@@ -90,9 +89,7 @@ class StepRead:
         )
 
 
-_RUN_INPUT_ALIASES = frozenset(
-    {FLOW_INPUT_TEXT_ALIAS, FLOW_INPUT_JSON_ALIAS, FLOW_INPUT_TRANSCRIPTION_KEY}
-)
+_RUN_INPUT_ALIASES = FLOW_INPUT_ALIASES | {FLOW_INPUT_TRANSCRIPTION_KEY}
 
 
 def step_template_sites(step: StepSpec) -> list[tuple[ReadSite, str]]:
@@ -169,6 +166,28 @@ def step_reads(
     if runtime_input.enabled:
         reads.append(StepRead(None, ReadChannel.STEP_INPUT, (), ReadSite.IMPLICIT))
     return tuple(reads)
+
+
+def form_fields_read(
+    step: StepSpec,
+    *,
+    order: int,
+    step_refs: dict[str, int],
+    form_field_names: set[str],
+) -> frozenset[str]:
+    """The form fields a step reads at any site `step_reads` enumerates (its
+    question, instructions, output mapping) and by reading the whole run input.
+    The one answer to "does this step read that field", so no site is missed."""
+
+    names: set[str] = set()
+    for read in step_reads(
+        step, order=order, step_refs=step_refs, form_field_names=form_field_names
+    ):
+        if read.channel is ReadChannel.FORM_FIELD:
+            names.add(read.path[0])
+        elif read.reads_whole_run_input:
+            names.update(form_field_names)
+    return frozenset(names)
 
 
 def _implicit_reads(step: StepSpec, *, order: int) -> list[StepRead]:

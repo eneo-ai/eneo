@@ -6539,6 +6539,7 @@
   "flow_validation_msg_input_binding_future_step": "The step references a later step. A step can only use results from earlier steps.",
   "flow_validation_msg_input_binding_invalid_step": "The step references a step that cannot be used here.",
   "flow_validation_msg_input_binding_unknown_step": "The step references a step that does not exist in the flow.",
+  "flow_validation_msg_input_alias_not_received": "This step reads free text the run does not collect. The flow's run collects only form fields or uploaded files. Read a form field or the uploaded material instead.",
   "flow_validation_msg_duplicate_step_name": "Two steps share the same name. Give each step a unique name.",
   "flow_validation_msg_citation_mode_unsupported": "Citations cannot be used with the step's current Result settings.",
   "flow_validation_msg_template_fill_requires_docx": "The document template must be a Word file (.docx).",

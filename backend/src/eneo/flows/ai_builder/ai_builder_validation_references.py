@@ -1,19 +1,33 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from difflib import get_close_matches
 
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     missing_structured_output_path,
     schema_property_names,
 )
+from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
+    main_text_beside_fields_detail,
+)
 from eneo.flows.ai_builder.ai_builder_step_reads import ReadSite, step_template_sites
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
+from eneo.flows.flow_authoring_runtime_input import (
+    authoring_run_input,
+    resolve_runtime_input_config,
+)
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     OutputType,
     StepSpec,
 )
-from eneo.flows.flow_variable_definitions import runtime_variables_for_step
+from eneo.flows.flow_validators import run_input_alias_refusal, takes_runtime_files
+from eneo.flows.flow_variable_definitions import (
+    FlowRunInput,
+    reads_unreceived_run_input,
+    runtime_variables_for_step,
+)
 from eneo.flows.template_reference_analyzer import (
     TemplateReference,
     TemplateReferenceKind,
@@ -33,6 +47,8 @@ def validate_variable_references(
         field.name.strip() for field in (spec.form_fields or []) if field.name.strip()
     }
     payload_variables = runtime_variables_for_step()
+    declared_fields = [(field.name, field.type) for field in spec.form_fields or []]
+    run_input = authoring_run_input(spec.steps, spec.form_fields)
 
     for index, step in enumerate(spec.steps, start=1):
         prompt_variables = runtime_variables_for_step(step.input_config)
@@ -42,11 +58,12 @@ def validate_variable_references(
                 prompt_variables
                 if site is ReadSite.INSTRUCTIONS
                 else payload_variables,
+                site,
             )
             for site, template in step_template_sites(step)
             for expression in iter_template_expressions(template)
         ]
-        for expression, runtime_variables in expressions:
+        for expression, runtime_variables, site in expressions:
             allowed_roots = {*runtime_variables, *form_field_names}
             reference = _parse_reference_expression(
                 expression,
@@ -54,6 +71,17 @@ def validate_variable_references(
                 runtime_variables=runtime_variables,
                 form_field_names=form_field_names,
             )
+            if reference.kind is TemplateReferenceKind.RUNTIME and (
+                reads_unreceived_run_input(expression, run_input)
+            ):
+                result.add_error(
+                    step_ref=step.plan_step_ref,
+                    code=FlowGraphIssueCode.FLOW_INPUT_ALIAS_NOT_RECEIVED.value,
+                    message=_run_input_refusal(
+                        step, index, expression, site, run_input, declared_fields
+                    ),
+                )
+                continue
             if reference.kind is TemplateReferenceKind.UNKNOWN:
                 suggestion = _suggest_similar(
                     reference.head,
@@ -167,6 +195,40 @@ def validate_variable_references(
                         f"{suggestion}"
                     ),
                 )
+
+
+def _run_input_refusal(
+    step: StepSpec,
+    order: int,
+    expression: str,
+    site: ReadSite,
+    run_input: FlowRunInput,
+    fields: Iterable[tuple[str, str | None]],
+) -> str:
+    """The refusal of a read of free-text run input, naming the step as the
+    model knows it and, on an edit, the step to modify."""
+
+    ref = step.existing_step_ref
+    label = f'Step {order} "{step.name}"' + (f" ({ref})" if ref else "")
+    if not run_input.form_fields:
+        upload = takes_runtime_files(resolve_runtime_input_config(step_spec=step))
+        return f"{label}: " + run_input_alias_refusal(
+            expression, run_input, takes_upload=upload
+        )
+    message = (
+        f"{label}: '{{{{ {expression} }}}}' reads the run's main text. "
+        + main_text_beside_fields_detail(
+            can_declare_fields=ref is not None, fields=fields
+        )
+    )
+    if ref is None:
+        return message
+    if site is ReadSite.INSTRUCTIONS:
+        return (
+            f"{message} A read written into the instructions is rewritten there: "
+            f"modify {ref} with assistant_spec.instructions reading a form field."
+        )
+    return f"{message} The step to modify is {ref}."
 
 
 def iter_step_templates(step: StepSpec) -> list[str]:

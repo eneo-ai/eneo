@@ -55,6 +55,7 @@ from eneo.flows.domain.flow_step_validation import (
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
+    FormFieldSpec,
     InputSource,
     InputType,
     OutputMode,
@@ -622,6 +623,50 @@ def test_planner_rejects_invalid_flow_graph_before_install() -> None:
 
     assert exc_info.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
     assert exc_info.value.context["reason"] == "duplicate_step_name"
+
+
+@pytest.mark.parametrize(
+    ("instructions", "question", "form_fields"),
+    [
+        pytest.param(
+            "Sammanfatta {{ indata_text }}", None, ["namn"], id="prompt-alias"
+        ),
+        pytest.param(
+            "Sammanfatta.", "{{ flow . input . text }}", ["namn"], id="question-path"
+        ),
+    ],
+)
+def test_planner_refuses_a_package_that_reads_run_text_its_form_run_never_collects(
+    instructions: str, question: str | None, form_fields: list[str]
+) -> None:
+    envelope = _envelope(
+        requirements=[], assistant=AssistantSpec(instructions=instructions)
+    )
+    step = envelope.draft.spec.steps[0]
+    if question is not None:
+        step.input_bindings = {"question": question}
+    envelope.draft.spec.form_fields = [
+        FormFieldSpec(name=name, type="text", label=name) for name in form_fields
+    ]
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        build_flow_package_import_plan(
+            envelope, candidates=FlowPackageImportPlannerCandidates()
+        )
+
+    assert exc_info.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+    assert exc_info.value.context["reason"] == "flow_input_alias_not_received"
+
+
+def test_planner_accepts_a_package_that_reads_the_run_text_of_a_free_text_run() -> None:
+    envelope = _envelope(
+        requirements=[],
+        assistant=AssistantSpec(instructions="Sammanfatta {{ indata_text }}"),
+    )
+
+    build_flow_package_import_plan(
+        envelope, candidates=FlowPackageImportPlannerCandidates()
+    )
 
 
 def test_planner_rejects_section_step_whose_prompt_reads_json_step() -> None:

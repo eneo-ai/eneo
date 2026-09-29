@@ -29,7 +29,14 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     EMPTY_REQUESTED_OUTPUT_SECTIONS,
 )
 from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
-    is_primary_runtime_input_shadow_field,
+    MAIN_TEXT_FIELD_NAMES,
+    declared_main_text_field,
+    dropped_primary_field_names,
+    elect_main_text_field,
+    free_main_text_name,
+    main_text_has_no_place,
+    main_text_is_a_field,
+    main_text_name_collision,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     AttestedResultField,
@@ -211,6 +218,8 @@ def compile_create_intent_to_spec(
                 compiled_spec,
                 selected_template_count=context.selected_template_count,
                 placeholders=context.selected_template_placeholders,
+                can_declare_main_text=True,
+                ui_language=context.ui_language,
             )
         # After the template contract: the run fields it declares belong to
         # the JSON input contract and its name-conflict check too.
@@ -578,22 +587,80 @@ def _compile_form_fields(
     fields: list[FormFieldSpec] = []
     dropped_primary_input_field_names: list[str] = []
     seen: set[str] = set()
+    declared = [
+        (hint.variable_name, hint.field_type) for hint in runtime_input_field_hints
+    ]
+    collision = main_text_name_collision(
+        runtime_input_type=runtime_input_type,
+        fields=[
+            (hint.variable_name, hint.field_type, hint.provenance)
+            for hint in runtime_input_field_hints
+        ],
+    )
+    if collision is not None:
+        # The main text has no free name: a declared field is never replaced or
+        # retyped. The person renames what they confirmed, the model its own.
+        raise AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            repair_disposition=(
+                "user_action" if collision.user_action else "model_correctable"
+            ),
+            detail=(
+                "Every name the flow's main text can be declared under "
+                f"({', '.join(f'`{name}`' for name in MAIN_TEXT_FIELD_NAMES)}) is "
+                "taken by a field of another type. Rename "
+                f"{', '.join(f'`{name}`' for name in collision.names)}."
+            ),
+            log_context={
+                "failure_code": (
+                    "confirmed_form_field_incompatible"
+                    if collision.user_action
+                    else "main_text_name_taken"
+                ),
+                "runtime_input_type": InputType.TEXT.value,
+            },
+            affected=collision.names,
+        )
+    if main_text_has_no_place(runtime_input_type=runtime_input_type, fields=declared):
+        # The run collects other fields, so the run dialog has no text box for
+        # the main text: it gets a required field of its own, first in the form,
+        # on the first name no declared field holds.
+        main_text_name = free_main_text_name(name for name, _ in declared)
+        assert main_text_name is not None  # no collision, so a name is free
+        fields.append(
+            declared_main_text_field(
+                name=main_text_name,
+                ui_language=context.ui_language if context is not None else None,
+            )
+        )
+        seen.add(main_text_name)
+    elected = (
+        elect_main_text_field(declared)
+        if main_text_is_a_field(runtime_input_type=runtime_input_type, fields=declared)
+        else None
+    )
+    dropped = dropped_primary_field_names(
+        runtime_input_type=runtime_input_type, fields=declared
+    )
     for hint in runtime_input_field_hints:
-        if is_primary_runtime_input_shadow_field(
-            variable_name=hint.variable_name,
-            field_type=hint.field_type,
-            runtime_input_type=runtime_input_type,
-        ):
+        if hint.variable_name in dropped:
             _reject_or_diagnose_field_drops(
                 fields=[hint],
                 code="primary_input_shadow_form_field_dropped",
                 field_diagnostics=field_diagnostics,
+                runtime_input_type=runtime_input_type,
             )
             dropped_primary_input_field_names.append(hint.variable_name)
             continue
         if hint.variable_name in seen:
             continue
-        fields.append(_compile_form_field(hint))
+        # The elected main text is required; every other field keeps its
+        # declared contract exactly.
+        fields.append(
+            _compile_form_field(
+                hint, required=True if hint.variable_name == elected else None
+            )
+        )
         seen.add(hint.variable_name)
     return fields, dropped_primary_input_field_names
 
@@ -603,6 +670,7 @@ def _reject_or_diagnose_field_drops(
     fields: list[RuntimeInputFieldHint],
     code: str,
     field_diagnostics: list[LintWarning] | None,
+    runtime_input_type: InputType | None = None,
 ) -> None:
     confirmed_names = sorted(
         field.variable_name for field in fields if field.provenance == "user_confirmed"
@@ -615,7 +683,13 @@ def _reject_or_diagnose_field_drops(
             log_context={
                 "failure_code": "confirmed_form_field_incompatible",
                 "field_names": ",".join(confirmed_names),
+                **(
+                    {"runtime_input_type": runtime_input_type.value}
+                    if runtime_input_type is not None
+                    else {}
+                ),
             },
+            affected=confirmed_names,
         )
     if field_diagnostics is None:
         return
@@ -714,11 +788,13 @@ def _log_dropped_primary_input_shadow_fields(
 
 def _compile_form_field(
     field: RuntimeInputFieldHint,
+    *,
+    required: bool | None = None,
 ) -> FormFieldSpec:
     return FormFieldSpec(
         name=field.variable_name,
         label=field.label,
         type=field.field_type,
-        required=field.required,
+        required=field.required if required is None else required,
         options=list(field.options) or None,
     )

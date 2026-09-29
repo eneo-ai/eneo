@@ -13,6 +13,7 @@ from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     SourceCaptureField,
 )
 from eneo.flows.flow_authoring_spec import InputSource, InputType, OutputType
+from eneo.flows.flow_variable_definitions import FlowRunInput
 
 
 def _compile_source_capture_instructions(
@@ -22,6 +23,7 @@ def _compile_source_capture_instructions(
     ui_language: str | None = None,
 ) -> str:
     step = compile_new_step_draft(
+        run_input=FlowRunInput(),
         step_draft=NewStepDraft(
             name="Extract source",
             instructions=instructions,
@@ -80,6 +82,7 @@ def test_source_capture_guidance_keeps_field_named_inside_instructions() -> None
 
 def test_output_field_guidance_keeps_field_named_in_instructions() -> None:
     step = compile_new_step_draft(
+        run_input=FlowRunInput(),
         step_draft=NewStepDraft(
             name="Extract metadata",
             instructions="Extract the title from the document.",
@@ -129,6 +132,7 @@ def test_input_reference_hint_uses_english_when_requested() -> None:
 
 def test_compile_new_step_passes_ui_language_to_input_reference_hint() -> None:
     source_step = compile_new_step_draft(
+        run_input=FlowRunInput(),
         step_draft=NewStepDraft(
             name="Decide",
             instructions="Produce a structured decision.",
@@ -138,6 +142,7 @@ def test_compile_new_step_passes_ui_language_to_input_reference_hint() -> None:
         prior_steps=[],
     )
     step = compile_new_step_draft(
+        run_input=FlowRunInput(),
         step_draft=NewStepDraft(
             name="Summarize all prior work",
             instructions="Write the combined summary.",

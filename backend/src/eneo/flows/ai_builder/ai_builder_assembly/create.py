@@ -51,6 +51,10 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
+from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
+    elect_main_text_field,
+    main_text_is_a_field,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     CreateFlowIntent,
     SemanticStepIntent,
@@ -1588,6 +1592,20 @@ def _place_runtime_form_fields(
     """Place server-owned runtime fields on the completed create topology."""
 
     declared_names = {field.name for field in form_fields}
+    # The elected main text of a text flow that collects other fields: the first
+    # step, which reads the primary input, reads it.
+    first_step = planned_steps[0] if planned_steps else None
+    main_text_name = (
+        elect_main_text_field((field.name, field.type) for field in form_fields)
+        if first_step is not None
+        and first_step.input_source is InputSource.FLOW_INPUT
+        and first_step.input_type is InputType.TEXT
+        and main_text_is_a_field(
+            runtime_input_type=InputType.TEXT,
+            fields=[(field.name, field.type) for field in form_fields],
+        )
+        else None
+    )
     runtime_fields_by_name = {
         record.value.variable_name: record for record in runtime_input_fields
     }
@@ -1649,12 +1667,18 @@ def _place_runtime_form_fields(
                     semantic_indexes = semantic_target_indexes
                 case _ as unsupported_purpose:
                     assert_never(unsupported_purpose)
+        elif name == main_text_name and semantic_target_indexes:
+            semantic_indexes = semantic_target_indexes[:1]
         elif not has_template_target:
             return _reject(
                 "form_field_no_legal_target",
                 detail=f"Runtime form field {name!r} has no legal target.",
             )
 
+        if name == main_text_name and semantic_target_indexes:
+            semantic_indexes = tuple(
+                dict.fromkeys((semantic_target_indexes[0], *semantic_indexes))
+            )
         target_indexes = tuple(
             dict.fromkeys(
                 (

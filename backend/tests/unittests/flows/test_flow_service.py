@@ -21,7 +21,10 @@ from eneo.flows.domain.flow_invariant_exceptions import (
     FlowPersistedIdMissingError,
     FlowPublishedDefinitionInvalidError,
 )
-from eneo.flows.domain.flow_step_validation import FlowStepValidationError
+from eneo.flows.domain.flow_step_validation import (
+    FlowGraphIssueCode,
+    FlowStepValidationError,
+)
 from eneo.flows.enums import FlowInputSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_resource_bindings import (
@@ -669,6 +672,164 @@ async def test_publish_flow_refuses_section_step_selecting_json_step(
     assert caught.value.context["reference"] == reference
     version_repo.create.assert_not_awaited()
     flow_repo.update.assert_not_awaited()
+
+
+_FORM_ONLY_RUN = {"form_schema": {"fields": [{"name": "diarienummer", "type": "text"}]}}
+_UPLOAD_RUN_CONFIG = {
+    "runtime_input": {"enabled": True, "input_format": "document", "required": True}
+}
+
+
+def _run_input_flow(user, *, metadata_json, steps):
+    return Flow(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Run input flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=metadata_json,
+        data_retention_days=None,
+        draft_revision=1,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=steps,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("metadata_json", "first_step", "prompt", "field", "reference"),
+    [
+        pytest.param(
+            _FORM_ONLY_RUN,
+            {
+                "input_bindings": {
+                    "question": "{{ indata_text }}\n\n"
+                    "diarienummer: {{ flow_input.diarienummer }}"
+                }
+            },
+            "",
+            "input_bindings.question",
+            "indata_text",
+            id="form-run-question-reads-text",
+        ),
+        pytest.param(
+            _FORM_ONLY_RUN,
+            {"input_bindings": {"question": "{{ flow_input.diarienummer }}"}},
+            "Sammanfatta {{ indata_text }}.",
+            "prompt",
+            "indata_text",
+            id="form-run-prompt-reads-text",
+        ),
+        pytest.param(
+            _FORM_ONLY_RUN,
+            {"input_bindings": {"question": "{{ indata_json.rader }}"}},
+            "",
+            "input_bindings.question",
+            "indata_json.rader",
+            id="form-run-question-reads-json",
+        ),
+        pytest.param(
+            _FORM_ONLY_RUN,
+            {"input_bindings": {"question": "{{ flow_input.text }}"}},
+            "",
+            "input_bindings.question",
+            "flow_input.text",
+            id="form-run-question-reads-payload-text",
+        ),
+        pytest.param(
+            _FORM_ONLY_RUN,
+            {"input_bindings": {"question": "{{ flow_input.diarienummer }}"}},
+            "Läs {{ flow.input.structured.rader }}.",
+            "prompt",
+            "flow.input.structured.rader",
+            id="form-run-prompt-reads-payload-structured",
+        ),
+        pytest.param(
+            None,
+            {"input_type": "document", "input_config": _UPLOAD_RUN_CONFIG},
+            "Sammanfatta {{ indata_text }}.",
+            "prompt",
+            "indata_text",
+            id="upload-run-prompt-reads-text",
+        ),
+    ],
+)
+async def test_publish_flow_refuses_a_read_of_run_text_the_run_never_collects(
+    user, metadata_json, first_step, prompt, field, reference
+):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    step = _step(step_order=1).model_copy(update=first_step)
+    prompts = {step.assistant_id: prompt}
+    service.assistant_service.get_assistant.side_effect = lambda assistant_id: (
+        Assistant(
+            id=assistant_id,
+            user=None,
+            space_id=uuid4(),
+            completion_model=None,
+            name="Assistant",
+            prompt=SimpleNamespace(text=prompts.get(assistant_id, "")),
+            completion_model_kwargs=ModelKwargs(),
+            logging_enabled=False,
+            websites=[],
+            collections=[],
+            attachments=[],
+            published=False,
+        ),
+        [],
+    )
+    flow = _run_input_flow(user, metadata_json=metadata_json, steps=[step])
+    flow_repo.get.return_value = flow
+
+    with pytest.raises(FlowStepValidationError) as caught:
+        await service.publish_flow(flow_id=flow.id)
+
+    assert caught.value.code == FlowGraphIssueCode.FLOW_INPUT_ALIAS_NOT_RECEIVED.value
+    assert caught.value.step_order == 1
+    assert caught.value.context["field"] == field
+    assert caught.value.context["reference"] == reference
+    assert reference.split(".")[0] in str(caught.value)
+    assert "flow_input." in str(caught.value) or "step_input.text" in str(caught.value)
+    version_repo.create.assert_not_awaited()
+    flow_repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("metadata_json", "question"),
+    [
+        pytest.param(None, "{{ indata_text }}", id="free-text-run-reads-text"),
+        pytest.param(None, "{{ indata_json.rader }}", id="free-text-run-reads-json"),
+        pytest.param(None, "{{ flow_input.text }}", id="free-text-run-reads-payload"),
+        pytest.param(
+            _FORM_ONLY_RUN,
+            "diarienummer: {{ flow_input.diarienummer }}",
+            id="form-run-reads-its-field",
+        ),
+    ],
+)
+async def test_publish_flow_accepts_reads_the_run_collects(
+    user, metadata_json, question
+):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    step = _step(step_order=1).model_copy(
+        update={"input_bindings": {"question": question}}
+    )
+    flow = _run_input_flow(user, metadata_json=metadata_json, steps=[step])
+    flow_repo.get.return_value = flow
+    flow_repo.allocate_next_version.return_value = 1
+    flow_repo.update.return_value = flow.model_copy(update={"published_version": 1})
+
+    await service.publish_flow(flow_id=flow.id)
+
+    version_repo.create.assert_awaited_once()
 
 
 @pytest.mark.asyncio

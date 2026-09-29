@@ -21,6 +21,7 @@ from eneo.flows.ai_builder.ai_builder_authoring_projection import (
     MaterializedOrderedEditProposal,
     MaterializedOrderedEditStep,
     compile_ordered_edit_proposal,
+    edit_baseline_spec,
     input_restates_exactly,
     materialize_ordered_edit_proposal,
     question_form_reads,
@@ -52,7 +53,9 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
 )
 from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
-    is_primary_runtime_input_shadow_field,
+    dropped_primary_field_names,
+    elect_main_text_field,
+    main_text_is_a_field,
     split_primary_runtime_input_shadow_names,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
@@ -66,6 +69,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     display_value,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
+from eneo.flows.ai_builder.ai_builder_step_reads import (
+    form_fields_read,
+    spec_step_refs,
+)
 from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
     StepNormalizationChange,
     discarded_output_config_keys,
@@ -120,6 +127,8 @@ class _PreparedOrderedEditProposal:
     warnings: list[str]
     shadowed_primary_input_fields: list[str]
     form_field_provenance: dict[str, FlowInputFieldProvenance]
+    # The run form's one main-text field when the run collects other fields.
+    main_text_field: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,15 +293,16 @@ def compile_edit_proposal(
             else False
         ),
     )
+    baseline = edit_baseline_spec(saved=base_spec, revision=revision_spec)
     prepared = _prepare_ordered_edit_proposal(
         proposal=materialized_proposal,
         current_steps=current_steps,
-        current_metadata_json=current_metadata_json,
+        baseline_form_fields=baseline.form_fields,
         primary_runtime_input_type=primary_runtime_input_type,
         may_restructure=mutation_scope is None,
     )
     compiled_spec = compile_ordered_edit_proposal(
-        base_spec=revision_spec if revision_spec is not None else base_spec,
+        base_spec=baseline,
         proposal=prepared.proposal,
         ui_language=ui_language,
     )
@@ -344,10 +354,22 @@ def compile_edit_proposal(
             if not mutation_scope.is_protected(step)
         ]
         normalized_spec = mutation_scope.restore(normalized_spec)
+    # The one place the run form is judged: on the final spec, so a read or a
+    # field added by the proposal, by normalization or by the template
+    # attachment is seen, and the form diff below shows what changed.
+    normalized_spec = _settle_run_form(
+        normalized_spec,
+        baseline=baseline,
+        main_text_field=prepared.main_text_field,
+        scoped=mutation_scope is not None,
+    )
     compiled_steps = normalized_spec.steps
     final_name = normalized_spec.flow_name
     final_description = normalized_spec.flow_description
     compiled_form_fields = normalized_spec.form_fields
+    # The diff is against the SAVED flow's fields (base_form_fields, from its
+    # metadata): that is the form the person has now and approves a change to.
+    # Every stage above judges against the edit baseline instead.
     form_changes = build_form_field_changes(base_form_fields, compiled_form_fields)
 
     compiled_spec = FlowDraftSpecCore(
@@ -518,19 +540,44 @@ def _prepare_ordered_edit_proposal(
     *,
     proposal: MaterializedOrderedEditProposal,
     current_steps: list[FlowStep],
-    current_metadata_json: dict[str, Any] | None,
+    baseline_form_fields: list[FormFieldSpec] | None,
     primary_runtime_input_type: InputType | None,
     may_restructure: bool,
 ) -> _PreparedOrderedEditProposal:
     warnings: list[str] = []
+    base_form_fields = baseline_form_fields
+    edited_fields = (
+        proposal.form_fields
+        if "form_fields" in proposal.model_fields_set
+        else base_form_fields
+    ) or []
+    declared = [(field.name, field.type) for field in edited_fields]
+    dropped = dropped_primary_field_names(
+        runtime_input_type=primary_runtime_input_type, fields=declared
+    )
+    elected = (
+        elect_main_text_field(declared)
+        if main_text_is_a_field(
+            runtime_input_type=primary_runtime_input_type, fields=declared
+        )
+        else None
+    )
+    if elected is not None:
+        # The run collects other fields, so the main text is a field: the one
+        # elected is required. Every other field keeps its declared contract.
+        proposal = _with_main_text_field_required(proposal, elected)
+    # A read of a shadow-looking name no field declares is still the shadow it was.
+    kept_names = frozenset(name for name, _ in declared) - dropped
     prepared, dropped_step_field_names = _sanitize_shadowed_primary_inputs(
         proposal=proposal,
         primary_runtime_input_type=primary_runtime_input_type,
+        kept_names=kept_names,
     )
     prepared, dropped_declared_field_names = _sanitize_shadowed_form_fields(
         proposal=prepared,
-        base_form_fields=extract_form_fields_from_metadata(current_metadata_json),
+        base_form_fields=base_form_fields,
         primary_runtime_input_type=primary_runtime_input_type,
+        dropped_names=dropped,
     )
     if may_restructure:
         # A saved-step revision keeps the saved step sequence; inserting a
@@ -543,15 +590,11 @@ def _prepare_ordered_edit_proposal(
                 for field in (
                     prepared.form_fields
                     if "form_fields" in prepared.model_fields_set
-                    else extract_form_fields_from_metadata(current_metadata_json)
+                    else base_form_fields
                 )
                 or []
             ],
-            saved_form_field_names=[
-                field.name
-                for field in extract_form_fields_from_metadata(current_metadata_json)
-                or []
-            ],
+            saved_form_field_names=[field.name for field in base_form_fields or []],
             warnings=warnings,
         )
     return _PreparedOrderedEditProposal(
@@ -562,13 +605,137 @@ def _prepare_ordered_edit_proposal(
             *dropped_declared_field_names,
         ],
         form_field_provenance=prepared.form_field_provenance,
+        main_text_field=elected,
     )
+
+
+def _with_main_text_field_required(
+    proposal: MaterializedOrderedEditProposal, elected: str
+) -> MaterializedOrderedEditProposal:
+    if "form_fields" not in proposal.model_fields_set or not proposal.form_fields:
+        return proposal
+    return proposal.model_copy(
+        update={
+            "form_fields": [
+                field.model_copy(update={"required": True})
+                if field.name == elected
+                else field
+                for field in proposal.form_fields
+            ]
+        }
+    )
+
+
+def _settle_run_form(
+    compiled: FlowDraftSpecCore,
+    *,
+    baseline: FlowDraftSpecCore,
+    main_text_field: str | None,
+    scoped: bool,
+) -> FlowDraftSpecCore:
+    """The run form an edit ends with, judged once on the final spec.
+
+    A whole-flow edit may change the run form: the main-text field it newly
+    binds is required (see `_with_bound_main_text_required`) and the change
+    shows in the form diff. A saved-step (`scoped`) edit may not change the run
+    form in any way, so the rule is general: fields that differ from the
+    baseline, whatever made them differ (a bind, a template placeholder), are
+    refused with the whole-flow edit as the remedy."""
+
+    settled = _with_bound_main_text_required(
+        compiled, baseline=baseline, main_text_field=main_text_field
+    )
+    if not scoped:
+        return settled
+    baseline_fields = baseline.form_fields or []
+    if (settled.form_fields or []) == baseline_fields:
+        return settled
+    raise AIBuilderBadRequestException(
+        "A single-step edit cannot change the run form, and this edit would: "
+        f"{_describe_form_change(baseline_fields, settled.form_fields or [])}. Leave "
+        "out what causes it, such as a read of a form field the run form lets "
+        "stay empty or a template placeholder the flow does not collect; the "
+        "change itself is a whole-flow edit.",
+        code=AIBuilderErrorCode.BAD_REQUEST,
+    )
+
+
+def _describe_form_change(
+    saved: list[FormFieldSpec], final: list[FormFieldSpec]
+) -> str:
+    saved_by_name = {field.name: field for field in saved}
+    final_names = {field.name for field in final}
+    parts: list[str] = []
+    for field in final:
+        name = f"`{display_value(field.name)}`"
+        before = saved_by_name.get(field.name)
+        if before is None:
+            parts.append(f"add {name}")
+        elif before.model_copy(update={"required": field.required}) != field:
+            parts.append(f"change {name}")
+        elif before.required != field.required:
+            parts.append(f"make {name} {'required' if field.required else 'optional'}")
+    parts.extend(
+        f"remove `{display_value(field.name)}`"
+        for field in saved
+        if field.name not in final_names
+    )
+    return ", ".join(parts) or "reorder the fields"
+
+
+def _with_bound_main_text_required(
+    compiled: FlowDraftSpecCore,
+    *,
+    baseline: FlowDraftSpecCore,
+    main_text_field: str | None,
+) -> FlowDraftSpecCore:
+    """The main-text field an edit newly binds is required in the run form.
+
+    A proposal that declares the form fields already has it required; one that
+    omits them inherits the baseline fields, where it may be optional, so a step
+    the edit newly makes read it would get an empty main text."""
+
+    fields = compiled.form_fields or []
+    field = next((item for item in fields if item.name == main_text_field), None)
+    if main_text_field is None or field is None or field.required:
+        return compiled
+    saved_names = {item.name for item in baseline.form_fields or []}
+    saved_refs = spec_step_refs(baseline.steps)
+    saved_reads = {
+        step.existing_step_ref: form_fields_read(
+            step, order=order, step_refs=saved_refs, form_field_names=saved_names
+        )
+        for order, step in enumerate(baseline.steps, 1)
+        if step.existing_step_ref is not None
+    }
+    names = {item.name for item in fields}
+    refs = spec_step_refs(compiled.steps)
+    for order, step in enumerate(compiled.steps, 1):
+        reads = form_fields_read(
+            step, order=order, step_refs=refs, form_field_names=names
+        )
+        if main_text_field not in reads:
+            continue
+        if main_text_field in saved_reads.get(step.existing_step_ref or "", ()):
+            continue
+        return compiled.model_copy(
+            update={
+                "form_fields": [
+                    item.model_copy(update={"required": True})
+                    if item.name == main_text_field
+                    else item
+                    for item in fields
+                ]
+            }
+        )
+    return compiled
 
 
 def _sanitize_shadowed_primary_inputs(
     *,
     proposal: MaterializedOrderedEditProposal,
     primary_runtime_input_type: InputType | None,
+    kept_names: frozenset[str] = frozenset(),
 ) -> tuple[MaterializedOrderedEditProposal, list[str]]:
     steps: list[MaterializedOrderedEditStep] = []
     dropped_field_names: list[str] = []
@@ -579,6 +746,7 @@ def _sanitize_shadowed_primary_inputs(
             step, dropped = _without_primary_runtime_shadow_fields(
                 item.step,
                 primary_runtime_input_type=primary_runtime_input_type,
+                kept_names=kept_names,
             )
             dropped_field_names.extend(dropped)
             if step is item.step:
@@ -594,6 +762,7 @@ def _sanitize_shadowed_primary_inputs(
         filtered, dropped = split_primary_runtime_input_shadow_names(
             field_names=item.uses_form_fields or [],
             runtime_input_type=primary_runtime_input_type,
+            kept_names=kept_names,
         )
         dropped_field_names.extend(dropped)
         if filtered == (item.uses_form_fields or []):
@@ -612,6 +781,7 @@ def _sanitize_shadowed_form_fields(
     proposal: MaterializedOrderedEditProposal,
     base_form_fields: list[FormFieldSpec] | None,
     primary_runtime_input_type: InputType | None,
+    dropped_names: frozenset[str] = frozenset(),
 ) -> tuple[MaterializedOrderedEditProposal, list[str]]:
     if (
         "form_fields" not in proposal.model_fields_set
@@ -623,11 +793,7 @@ def _sanitize_shadowed_form_fields(
     kept_fields: list[FormFieldSpec] = []
     dropped_field_names: list[str] = []
     for field in proposal.form_fields:
-        if is_primary_runtime_input_shadow_field(
-            variable_name=field.name,
-            field_type=field.type,
-            runtime_input_type=primary_runtime_input_type,
-        ):
+        if field.name in dropped_names:
             dropped_field_names.append(field.name)
             continue
         kept_fields.append(field)
@@ -1239,10 +1405,12 @@ def _without_primary_runtime_shadow_fields(
     step: NewStepDraft,
     *,
     primary_runtime_input_type: InputType | None,
+    kept_names: frozenset[str] = frozenset(),
 ) -> tuple[NewStepDraft, list[str]]:
     filtered, dropped = split_primary_runtime_input_shadow_names(
         field_names=step.uses_form_fields,
         runtime_input_type=primary_runtime_input_type,
+        kept_names=kept_names,
     )
     if filtered == step.uses_form_fields:
         return step, dropped

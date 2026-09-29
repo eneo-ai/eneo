@@ -6539,6 +6539,7 @@
   "flow_validation_msg_input_binding_future_step": "Steget hänvisar till ett senare steg. Ett steg kan bara använda resultat från tidigare steg.",
   "flow_validation_msg_input_binding_invalid_step": "Steget hänvisar till ett steg som inte går att använda här.",
   "flow_validation_msg_input_binding_unknown_step": "Steget hänvisar till ett steg som inte finns i flödet.",
+  "flow_validation_msg_input_alias_not_received": "Steget läser fritext som körningen inte samlar in. Flödets körning samlar bara in formulärfält eller uppladdade filer. Läs ett formulärfält eller det uppladdade underlaget i stället.",
   "flow_validation_msg_duplicate_step_name": "Två steg har samma namn. Ge varje steg ett unikt namn.",
   "flow_validation_msg_citation_mode_unsupported": "Källhänvisningar kan inte användas med stegets nuvarande inställningar under Resultat.",
   "flow_validation_msg_template_fill_requires_docx": "Dokumentmallen måste vara en Word-fil (.docx).",
