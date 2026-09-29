@@ -160,14 +160,16 @@ services:
         condition: service_completed_successfully
 
   worker:
-    # Background task processor (crawls, uploads, integrations)
+    # General background task processor (uploads, integrations, and control jobs)
     # Uses same image as backend but runs ARQ worker instead of HTTP server
     # The RUN_AS_WORKER env var tells run.sh to start ARQ instead of Gunicorn
     image: ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}
     container_name: eneo_worker
+    init: true
     restart: unless-stopped
     environment:
       - RUN_AS_WORKER=true  # Runs today's ARQ adapter; task logic is queue-neutral
+      - WORKER_ROLE=general
       - OBJECT_CONTENT_ENDPOINT_URL
       - OBJECT_CONTENT_REGION
       - OBJECT_CONTENT_BUCKET
@@ -234,6 +236,40 @@ services:
     depends_on:
       - backend
 
+  crawler-worker:
+    # Dedicated consumer for long-running website crawls on arq:crawler.
+    image: ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 70s
+    healthcheck:
+      test: ["CMD", "arq", "--check", "src.eneo.worker.arq.CrawlerWorkerSettings"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    environment:
+      - RUN_AS_WORKER=true
+      - WORKER_ROLE=crawler
+      - OBJECT_CONTENT_ENDPOINT_URL
+      - OBJECT_CONTENT_REGION
+      - OBJECT_CONTENT_BUCKET
+      - OBJECT_CONTENT_ACCESS_KEY_ID
+      - OBJECT_CONTENT_SECRET_ACCESS_KEY
+      - OBJECT_CONTENT_DEPLOYMENT_ID
+      - OBJECT_CONTENT_ALLOW_INSECURE_HTTP
+    env_file:
+      - env_backend.env
+    # Startup recovery requires /tmp to remain private to this crawler container.
+    # eneo_temp_files contains upload and export staging, so do not mount it here.
+    volumes:
+      - eneo_backend_data:/app/data
+    networks:
+      - proxy_tier
+      - data_net
+    depends_on:
+      - backend
+
   db:
     image: pgvector/pgvector@sha256:${PGVECTOR_IMAGE_DIGEST:?Set PGVECTOR_IMAGE_DIGEST in .env}
     container_name: eneo_db
@@ -247,10 +283,11 @@ services:
     #
     # THE AGGREGATE BUDGET TABLE LIVES IN env_backend.template and is
     # the single owner of this arithmetic. In short: the shipped
-    # default profile configures a maximum of 360, so 400 covers it
+    # default profile configures a maximum of 210 (backend, general,
+    # execution, maintenance, and crawler processes), so 400 covers it
     # plus the 3 reserved superuser slots and headroom. The Large
-    # profile (600) is deliberately NOT covered — that many backend
-    # processes belongs behind a connection pooler.
+    # profile (350) fits too; more replicas than this stack ships
+    # belong behind a connection pooler.
     #
     # These are CONFIGURED MAXIMA, not observed usage. Pool
     # right-sizing needs measured peak checkouts and is deferred to the

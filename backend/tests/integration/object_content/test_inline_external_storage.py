@@ -604,7 +604,7 @@ async def test_external_migration_is_transactional_idempotent_and_metadata_only(
     migration = runpy.run_path(
         str(
             Path(__file__).parents[3]
-            / "alembic/versions/202609211200_inline_external_storage.py"
+            / "alembic/versions/202609211201_inline_external_storage.py"
         )
     )
 

@@ -9,7 +9,6 @@ from eneo.ai_models.embedding_models.datastore.datastore_models import (
     SemanticSearchResponse,
 )
 from eneo.authentication.auth_dependencies import (
-    get_current_active_user,
     get_scope_filter,
     require_user_for_creation,
 )
@@ -37,7 +36,6 @@ from eneo.server.dependencies.container import get_container
 from eneo.server.models.api import InfoBlobUpsertRequest
 from eneo.server.protocol import responses
 from eneo.spaces.api.space_models import TransferRequest
-from eneo.users.user import UserInDB
 
 router = APIRouter()
 
@@ -235,14 +233,20 @@ async def delete_group_by_id(
 async def add_info_blobs(
     id: UUID,
     info_blobs: InfoBlobUpsertRequest,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-    current_user: Annotated[UserInDB, Depends(get_current_active_user)],
-    _user_for_creation: None = Depends(require_user_for_creation),
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user=True, transaction_scope="function")),
+    ],
 ):
     """Maximum allowed simultaneous upload is 128.
 
     Will be embedded using the embedding model of the group.
     """
+    # Reuse this function-scoped transaction's authenticated user. A second
+    # request-scoped authentication can block API-key hash upgrades until after
+    # this publication has already needed to commit.
+    current_user = container.user()
+    await require_user_for_creation(current_user)
     if len(info_blobs.info_blobs) > 128:
         raise BadRequestException("Too many info-blobs!")
 

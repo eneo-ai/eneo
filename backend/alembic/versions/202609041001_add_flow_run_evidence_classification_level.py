@@ -1,7 +1,7 @@
 """add flow run evidence classification level
 
 Revision ID: 202609041001
-Revises: 202609031000
+Revises: 202609031001
 Create Date: 2026-09-04 16:00:00.000000
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "202609041001"
-down_revision: str | None = "202609031000"
+down_revision: str | None = "202609031001"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

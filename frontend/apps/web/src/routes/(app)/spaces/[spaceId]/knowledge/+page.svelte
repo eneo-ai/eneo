@@ -13,6 +13,8 @@
   import { IconInfo } from "@eneo/icons/info";
   import { IconLinkExternal } from "@eneo/icons/link-external";
   import { IconRefresh } from "@eneo/icons/refresh";
+  import { IconStop } from "@eneo/icons/stop";
+  import { IconTrash } from "@eneo/icons/trash";
   import IntegrationsTable from "./integrations/IntegrationsTable.svelte";
   import SyncHistoryDialog from "./integrations/SyncHistoryDialog.svelte";
   import ImportKnowledgeDialog from "$lib/features/integrations/components/import/ImportKnowledgeDialog.svelte";
@@ -20,14 +22,24 @@
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
-  import type { IntegrationKnowledge } from "@eneo/eneo-js";
-  import { jobCompletionEvents } from "$lib/features/jobs/JobManager";
+  import type { IntegrationKnowledge, WebsiteSparse } from "@eneo/eneo-js";
+  import { getJobManager, jobCompletionEvents } from "$lib/features/jobs/JobManager";
   import { untrack } from "svelte";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import { canRequestCrawlStop } from "$lib/features/knowledge/crawlRunState";
+  import {
+    bulkDeletionWaitsForCrawlerCleanup,
+    bulkFailureWebsiteIds,
+    deleteWebsiteBatches,
+    runWebsiteBatches,
+    stopWebsiteBatches
+  } from "./bulkWebsiteActions";
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- page data type inferred from layout chain
   let { data } = $props<{ data: any }>();
 
   const eneo = getEneo();
+  const { startFastUpdatePolling } = getJobManager();
   const {
     state: { currentSpace },
     refreshCurrentSpace
@@ -67,6 +79,46 @@
   // Website selection state (shared with WebsiteTable)
   let selectedWebsiteIds = $state.raw(writable<Set<string>>(new Set()));
   let isBulkRecrawling = $state(false);
+  let isBulkStopping = $state(false);
+  let isBulkDeleting = $state(false);
+  let stopDialogOpen = $state(false);
+  let stopTargetIds = $state<string[]>([]);
+  let deleteDialogOpen = $state(false);
+  let deleteTargetIds = $state<string[]>([]);
+  let bulkActionPending = $derived(isBulkRecrawling || isBulkStopping || isBulkDeleting);
+
+  async function refreshWebsiteData() {
+    try {
+      await refreshCurrentSpace("knowledge");
+    } catch (error) {
+      console.error("Failed to refresh website data after a bulk action", error);
+    }
+  }
+
+  function canStopWebsite(website: WebsiteSparse): boolean {
+    return (
+      website.space_id === $currentSpace.id &&
+      website.latest_crawl !== null &&
+      canRequestCrawlStop(website.latest_crawl)
+    );
+  }
+
+  let stoppableWebsiteIds = $derived(
+    $currentSpace.knowledge.websites.filter(canStopWebsite).map((website) => website.id)
+  );
+  let selectedStoppableWebsiteIds = $derived(
+    stoppableWebsiteIds.filter((websiteId) => $selectedWebsiteIds.has(websiteId))
+  );
+  let selectedDeletableWebsiteIds = $derived(
+    $currentSpace.knowledge.websites
+      .filter(
+        (website) =>
+          website.space_id === $currentSpace.id &&
+          website.permissions?.includes("delete") &&
+          $selectedWebsiteIds.has(website.id)
+      )
+      .map((website) => website.id)
+  );
 
   // Bulk recrawl handler
   async function bulkRecrawl() {
@@ -74,31 +126,119 @@
 
     isBulkRecrawling = true;
     try {
-      const websiteIds = Array.from($selectedWebsiteIds);
-
-      const response = await eneo.websites.bulkRun({
-        website_ids: websiteIds
-      });
-
-      // Only show alert if there were errors
-      if (response.failed > 0) {
-        const errorMessages = response.errors
-          .map((e: { error?: string }) => e.error)
-          .filter(Boolean);
-        const detail = errorMessages.length > 0 ? `: ${errorMessages.join(", ")}` : "";
-        toast.error(
-          `${response.queued} website${response.queued !== 1 ? "s" : ""} queued, ${response.failed} failed${detail}`
-        );
+      const result = await runWebsiteBatches(Array.from($selectedWebsiteIds), (websiteIds) =>
+        eneo.websites.bulkRun({ website_ids: websiteIds })
+      );
+      if (result.queued > 0) {
+        await startFastUpdatePolling();
       }
 
-      // Clear selection and refresh
-      $selectedWebsiteIds = new Set();
-      refreshCurrentSpace();
-    } catch (e) {
-      toastError(e);
-      console.error(e);
+      if (result.failed > 0) {
+        toast.error(
+          result.queued > 0
+            ? m.bulk_crawl_partial({ queued: result.queued, failed: result.failed })
+            : m.bulk_crawl_failed()
+        );
+        const failedWebsiteIds = bulkFailureWebsiteIds(result.errors);
+        if (failedWebsiteIds.length > 0) {
+          $selectedWebsiteIds = new Set(failedWebsiteIds);
+        }
+      } else {
+        toast.success(m.bulk_crawl_started({ count: result.queued, total: result.total }));
+        $selectedWebsiteIds = new Set();
+      }
+    } catch (error) {
+      toastError(error, m.bulk_crawl_failed());
+      console.error(error);
+    } finally {
+      isBulkRecrawling = false;
+      await refreshWebsiteData();
     }
-    isBulkRecrawling = false;
+  }
+
+  function confirmBulkStop(websiteIds: string[]) {
+    stopTargetIds = [...websiteIds];
+    stopDialogOpen = true;
+  }
+
+  async function bulkStop() {
+    if (stopTargetIds.length === 0) return;
+
+    isBulkStopping = true;
+    try {
+      const result = await stopWebsiteBatches(stopTargetIds, (websiteIds) =>
+        eneo.websites.bulkStop({ website_ids: websiteIds })
+      );
+
+      const failedWebsiteIds = bulkFailureWebsiteIds(result.errors);
+      $selectedWebsiteIds = result.failed > 0 ? new Set(failedWebsiteIds) : new Set();
+
+      if (result.failed > 0) {
+        toast.error(
+          result.stopped > 0
+            ? m.crawls_stop_partial({ stopped: result.stopped, failed: result.failed })
+            : m.bulk_crawl_stop_failed()
+        );
+      } else if (result.stopped > 0) {
+        toast.success(m.crawls_stop_requested({ count: result.stopped }));
+      } else {
+        toast.info(m.crawls_not_running());
+      }
+    } finally {
+      isBulkStopping = false;
+      await refreshWebsiteData();
+    }
+  }
+
+  function confirmBulkDelete(websiteIds: string[]) {
+    deleteTargetIds = [...websiteIds];
+    deleteDialogOpen = true;
+  }
+
+  async function bulkDelete() {
+    if (deleteTargetIds.length === 0) return;
+
+    isBulkDeleting = true;
+    try {
+      const result = await deleteWebsiteBatches(deleteTargetIds, (websiteIds) =>
+        eneo.websites.bulkDelete({ website_ids: websiteIds })
+      );
+
+      if (result.failed > 0) {
+        if (bulkDeletionWaitsForCrawlerCleanup(result.errors)) {
+          const cleanupPending = result.errors.some(
+            (error) => error.error === "crawl_cleanup_pending"
+          );
+          toast.info(
+            cleanupPending
+              ? m.websites_remove_cleanup_pending()
+              : result.deleted > 0
+                ? m.websites_remove_partial_stopping()
+                : m.websites_remove_stopping()
+          );
+        } else {
+          toast.error(
+            result.deleted > 0
+              ? m.websites_remove_partial({ deleted: result.deleted, failed: result.failed })
+              : m.bulk_website_remove_failed()
+          );
+        }
+        const failedWebsiteIds = bulkFailureWebsiteIds(result.errors);
+        $selectedWebsiteIds = new Set(
+          failedWebsiteIds.length > 0 ? failedWebsiteIds : deleteTargetIds
+        );
+      } else {
+        if (result.deleted > 0) {
+          toast.success(m.websites_removed({ count: result.deleted }));
+        } else {
+          toast.info(m.websites_already_removed());
+        }
+        $selectedWebsiteIds = new Set();
+      }
+    } finally {
+      isBulkDeleting = false;
+      await refreshWebsiteData();
+    }
   }
 
   let userCanSeeCollections = $derived($currentSpace.hasPermission("read", "collection"));
@@ -163,17 +303,64 @@
         <CollectionEditor mode="create" collection={undefined}></CollectionEditor>
       {:else if $selectedTab === "collections"}
         {@render noCreatePermission(m.collections().toLowerCase())}
-      {:else if $selectedTab === "websites" && $currentSpace.hasPermission("create", "website")}
-        {#if $selectedWebsiteIds.size > 0}
-          <Button onclick={bulkRecrawl} disabled={isBulkRecrawling}>
-            <IconRefresh size="sm" />
-            {isBulkRecrawling ? m.syncing() : m.sync_selected({ count: $selectedWebsiteIds.size })}
-          </Button>
-        {:else}
-          <WebsiteEditor mode="create"></WebsiteEditor>
-        {/if}
       {:else if $selectedTab === "websites"}
-        {@render noCreatePermission(m.websites().toLowerCase())}
+        {#if $selectedWebsiteIds.size > 0}
+          {#if $currentSpace.hasPermission("create", "website")}
+            {#if selectedStoppableWebsiteIds.length > 0}
+              <Button
+                variant="outline"
+                disabled={bulkActionPending}
+                aria-busy={isBulkStopping}
+                onclick={() => confirmBulkStop(selectedStoppableWebsiteIds)}
+              >
+                <IconStop data-icon="inline-start" />
+                {isBulkStopping
+                  ? m.stopping_crawls()
+                  : m.stop_selected_crawls({ count: selectedStoppableWebsiteIds.length })}
+              </Button>
+            {/if}
+          {/if}
+          {#if selectedDeletableWebsiteIds.length > 0}
+            <Button
+              variant="destructive"
+              disabled={bulkActionPending}
+              aria-busy={isBulkDeleting}
+              onclick={() => confirmBulkDelete(selectedDeletableWebsiteIds)}
+            >
+              <IconTrash data-icon="inline-start" />
+              {isBulkDeleting
+                ? m.removing_websites()
+                : m.remove_selected_websites({ count: selectedDeletableWebsiteIds.length })}
+            </Button>
+          {/if}
+          {#if $currentSpace.hasPermission("create", "website")}
+            <Button onclick={bulkRecrawl} disabled={bulkActionPending} aria-busy={isBulkRecrawling}>
+              <IconRefresh data-icon="inline-start" />
+              {isBulkRecrawling
+                ? m.syncing()
+                : m.sync_selected({ count: $selectedWebsiteIds.size })}
+            </Button>
+          {/if}
+        {:else}
+          {#if $currentSpace.hasPermission("create", "website")}
+            {#if stoppableWebsiteIds.length > 0}
+              <Button
+                variant="outline"
+                disabled={bulkActionPending}
+                aria-busy={isBulkStopping}
+                onclick={() => confirmBulkStop(stoppableWebsiteIds)}
+              >
+                <IconStop data-icon="inline-start" />
+                {isBulkStopping
+                  ? m.stopping_crawls()
+                  : m.stop_all_crawls({ count: stoppableWebsiteIds.length })}
+              </Button>
+            {/if}
+            <WebsiteEditor mode="create"></WebsiteEditor>
+          {:else}
+            {@render noCreatePermission(m.websites().toLowerCase())}
+          {/if}
+        {/if}
       {:else if $selectedTab === "integrations" && $currentSpace.hasPermission("create", "integrationKnowledge")}
         {#if data.settings.sharepoint_fixture_mode_available}
           <SharePointFixtureLauncher authType={isPersonalSpace ? "user_oauth" : "tenant_app"}
@@ -261,3 +448,23 @@
     {/if}
   </Page.Main>
 </Page.Root>
+
+<ConfirmDialog
+  bind:open={stopDialogOpen}
+  title={m.stop_crawls_title({ count: stopTargetIds.length })}
+  description={m.stop_crawls_description()}
+  confirmLabel={m.stop_crawl()}
+  pendingLabel={m.stopping_crawls()}
+  errorContext={m.bulk_crawl_stop_failed()}
+  onConfirm={bulkStop}
+/>
+
+<ConfirmDialog
+  bind:open={deleteDialogOpen}
+  title={m.remove_websites_title({ count: deleteTargetIds.length })}
+  description={m.remove_websites_description()}
+  confirmLabel={m.remove_websites_confirm()}
+  pendingLabel={m.removing_websites()}
+  errorContext={m.bulk_website_remove_failed()}
+  onConfirm={bulkDelete}
+/>

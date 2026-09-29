@@ -38,6 +38,7 @@ BASE_STACK_SERVICE_IMAGES = {
     "frontend": "ghcr.io/eneo-ai/eneo-frontend@sha256:${ENEO_FRONTEND_IMAGE_DIGEST:?Set ENEO_FRONTEND_IMAGE_DIGEST in .env}",
     "backend": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
     "worker": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
+    "crawler-worker": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
     "task-execution-worker": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
     "task-maintenance-worker": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
     "db": "pgvector/pgvector@sha256:${PGVECTOR_IMAGE_DIGEST:?Set PGVECTOR_IMAGE_DIGEST in .env}",

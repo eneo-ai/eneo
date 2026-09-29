@@ -23,7 +23,7 @@ def test_worker_settings_import_does_not_reenter_partially_initialized_user() ->
     _run_python_import_probe(
         """
 import eneo.worker.arq as arq_worker
-assert arq_worker.WorkerSettings.functions
+assert arq_worker.WorkerSettings["functions"]
 """
     )
 

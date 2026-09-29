@@ -390,6 +390,14 @@ def _seed_legacy_duplicate_identities(
     return identities, untitled_ids
 
 
+# Columns that migrations after _VERSION_REVISION add to info_blobs: incremental
+# crawl state (202608131000) and website source identity (202609071200). Their
+# own migration tests cover them.
+_LATER_INFO_BLOB_COLUMNS = frozenset(
+    {"http_etag", "http_last_modified", "website_source_url"}
+)
+
+
 def _assert_orm_parity(database_url: str) -> None:
     engine = create_engine(database_url)
     try:
@@ -398,7 +406,7 @@ def _assert_orm_parity(database_url: str) -> None:
             for column in inspect(engine).get_columns(InfoBlobs.__tablename__)
         }
         orm_columns = {column.name for column in InfoBlobs.__table__.columns}
-        assert database_columns == orm_columns
+        assert database_columns == orm_columns - _LATER_INFO_BLOB_COLUMNS
     finally:
         engine.dispose()
 

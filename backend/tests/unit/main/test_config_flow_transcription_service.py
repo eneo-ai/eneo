@@ -14,7 +14,6 @@ _BASE_KWARGS: dict[str, object] = {
     "redis_port": 6379,
     "encryption_key": "yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=",
     "crawl_max_length": 1800,
-    "tenant_worker_semaphore_ttl_seconds": 3600,
 }
 
 

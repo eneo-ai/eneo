@@ -14,14 +14,15 @@
     Cloud,
     Cpu,
     FingerprintPattern,
+    Globe,
     HardDrive,
-    History,
     KeyRound,
     Landmark,
     LayoutTemplate,
     Lightbulb,
     MessageSquareText,
     Plug,
+    RotateCcwClock,
     ShieldCheck,
     Sparkles,
     UserRound,
@@ -93,7 +94,8 @@
       items: [
         navItem("/admin/usage", ChartPie, m.usage()),
         navItem("/admin/insights", Lightbulb, m.insights()),
-        navItem("/admin/audit-logs", History, m.audit_logs())
+        navItem("/admin/crawler", Globe, m.admin_crawler_title()),
+        navItem("/admin/audit-logs", RotateCcwClock, m.audit_logs())
       ]
     },
     {

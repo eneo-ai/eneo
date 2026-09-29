@@ -53,7 +53,8 @@ The provided `docker-compose.yml` file defines all the services needed to run En
 - **`traefik`**: A reverse proxy that handles incoming traffic, routes it to the correct service, and automatically manages SSL certificates
 - **`frontend`**: The web interface for Eneo
 - **`backend`**: The main API and application logic
-- **`worker`**: The general ARQ worker for document ingestion, crawling, integrations, and audit jobs
+- **`worker`**: The general ARQ worker for document ingestion, integrations, and audit jobs
+- **`crawler-worker`**: The dedicated ARQ worker for website crawls on the isolated crawler queue
 - **`task-execution-worker`**: The ARQ worker that executes Flow runs on the dedicated execution-capacity queue
 - **`task-maintenance-worker`**: The ARQ worker and scheduler for Flow recovery, review expiry, and audit/webhook outboxes
 - **`db`**: A PostgreSQL database with the pgvector extension for storing all application data

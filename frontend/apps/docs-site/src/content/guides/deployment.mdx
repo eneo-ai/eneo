@@ -395,28 +395,28 @@ value and a comment.
 
     | Variable | Default | Description |
     |----------|---------|-------------|
-    | `CRAWL_FEEDER_ENABLED` | `true` | Meters the crawl enqueue rate (keep `true`) |
-    | `CRAWL_MAX_LENGTH` | `36000` | Max crawl duration in seconds (10 hours) |
-    | `CLOSESPIDER_ITEMCOUNT` | `20000` | Max pages per crawl |
+    | `CRAWL_MAX_LENGTH` | `36000` | Max crawl duration in seconds (~10 hours) |
+    | `CLOSESPIDER_ITEMCOUNT` | `20000` | Max pages and linked files per crawl |
+    | `CRAWL_JOB_CONCURRENCY_LIMIT` | `WORKER_MAX_JOBS` | Cluster-wide crawl admission limit across crawler replicas |
+    | `CRAWL_HEARTBEAT_INTERVAL_SECONDS` | `300` | PostgreSQL lease renewal interval |
     | `CRAWLER_BLOCK_PRIVATE_NETWORKS` | `false` | Also refuse private (intranet) ranges; loopback, link-local and metadata addresses are always refused |
 
     <Callout type="warning">
       **Crawler network access.** The crawler only fetches `http(s)` URLs. Loopback, link-local (including the cloud metadata address), unspecified and multicast destinations are always refused at connection time, including after redirects. Private (intranet) ranges are allowed by default so intranet sites can be indexed; set `CRAWLER_BLOCK_PRIVATE_NETWORKS=true` on backend and worker to refuse them as well. The worker's `HTTP_PROXY`/`HTTPS_PROXY` are not used for crawling.
     </Callout>
-    | `DOWNLOAD_MAX_SIZE` | `10485760` | Max file the crawler downloads (bytes) |
-    | `OBEY_ROBOTS` | `true` | Respect `robots.txt` |
-    | `AUTOTHROTTLE_ENABLED` | `true` | Slow down automatically on busy sites |
 
     **Background Worker:**
 
     | Variable | Default | Description |
     |----------|---------|-------------|
-    | `WORKER_MAX_JOBS` | `15` | Max concurrent background jobs (should be ≤60% of DB pool size) |
-    | `TENANT_WORKER_CONCURRENCY_LIMIT` | `4` | Max concurrent crawl jobs per tenant (prevents one tenant monopolizing workers) |
-    | `TENANT_WORKER_SEMAPHORE_TTL_SECONDS` | `39600` | Slot TTL for crashed workers; must exceed `CRAWL_MAX_LENGTH` |
+    | `WORKER_MAX_JOBS` | `15` | Max concurrent jobs per worker process; general and crawler services apply it independently |
 
     <Callout type="info">
-      **High CPU usage on worker?** Reduce `WORKER_MAX_JOBS` to limit concurrent document processing.
+      Each API or worker process owns its own database pool. Budget PostgreSQL
+      `max_connections` for the sum of every API, general-worker,
+      task-worker, and crawler-worker process pool, plus operational headroom. Tune
+      `WORKER_MAX_JOBS` per worker process for its CPU, memory, and
+      database-active workload.
     </Callout>
 
     **Flows live transcription:**
@@ -816,7 +816,7 @@ Configure crawling behavior per tenant.
     curl -X PUT "https://eneo.example.com/api/v1/sysadmin/tenants/{tenant_id}/crawler-settings" \
       -H "X-API-Key: your-super-api-key" \
       -H "Content-Type: application/json" \
-      -d '{"crawl_feeder_enabled": true, "closespider_itemcount": 20000}'
+      -d '{"closespider_itemcount": 20000, "crawl_heartbeat_interval_seconds": 300}'
     ```
   </Tabs.Tab>
   <Tabs.Tab>
@@ -842,10 +842,15 @@ After deployment, some features require additional configuration in the Admin pa
 ### Crawler & Document Upload
 
 <Callout type="info">
-  To use the web crawler or upload documents for processing, the **worker
-  service must be running** and at least one **embedding model must be enabled**
-  in Admin → Models → Embedding models.
+  Document uploads require the **general worker**. Web crawls require both the
+  **general worker and crawler worker**. Enable at least one embedding model in
+  Admin → Models → Embeddings. See [how crawling works](/docs/architecture#worker-service-arq-today).
 </Callout>
+
+When applying source-URL migration `202609071200`, stop the API and both workers,
+then restart all publishers on the same version. Old publishers identify website
+documents by title; the new version uses their source URL. The migration preserves
+metadata and citation IDs and reports ambiguous legacy URLs for review.
 
 ### Apps (Voice/Audio Features)
 
@@ -886,8 +891,8 @@ key or a tenant ID. The container side is covered in
 | "Failed to decrypt credential"        | `ENCRYPTION_KEY` missing or changed                     | Set correct key or re-enter credentials                                                        |
 | Credentials API returns 404           | `TENANT_CREDENTIALS_ENABLED=false`                      | Set to `true`, requires `ENCRYPTION_KEY`                                                       |
 | OIDC redirect fails                   | `PUBLIC_ORIGIN` mismatch                                | Must match in backend, frontend, AND the IdP redirect URI (`{PUBLIC_ORIGIN}/login/callback`)   |
-| Scheduled crawls never start          | `CRAWL_FEEDER_ENABLED=false`                            | Set to `true`                                                                                  |
-| Crawls/uploads not working            | Worker not running or no embedding model                | Check worker is running, enable embedding model in Admin → Models                              |
+| Crawls not processing                 | Crawler worker unavailable or execution leases expired  | Check `/api/healthz/crawler`; an increasing `oldest_active_age_seconds` or nonzero `expired_leases` identifies stalled lifecycle work |
+| Crawls/uploads not working            | Worker not running or no embedding model                | Check both workers are running, enable embedding model in Admin → Models                       |
 | Flow remains queued                   | Execution worker not running                            | Check `task-execution-worker`; its queue is separate from the general worker                   |
 | Flow recovery or outboxes are delayed | Maintenance worker not running                          | Check `task-maintenance-worker` and `/api/healthz/flows`                                       |
 | Can't create Apps                     | No transcription model enabled                          | Admin → Models → Transcription models tab, enable Whisper                                      |
@@ -958,7 +963,7 @@ docker compose logs -f
 docker compose logs -f backend
 
 # Last 100 lines for the API and all worker roles
-docker compose logs --tail=100 backend worker \
+docker compose logs --tail=100 backend worker crawler-worker \
   task-execution-worker task-maintenance-worker
 ```
 
@@ -1064,7 +1069,7 @@ File/Icon adoption, do not use a rolling `docker compose up`. Stop all backend
 replicas, let the old worker drain its executable knowledge jobs, then stop all
 old workers before starting `db-init`. The schema expansion installs a database
 write fence because old File/Icon code still changes legacy payload columns.
-Keep `backend`, `worker`, `task-execution-worker`, and
+Keep `backend`, `worker`, `crawler-worker`, `task-execution-worker`, and
 `task-maintenance-worker` stopped through the recovery point and `db-init`.
 
 Follow the [File and Icon storage upgrade
@@ -1090,7 +1095,7 @@ For PostgreSQL-inline content or an external endpoint:
 
 ```bash
 docker compose config --images
-docker compose stop backend worker task-execution-worker task-maintenance-worker
+docker compose stop backend worker crawler-worker task-execution-worker task-maintenance-worker
 docker compose pull
 docker compose run --rm db-init
 docker compose up -d
@@ -1110,7 +1115,7 @@ docker compose \
   --profile object-content \
   -f docker-compose.yml \
   -f docker-compose.object-content.yml \
-  stop backend worker task-execution-worker task-maintenance-worker
+  stop backend worker crawler-worker task-execution-worker task-maintenance-worker
 docker compose \
   --profile object-content \
   -f docker-compose.yml \
@@ -1197,7 +1202,7 @@ docker compose \
   --profile object-content \
   -f docker-compose.yml \
   -f docker-compose.object-content.yml \
-  stop backend worker task-execution-worker task-maintenance-worker object-content
+  stop backend worker crawler-worker task-execution-worker task-maintenance-worker object-content
 # Restore the matching PostgreSQL dump and object-store snapshot as described
 # in the linked procedure, then start the previous digest set:
 docker compose \
@@ -1221,8 +1226,9 @@ The reference `docker-compose.yml` sets a fixed `container_name` on every
 service, so `docker compose up --scale ...` is refused. To run more than one
 backend or worker replica, define additional services without `container_name`
 (or run the images under an orchestrator) and place the backend replicas behind
-your load balancer. Additional workers are safe: only one crawl feeder runs
-across all workers through leader election.
+your load balancer. Additional workers are safe: crawl admission and leases live in PostgreSQL, so
+extra `crawler-worker` replicas only add capacity. Set
+`CRAWL_JOB_CONCURRENCY_LIMIT` to the aggregate crawl capacity when you scale them.
 
 ---
 

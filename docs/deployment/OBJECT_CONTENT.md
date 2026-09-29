@@ -335,7 +335,7 @@ docker compose exec backend printenv OBJECT_CONTENT_INLINE_MAXIMUM_BYTES
 docker compose exec task-execution-worker printenv OBJECT_CONTENT_INLINE_MAXIMUM_BYTES
 
 # 2. Edit env_backend.env, then recreate every process that reads it.
-docker compose up -d --force-recreate backend worker \
+docker compose up -d --force-recreate backend worker crawler-worker \
   task-execution-worker task-maintenance-worker
 ```
 
@@ -594,7 +594,7 @@ duration, connection-pool pressure, and the documented inline admission
 ceiling. Reads are linear in payload size and use bounded chunks after the
 database driver returns the bounded BYTEA value.
 
-Before deploying migration `202609211200`, stop or drain every worker that runs
+Before deploying migration `202609211201`, stop or drain every worker that runs
 the `reconcile_object_content` cron (for the Compose worker, use
 `docker compose stop worker`, including all replicas). Upgrade every backend
 and worker that writes inline content before restarting those cron workers.
@@ -684,7 +684,7 @@ database-only or object-only backup complete in that state.
 For the bundled reference service:
 
 1. Put Eneo in maintenance and stop `backend`, `worker`,
-   `task-execution-worker`, and `task-maintenance-worker` so there are no new
+   `crawler-worker`, `task-execution-worker`, and `task-maintenance-worker` so there are no new
    writes or lifecycle transitions.
 2. Record the Eneo version, exact SeaweedFS manifest digest, stable deployment
    ID, PostgreSQL timestamp, and an operator backup ID. Do not record secrets.
@@ -700,7 +700,7 @@ Example commands (the utility image is digest-pinned):
 backup_id="$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -m 0700 "backup-$backup_id"
 
-docker compose stop backend worker task-execution-worker task-maintenance-worker
+docker compose stop backend worker crawler-worker task-execution-worker task-maintenance-worker
 docker compose exec -T db pg_dump -U postgres -Fc eneo \
   >"backup-$backup_id/postgresql.dump"
 docker compose stop object-content

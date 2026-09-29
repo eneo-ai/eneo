@@ -29,8 +29,8 @@ from eneo.tasks.routing import (
 )
 from eneo.worker.worker import ARQContext, Worker
 
-execution_worker = Worker(enable_feeder=False)
-maintenance_worker = Worker(enable_feeder=False)
+execution_worker = Worker()
+maintenance_worker = Worker()
 
 
 @execution_worker.long_running_function(

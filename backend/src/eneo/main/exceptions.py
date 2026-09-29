@@ -95,6 +95,10 @@ class ErrorCodes(int, Enum):
     # Develop numbers this 9062; the branch keeps its own 9056-9064 (see
     # the 2026-09-20 develop merge), so it takes the next free code here.
     SKILL_REMOVAL_BUSY = 9065
+    # Develop numbers these 9063 and 9064; the branch already uses those for the
+    # password codes above, so they take the next free codes here.
+    WEBSITE_CRAWL_ACTIVE = 9066
+    WEBSITE_CRAWL_CLEANUP_PENDING = 9067
 
 
 class NotFoundException(Exception):
@@ -231,7 +235,7 @@ class TypedIOValidationException(BadRequestException):
 
 
 class ModelInUseException(Exception):
-    """Raised when trying to soft-delete a model that is still referenced.
+    """Raised when deleting or semantically changing a model still in use.
 
     Surfaced as 400 with a dedicated error code so the frontend can show a
     localized "Model is in use" message and offer the migration flow as a
@@ -243,6 +247,14 @@ class ModelInUseException(Exception):
 
 
 class QuotaExceededException(Exception):
+    pass
+
+
+class TenantQuotaExceededException(QuotaExceededException):
+    pass
+
+
+class UserQuotaExceededException(QuotaExceededException):
     pass
 
 

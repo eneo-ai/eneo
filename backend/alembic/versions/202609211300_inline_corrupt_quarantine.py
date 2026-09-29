@@ -1,13 +1,13 @@
 """Allow quarantined inline corruption to retain its observed payload.
 
 Revision ID: 202609211300
-Revises: 202609211200
+Revises: 202609211201
 """
 
 from alembic import op
 
 revision = "202609211300"
-down_revision = "202609211200"
+down_revision = "202609211201"
 branch_labels = None
 depends_on = None
 

@@ -9,6 +9,18 @@ from eneo.model_providers.domain.model_provider_service import ModelProviderServ
 from eneo.settings.encryption_service import EncryptionService
 
 
+@pytest.fixture(autouse=True)
+def _embedding_guard_allows_edit(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Whether retained embeddings block a semantic edit is decided against the
+    # database and covered by the embedding-model lifecycle tests; these tests
+    # cover only what an endpoint move does to route declarations.
+    monkeypatch.setattr(
+        "eneo.model_providers.domain.model_provider_service."
+        "guard_embedding_provider_update",
+        AsyncMock(),
+    )
+
+
 def _service(
     provider: SimpleNamespace,
     *,

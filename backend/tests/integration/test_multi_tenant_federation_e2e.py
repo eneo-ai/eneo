@@ -886,7 +886,6 @@ async def test_federation_callback_rejects_redirect_mismatch_without_grace(
     jwks_mock,
     monkeypatch,
     mock_transcription_models,
-    test_settings,
     async_session,
     override_runtime_settings,
 ):

@@ -356,8 +356,16 @@ def test_request_validation_error_returns_sanitized_general_error():
 
 
 def test_main_app_request_validation_error_uses_general_error_for_non_flow_route():
-    response = TestClient(get_application()).get(
-        "/api/healthz/crawler",
+    app = get_application()
+
+    # The crawler health route takes no parameters, so a probe route stands in
+    # for any non-Flow route with a typed query parameter.
+    @app.get("/_test-query-validation")
+    async def validate_query_request(include_all: bool = False) -> dict[str, bool]:
+        return {"include_all": include_all}
+
+    response = TestClient(app).get(
+        "/_test-query-validation",
         params={"include_all": "not-bool"},
         headers={"x-request-id": "crawler-validation-id"},
     )

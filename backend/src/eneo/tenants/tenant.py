@@ -3,7 +3,14 @@ from enum import Enum
 from typing import Any, Optional, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_serializer,
+    field_validator,
+)
 from pydantic.networks import HttpUrl
 
 from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
@@ -240,9 +247,14 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
             return {}
 
         # Import here to avoid circular dependency
-        from eneo.tenants.crawler_settings_helper import validate_crawler_setting
+        from eneo.tenants.crawler_settings_helper import (
+            RETIRED_CRAWLER_SETTINGS,
+            validate_crawler_setting,
+        )
 
         for key, value in v.items():
+            if key in RETIRED_CRAWLER_SETTINGS:
+                continue
             errors = validate_crawler_setting(key, value)
             if errors:
                 raise ValueError(errors[0])
@@ -270,6 +282,16 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         except BadRequestException as error:
             # Pydantic field validation reports model errors as ValueError.
             raise ValueError(str(error)) from error
+
+    @field_serializer("crawler_settings")
+    def serialize_active_crawler_settings(
+        self,
+        crawler_settings: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Hide rollback-only crawler settings from every API projection."""
+        from eneo.tenants.crawler_settings_helper import get_active_crawler_settings
+
+        return get_active_crawler_settings(crawler_settings)
 
 
 class TenantUpdatePublic(BaseModel):

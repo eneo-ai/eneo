@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import math
 import multiprocessing
 import os
 import signal
@@ -22,6 +23,8 @@ from pdfminer.pdfdocument import PDFPasswordIncorrect
 from pdfminer.pdfparser import PDFSyntaxError
 from pptx.exc import PackageNotFoundError
 from pydantic import BaseModel, TypeAdapter
+
+from eneo.files.extraction_limits import FileExtractionLimits
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +100,11 @@ class NoExtractableTextError(ExtractionError):
         super().__init__(
             f"File '{filename}' contains no extractable text", "NO_EXTRACTABLE_TEXT"
         )
+
+
+class ExtractionLimitError(ExtractionError):
+    def __init__(self, filename: str, limit: str):
+        super().__init__(f"File '{filename}' exceeded the {limit}", "EXTRACTION_LIMIT")
 
 
 class EncryptedFileError(ExtractionError):
@@ -358,10 +366,29 @@ class TextExtractor:
         cls,
         filepath: Path,
         filename: str | None = None,
+        *,
+        limits: FileExtractionLimits | None = None,
     ) -> str:
         display_name = filename or filepath.name
+        pdf_limits = (
+            None
+            if limits is None
+            else PdfExtractionLimits(
+                max_pages=limits.max_pdf_pages,
+                max_extracted_bytes=limits.max_output_bytes,
+                timeout_seconds=math.ceil(limits.timeout_seconds),
+            )
+        )
         with cls._pdf_errors(display_name):
-            return cls._extract_pdf_text(filepath, display_name, limits=None)
+            try:
+                return cls._extract_pdf_text(filepath, display_name, pdf_limits)
+            except PdfExtractionLimitExceeded as exc:
+                # Background extraction reports every ceiling as one limit error;
+                # the deadline itself is owned by the extraction subprocess.
+                raise ExtractionLimitError(
+                    display_name,
+                    "PDF page limit" if exc.limit == "pages" else "text output limit",
+                ) from exc
 
     @classmethod
     async def extract_from_pdf_async(
@@ -713,6 +740,8 @@ class TextExtractor:
         filepath: Path,
         mimetype: str | None = None,
         filename: str | None = None,
+        *,
+        limits: FileExtractionLimits | None = None,
     ) -> str:
         mimetype = mimetype or magic.from_file(filepath, mime=True)  # pyright: ignore[reportUnknownMemberType]  # python-magic stubs are incomplete
         # Use original filename for error messages, fallback to temp filepath
@@ -742,7 +771,9 @@ class TextExtractor:
             ):
                 extracted_text = self.extract_from_plain_text(filepath, display_name)
             case TextMimeTypes.PDF:
-                extracted_text = self.extract_from_pdf(filepath, display_name)
+                extracted_text = self.extract_from_pdf(
+                    filepath, display_name, limits=limits
+                )
             case TextMimeTypes.DOCX:
                 extracted_text = self.extract_from_docx(filepath, display_name)
             case TextMimeTypes.PPTX:
@@ -758,3 +789,17 @@ class TextExtractor:
                 extracted_text = self.extract_from_plain_text(filepath, display_name)
 
         return extracted_text.strip()
+
+    async def extract_bounded(
+        self,
+        filepath: Path,
+        mimetype: str | None = None,
+        filename: str | None = None,
+        *,
+        limits: FileExtractionLimits | None = None,
+    ) -> str:
+        from eneo.files.bounded_extraction import extract_in_process
+
+        return await extract_in_process(
+            filepath, mimetype, filename or filepath.name, limits=limits
+        )

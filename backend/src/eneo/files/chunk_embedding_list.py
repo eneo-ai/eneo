@@ -28,11 +28,15 @@ class ChunkEmbeddingList:
         for embedding in embeddings:
             np.save(self._file, embedding)
 
+    def close(self) -> None:
+        self._file.close()
+
     def __iter__(self) -> Iterator[tuple[InfoBlobChunk, list[float]]]:
         self._file.seek(0)
-        for chunk in self._chunks:
-            embedding: list[float] = np.load(self._file).tolist()
+        try:
+            for chunk in self._chunks:
+                embedding: list[float] = np.load(self._file).tolist()
 
-            yield chunk, embedding
-
-        self._file.close()
+                yield chunk, embedding
+        finally:
+            self.close()

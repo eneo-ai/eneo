@@ -67,6 +67,10 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9059: () => m.eneo_error_9059(), // INFO_BLOB_ORIGINAL_UNAVAILABLE
   9060: () => m.eneo_error_9060(), // UNKNOWN_MODEL_CAPACITY
 
+  // --- Website crawl lifecycle ---
+  9066: () => m.eneo_error_9066(), // WEBSITE_CRAWL_ACTIVE
+  9067: () => m.eneo_error_9067(), // WEBSITE_CRAWL_CLEANUP_PENDING
+
   // --- Model lifecycle ---
   9039: () => m.eneo_error_9039(), // MODEL_IN_USE
 

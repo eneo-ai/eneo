@@ -3,9 +3,12 @@
 The tidy AI Builder branch once used 202609151000, 202609161000 and
 202609181000 for its own migrations. Develop shipped different migrations
 under the same ids, so the merged history renumbered the branch's three to
-202609151040, 202609161010 and 202609181010. A database stamped at one of the
-old ids by the branch would now be read as develop's migration of that id:
-Alembic would rerun the branch's renamed migrations and skip develop's.
+202609151040, 202609161010 and 202609181010. The crawler merge later took
+202609031000 and 202609211200 for its head-merge migrations, so the branch's
+flow_step_transcript_words and inline_external_storage migrations became
+202609031001 and 202609211201. A database stamped at one of the old ids by the
+branch would now be read as develop's migration of that id: Alembic would rerun
+the branch's renamed migrations and skip develop's.
 
 Such a database is recognised by the schema its branch migration left behind,
 which develop's migration of the same id never creates. It is refused with the
@@ -43,6 +46,17 @@ RENUMBERED_BRANCH_REVISIONS: tuple[RenumberedRevision, ...] = (
         new="202609181010",
         table="flow_runs",
         column="run_label",
+    ),
+    RenumberedRevision(
+        old="202609031000",
+        new="202609031001",
+        table="flow_step_transcript_words",
+    ),
+    RenumberedRevision(
+        old="202609211200",
+        new="202609211201",
+        table="object_content_reconciliation_state",
+        column="inline_conversion_ready_at",
     ),
 )
 
