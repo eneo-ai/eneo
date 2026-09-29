@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Literal, Protocol, TypeAlias, TypeGuard
 
+from eneo.flows.enums import FlowInputSource
 from eneo.flows.flow_variable_definitions import PREVIOUS_STEP_TEXT_ALIAS
 from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.template_reference_analyzer import TemplateReference, analyze_template
@@ -69,7 +70,7 @@ def build_step_ref_mapping(steps: Iterable[_StepReferenceSource]) -> dict[str, i
 
 def resolve_upstream_step_orders(
     *,
-    input_source: str | None,
+    input_source: FlowInputSource | str,
     step_order: int,
     binding_references: Iterable[TemplateReference] | None,
     max_prior_step_order: int,
@@ -78,24 +79,31 @@ def resolve_upstream_step_orders(
 
     Explicit underlag (``input_bindings``) is the whole step input, so its
     step references decide alone; ``input_source`` describes the input only
-    for a step without underlag. ``None`` means the step has no underlag.
+    for a step without underlag. ``None`` for ``binding_references`` means the
+    step has no underlag.
+
+    ``input_source`` is a ``FlowInputSource`` or the value it is stored as.
+    Anything else raises ``ValueError``: the security-classification check
+    reads its upstream set from here, and a source it cannot read must fail
+    that check rather than read as "no prior step".
     """
+    source = FlowInputSource(input_source)
     if binding_references is not None:
         return resolve_reference_step_orders(
             references=binding_references,
             step_order=step_order,
             max_prior_step_order=max_prior_step_order,
         )
-    if input_source == "previous_step" and step_order > 1:
+    if source is FlowInputSource.PREVIOUS_STEP and step_order > 1:
         return [step_order - 1]
-    if input_source == "all_previous_steps" and step_order > 1:
+    if source is FlowInputSource.ALL_PREVIOUS_STEPS and step_order > 1:
         return list(range(1, step_order))
     return []
 
 
 def resolve_step_upstream_orders(
     *,
-    input_source: str | None,
+    input_source: FlowInputSource | str,
     step_order: int,
     input_bindings: object,
     prompt_template: str | None,

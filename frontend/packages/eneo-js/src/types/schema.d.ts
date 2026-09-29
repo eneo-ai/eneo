@@ -16264,7 +16264,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v17";
+      schema_version: "flow-evidence-export.v18";
       /** Tenant Id */
       tenant_id: string;
       /** Trace Id */
@@ -16447,10 +16447,16 @@ export interface components {
         [key: string]: components["schemas"]["JsonValue"];
       }[];
       runtime_input_format: components["schemas"]["JsonValue"];
-      /** Upstream Step Labels */
-      upstream_step_labels: string[];
-      /** Upstream Step Orders */
-      upstream_step_orders: number[];
+      /**
+       * Upstream Step Labels
+       * @description Labels of upstream_step_orders; null when that is null.
+       */
+      upstream_step_labels: string[] | null;
+      /**
+       * Upstream Step Orders
+       * @description The prior steps whose output the step read, or null when the recorded input_source is not one this version knows, so the lineage is unknown.
+       */
+      upstream_step_orders: number[] | null;
       used_question_binding: components["schemas"]["JsonValue"];
       /** Uses Runtime Input */
       uses_runtime_input: boolean;
@@ -20965,7 +20971,7 @@ export interface components {
      *           "count": 1
      *         },
      *         "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
-     *         "schema_version": "flow-evidence-export.v17",
+     *         "schema_version": "flow-evidence-export.v18",
      *         "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808",
      *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
      *       },
@@ -20985,7 +20991,7 @@ export interface components {
      *         ],
      *         "policy_version": "flow-evidence-redaction.v3"
      *       },
-     *       "schema_version": "flow-evidence-export.v17",
+     *       "schema_version": "flow-evidence-export.v18",
      *       "summary": {
      *         "artifact_details": [
      *           {
@@ -21319,7 +21325,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v17";
+      schema_version: "flow-evidence-export.v18";
       summary: components["schemas"]["EvidenceExportSummary"];
     };
     /**

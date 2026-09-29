@@ -4457,7 +4457,7 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
         (redacted_export, "redacted"),
         (raw_export, "raw"),
     ):
-        assert export["schema_version"] == "flow-evidence-export.v17"
+        assert export["schema_version"] == "flow-evidence-export.v18"
         assert export["manifest"]["schema_version"] == export["schema_version"]
         assert isinstance(export["manifest"]["app_version"], str)
         assert export["manifest"]["app_version"]

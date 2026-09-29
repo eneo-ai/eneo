@@ -2978,7 +2978,11 @@ def test_a_selected_step_decline_is_judged_with_the_step_name_from_the_baseline(
     ]
     assert case.edit is not None and case.edit.target_order == 2
     steps = [
-        {"step_order": order, "user_description": step["name"]}
+        {
+            "step_order": order,
+            "user_description": step["name"],
+            "input_source": step["input_source"],
+        }
         for order, step in enumerate(case.edit.fixture["steps"], start=1)
     ]
     name = steps[1]["user_description"]

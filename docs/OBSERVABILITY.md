@@ -288,10 +288,13 @@ reads the authorized failed attempt and published definition directly. A metadat
 export alone cannot establish whether an answer is factually correct or supply
 the content needed to repair its instructions.
 
-Evidence exports use `flow-evidence-export.v17` for this layout: current-attempt
+Evidence exports use `flow-evidence-export.v18` for this layout: current-attempt
 source review moves from `bundle.debug_export.steps[].rag` to
 `bundle.knowledge_traces`, and the full definition remains at
-`bundle.definition_snapshot`. Consumers must check the export schema version;
+`bundle.definition_snapshot`. Since v18 a step's
+`input_lineage.upstream_step_orders` and `upstream_step_labels` are `null` when
+its recorded `input_source` is unrecognised (lineage unknown, not "reads no
+earlier step"). Consumers must check the export schema version;
 the diagnostic artifact also has its own `schema_version`.
 
 Older `debug_export` versions can contain source content. The frontend does not

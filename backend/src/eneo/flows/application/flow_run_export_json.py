@@ -43,7 +43,7 @@ from eneo.flows.domain.rag_evidence import (
     iter_retrieved_source_payloads,
     iter_step_rag_payloads,
 )
-from eneo.flows.enums import FlowRunReviewCheckpointState
+from eneo.flows.enums import FlowInputSource, FlowRunReviewCheckpointState
 from eneo.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
     FlowAttemptProvenanceParseResult,
@@ -996,14 +996,20 @@ def _build_input_lineage(
         if question_template is not None
         else []
     )
-    upstream_orders = resolve_upstream_step_orders(
-        input_source=step.get("input_source"),
-        step_order=step_order,
-        binding_references=references if question_template is not None else None,
-        max_prior_step_order=max_prior_step_order,
+    recorded_input_source = step.get("input_source")
+    input_source = _recorded_input_source(recorded_input_source)
+    upstream_orders = (
+        resolve_upstream_step_orders(
+            input_source=input_source,
+            step_order=step_order,
+            binding_references=(references if question_template is not None else None),
+            max_prior_step_order=max_prior_step_order,
+        )
+        if input_source is not None
+        else None
     )
     return {
-        "input_source": step.get("input_source"),
+        "input_source": recorded_input_source,
         "used_question_binding": input_payload.get("used_question_binding"),
         "uses_runtime_input": bool(runtime_input),
         "runtime_input_format": runtime_input.get("input_format"),
@@ -1025,12 +1031,32 @@ def _build_input_lineage(
             reference.expression for reference in references
         ],
         "upstream_step_orders": upstream_orders,
-        "upstream_step_labels": [
-            str(step_labels_by_order[order])
-            for order in upstream_orders
-            if isinstance(step_labels_by_order.get(order), str)
-        ],
+        "upstream_step_labels": (
+            [
+                str(step_labels_by_order[order])
+                for order in upstream_orders
+                if isinstance(step_labels_by_order.get(order), str)
+            ]
+            if upstream_orders is not None
+            else None
+        ),
     }
+
+
+def _recorded_input_source(recorded: object) -> FlowInputSource | None:
+    """The input source a snapshot step ran with, or ``None`` when unknown.
+
+    A step that names no source ran as flow_input: the runtime's own default
+    (step_definition_parser). The export keeps snapshots whose definition no
+    longer verifies, so a recorded value this version does not know is
+    reported as unknown rather than guessed.
+    """
+    if recorded is None:
+        return FlowInputSource.FLOW_INPUT
+    try:
+        return FlowInputSource(recorded)
+    except ValueError:
+        return None
 
 
 def _build_step_knowledge_retrieval_summary(

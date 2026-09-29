@@ -2446,11 +2446,11 @@ class FlowRunEvidenceExportResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "schema_version": "flow-evidence-export.v17",
+                "schema_version": "flow-evidence-export.v18",
                 "generated_at": "2026-03-31T12:00:00Z",
                 "content_hash": "e66736c443a4e643e6c96219794d20973c17376047c8754bf57b7bd48e255cb7",
                 "manifest": {
-                    "schema_version": "flow-evidence-export.v17",
+                    "schema_version": "flow-evidence-export.v18",
                     "app_version": "DEV",
                     "provenance_schema_version_min": "flow-attempt-provenance.v3",
                     "provenance_schema_version_current": "flow-attempt-provenance.v3",
@@ -2820,7 +2820,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
         }
     )
 
-    schema_version: Literal["flow-evidence-export.v17"]
+    schema_version: Literal["flow-evidence-export.v18"]
     generated_at: datetime
     content_hash: str
     manifest: EvidenceExportManifest

@@ -621,7 +621,7 @@ class FlowService:
             evaluation = evaluate_step_security_classification(
                 step_order=step.step_order,
                 upstream_step_orders=resolve_step_upstream_orders(
-                    input_source=str(step.input_source),
+                    input_source=step.input_source,
                     step_order=step.step_order,
                     input_bindings=step.input_bindings,
                     prompt_template=(

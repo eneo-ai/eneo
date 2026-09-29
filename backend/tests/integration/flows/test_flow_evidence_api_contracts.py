@@ -282,6 +282,7 @@ async def _seed_flow_run_contract_data(
     admin_user,
     attempt_provenance_json: dict[str, Any] | None = None,
     include_review_checkpoint_lineage: bool = False,
+    recorded_step_fields: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     async with db_container() as container:
         session = container.session()
@@ -337,6 +338,7 @@ async def _seed_flow_run_contract_data(
                         "assistant_id": str(step.assistant_id),
                         "assistant_snapshot": assistant_snapshot(step.assistant_id),
                         "step_order": 1,
+                        **(recorded_step_fields or {}),
                         "output_config": {
                             "url": "https://example.org/hook?token=top-secret",
                             "headers": {
@@ -657,6 +659,7 @@ async def _seed_trace_view_flow_run_contract_data(
     admin_user: UserInDB,
     attempt_provenance_json: dict[str, Any] | None = None,
     include_review_checkpoint_lineage: bool = False,
+    recorded_step_fields: dict[str, Any] | None = None,
 ) -> tuple[dict[str, str], UserInDB, str]:
     trace_user, trace_token = await _create_trace_view_user_and_token(
         db_container=db_container,
@@ -671,6 +674,7 @@ async def _seed_trace_view_flow_run_contract_data(
         admin_user=trace_user,
         attempt_provenance_json=attempt_provenance_json,
         include_review_checkpoint_lineage=include_review_checkpoint_lineage,
+        recorded_step_fields=recorded_step_fields,
     )
     return seeded, trace_user, trace_token
 
@@ -1064,7 +1068,7 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
     )
     assert export_response.status_code == 200, export_response.text
     evidence_export = export_response.json()
-    assert evidence_export["schema_version"] == "flow-evidence-export.v17"
+    assert evidence_export["schema_version"] == "flow-evidence-export.v18"
     assert (
         evidence_export["manifest"]["schema_version"]
         == evidence_export["schema_version"]
@@ -1809,6 +1813,55 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
         ]
         == "model_default"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("recorded_step_fields", "upstream_step_orders"),
+    [
+        pytest.param({"input_source": "bogus"}, None, id="unrecognised-unknown"),
+        pytest.param({}, [], id="absent-runs-as-flow_input"),
+    ],
+)
+@pytest.mark.parametrize(
+    "query", ["format=json", "format=json&detail=raw&reason=lineage-review"]
+)
+async def test_flow_run_evidence_export_reports_unrecognised_input_source_lineage_as_unknown(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    recorded_step_fields,
+    upstream_step_orders,
+    query,
+):
+    # The export keeps a snapshot whose definition no longer verifies, so a
+    # recorded input_source may be one this version does not know: the export
+    # still answers, echoes the raw value and reports the lineage as unknown.
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+        recorded_step_fields=recorded_step_fields,
+    )
+
+    response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export?{query}",
+        headers={"Authorization": f"Bearer {trace_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    lineage = response.json()["summary"]["step_overview"][0]["input_lineage"]
+    assert lineage["input_source"] == recorded_step_fields.get("input_source")
+    assert lineage["upstream_step_orders"] == upstream_step_orders
+    assert lineage["upstream_step_labels"] == upstream_step_orders
 
 
 @pytest.mark.asyncio

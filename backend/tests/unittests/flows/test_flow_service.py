@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -20,6 +21,7 @@ from eneo.flows.domain.flow_invariant_exceptions import (
     FlowPublishedDefinitionInvalidError,
 )
 from eneo.flows.domain.flow_step_validation import FlowStepValidationError
+from eneo.flows.enums import FlowInputSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
@@ -2463,7 +2465,6 @@ async def test_publish_flow_rejects_output_override_write_down(user):
             _step(step_order=2).model_copy(
                 update={
                     "assistant_id": assistant_b,
-                    "input_source": "previous_step",
                     "output_classification_override": 1,
                 }
             ),
@@ -2512,6 +2513,245 @@ async def test_publish_flow_rejects_output_override_write_down(user):
 
     with pytest.raises(BadRequestException, match="output classification override"):
         await service.publish_flow(flow_id=flow_id)
+
+
+@dataclass(frozen=True)
+class _ClassifiedStep:
+    """One step of a classified chain, as the API hands it to the service."""
+
+    model_level: int
+    input_source: str = "previous_step"
+    override: int | None = None
+    question: str | None = None
+    http: bool = False
+
+
+_MISMATCH = "flow_step_security_classification_mismatch"
+_WRITE_DOWN = "flow_step_output_classification_write_down"
+_HIGH_FIRST_STEP = _ClassifiedStep(model_level=3, input_source="flow_input", override=3)
+_LITERAL_SECOND_STEP = _ClassifiedStep(model_level=1, question="Fast text.")
+
+
+def _classified_chain(user, steps: list[_ClassifiedStep], *, space_level: int = 1):
+    """A saved draft whose steps carry the given classifications.
+
+    Steps are built through ``FlowStep`` validation, so ``input_source`` is the
+    ``FlowInputSource`` member every persisted or API-supplied step carries (a
+    ``model_copy(update=...)`` would leave a bare string and hide how the
+    service reads the field).
+    """
+    flow_id = uuid4()
+    space_id = uuid4()
+    assistants = []
+    flow_steps = []
+    for order, spec in enumerate(steps, start=1):
+        assistant = _build_assistant(flow_id=flow_id, space_id=space_id, user=user)
+        assistant.completion_model = SimpleNamespace(
+            security_classification=_classification(spec.model_level),
+            can_access=True,
+        )
+        assistants.append(assistant)
+        step = FlowStep(
+            id=uuid4(),
+            assistant_id=assistant.id,
+            step_order=order,
+            user_description=f"Step {order}",
+            input_source=spec.input_source,
+            input_type="text",
+            output_mode="pass_through",
+            output_type="text",
+            input_bindings=(
+                {"question": spec.question} if spec.question is not None else None
+            ),
+            input_config=(
+                {"url": "https://example.org/input", "auth": {"mode": "none"}}
+                if spec.http
+                else None
+            ),
+            output_classification_override=spec.override,
+        )
+        assert isinstance(step.input_source, FlowInputSource)
+        flow_steps.append(step)
+
+    flow_repo = AsyncMock()
+    flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=space_id,
+        name="Classified",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=flow_steps,
+    )
+    flow_repo.get.return_value = flow
+    flow_repo.update.side_effect = lambda flow, tenant_id, expected_revision=None: flow
+    space_service = AsyncMock()
+    space_service.get_space.return_value = _FlowSecuritySpaceStub(level=space_level)
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=AsyncMock(),
+        space_service=space_service,
+    )
+    by_id = {assistant.id: assistant for assistant in assistants}
+    service.assistant_service.get_assistant.side_effect = lambda assistant_id: (
+        by_id[assistant_id],
+        [],
+    )
+    return service, flow_repo, flow
+
+
+async def _save(service: FlowService, flow: Flow, operation: str) -> None:
+    if operation == "create":
+        await service.create_flow(
+            space_id=flow.space_id, name=flow.name, steps=flow.steps
+        )
+    else:
+        await service.update_flow(flow_id=flow.id, steps=flow.steps)
+
+
+def _rows_written(flow_repo: AsyncMock, operation: str) -> bool:
+    return (
+        flow_repo.create if operation == "create" else flow_repo.update
+    ).await_count > 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["create", "update"])
+@pytest.mark.parametrize(
+    ("steps", "code"),
+    [
+        pytest.param(
+            [_HIGH_FIRST_STEP, _ClassifiedStep(model_level=1)],
+            _MISMATCH,
+            id="previous_step-low-model",
+        ),
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _ClassifiedStep(model_level=3, override=1),
+            ],
+            _WRITE_DOWN,
+            id="previous_step-low-override",
+        ),
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _LITERAL_SECOND_STEP,
+                _ClassifiedStep(model_level=1, input_source="all_previous_steps"),
+            ],
+            _MISMATCH,
+            id="all_previous_steps-low-model",
+        ),
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _LITERAL_SECOND_STEP,
+                _ClassifiedStep(
+                    model_level=3,
+                    input_source="all_previous_steps",
+                    override=1,
+                ),
+            ],
+            _WRITE_DOWN,
+            id="all_previous_steps-low-override",
+        ),
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _ClassifiedStep(model_level=1, question="{{ step_1.output }}"),
+            ],
+            _MISMATCH,
+            id="explicit-binding-low-model",
+        ),
+    ],
+)
+async def test_save_refuses_a_step_that_reads_a_classified_step_it_is_not_cleared_for(
+    user, steps, code, operation
+):
+    service, flow_repo, flow = _classified_chain(user, steps)
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await _save(service, flow, operation)
+
+    assert exc_info.value.code == code
+    assert not _rows_written(flow_repo, operation)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["create", "update"])
+@pytest.mark.parametrize(
+    "steps",
+    [
+        pytest.param(
+            [_HIGH_FIRST_STEP, _ClassifiedStep(model_level=3, override=3)],
+            id="previous_step-equal-level",
+        ),
+        pytest.param(
+            [_HIGH_FIRST_STEP, _ClassifiedStep(model_level=4, override=3)],
+            id="previous_step-higher-level",
+        ),
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _ClassifiedStep(
+                    model_level=1,
+                    input_source="http_get",
+                    http=True,
+                ),
+            ],
+            id="http_get-reads-no-prior-step",
+        ),
+        pytest.param(
+            [_HIGH_FIRST_STEP, _LITERAL_SECOND_STEP],
+            id="own-input-decides-alone",
+        ),
+        pytest.param(
+            [
+                _HIGH_FIRST_STEP,
+                _LITERAL_SECOND_STEP,
+                _ClassifiedStep(model_level=1),
+            ],
+            id="previous_step-reads-only-the-step-before",
+        ),
+        pytest.param(
+            [
+                _ClassifiedStep(model_level=1, input_source="flow_input"),
+                _ClassifiedStep(model_level=1),
+            ],
+            id="unclassified-chain",
+        ),
+    ],
+)
+async def test_save_accepts_a_step_cleared_for_everything_it_reads(
+    user, steps, operation
+):
+    service, flow_repo, flow = _classified_chain(user, steps)
+
+    await _save(service, flow, operation)
+
+    assert _rows_written(flow_repo, operation)
+
+
+@pytest.mark.asyncio
+async def test_save_without_changes_refuses_stored_steps_that_write_down(user):
+    # A flow stored with a default-input read of a classified step is refused on
+    # its next save, even a rename that touches no step.
+    service, flow_repo, flow = _classified_chain(
+        user, [_HIGH_FIRST_STEP, _ClassifiedStep(model_level=1)]
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.update_flow(flow_id=flow.id, name="Renamed")
+
+    assert exc_info.value.code == _MISMATCH
+    flow_repo.update.assert_not_awaited()
 
 
 @pytest.mark.asyncio

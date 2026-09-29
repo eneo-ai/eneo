@@ -1464,8 +1464,14 @@ The default export is `detail=redacted` with reason `support_debug`. A raw expor
 requires an explicit non-default reason between 3 and 500 characters. The
 eneo-js wrapper exposes both generated options:
 
-The JSON response uses manifest schema `flow-evidence-export.v17`. Version 17
-separates diagnostic metadata from content-bearing evidence. The nested
+The JSON response uses manifest schema `flow-evidence-export.v18`. Version 18
+lets a step's `summary.step_overview[].input_lineage.upstream_step_orders` and
+`upstream_step_labels` be `null`: the recorded `input_source` of that step is
+not one this version recognises, so which earlier steps it read is unknown. An
+empty list still means the step read no earlier step. `input_source` keeps the
+recorded value, and a step with no recorded source ran as `flow_input`.
+
+Version 17 separates diagnostic metadata from content-bearing evidence. The nested
 `debug_export` uses `eneo.flow.debug-export.v3` and excludes prompts, inputs,
 outputs, free-form errors, definitions and source text. It retains identifiers,
 statuses, timings, error codes, finish reasons and available token/retrieval

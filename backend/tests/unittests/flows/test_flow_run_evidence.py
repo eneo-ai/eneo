@@ -1760,6 +1760,57 @@ def test_normalize_rag_payload_derives_missing_counts_from_recorded_passages() -
     assert reference["recorded_passage_count"] == 2
 
 
+@pytest.mark.parametrize("unknown", ["bogus", "FlowInputSource.PREVIOUS_STEP", 7])
+@pytest.mark.parametrize("redacted", [False, True])
+def test_evidence_export_reports_the_lineage_of_an_unrecognised_input_source_as_unknown(
+    unknown: object, redacted: bool
+) -> None:
+    # The export keeps snapshots whose definition no longer verifies, so a
+    # recorded source may be one this version does not know. The export keeps
+    # the raw value and reports the lineage as unknown (null), never as "no
+    # prior step". A step that names no source ran as flow_input, the runtime
+    # parser's default; a known source keeps its reads.
+    run, _ = _evidence_run_and_version()
+    version = _evidence_version_with_steps(
+        run, step_ids=[uuid4(), uuid4(), uuid4(), uuid4()]
+    )
+    steps = version.definition_json["steps"]
+    del steps[1]["input_source"]
+    steps[2]["input_source"] = unknown
+    steps[3]["input_source"] = "all_previous_steps"
+    bundle = build_evidence_bundle(
+        run=run, version=version, step_results=[], step_attempts=[]
+    )
+
+    export = (
+        render_evidence_json_export(
+            bundle=redact_evidence_bundle(bundle), context=_redacted_export_context()
+        )
+        if redacted
+        else render_evidence_json_export(bundle=bundle, context=_raw_export_context())
+    )
+
+    lineage = [step["input_lineage"] for step in export["summary"]["step_overview"]]
+    assert [item["input_source"] for item in lineage] == [
+        "previous_step",
+        None,
+        unknown,
+        "all_previous_steps",
+    ]
+    assert [item["upstream_step_orders"] for item in lineage] == [
+        [],
+        [],
+        None,
+        [1, 2, 3],
+    ]
+    assert [item["upstream_step_labels"] for item in lineage] == [
+        [],
+        [],
+        None,
+        ["Steg 1", "Steg 2", "Steg 3"],
+    ]
+
+
 def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
     now = datetime.now(timezone.utc)
     run = FlowRun(

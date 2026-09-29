@@ -52,8 +52,16 @@ class EvidenceStepInputLineageSummary(BaseModel):
     runtime_files: list[JsonObject]
     question_binding_references_runtime_input: bool
     question_binding_expressions: list[str]
-    upstream_step_orders: list[int]
-    upstream_step_labels: list[str]
+    upstream_step_orders: list[int] | None = Field(
+        description=(
+            "The prior steps whose output the step read, or null when the "
+            "recorded input_source is not one this version knows, so the "
+            "lineage is unknown."
+        ),
+    )
+    upstream_step_labels: list[str] | None = Field(
+        description="Labels of upstream_step_orders; null when that is null.",
+    )
 
 
 class EvidenceStepKnowledgeRetrievalSummary(BaseModel):

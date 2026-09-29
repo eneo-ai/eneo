@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 import pytest
 
+from eneo.flows.enums import FlowInputSource
 from eneo.flows.step_lineage import (
     build_step_ref_mapping,
     existing_step_order_from_ref,
@@ -261,3 +262,94 @@ def test_resolve_step_upstream_orders_shorthand_on_first_step_reads_no_step() ->
     )
 
     assert orders == []
+
+
+_INPUT_SOURCE_READS = [
+    pytest.param(FlowInputSource.FLOW_INPUT, [], id="flow_input"),
+    pytest.param(FlowInputSource.HTTP_GET, [], id="http_get"),
+    pytest.param(FlowInputSource.PREVIOUS_STEP, [2], id="previous_step"),
+    pytest.param(FlowInputSource.ALL_PREVIOUS_STEPS, [1, 2], id="all_previous_steps"),
+]
+
+
+@pytest.mark.parametrize(("source", "expected"), _INPUT_SOURCE_READS)
+def test_resolve_upstream_step_orders_reads_what_each_input_source_reads(
+    source: FlowInputSource, expected: list[int]
+) -> None:
+    # The typed member and the value it is stored as name the same source.
+    for spelling in (source, source.value):
+        assert (
+            resolve_upstream_step_orders(
+                input_source=spelling,
+                step_order=3,
+                binding_references=None,
+                max_prior_step_order=2,
+            )
+            == expected
+        )
+
+
+@pytest.mark.parametrize(
+    "source", [FlowInputSource.PREVIOUS_STEP, FlowInputSource.ALL_PREVIOUS_STEPS]
+)
+def test_resolve_upstream_step_orders_first_step_reads_no_prior_step(
+    source: FlowInputSource,
+) -> None:
+    assert (
+        resolve_upstream_step_orders(
+            input_source=source,
+            step_order=1,
+            binding_references=None,
+            max_prior_step_order=0,
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "unknown",
+    [
+        # What str() makes of a member: it names no source, so it must not
+        # read as "no prior step".
+        pytest.param(str(FlowInputSource.PREVIOUS_STEP), id="member-text-form"),
+        pytest.param("sideways", id="unknown-value"),
+        pytest.param("", id="empty"),
+        pytest.param(None, id="absent"),
+    ],
+)
+@pytest.mark.parametrize("binding_references", [None, []])
+def test_resolve_upstream_step_orders_fails_closed_on_an_unknown_input_source(
+    unknown: object, binding_references: list[TemplateReference] | None
+) -> None:
+    with pytest.raises(ValueError):
+        resolve_upstream_step_orders(
+            input_source=unknown,  # pyright: ignore[reportArgumentType]
+            step_order=3,
+            binding_references=binding_references,
+            max_prior_step_order=2,
+        )
+
+
+def test_resolve_step_upstream_orders_fails_closed_on_an_unknown_input_source() -> None:
+    with pytest.raises(ValueError):
+        resolve_step_upstream_orders(
+            input_source=str(FlowInputSource.PREVIOUS_STEP),
+            step_order=3,
+            input_bindings=None,
+            prompt_template=None,
+            step_ref_mapping={},
+            max_prior_step_order=2,
+        )
+
+
+def test_resolve_step_upstream_orders_reads_the_typed_default_input_source() -> None:
+    orders = resolve_step_upstream_orders(
+        input_source=FlowInputSource.PREVIOUS_STEP,
+        step_order=3,
+        input_bindings=None,
+        prompt_template="Bakgrund: {{ step_1.output.text }}",
+        step_ref_mapping={},
+        max_prior_step_order=2,
+    )
+
+    assert orders == [1, 2]
