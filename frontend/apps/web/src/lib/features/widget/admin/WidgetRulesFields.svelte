@@ -42,7 +42,9 @@
     max: number,
     apply: (value: number) => void
   ) {
-    const value = Number((event.currentTarget as HTMLInputElement).value);
+    // valueAsNumber is NaN for an empty field. Number("") is 0, which would
+    // silently switch retention to "do not persist" when the policy permits 0.
+    const value = (event.currentTarget as HTMLInputElement).valueAsNumber;
     if (!Number.isInteger(value) || value < min || value > max) {
       rangeErrors = {
         ...rangeErrors,

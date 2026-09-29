@@ -6,9 +6,10 @@
 export const FULL_SCREEN_MEDIA = "(max-width: 40em), (max-height: 31.25em)";
 
 /**
- * Styles for the launcher and panel inside the shadow root. Host pages tune
- * them through the `--eneo-widget-*` custom properties documented in the
- * README; nothing here leaks into or depends on the host's stylesheet.
+ * Styles for the launcher and panel inside the shadow root. The build emits
+ * this as eneo.css beside the loader, so hosts can allow it through style-src.
+ * Host pages tune it through the `--eneo-widget-*` custom properties documented
+ * in the README; nothing here leaks into or depends on the host's stylesheet.
  */
 export const styles = `
 :host {

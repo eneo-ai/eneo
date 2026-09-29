@@ -1,22 +1,23 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { defineConfig, type Plugin } from "vitest/config";
 import { playwright } from "@vitest/browser-playwright";
 import { minifyCss } from "./scripts/minify-css.mjs";
+import { styles } from "./src/styles";
 
 const pkg = JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8")) as {
   version: string;
 };
+const stylesheet = minifyCss(styles);
+const cssIntegrity = `sha384-${createHash("sha384").update(stylesheet).digest("base64")}`;
 
-const STYLES_LITERAL = /(export const styles = `)([\s\S]*?)(`;)/;
-
-/** The stylesheet string ships collapsed; esbuild leaves string contents alone. */
-function minifyStyles(): Plugin {
+/** The shadow root loads this stylesheet from the Eneo origin under the host CSP. */
+function emitStyles(): Plugin {
   return {
-    name: "eneo-minify-styles",
+    name: "eneo-emit-styles",
     apply: "build",
-    transform(code, id) {
-      if (!id.endsWith("/src/styles.ts")) return null;
-      return code.replace(STYLES_LITERAL, (_, open, css, close) => open + minifyCss(css) + close);
+    generateBundle() {
+      this.emitFile({ type: "asset", fileName: "eneo.css", source: stylesheet });
     }
   };
 }
@@ -27,9 +28,10 @@ function minifyStyles(): Plugin {
 // modern test tooling that must not be downlevelled.
 export default defineConfig(({ command }) => ({
   define: {
-    __LOADER_VERSION__: JSON.stringify(pkg.version)
+    __LOADER_VERSION__: JSON.stringify(pkg.version),
+    __LOADER_CSS_INTEGRITY__: JSON.stringify(cssIntegrity)
   },
-  plugins: [minifyStyles()],
+  plugins: [emitStyles()],
   optimizeDeps: {
     esbuildOptions: { target: "es2022" }
   },

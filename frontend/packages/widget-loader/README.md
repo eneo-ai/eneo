@@ -7,12 +7,15 @@ the Eneo origin. All chat UI, tokens and API calls live inside the iframe;
 the loader only owns placement, focus and a small `postMessage` bridge.
 
 Built with Vite library mode to a classic IIFE (`dist/eneo.js`, es2019, no
-dependencies) so it works with `async` in any CMS. The build writes
-`dist/manifest.json` (version, channel, SRI hash, sizes) and fails when the bundle
+dependencies) so it works with `async` in any CMS. The shadow root loads
+`dist/eneo.css` from the same pinned version with its own SRI check, allowing
+hosts to keep a strict policy against inline styles. The build writes
+`dist/manifest.json` (version, channel, hashes, sizes) and fails when the bundle
 exceeds **6 kB gzipped** or when its bytes differ from what `release.json`
 records for the version (see [Releases](#releases)). The web app serves the
 bundle from `/widget/v1/eneo.js` (floating) and `/widget/<version>/eneo.js`
-(pinned, immutable, for hosts that require `integrity`).
+(pinned, immutable, for hosts that require `integrity`). Older pinned assets
+come from the checked-in `releases/<version>/` snapshots.
 
 ## Host snippet
 
@@ -105,7 +108,9 @@ calls `Eneo('open')`: the launcher is appended to `<body>`, so keyboard and
 screen reader users otherwise reach it last.
 
 A host with a Content Security Policy allows the Eneo origin in `script-src`
-(the loader), `connect-src` (the saved settings) and `frame-src` (the chat).
+(the loader), `style-src` (its external stylesheet), `connect-src` (the saved
+settings) and `frame-src` (the chat). When the host sets `style-src-elem`
+separately, it allows Eneo there too.
 The iframe's sandbox allows scripts, same-origin storage, forms (the
 composer and the comment dialog are forms; nothing is ever really
 submitted) and popups for source links.
@@ -113,7 +118,7 @@ submitted) and popups for source links.
 ## Development
 
 ```bash
-bun run --filter @eneo/widget-loader build   # dist/eneo.js + manifest.json, size budget, release check
+bun run --filter @eneo/widget-loader build   # dist/eneo.js + eneo.css + manifest.json, size budget, release check
 bun run --filter @eneo/widget-loader build:dev   # the same without the release check, for work in progress
 bun run --filter @eneo/widget-loader test    # builds, then Vitest in headless Chromium and the release check's tests
 bun run --filter @eneo/widget-loader lock    # records a new version's bytes in release.json
@@ -126,14 +131,20 @@ once before it starts the web app.
 ## Releases
 
 Hosts that require `integrity` load `/widget/<version>/eneo.js`, which is
-served as immutable and printed with its SRI hash. A version's bytes must
-therefore never change once it can have shipped: browsers and proxies keep
-the old ones for a year and the new ones fail the host's `integrity`.
-`release.json` records the version and the SRI hash of its bytes, and every
-build (CI, the Docker image, `pretest`) stops when they differ. After any
-change that alters the bundle (source, the stylesheet, a Vite or esbuild
-upgrade), bump `version` in `package.json`, run `lock` and commit
-`release.json`; `lock` refuses to give a recorded version other bytes.
+served as immutable and printed with its SRI hash. A version's JavaScript and
+CSS bytes must never change once it can have shipped: browsers and proxies
+keep the old ones for a year, and a changed script fails the host's
+`integrity` check. `release.json` records the hashes for every version, and
+the CSS link carries its own SRI hash. Every build (CI, the Docker image,
+`pretest`) stops when a current or archived asset differs. Before
+bumping `version` in `package.json`, copy the current `dist/eneo.js`,
+`dist/manifest.json` and, when present, `dist/eneo.css` into
+`releases/<old-version>/`. Then bump the version, run `lock` and commit the
+archive and `release.json`. The build verifies archived bytes against the
+append-only release record, and `lock` refuses to strand a recorded version
+or give it other bytes. An older pinned snippet keeps working after an
+upgrade; update it when you want newer loader fixes. Versions before 1.0.4
+carry inline CSS, so sites with a strict style CSP need a newer snippet.
 
 The floating channel (`v1` in `/widget/v1/eneo.js`) is `eneoWidgetChannel`
 in `package.json`, not the major version. Every floating snippet already

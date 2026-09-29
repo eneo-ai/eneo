@@ -93,48 +93,62 @@
         {/if}
         <Card.Root class="mx-auto w-full max-w-3xl">
           <Card.Header>
-            <Card.Title><h2>{m.widget_admin_create_title()}</h2></Card.Title>
-            <Card.Description>{m.widget_admin_create_description()}</Card.Description>
-          </Card.Header>
-          <Card.Content>
-            <form
-              class="flex flex-col gap-6"
-              onsubmit={(event) => {
-                event.preventDefault();
-                void create();
-              }}
+            <Card.Title
+              ><h2>
+                {data.currentSpace.organization
+                  ? m.widget_admin_title()
+                  : m.widget_admin_create_title()}
+              </h2></Card.Title
             >
-              <Field.Field>
-                <Field.Label for="widget-create-name">{m.name()}</Field.Label>
-                <Input
-                  id="widget-create-name"
-                  maxlength={100}
-                  required
-                  bind:value={name}
-                  aria-describedby="widget-create-name-help"
-                />
-                <Field.Description id="widget-create-name-help"
-                  >{m.widget_admin_name_description()}</Field.Description
-                >
-              </Field.Field>
-              {#if templates.length > 0}
+            <Card.Description
+              >{data.currentSpace.organization
+                ? m.widget_admin_blocker_organization_space_unsupported()
+                : m.widget_admin_create_description()}</Card.Description
+            >
+          </Card.Header>
+          {#if !data.currentSpace.organization}
+            <Card.Content>
+              <form
+                class="flex flex-col gap-6"
+                onsubmit={(event) => {
+                  event.preventDefault();
+                  void create();
+                }}
+              >
                 <Field.Field>
-                  <Field.Title>{m.widget_admin_template()}</Field.Title>
-                  <Field.Description>{m.widget_admin_template_create_help()}</Field.Description>
-                  <TemplatePicker
-                    {templates}
-                    bind:value={templateId}
-                    includeNone
-                    legend={m.widget_admin_template()}
-                    id="widget-create-template"
+                  <Field.Label for="widget-create-name">{m.name()}</Field.Label>
+                  <Input
+                    id="widget-create-name"
+                    maxlength={100}
+                    required
+                    bind:value={name}
+                    aria-describedby="widget-create-name-help"
                   />
+                  <Field.Description id="widget-create-name-help"
+                    >{m.widget_admin_name_description()}</Field.Description
+                  >
                 </Field.Field>
-              {/if}
-              <div>
-                <Button type="submit" disabled={create.isLoading}>{m.widget_admin_create()}</Button>
-              </div>
-            </form>
-          </Card.Content>
+                {#if templates.length > 0}
+                  <Field.Field>
+                    <Field.Title>{m.widget_admin_template()}</Field.Title>
+                    <Field.Description>{m.widget_admin_template_create_help()}</Field.Description>
+                    <TemplatePicker
+                      {templates}
+                      bind:value={templateId}
+                      includeNone
+                      legend={m.widget_admin_template()}
+                      id="widget-create-template"
+                    />
+                  </Field.Field>
+                {/if}
+                <div>
+                  <Button type="submit" disabled={create.isLoading}
+                    >{m.widget_admin_create()}</Button
+                  >
+                </div>
+              </form>
+            </Card.Content>
+          {/if}
         </Card.Root>
       {/if}
     </div>

@@ -8,7 +8,7 @@ import {
   type PageContext,
   type WidgetSettings
 } from "./protocol";
-import { FULL_SCREEN_MEDIA, styles } from "./styles";
+import { FULL_SCREEN_MEDIA } from "./styles";
 
 export type WidgetEventName = "ready" | "open" | "close" | "conversation_started" | "unread";
 
@@ -282,9 +282,16 @@ export class EneoWidgetElement extends HTMLElement {
   private render(): void {
     const root = this.attachShadow({ mode: "open" });
     root.innerHTML =
-      `<style>${styles}</style>` +
       `<button type="button" part="launcher" class="launcher" aria-haspopup="dialog" aria-expanded="false" aria-controls="eneo-panel">${CHAT_ICON}${CLOSE_ICON}<span class="badge" aria-hidden="true" hidden></span></button>` +
       `<div id="eneo-panel" part="panel" class="panel" role="dialog" hidden></div>`;
+    // A host with a strict style-src blocks <style> in this shadow root. The
+    // CSS ships beside this exact loader version, including pinned installs.
+    const stylesheet = document.createElement("link");
+    stylesheet.rel = "stylesheet";
+    stylesheet.href = `${this.baseUrl}/widget/${__LOADER_VERSION__}/eneo.css`;
+    stylesheet.integrity = __LOADER_CSS_INTEGRITY__;
+    stylesheet.crossOrigin = "anonymous";
+    root.prepend(stylesheet);
     this.launcher = root.querySelector(".launcher") as HTMLButtonElement;
     this.panel = root.querySelector(".panel") as HTMLDivElement;
     this.badge = root.querySelector(".badge") as HTMLSpanElement;

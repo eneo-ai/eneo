@@ -121,10 +121,11 @@ def _user(*permissions: Permission, widget_policy=None):
     )
 
 
-def _space(space_id, assistant, *, can_edit=True):
+def _space(space_id, assistant, *, can_edit=True, organization=False):
     space = MagicMock()
     space.id = space_id
     space.assistant_ids = [assistant.id]
+    space.is_organization.return_value = organization
     space.get_assistant = MagicMock(
         side_effect=lambda aid: assistant
         if aid == assistant.id
@@ -189,6 +190,38 @@ async def test_create_rejects_assistant_outside_space(assistant):
         await _service(_user(Permission.WIDGETS), space).create_widget(
             space_id=space.id, target_id=uuid4(), name="w"
         )
+
+
+async def test_create_rejects_organization_space_even_for_an_editor(assistant):
+    space, _ = _space(uuid4(), assistant, organization=True)
+    repo = _InMemoryRepo()
+    service = _service(_user(Permission.WIDGETS), space, repo=repo)
+
+    with pytest.raises(BadRequestException, match="organization space"):
+        await service.create_widget(space_id=space.id, target_id=assistant.id, name="w")
+    assert repo.rows == {}
+
+
+async def test_existing_organization_space_draft_cannot_be_activated(assistant):
+    space, _ = _space(uuid4(), assistant, organization=True)
+    repo = _InMemoryRepo()
+    user = _user(Permission.WIDGETS, Permission.ADMIN)
+    service = _service(user, space, repo=repo)
+    widget = Widget.create(
+        tenant_id=user.tenant_id,
+        space_id=space.id,
+        target_id=assistant.id,
+        name="Existing draft",
+    )
+    widget.apply_update({"allowed_origins": ["https://a.se"]})
+    widget = await repo.add(widget)
+
+    view = await service.get_widget(widget.id)
+    assert view.activation_blockers == ["organization_space_unsupported"]
+    with pytest.raises(WidgetServingBlockedError) as exc:
+        await service.activate_widget(widget.id)
+    assert exc.value.details() == {"blockers": ["organization_space_unsupported"]}
+    assert repo.rows[widget.id].status == WidgetStatus.DRAFT
 
 
 async def test_widgets_are_tenant_isolated(assistant):

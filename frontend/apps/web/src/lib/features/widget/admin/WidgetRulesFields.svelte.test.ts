@@ -62,6 +62,7 @@ function setup(
 
 const origins = () => page.getByLabelText("widget_admin_allowed_origins", { exact: true });
 const budget = () => page.getByLabelText("widget_admin_daily_budget", { exact: true });
+const retention = () => page.getByLabelText("widget_admin_retention", { exact: true });
 
 describe("WidgetRulesFields origins", () => {
   test("a pasted page address is flagged at the field and never sent", async () => {
@@ -158,6 +159,33 @@ describe("WidgetRulesFields origins", () => {
 });
 
 describe("WidgetRulesFields policy", () => {
+  test("an empty retention field stays unsaved even when zero is allowed", async () => {
+    const save = vi.fn(async (update: WidgetUpdate) => widget(update as Partial<Widget>));
+    const { autosave } = setup(widget(), save, null);
+
+    await userEvent.clear(retention());
+    await userEvent.tab();
+
+    await expect.element(retention()).toHaveAttribute("aria-invalid", "true");
+    await expect
+      .element(retention())
+      .toHaveAccessibleDescription(/widget_admin_value_out_of_range/);
+    expect((retention().element() as HTMLInputElement).value).toBe("");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(save).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(autosave.stranded).toBe(true));
+
+    await userEvent.fill(retention(), "0");
+    await userEvent.tab();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save).toHaveBeenCalledWith({
+      privacy: expect.objectContaining({ retention_days: 0 }),
+      revision: 0
+    });
+    await expect.element(retention()).toHaveAttribute("aria-invalid", "false");
+    await vi.waitFor(() => expect(autosave.stranded).toBe(false));
+  });
+
   test("an editor is held to the organisation's limits before saving", async () => {
     const save = vi.fn();
     setup(widget(), save);

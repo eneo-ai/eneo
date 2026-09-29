@@ -681,7 +681,9 @@
           {#if hasPermission(data.user)("widgets") && data.assistant.permissions?.includes("edit")}
             <Settings.Row
               title={m.widget_admin_title()}
-              description={m.widget_admin_link_description()}
+              description={data.currentSpace.organization
+                ? m.widget_admin_blocker_organization_space_unsupported()
+                : m.widget_admin_link_description()}
             >
               <div class="flex h-14 items-center">
                 <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- localized href built from typed route segments -->

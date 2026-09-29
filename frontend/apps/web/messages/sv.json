@@ -4245,6 +4245,7 @@
   "widget_admin_blocker_subtitle_empty": "Beskrivningen under rubriken får inte vara tom.",
   "widget_admin_blocker_legal_texts_lock_subtitle": "Beskrivningen under rubriken får inte vara tom så länge mallen låser upplysning och sidfot.",
   "widget_admin_blocker_target_not_published": "Publicera assistenten i dess yta först.",
+  "widget_admin_blocker_organization_space_unsupported": "Widgetar kan inte användas i organisationsytan. Välj en assistent i en delad eller personlig yta.",
   "widget_admin_blocker_archived": "Widgeten är arkiverad.",
   "widget_admin_blocker_budget_policy": "Den dagliga tokenbudgeten överstiger vad organisationen tillåter.",
   "widget_admin_blocker_retention_min": "Lagringstiden är kortare än vad organisationen tillåter.",

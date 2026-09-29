@@ -2,9 +2,12 @@ import { page } from "@vitest/browser/context";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { EneoWidgetElement } from "./element";
 import { BRIDGE_NAMESPACE } from "./protocol";
+import { styles } from "./styles";
 import { flushSettings, spyOnSeam, stubSettings } from "./testing";
 
 const WIDGET_ID = "wgt_test123";
+const testStylesheet = new CSSStyleSheet();
+testStylesheet.replaceSync(styles);
 
 beforeAll(() => {
   // The test page is English; the loader falls back to the document language.
@@ -28,6 +31,9 @@ function attach(attributes: Record<string, string> = {}): EneoWidgetElement {
   element.setAttribute("widget-id", WIDGET_ID);
   for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
   document.body.appendChild(element);
+  // The package's test server does not serve the web app's versioned CSS
+  // route. Keep the layout tests using the same source stylesheet.
+  element.shadowRoot!.adoptedStyleSheets = [testStylesheet];
   return element;
 }
 
@@ -85,6 +91,16 @@ const frameMessage = (type: string, payload?: unknown) => ({
 });
 
 describe("launcher", () => {
+  it("loads versioned CSS from Eneo without an inline style element", async () => {
+    const element = await mount();
+    const root = element.shadowRoot!;
+    const stylesheet = root.querySelector('link[rel="stylesheet"]') as HTMLLinkElement;
+    expect(stylesheet.href).toBe(`${location.origin}/widget/${__LOADER_VERSION__}/eneo.css`);
+    expect(stylesheet.integrity).toBe(__LOADER_CSS_INTEGRITY__);
+    expect(stylesheet.crossOrigin).toBe("anonymous");
+    expect(root.querySelector("style")).toBeNull();
+  });
+
   it("is a labelled disclosure button that controls the panel", async () => {
     const element = await mount();
     const launcher = launcherOf(element);

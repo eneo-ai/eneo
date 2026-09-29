@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@514b623d063a
+translationSource: guides/embed-widget.mdx@67c5ef2fd62a
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -84,7 +84,9 @@ Du behöver behörigheten för webbwidgetar och rätt att redigera assistenten.
 
 1. Publicera assistenten i dess yta under **Publicering**.
 2. Öppna **Webbwidget** på samma sida och skapa en widget, eventuellt från en
-   organisationsmall.
+   organisationsmall. Assistenten måste ligga i en delad eller personlig yta.
+   Organisationsytan kan inte ha widgetar eftersom anonyma besökare inte får
+   läsa dess assistenter.
 3. Anpassa widgeten. Ändringar sparas automatiskt, och sidan följer
    arbetsordningen:
    - **Innehåll**: namn och språk, reglagen **Visa källor** och **Visa
@@ -131,7 +133,8 @@ Installationskoden innehåller inget du kan ändra senare: widgetens sparade
 språk, placering och färger når alla webbplatser där den är installerad inom
 ungefär en minut. Adressen `v1` följer Eneo-utgåvorna. Webbplatser som kräver
 Subresource Integrity (SRI) kan i stället använda den låsta varianten; den
-behöver bara bytas ut när själva laddaren får en ny version (se
+fortsätter att fungera efter Eneo-uppgraderingar. Byt till en ny version när ni
+vill ta del av ändringar i laddaren (se
 [För webbansvariga](#for-the-website-team)).
 
 Redigeraren kontrollerar varje värde mot serverns regler innan det sparas: en
@@ -254,10 +257,12 @@ in i webbplatsen:
    saknas kan knappen synas medan panelen förblir tom, eftersom webbläsaren
    blockerar inramningen.
 3. **Content Security Policy.** Om webbplatsen använder CSP måste Eneos origin
-   tillåtas i `script-src` för skriptet, `connect-src` för widgetens sparade
-   inställningar (som skriptet läser från `/widget/settings/<widget-id>`) och
-   `frame-src` för panelen, till exempel
-   `script-src 'self' https://eneo.kommun.se; connect-src 'self' https://eneo.kommun.se; frame-src https://eneo.kommun.se`.
+   tillåtas i `script-src` för skriptet, `style-src` för dess externa stilmall,
+   `connect-src` för widgetens sparade inställningar (som skriptet läser från
+   `/widget/settings/<widget-id>`) och `frame-src` för panelen, till exempel
+   `script-src 'self' https://eneo.kommun.se; style-src 'self' https://eneo.kommun.se; connect-src 'self' https://eneo.kommun.se; frame-src https://eneo.kommun.se`.
+   Om policyn har ett separat `style-src-elem` måste Eneos origin tillåtas där
+   också. Utan `style-src` saknar knappen och panelen sin placering och form.
    Utan `connect-src` visas knappen ändå, men nere till höger, på sidans språk
    och i Eneos standardfärg (eller som de valfria `data-*`-attributen anger) i
    stället för widgetens sparade placering, språk och färger, och webbläsaren
@@ -269,18 +274,23 @@ in i webbplatsen:
    kontaktuppgifterna, som anropar `Eneo('open')` (se
    [Attribut och API](#optional-attributes-and-api)). Med
    `data-launcher="none"` ersätter länken den flytande knappen.
-5. **Information till besökare.** Widgeten sätter inga kakor på värdwebbplatsen.
-   Chattramen sparar en pseudonym besökaridentitet och aktuell konversation i
-   sin egen webbläsarlagring. Beskriv användningen i webbplatsens
-   integritetsinformation; se [Personuppgifter och lagring](#personal-data-and-cookies).
+5. **Information till besökare.** Widgeten sätter inga kakor. Efter första
+   meddelandet använder chattramen `localStorage` för en pseudonym
+   besökaridentitet och aktuell konversation. Webbläsare kan hantera sådan
+   lagring olika, så möjligheten att fortsätta samtalet är inte garanterad.
+   Bedöm om lagringen kräver samtycke på er webbplats, inklusive om undantaget
+   för strikt nödvändig lagring kan användas, och beskriv den i
+   integritetsinformationen; se [Personuppgifter och lagring](#personal-data-and-cookies).
 6. **Låst version med SRI.** Om er policy kräver SRI, använd installationskoden
    med `integrity`. Adressen innehåller laddarens version, och innehållet i en
    version ändras aldrig, så `integrity`-värdet fortsätter att gälla när Eneo
-   uppgraderas. När en uppgradering ger laddaren en ny version serverar Eneo
-   bara den nya: den gamla låsta koden slutar då att laddas tills du klistrar
-   in den nya från widgetens flik **Publicera**. Kontrollera fliken efter varje
-   Eneo-uppgradering, eller använd den flytande adressen `v1` om SRI inte är
-   ett krav.
+   uppgraderas. Versionens JavaScript och eventuella stilmall fortsätter att
+   serveras med oförändrat innehåll. Den externa stilmallen har också en
+   integritetskontroll. Den gamla koden fortsätter alltså att laddas; kopiera
+   en nyare version från fliken **Publicera** när ni vill ha ändringar i
+   laddaren. Versioner före `1.0.4` använder fortfarande inline-stilar, så en
+   webbplats med strikt CSP för stilar måste uppdatera sin låsta kod. Den
+   flytande adressen `v1` följer utgåvor automatiskt.
 7. **Test före publicering.** Testmiljöns origin måste också vara tillåten.
    Öppna chatten, skicka en fråga, stäng med Escape och kontrollera att fokus
    återgår till knappen. Prova med enbart tangentbord, med skärmläsare, på
@@ -460,18 +470,22 @@ kunna använda en ny adress för varje anrop.
 
 ### Personuppgifter och lagring [#personal-data-and-cookies]
 
-Widgeten använder inga kakor. Efter första meddelandet sparar webbläsaren en
+Widgeten använder inga kakor. Efter första meddelandet sparar ramen en
 slumpmässig besökaridentitet från Eneo, ett tillhörande bevis, aktuell token och
-senaste konversationens id i ramens lagring. Det gör att samtalet kan fortsätta
-när besökaren byter sida. Webbläsaren håller ramens lagring åtskild mellan
-värdwebbplatser.
+senaste konversationens id i sin `localStorage`. Det kan göra att samtalet
+fortsätter när besökaren byter sida. Webbläsare kan dela upp, rensa eller
+blockera lagring i tredjepartsramar, så fortsättningen är inte garanterad.
+Lokal lagring kan omfattas av samma samtyckesregler som kakor. Webbplatsens
+ansvariga behöver bedöma ändamålet och om undantaget för strikt nödvändig
+lagring gäller.
 
 Anpassa exempelvis följande information till er faktiska konfiguration:
 
-> Chattassistenten använder inga kakor. Din webbläsare sparar en slumpmässig
-> identifierare och den aktuella konversationen lokalt så att du kan fortsätta
-> samtalet när du besöker andra sidor på webbplatsen. Konversationer sparas av
-> [organisation] i [N] dagar.
+> Chattassistenten använder inga kakor. Efter ditt första meddelande sparar
+> chattramen en slumpmässig identifierare och den aktuella konversationen i
+> webbläsarens lokala lagring, vilket kan låta dig fortsätta samtalet när du
+> besöker andra sidor på webbplatsen. Konversationer sparas av [organisation]
+> i [N] dagar.
 
 ### Lagring av konversationer [#conversation-retention]
 

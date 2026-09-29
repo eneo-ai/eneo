@@ -156,15 +156,23 @@ class WidgetService:
         except NotFoundException:
             return False
 
+    def _activation_blockers(self, space: "Space", widget: Widget) -> list[str]:
+        blockers = widget.activation_blockers(
+            target_published=self._target_published(space, widget)
+        )
+        # Widget visitors are viewers. Organization spaces grant viewers no
+        # assistant read permission, so a widget there could never answer.
+        if space.is_organization():
+            blockers.append("organization_space_unsupported")
+        return blockers
+
     def _view(
         self,
         space: "Space",
         widget: Widget,
         template: Optional[WidgetTemplate] = None,
     ) -> WidgetView:
-        blockers = widget.activation_blockers(
-            target_published=self._target_published(space, widget)
-        )
+        blockers = self._activation_blockers(space, widget)
         blockers.extend(self.get_policy().violations(widget))
         return WidgetView(
             widget=widget, activation_blockers=blockers, template=template
@@ -212,6 +220,11 @@ class WidgetService:
     ) -> WidgetView:
         validate_permission(self.user, Permission.WIDGETS)
         space = await self._space_for_edit(space_id)
+        if space.is_organization():
+            raise BadRequestException(
+                "Widgets cannot be created in the organization space."
+                " Choose a shared or personal space."
+            )
         # Raises NotFound when the assistant is not part of this space.
         space.get_assistant(target_id)
         # Held until commit: moving or deleting the assistant waits for the
@@ -322,9 +335,7 @@ class WidgetService:
         violations = self.get_policy().violations(widget)
         if violations:
             raise WidgetPolicyViolationError(violations)
-        blockers = widget.activation_blockers(
-            target_published=self._target_published(space, widget)
-        )
+        blockers = self._activation_blockers(space, widget)
         if blockers:
             raise WidgetServingBlockedError(blockers)
         widget.activate(by=self.user.id)
