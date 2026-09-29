@@ -73,6 +73,11 @@
   // Survives the loading-view swap so a typo in the password doesn't cost the email too.
   let email = $state("");
   let upLoginCorrelationId = $state<string | null>(null);
+  let loginAttemptsRemaining = $state<number | null>(null);
+  let loginRetryAfterSeconds = $state<number | null>(null);
+  const loginRetryAfterMinutes = $derived(
+    loginRetryAfterSeconds === null ? null : Math.max(1, Math.ceil(loginRetryAfterSeconds / 60))
+  );
   let loginErrorAlert = $state<HTMLDivElement | null>(null);
   let isAwaitingLoginResponse = $state(false);
   let showTenantSelector = $state(false);
@@ -465,6 +470,8 @@
             isSubmittingUPLogin = true;
             loginFailed = false;
             upLoginCorrelationId = null;
+            loginAttemptsRemaining = null;
+            loginRetryAfterSeconds = null;
 
             return async ({ result }) => {
               if (result.type === "redirect") {
@@ -479,6 +486,8 @@
               // Capture correlation ID from form action result
               if (result.type === "failure" && result.data) {
                 upLoginCorrelationId = (result.data.correlationId as string) || null;
+                loginAttemptsRemaining = (result.data.attemptsRemaining as number | null) ?? null;
+                loginRetryAfterSeconds = (result.data.retryAfterSeconds as number | null) ?? null;
               }
               await tick();
               loginErrorAlert?.focus();
@@ -489,7 +498,14 @@
 
           {#if loginFailed}
             <AuthAlert tone="error" id="login-error" tabindex={-1} bind:ref={loginErrorAlert}>
-              <p>{m.incorrect_credentials()}</p>
+              {#if loginAttemptsRemaining === 0 && loginRetryAfterMinutes !== null}
+                <p>{m.login_too_many_attempts({ minutes: loginRetryAfterMinutes })}</p>
+              {:else}
+                <p>{m.incorrect_credentials()}</p>
+                {#if loginAttemptsRemaining !== null}
+                  <p>{m.login_attempts_remaining({ count: loginAttemptsRemaining })}</p>
+                {/if}
+              {/if}
               {#if upLoginCorrelationId}
                 <CorrelationReference correlationId={upLoginCorrelationId} />
               {/if}
