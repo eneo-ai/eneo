@@ -65,6 +65,32 @@ class AppTemplateService:
 
         return app_template
 
+    async def get_consumable_app_template(
+        self, app_template_id: "UUID"
+    ) -> "AppTemplate":
+        """Resolve a template the current user may create an app from.
+
+        Consumption is gated on the tenant's templates entitlement and resolves
+        only the caller's own templates and global templates. A foreign,
+        deleted or unknown id is not found.
+        """
+        is_enabled = await self.feature_flag_service.check_is_feature_enabled(
+            feature_name="using_templates", tenant_id=self.user.tenant_id
+        )
+        if not is_enabled:
+            raise BadRequestException(
+                "Templates feature is not enabled for this tenant. Enable in settings first."
+            )
+
+        app_template = await self.repo.get_consumable(
+            app_template_id=app_template_id, tenant_id=self.user.tenant_id
+        )
+
+        if app_template is None:
+            raise NotFoundException("Template not found")
+
+        return app_template
+
     async def get_app_templates(self, tenant_id: "UUID") -> list["AppTemplate"]:
         """Get templates for gallery (tenant + global).
 
