@@ -455,6 +455,8 @@ class Settings(BaseSettings):
     trusted_proxy_headers: list[str] = ["x-forwarded-for", "x-real-ip"]
     jwt_audience: str
     jwt_issuer: str
+    # Session token lifetime in minutes. The value has always been applied as
+    # minutes; it is not reinterpreted on upgrade.
     jwt_expiry_time: int
     jwt_algorithm: str
     jwt_secret: str
@@ -558,6 +560,16 @@ class Settings(BaseSettings):
         """
         if v is None or (isinstance(v, str) and not v.strip()):
             return Path("exports")
+        return v
+
+    @field_validator("jwt_expiry_time")
+    @classmethod
+    def validate_jwt_expiry_time(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError(
+                "JWT_EXPIRY_TIME must be a positive number of minutes "
+                "(for example 1440 for 24 hours)"
+            )
         return v
 
     @field_validator("sharepoint_max_download_bytes")
