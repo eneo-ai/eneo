@@ -3,6 +3,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
 from eneo.server.dependencies.container import get_container
@@ -23,6 +28,11 @@ ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
 @router.get(
     "/{id}/", response_model=CrawlRunPublic, responses=responses.get_responses([404])
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="WebsiteCrudService checks read access to the run's parent space and website.",
+)
 async def get_crawl_run(
     id: Annotated[
         UUID, Path(description="Unique identifier of the crawl run to retrieve")
@@ -39,6 +49,11 @@ async def get_crawl_run(
     responses=responses.get_responses([400, 403, 404]),
     summary="List failed crawl addresses",
     description="Read a bounded page of recorded page and file failures, oldest first. Older runs retain aggregate counts but may have no recorded addresses.",
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="WebsiteCrudService checks read access to the run's parent space and websites before listing failures.",
 )
 async def get_crawl_failures(
     id: Annotated[UUID, Path(description="Unique identifier of the crawl run")],
@@ -72,6 +87,11 @@ async def get_crawl_failures(
         "Persist an idempotent cancellation request. Queued work stops immediately; "
         "running work transitions through the stopping phase."
     ),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="WebsiteCrudService checks create-website access in the parent space before cancelling a run.",
 )
 async def cancel_crawl_run(
     id: Annotated[UUID, Path(description="Unique identifier of the crawl run to stop")],

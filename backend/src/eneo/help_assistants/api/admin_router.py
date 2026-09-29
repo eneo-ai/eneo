@@ -22,6 +22,9 @@ from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, status
 
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
+from eneo.roles.permissions import Permission
+
 if TYPE_CHECKING:
     from eneo.assistants.assistant_service import AssistantService
 
@@ -88,6 +91,11 @@ async def _resolve_name(
     description="List the Help-Assistant roles installed for the calling tenant.",
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def list_roles(container: AdminContainer):
     service = container.org_space_assistant_role_service()
     assistant_service = container.assistant_service()
@@ -106,6 +114,11 @@ async def list_roles(container: AdminContainer):
     response_model=PaginatedResponse[HelperTemplatePublic],
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def list_templates(container: AdminContainer):
     """Shipped Help Assistant templates not yet installed for the tenant."""
     service = container.org_space_assistant_role_service()
@@ -122,7 +135,12 @@ async def list_templates(container: AdminContainer):
 @router.get(
     "/roles/{kind}/",
     response_model=RoleAssignmentPublic | None,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
 )
 async def get_active_role(kind: HelperKind, container: AdminContainer):
     service = container.org_space_assistant_role_service()
@@ -142,6 +160,11 @@ async def get_active_role(kind: HelperKind, container: AdminContainer):
     description="Install a shipped Help-Assistant template (blank helper + active role).",
     responses=responses.get_responses([400, 403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def install_helper(kind: HelperKind, container: AdminContainer):
     """Install a shipped template; creates a blank helper + active role."""
     service = container.org_space_assistant_role_service()
@@ -155,6 +178,11 @@ async def install_helper(kind: HelperKind, container: AdminContainer):
     description="Uninstall the active helper for a kind (deletes its role and assistant).",
     responses=responses.get_responses([400, 403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def uninstall_helper(kind: HelperKind, container: ApiKeyRevokingAdminContainer):
     """Uninstall the active helper for ``kind`` (role + assistant)."""
     service = container.org_space_assistant_role_service()
@@ -166,6 +194,11 @@ async def uninstall_helper(kind: HelperKind, container: ApiKeyRevokingAdminConta
     response_model=RoleAssignmentPublic,
     description="Enable or disable a helper role for the tenant.",
     responses=responses.get_responses([400, 403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
 )
 async def toggle_enabled(
     kind: HelperKind,
@@ -182,6 +215,11 @@ async def toggle_enabled(
     response_model=RoleAssignmentPublic,
     description="Show or hide a helper role from end users.",
     responses=responses.get_responses([400, 403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
 )
 async def toggle_visible(
     kind: HelperKind,

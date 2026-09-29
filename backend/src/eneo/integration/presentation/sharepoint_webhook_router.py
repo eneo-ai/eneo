@@ -3,6 +3,11 @@ from typing import Annotated, Optional, cast
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.integration.infrastructure.content_service.types import (
     SharePointWebhookPayload,
 )
@@ -40,6 +45,11 @@ router = APIRouter()
     },
     response_model=None,
 )
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Graph subscription handshake is public; notification service validates subscription clientState before processing.",
+)
 async def sharepoint_webhook_validation(validationToken: Optional[str] = None):
     if validationToken:
         logger.debug("SharePoint webhook validation token received via GET")
@@ -73,6 +83,11 @@ async def sharepoint_webhook_validation(validationToken: Optional[str] = None):
         },
     },
     response_model=None,
+)
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Graph subscription handshake is public; notification service validates subscription clientState before processing.",
 )
 async def sharepoint_webhook(
     request: Request,

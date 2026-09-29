@@ -95,7 +95,7 @@ async def test_user_without_api_keys_permission_cannot_create(
         headers={"Authorization": f"Bearer {user_without_api_keys_token}"},
     )
     assert response.status_code == 403, response.text
-    assert "api_keys" in response.json().get("detail", "").lower()
+    assert "api_keys" in response.json()["message"].lower()
 
 
 @pytest.mark.integration

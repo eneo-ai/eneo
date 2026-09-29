@@ -32,6 +32,7 @@ from eneo.authentication.auth_models import (
     ApiKeyV2InDB,
 )
 from eneo.authentication.auth_service import AuthService
+from eneo.authentication.endpoint_access import authorize_user
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.collections_table import CollectionsTable
@@ -100,7 +101,7 @@ def _permission_allows(key: ApiKeyV2InDB, required: ApiKeyPermission) -> bool:
 # and at SpaceActor for per-resource actions. Excludes:
 #   - Permission.ADMIN: only TENANT+ADMIN service keys get this
 #   - Permission.API_KEYS: lifecycle mutations are session-only (gated
-#     via require_session_auth in api_key_router)
+#     via Authentication.SESSION in api_key_router)
 _SERVICE_KEY_BASE_PERMISSIONS: frozenset[Permission] = frozenset(
     {
         Permission.ASSISTANTS,
@@ -1723,6 +1724,8 @@ class UserService:
 
         await self._check_user_and_tenant_state(user_in_db, correlation_id="api-auth")
 
+        authorize_user(request, user_in_db)
+
         if with_quota_used:
             user_in_db.quota_used = await self.info_blob_repo.get_total_size_of_user(
                 user_id=user_in_db.id
@@ -1853,6 +1856,7 @@ class UserService:
 
         await self._check_user_and_tenant_state(user_in_db, correlation_id="api-auth")
 
+        authorize_user(request, user_in_db)
         return user_in_db
 
     async def update_used_tokens(self, user_id: UUID, tokens_to_add: int):

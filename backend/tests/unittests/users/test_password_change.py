@@ -14,8 +14,8 @@ from eneo.audit.infrastructure.rate_limiting import (
     RateLimitResult,
     RateLimitServiceUnavailableError,
 )
-from eneo.authentication.auth_dependencies import require_session_auth
 from eneo.authentication.auth_service import AuthService
+from eneo.authentication.endpoint_access import Authentication, access_for
 from eneo.main.exceptions import AuthenticationException, ErrorCodes
 from eneo.server.exception_handlers import DOMAIN_EXCEPTION_MAP
 from eneo.users import user_router
@@ -325,7 +325,6 @@ async def test_password_route_audits_only_static_metadata(monkeypatch):
             new_password=VALID_PASSWORD,
         ),
         container=container,
-        _session_guard=None,
     )
 
     assert response.status_code == 204
@@ -366,7 +365,6 @@ async def test_password_route_rate_limits_before_password_verification(monkeypat
                 new_password=VALID_PASSWORD,
             ),
             container=container,
-            _session_guard=None,
         )
 
     assert exc_info.value.status_code == 429
@@ -407,7 +405,6 @@ async def test_password_route_fails_closed_when_rate_limiter_is_unavailable(
                 new_password=VALID_PASSWORD,
             ),
             container=container,
-            _session_guard=None,
         )
 
     assert exc_info.value.status_code == 503
@@ -426,10 +423,9 @@ def test_password_mutation_routes_require_session_auth():
     ]
     assert len(matching_routes) == 2
     for route in matching_routes:
-        dependency_calls = {
-            dependency.call for dependency in route.dependant.dependencies
-        }
-        assert require_session_auth in dependency_calls
+        policy = access_for(route.endpoint)
+        assert policy is not None
+        assert policy.authentication is Authentication.SESSION
 
 
 def test_local_credential_version_enforcement():

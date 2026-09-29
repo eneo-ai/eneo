@@ -6,7 +6,11 @@ from fastapi import APIRouter, Depends, Query, Response
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
-from eneo.authentication.auth_dependencies import require_session_auth
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.container.container import Container
 from eneo.main.models import CursorPaginatedResponse
 from eneo.server.dependencies.container import get_container
@@ -55,7 +59,10 @@ from eneo.skills.presentation.skill_models import (
 router = APIRouter(
     prefix="/skills",
     tags=["skills"],
-    dependencies=[Depends(require_session_auth)],
+)
+_CATALOGUE_SKILL_ACCESS_REASON = "Organization Skill service restricts catalogue reads to published skills in the caller's tenant."
+_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON = (
+    "Organization Skill service enforces tenant scope and administrator access."
 )
 
 _ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))]
@@ -68,6 +75,11 @@ _MAX_PAGE_LIMIT = 100
     response_model=PublishedSkillSummaryPagePublic,
     description="List approved Skills in the current tenant's catalogue.",
     responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_CATALOGUE_SKILL_ACCESS_REASON,
 )
 async def list_catalogue(
     container: _ContainerWithUser,
@@ -94,6 +106,11 @@ async def list_catalogue(
     description="Open the exact approved revision of a catalogue Skill.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_CATALOGUE_SKILL_ACCESS_REASON,
+)
 async def get_catalogue_skill(
     skill_id: UUID,
     container: _ContainerWithUser,
@@ -109,6 +126,11 @@ async def get_catalogue_skill(
     response_model=OrganizationSkillSummaryPagePublic,
     description="List organisation Skill drafts and publication status.",
     responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def list_organization_skills(
     container: _ContainerWithUser,
@@ -141,6 +163,11 @@ async def list_organization_skills(
     description="Create an organisation Skill draft.",
     responses=responses.get_responses([400, 403, 409]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
+)
 async def create_organization_skill(
     payload: SkillCreateRequest,
     container: _ContainerWithUser,
@@ -165,6 +192,11 @@ async def create_organization_skill(
     response_model=OrganizationSkillPublic,
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
+)
 async def get_organization_skill(
     skill_id: UUID,
     container: _ContainerWithUser,
@@ -185,6 +217,11 @@ async def get_organization_skill(
         "with full-result revision totals."
     ),
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def get_organization_skill_adoption(
     skill_id: UUID,
@@ -216,6 +253,11 @@ async def get_organization_skill_adoption(
     description="List immutable revisions of an organisation Skill.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
+)
 async def list_organization_skill_revisions(
     skill_id: UUID,
     container: _ContainerWithUser,
@@ -245,6 +287,11 @@ async def list_organization_skill_revisions(
     description="Open one immutable organisation Skill revision.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
+)
 async def get_organization_skill_revision(
     skill_id: UUID,
     revision_id: UUID,
@@ -272,6 +319,11 @@ async def get_organization_skill_revision(
         },
         **responses.get_responses([400, 403, 404]),
     },
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def create_organization_skill_revision(
     skill_id: UUID,
@@ -326,6 +378,11 @@ async def create_organization_skill_revision(
     response_model=SkillRevisionRestorePublic,
     description="Restore historical content as the next immutable revision.",
     responses=responses.get_responses([403, 404, 409]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def restore_organization_skill_revision(
     skill_id: UUID,
@@ -388,6 +445,11 @@ async def restore_organization_skill_revision(
     description="Publish the exact organisation Skill revision just reviewed.",
     responses=responses.get_responses([403, 404, 409]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
+)
 async def publish_organization_skill(
     skill_id: UUID,
     payload: SkillPublishRequest,
@@ -444,6 +506,11 @@ async def publish_organization_skill(
         "instead of overwritten."
     ),
     responses=responses.get_responses([400, 403, 404, 409]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def advance_personal_chat_binding(
     skill_id: UUID,
@@ -506,6 +573,11 @@ async def advance_personal_chat_binding(
     ),
     responses=responses.get_responses([400, 403, 404, 409]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
+)
 async def advance_assistant_bindings(
     skill_id: UUID,
     payload: AssistantFleetAdvanceRequest,
@@ -545,6 +617,11 @@ async def advance_assistant_bindings(
     ),
     responses=responses.get_responses([400, 403, 404, 409]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
+)
 async def advance_app_bindings(
     skill_id: UUID,
     payload: AppFleetAdvanceRequest,
@@ -580,6 +657,11 @@ async def advance_app_bindings(
     response_model=OrganizationSkillPublic,
     description="Remove an organisation Skill from new catalogue use.",
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def unpublish_organization_skill(
     skill_id: UUID,
@@ -630,6 +712,11 @@ async def unpublish_organization_skill(
     ),
     responses=responses.get_responses([403, 404, 409]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
+)
 async def delete_organization_skill(
     skill_id: UUID,
     container: _ContainerWithUser,
@@ -648,6 +735,11 @@ async def delete_organization_skill(
         "Apps in one transaction. Personal Chat keeps its binding."
     ),
     responses=responses.get_responses([400, 403, 404, 409]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def detach_organization_skill_bindings(
     skill_id: UUID,
@@ -676,6 +768,11 @@ async def detach_organization_skill_bindings(
         "the whole batch."
     ),
     responses=responses.get_responses([400, 403, 404, 409]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def remove_organization_skills(
     payload: SkillRemovalRequest,

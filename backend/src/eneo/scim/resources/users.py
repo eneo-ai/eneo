@@ -4,6 +4,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import JSONResponse, Response
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.scim.auth import require_scim_auth
 from eneo.scim.deps import get_scim_user_service
 from eneo.scim.domain.errors import (
@@ -26,6 +31,11 @@ router = APIRouter(dependencies=[Depends(require_scim_auth)], tags=["SCIM Users"
     description="Provision a SCIM user.",
     responses=scim_responses(400, 401, 409, 500),
 )
+@endpoint_access(
+    authentication=Authentication.SCIM,
+    authorization=Authorization.SCIM,
+    reason="The SCIM token authorizes provisioning only within its bound tenant.",
+)
 async def create_user(
     payload: ScimUserRequest,
     service: Annotated[ScimUserService, Depends(get_scim_user_service)],
@@ -47,6 +57,11 @@ async def create_user(
     description="List and filter SCIM users.",
     responses=scim_responses(400, 401, 500),
     response_model=ListResponse,
+)
+@endpoint_access(
+    authentication=Authentication.SCIM,
+    authorization=Authorization.SCIM,
+    reason="The SCIM token authorizes provisioning only within its bound tenant.",
 )
 async def list_users(
     service: Annotated[ScimUserService, Depends(get_scim_user_service)],
@@ -78,6 +93,11 @@ async def list_users(
     responses=scim_responses(400, 401, 404, 500),
     response_model=ScimUser,
 )
+@endpoint_access(
+    authentication=Authentication.SCIM,
+    authorization=Authorization.SCIM,
+    reason="The SCIM token authorizes provisioning only within its bound tenant.",
+)
 async def get_user(
     user_id: UUID,
     service: Annotated[ScimUserService, Depends(get_scim_user_service)],
@@ -93,6 +113,11 @@ async def get_user(
     description="Replace a SCIM user.",
     responses=scim_responses(400, 401, 404, 409, 500),
     response_model=ScimUser,
+)
+@endpoint_access(
+    authentication=Authentication.SCIM,
+    authorization=Authorization.SCIM,
+    reason="The SCIM token authorizes provisioning only within its bound tenant.",
 )
 async def replace_user(
     user_id: UUID,
@@ -113,6 +138,11 @@ async def replace_user(
     responses=scim_responses(400, 401, 404, 409, 500),
     response_model=ScimUser,
 )
+@endpoint_access(
+    authentication=Authentication.SCIM,
+    authorization=Authorization.SCIM,
+    reason="The SCIM token authorizes provisioning only within its bound tenant.",
+)
 async def patch_user(
     user_id: UUID,
     payload: PatchRequest,
@@ -132,6 +162,11 @@ async def patch_user(
     description="Delete a SCIM user.",
     responses=scim_responses(400, 401, 404, 500),
     response_model=None,
+)
+@endpoint_access(
+    authentication=Authentication.SCIM,
+    authorization=Authorization.SCIM,
+    reason="The SCIM token authorizes provisioning only within its bound tenant.",
 )
 async def delete_user(
     user_id: UUID,

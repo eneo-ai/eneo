@@ -7,6 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.info_blobs import info_blob_protocol
 from eneo.info_blobs.info_blob import InfoBlobPublicNoText
 from eneo.main.container.container import Container
@@ -27,6 +32,16 @@ from eneo.websites.presentation.website_models import (
     WebsiteUpdate,
 )
 
+_DEPRECATED_WEBSITE_ACCESS_REASON = (
+    "Authenticated callers receive 410 for this deprecated endpoint."
+)
+_WEBSITE_SERVICE_ACCESS_REASON = (
+    "WebsiteService enforces website permissions and space membership."
+)
+_WEBSITE_BLOB_ACCESS_REASON = (
+    "InfoBlobService checks space permission before listing website content."
+)
+
 router = APIRouter()
 
 ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
@@ -38,6 +53,11 @@ ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
     responses=responses.get_responses([410]),
     description="Deprecated: list websites. Always returns 410 Gone.",
     deprecated=True,
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_DEPRECATED_WEBSITE_ACCESS_REASON,
 )
 async def get_websites(
     container: ContainerDep,
@@ -55,6 +75,11 @@ async def get_websites(
     responses=responses.get_responses([410]),
     description="Deprecated: create a website. Always returns 410 Gone.",
     deprecated=True,
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_DEPRECATED_WEBSITE_ACCESS_REASON,
 )
 async def create_website(
     crawl: WebsiteCreateRequestDeprecated,
@@ -83,6 +108,11 @@ async def create_website(
 
     **Note:** This does not block website creation - it's informational only.
     """,
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="The lookup reads the caller's tenant organization space for an existing URL.",
 )
 async def check_existing_website_url(
     container: ContainerDep,
@@ -137,6 +167,11 @@ async def check_existing_website_url(
     ```
     """,
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_WEBSITE_SERVICE_ACCESS_REASON,
+)
 async def bulk_run_crawl(
     request: BulkCrawlRequest,
     container: ContainerDep,
@@ -189,6 +224,11 @@ async def bulk_run_crawl(
         "an active crawl are reported separately and do not fail the batch."
     ),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_WEBSITE_SERVICE_ACCESS_REASON,
+)
 async def bulk_stop_crawl(
     request: BulkCrawlRequest,
     container: ContainerDep,
@@ -221,6 +261,11 @@ async def bulk_stop_crawl(
         "and their crawl history. Sources with active crawls remain in place while "
         "their crawl is stopped and must be submitted again after cleanup completes."
     ),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_WEBSITE_SERVICE_ACCESS_REASON,
 )
 async def bulk_delete_websites(
     request: BulkCrawlRequest,
@@ -265,6 +310,11 @@ async def bulk_delete_websites(
     response_model=WebsitePublic,
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_WEBSITE_SERVICE_ACCESS_REASON,
+)
 async def get_website(
     id: Annotated[UUID, Path(description="Unique identifier of the website")],
     container: ContainerDep,
@@ -280,6 +330,11 @@ async def get_website(
     response_model=WebsitePublic,
     responses=responses.get_responses([403, 404]),
     description="Update a website's configuration by id.",
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_WEBSITE_SERVICE_ACCESS_REASON,
 )
 async def update_website(
     website_update: WebsiteUpdate,
@@ -330,6 +385,11 @@ async def update_website(
         "durable crawler cleanup is still pending."
     ),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_WEBSITE_SERVICE_ACCESS_REASON,
+)
 async def delete_website(
     id: Annotated[UUID, Path(description="Unique identifier of the website to delete")],
     container: ContainerDep,
@@ -375,6 +435,11 @@ async def delete_website(
     describes whether it completed, failed, or was cancelled.
     """,
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_WEBSITE_SERVICE_ACCESS_REASON,
+)
 async def run_crawl(
     id: Annotated[UUID, Path(description="Unique identifier of the website to crawl")],
     container: ContainerDep,
@@ -392,6 +457,11 @@ async def run_crawl(
     response_model=CursorPaginatedResponse[CrawlRunPublic],
     responses=responses.get_responses([400, 403, 404]),
     description="List newest crawl runs first. A cursor continues into older history; new runs appear on refresh.",
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_WEBSITE_SERVICE_ACCESS_REASON,
 )
 async def get_crawl_runs(
     id: Annotated[UUID, Path(description="Unique identifier of the website")],
@@ -416,6 +486,11 @@ async def get_crawl_runs(
     responses=responses.get_responses([403, 404]),
     description="Read the latest crawl run without loading the full website or run history.",
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_WEBSITE_SERVICE_ACCESS_REASON,
+)
 async def get_latest_crawl_run(
     id: Annotated[UUID, Path(description="Unique identifier of the website")],
     container: ContainerDep,
@@ -429,6 +504,11 @@ async def get_latest_crawl_run(
     status_code=204,
     responses=responses.get_responses([403, 404]),
     description="Transfer a website to another space by id.",
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="ResourceMoverService checks source and target space access before transfer.",
 )
 async def transfer_website_to_space(
     transfer_req: TransferRequest,
@@ -473,6 +553,11 @@ async def transfer_website_to_space(
     response_model=PaginatedResponse[InfoBlobPublicNoText],
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_WEBSITE_BLOB_ACCESS_REASON,
+)
 async def get_info_blobs(
     id: Annotated[UUID, Path(description="Unique identifier of the website")],
     container: ContainerDep,
@@ -489,6 +574,11 @@ async def get_info_blobs(
     "/{id}/info-blobs/page/",
     response_model=CursorPaginatedResponse[InfoBlobPublicNoText],
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_WEBSITE_BLOB_ACCESS_REASON,
 )
 async def get_info_blob_page(
     id: Annotated[UUID, Path(description="Unique identifier of the website")],

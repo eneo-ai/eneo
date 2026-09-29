@@ -13,7 +13,13 @@ from dataclasses import dataclass
 
 from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
+from starlette.routing import Route
 
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.internal_mcp.files import FILES_SERVER_NAME
 from eneo.internal_mcp.files import mcp as files_mcp
 from eneo.internal_mcp.image_generation import IMAGE_GENERATION_SERVER_NAME
@@ -49,6 +55,20 @@ INTERNAL_MCP_SERVERS: tuple[InternalMCP, ...] = (
         app=image_generation_mcp.streamable_http_app(),
     ),
 )
+
+# FastMCP's transport admits protocol initialization and health exchanges.
+# Every tool invocation enters foundation.tool_context, which authenticates
+# the caller and authorizes the assistant and tool resources. This grants
+# transport admission only, to the exact generated /mcp route.
+for _server in INTERNAL_MCP_SERVERS:
+    for _route in _server.app.routes:
+        if not isinstance(_route, Route) or _route.path != "/mcp":
+            raise ValueError("An internal MCP transport route needs an access decision")
+        endpoint_access(
+            authentication=Authentication.PUBLIC,
+            authorization=Authorization.PUBLIC,
+            reason="MCP protocol transport; tool_context authorizes each tool invocation.",
+        )(_route.endpoint)
 
 
 def internal_mcp_mounts() -> list[tuple[str, Starlette]]:

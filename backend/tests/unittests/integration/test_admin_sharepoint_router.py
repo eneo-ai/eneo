@@ -35,10 +35,7 @@ async def test_list_subscriptions_scopes_by_tenant():
     container.user_integration_repo.return_value = AsyncMock()
     container.user_repo.return_value = AsyncMock()
 
-    with patch(
-        "eneo.integration.presentation.admin_sharepoint_router.validate_permission"
-    ):
-        result = await list_sharepoint_subscriptions(container=container)
+    result = await list_sharepoint_subscriptions(container=container)
 
     assert result == []
     subscription_repo.list_by_tenant.assert_called_once_with(user.tenant_id)
@@ -56,10 +53,7 @@ async def test_renew_expired_subscriptions_scopes_by_tenant():
     container.sharepoint_subscription_service.return_value = AsyncMock()
     container.user_integration_repo.return_value = AsyncMock()
 
-    with patch(
-        "eneo.integration.presentation.admin_sharepoint_router.validate_permission"
-    ):
-        result = await renew_expired_subscriptions(container=container)
+    result = await renew_expired_subscriptions(container=container)
 
     assert result.total_subscriptions == 0
     assert result.expired_count == 0
@@ -78,13 +72,10 @@ async def test_recreate_subscription_uses_tenant_scoped_lookup():
     container.sharepoint_subscription_service.return_value = AsyncMock()
     container.user_integration_repo.return_value = AsyncMock()
 
-    with patch(
-        "eneo.integration.presentation.admin_sharepoint_router.validate_permission"
-    ):
-        with pytest.raises(HTTPException) as exc_info:
-            await recreate_subscription(
-                subscription_id=subscription_id, container=container
-            )
+    with pytest.raises(HTTPException) as exc_info:
+        await recreate_subscription(
+            subscription_id=subscription_id, container=container
+        )
 
     assert exc_info.value.status_code == 404
     subscription_repo.one_by_tenant.assert_called_once_with(

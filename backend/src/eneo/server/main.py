@@ -5,12 +5,18 @@ from datetime import datetime, timezone
 from typing import Any, Literal, cast
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from eneo.allowed_origins.get_origin_callback import get_origin
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+    require_endpoint_access,
+)
 from eneo.internal_mcp import internal_mcp_mounts
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
@@ -23,6 +29,10 @@ from eneo.object_content.runtime import (
 from eneo.scim.app import scim_app
 from eneo.server import api_documentation
 from eneo.server.dependencies.lifespan import lifespan as app_lifespan
+from eneo.server.endpoint_routes import (
+    declare_framework_documentation_access,
+    validate_endpoint_access,
+)
 from eneo.server.exception_handlers import (
     add_exception_handlers,
     default_error_code_for_status,
@@ -215,7 +225,9 @@ def _remove_invalid_defaults(schema: dict[str, Any]) -> None:
 def get_application():
     app = FastAPI(
         lifespan=app_lifespan,
+        dependencies=[Depends(require_endpoint_access)],
     )
+    declare_framework_documentation_access(app)
 
     _log_api_key_security_overrides()
 
@@ -520,6 +532,11 @@ def get_application():
         responses={200: {"description": "API process is alive"}},
         response_model=None,
     )
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Deployment health probes and version discovery are intentionally public.",
+    )
     async def get_livez():
         return {"detail": {"status": "HEALTHY"}}
 
@@ -531,6 +548,11 @@ def get_application():
             503: {"description": "Worker health check failed"},
         },
         response_model=None,
+    )
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Deployment health probes and version discovery are intentionally public.",
     )
     async def get_healthz():
         from datetime import datetime, timezone
@@ -612,6 +634,11 @@ def get_application():
         },
         response_model=None,
     )
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Deployment health probes and version discovery are intentionally public.",
+    )
     async def get_readyz():
         return await get_healthz()
 
@@ -620,6 +647,11 @@ def get_application():
         response_model=CrawlerHealthResponse,
         description="Get detailed crawler queue and worker diagnostics.",
         responses={200: {"description": "Crawler diagnostics"}},
+    )
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Deployment health probes and version discovery are intentionally public.",
     )
     async def crawler_health() -> CrawlerHealthResponse:
         """Report aggregate transport and PostgreSQL lifecycle health."""
@@ -738,6 +770,11 @@ def get_application():
         responses={200: {"description": "Backend version"}},
         response_model=None,
     )
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Deployment health probes and version discovery are intentionally public.",
+    )
     async def get_version():
         return VersionResponse(version=get_settings().app_version)
 
@@ -753,6 +790,7 @@ def get_application():
     )
     del _registered_endpoints
 
+    validate_endpoint_access(app)
     return app
 
 

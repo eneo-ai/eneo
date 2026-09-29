@@ -12,10 +12,11 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import require_user_for_creation
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException
 from eneo.main.models import CursorPaginatedResponse
-from eneo.roles.permissions import Permission, validate_permission
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.websites.domain.crawl_run import CrawlResourceKind, CrawlRun
@@ -245,6 +246,11 @@ async def _scheduler_health(
     description="Read tenant-wide crawl metadata and totals. Requires admin permission; includes private-space operational metadata without granting content access.",
     responses=responses.get_responses([400, 403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Tenant admin permission gates crawl overview; the repository scopes metadata to the caller's tenant.",
+)
 async def get_crawler_overview(
     container: AdminContainer,
     view: Literal["active", "recent", "all"] = "active",
@@ -262,7 +268,6 @@ async def get_crawler_overview(
 ) -> AdminCrawlerOverview:
     """Read tenant-wide crawl metadata, including spaces the Owner cannot open."""
     user = container.user()
-    validate_permission(user, Permission.ADMIN)
     try:
         zone = ZoneInfo(time_zone)
     except (ZoneInfoNotFoundError, ValueError) as error:
@@ -323,6 +328,11 @@ async def get_crawler_overview(
     ),
     responses=responses.get_responses([400, 403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Tenant admin permission gates schedules; the repository lists websites in the caller's tenant.",
+)
 async def list_admin_scheduled_websites(
     container: AdminContainer,
     search: Annotated[str, Query(max_length=200)] = "",
@@ -339,7 +349,6 @@ async def list_admin_scheduled_websites(
     cursor: UUID | None = None,
 ) -> AdminCrawlerScheduledWebsitePage:
     user = container.user()
-    validate_permission(user, Permission.ADMIN)
     as_of = datetime.now(timezone.utc)
     page = await container.website_sparse_repo().scheduled_for_tenant(
         user.tenant_id,
@@ -365,11 +374,15 @@ async def list_admin_scheduled_websites(
     description="Read a crawl's owning space, source owner, recorded manual initiator, indexed storage and current source state. Requires tenant admin permission; does not grant access to indexed content.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Tenant admin permission gates crawl details; the repository loads runs in the caller's tenant.",
+)
 async def get_crawler_details(
     id: UUID, container: AdminContainer
 ) -> AdminCrawlerDetails:
     user = container.user()
-    validate_permission(user, Permission.ADMIN)
     details = await container.crawl_run_repo().tenant_details(id, user.tenant_id)
     item = details.item
     return AdminCrawlerDetails(
@@ -407,6 +420,11 @@ async def get_crawler_details(
     description="Read recorded failure addresses for a crawl in the administrator's tenant.",
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Tenant admin permission gates failure addresses; the run is loaded for the caller's tenant first.",
+)
 async def get_crawler_failures(
     id: UUID,
     container: AdminContainer,
@@ -415,7 +433,6 @@ async def get_crawler_failures(
     kind: CrawlResourceKind | None = None,
 ) -> CrawlFailurePagePublic:
     user = container.user()
-    validate_permission(user, Permission.ADMIN)
     repo = container.crawl_run_repo()
     run = await repo.one_for_tenant(id, user.tenant_id)
     page = await repo.get_failures(id, limit=limit, cursor=cursor, kind=kind)
@@ -440,6 +457,11 @@ async def get_crawler_failures(
     description="Read paginated crawl history for one website in the administrator's tenant, including runs older than 24 hours. Does not grant private content access.",
     responses=responses.get_responses([400, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Tenant admin permission gates crawl history; the website is loaded for the caller's tenant first.",
+)
 async def get_admin_website_runs(
     id: UUID,
     container: AdminContainer,
@@ -447,7 +469,6 @@ async def get_admin_website_runs(
     cursor: UUID | None = None,
 ) -> CursorPaginatedResponse[CrawlRunPublic]:
     user = container.user()
-    validate_permission(user, Permission.ADMIN)
     await container.website_sparse_repo().one_for_tenant(id, user.tenant_id)
     page = await container.crawl_run_repo().get_crawl_runs(
         id, limit=limit, cursor=cursor
@@ -466,6 +487,11 @@ async def get_admin_website_runs(
     description="Read a bounded page of other source registrations with this exact website address in the administrator's tenant. Matching addresses do not imply identical indexed content.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Tenant admin permission gates matching source registrations in the caller's tenant.",
+)
 async def get_admin_website_matches(
     id: UUID,
     container: AdminContainer,
@@ -473,7 +499,6 @@ async def get_admin_website_matches(
     cursor: UUID | None = None,
 ) -> AdminCrawlerRelatedPage:
     user = container.user()
-    validate_permission(user, Permission.ADMIN)
     repo = container.website_sparse_repo()
     website = await repo.one_for_tenant(id, user.tenant_id)
     page = await repo.same_address(website, limit=limit, cursor=cursor)
@@ -521,11 +546,15 @@ async def _audit_crawler_action(
     description="Request a crawl with the website's current settings. Tenant admin permission permits this operation in private spaces without granting content access. Returns the existing active run when present. Requires a user identity; retry starts a new full crawl. A new run executes as the requesting administrator, whose storage quota covers newly published content versions.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Tenant admin permission and a user identity gate crawl requests; the website is loaded for the caller's tenant.",
+)
 async def request_admin_crawl(
     id: UUID, container: AdminMutationContainer
 ) -> CrawlRunPublic:
     user = container.user()
-    validate_permission(user, Permission.ADMIN)
     await require_user_for_creation(user)
     website = await container.website_sparse_repo().one_for_tenant(id, user.tenant_id)
     run = await container.crawl_service().crawl(website)
@@ -541,11 +570,15 @@ async def request_admin_crawl(
     description="Request cancellation of this exact run. Tenant admin permission permits this operation in private spaces without granting content access. Queued work cancels immediately; running work enters stopping. An already finished run is returned unchanged.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Tenant admin permission gates cancellation; the run and website are loaded for the caller's tenant.",
+)
 async def cancel_admin_crawl(
     id: UUID, container: AdminMutationContainer
 ) -> CrawlRunPublic:
     user = container.user()
-    validate_permission(user, Permission.ADMIN)
     run = await container.crawl_run_repo().one_for_tenant(id, user.tenant_id)
     website = await container.website_sparse_repo().one_for_tenant(
         run.website_id, user.tenant_id

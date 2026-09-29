@@ -5,7 +5,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
-from eneo.authentication.auth_dependencies import require_session_auth
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException
 from eneo.questions.question import MessageLogging
@@ -13,7 +17,7 @@ from eneo.questions.question_protocol import to_question_logging
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
-router = APIRouter(dependencies=[Depends(require_session_auth)])
+router = APIRouter()
 
 
 @router.get(
@@ -21,6 +25,11 @@ router = APIRouter(dependencies=[Depends(require_session_auth)])
     response_model=MessageLogging,
     description="Get the logging details for a single message by id.",
     responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Authenticated sessions may submit client diagnostics.",
 )
 async def get_logging_details(
     message_id: UUID,

@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from redis.asyncio import Redis
 
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.integration.application.tenant_sharepoint_app_service import (
     TenantSharePointAppService,
 )
@@ -36,7 +37,7 @@ from eneo.integration.presentation.admin_models import (
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
-from eneo.roles.permissions import Permission, validate_permission
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.settings.encryption_service import EncryptionService
 from eneo.users.user import UserInDB
@@ -231,6 +232,11 @@ async def _get_sharepoint_token_for_user_integration(
         403: {"description": "Admin permissions required"},
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def configure_sharepoint_app(
     app_config: TenantSharePointAppCreate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -238,7 +244,6 @@ async def configure_sharepoint_app(
     """Configure or update the tenant's SharePoint application credentials."""
     try:
         user = container.user()
-        validate_permission(user, Permission.ADMIN)
         _require_sharepoint_webhook_client_state()
 
         tenant_app_service: TenantSharePointAppService = (
@@ -413,13 +418,17 @@ async def configure_sharepoint_app(
         403: {"description": "Admin permissions required"},
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def get_sharepoint_app(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> Optional[TenantSharePointAppPublic]:
     """Get the tenant's SharePoint app configuration."""
     try:
         user = container.user()
-        validate_permission(user, Permission.ADMIN)
 
         tenant_app_service: TenantSharePointAppService = (
             container.tenant_sharepoint_app_service()
@@ -471,6 +480,11 @@ async def get_sharepoint_app(
         403: {"description": "Admin permissions required"},
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def test_sharepoint_app_credentials(
     app_config: Annotated[TenantSharePointAppCreate, Body()],
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -478,7 +492,6 @@ async def test_sharepoint_app_credentials(
     """Test SharePoint app credentials without saving them."""
     try:
         user = container.user()
-        validate_permission(user, Permission.ADMIN)
         logger.info(
             "Received SharePoint app test request for tenant %s by user %s "
             "(client_id_prefix=%s, tenant_domain=%s)",
@@ -546,13 +559,17 @@ async def test_sharepoint_app_credentials(
         403: {"description": "Admin permissions required"},
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def delete_sharepoint_app(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> dict[str, str]:
     """Permanently delete the tenant's SharePoint app and all associated data."""
     try:
         user = container.user()
-        validate_permission(user, Permission.ADMIN)
 
         tenant_app_service: TenantSharePointAppService = (
             container.tenant_sharepoint_app_service()
@@ -627,15 +644,17 @@ async def delete_sharepoint_app(
         403: {"description": "Admin permissions required"},
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def list_sharepoint_subscriptions(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """List all SharePoint subscriptions for the tenant."""
     try:
         user = container.user()
-
-        # Check admin permissions
-        validate_permission(user, Permission.ADMIN)
 
         subscription_repo = container.sharepoint_subscription_repo()
         user_integration_repo = container.user_integration_repo()
@@ -710,15 +729,17 @@ async def list_sharepoint_subscriptions(
         403: {"description": "Admin permissions required"},
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def renew_expired_subscriptions(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Renew all expired SharePoint subscriptions for the tenant."""
     try:
         user = container.user()
-
-        # Check admin permissions
-        validate_permission(user, Permission.ADMIN)
 
         subscription_repo = container.sharepoint_subscription_repo()
         subscription_service = container.sharepoint_subscription_service()
@@ -833,6 +854,11 @@ async def renew_expired_subscriptions(
         403: {"description": "Admin permissions required"},
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def recreate_subscription(
     subscription_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -840,9 +866,6 @@ async def recreate_subscription(
     """Recreate a specific SharePoint subscription."""
     try:
         user = container.user()
-
-        # Check admin permissions
-        validate_permission(user, Permission.ADMIN)
 
         subscription_repo = container.sharepoint_subscription_repo()
         subscription_service = container.sharepoint_subscription_service()
@@ -956,6 +979,11 @@ async def recreate_subscription(
         403: {"description": "Admin permissions required"},
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def start_service_account_auth(
     app_config: ServiceAccountAuthStart,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -963,7 +991,6 @@ async def start_service_account_auth(
     """Start OAuth flow for service account configuration."""
     try:
         user = container.user()
-        validate_permission(user, Permission.ADMIN)
         _require_sharepoint_webhook_client_state()
 
         # Generate a secure state token
@@ -1027,6 +1054,11 @@ async def start_service_account_auth(
         403: {"description": "Admin permissions required"},
     },
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def service_account_auth_callback(
     callback: ServiceAccountAuthCallback,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1034,7 +1066,6 @@ async def service_account_auth_callback(
     """Complete OAuth flow and configure service account."""
     try:
         user = container.user()
-        validate_permission(user, Permission.ADMIN)
         _require_sharepoint_webhook_client_state()
 
         # Verify state (atomically retrieve and delete from Redis)
