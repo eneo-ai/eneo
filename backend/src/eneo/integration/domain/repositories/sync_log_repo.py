@@ -20,15 +20,20 @@ class SyncLogRepository(ABC):
 
     @abstractmethod
     async def get_by_integration_knowledge(
-        self, integration_knowledge_id: UUID, limit: int = 50, offset: int = 0
+        self,
+        integration_knowledge_id: UUID,
+        *,
+        tenant_id: UUID,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list["SyncLog"]: ...
 
     @abstractmethod
     async def count_by_integration_knowledge(
-        self, integration_knowledge_id: UUID
+        self, integration_knowledge_id: UUID, *, tenant_id: UUID
     ) -> int: ...
 
     @abstractmethod
     async def get_recent_by_integration_knowledge(
-        self, integration_knowledge_id: UUID, limit: int = 10
+        self, integration_knowledge_id: UUID, *, tenant_id: UUID, limit: int = 10
     ) -> list["SyncLog"]: ...

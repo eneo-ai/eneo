@@ -9,6 +9,7 @@ import sqlalchemy as sa
 from dependency_injector import providers
 from httpx import ASGITransport, AsyncClient
 
+from eneo.authentication.auth_models import ApiKeyOwnership
 from eneo.database.tables.integration_knowledge_spaces_table import (
     IntegrationKnowledgesSpaces,
 )
@@ -191,7 +192,8 @@ async def test_sync_history_obeys_knowledge_read_access(
     sync_log_repo = AsyncMock(spec=SyncLogRepository)
     sync_log_repo.count_by_integration_knowledge.return_value = len(logs)
 
-    async def page(integration_knowledge_id, limit, offset):
+    async def page(integration_knowledge_id, *, tenant_id, limit, offset):
+        assert tenant_id == case.user.tenant_id
         return logs[offset : offset + limit]
 
     sync_log_repo.get_by_integration_knowledge.side_effect = page
@@ -228,5 +230,86 @@ async def test_sync_history_obeys_knowledge_read_access(
         ]
     else:
         assert "/internal/example" not in response.text
+        sync_log_repo.count_by_integration_knowledge.assert_not_awaited()
+        sync_log_repo.get_by_integration_knowledge.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "knowledge, permission, expected",
+    [
+        ("own_tenant", "admin", 200),
+        ("own_tenant", "read", 200),
+        ("foreign_knowledge", "admin", 404),
+        ("foreign_space", "admin", 404),
+        ("missing_knowledge", "admin", 404),
+    ],
+)
+async def test_service_key_reads_sync_history_within_its_tenant(
+    integration_access,
+    sync_log_database,
+    authenticated_integration_app,
+    knowledge,
+    permission,
+    expected,
+):
+    case = integration_access
+    connection, tables, space_repo = sync_log_database
+    case.user.roles = []
+    case.user.active_api_key = MagicMock(
+        ownership=ApiKeyOwnership.SERVICE,
+        scope_type="tenant",
+        scope_id=None,
+        permission=permission,
+    )
+    knowledge_id, space_id = uuid4(), uuid4()
+    connection.execute(
+        tables[IntegrationKnowledge]
+        .insert()
+        .values(
+            id=knowledge_id,
+            space_id=space_id,
+            tenant_id=uuid4()
+            if knowledge == "foreign_knowledge"
+            else case.user.tenant_id,
+        )
+    )
+    connection.execute(
+        tables[Spaces]
+        .insert()
+        .values(
+            id=space_id,
+            tenant_id=uuid4() if knowledge == "foreign_space" else case.user.tenant_id,
+            user_id=None,
+            tenant_space_id=uuid4(),
+        )
+    )
+    sync_log_repo = AsyncMock(spec=SyncLogRepository)
+    sync_log_repo.count_by_integration_knowledge.return_value = 0
+    sync_log_repo.get_by_integration_knowledge.return_value = []
+    container = Container(
+        user=providers.Object(case.user),
+        user_integration_repo=providers.Object(case.integration_repo),
+        tenant_integration_repo=providers.Object(AsyncMock()),
+        tenant_sharepoint_app_repo=providers.Object(case.app_repo),
+        space_repo=providers.Object(space_repo),
+        oauth_token_repo=providers.Object(AsyncMock()),
+        integration_knowledge_repo=providers.Object(AsyncMock()),
+        embedding_model_repo2=providers.Object(AsyncMock()),
+        job_service=providers.Object(AsyncMock()),
+        sharepoint_subscription_service=providers.Object(AsyncMock()),
+        sync_log_repo=providers.Object(sync_log_repo),
+    )
+    app = authenticated_integration_app(container)
+    requested_id = uuid4() if knowledge == "missing_knowledge" else knowledge_id
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get(f"/integrations/sync-logs/{requested_id}/")
+    assert response.status_code == expected, response.text
+    if expected == 200:
+        sync_log_repo.count_by_integration_knowledge.assert_awaited_once_with(
+            integration_knowledge_id=knowledge_id, tenant_id=case.user.tenant_id
+        )
+    else:
         sync_log_repo.count_by_integration_knowledge.assert_not_awaited()
         sync_log_repo.get_by_integration_knowledge.assert_not_awaited()

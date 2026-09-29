@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 from typing_extensions import TypedDict
 
+from eneo.authentication.auth_models import is_service_api_key
 from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
@@ -150,9 +151,15 @@ class IntegrationKnowledgeService:
 
     async def require_sync_log_access(self, integration_knowledge_id: UUID) -> None:
         """Sync history follows knowledge read access, not connection ownership."""
-        access = await self.space_repo.get_knowledge_source_read_access(
-            INTEGRATION_KNOWLEDGE_SOURCE, integration_knowledge_id
-        )
+        if is_service_api_key(self.user):
+            owner = await self.space_repo.get_knowledge_source_owner_access(
+                INTEGRATION_KNOWLEDGE_SOURCE, integration_knowledge_id
+            )
+            access = [owner] if owner is not None else []
+        else:
+            access = await self.space_repo.get_knowledge_source_read_access(
+                INTEGRATION_KNOWLEDGE_SOURCE, integration_knowledge_id
+            )
         for space in access:
             actor = self.actor_manager.get_space_actor(space)
             if actor.can_read_space() and actor.can_read_integrations():
