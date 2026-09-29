@@ -155,14 +155,19 @@ class FileRestrictions(BaseModel):
     limit: Limit
 
 
+# Signed links are stateless bearer credentials and cannot be revoked, so
+# every purpose has a hard maximum lifetime enforced at mint and at redemption.
+FILE_PROCESSING_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS = 7 * 24 * 60 * 60
+FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS = 60 * 60
+
+
 class SignedURLRequest(BaseModel):
     # Default 1 hour; capped at 7 days so a leaked URL cannot stay valid
-    # indefinitely (tokens are stateless and cannot be revoked).
-    expires_in: int = Field(default=3600, ge=1, le=604_800)
+    # indefinitely.
+    expires_in: int = Field(
+        default=3600, ge=1, le=FILE_PROCESSING_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS
+    )
     content_disposition: ContentDisposition = ContentDisposition.ATTACHMENT
-
-
-FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS = 60 * 60
 
 
 class OriginalSignedURLRequest(SignedURLRequest):

@@ -1,7 +1,7 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -290,6 +290,7 @@ async def test_download_file_signed_raises_not_found_for_missing_content(monkeyp
     file_id = uuid4()
     payload = {
         "file_id": str(file_id),
+        "tenant_id": str(uuid4()),
         "content_disposition": "inline",
     }
 
@@ -319,6 +320,7 @@ def test_processing_download_returns_and_documents_object_store_503(monkeypatch)
         "verify_signed_token",
         lambda _: {
             "file_id": str(file_id),
+            "tenant_id": str(uuid4()),
             "content_disposition": "inline",
         },
     )
@@ -390,6 +392,7 @@ async def test_original_download_rejects_token_for_another_file(monkeypatch):
         "verify_file_original_download_token",
         lambda _: {
             "file_id": str(uuid4()),
+            "tenant_id": str(uuid4()),
             "content_disposition": "attachment",
         },
     )
@@ -412,6 +415,7 @@ async def test_unsatisfiable_original_range_uses_known_size_without_reopening(
         "verify_file_original_download_token",
         lambda _: {
             "file_id": str(file_id),
+            "tenant_id": str(uuid4()),
             "content_disposition": "attachment",
         },
     )
@@ -441,7 +445,7 @@ async def test_unsatisfiable_original_range_uses_known_size_without_reopening(
     service.get_original_download_no_auth.assert_awaited_once_with(
         file_id,
         range_header="bytes=999-",
-        expected_tenant_id=None,
+        expected_tenant_id=ANY,
     )
 
 
@@ -516,7 +520,6 @@ async def test_original_download_audits_the_redemption(monkeypatch):
     assert audit["metadata"]["extra"] == {
         "content_disposition": "attachment",
         "ranged": False,
-        "tenant_claim_present": True,
         "content_length": 5,
     }
 
@@ -526,7 +529,11 @@ async def test_original_download_is_served_when_audit_storage_fails(monkeypatch)
     monkeypatch.setattr(
         file_router,
         "verify_file_original_download_token",
-        lambda _: {"file_id": str(file_id), "content_disposition": "inline"},
+        lambda _: {
+            "file_id": str(file_id),
+            "tenant_id": str(uuid4()),
+            "content_disposition": "inline",
+        },
     )
 
     async def chunks() -> AsyncGenerator[bytes]:
@@ -584,6 +591,7 @@ async def test_legacy_unsatisfiable_range_preserves_empty_response(monkeypatch):
         "verify_signed_token",
         lambda _: {
             "file_id": str(file_id),
+            "tenant_id": str(uuid4()),
             "content_disposition": "attachment",
         },
     )
@@ -862,12 +870,11 @@ def test_download_claims_return_tenant_claim_when_present():
     assert expected_tenant == tenant_id
 
 
-def test_download_claims_tolerate_absent_tenant_claim():
+def test_download_claims_reject_absent_tenant_claim():
+    """A token that cannot name its tenant is not a valid credential."""
     file_id = uuid4()
-    disposition, expected_tenant = file_router._validate_download_claims(
-        file_id=file_id,
-        payload={"file_id": str(file_id), "content_disposition": "attachment"},
-    )
-
-    assert disposition is ContentDisposition.ATTACHMENT
-    assert expected_tenant is None
+    with pytest.raises(AuthenticationException, match="Invalid token claims"):
+        file_router._validate_download_claims(
+            file_id=file_id,
+            payload={"file_id": str(file_id), "content_disposition": "attachment"},
+        )

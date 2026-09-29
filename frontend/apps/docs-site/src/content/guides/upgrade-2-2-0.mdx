@@ -90,6 +90,33 @@ docker compose logs db-init backend worker frontend | grep -E 'no longer read|is
 
 ---
 
+### Signed download links
+
+Signed download links (file downloads, exact-original downloads and knowledge
+originals) are stateless bearer credentials signed with `URL_SIGNING_KEY`.
+From this release:
+
+- The backend refuses to start when `URL_SIGNING_KEY` is blank or shorter
+  than 32 bytes. Generate a key from at least 32 random bytes, for example
+  `openssl rand -hex 32`, and set it in `env_backend.env`. A key that already
+  meets this length can stay as it is.
+- Every signed link now carries its purpose, the owning tenant, its issuance
+  time and its expiry, and the backend enforces a maximum lifetime per
+  purpose: seven days for file downloads and one hour for exact-original and
+  knowledge-original downloads.
+- Links issued before the upgrade are rejected immediately; there is no grace
+  period. Integrations that stored signed links must request new ones after
+  the upgrade.
+
+When the API runs on several replicas, cut them all over together: replicas
+on the previous release keep accepting the old link format and reject the
+new one, so a mixed fleet serves inconsistent answers until the rollout
+completes.
+
+A valid link is still a bearer credential. Binding it to a tenant stops it
+from being redeemed against another tenant's copy of a file; it does not stop
+another person from using a leaked, unexpired link.
+
 ## API changes for integrations
 
 Clients that call the Eneo API directly must use the new names. The API no

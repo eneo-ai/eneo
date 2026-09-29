@@ -20,7 +20,7 @@ REQUIRED_SETTINGS = {
     "jwt_algorithm": "HS256",
     "jwt_secret": "test-secret",
     "jwt_token_prefix": "Bearer",
-    "url_signing_key": "test-key",
+    "url_signing_key": "unit-test-url-signing-key-with-at-least-32-bytes",
 }
 
 MODULE_AUTH_LIFETIME_SETTINGS = [

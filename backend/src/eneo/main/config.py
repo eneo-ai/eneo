@@ -23,6 +23,9 @@ _LOCAL_MANIFEST = (
 )
 
 
+URL_SIGNING_KEY_MINIMUM_BYTES = 32
+
+
 def validate_public_origin(origin: str | None) -> str | None:
     """
     Validate and normalize public origin.
@@ -212,7 +215,11 @@ _SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS = frozenset(
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    # Never echo settings values in validation errors: the environment holds
+    # secrets, and a failed startup must not print them.
+    model_config = SettingsConfigDict(
+        env_file=".env", extra="allow", hide_input_in_errors=True
+    )
 
     app_version: str = _set_app_version()
 
@@ -569,6 +576,19 @@ class Settings(BaseSettings):
             raise ValueError(
                 "JWT_EXPIRY_TIME must be a positive number of minutes "
                 "(for example 1440 for 24 hours)"
+            )
+        return v
+
+    @field_validator("url_signing_key")
+    @classmethod
+    def validate_url_signing_key(cls, v: str) -> str:
+        """Signed download links are HMAC bearer credentials; a blank or short
+        key would let anyone forge them. The key value is never logged."""
+        if len(v.strip().encode("utf-8")) < URL_SIGNING_KEY_MINIMUM_BYTES:
+            raise ValueError(
+                "URL_SIGNING_KEY must be set to at least "
+                f"{URL_SIGNING_KEY_MINIMUM_BYTES} bytes of random data "
+                "(for example: openssl rand -hex 32)"
             )
         return v
 
