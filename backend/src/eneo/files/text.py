@@ -4,14 +4,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-import magic
-import pdfplumber
-import pptx
-from docx2python import docx2python
-from pdfminer.pdfdocument import PDFPasswordIncorrect
-from pdfminer.pdfparser import PDFSyntaxError
-from pptx.exc import PackageNotFoundError
-
+# Keep format-specific imports in extraction methods: MIME types and exceptions
+# are also used by paths that never extract text.
 logger = logging.getLogger(__name__)
 
 
@@ -209,6 +203,10 @@ class TextExtractor:
 
     @classmethod
     def extract_from_pdf(cls, filepath: Path, filename: str | None = None) -> str:
+        import pdfplumber
+        from pdfminer.pdfdocument import PDFPasswordIncorrect
+        from pdfminer.pdfparser import PDFSyntaxError
+
         display_name = filename or filepath.name
         try:
             with pdfplumber.open(filepath) as pdf:
@@ -255,6 +253,8 @@ class TextExtractor:
 
     @staticmethod
     def extract_from_docx(filepath: Path, filename: str | None = None) -> str:
+        from docx2python import docx2python
+
         display_name = filename or filepath.name
         try:
             with docx2python(filepath) as docx_content:
@@ -334,6 +334,9 @@ class TextExtractor:
 
     @staticmethod
     def extract_from_pptx(filepath: Path, filename: str | None = None) -> str:
+        import pptx
+        from pptx.exc import PackageNotFoundError
+
         display_name = filename or filepath.name
         try:
             # Extract text from pptx using python-pptx
@@ -385,7 +388,10 @@ class TextExtractor:
     def extract(
         self, filepath: Path, mimetype: str | None = None, filename: str | None = None
     ) -> str:
-        mimetype = mimetype or magic.from_file(filepath, mime=True)  # pyright: ignore[reportUnknownMemberType]  # python-magic stubs are incomplete
+        if not mimetype:
+            import magic
+
+            mimetype = magic.from_file(filepath, mime=True)  # pyright: ignore[reportUnknownMemberType]  # python-magic stubs are incomplete
         # Use original filename for error messages, fallback to temp filepath
         display_name = filename or filepath.name
 
