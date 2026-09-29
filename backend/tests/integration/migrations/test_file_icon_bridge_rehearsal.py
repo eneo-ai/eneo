@@ -577,7 +577,8 @@ async def test_released_upgrade_recovers_from_process_death_and_backup_restore(
             f"worker RSS bytes: imports={report['worker']['rss_after_imports_bytes']}, "
             f"init={report['worker']['rss_after_init_bytes']}, "
             f"first_run={report['worker']['rss_after_first_run_bytes']}, "
-            f"peak={report['worker']['max_rss_bytes']}"
+            f"peak={report['worker']['max_rss_bytes']}, "
+            f"import_stages={report['worker']['rss_import_stages_bytes']}"
         )
         _assert_adopted(url)
         assert _source_facts(url) == state["expected_sources"]

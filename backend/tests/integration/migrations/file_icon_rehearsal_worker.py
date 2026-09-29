@@ -15,15 +15,6 @@ import sys
 import time
 from pathlib import Path
 
-from eneo.database.database import DatabaseSessionManager
-from eneo.object_content.configuration import ObjectContentCoreSettings
-from eneo.object_content.content_service import ObjectContentService
-from eneo.object_content.file_icon_backfill import (
-    FileIconBackfill,
-    FileIconBackfillSettings,
-    FileIconBackfillState,
-)
-
 _BYTES_PER_RUSAGE_UNIT = 1 if sys.platform == "darwin" else 1024
 
 
@@ -31,6 +22,29 @@ def _peak_rss_bytes() -> int:
     return int(
         resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * _BYTES_PER_RUSAGE_UNIT
     )
+
+
+_IMPORT_RSS_STAGES = {"stdlib": _peak_rss_bytes()}
+
+from eneo.database.database import DatabaseSessionManager
+
+_IMPORT_RSS_STAGES["database"] = _peak_rss_bytes()
+
+from eneo.object_content.configuration import ObjectContentCoreSettings
+
+_IMPORT_RSS_STAGES["configuration"] = _peak_rss_bytes()
+
+from eneo.object_content.content_service import ObjectContentService
+
+_IMPORT_RSS_STAGES["content_service"] = _peak_rss_bytes()
+
+from eneo.object_content.file_icon_backfill import (
+    FileIconBackfill,
+    FileIconBackfillSettings,
+    FileIconBackfillState,
+)
+
+_IMPORT_RSS_STAGES["file_icon_backfill"] = _peak_rss_bytes()
 
 
 async def _worker_main() -> None:
@@ -71,6 +85,7 @@ async def _worker_main() -> None:
                     "active_seconds": active_seconds,
                     "schedule": "repeated run_once with 50 ms gaps; production minute cron not exercised",
                     "rss_after_imports_bytes": rss_after_imports,
+                    "rss_import_stages_bytes": _IMPORT_RSS_STAGES,
                     "rss_after_init_bytes": rss_after_init,
                     "rss_after_first_run_bytes": rss_after_first_run,
                     "max_rss_bytes": _peak_rss_bytes(),
