@@ -808,6 +808,79 @@ def test_text_input_fills_docx_without_generic_reader_step() -> None:
     assert validation.valid, validation.errors
 
 
+def test_a_planner_nullable_field_a_placeholder_reads_compiles_to_publishable_text() -> (
+    None
+):
+    # The fill step refuses null. The planner may declare a field nullable; when
+    # a template placeholder reads it, the compiled contract is text that may
+    # be empty, and the flow passes the publish rule as compiled.
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Beslutsbrev",
+            "plan_rationale": "Prepare the fields the selected template asks for.",
+            "steps": [
+                {
+                    "name": "Förbered beslut",
+                    "instructions": "Fill each field; leave a field empty when the "
+                    "source does not state it.",
+                    "output_fields": [
+                        {
+                            "name": "diarienummer",
+                            "field_type": "string",
+                            "description": "Ärendets diarienummer.",
+                            "nullable": True,
+                        },
+                        {
+                            "name": "kommentar",
+                            "field_type": "string",
+                            "description": "Not read by the template.",
+                            "nullable": True,
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.TEXT,
+            final_output_type=OutputType.DOCX,
+            final_output_mode=OutputMode.TEMPLATE_FILL,
+            selected_template_count=1,
+            selected_template_placeholders=("diarienummer",),
+        ),
+    )
+
+    preparation_step, template_step = compiled.steps
+    contract = preparation_step.output_contract
+    assert contract is not None
+    assert contract["properties"]["diarienummer"]["type"] == "string"
+    assert contract["properties"]["kommentar"]["type"] == ["string", "null"]
+    assert "diarienummer" in contract["required"]
+    assert template_step.output_config == {
+        "bindings": {"diarienummer": "{{ step_a.output.structured.diarienummer }}"}
+    }
+    assert template_step.output_config is not None
+    publishable = [
+        preparation_step,
+        template_step.model_copy(
+            update={
+                "output_config": {
+                    **template_step.output_config,
+                    "template_asset_id": str(uuid4()),
+                }
+            }
+        ),
+    ]
+    assert not collect_step_graph_issues(
+        flow_step_validation_views_from_draft_spec(publishable),
+        metadata_json=metadata_json_from_authoring_form_fields(compiled.form_fields),
+        require_complete_template_fill_config=True,
+    )
+
+
 def test_document_report_preserves_depth_four_source_contract_after_wrapping() -> None:
     intent = parse_create_flow_intent_arguments(
         {

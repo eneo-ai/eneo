@@ -113,8 +113,13 @@ from eneo.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
     StepSpec,
+    metadata_json_from_authoring_form_fields,
+)
+from eneo.flows.flow_authoring_variable_rewriting import (
+    flow_step_validation_views_from_draft_spec,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
+from eneo.flows.flow_validators import collect_step_graph_issues
 from eneo.flows.input_binding_contract_rules import (
     derive_structured_projection_contract,
 )
@@ -4569,6 +4574,550 @@ async def test_edit_keeps_the_flows_template_mappings_when_an_earlier_step_chang
         },
     }
     assert not spec.form_fields
+
+
+def _nullable_producer_flow(
+    template_asset_id, declared: dict | None = None, *, contract: dict | None = None
+) -> SimpleNamespace:
+    # Saved before the rule: the template reads a field its step declares
+    # required but nullable, and the fill step cannot use null.
+    return _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Läs underlaget",
+            input_type="text",
+            output_type="text",
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Förbered fält",
+            input_source="previous_step",
+            input_type="text",
+            output_type="json",
+            output_contract=contract
+            or {
+                "type": "object",
+                "properties": {"handlaggare": declared or {"type": ["string", "null"]}},
+                "required": ["handlaggare"],
+                "additionalProperties": False,
+            },
+        ),
+        _flow_step(
+            step_order=3,
+            user_description="Fyll i mallen",
+            input_source="previous_step",
+            input_type="json",
+            output_mode="template_fill",
+            output_type="docx",
+            output_config={
+                "template_asset_id": str(template_asset_id),
+                "bindings": {
+                    "handlaggare": "{{ step_2.output.structured.handlaggare }}"
+                },
+            },
+        ),
+    )
+
+
+def _handlaggare_type(spec, index: int) -> object:
+    contract = spec.steps[index].output_contract
+    assert contract is not None
+    return contract["properties"]["handlaggare"]["type"]
+
+
+@pytest.mark.asyncio
+async def test_edit_makes_the_field_a_kept_template_mapping_reads_non_null() -> None:
+    template_asset_id = uuid4()
+
+    result = await _process(
+        flow=_nullable_producer_flow(template_asset_id),
+        planning_state=_inherited_planning_state(template_asset_id, ["handlaggare"]),
+        arguments={
+            "plan_rationale": "Byter bara namn på första steget.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "name": "Läs ärendet",
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                {"kind": "modify", "existing_step_ref": "existing_step_3"},
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady), result
+    spec = result.compiled.content.spec
+    assert _handlaggare_type(spec, 1) == "string"
+    assert spec.steps[-1].output_config == {
+        "template_asset_id": str(template_asset_id),
+        "bindings": {
+            "handlaggare": "{{ "
+            + spec.steps[1].plan_step_ref
+            + ".output.structured.handlaggare }}"
+        },
+    }
+
+
+async def _scoped_edit(flow, *, target_ref: str, template_asset_id, placeholders):
+    """A step-scoped instruction edit of `target_ref`: the result and the prior spec."""
+
+    snapshots = {
+        step.assistant_id: AssistantAuthoringSnapshot(instructions=f"Step {index}")
+        for index, step in enumerate(flow.steps, start=1)
+    }
+    catalog = build_ai_builder_resource_catalog(
+        available_models=None, available_kbs=None
+    )
+    target_order = int(target_ref.rsplit("_", 1)[1])
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(
+            flow_step_id=flow.steps[target_order - 1].id
+        ),
+        scope="step",
+        target_existing_step_ref=target_ref,
+    )
+    prior = _prior_spec_for_revision(
+        context=context,
+        prior_plan=None,
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+    )
+    assert prior is not None
+    result = await _process(
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+        planning_state=_inherited_planning_state(template_asset_id, placeholders),
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        arguments={
+            "plan_rationale": "Improve the instructions.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": target_ref,
+                    "assistant_spec": {"instructions": "Improved instructions"},
+                },
+            ],
+        },
+    )
+    return result, prior
+
+
+@pytest.mark.asyncio
+async def test_a_step_scoped_edit_of_another_step_leaves_the_saved_flow_alone() -> None:
+    template_asset_id = uuid4()
+
+    result, prior = await _scoped_edit(
+        _nullable_producer_flow(template_asset_id),
+        target_ref="existing_step_1",
+        template_asset_id=template_asset_id,
+        placeholders=["handlaggare"],
+    )
+
+    assert isinstance(result, ProposalReady), result
+    spec = result.compiled.content.spec
+    assert _handlaggare_type(spec, 1) == ["string", "null"]
+    assert spec.steps[1].output_contract == prior.steps[1].output_contract
+
+
+@pytest.mark.asyncio
+async def test_a_step_scoped_edit_refuses_a_selected_step_the_template_cannot_rely_on() -> (
+    None
+):
+    # A saved-step revision rewrites nothing for the template. The selected
+    # step still declares the field it feeds the template as nullable, so the
+    # revision is refused and the whole-flow edit is named as the remedy.
+    template_asset_id = uuid4()
+
+    result, _ = await _scoped_edit(
+        _nullable_producer_flow(template_asset_id),
+        target_ref="existing_step_2",
+        template_asset_id=template_asset_id,
+        placeholders=["handlaggare"],
+    )
+
+    assert isinstance(result, CorrectableFailure), result
+    assert "template_bound_field_not_plain" in result.codes
+    assert "'handlaggare'" in result.feedback
+    assert "'Förbered fält'" in result.feedback
+    assert "whole flow" in result.feedback
+
+
+_WHOLE_FLOW_EDIT_KEEPING_THE_TEMPLATE = {
+    "plan_rationale": "Byter bara namn på första steget.",
+    "steps": [
+        {
+            "kind": "modify",
+            "existing_step_ref": "existing_step_1",
+            "name": "Läs ärendet",
+        },
+        {"kind": "modify", "existing_step_ref": "existing_step_2"},
+        {"kind": "modify", "existing_step_ref": "existing_step_3"},
+    ],
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("declared", "narrowed"),
+    [
+        ({"type": ["string", "null"]}, {"type": "string"}),
+        (
+            {"type": ["string", "null"], "description": "D", "default": "a"},
+            {"type": "string", "description": "D", "default": "a"},
+        ),
+        (
+            {"type": ["integer", "null"], "title": "Antal"},
+            {"type": "integer", "title": "Antal"},
+        ),
+        # Already one type: a field the check accepts is left as declared.
+        (
+            {"type": "string", "minLength": 1},
+            {"type": "string", "minLength": 1},
+        ),
+        (
+            {"type": "integer", "minimum": 0},
+            {"type": "integer", "minimum": 0},
+        ),
+    ],
+)
+async def test_edit_touches_only_the_type_of_the_field_a_kept_template_mapping_reads(
+    declared: dict, narrowed: dict
+) -> None:
+    template_asset_id = uuid4()
+
+    result = await _process(
+        flow=_nullable_producer_flow(template_asset_id, declared),
+        planning_state=_inherited_planning_state(template_asset_id, ["handlaggare"]),
+        arguments=_WHOLE_FLOW_EDIT_KEEPING_THE_TEMPLATE,
+    )
+
+    assert isinstance(result, ProposalReady), result
+    spec = result.compiled.content.spec
+    contract = spec.steps[1].output_contract
+    assert contract is not None
+    assert contract["properties"]["handlaggare"] == narrowed
+    assert contract["required"] == ["handlaggare"]
+    assert not collect_step_graph_issues(
+        flow_step_validation_views_from_draft_spec(spec.steps),
+        metadata_json=metadata_json_from_authoring_form_fields(spec.form_fields),
+        require_complete_template_fill_config=True,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "declared",
+    [
+        {"type": "null"},
+        {"type": ["string", "integer"]},
+        {"enum": ["a", None]},
+        {"enum": ["a", "b"]},
+        {"const": "x"},
+        {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        # Narrowing these would make a contract no value satisfies.
+        {"type": ["string", "null"], "enum": [None]},
+        {"type": ["string", "null"], "enum": ["a", None]},
+        {"type": ["integer", "null"], "minimum": 0},
+    ],
+)
+async def test_edit_names_a_kept_template_field_that_has_no_single_type(
+    declared: dict,
+) -> None:
+    template_asset_id = uuid4()
+
+    result = await _process(
+        flow=_nullable_producer_flow(template_asset_id, declared),
+        planning_state=_inherited_planning_state(template_asset_id, ["handlaggare"]),
+        arguments=_WHOLE_FLOW_EDIT_KEEPING_THE_TEMPLATE,
+    )
+
+    assert isinstance(result, CorrectableFailure), result
+    assert "template_bound_field_not_plain" in result.codes
+    assert "'handlaggare'" in result.feedback
+    assert "'Förbered fält'" in result.feedback
+    assert "one type" in result.feedback
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "contract",
+    [
+        pytest.param(
+            {
+                "type": "object",
+                "allOf": [{"properties": {"handlaggare": {"const": None}}}],
+                "properties": {"handlaggare": {"type": ["string", "null"]}},
+                "required": ["handlaggare"],
+            },
+            id="ancestor-allof-const-null",
+        ),
+        pytest.param(
+            {
+                "type": "object",
+                "properties": {"handlaggare": {"type": "string", "enum": [None]}},
+                "required": [],
+            },
+            id="optional-child-enum-null-newly-required",
+        ),
+        pytest.param(
+            {
+                "type": "object",
+                "$defs": {"alias": {"$ref": "#/properties/handlaggare"}},
+                "properties": {
+                    "handlaggare": {"type": ["string", "null"]},
+                    "alias": {"$ref": "#/$defs/alias", "const": None},
+                },
+                "required": ["handlaggare"],
+            },
+            id="sibling-ref-const-null",
+        ),
+        pytest.param(
+            {
+                "type": ["object", "null"],
+                "properties": {"handlaggare": {"type": "string"}},
+                "required": ["handlaggare", "phantom"],
+                "additionalProperties": False,
+            },
+            id="closed-object-requires-an-undeclared-key",
+        ),
+    ],
+)
+async def test_edit_stores_nothing_when_an_interacting_assertion_would_break_the_edit(
+    contract: dict,
+) -> None:
+    template_asset_id = uuid4()
+
+    result = await _process(
+        flow=_nullable_producer_flow(template_asset_id, contract=contract),
+        planning_state=_inherited_planning_state(template_asset_id, ["handlaggare"]),
+        arguments=_WHOLE_FLOW_EDIT_KEEPING_THE_TEMPLATE,
+    )
+
+    assert isinstance(result, CorrectableFailure), result
+    assert "template_bound_field_not_plain" in result.codes
+    assert "'handlaggare'" in result.feedback
+    assert "'Förbered fält'" in result.feedback
+    assert "without other constraints" in result.feedback
+
+
+def _projected_consumer_flow(
+    template_asset_id,
+    *,
+    projected: dict | None = None,
+    unrelated: dict | None = None,
+) -> SimpleNamespace:
+    # Step 3 reads step 2's `handlaggare` through a structured source_ref, so
+    # its input contract is an exact copy of that field's declaration. The
+    # template also reads `kommentar` of step 2 when `unrelated` declares it.
+    fields = {"handlaggare": projected or {"type": ["string", "null"]}}
+    template_bindings = {
+        "handlaggare": "{{ step_2.output.structured.handlaggare }}",
+        "summary": "{{ step_3.output.structured.summary }}",
+    }
+    if unrelated is not None:
+        fields["kommentar"] = unrelated
+        template_bindings["kommentar"] = "{{ step_2.output.structured.kommentar }}"
+    producer_contract = {
+        "type": "object",
+        "properties": fields,
+        "required": list(fields),
+        "additionalProperties": False,
+    }
+    bindings = {
+        "source_refs": [
+            {
+                "step_ref": "step_2",
+                "output": "structured",
+                "field_path": "handlaggare",
+            }
+        ]
+    }
+    return _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Läs underlaget",
+            input_type="text",
+            output_type="text",
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Förbered fält",
+            input_source="previous_step",
+            input_type="text",
+            output_type="json",
+            output_contract=producer_contract,
+        ),
+        _flow_step(
+            step_order=3,
+            user_description="Sammanfatta fält",
+            input_source="previous_step",
+            input_type="json",
+            input_bindings=bindings,
+            input_contract=derive_structured_projection_contract(
+                input_bindings=bindings,
+                source_contracts_by_step_ref={"step_2": producer_contract},
+            ),
+            output_type="json",
+            output_contract={
+                "type": "object",
+                "properties": {"summary": {"type": "string"}},
+                "required": ["summary"],
+                "additionalProperties": False,
+            },
+        ),
+        _flow_step(
+            step_order=4,
+            user_description="Fyll i mallen",
+            input_source="previous_step",
+            input_type="json",
+            output_mode="template_fill",
+            output_type="docx",
+            output_config={
+                "template_asset_id": str(template_asset_id),
+                "bindings": template_bindings,
+            },
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_edit_moves_a_structured_projection_with_the_field_it_replaces() -> None:
+    template_asset_id = uuid4()
+
+    result = await _process(
+        flow=_projected_consumer_flow(template_asset_id),
+        planning_state=_inherited_planning_state(
+            template_asset_id, ["handlaggare", "summary"]
+        ),
+        arguments={
+            "plan_rationale": "Byter bara namn på första steget.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "name": "Läs ärendet",
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                {"kind": "modify", "existing_step_ref": "existing_step_3"},
+                {"kind": "modify", "existing_step_ref": "existing_step_4"},
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady), result
+    spec = result.compiled.content.spec
+    assert _handlaggare_type(spec, 1) == "string"
+    consumer_contract = spec.steps[2].input_contract
+    assert consumer_contract is not None
+    assert consumer_contract["properties"]["handlaggare"] == {"type": "string"}
+    assert not collect_step_graph_issues(
+        flow_step_validation_views_from_draft_spec(spec.steps),
+        metadata_json=metadata_json_from_authoring_form_fields(spec.form_fields),
+        require_complete_template_fill_config=True,
+    )
+
+
+_PLAIN = {"type": "string"}
+_NULLABLE = {"type": ["string", "null"]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("projected", "unrelated", "refused_field"),
+    [
+        (_NULLABLE, None, "handlaggare"),
+        (_PLAIN, _NULLABLE, "kommentar"),
+    ],
+)
+async def test_a_step_scoped_edit_refuses_what_it_may_not_rewrite_for_a_saved_projection(
+    projected: dict, unrelated: dict | None, refused_field: str
+) -> None:
+    # Step 3 copies step 2's `handlaggare` and is outside the revision of step
+    # 2, so nothing of step 2 is rewritten. A field of step 2 that the template
+    # reads and that is not plain, projected or not, is refused instead.
+    template_asset_id = uuid4()
+    flow = _projected_consumer_flow(
+        template_asset_id, projected=projected, unrelated=unrelated
+    )
+
+    result, _ = await _scoped_edit(
+        flow,
+        target_ref="existing_step_2",
+        template_asset_id=template_asset_id,
+        placeholders=["handlaggare", "summary", *(["kommentar"] if unrelated else [])],
+    )
+
+    assert isinstance(result, CorrectableFailure), result
+    assert "template_bound_field_not_plain" in result.codes
+    assert f"'{refused_field}'" in result.feedback
+    assert "whole flow" in result.feedback
+
+
+@pytest.mark.asyncio
+async def test_a_step_scoped_edit_passes_a_selected_step_whose_fields_are_plain() -> (
+    None
+):
+    template_asset_id = uuid4()
+    flow = _projected_consumer_flow(
+        template_asset_id, projected=_PLAIN, unrelated=_PLAIN
+    )
+
+    result, prior = await _scoped_edit(
+        flow,
+        target_ref="existing_step_2",
+        template_asset_id=template_asset_id,
+        placeholders=["handlaggare", "summary", "kommentar"],
+    )
+
+    assert isinstance(result, ProposalReady), result
+    spec = result.compiled.content.spec
+    assert spec.steps[1].output_contract == prior.steps[1].output_contract
+    assert spec.steps[2].input_contract == prior.steps[2].input_contract
+
+
+@pytest.mark.asyncio
+async def test_a_whole_flow_edit_repairs_the_field_a_scoped_edit_had_to_refuse() -> (
+    None
+):
+    template_asset_id = uuid4()
+    flow = _projected_consumer_flow(
+        template_asset_id, projected=_PLAIN, unrelated=_NULLABLE
+    )
+
+    result = await _process(
+        flow=flow,
+        planning_state=_inherited_planning_state(
+            template_asset_id, ["handlaggare", "summary", "kommentar"]
+        ),
+        arguments={
+            "plan_rationale": "Byter bara namn på första steget.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "name": "Läs ärendet",
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                {"kind": "modify", "existing_step_ref": "existing_step_3"},
+                {"kind": "modify", "existing_step_ref": "existing_step_4"},
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady), result
+    spec = result.compiled.content.spec
+    contract = spec.steps[1].output_contract
+    assert contract is not None
+    assert contract["properties"]["kommentar"] == _PLAIN
+    assert not collect_step_graph_issues(
+        flow_step_validation_views_from_draft_spec(spec.steps),
+        metadata_json=metadata_json_from_authoring_form_fields(spec.form_fields),
+        require_complete_template_fill_config=True,
+    )
 
 
 @pytest.mark.asyncio

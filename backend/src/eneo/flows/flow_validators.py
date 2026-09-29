@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from dataclasses import replace
 from enum import Enum
 from typing import Any, cast
@@ -97,6 +98,7 @@ from eneo.flows.output_modes import (
 )
 from eneo.flows.output_processing import (
     schema_expects_structured,
+    validate_against_contract,
     validate_schema_syntax,
 )
 from eneo.flows.runtime.output_formats import resolve_format_spec
@@ -1066,6 +1068,13 @@ def _validate_template_fill_config(
             form_field_types=form_field_types,
             step_ref_mapping=step_ref_mapping,
         )
+        _validate_template_binding_present(
+            binding,
+            placeholder=placeholder,
+            step_order=step.step_order,
+            output_contracts_by_order=output_contracts_by_order,
+            step_ref_mapping=step_ref_mapping,
+        )
 
 
 def validate_template_binding_scalar(
@@ -1143,6 +1152,262 @@ def validate_template_binding_scalar(
         raise FlowStepValidationError(
             f"Step {step_order}: template binding '{placeholder}' must resolve "
             "to a scalar value; select a text output or a scalar field from a declared contract.",
+            context={"field": "output_config.bindings", "placeholder": placeholder},
+            step_order=step_order,
+        )
+
+
+def template_binding_structured_source(
+    binding: str, *, step_ref_mapping: Mapping[str, int]
+) -> tuple[int, tuple[str, ...]] | None:
+    """The step order and structured field path a template binding reads, if any."""
+
+    references = analyze_template(
+        binding, step_refs=dict(step_ref_mapping), form_field_names=set()
+    )
+    reference = references[0] if len(references) == 1 else None
+    if (
+        reference is None
+        or reference.kind is not TemplateReferenceKind.STEP
+        or reference.step_order is None
+        or not reference.structured_path
+        or reference.path_error_code is not None
+    ):
+        return None
+    return reference.step_order, reference.structured_path
+
+
+# A tuple, not a set: a declared type list is unhashable.
+_FIELD_TYPES = ("string", "number", "integer", "boolean")
+
+
+def _mapping(node: object) -> Mapping[str, object]:
+    return cast(Mapping[str, object], node) if isinstance(node, Mapping) else {}
+
+
+def template_bound_path_ok(schema: Mapping[str, object], path: tuple[str, ...]) -> bool:
+    """Whether the field at `path` is a required field of one type, from the step's result down.
+
+    Keywords of a JSON Schema node are conjunctive: a node whose `type` is one
+    non-null type excludes null however its other keywords read. So the step's
+    result and every object above the field have `type` exactly "object" and
+    list the next key in `properties` and `required`, and the field's `type` is
+    exactly one of string, number, integer or boolean. Other keywords are
+    allowed, except `$ref` on the path: refs are not resolved here and a
+    draft-07 validator ignores its siblings. Satisfiability is not asked.
+    """
+
+    node: object = schema
+    for key in path:
+        obj = _mapping(node)
+        required = obj.get("required")
+        if (
+            obj.get("type") != "object"
+            or "$ref" in obj
+            or not isinstance(required, list)
+            or key not in cast(list[object], required)
+        ):
+            return False
+        node = _mapping(obj.get("properties")).get(key)
+    field = _mapping(node)
+    return "$ref" not in field and field.get("type") in _FIELD_TYPES
+
+
+# The keywords a schema may carry anywhere and still be edited. Any other (not,
+# allOf, $ref, enum, const, ...) asserts something an edit could turn, here or
+# in another branch, into a contract no value satisfies. `default` and
+# `examples` are annotations in draft 2020-12 and nothing here reads them.
+_PLAIN_NODE_KEYS = frozenset(
+    "type properties required additionalProperties items title description "
+    "examples default $comment".split()
+)
+
+
+def _is_plain_tree(node: object) -> bool:
+    """Whether every schema node under `node` carries only `_PLAIN_NODE_KEYS`."""
+
+    if not isinstance(node, dict):
+        return False
+    schema = cast(dict[str, object], node)
+    properties = schema.get("properties", {})
+    required = schema.get("required", [])
+    if (
+        not set(schema) <= _PLAIN_NODE_KEYS
+        or not isinstance(properties, dict)
+        or not isinstance(required, list)
+        # A closed object cannot require a key it does not declare.
+        or (
+            schema.get("additionalProperties") is False
+            and any(key not in properties for key in cast(list[object], required))
+        )
+    ):
+        return False
+    children = [*cast(dict[str, object], properties).values()]
+    children += [
+        schema[key]
+        for key in ("items", "additionalProperties")
+        if key in schema and not isinstance(schema[key], bool)
+    ]
+    return all(_is_plain_tree(child) for child in children)
+
+
+def _narrowed_to(node: dict[str, object], allowed: tuple[str, ...]) -> bool:
+    """Whether `node` has one of the `allowed` types, narrowing `[type, "null"]`."""
+
+    declared = node.get("type")
+    if isinstance(declared, list):
+        kept = [item for item in cast(list[object], declared) if item != "null"]
+        if len(kept) == 1 and kept[0] in allowed:
+            node["type"] = kept[0]
+    return node.get("type") in allowed
+
+
+def _witness(schema: object) -> object:
+    """One instance for a plain schema, accepted whenever the schema is satisfiable.
+
+    Text is "", numbers and integers 0, booleans false and an array `[]`, which
+    a plain schema always accepts (it has no minItems, contains or
+    prefixItems). An object has every required key, filled recursively: from
+    `properties`, else from the `additionalProperties` schema, else "". The one
+    plain shape it can refuse without cause is a type list of several non-null
+    types whose first member is unsatisfiable while another is not; the edit
+    is then refused, which fails safe.
+    """
+
+    node = _mapping(schema)
+    declared = node.get("type")
+    listed = cast(list[object], declared) if isinstance(declared, list) else [declared]
+    kinds = [kind for kind in listed if isinstance(kind, str)]
+    kind = next((kind for kind in kinds if kind != "null"), "null" if kinds else None)
+    if kind == "object" or (kind is None and "properties" in node):
+        required = node.get("required")
+        properties = _mapping(node.get("properties"))
+        return {
+            str(key): _witness(
+                properties[str(key)]
+                if str(key) in properties
+                else node.get("additionalProperties")
+            )
+            for key in (
+                cast(list[object], required) if isinstance(required, list) else []
+            )
+        }
+    if kind == "array":
+        return []
+    if kind in ("number", "integer"):
+        return 0
+    if kind == "boolean":
+        return False
+    return None if kind == "null" else ""
+
+
+def _accepts_witness(contract: FlowPersistedJsonObject) -> bool:
+    """Whether the platform's validator (draft 2020-12) accepts the witness.
+
+    Only called on a plain contract: no `$ref` keyword can be in it, so the
+    validator resolves nothing.
+    """
+
+    try:
+        validate_schema_syntax(contract, label="contract")
+        validate_against_contract(_witness(contract), contract, label="witness")
+    except TypedIOValidationException:
+        return False
+    return True
+
+
+def template_bound_path_made_ok(
+    schema: FlowPersistedJsonObject, path: tuple[str, ...]
+) -> FlowPersistedJsonObject | None:
+    """`schema` with `type` and `required` on `path` set so `template_bound_path_ok` holds.
+
+    A path already ok is left alone. Otherwise the schema is edited only when
+    the ENTIRE schema is plain: an assertion anywhere could interact with the
+    edit. A type list of one non-null type (with or without "null") becomes
+    that type and each key on the path joins its parent's `required`. The edit
+    is kept only if a witness instance still validates against the result. None
+    when the schema is not plain, a node has no single type or the witness
+    fails. `schema` itself when it has no such path or the field is a
+    container, which publication names.
+    """
+
+    contract = deepcopy(schema)
+    nodes = [contract]
+    for key in path:
+        child = _mapping(nodes[-1].get("properties")).get(key)
+        if not isinstance(child, dict):
+            return schema
+        nodes.append(cast(dict[str, object], child))
+    if nodes[-1].get("type") in ("array", "object") or template_bound_path_ok(
+        schema, path
+    ):
+        return schema
+    if not _is_plain_tree(schema):
+        return None
+    for node, key in zip(nodes, path, strict=False):
+        required = cast(list[object], node.setdefault("required", []))
+        if not _narrowed_to(node, ("object",)):
+            return None
+        if key not in required:
+            required.append(key)
+    edited = _narrowed_to(nodes[-1], _FIELD_TYPES) and _accepts_witness(contract)
+    return contract if edited else None
+
+
+def _blank_remedy(contract: FlowPersistedJsonObject, path: tuple[str, ...]) -> str:
+    """How the field says there is nothing to fill in, by its declared type alone."""
+
+    node: object = contract
+    for key in path:
+        node = _mapping(_mapping(node).get("properties")).get(key)
+    declared = _mapping(node).get("type")
+    listed = cast(list[object], declared) if isinstance(declared, list) else [declared]
+    kinds = {item for item in listed if isinstance(item, str) and item != "null"}
+    if kinds and kinds <= {"number", "integer", "boolean"}:
+        return (
+            "the step always gives a valid value, and a deliberately blank "
+            "template binding is the way to leave the placeholder empty."
+        )
+    return (
+        "the step writes an empty string when there is nothing to say only if the "
+        "field accepts one; otherwise it always gives a valid value, and a "
+        "deliberately blank template binding leaves the placeholder empty."
+    )
+
+
+def _validate_template_binding_present(
+    binding: str,
+    *,
+    placeholder: str,
+    step_order: int,
+    output_contracts_by_order: Mapping[int, FlowPersistedJsonObject | None],
+    step_ref_mapping: Mapping[str, int],
+) -> None:
+    """Refuse a placeholder bound to a step field that is not a required field of one type.
+
+    The fill step stops the run on null and on a key the step did not write,
+    and treats "" as a deliberate omission. The Builder makes its own bound
+    fields meet the rule; this is the rule for every other author.
+    """
+
+    source = template_binding_structured_source(
+        binding, step_ref_mapping=step_ref_mapping
+    )
+    if source is None:
+        return
+    source_order, path = source
+    contract = output_contracts_by_order.get(source_order)
+    if contract is None or source_order >= step_order:
+        return
+    if not template_bound_path_ok(contract, path):
+        field = ".".join(path)
+        raise FlowStepValidationError(
+            f"Step {step_order}: template binding '{placeholder}' reads '{field}' of "
+            f"step {source_order}, which is not a required field of one type. A "
+            "template field cannot be filled from a missing or null value. Declare "
+            f"'{field}' as required with exactly one type (string, number, integer "
+            "or boolean), and every object above it and the step's result as "
+            f'type "object" listing it in required; {_blank_remedy(contract, path)}',
             context={"field": "output_config.bindings", "placeholder": placeholder},
             step_order=step_order,
         )

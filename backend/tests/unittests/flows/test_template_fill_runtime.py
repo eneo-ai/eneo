@@ -672,6 +672,140 @@ async def test_template_contract_materializes_and_renders_without_tokens() -> No
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("written", ["", None])
+async def test_a_field_the_builder_binds_to_a_placeholder_renders_empty_never_null(
+    written: str | None,
+) -> None:
+    # The planner declared the field nullable. The compiled contract is what
+    # the step's model answers to: text that may be empty. A run that still
+    # produces null (a provider that ignores the schema) stops at the fill
+    # step, and a run that writes "" leaves the control empty in the document.
+    run = _run()
+    step_ref = "step_a"
+    approved = apply_template_attachment_contract(
+        FlowDraftSpecCore(
+            flow_name="Nullable field flow",
+            steps=[
+                StepSpec(
+                    plan_step_ref=step_ref,
+                    name="Prepare",
+                    assistant_spec=AssistantSpec(instructions="Prepare."),
+                    input_source=InputSource.FLOW_INPUT,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"title": {"type": ["string", "null"]}},
+                        "required": ["title"],
+                        "additionalProperties": False,
+                    },
+                ),
+                StepSpec(
+                    plan_step_ref="step_b",
+                    name="Fill",
+                    assistant_spec=AssistantSpec(instructions="Fill."),
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.JSON,
+                    output_mode=OutputMode.TEMPLATE_FILL,
+                    output_type=OutputType.DOCX,
+                ),
+            ],
+        ),
+        selected_template_count=1,
+        placeholders=("title",),
+        inherited_template_asset_id=uuid4(),
+    )
+    compiled = compile_flow_draft_changeset(approved, current_flow=None).compiled_steps
+    assert compiled[0].output_contract is not None
+    assert compiled[0].output_contract["properties"]["title"] == {"type": "string"}
+    terminal = compiled[-1]
+    assert terminal.output_config is not None
+    assert terminal.output_config["bindings"] == {
+        "title": "{{ step_1.output.structured.title }}"
+    }
+    template_file_id = uuid4()
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
+    file_service = AsyncMock()
+    file_service.save_generated_file.return_value = SimpleNamespace(id=uuid4())
+    deps = _runtime_deps(
+        file_repo=AsyncMock(),
+        template_asset_repo=template_asset_repo,
+        template_file=SimpleNamespace(
+            id=template_file_id,
+            name="template.docx",
+            checksum="checksum",
+            blob=control_template_bytes(text=[("title", "Titel", "Titel")]),
+        ),
+        file_service=file_service,
+    )
+    runtime_step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=terminal.step_order,
+        assistant_id=uuid4(),
+        user_description=terminal.user_description,
+        input_source=terminal.input_source,
+        input_bindings=terminal.input_bindings,
+        input_config=terminal.input_config,
+        output_mode=terminal.output_mode,
+        output_config={
+            **(terminal.output_config or {}),
+            "template_checksum": "checksum",
+        },
+        output_type=terminal.output_type,
+    )
+    state = _state(
+        result=_completed_result(
+            run=run, output_payload={"structured": {"title": written}}
+        )
+    )
+
+    if written is None:
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            await execute_template_fill_step(
+                step=runtime_step, run=run, state=state, deps=deps
+            )
+        assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED
+        assert "without a value: title" in str(exc_info.value)
+        file_service.save_generated_file.assert_not_awaited()
+        return
+
+    output = await execute_template_fill_step(
+        step=runtime_step, run=run, state=state, deps=deps
+    )
+
+    assert output.persisted_text == "## title"
+    file_service.save_generated_file.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_bound_key_the_step_did_not_write_stops_the_fill_naming_the_key() -> (
+    None
+):
+    # Publication refuses a placeholder bound to a field the step may leave
+    # out; a run that reaches the fill without the key stops on it.
+    run = _run()
+    state = _state(
+        result=_completed_result(run=run, output_payload={"structured": {}}),
+    )
+    step = _step()
+    step.output_config["bindings"]["summary"] = "{{step_1.output.structured.note}}"
+    deps = _runtime_deps(
+        file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
+        template_file=SimpleNamespace(
+            id=uuid4(),
+            name="template.docx",
+            checksum="checksum",
+            blob=_build_template_bytes(),
+        ),
+    )
+
+    with pytest.raises(TypedIOValidationException, match="Missing key 'note'"):
+        await execute_template_fill_step(step=step, run=run, state=state, deps=deps)
+
+
+@pytest.mark.asyncio
 async def test_execute_template_fill_step_loads_template_asset_by_tenant() -> None:
     run = _run()
     result = _completed_result(run=run)

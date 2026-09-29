@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import itertools
+from collections.abc import Iterator
 from uuid import uuid4
 
+import jsonschema
 import pytest
 
 from eneo.flows.domain.flow import FlowStep
@@ -20,13 +23,21 @@ from eneo.flows.flow_review_policy import (
 )
 from eneo.flows.flow_validators import (
     FLOW_AUDIO_TRANSCRIPTION_REQUIRED,
+    _is_plain_tree,
     _validate_step_mapped_execution,
     collect_step_graph_issues,
+    template_bound_path_made_ok,
+    template_bound_path_ok,
     validate_form_schema,
     validate_steps,
 )
 from eneo.flows.flow_validators_form import validate_variable_alias_collisions
 from eneo.main.exceptions import BadRequestException
+from tests.unittests.flows.schema_witness_support import (
+    all_plain,
+    local_listener,
+    witness,
+)
 from tests.unittests.flows.test_input_binding_contract_rules import (
     _wildcard_projection_case,
 )
@@ -2463,14 +2474,21 @@ def test_template_fill_publish_rejects_non_scalar_bindings(expression: str) -> N
 @pytest.mark.parametrize(
     "title_schema",
     [
-        {"type": ["string", "null"]},
-        {"enum": ["draft", "final", None]},
-        {"const": "final"},
-        {"anyOf": [{"type": "string"}, {"type": "null"}]},
-        {"oneOf": [{"type": "string"}, {"type": "number"}]},
+        {"type": "string"},
+        {"type": "number"},
+        {"type": "integer"},
+        {"type": "boolean"},
+        {"type": "string", "title": "Titel", "description": "Ärendets titel."},
+        # Every other keyword only narrows a node that already has one type.
+        {"type": "string", "minLength": 1},
+        {"type": "string", "enum": ["a", "b"]},
+        {"type": "string", "pattern": "^A", "format": "date"},
+        {"type": "integer", "minimum": 0},
+        {"type": "string", "allOf": [{"minLength": 1}]},
+        {"type": "string", "anyOf": [{"minLength": 1}, {"pattern": "^A"}]},
     ],
 )
-def test_template_fill_publish_accepts_scalar_contract_fields_and_form_values(
+def test_template_fill_publish_accepts_a_required_field_of_one_type(
     title_schema,
 ) -> None:
     validate_steps(
@@ -2484,9 +2502,11 @@ def test_template_fill_publish_accepts_scalar_contract_fields_and_form_values(
                             "properties": {
                                 "title": title_schema,
                             },
+                            "required": ["title"],
                         },
                         "count": {"type": "integer"},
                     },
+                    "required": ["details", "count"],
                 }
             ),
             _step(
@@ -2530,6 +2550,968 @@ def test_template_fill_publish_accepts_the_free_text_of_a_free_text_run() -> Non
         ],
         require_complete_template_fill_config=True,
     )
+
+
+def _template_fill_over_contract(contract: dict, *, binding: str) -> list[FlowStep]:
+    return [
+        _step(output_contract=contract),
+        _step(
+            step_order=2,
+            output_type="docx",
+            output_mode="template_fill",
+            output_config={
+                "template_asset_id": str(uuid4()),
+                "bindings": {"title": binding},
+            },
+        ),
+    ]
+
+
+def _nested(leaf: dict, *, above: dict | None = None) -> dict:
+    """A step result with `leaf` at `details.title`; `above` overrides `details`."""
+
+    details = {
+        "type": "object",
+        "properties": {"title": leaf},
+        "required": ["title"],
+        **(above or {}),
+    }
+    return {
+        "type": "object",
+        "properties": {"details": details},
+        "required": ["details"],
+    }
+
+
+# One entry per way the field itself can fail to have exactly one type.
+_UNPLAIN_LEAVES = [
+    pytest.param({"type": ["string", "null"]}, id="type-list-with-null"),
+    pytest.param({"type": ["null", "integer"]}, id="type-list-null-first"),
+    pytest.param({"type": ["string"]}, id="type-list-of-one"),
+    pytest.param({"type": ["string", "number"]}, id="type-list"),
+    pytest.param({"type": "null"}, id="null"),
+    pytest.param({"enum": ["a", "b"]}, id="untyped-enum"),
+    pytest.param({"enum": ["a", None]}, id="untyped-enum-with-null"),
+    pytest.param({"const": "final"}, id="untyped-const"),
+    pytest.param({"const": None}, id="untyped-const-null"),
+    pytest.param({"anyOf": [{"type": "string"}, {"type": "null"}]}, id="untyped-anyof"),
+    pytest.param(
+        {"oneOf": [{"type": "string"}, {"type": "number"}]}, id="untyped-oneof"
+    ),
+    pytest.param({"allOf": [{"type": "string"}]}, id="untyped-allof"),
+    pytest.param({"$ref": "#/$defs/title"}, id="ref"),
+    pytest.param({"type": "string", "$ref": "#/$defs/title"}, id="ref-beside-type"),
+    pytest.param({"description": "Titel"}, id="missing-type"),
+    pytest.param({}, id="empty"),
+]
+
+
+@pytest.mark.parametrize("leaf", _UNPLAIN_LEAVES)
+def test_template_fill_publish_rejects_a_field_without_exactly_one_type(
+    leaf: dict,
+) -> None:
+    # The fill step refuses null and a missing key and treats "" as an
+    # omission. Keywords only narrow a node, so exactly one non-null type
+    # excludes null; without it, nothing on the node does.
+    steps = _template_fill_over_contract(
+        _nested(leaf), binding="{{step_1.output.structured.details.title}}"
+    )
+
+    with pytest.raises(FlowStepValidationError) as exc_info:
+        validate_steps(steps, require_complete_template_fill_config=True)
+
+    message = str(exc_info.value)
+    assert exc_info.value.step_order == 2
+    assert "template binding 'title'" in message
+    # A field the scalar rule already refuses keeps that message.
+    if "scalar" not in message:
+        assert "'details.title' of step 1" in message
+        assert "required field of one type" in message
+        assert "empty string" in message or "valid value" in message
+    # The same graph is fine while it is only a draft.
+    validate_steps(steps)
+
+
+# One entry per way the objects above the field, or the step's result, can
+# fail to be an object that requires the next key.
+_UNPLAIN_ABOVE = [
+    pytest.param(
+        _nested({"type": "string"}, above={"type": ["object", "null"]}),
+        id="nullable-object",
+    ),
+    pytest.param(
+        _nested({"type": "string"}, above={"type": ["object"]}), id="type-list-of-one"
+    ),
+    pytest.param(
+        {
+            "type": "object",
+            "properties": {
+                "details": {
+                    "properties": {"title": {"type": "string"}},
+                    "required": ["title"],
+                }
+            },
+            "required": ["details"],
+        },
+        id="object-without-type",
+    ),
+    pytest.param(
+        {
+            "type": ["object", "null"],
+            "properties": _nested({"type": "string"})["properties"],
+            "required": ["details"],
+        },
+        id="nullable-result",
+    ),
+    pytest.param(
+        {
+            "properties": _nested({"type": "string"})["properties"],
+            "required": ["details"],
+        },
+        id="result-without-type",
+    ),
+    pytest.param(
+        {
+            "type": "object",
+            "properties": _nested({"type": "string"})["properties"],
+        },
+        id="object-not-required-no-list",
+    ),
+    pytest.param(
+        {
+            "type": "object",
+            "properties": _nested({"type": "string"})["properties"],
+            "required": [],
+        },
+        id="object-not-required",
+    ),
+    pytest.param(
+        _nested({"type": "string"}, above={"required": []}), id="field-not-required"
+    ),
+    pytest.param(
+        _nested({"type": "string"}, above={"$ref": "#/$defs/details"}),
+        id="object-ref",
+    ),
+    pytest.param(
+        {**_nested({"type": "string"}), "$ref": "#/$defs/result"}, id="result-ref"
+    ),
+]
+
+
+@pytest.mark.parametrize("contract", _UNPLAIN_ABOVE)
+def test_template_fill_publish_rejects_a_field_under_an_object_without_one_type(
+    contract: dict,
+) -> None:
+    steps = _template_fill_over_contract(
+        contract, binding="{{step_1.output.structured.details.title}}"
+    )
+
+    with pytest.raises(FlowStepValidationError) as exc_info:
+        validate_steps(steps, require_complete_template_fill_config=True)
+
+    message = str(exc_info.value)
+    assert "template binding 'title' reads 'details.title' of step 1" in message
+    assert "required field of one type" in message
+    validate_steps(steps)
+
+
+def test_template_fill_publish_accepts_constraints_on_the_objects_above_the_field() -> (
+    None
+):
+    # An ancestor's own keywords only narrow it; the one that forbids `secret`
+    # is not the placeholder's business and is not refused.
+    steps = _template_fill_over_contract(
+        _nested(
+            {"type": "string", "minLength": 1},
+            above={
+                "allOf": [{"not": {"required": ["secret"]}}],
+                "anyOf": [{"required": ["title"]}],
+                "minProperties": 1,
+                "additionalProperties": False,
+            },
+        ),
+        binding="{{step_1.output.structured.details.title}}",
+    )
+
+    validate_steps(steps, require_complete_template_fill_config=True)
+
+
+def test_template_fill_publish_accepts_an_unbound_field_of_any_shape() -> None:
+    steps = _template_fill_over_contract(
+        {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "note": {"type": ["string", "null"]},
+                "extra": {"enum": [None, "x"], "minLength": 2},
+            },
+            "required": ["title"],
+        },
+        binding="{{step_1.output.structured.title}}",
+    )
+
+    validate_steps(steps, require_complete_template_fill_config=True)
+
+
+def _null_instances(path: tuple[str, ...]) -> list[object]:
+    """Instances that put null, or nothing, at each depth of `path`."""
+
+    instances: list[object] = [None]
+    for depth in range(1, len(path) + 1):
+        for missing in (False, True):
+            instance: object = "x"
+            for index in range(depth, 0, -1):
+                key = path[index - 1]
+                if index == depth:
+                    instance = {} if missing else {key: None}
+                else:
+                    instance = {key: instance}
+            instances.append(instance)
+    return instances
+
+
+def _path_contract(
+    path: tuple[str, ...], leaf: dict, *, above: dict | None = None
+) -> dict:
+    contract = leaf
+    for key in reversed(path):
+        contract = {
+            "type": "object",
+            "properties": {key: contract},
+            "required": [key],
+            **(above or {}),
+        }
+    return contract
+
+
+# Extra keywords on every object above the field, and on the field itself.
+_EXTRA_ABOVE = [
+    {},
+    {"additionalProperties": False, "title": "T", "description": "D"},
+    {"allOf": [{"not": {"required": ["secret"]}}], "minProperties": 1},
+    {"anyOf": [{"required": ["x"]}, {}], "enum": [{"x": {"x": "a"}}, {"a": {}}]},
+]
+_EXTRA_LEAF = [
+    {},
+    {"title": "T", "description": "D"},
+    {"minLength": 1, "pattern": "^a", "enum": ["a", "ab"]},
+    {"allOf": [{"minLength": 1}], "anyOf": [{"pattern": "^a"}, {}], "const": "a"},
+    {"minimum": 0, "maximum": 9, "multipleOf": 1},
+]
+
+
+@pytest.mark.parametrize("path", [("x",), ("a", "x"), ("a", "b", "x")])
+@pytest.mark.parametrize("leaf_type", ["string", "number", "integer", "boolean"])
+@pytest.mark.parametrize("extra_leaf", _EXTRA_LEAF)
+@pytest.mark.parametrize("extra_above", _EXTRA_ABOVE)
+def test_the_accepted_shape_admits_no_null_and_no_missing_field(
+    path: tuple[str, ...], leaf_type: str, extra_leaf: dict, extra_above: dict
+) -> None:
+    contract = _path_contract(
+        path, {"type": leaf_type, **extra_leaf}, above=extra_above
+    )
+
+    assert template_bound_path_ok(contract, path)
+    validator = jsonschema.Draft202012Validator(contract)
+    for instance in _null_instances(path):
+        assert not validator.is_valid(instance), instance
+
+
+_ANNOTATIONS = {
+    "title": "T",
+    "description": "D",
+    "examples": ["a"],
+    "default": "a",
+    "$comment": "c",
+}
+
+
+@pytest.mark.parametrize(
+    "declared",
+    [
+        {"type": ["string", "null"]},
+        {"type": ["null", "string"]},
+        {"type": ["string"]},
+        {"type": ["integer", "null"], **_ANNOTATIONS},
+        {"type": ["number", "null"], "title": "T"},
+        {"type": ["boolean", "null"]},
+    ],
+)
+@pytest.mark.parametrize("above", ["typed", "nullable", "optional", "no-required"])
+def test_the_path_made_ok_is_ok_and_admits_no_null(declared: dict, above: str) -> None:
+    details: dict = {
+        "type": ["object", "null"] if above == "nullable" else "object",
+        "properties": {"title": declared, "other": {"type": "string"}},
+        "required": [] if above == "optional" else ["title"],
+        "description": "Details",
+    }
+    if above == "no-required":
+        del details["required"]
+    contract = {
+        "type": ["object", "null"],
+        "properties": {"details": details},
+        "additionalProperties": False,
+    }
+    path = ("details", "title")
+
+    made = template_bound_path_made_ok(contract, path)
+
+    assert made is not None
+    assert template_bound_path_ok(made, path)
+    validator = jsonschema.Draft202012Validator(made)
+    for instance in _null_instances(path):
+        assert not validator.is_valid(instance), instance
+
+
+def test_the_path_made_ok_touches_only_type_and_required_of_plain_nodes() -> None:
+    contract = {
+        "type": ["object", "null"],
+        "properties": {
+            "details": {
+                "type": ["object", "null"],
+                "description": "Details",
+                "examples": [{"count": 1}],
+                "properties": {
+                    "count": {
+                        "type": ["integer", "null"],
+                        **_ANNOTATIONS,
+                    },
+                    "other": {"type": ["string", "null"]},
+                },
+                "required": ["other"],
+            },
+            "unrelated": {"type": ["string", "null"], "default": None},
+        },
+        "additionalProperties": False,
+    }
+
+    made = template_bound_path_made_ok(contract, ("details", "count"))
+
+    assert made == {
+        "type": "object",
+        "properties": {
+            "details": {
+                "type": "object",
+                "description": "Details",
+                "examples": [{"count": 1}],
+                "properties": {
+                    "count": {"type": "integer", **_ANNOTATIONS},
+                    "other": {"type": ["string", "null"]},
+                },
+                "required": ["other", "count"],
+            },
+            "unrelated": {"type": ["string", "null"], "default": None},
+        },
+        "additionalProperties": False,
+        "required": ["details"],
+    }
+    # The input is not modified.
+    assert contract["properties"]["details"]["type"] == ["object", "null"]
+
+
+def test_the_path_made_ok_leaves_a_node_that_is_already_ok_whatever_it_carries() -> (
+    None
+):
+    guard = {"allOf": [{"not": {"required": ["secret"]}}], "minProperties": 1}
+    contract = {
+        "type": "object",
+        **guard,
+        "properties": {
+            "details": {
+                "type": "object",
+                **guard,
+                "properties": {
+                    "count": {"type": "integer", "minimum": 0, "enum": [0, 1, None]}
+                },
+                "required": ["count"],
+            }
+        },
+        "required": ["details"],
+    }
+
+    assert template_bound_path_made_ok(contract, ("details", "count")) == contract
+
+
+# Keywords a node may carry without being touched only when it needs no change:
+# each can make the schema unsatisfiable or change what a null means once the
+# node is edited.
+_ASSERTING_KEYWORDS = {
+    "not": {"required": ["title"]},
+    "if": {"required": ["other"]},
+    "then": {"required": ["other"]},
+    "else": {"required": ["other"]},
+    "allOf": [{"minProperties": 1}],
+    "anyOf": [{"required": ["other"]}, {}],
+    "oneOf": [{"required": ["other"]}],
+    "enum": [None],
+    "const": None,
+    "dependentRequired": {"title": ["other"]},
+    "dependentSchemas": {"title": {"required": ["other"]}},
+    "maxProperties": 1,
+    "minProperties": 1,
+    "propertyNames": {"maxLength": 1},
+    "patternProperties": {"^t": {"type": "string"}},
+    "unevaluatedProperties": False,
+    "minLength": 1,
+    "minimum": 0,
+    "pattern": "^a",
+    "format": "date",
+    "contains": {"type": "string"},
+    "$ref": "#/$defs/x",
+    "deprecated": True,
+}
+
+
+@pytest.mark.parametrize("keyword", sorted(_ASSERTING_KEYWORDS))
+@pytest.mark.parametrize("needs", ["required", "type-list"])
+def test_the_path_made_ok_does_not_edit_an_ancestor_that_carries_an_asserting_keyword(
+    keyword: str, needs: str
+) -> None:
+    # Adding `title` to `required` under {"not": {"required": ["title"]}} makes
+    # every output invalid; an ancestor that asserts anything is not edited.
+    details: dict = {
+        "type": "object" if needs == "required" else ["object", "null"],
+        "properties": {"title": {"type": "string"}, "other": {"type": "string"}},
+        "required": [] if needs == "required" else ["title"],
+        keyword: _ASSERTING_KEYWORDS[keyword],
+    }
+    contract = {
+        "type": "object",
+        "properties": {"details": details},
+        "required": ["details"],
+    }
+
+    assert template_bound_path_made_ok(contract, ("details", "title")) is None
+
+
+@pytest.mark.parametrize("keyword", sorted(_ASSERTING_KEYWORDS))
+def test_the_path_made_ok_does_not_edit_a_field_that_carries_an_asserting_keyword(
+    keyword: str,
+) -> None:
+    # {"type": ["string", "null"], "enum": [null]} would become
+    # {"type": "string", "enum": [null]}, which no value satisfies.
+    leaf = {"type": ["string", "null"], keyword: _ASSERTING_KEYWORDS[keyword]}
+
+    assert template_bound_path_made_ok(_nested(leaf), ("details", "title")) is None
+
+
+@pytest.mark.parametrize(
+    ("keyword", "value"),
+    [
+        ("additionalProperties", False),
+        ("items", {"type": "string"}),
+        ("title", "T"),
+        ("description", "D"),
+        ("examples", ["a"]),
+        ("default", "a"),
+        ("$comment", "c"),
+    ],
+)
+def test_the_path_made_ok_edits_a_node_that_carries_only_plain_keywords(
+    keyword: str, value: object
+) -> None:
+    # `default` and `examples` are annotations in draft 2020-12: they assert
+    # nothing, so narrowing beside them cannot leave a schema no value satisfies.
+    contract = _nested(
+        {"type": ["string", "null"], keyword: value},
+        above={"type": ["object", "null"], "required": [], keyword: value},
+    )
+
+    made = template_bound_path_made_ok(contract, ("details", "title"))
+
+    assert made is not None
+    assert template_bound_path_ok(made, ("details", "title"))
+    details = made["properties"]["details"]
+    assert details[keyword] == value
+    assert details["properties"]["title"] == {"type": "string", keyword: value}
+
+
+def test_the_path_made_ok_refuses_both_inputs_that_narrowing_would_make_unsatisfiable() -> (
+    None
+):
+    enum_null = _nested({"type": ["string", "null"], "enum": [None]})
+    forbids_title = _nested(
+        {"type": "string"},
+        above={"not": {"required": ["title"]}, "required": []},
+    )
+
+    assert template_bound_path_made_ok(enum_null, ("details", "title")) is None
+    assert template_bound_path_made_ok(forbids_title, ("details", "title")) is None
+
+
+def _own(node: dict) -> dict:
+    return {key: value for key, value in node.items() if key != "properties"}
+
+
+def _path_nodes(contract: dict) -> list[dict]:
+    details = contract["properties"]["details"]
+    return [contract, details, details["properties"]["title"]]
+
+
+# Where a keyword that asserts something can sit relative to the edited path.
+_LOCATIONS = ("root", "details", "title", "sibling", "unrelated", "defs")
+
+
+def _shape(
+    ancestor_type: object,
+    requirement: str,
+    leaf_type: object,
+    location: str | None,
+    extra: dict,
+) -> dict:
+    title: dict = {} if leaf_type is None else {"type": leaf_type}
+    details: dict = {
+        "properties": {"title": title, "other": {"type": "string"}},
+        "additionalProperties": False,
+    }
+    if ancestor_type is not None:
+        details["type"] = ancestor_type
+    if requirement != "absent":
+        details["required"] = ["title"] if requirement == "listed" else []
+    contract: dict = {
+        "type": "object",
+        "properties": {
+            "details": details,
+            "unrelated": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["details", "unrelated"],
+        "additionalProperties": False,
+    }
+    if location == "root":
+        contract.update(extra)
+    elif location == "details":
+        details.update(extra)
+    elif location == "title":
+        title.update(extra)
+    elif location == "sibling":
+        details["properties"]["other"].update(extra)
+    elif location == "unrelated":
+        contract["properties"]["unrelated"].update(extra)
+    elif location == "defs":
+        contract["$defs"] = {"alias": {"$ref": "#/properties/details/properties/title"}}
+        contract["properties"]["alias"] = {"$ref": "#/$defs/alias", **extra}
+    return contract
+
+
+_ROUND_SIX = {"required": ["details", "phantom"], "additionalProperties": False}
+# Plain: a required key the properties do not declare, typed by an open schema.
+_OPEN_REQUIRED = {
+    "required": ["details", "unrelated", "extra"],
+    "additionalProperties": {"type": "integer"},
+}
+
+
+def _generated_contracts() -> Iterator[dict]:
+    """Contracts with an asserting keyword or a closed object that requires an
+    undeclared key at the root, the objects, the field, a sibling, another
+    branch or `$defs`, in every combination of type and requiredness."""
+
+    extras = [
+        {"description": "D"},
+        {"items": False},
+        _OPEN_REQUIRED,
+        *({k: v} for k, v in _ASSERTING_KEYWORDS.items()),
+        _ROUND_SIX,
+    ]
+    leaf_types = [
+        "string",
+        ["string", "null"],
+        "integer",
+        ["integer", "null"],
+        "array",
+        None,
+        ["string", "integer"],
+        "null",
+    ]
+    yield from (
+        _shape(a, r, leaf, None, {})
+        for a, r, leaf in itertools.product(
+            ["object", ["object", "null"], ["object"], None],
+            ["listed", "unlisted", "absent"],
+            leaf_types,
+        )
+    )
+    yield from (
+        _shape(a, r, leaf, location, extra)
+        for a, r, leaf, location, extra in itertools.product(
+            ["object", ["object", "null"]],
+            ["listed", "unlisted", "absent"],
+            leaf_types,
+            _LOCATIONS,
+            extras,
+        )
+    )
+
+
+def test_the_plain_check_agrees_with_an_independent_oracle_on_every_generated_shape() -> (
+    None
+):
+    plain = 0
+    for contract in _generated_contracts():
+        assert _is_plain_tree(contract) == all_plain(contract), contract
+        plain += all_plain(contract)
+    assert plain > 100
+
+
+def test_the_path_made_ok_edits_only_an_entirely_plain_schema_and_the_result_is_satisfiable() -> (
+    None
+):
+    # Whatever sits next to the path, above it or in another branch: when the
+    # compiler edits, the whole input was plain, only type and required moved,
+    # and the result still accepts an instance. When anything asserts, it does
+    # not edit at all.
+    path = ("details", "title")
+    shapes = _generated_contracts()
+    changed = refused = 0
+    for contract in shapes:
+        made = template_bound_path_made_ok(contract, path)
+
+        if made is None:
+            refused += 1
+            assert not template_bound_path_ok(contract, path)
+            continue
+        if made == contract:
+            continue
+        changed += 1
+        assert all_plain(contract), contract
+        assert template_bound_path_ok(made, path)
+        assert jsonschema.Draft202012Validator(made).is_valid(witness(made)), made
+        for before, after in zip(_path_nodes(contract), _path_nodes(made), strict=True):
+            moved = {
+                key
+                for key in set(_own(before)) | set(_own(after))
+                if _own(before).get(key) != _own(after).get(key)
+            }
+            assert moved <= {"type", "required"}, (before, after)
+        assert (
+            made["properties"]["details"]["properties"]["other"]
+            == (contract["properties"]["details"]["properties"]["other"])
+        )
+        assert made["properties"]["unrelated"] == contract["properties"]["unrelated"]
+    assert changed > 100
+    assert refused > 1000
+
+
+@pytest.mark.parametrize("location", _LOCATIONS)
+@pytest.mark.parametrize("keyword", sorted(_ASSERTING_KEYWORDS))
+def test_the_path_made_ok_edits_nothing_when_any_node_of_the_schema_asserts(
+    keyword: str, location: str
+) -> None:
+    # The path needs an edit (optional field, nullable field), and something else
+    # in the schema asserts: nothing is changed and the caller is told.
+    contract = _shape(
+        ["object", "null"],
+        "unlisted",
+        ["string", "null"],
+        location,
+        {keyword: _ASSERTING_KEYWORDS[keyword]},
+    )
+
+    assert template_bound_path_made_ok(contract, ("details", "title")) is None
+
+
+# A closed object that requires a key it does not declare has no instance.
+_PHANTOM = {
+    "type": "object",
+    "properties": {"x": {"type": "string"}},
+    "required": ["x", "phantom"],
+    "additionalProperties": False,
+}
+
+
+def test_the_path_made_ok_repairs_a_contract_with_a_closed_array_of_no_items() -> None:
+    # `items: false` accepts only the empty array: the witness is [], not one item.
+    contract = {
+        "type": "object",
+        "properties": {
+            "title": {"type": ["string", "null"]},
+            "rows": {"type": "array", "items": False},
+        },
+        "required": ["rows"],
+        "additionalProperties": False,
+    }
+
+    made = template_bound_path_made_ok(contract, ("title",))
+
+    assert made is not None
+    assert made["properties"]["title"] == {"type": "string"}
+    assert made["required"] == ["rows", "title"]
+    assert made["properties"]["rows"] == contract["properties"]["rows"]
+
+
+def test_the_path_made_ok_repairs_a_contract_whose_required_extra_key_is_typed_by_additional() -> (
+    None
+):
+    # `extra` is required but only additionalProperties types it: the witness
+    # takes its value from that schema (0), not "".
+    contract = {
+        "type": "object",
+        "properties": {"title": {"type": ["string", "null"]}},
+        "required": ["extra"],
+        "additionalProperties": {"type": "integer"},
+    }
+
+    made = template_bound_path_made_ok(contract, ("title",))
+
+    assert made is not None
+    assert made["properties"]["title"] == {"type": "string"}
+    assert made["required"] == ["extra", "title"]
+    assert made["additionalProperties"] == {"type": "integer"}
+    assert jsonschema.Draft202012Validator(made).is_valid({"extra": 0, "title": ""})
+
+
+@pytest.mark.parametrize("keyword", ["$ref", "$dynamicRef"])
+@pytest.mark.parametrize("where", ["field", "sibling", "defs", "items"])
+def test_a_remote_ref_is_never_resolved_by_publish_or_the_compiler(
+    keyword: str, where: str
+) -> None:
+    # jsonschema fetches a remote $ref when it validates. Neither the publish
+    # remedy nor the witness check may validate a schema that holds one, so a
+    # real listener sees no request at all.
+    path = ("details", "title")
+    with local_listener() as (base, requested):
+        ref = {keyword: f"{base}/x"}
+        leaf: dict = {"type": "string", **(ref if where == "field" else {})}
+        contract = _nested(leaf, above={"required": []})
+        if where == "sibling":
+            contract["properties"]["details"]["properties"]["other"] = ref
+        elif where == "defs":
+            contract["$defs"] = {"remote": ref}
+        elif where == "items":
+            contract["properties"]["rows"] = {"type": "array", "items": ref}
+
+        steps = _template_fill_over_contract(
+            contract, binding="{{step_1.output.structured.details.title}}"
+        )
+        with pytest.raises(FlowStepValidationError) as exc_info:
+            validate_steps(steps, require_complete_template_fill_config=True)
+        made = template_bound_path_made_ok(contract, path)
+
+    # The advice follows the leaf's type alone: no validator runs on it.
+    assert "only if the field accepts one" in str(exc_info.value)
+    assert made is None
+    assert requested == []
+
+
+def test_data_that_only_looks_like_a_ref_is_not_one_and_the_contract_is_repaired() -> (
+    None
+):
+    # A property NAMED "$ref" is a name under `properties`, and `default` and
+    # `examples` hold data: none is a keyword, so the tree is plain and the
+    # validator never resolves any of them, whatever URL they carry.
+    with local_listener() as (base, requested):
+        data = {"$ref": f"{base}/x", "$dynamicRef": f"{base}/y"}
+        contract = {
+            "type": "object",
+            "properties": {
+                "$ref": {"type": "string", "default": data, "examples": [data]},
+                "title": {
+                    "type": ["string", "null"],
+                    "default": data,
+                    "examples": [{"$dynamicRef": f"{base}/z"}, data],
+                },
+            },
+            "required": ["$ref"],
+            "additionalProperties": False,
+        }
+
+        assert _is_plain_tree(contract)
+        made = template_bound_path_made_ok(contract, ("title",))
+
+    assert made is not None
+    assert made["properties"]["title"]["type"] == "string"
+    assert made["required"] == ["$ref", "title"]
+    assert template_bound_path_ok(made, ("title",))
+    assert requested == []
+
+
+def test_the_path_made_ok_refuses_the_round_six_input() -> None:
+    contract = {
+        "type": ["object", "null"],
+        "properties": {"title": {"type": "string"}},
+        "required": ["title", "phantom"],
+        "additionalProperties": False,
+    }
+
+    assert template_bound_path_made_ok(contract, ("title",)) is None
+
+
+@pytest.mark.parametrize(
+    "placement", ["root", "details", "sibling", "unrelated", "array-item", "field"]
+)
+@pytest.mark.parametrize(
+    "needs", ["nullable-object", "optional-field", "nullable-field"]
+)
+def test_the_path_made_ok_never_edits_a_schema_with_a_required_undeclared_key_under_closed(
+    placement: str, needs: str
+) -> None:
+    details: dict = {
+        "type": ["object", "null"] if needs == "nullable-object" else "object",
+        "properties": {
+            "title": {
+                "type": ["string", "null"] if needs == "nullable-field" else "string"
+            },
+            "other": {"type": "string"},
+        },
+        "required": [] if needs == "optional-field" else ["title"],
+    }
+    contract: dict = {
+        "type": "object",
+        "properties": {
+            "details": details,
+            "unrelated": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["details"],
+    }
+    if placement == "root":
+        contract.update(required=["details", "phantom"], additionalProperties=False)
+    elif placement == "details":
+        details.update(
+            required=[*details["required"], "phantom"], additionalProperties=False
+        )
+    elif placement == "sibling":
+        details["properties"]["other"] = _PHANTOM
+    elif placement == "unrelated":
+        contract["properties"]["unrelated"] = _PHANTOM
+    elif placement == "array-item":
+        contract["properties"]["unrelated"]["items"] = _PHANTOM
+    else:
+        details["properties"]["title"]["additionalProperties"] = False
+        details["properties"]["title"]["required"] = ["phantom"]
+
+    assert not all_plain(contract)
+    assert template_bound_path_made_ok(contract, ("details", "title")) is None
+
+
+@pytest.mark.parametrize(
+    "sibling",
+    [
+        {"type": "strng"},
+        {"type": ["string", "string"]},
+        {"type": []},
+        {"type": "object", "required": "x"},
+    ],
+)
+def test_the_path_made_ok_refuses_a_contract_the_platform_validator_cannot_use(
+    sibling: dict,
+) -> None:
+    # Plain by keyword, but no draft 2020-12 validator can evaluate it: the
+    # final-artifact witness check refuses rather than editing or raising.
+    contract = _shape(["object", "null"], "unlisted", ["string", "null"], None, {})
+    contract["properties"]["details"]["properties"]["other"] = sibling
+
+    assert template_bound_path_made_ok(contract, ("details", "title")) is None
+
+
+def test_the_path_made_ok_refuses_the_inputs_an_interacting_assertion_would_break() -> (
+    None
+):
+    path = ("details", "title")
+    guard = {"allOf": [{"properties": {"title": {"const": None}}}]}
+    ancestor_const_null = _shape(
+        ["object", "null"], "unlisted", ["string", "null"], "details", guard
+    )
+    newly_required_enum_null = _nested(
+        {"type": "string", "enum": [None]}, above={"required": []}
+    )
+    sibling_ref_const_null = _shape(
+        "object", "listed", ["string", "null"], "defs", {"const": None}
+    )
+
+    for contract in (
+        ancestor_const_null,
+        newly_required_enum_null,
+        sibling_ref_const_null,
+    ):
+        assert template_bound_path_made_ok(contract, path) is None
+
+
+@pytest.mark.parametrize(
+    ("leaf", "wording"),
+    [
+        # A string gets the conditional advice: "" only if the field accepts one.
+        ({"type": "string"}, "only if the field accepts one"),
+        ({"type": ["string", "null"]}, "only if the field accepts one"),
+        ({"type": "string", "minLength": 1}, "only if the field accepts one"),
+        ({"type": "string", "enum": ["a", "b"]}, "only if the field accepts one"),
+        ({"type": "string", "$ref": "#/$defs/t"}, "only if the field accepts one"),
+        # A number, integer or boolean has no empty value at all.
+        ({"type": "number"}, "always gives a valid value"),
+        ({"type": "integer"}, "always gives a valid value"),
+        ({"type": "boolean"}, "always gives a valid value"),
+        ({"type": ["integer", "null"]}, "always gives a valid value"),
+    ],
+)
+def test_the_publish_remedy_for_a_missing_value_fits_the_type_of_the_field(
+    leaf: dict, wording: str
+) -> None:
+    # The advice follows the field's type alone, with no validator call: a
+    # string may take an empty string only if it accepts one; a number, integer
+    # or boolean is given a valid value, and a deliberately blank template
+    # binding is how the placeholder stays empty.
+    steps = _template_fill_over_contract(
+        _nested(leaf, above={"required": []}),
+        binding="{{step_1.output.structured.details.title}}",
+    )
+
+    with pytest.raises(FlowStepValidationError) as exc_info:
+        validate_steps(steps, require_complete_template_fill_config=True)
+
+    message = str(exc_info.value)
+    assert wording in message
+    assert "blank template binding" in message
+    if wording == "always gives a valid value":
+        assert "empty string" not in message
+
+
+@pytest.mark.parametrize(
+    "leaf",
+    [
+        p
+        for p in _UNPLAIN_LEAVES
+        if p.id
+        not in {"type-list-with-null", "type-list-null-first", "type-list-of-one"}
+    ],
+)
+def test_the_path_made_ok_has_no_answer_for_a_field_without_a_type_it_can_keep(
+    leaf: dict,
+) -> None:
+    assert template_bound_path_made_ok(_nested(leaf), ("details", "title")) is None
+
+
+@pytest.mark.parametrize(
+    "above",
+    [{"type": ["object", "string"]}, {"$ref": "#/$defs/details"}, {"type": "array"}],
+)
+def test_the_path_made_ok_has_no_answer_for_an_object_it_cannot_make_one_type(
+    above: dict,
+) -> None:
+    contract = _nested({"type": "string"}, above=above)
+
+    assert template_bound_path_made_ok(contract, ("details", "title")) is None
+
+
+@pytest.mark.parametrize(
+    "leaf",
+    [
+        {"type": "array", "items": {"type": "string"}},
+        {"type": "object", "properties": {"a": {"type": "string"}}},
+    ],
+)
+def test_the_path_made_ok_leaves_a_container_for_publication_to_name(
+    leaf: dict,
+) -> None:
+    contract = _nested(leaf)
+
+    assert template_bound_path_made_ok(contract, ("details", "title")) is contract
+    assert not template_bound_path_ok(contract, ("details", "title"))
+
+
+def test_the_path_made_ok_leaves_a_path_the_contract_does_not_have_as_it_is() -> None:
+    contract = _nested({"type": ["string", "null"]})
+
+    assert template_bound_path_made_ok(contract, ("details", "missing")) is contract
+    assert template_bound_path_made_ok(contract, ("other", "title")) is contract
 
 
 @pytest.mark.parametrize(

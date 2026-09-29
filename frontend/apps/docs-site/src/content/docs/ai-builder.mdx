@@ -77,12 +77,25 @@ A terminal DOCX template-fill Flow requires exactly one confirmed DOCX
 template. Before approval, AI Builder inspects the real document, binds every
 exact placeholder to an injected transcription value, the current date
 (`datum`), a typed earlier-step output, or a form field, and refuses
-placeholders it cannot prove will exist. A placeholder nothing in the Flow
-fills sends the plan back to add a step that prepares it; it becomes a form
-field only when you ask to type it at run time or it names a Flow input
-(`flow_input.x`). A transcription placeholder also makes
-the Flow's audio input required. Zero or multiple selected templates produce a
-typed refusal instead of a publishable-looking incomplete Flow.
+placeholders it cannot prove will exist. A step field a placeholder reads is
+compiled as a required field of one type, even when the plan declared it
+optional or nullable: the fill step stops a run on null or a missing key and
+treats an empty string as a deliberate omission, so the step writes an empty
+string for a text value the source does not state. Only `type` and `required`
+change, and only when they must: a field declared as one type plus null keeps
+that type, and every other keyword stays. The change is made only when the
+whole output contract of the step is plain (types, properties, required, items
+and annotations only): a step whose contract carries an enum, a constraint,
+allOf, $ref or not anywhere, or a field with no single type, is not edited and
+is sent back to the plan. Before an edit is kept, a sample instance is
+validated against the edited contract, and if it fails nothing is changed. An
+edit of a single step rewrites nothing for the template and refuses such a
+field in the selected step; an edit of the whole flow corrects it. A
+placeholder nothing in the Flow fills sends the plan back to add a step that
+prepares it; it becomes a form field only when you ask to type it at run time
+or it names a Flow input (`flow_input.x`). A transcription placeholder also
+makes the Flow's audio input required. Zero or multiple selected templates
+produce a typed refusal instead of a publishable-looking incomplete Flow.
 
 When the plan is applied, Eneo reuses the same uploaded File and creates the
 Flow-owned template asset and binding inside the atomic plan-apply transaction.

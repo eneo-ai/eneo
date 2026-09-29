@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from functools import partial
 from typing import TypeGuard, cast
@@ -55,13 +55,23 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
-from eneo.flows.flow_validators import validate_template_binding_scalar
+from eneo.flows.flow_validators import (
+    template_binding_structured_source,
+    template_bound_path_made_ok,
+    template_bound_path_ok,
+    validate_template_binding_scalar,
+)
 from eneo.flows.flow_variable_definitions import (
     PREVIOUS_STEP_TEXT_ALIAS,
     form_field_reference_expression,
     is_reserved_runtime_variable,
     is_step_alias_variable,
     template_placeholder_form_field_name,
+)
+from eneo.flows.input_binding_contract_rules import (
+    InputBindingContractError,
+    derive_structured_projection_contract,
+    is_structured_projection_binding,
 )
 
 _LOCAL_TEMPLATE_CONFIG_KEYS = frozenset(
@@ -112,6 +122,7 @@ def apply_template_attachment_contract(
     drop_unused_predecessor: bool = True,
     can_declare_main_text: bool = False,
     ui_language: str | None = None,
+    is_frozen: Callable[[StepSpec], bool] | None = None,
 ) -> FlowDraftSpecCore:
     """Compile one selected DOCX's exact runtime contract before approval.
 
@@ -127,6 +138,10 @@ def apply_template_attachment_contract(
     template-fill step names it, wherever that step now is, so the apply has
     nothing to materialize. A create session passes neither. Only create
     drops an unused predecessor: in an edit every step is saved or authored.
+    `is_frozen` names the saved steps a step-scoped edit must leave as saved.
+    Such an edit rewrites no step for the template: the fields the template
+    reads are checked in the selected step, and a field that is not plain is
+    refused, with the whole-flow edit as the remedy.
     """
 
     template_step_indexes = [
@@ -316,6 +331,7 @@ def apply_template_attachment_contract(
                 ),
             )
         steps = [rebind_run_text_read_to_field(step, main_text_name) for step in steps]
+    steps = _one_type_bound_fields(steps, bindings, is_frozen=is_frozen)
     return spec.model_copy(update={"steps": steps, "form_fields": form_fields})
 
 
@@ -665,6 +681,106 @@ def _materialize_nested_template_outputs(
     steps = list(spec.steps)
     steps[candidate_index] = updated_candidate
     return spec.model_copy(update={"steps": steps})
+
+
+def _one_type_bound_fields(
+    steps: list[StepSpec],
+    bindings: Mapping[str, str],
+    *,
+    is_frozen: Callable[[StepSpec], bool] | None,
+) -> list[StepSpec]:
+    """Make each step field a placeholder reads a required field of one type.
+
+    The fill step fails the run on null and on a key the step did not write,
+    yet the planner may declare a field nullable or optional. Only `type` and
+    `required` on the path change (`template_bound_path_made_ok`), without a
+    model call; a field that cannot be made one type goes back to the plan.
+    The projections of a changed step copy its declarations and must match
+    them, so they are derived again. A step-scoped edit (`is_frozen`) rewrites
+    nothing: it checks the selected step and refuses a field that is not ok.
+    """
+
+    step_refs = {
+        step.plan_step_ref: order
+        for order, step in enumerate(steps, start=1)
+        if step.plan_step_ref
+    }
+    paths_by_order: dict[int, list[tuple[str, ...]]] = {}
+    for binding in bindings.values():
+        source = template_binding_structured_source(binding, step_ref_mapping=step_refs)
+        if source is not None and 1 <= source[0] < len(steps):
+            paths_by_order.setdefault(source[0], []).append(source[1])
+
+    changed = list(steps)
+    for order, paths in paths_by_order.items():
+        step = steps[order - 1]
+        contract = step.output_contract
+        if contract is None or (is_frozen is not None and is_frozen(step)):
+            continue
+        for path in paths:
+            if is_frozen is not None:
+                if not template_bound_path_ok(contract, path):
+                    raise _bound_field_error(step, path, scoped=True)
+            elif (made := template_bound_path_made_ok(contract, path)) is None:
+                raise _bound_field_error(step, path, scoped=False)
+            else:
+                contract = made
+        if contract != step.output_contract:
+            changed[order - 1] = step.model_copy(update={"output_contract": contract})
+    return _derive_projections_again(steps, changed)
+
+
+def _bound_field_error(
+    step: StepSpec, path: tuple[str, ...], *, scoped: bool
+) -> AIBuilderArchitectureError:
+    field = ".".join(path)
+    return _architecture_error(
+        failure_code="template_bound_field_not_plain",
+        repair_disposition="model_correctable",
+        detail=(
+            f"The DOCX template reads '{field}' of step '{step.name}', which is "
+            "not a required field of one type. Declare the bound field and its "
+            "parents in that step's output_fields as one type, required, without "
+            "other constraints"
+            + (
+                "; a single-step revision does not rewrite saved fields for the "
+                "template, so ask the person to revise the whole flow."
+                if scoped
+                else "."
+            )
+        ),
+        affected=(field,),
+    )
+
+
+def _derive_projections_again(
+    before: Sequence[StepSpec], after: list[StepSpec]
+) -> list[StepSpec]:
+    """Derive each structured projection again from the final source contracts."""
+
+    result = list(after)
+    for index, step in enumerate(after):
+        if before[:index] == after[:index]:
+            continue
+        try:
+            if is_structured_projection_binding(
+                input_bindings=step.input_bindings, input_type=step.input_type.value
+            ):
+                result[index] = step.model_copy(
+                    update={
+                        "input_contract": derive_structured_projection_contract(
+                            input_bindings=step.input_bindings,
+                            source_contracts_by_step_ref={
+                                source.plan_step_ref: source.output_contract
+                                for source in after[:index]
+                                if source.plan_step_ref and source.output_contract
+                            },
+                        )
+                    }
+                )
+        except InputBindingContractError:
+            continue
+    return result
 
 
 def _add_required_string_path(

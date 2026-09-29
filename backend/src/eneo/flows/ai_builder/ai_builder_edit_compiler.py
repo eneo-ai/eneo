@@ -346,6 +346,7 @@ def compile_edit_proposal(
             inherited_template_asset_id=inherited_template_asset_id,
             # A saved step and a step the edit adds are the user's to remove.
             drop_unused_predecessor=False,
+            is_frozen=mutation_scope.is_protected if mutation_scope else None,
         )
     if mutation_scope is not None:
         normalization_changes = [
