@@ -49,7 +49,7 @@ async def test_get_raise_unauthorized_if_can_not_access(
 ):
     service.space_repo.get_space_by_app.return_value = MagicMock()
     actor = MagicMock()
-    actor.can_read_apps.return_value = False
+    actor.can_read_app.return_value = False
     service.actor_manager.get_space_actor_from_space.return_value = actor
 
     with pytest.raises(UnauthorizedException):

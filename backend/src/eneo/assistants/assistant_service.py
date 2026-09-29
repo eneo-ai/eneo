@@ -1822,7 +1822,7 @@ class AssistantService:
         can_read = (
             actor.can_read_default_assistant()
             if is_personal_default
-            else actor.can_read_assistants()
+            else actor.can_read_assistant(assistant=assistant)
         )
         if not can_read:
             raise UnauthorizedException(
@@ -1998,7 +1998,7 @@ class AssistantService:
         Help Assistants live in the org-space, whose only members are the
         tenant admins added by ``SpaceService.ensure_org_admin_members`` —
         regular users are never org-space members and therefore cannot pass
-        the ``actor.can_read_assistants()`` check in :meth:`get_assistant`.
+        the ``actor.can_read_assistant()`` check in :meth:`get_assistant`.
         But the Prompt Guide is, by design (PRD §5/§6/§10), usable by *any*
         authenticated user who has ``EDIT`` rights on the *target* assistant:
         their authorization is governed by those target-edit rights plus the
@@ -3380,7 +3380,7 @@ class AssistantService:
         assistant = space.get_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
-        if not actor.can_read_assistants():
+        if not actor.can_read_assistant(assistant=assistant):
             raise UnauthorizedException(
                 "You do not have permission to read assistants in this space.",
                 code="forbidden_action",
