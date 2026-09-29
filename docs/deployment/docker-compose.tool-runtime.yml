@@ -1,17 +1,28 @@
-# Optional bundled tool runtime: isolated MCP tools (restricted JavaScript
-# compute) that Eneo registers through Admin -> Tools.
+# Optional bundled tool runtime: isolated MCP tools (compute, tabular
+# analysis, document and spreadsheet creation) that Eneo registers through
+# Admin -> Tools.
 #
 # Compose this file with docker-compose.yml and enable the tool-runtime profile
 # after setting ENEO_TOOL_RUNTIME_IMAGE (an immutable digest) and
-# TOOL_RUNTIME_TOKEN in .env, plus TOOL_RUNTIME_URL/TOOL_RUNTIME_TOKEN in
-# env_backend.env. See TOOL_RUNTIME.md.
+# TOOL_RUNTIME_TOKEN in .env. That one token is handed to the runtime, the
+# backend and the worker below, together with the runtime URL, so nothing
+# goes into env_backend.env and the two sides cannot disagree. See
+# TOOL_RUNTIME.md.
+
+x-tool-runtime-client: &tool-runtime-client
+  # Overrides any TOOL_RUNTIME_* in env_backend.env: this file is the one
+  # place the bundled runtime is configured.
+  - TOOL_RUNTIME_URL=http://tool-runtime:3010
+  - TOOL_RUNTIME_TOKEN=${TOOL_RUNTIME_TOKEN:?Set TOOL_RUNTIME_TOKEN in .env (openssl rand -hex 32)}
 
 services:
   backend:
+    environment: *tool-runtime-client
     networks:
       - tool_runtime_net
 
   worker:
+    environment: *tool-runtime-client
     networks:
       - tool_runtime_net
 
@@ -28,6 +39,8 @@ services:
       # well; a mismatch then fails the call instead of fetching.
       TOOL_RUNTIME_FILE_ORIGINS: ${TOOL_RUNTIME_FILE_ORIGINS:-}
       TABULAR_CONCURRENCY: ${TOOL_RUNTIME_TABULAR_CONCURRENCY:-2}
+      # Name shown in the footer of generated documents.
+      DOCUMENT_ORGANISATION_NAME: ${TOOL_RUNTIME_DOCUMENT_ORGANISATION_NAME:-}
     # Only the backend can reach the runtime, and the runtime can reach nothing:
     # the network is internal, so guest code has no route out even if it
     # escaped the WebAssembly engine and the sandbox child.

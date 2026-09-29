@@ -105,18 +105,20 @@ footers.
    TOOL_RUNTIME_TOKEN=<token>
    ```
 
-3. In `env_backend.env`, set the same token and the runtime URL:
+   The overlay hands this token to the runtime, the backend and the worker,
+   and points the backend at `http://tool-runtime:3010`. Nothing goes into
+   `env_backend.env` for the runtime itself.
+
+3. For tabular analysis, the runtime must be able to reach Eneo's signed file
+   links. In `env_backend.env`:
 
    ```bash
-   TOOL_RUNTIME_URL=http://tool-runtime:3010
-   TOOL_RUNTIME_TOKEN=<token>
-   # Needed for tabular analysis: signed file links must be reachable from the runtime.
    FILE_REFERENCE_BASE_URL=http://backend:8000
    ```
 
-   Eneo tells the runtime this origin on every call, so the runtime needs no
-   matching setting. To have the runtime enforce it too, set
-   `TOOL_RUNTIME_FILE_ORIGINS=http://backend:8000` in `.env`.
+   Eneo tells the runtime this origin on every call. To have the runtime
+   enforce it as well, also set `TOOL_RUNTIME_FILE_ORIGINS=http://backend:8000`
+   in `.env`.
 
 4. Start it with the overlay and profile:
 
@@ -137,9 +139,8 @@ footers.
 
 ## Rotate the token
 
-Set a new `TOOL_RUNTIME_TOKEN` in both `.env` and `env_backend.env` and
-recreate `tool-runtime`, `backend` and `worker`. Nothing in the database
-changes.
+Set a new `TOOL_RUNTIME_TOKEN` in `.env` and recreate `tool-runtime`,
+`backend` and `worker`. Nothing in the database changes.
 
 ## Footprint
 
