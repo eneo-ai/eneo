@@ -24,7 +24,7 @@ from eneo.database.tables.user_groups_table import UserGroups
 from eneo.database.tables.users_table import usergroups_users_table
 from eneo.database.tables.websites_spaces_table import WebsitesSpaces
 from eneo.database.tables.websites_table import Websites
-from eneo.main.exceptions import UnauthorizedException
+from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.users.user import UserInDB
 from eneo.websites.domain.crawl_run import CrawlType
 
@@ -293,7 +293,9 @@ async def test_preview_cannot_cross_tenant_boundary(
         session = container.session()
         tenant = await tenant_factory(session)
         reader = await user_factory(session, tenant_id=tenant.id)
-        # A foreign key alone cannot authorize an organization in another tenant.
+        # A foreign key alone cannot authorize an organization in another
+        # tenant: the source is resolved within the caller's tenant, so the
+        # knowledge does not exist from the reader's point of view.
         session.add(
             Spaces(
                 name="Foreign reader",
@@ -305,7 +307,7 @@ async def test_preview_cannot_cross_tenant_boundary(
         await session.flush()
         reader = await container.user_repo().get_user_by_id(reader.id)
     async with db_container(user=reader) as container:
-        with pytest.raises(UnauthorizedException):
+        with pytest.raises(NotFoundException):
             await container.info_blob_service().get_by_id(knowledge.blob_id)
 
 
