@@ -64,6 +64,8 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     parse_create_flow_intent_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
+    _named_result_summary_line,  # noqa: PLC2701
+    _whole_evidence_value,  # noqa: PLC2701
     build_requirements_disclosure,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
@@ -1272,6 +1274,58 @@ def test_a_declared_output_schema_shows_no_placement_limitation() -> None:
     )
 
     assert "översta nivån" not in disclosure.summary
+
+
+_PRESERVED = {
+    "sv": " som slutresultatet ska bevara:",
+    "en": " that the final result must preserve:",
+}
+
+
+@pytest.mark.parametrize("locale", ["sv", "en"])
+@pytest.mark.parametrize(
+    ("terminal", "declared_schema", "claims"),
+    [
+        # A structured result is held to the names it was given, or to the
+        # schema that owns them.
+        ("structured_json", False, True),
+        ("structured_json", True, True),
+        # Nothing verifies a text or document result against names that may
+        # belong to an earlier step, so the confirmed line only says they were
+        # named.
+        ("structured_text", False, False),
+        ("docx_document", False, False),
+    ],
+)
+def test_the_identity_claims_preservation_only_of_results_held_to_the_names(
+    terminal: str, declared_schema: bool, claims: bool, locale: str
+) -> None:
+    state = _state(PUBLIC_RECORD_OBLIGATIONS, terminal_output=terminal)
+    if declared_schema:
+        state.output_schema_evidence = build_schema_evidence(
+            json_schema={"type": "object", "properties": {"a": {"type": "string"}}},
+            source="declared_schema",
+            confidence="high",
+            evidence=("quote:user_message:user-1:schema",),
+        )
+
+    def line(*, is_edit_mode: bool) -> str | None:
+        return _named_result_summary_line(
+            state,
+            locale,
+            render_value=_whole_evidence_value,
+            is_edit_mode=is_edit_mode,
+            include_details=True,
+        )
+
+    create_line, edit_line = line(is_edit_mode=False), line(is_edit_mode=True)
+    assert create_line is not None and edit_line is not None
+    assert (_PRESERVED[locale] in create_line) is claims
+    # An edit has no create contract either and keeps the line as it was; the
+    # two differ only in the claim.
+    assert _PRESERVED[locale] in edit_line
+    if not claims:
+        assert create_line == edit_line.replace(_PRESERVED[locale], ":")
 
 
 _SCHEMA_CANDIDATE = DeclaredSchemaCandidate(

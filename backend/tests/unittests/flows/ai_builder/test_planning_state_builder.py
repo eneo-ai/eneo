@@ -4499,6 +4499,7 @@ class TestModelSlotMerge:
                         {
                             "slot_name": "primary_runtime_input",
                             "value": "text",
+                            "uploaded_at_run_time": False,
                             "confidence": "medium",
                             "reason": "The user explicitly supplies text.",
                             "evidence": [

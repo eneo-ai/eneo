@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import pytest
+
 from eneo.flows.ai_builder.ai_builder_discovery import analyze_discovery
 from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile,
@@ -524,3 +526,53 @@ class TestEditScopePolicy:
 
         assert "input_shape" in profile.edit_scope.active_families
         assert "final_pdf_type" not in question_ids
+
+
+def _flow_taking(input_source: str, input_type: str, *, files: bool = False) -> Flow:
+    return _make_flow(
+        _make_flow_step(
+            step_order=1,
+            user_description="Läs underlaget",
+            input_source=input_source,
+            input_type=input_type,
+            output_mode="pass_through",
+            output_type="text",
+            input_config=(
+                {"runtime_input": {"enabled": True, "max_files": 1}} if files else None
+            ),
+        ),
+    )
+
+
+def _questions_after_the_edit(flow: Flow, request: str) -> set[str]:
+    conversation = [
+        ConversationMessage(role="user", content="Ändra flödet."),
+        ConversationMessage(role="assistant", content="Vad vill du ändra?"),
+        ConversationMessage(role="user", content=request),
+    ]
+    return set(analyze_discovery(conversation, flow=flow).selected_question_ids)
+
+
+class TestJsonInputEdits:
+    """Edit turns read the request without a classifier: a request to take
+    JSON as the input is asked about, never dropped."""
+
+    def test_a_settled_flow_is_asked_when_the_edit_swaps_files_for_json(self) -> None:
+        flow = _flow_taking("flow_input", "file", files=True)
+
+        questions = _questions_after_the_edit(
+            flow, "Byt så att flödet tar emot JSON istället för filer."
+        )
+
+        assert "primary_runtime_input" in questions
+
+    @pytest.mark.parametrize(
+        "request_text",
+        ["Vi vill skicka JSON till flödet", "Ta emot JSON", "Ta emot JSON istället"],
+    )
+    def test_an_unsettled_flow_is_asked_when_the_edit_names_json(
+        self, request_text: str
+    ) -> None:
+        flow = _flow_taking("previous_step", "text")
+
+        assert "primary_runtime_input" in _questions_after_the_edit(flow, request_text)

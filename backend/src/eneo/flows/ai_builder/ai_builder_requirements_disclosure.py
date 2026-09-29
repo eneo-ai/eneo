@@ -1065,7 +1065,19 @@ def _named_result_summary_line(
         # a structured result at all — so describing flat placement would
         # describe something that is not happening. The confirmation is
         # hashed, so a sentence that does not apply would be attested to as
-        # if it did.
+        # if it did. For the same reason a result that is not structured JSON
+        # is not held to the names, which may belong to an earlier step:
+        # nothing verifies them, so the line only says they were named.
+        if (
+            not is_edit_mode
+            and session_state.commit_grade_slot_value("terminal_output")
+            != "structured_json"
+        ):
+            return (
+                f"Användaren har namngett innehåll: {names}."
+                if locale == "sv"
+                else f"The user named content: {names}."
+            )
         return preserved
     # The placement limitation belongs here, not in a later error: these fields
     # are built side by side at the top level, so a user who described one

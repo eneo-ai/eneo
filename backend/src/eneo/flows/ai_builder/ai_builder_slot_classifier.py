@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping
 from dataclasses import replace
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, NoReturn, TypedDict, cast
 from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
@@ -77,6 +77,7 @@ from eneo.flows.ai_builder.ai_builder_token_usage import (
 )
 from eneo.flows.ai_builder.ai_builder_tools import build_native_strict_tool_schema
 from eneo.flows.ai_builder.planning_state import CheckpointProducerKind
+from eneo.flows.ai_builder.question_catalog import QUESTION_CATALOG
 from eneo.main.logging import get_logger
 from eneo.tokens.token_utils import (
     measure_provider_input_reserve,
@@ -189,6 +190,7 @@ async def classify_slots(
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
     capacity: ModelCapacity,
     budget_policy: AIBuilderBudgetPolicy,
+    read_declarations: bool = True,
 ) -> SlotClassificationAttempt:
     slot_values = normalize_slot_classification_values(allowed_slot_values)
     transport = resolve_slot_classification_transport(
@@ -215,12 +217,14 @@ async def classify_slots(
         ui_language=ui_language,
         bias=bias,
         has_uploaded_files=has_uploaded_files,
+        read_declarations=read_declarations,
     )
     request_format = _slot_classification_request_format(
         slot_values,
         schema_candidate_fingerprints=schema_candidate_fingerprints,
         mode=transport,
         has_uploaded_files=has_uploaded_files,
+        read_declarations=read_declarations,
     )
     cache_key = slot_classification_prompt_hash(
         classification_input=classification_input,
@@ -235,6 +239,7 @@ async def classify_slots(
         capacity=capacity,
         safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
         structured_output_mode=transport,
+        read_declarations=read_declarations,
     )
     cached = _SLOT_CLASSIFICATION_CACHE.get(cache_key)
     if cached is not None:
@@ -279,6 +284,7 @@ async def classify_slots(
             ui_language=ui_language,
             bias=bias,
             has_uploaded_files=has_uploaded_files,
+            read_declarations=read_declarations,
         ),
         request_format=request_format,
         litellm_model=litellm_model,
@@ -404,6 +410,12 @@ async def classify_slots(
         allowed_slot_values=slot_values,
         classification_input=classification_input,
         schema_candidate_fingerprints=schema_candidate_fingerprints,
+        schema_sent=transport
+        in {
+            SlotClassificationTransport.STRICT_TOOL,
+            SlotClassificationTransport.STRICT_JSON_SCHEMA,
+        },
+        read_declarations=read_declarations,
     )
     if result is None:
         # The turn continues without this reading (discovery asks instead), so
@@ -441,6 +453,7 @@ async def classify_slots(
                 diagnostic.code == "slot_outcome_omitted"
                 for diagnostic in result.diagnostics
             ),
+            "regraded_slots": list(result.regraded_slots),
             "elapsed_ms": elapsed_ms,
         },
     )
@@ -559,6 +572,7 @@ def admit_slot_classification_input(
     litellm_model: str,
     capacity: ModelCapacity,
     budget_policy: AIBuilderBudgetPolicy,
+    read_declarations: bool = True,
 ) -> SlotClassificationInput:
     normalized_values = normalize_slot_classification_values(allowed_slot_values)
     # Each candidate is measured with the request it would send: the upload
@@ -571,6 +585,7 @@ def admit_slot_classification_input(
             ),
             mode=SlotClassificationTransport(structured_output_mode.value),
             has_uploaded_files=has_uploaded_files,
+            read_declarations=read_declarations,
         )
         for has_uploaded_files in (False, True)
     }
@@ -586,6 +601,7 @@ def admit_slot_classification_input(
                 ui_language=ui_language,
                 bias=bias,
                 has_uploaded_files=has_uploaded_files,
+                read_declarations=read_declarations,
             ),
             request_format=request_formats[has_uploaded_files],
             litellm_model=litellm_model,
@@ -784,6 +800,7 @@ def _slot_classification_request_format(
     schema_candidate_fingerprints: Collection[str],
     mode: SlotClassificationTransport,
     has_uploaded_files: bool,
+    read_declarations: bool = True,
 ) -> _SlotClassificationRequestFormat:
     if mode is SlotClassificationTransport.STRICT_TOOL:
         tool = build_native_strict_tool_schema(
@@ -795,6 +812,7 @@ def _slot_classification_request_format(
                         allowed_slot_values,
                         schema_candidate_fingerprints=schema_candidate_fingerprints,
                         has_uploaded_files=has_uploaded_files,
+                        declarations=read_declarations,
                     ),
                 },
             }
@@ -809,6 +827,7 @@ def _slot_classification_request_format(
         schema_candidate_fingerprints=schema_candidate_fingerprints,
         mode=StructuredOutputMode(mode.value),
         has_uploaded_files=has_uploaded_files,
+        read_declarations=read_declarations,
     )
     return {"response_format": response_format} if response_format else {}
 
@@ -819,6 +838,7 @@ def _slot_classification_response_format(
     schema_candidate_fingerprints: Collection[str] = (),
     mode: StructuredOutputMode,
     has_uploaded_files: bool,
+    read_declarations: bool = True,
 ) -> dict[str, object]:
     if mode is StructuredOutputMode.PROMPT_WITH_PYDANTIC_VALIDATION:
         return {}
@@ -837,6 +857,7 @@ def _slot_classification_response_format(
                 allowed_slot_values,
                 schema_candidate_fingerprints=schema_candidate_fingerprints,
                 has_uploaded_files=has_uploaded_files,
+                declarations=read_declarations,
             ),
         },
     }
@@ -856,6 +877,7 @@ def slot_classification_prompt_hash(
     capacity: ModelCapacity | None = None,
     safety_buffer_tokens: int = 0,
     structured_output_mode: StructuredOutputMode | SlotClassificationTransport,
+    read_declarations: bool = True,
 ) -> str:
     return hashlib.sha256(
         _classification_cache_payload(
@@ -875,6 +897,7 @@ def slot_classification_prompt_hash(
             capacity=capacity,
             safety_buffer_tokens=safety_buffer_tokens,
             structured_output_mode=structured_output_mode,
+            read_declarations=read_declarations,
         ).encode("utf-8")
     ).hexdigest()
 
@@ -1000,10 +1023,51 @@ _UPLOADED_EXAMPLE_RECOGNITION_RULES = (
 )
 
 
+# The declaration the parser reads beside the input value (see
+# parse_slot_classification_response); asked for only when it is read.
+_UPLOADED_AT_RUN_TIME_RULE = (
+    "With a resolved primary_runtime_input, set "
+    "uploaded_at_run_time true when the person uploads the source material as a "
+    "file each time the flow runs, whatever its format; files attached while "
+    "the flow is built do not count. "
+)
+
+
 def _carries_uploaded_files(classification_input: SlotClassificationInput) -> bool:
     return any(
         source.kind == "uploaded_file" for source in classification_input.sources
     )
+
+
+def _allowed_value_lines(
+    allowed_slot_values: Mapping[str, frozenset[str]],
+) -> list[str]:
+    """Each offered value with its model-facing meaning from the question catalog.
+
+    A bare value name lets a word in the request pick the value that shares
+    it (JSON, PDF). The catalog owns what an option means to the classifier,
+    in one language and apart from the UI copy, so neither the person's
+    language nor an edit of the card text changes a classification. A slot,
+    value or meaning the catalog does not hold raises KeyError: drift fails
+    loudly. One line per slot keeps the meanings and drops the list layout.
+    """
+
+    lines: list[str] = []
+    for slot_name, values in sorted(allowed_slot_values.items()):
+        meanings = {
+            option.value: option.meaning
+            for option in QUESTION_CATALOG[slot_name].options
+        }
+        entries = " ".join(
+            f"{value} = {meanings[value] or _no_meaning(slot_name, value)}"
+            for value in sorted(values)
+        )
+        lines.append(f"- {slot_name}: {entries}")
+    return lines
+
+
+def _no_meaning(slot_name: str, value: str) -> NoReturn:
+    raise KeyError(f"{slot_name}.{value} has no model-facing meaning")
 
 
 def _build_slot_classification_prompt(
@@ -1015,20 +1079,19 @@ def _build_slot_classification_prompt(
     active_checkpoint_producers: tuple[CheckpointProducerKind, ...] = (),
     bias: SlotClassificationBias | None = None,
     has_uploaded_files: bool | None = None,
+    read_declarations: bool = True,
 ) -> list[dict[str, str]]:
     """The classification request's messages.
 
     The upload-only rules follow whether this input carries an uploaded file.
     A caller measuring part of a larger request passes the larger request's
-    answer instead, so both are measured with the same rules.
+    answer instead, so both are measured with the same rules. A request whose
+    declarations are not read (a turn on a saved flow) does not ask for them.
     """
 
     if has_uploaded_files is None:
         has_uploaded_files = _carries_uploaded_files(classification_input)
-    dimension_lines = [
-        f"- {slot_name}: {', '.join(sorted(values))}"
-        for slot_name, values in sorted(allowed_slot_values.items())
-    ]
+    dimension_lines = _allowed_value_lines(allowed_slot_values)
     schema_candidate_lines = _schema_candidate_prompt_lines(schema_candidates)
     obligation_values = ", ".join(RESULT_OBLIGATION_VALUES)
     language_hint = (
@@ -1065,12 +1128,8 @@ def _build_slot_classification_prompt(
         "keywords. The allowed values are framework concepts, so choose a value only "
         "when a normal product user would reasonably expect that architecture. "
         "Distinguish runtime source material from intermediate work and final "
-        "deliverables. Uploaded files are document input; pasted or typed prose is "
-        "text input; uploaded or recorded speech for transcription is audio input. "
-        "If the runtime source material itself is a JSON payload, classify "
-        "primary_runtime_input as json. Do not classify JSON as runtime input "
-        "when the user asks to extract JSON from documents or only requests JSON "
-        "as the final output. "
+        "deliverables. Speech to transcribe, uploaded or recorded, is audio input. "
+        + (_UPLOADED_AT_RUN_TIME_RULE if read_declarations else "")
         + (_UPLOADED_FILE_ROLE_RULES if has_uploaded_files else "")
         + "When declared JSON schema candidates are listed, classify their complete "
         "direction as one schema_direction object. Select an input_fingerprint, an "
@@ -1167,14 +1226,7 @@ def _build_slot_classification_prompt(
         "For post_processing_goal, classify what the user wants done with the "
         "source material after the primary read/transcription/conversion. "
         "Use stop_after_primary_operation only for explicit transcript-only, "
-        "verbatim, no-summary, or conversion-only intent. Meeting decisions, "
-        "next steps, owners, deadlines, and open questions are action_followup. "
-        "Extracting fields/facts is extract_key_information; creating notes, "
-        "memos, or reports from material is structure_key_information; comparing "
-        "or validating against another source, schema, rule, or checklist is "
-        "compare_or_validate. Summaries and overviews are summarize_or_overview. "
-        "Recommendations or possible choices are decision_support. Risk, issue, "
-        "deviation, or red-flag review is risk_or_issue_review. "
+        "verbatim, no-summary, or conversion-only intent. "
         "Also preserve explicit secondary result obligations that are not already "
         "the primary post_processing_goal. Use only the listed "
         "secondary_obligations values. For example, when the user asks to compare "
@@ -1182,8 +1234,6 @@ def _build_slot_classification_prompt(
         "post_processing_goal as compare_or_validate and include risks/actions as "
         "secondary_obligations. Do not include obligations that are not explicitly "
         "requested or strongly implied by the conversation. "
-        "For runtime metadata, choose no_extra_metadata when all needed data comes "
-        "from the source material and no separate per-run fields are requested. "
         "If the user says values should be derived from source material, do not "
         "classify that as runtime form fields. "
         "For runtime_metadata_fields, evidence_level explicit requires the quote "
@@ -1198,16 +1248,9 @@ def _build_slot_classification_prompt(
         "If the user explicitly says they do not know, have not decided, are "
         "unsure, or want help choosing a slot, emit explicitly_uncertain with "
         "their exact quote; do not choose the most likely option. "
-        "For report_disposition, classify per_source_sections when the user wants "
-        "a separate report section or document record for each uploaded source; "
-        "classify synthesized_overview when they want the sources combined into "
-        "one shared summary or analysis; classify both when they ask for source "
-        "sections plus a shared overview, comparison, or conclusion. "
         "For comparison_scope, classify same_run_compare when the user compares, "
         "checks, or reconciles the material of one run against other material "
-        "of the same run, whatever verb they use; compare_previous_material when "
-        "new material is compared with earlier stored material; no_direct_compare "
-        "when nothing is compared. "
+        "of the same run, whatever verb they use. "
         + (_UPLOADED_EXAMPLE_OUTPUT_RULES if has_uploaded_files else "")
         # Applies with or without a file: a template the user names but has
         # not attached is what makes the Builder ask for it.
@@ -1286,6 +1329,7 @@ def _classification_cache_payload(
     capacity: ModelCapacity | None = None,
     safety_buffer_tokens: int = 0,
     structured_output_mode: StructuredOutputMode | SlotClassificationTransport,
+    read_declarations: bool = True,
 ) -> str:
     normalized_values = normalize_slot_classification_values(allowed_slot_values)
     has_uploaded_files = _carries_uploaded_files(classification_input)
@@ -1297,6 +1341,7 @@ def _classification_cache_payload(
         ui_language=ui_language,
         bias=bias,
         has_uploaded_files=has_uploaded_files,
+        read_declarations=read_declarations,
     )
     payload: dict[str, object] = {
         "allowed_slot_values": {
@@ -1325,6 +1370,7 @@ def _classification_cache_payload(
             ),
             mode=SlotClassificationTransport(structured_output_mode.value),
             has_uploaded_files=has_uploaded_files,
+            read_declarations=read_declarations,
         )
     )
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)

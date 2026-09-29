@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -97,7 +98,7 @@ from eneo.flows.ai_builder.planning_state import (
     PlanningState,
     UnplacedNamedResultPlacement,
 )
-from eneo.flows.ai_builder.question_catalog import legal_slot_values
+from eneo.flows.ai_builder.question_catalog import QUESTION_CATALOG, legal_slot_values
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.model_providers.infrastructure.litellm_provider import (
     ResolvedLiteLLMProvider,
@@ -541,6 +542,8 @@ def test_a_response_shaped_like_a_small_prompt_mode_model_keeps_its_reading() ->
             "report_disposition": {"per_source_sections", "synthesized_overview"},
         },
         classification_input=_classification_input(request),
+        # Prompt-only mode sends no response schema, so no declaration either.
+        schema_sent=False,
     )
 
     assert result is not None
@@ -1090,6 +1093,8 @@ def test_a_follow_up_reading_that_restates_an_earlier_review_request_is_read(
             slot_name: legal_slot_values(slot_name) for slot_name in reply["slot_names"]
         },
         classification_input=classification_input,
+        # Recorded before slots declared the fact their value follows.
+        schema_sent=False,
     )
 
     assert result is not None
@@ -3448,6 +3453,7 @@ def test_parse_slot_classification_response_downgrades_unsupported_claims() -> N
                     {
                         "slot_name": "primary_runtime_input",
                         "value": "documents",
+                        "uploaded_at_run_time": True,
                         "confidence": "high",
                         "reason": "unsupported",
                     },
@@ -3533,6 +3539,7 @@ def test_parse_slot_classification_response_rejects_fabricated_quote() -> None:
                         "value": "documents",
                         "confidence": "high",
                         "reason": "fabricated evidence",
+                        "uploaded_at_run_time": True,
                         "evidence": [_evidence("User requested documents")],
                         "evidence_level": "explicit",
                     }
@@ -3586,6 +3593,347 @@ def test_attachment_only_evidence_cannot_classify_terminal_output() -> None:
 
     assert result is not None
     assert _resolved_slots(result) == ()
+
+
+_EXPORT_UPLOAD = "Vid körning laddar jag bara upp e-tjänstexporten (json)."
+_OMITTED = object()
+# A reading nobody confirmed stands as graded; one the parser derived from a
+# declaration, or one the declaration contradicts, is only a suggestion.
+_STANDS = ("high", "explicit")
+_SUGGESTED = ("medium", "inferred")
+
+
+def _read_slot(
+    slot_name: str,
+    entry: dict[str, object],
+    *,
+    text: str,
+    allowed: set[str],
+    **parse: bool,
+) -> SlotClassificationResult:
+    result = parse_slot_classification_response(
+        json.dumps({**_VALID_CLASSIFICATION_RESPONSE, "slots": {slot_name: entry}}),
+        allowed_slot_values={slot_name: allowed},
+        classification_input=_classification_input(text),
+        **parse,
+    )
+    assert result is not None
+    return result
+
+
+def _reading(
+    result: SlotClassificationResult, slot_name: str
+) -> tuple[str, str, str] | None:
+    outcome = result.slot_outcomes[slot_name]
+    if not isinstance(outcome, ResolvedSlotClassificationOutcome):
+        return None
+    return outcome.value, outcome.confidence, outcome.evidence_level
+
+
+def _input_entry(value: str, uploaded: object, confidence: str = "high") -> dict:
+    entry: dict[str, object] = {
+        "outcome": "resolved",
+        "value": value,
+        "confidence": confidence,
+        "reason": "Körningen får en e-tjänstexport.",
+        "evidence": [_evidence(_EXPORT_UPLOAD)],
+        "evidence_level": "explicit",
+    }
+    if uploaded is not _OMITTED:
+        entry["uploaded_at_run_time"] = uploaded
+    return entry
+
+
+def _input_reading(
+    value: str,
+    uploaded: object,
+    *,
+    confidence: str = "high",
+    allowed: set[str] | None = None,
+    **parse: bool,
+) -> SlotClassificationResult:
+    return _read_slot(
+        "primary_runtime_input",
+        _input_entry(value, uploaded, confidence),
+        text=_EXPORT_UPLOAD,
+        allowed=allowed or {"audio", "documents", "json", "text", "text_and_documents"},
+        **parse,
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "uploaded", "expected"),
+    [
+        # The value and the declared fact agree: the reading stands.
+        ("json", False, ("json", *_STANDS)),
+        ("text", False, ("text", *_STANDS)),
+        ("documents", True, ("documents", *_STANDS)),
+        # An upload proves the files, never the pasted text beside them.
+        ("text_and_documents", True, ("text_and_documents", *_SUGGESTED)),
+        # A recording is not a file upload either way.
+        ("audio", True, ("audio", *_STANDS)),
+        ("audio", False, ("audio", *_STANDS)),
+        # A declared upload turns a sent or pasted reading into documents; the
+        # derived value is a suggestion the person confirms (a JSON payload
+        # declared uploaded by mistake must not become documents silently).
+        ("json", True, ("documents", *_SUGGESTED)),
+        ("text", True, ("documents", *_SUGGESTED)),
+        # A declaration that contradicts the value leaves the value in question.
+        ("documents", False, ("documents", *_SUGGESTED)),
+        ("text_and_documents", False, ("text_and_documents", *_SUGGESTED)),
+        # No declared fact, no reading: the input question is asked. (The parser
+        # reads a reply as sent with the response schema unless told otherwise.)
+        ("json", _OMITTED, None),
+        ("documents", _OMITTED, None),
+        ("json", "true", None),
+        ("json", 1, None),
+        ("json", None, None),
+    ],
+)
+def test_a_declared_upload_regrades_the_input_it_contradicts(
+    value: str, uploaded: object, expected: tuple[str, str, str] | None
+) -> None:
+    result = _input_reading(value, uploaded)
+
+    assert _reading(result, "primary_runtime_input") == expected
+    assert result.regraded_slots == (
+        ("primary_runtime_input",)
+        if expected is not None and expected[1:] == _SUGGESTED
+        else ()
+    )
+
+
+@pytest.mark.parametrize("confidence", ["medium", "low"])
+def test_a_regrade_never_raises_the_models_own_confidence(confidence: str) -> None:
+    result = _input_reading("json", True, confidence=confidence)
+
+    assert _reading(result, "primary_runtime_input") == (
+        "documents",
+        confidence,
+        "inferred",
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "uploaded", "expected"),
+    [
+        # A request sent without the response schema keeps its reading while the
+        # declaration is missing, and a declaration that is there still decides.
+        ("json", _OMITTED, ("json", *_STANDS)),
+        ("json", False, ("json", *_STANDS)),
+        ("json", True, ("documents", *_SUGGESTED)),
+        ("documents", False, ("documents", *_SUGGESTED)),
+        # A declaration that is there but is not a fact is unusable, not
+        # missing: the reading stands below commit grade.
+        ("json", "true", ("json", *_SUGGESTED)),
+        ("json", 1, ("json", *_SUGGESTED)),
+        ("json", 0, ("json", *_SUGGESTED)),
+        ("json", None, ("json", *_SUGGESTED)),
+        ("documents", [], ("documents", *_SUGGESTED)),
+        ("text", {}, ("text", *_SUGGESTED)),
+    ],
+)
+def test_a_request_without_the_schema_keeps_a_missing_declaration_open(
+    value: str, uploaded: object, expected: tuple[str, str, str]
+) -> None:
+    result = _input_reading(value, uploaded, schema_sent=False)
+
+    assert _reading(result, "primary_runtime_input") == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "uploaded", "schema_sent"),
+    [
+        # A declared "no upload" beside json or text: whether the model set it
+        # wrongly is not something the parser can tell.
+        ("json", False, True),
+        ("text", False, True),
+        # A route that sent no response schema and got no declaration.
+        ("json", _OMITTED, False),
+        ("documents", _OMITTED, False),
+        ("text_and_documents", _OMITTED, False),
+    ],
+)
+def test_paths_this_change_does_not_claim_read_the_input_as_before(
+    value: str, uploaded: object, schema_sent: bool
+) -> None:
+    # Equal to the same reply read with no declaration at all, which is how
+    # the parser read it before declarations existed.
+    result = _input_reading(value, uploaded, schema_sent=schema_sent)
+    before = _input_reading(value, _OMITTED, read_declarations=False)
+
+    assert result.slot_outcomes == before.slot_outcomes
+    assert result.regraded_slots == ()
+
+
+def test_a_derived_input_the_vocabulary_does_not_offer_is_not_read() -> None:
+    result = _input_reading("json", True, allowed={"json", "text"})
+
+    assert _reading(result, "primary_runtime_input") is None
+    assert [item.code for item in result.diagnostics] == ["slot_outcome_malformed"]
+
+
+@pytest.mark.parametrize(
+    "uploaded",
+    [True, False, _OMITTED, "true", 1, None, []],
+)
+@pytest.mark.parametrize("value", ["json", "text", "documents", "text_and_documents"])
+def test_a_turn_on_a_saved_flow_reads_the_input_as_the_model_wrote_it(
+    value: str, uploaded: object
+) -> None:
+    # The declaration changes neither the value, the grade nor the evidence
+    # check: the slot is what the entry says without it.
+    read = _input_reading(value, uploaded, read_declarations=False)
+    stripped = _input_reading(value, _OMITTED, read_declarations=False)
+
+    assert read.slot_outcomes == stripped.slot_outcomes
+    assert _reading(read, "primary_runtime_input") == (value, *_STANDS)
+    assert read.regraded_slots == ()
+
+
+@pytest.mark.asyncio
+async def test_the_classifier_reads_a_reply_once_for_each_way_of_reading_it() -> None:
+    text = f"{_EXPORT_UPLOAD} {uuid4()}"
+    client = AsyncMock()
+    client.acompletion.return_value = _classification_tool_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "slots": {"primary_runtime_input": _input_entry("json", True)},
+            }
+        )
+    )
+
+    async def read(read_declarations: bool) -> SlotClassificationResult:
+        attempt = await classify_slots(
+            litellm_client=client,
+            completion_model_route=_route(supports_strict_tool_schema=True),
+            classification_input=_classification_input(text),
+            allowed_slot_values={"primary_runtime_input": {"documents", "json"}},
+            tenant_id=uuid4(),
+            read_declarations=read_declarations,
+        )
+        assert attempt.result is not None
+        return attempt.result
+
+    with patch.object(classifier, "logger") as log:
+        asked, applied, asked_again = (
+            await read(True),
+            await read(False),
+            await read(True),
+        )
+
+    assert _reading(asked, "primary_runtime_input") == ("documents", *_SUGGESTED)
+    assert asked.regraded_slots == ("primary_runtime_input",)
+    assert _reading(applied, "primary_runtime_input") == ("json", *_STANDS)
+    assert applied.regraded_slots == ()
+    # The provider was asked twice: the third read is the first one's cache.
+    assert client.acompletion.await_count == 2
+    assert asked_again.cached is True
+    # A regrade is visible in the completion log, the one place it is kept.
+    completed = [
+        call.kwargs["extra"]["regraded_slots"]
+        for call in log.info.call_args_list
+        if call.args[0] == "AI Builder slot classification completed"
+    ]
+    assert completed == [["primary_runtime_input"], []]
+
+
+def test_an_omitted_grade_reads_as_medium_beside_a_declaration() -> None:
+    entry = _input_entry("documents", True)
+    result = _read_slot(
+        "primary_runtime_input",
+        {key: item for key, item in entry.items() if key != "confidence"},
+        text=_EXPORT_UPLOAD,
+        allowed={"documents"},
+    )
+
+    assert _reading(result, "primary_runtime_input") == (
+        "documents",
+        "medium",
+        "explicit",
+    )
+    assert [item.code for item in result.diagnostics] == [
+        "slot_outcome_confidence_omitted"
+    ]
+
+
+# A citation that is not the person's exact words, or names a source that is
+# not their own message (a corrupted id, an attachment), cannot be verified.
+
+
+@pytest.mark.parametrize("schema_sent", [True, False])
+@pytest.mark.parametrize("uploaded", [True, False, _OMITTED, "true"])
+@pytest.mark.parametrize("own", [[_evidence("helt påhittat citat")], []])
+def test_an_input_reading_without_evidence_of_its_own_ignores_its_declaration(
+    own: list[dict[str, str]], uploaded: object, schema_sent: bool
+) -> None:
+    entry = {**_input_entry("json", uploaded), "evidence": own}
+    result = _read_slot(
+        "primary_runtime_input",
+        entry,
+        text=_EXPORT_UPLOAD,
+        allowed={"documents", "json"},
+        schema_sent=schema_sent,
+    )
+    unread = _read_slot(
+        "primary_runtime_input",
+        entry,
+        text=_EXPORT_UPLOAD,
+        allowed={"documents", "json"},
+        read_declarations=False,
+    )
+
+    # The reading is what the entry says without evidence: json, low, inferred.
+    assert result.slot_outcomes == unread.slot_outcomes
+    assert _reading(result, "primary_runtime_input") == ("json", "low", "inferred")
+    assert result.regraded_slots == ()
+
+
+@pytest.mark.parametrize("schema_sent", [True, False])
+@pytest.mark.parametrize("uploaded", [_OMITTED, None, "true", 1, [], {}, True, False])
+def test_an_audio_input_is_read_without_its_declaration(
+    uploaded: object, schema_sent: bool
+) -> None:
+    # A recording is neither sent nor uploaded as a document, so whatever the
+    # upload declaration says, or whether it is there, audio stands as written.
+    result = _input_reading("audio", uploaded, schema_sent=schema_sent)
+
+    assert _reading(result, "primary_runtime_input") == ("audio", *_STANDS)
+    assert result.regraded_slots == ()
+
+
+@pytest.mark.parametrize(
+    ("slot_name", "value", "extra"),
+    [
+        ("report_disposition", "both", {"uploaded_at_run_time": True}),
+        ("terminal_output", "structured_json", {"uploaded_at_run_time": True}),
+        ("primary_runtime_input", "documents", {"bogus": 1}),
+        ("report_disposition", "both", {"bogus": 1}),
+    ],
+)
+@pytest.mark.parametrize("graded", [True, False])
+def test_a_declaration_belongs_to_its_own_slot(
+    slot_name: str, value: str, extra: dict[str, object], graded: bool
+) -> None:
+    entry: dict[str, object] = {
+        "outcome": "resolved",
+        "value": value,
+        "reason": "Uppgiften anges i begäran.",
+        "evidence": [_evidence(_EXPORT_UPLOAD)],
+        "evidence_level": "explicit",
+        **extra,
+        **({"confidence": "high"} if graded else {}),
+    }
+    result = _read_slot(
+        slot_name,
+        entry,
+        text=_EXPORT_UPLOAD,
+        allowed={"both", "documents", "structured_json"},
+    )
+
+    assert _reading(result, slot_name) is None
+    assert [item.code for item in result.diagnostics] == ["slot_outcome_malformed"]
 
 
 def test_question_tied_evidence_is_explicit_only_for_its_canonical_slot() -> None:
@@ -4846,6 +5194,37 @@ def _requested_schema(request: dict[str, Any]) -> dict[str, Any]:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("strict_tool", [False, True])
+async def test_a_turn_on_a_saved_flow_asks_for_no_declarations(
+    strict_tool: bool,
+) -> None:
+    # Its declarations are not read, so the request neither asks for them in
+    # the prompt nor offers them in the response schema.
+    requests: dict[bool, dict[str, Any]] = {}
+    for read_declarations in (True, False):
+        litellm_client = AsyncMock()
+        litellm_client.acompletion.return_value = _make_response(json.dumps({}))
+        await classify_slots(
+            litellm_client=litellm_client,
+            completion_model_route=_route(supports_strict_tool_schema=strict_tool),
+            classification_input=_classification_input(f"{_EXPORT_UPLOAD} {uuid4()}"),
+            allowed_slot_values={
+                "primary_runtime_input": {"documents", "json"},
+                "terminal_output": {"structured_json", "structured_text"},
+            },
+            tenant_id=uuid4(),
+            read_declarations=read_declarations,
+        )
+        requests[read_declarations] = litellm_client.acompletion.await_args.kwargs
+
+    for read_declarations, request in requests.items():
+        schema = json.dumps(_requested_schema(request))
+        prompt = "\n".join(message["content"] for message in request["messages"])
+        assert ("uploaded_at_run_time" in schema) is read_declarations
+        assert ("uploaded_at_run_time" in prompt) is read_declarations
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("strict_tool", [False, True])
 async def test_a_request_without_uploads_carries_no_upload_only_rules_or_schema(
     strict_tool: bool,
 ) -> None:
@@ -5643,29 +6022,154 @@ def test_slot_classification_prompt_separates_source_material_from_artifacts() -
 
     prompt = "\n".join(message["content"] for message in messages)
     assert "requested final document is terminal_output" in prompt
+    assert "Speech to transcribe, uploaded or recorded, is audio input" in prompt
+    # The model states the facts; the parser derives the values from them.
+    # Builder-time attachments never enter a run, so the rule names run time.
+    assert "set uploaded_at_run_time true when the person uploads" in prompt
+    assert "files attached while the flow is built do not count" in prompt
+    assert "runtime source material itself is a JSON payload" not in prompt
+    # The final result is read as before this change; its own slice follows.
     assert "structured JSON mentioned as helpful intermediate/API context" in prompt
-    assert "uploaded or recorded speech for transcription is audio input" in prompt
+    assert "delivered_results" not in prompt
 
 
-def test_slot_classification_prompt_explains_report_disposition_values() -> None:
+def test_slot_classification_prompt_gives_each_value_its_catalog_meaning() -> None:
+    # A bare value name lets the word JSON in a request pick `json` although
+    # the person uploads the JSON export as a file.
     messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
         classification_input=_classification_input(
-            "Skriv ett rapportavsnitt för varje uppladdat dokument."
+            "Vid körning laddar jag bara upp e-tjänstexporten (json)."
         ),
         allowed_slot_values={
-            "report_disposition": frozenset(
-                {"both", "per_source_sections", "synthesized_overview"}
-            ),
+            "primary_runtime_input": frozenset({"documents", "json"}),
         },
         ui_language="sv",
     )
 
     prompt = "\n".join(message["content"] for message in messages)
-    assert "For report_disposition" in prompt
-    assert "per_source_sections" in prompt
-    assert "synthesized_overview" in prompt
-    assert "both" in prompt
-    assert "each uploaded source" in prompt
+    # The meaning, not an example: an uploaded JSON export is a document, and
+    # json is defined by how the data arrives.
+    documents = QUESTION_CATALOG["primary_runtime_input"].options
+    meanings = {option.value: option.meaning for option in documents}
+    assert (
+        "- primary_runtime_input: "
+        f"documents = {meanings['documents']} json = {meanings['json']}\n"
+    ) in prompt
+
+
+def test_the_prompt_reads_the_model_facing_meaning_not_the_ui_copy_or_language() -> (
+    None
+):
+    allowed = {
+        slot_name: legal_slot_values(slot_name)
+        for slot_name in LLM_RESOLVABLE_SLOT_NAMES
+    }
+    prompts = {
+        language: classifier._build_slot_classification_prompt(  # noqa: SLF001
+            classification_input=_classification_input("Bygg ett flöde."),
+            allowed_slot_values=allowed,
+            ui_language=language,
+        )
+        for language in ("sv", "en", None)
+    }
+
+    # Nothing but the language hint on the user turn differs with the UI language.
+    assert len({p[0]["content"] for p in prompts.values()}) == 1
+    assert len({p[1]["content"].split("\n", 1)[1] for p in prompts.values()}) == 1
+    prompt = "\n".join(message["content"] for message in prompts["sv"])
+    for slot_name in allowed:
+        for option in QUESTION_CATALOG[slot_name].options:
+            if option.value in allowed[slot_name]:
+                assert option.meaning in prompt
+                for ui_copy in (option.description_sv, option.description_en):
+                    assert ui_copy == option.meaning or ui_copy not in prompt
+
+
+def test_a_value_without_a_model_facing_meaning_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    template = QUESTION_CATALOG["primary_runtime_input"]
+    options = tuple(
+        replace(option, meaning="") if option.value == "json" else option
+        for option in template.options
+    )
+    monkeypatch.setattr(
+        classifier,
+        "QUESTION_CATALOG",
+        {
+            **QUESTION_CATALOG,
+            "primary_runtime_input": replace(template, options=options),
+        },
+    )
+
+    with pytest.raises(KeyError):
+        classifier._build_slot_classification_prompt(  # noqa: SLF001
+            classification_input=_classification_input("Ladda upp en fil."),
+            allowed_slot_values={"primary_runtime_input": frozenset({"json"})},
+            ui_language="sv",
+        )
+
+
+def test_slot_classification_prompt_gives_every_offered_value_a_meaning() -> None:
+    allowed = {
+        slot_name: legal_slot_values(slot_name)
+        for slot_name in LLM_RESOLVABLE_SLOT_NAMES
+    }
+    messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
+        classification_input=_classification_input("Bygg ett flöde."),
+        allowed_slot_values=allowed,
+        ui_language="sv",
+    )
+
+    lines = "\n".join(message["content"] for message in messages).splitlines()
+    for slot_name, values in allowed.items():
+        (line,) = [line for line in lines if line.startswith(f"- {slot_name}: ")]
+        rendered = line.removeprefix(f"- {slot_name}: ").split(" = ")
+        # "a = Meaning. b = Meaning.": each value, then its meaning.
+        assert [
+            rendered[0],
+            *(part.rsplit(". ", 1)[-1] for part in rendered[1:-1]),
+        ] == (sorted(values))
+        assert all(part.strip(". ") for part in rendered[1:]), rendered
+
+
+def test_slot_classification_prompt_refuses_a_value_the_catalog_does_not_mean() -> None:
+    # Catalog drift must fail loudly, not bring back the bare value name.
+    with pytest.raises(KeyError):
+        classifier._build_slot_classification_prompt(  # noqa: SLF001
+            classification_input=_classification_input("Ladda upp en fil."),
+            allowed_slot_values={
+                "primary_runtime_input": frozenset({"documents", "spreadsheet"}),
+            },
+            ui_language="sv",
+        )
+
+
+def test_slot_classification_prompt_states_a_value_meaning_once() -> None:
+    # The catalog line carries what a value means; prose that restates it costs
+    # tokens on every call and drifts from the catalog.
+    allowed = {
+        slot_name: legal_slot_values(slot_name)
+        for slot_name in LLM_RESOLVABLE_SLOT_NAMES
+    }
+    messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
+        classification_input=_classification_input("Bygg ett flöde."),
+        allowed_slot_values=allowed,
+        ui_language="sv",
+    )
+
+    prompt = "\n".join(message["content"] for message in messages)
+    for slot_name in allowed:
+        for option in QUESTION_CATALOG[slot_name].options:
+            if option.value in allowed[slot_name]:
+                assert prompt.count(option.meaning) == 1, option.value
+    for restated in (
+        "For report_disposition",
+        "compare_previous_material when",
+        "is extract_key_information",
+        "choose no_extra_metadata when",
+    ):
+        assert restated not in prompt
 
 
 def test_slot_classification_prompt_keeps_the_option_out_of_the_outcome_field() -> None:
@@ -5697,7 +6201,7 @@ def test_slot_classification_prompt_reads_a_template_result_as_a_document() -> N
     assert "emit that terminal_output at medium confidence" in prompt
 
 
-def test_slot_classification_prompt_explains_comparison_scope_values() -> None:
+def test_slot_classification_prompt_reads_a_comparison_by_meaning_not_verb() -> None:
     messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
         classification_input=_classification_input(
             "Flödet ska jämföra utfört arbete mot avtal."
@@ -5712,9 +6216,7 @@ def test_slot_classification_prompt_explains_comparison_scope_values() -> None:
 
     prompt = "\n".join(message["content"] for message in messages)
     assert "For comparison_scope" in prompt
-    assert "against other material of the same run" in prompt
-    assert "compare_previous_material when new material is compared" in prompt
-    assert "no_direct_compare when nothing is compared" in prompt
+    assert "against other material of the same run, whatever verb they use" in prompt
 
 
 def test_slot_classification_prompt_defines_every_file_role_by_its_place_in_the_flow() -> (
@@ -6356,7 +6858,10 @@ async def test_classifier_transport_follows_route_capability(
     strict_tool: bool,
 ) -> None:
     payload = json.dumps(
-        {**_VALID_CLASSIFICATION_RESPONSE, "slots": {"input": {"outcome": "absent"}}}
+        {
+            **_VALID_CLASSIFICATION_RESPONSE,
+            "slots": {"primary_runtime_input": {"outcome": "absent"}},
+        }
     )
     client = AsyncMock()
     client.acompletion.return_value = (
@@ -6371,7 +6876,7 @@ async def test_classifier_transport_follows_route_capability(
             kwargs={"response_format": {"type": "json_object"}} if strict_tool else {},
         ),
         classification_input=_classification_input(f"transport-{uuid4()}"),
-        allowed_slot_values={"input": {"text"}},
+        allowed_slot_values={"primary_runtime_input": {"text"}},
         tenant_id=uuid4(),
         structured_output_mode=mode,
     )
@@ -6400,7 +6905,7 @@ async def test_classifier_transport_follows_route_capability(
             assert "response_format" not in sent
     assert attempt.outcome == "resolved"
     assert attempt.result is not None
-    assert attempt.result.slot_outcomes["input"].kind == "absent"
+    assert attempt.result.slot_outcomes["primary_runtime_input"].kind == "absent"
 
 
 @pytest.mark.asyncio
@@ -6514,14 +7019,22 @@ async def test_strict_classifier_outbound_schema_preserves_classification_shapes
         provenance=("user_message:user-1",),
     )
     candidates = (candidate,) if with_candidates else ()
-    values = {"input": {"text", "documents"}}
+    values = {
+        "primary_runtime_input": {"text", "documents"},
+        "terminal_output": {"structured_json", "structured_text"},
+    }
     fallback = classification_contract.slot_classification_json_schema(values)
     original = deepcopy(fallback)
     payload = {
         name: value
         for name, value in _VALID_CLASSIFICATION_RESPONSE.items()
         if name not in _UPLOAD_ONLY_RESPONSE_PROPERTIES
-    } | {"slots": {"input": {"outcome": "absent"}}}
+    } | {
+        "slots": {
+            "primary_runtime_input": {"outcome": "absent"},
+            "terminal_output": {"outcome": "absent"},
+        }
+    }
     client = AsyncMock()
     client.acompletion.return_value = _classification_tool_response(json.dumps(payload))
     await classify_slots(
@@ -6546,9 +7059,9 @@ async def test_strict_classifier_outbound_schema_preserves_classification_shapes
     ]
     assert schema["additionalProperties"] is False
     slots = schema["properties"]["slots"]
-    assert slots["required"] == ["input"]
+    assert slots["required"] == ["primary_runtime_input", "terminal_output"]
     assert slots["additionalProperties"] is False
-    resolved, uncertain, absent = slots["properties"]["input"]["anyOf"]
+    resolved, uncertain, absent = slots["properties"]["primary_runtime_input"]["anyOf"]
     assert [
         branch["properties"]["outcome"] for branch in (resolved, uncertain, absent)
     ] == [
@@ -6556,14 +7069,13 @@ async def test_strict_classifier_outbound_schema_preserves_classification_shapes
         {"type": "string", "enum": ["explicitly_uncertain"]},
         {"type": "string", "enum": ["absent"]},
     ]
-    assert set(resolved["required"]) == {
-        "outcome",
-        "value",
-        "confidence",
-        "reason",
-        "evidence",
-        "evidence_level",
-    }
+    grades = {"outcome", "value", "confidence", "reason", "evidence", "evidence_level"}
+    # Each slot whose value must follow a stated fact declares that fact.
+    assert set(resolved["required"]) == grades | {"uploaded_at_run_time"}
+    assert resolved["properties"]["uploaded_at_run_time"] == {"type": "boolean"}
+    # Every other slot declares nothing beside its value.
+    terminal = slots["properties"]["terminal_output"]["anyOf"][0]
+    assert set(terminal["required"]) == grades
     assert uncertain["required"] == ["outcome", "evidence"]
     assert absent["required"] == ["outcome"]
     assert resolved["properties"]["value"]["enum"] == ["documents", "text"]
@@ -6596,7 +7108,9 @@ async def test_strict_classifier_outbound_schema_preserves_classification_shapes
         assert direction == {"type": "null"}
     validator = Draft202012Validator(schema)
     assert validator.is_valid(payload)
-    assert not validator.is_valid({**payload, "slots": {"input": {"outcome": "text"}}})
+    assert not validator.is_valid(
+        {**payload, "slots": {"primary_runtime_input": {"outcome": "text"}}}
+    )
     assert (
         fallback
         == original
@@ -6697,31 +7211,47 @@ async def test_strict_classifier_preserves_raw_arguments_and_semantic_diagnostic
     None
 ):
     source = _classification_input("Use text input.")
-    resolved = {
-        "outcome": "resolved",
-        "value": "text",
-        "confidence": "high",
-        "reason": "User request",
-        "evidence": [_evidence("Use text input.")],
-        "evidence_level": "explicit",
-    }
+    # Real catalog slots stand in for the five cases, since the prompt gives
+    # every offered value its catalog meaning.
+    valid, duplicate, omitted, fabricated, overlong = (
+        ("primary_runtime_input", "text"),
+        ("terminal_output", "structured_text"),
+        ("report_disposition", "both"),
+        ("comparison_scope", "no_direct_compare"),
+        ("document_material_scope", "single_document_case"),
+    )
+
+    def resolved(name: str, value: str) -> dict[str, Any]:
+        return {
+            "outcome": "resolved",
+            "value": value,
+            "confidence": "high",
+            "reason": "User request",
+            "evidence": [_evidence("Use text input.")],
+            "evidence_level": "explicit",
+            **({"uploaded_at_run_time": False} if name == valid[0] else {}),
+        }
+
     values = {
-        name: {"text"}
-        for name in ("valid", "duplicate", "omitted", "fabricated", "overlong")
+        name: {value}
+        for name, value in (valid, duplicate, omitted, fabricated, overlong)
     }
     payload = {
         **_VALID_CLASSIFICATION_RESPONSE,
         "slots": {
-            "valid": resolved,
-            "duplicate": {"outcome": "absent"},
-            "fabricated": {**resolved, "evidence": [_evidence("Invented quotation")]},
-            "overlong": {**resolved, "evidence": [_evidence("x" * 241)]},
+            valid[0]: resolved(*valid),
+            duplicate[0]: {"outcome": "absent"},
+            fabricated[0]: {
+                **resolved(*fabricated),
+                "evidence": [_evidence("Invented quotation")],
+            },
+            overlong[0]: {**resolved(*overlong), "evidence": [_evidence("x" * 241)]},
         },
         "named_result_evidence": {"operation": "invalid"},
     }
+    duplicate_entry = f'"{duplicate[0]}": {{"outcome": "absent"}}'
     arguments = json.dumps(payload).replace(
-        '"duplicate": {"outcome": "absent"}',
-        '"duplicate": {"outcome": "absent"}, "duplicate": {"outcome": "absent"}',
+        duplicate_entry, f"{duplicate_entry}, {duplicate_entry}"
     )
     expected = parse_slot_classification_response(
         arguments, allowed_slot_values=values, classification_input=source
@@ -6748,17 +7278,36 @@ async def test_strict_classifier_preserves_raw_arguments_and_semantic_diagnostic
         allowed_slot_values=values,
         classification_input=source,
         schema_candidate_fingerprints=(),
+        schema_sent=True,
+        read_declarations=True,
     )
     assert capture.call_args.args[0] == arguments
     assert attempt.result == expected
     assert expected is not None
     assert {(d.slot_name, d.code) for d in expected.diagnostics} == {
-        ("duplicate", "slot_outcome_duplicate"),
-        ("omitted", "slot_outcome_omitted"),
-        ("overlong", "slot_outcome_malformed"),
+        (duplicate[0], "slot_outcome_duplicate"),
+        (omitted[0], "slot_outcome_omitted"),
+        (overlong[0], "slot_outcome_malformed"),
     }
-    assert expected.slot_outcomes["fabricated"].confidence == "low"
+    assert expected.slot_outcomes[fabricated[0]].confidence == "low"
     assert expected.named_result_evidence is None
+
+
+def test_the_schema_declares_the_keys_the_parser_accepts_for_each_slot() -> None:
+    allowed = {
+        slot_name: legal_slot_values(slot_name)
+        for slot_name in LLM_RESOLVABLE_SLOT_NAMES
+    }
+    schema = classification_contract.slot_classification_json_schema(allowed)
+    grades = {"outcome", "value", "confidence", "reason", "evidence", "evidence_level"}
+
+    for slot_name in allowed:
+        resolved = schema["properties"]["slots"]["properties"][slot_name]["oneOf"][0]
+        declared = set(resolved["properties"]) - grades
+        assert declared == set(
+            classification_contract._SLOT_DECLARATION_KEYS.get(slot_name, ())  # noqa: SLF001
+        ), slot_name
+        assert set(resolved["required"]) == grades | declared, slot_name
 
 
 @pytest.mark.asyncio
@@ -6766,7 +7315,7 @@ async def test_strict_classifier_hash_tracks_outbound_schema_without_changing_pr
     None
 ):
     source = _classification_input(f"hash-{uuid4()}")
-    values = {"input": {"documents", "text"}}
+    values = {"primary_runtime_input": {"documents", "text"}}
     hash_kwargs = dict(
         classification_input=source,
         ui_language=None,
@@ -6788,9 +7337,9 @@ async def test_strict_classifier_hash_tracks_outbound_schema_without_changing_pr
 
     def changed_schema(tool):
         result = projected(tool)
-        result["function"]["parameters"]["properties"]["slots"]["properties"]["input"][
-            "anyOf"
-        ][0]["properties"]["reason"]["maxLength"] = 499
+        result["function"]["parameters"]["properties"]["slots"]["properties"][
+            "primary_runtime_input"
+        ]["anyOf"][0]["properties"]["reason"]["maxLength"] = 499
         return result
 
     with patch.object(
@@ -6804,14 +7353,20 @@ async def test_strict_classifier_hash_tracks_outbound_schema_without_changing_pr
         )
     assert (
         slot_classification_prompt_hash(
-            **{**hash_kwargs, "allowed_slot_values": {"input": ("text", "documents")}},
+            **{
+                **hash_kwargs,
+                "allowed_slot_values": {"primary_runtime_input": ("text", "documents")},
+            },
             structured_output_mode=strict,
         )
         == baseline
     )
     client = AsyncMock()
     payload = json.dumps(
-        {**_VALID_CLASSIFICATION_RESPONSE, "slots": {"input": {"outcome": "absent"}}}
+        {
+            **_VALID_CLASSIFICATION_RESPONSE,
+            "slots": {"primary_runtime_input": {"outcome": "absent"}},
+        }
     )
     client.acompletion.side_effect = [
         _make_response(payload),

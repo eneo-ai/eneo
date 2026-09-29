@@ -22,6 +22,7 @@ from eneo.flows.ai_builder.ai_builder_discovery_families import QUESTION_FAMILY
 from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryLanguage
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
+    LLM_RESOLVABLE_SLOT_NAMES,
     DiscoveryFamily,
 )
 from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
@@ -857,3 +858,60 @@ class TestSlotBackedDiscoveryQuestionProjection:
         assert suggestion.selection_mode == final_output["selection_mode"]
         assert suggestion.allow_custom == final_output["allow_custom"]
         assert suggestion.exposure == final_output["exposure"]
+
+
+def _meaning(slot: str, value: str) -> str:
+    (option,) = [o for o in QUESTION_CATALOG[slot].options if o.value == value]
+    return option.meaning
+
+
+def test_every_value_the_classifier_offers_has_a_model_facing_meaning() -> None:
+    # One English meaning per offered value, held by the catalog beside the UI
+    # copy: the classifier reads it and nothing a translator or designer edits.
+    for slot in LLM_RESOLVABLE_SLOT_NAMES:
+        for value in legal_slot_values(slot):
+            assert _meaning(slot, value).strip(), (slot, value)
+
+
+@pytest.mark.parametrize(
+    ("slot", "value", "fact"),
+    [
+        # An uploaded JSON export is a document; json is data that is never
+        # uploaded, so a word in the request cannot pick it.
+        ("primary_runtime_input", "documents", "JSON"),
+        ("primary_runtime_input", "documents", "Excel"),
+        ("primary_runtime_input", "json", "Nobody uploads a file"),
+        # JSON the flow extracts or delivers is not JSON it receives, and JSON
+        # named as intermediate context is not the final result.
+        ("primary_runtime_input", "json", "extracts from documents"),
+        ("primary_runtime_input", "json", "only as its final output"),
+        ("terminal_output", "structured_json", "final output itself"),
+        ("terminal_output", "structured_json", "intermediate or API context"),
+        # No extra fields holds whatever the input kind.
+        ("runtime_metadata_fields", "no_extra_metadata", "pasted text"),
+        ("runtime_metadata_fields", "no_extra_metadata", "a recording"),
+        (
+            "runtime_metadata_fields",
+            "no_extra_metadata",
+            "JSON sent in by an integration",
+        ),
+        (
+            "runtime_metadata_fields",
+            "no_extra_metadata",
+            "Nobody fills in separate fields",
+        ),
+        ("comparison_scope", "no_direct_compare", "Nothing is compared"),
+        ("post_processing_goal", "compare_or_validate", "validate"),
+        ("report_disposition", "both", "shared overview, comparison or conclusion"),
+        ("report_disposition", "per_source_sections", "section or record"),
+    ],
+)
+def test_a_meaning_states_what_the_prompt_no_longer_says_in_prose(
+    slot: str, value: str, fact: str
+) -> None:
+    assert fact in _meaning(slot, value)
+
+
+def test_a_comparison_meaning_does_not_depend_on_how_much_is_uploaded() -> None:
+    for option in QUESTION_CATALOG["comparison_scope"].options:
+        assert "upload" not in option.meaning.lower(), option.value

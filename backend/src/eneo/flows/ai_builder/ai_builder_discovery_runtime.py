@@ -728,6 +728,9 @@ async def build_runtime_discovery_context(
             provider_type=completion_model_route.provider_type,
         ).mode,
     )
+    # A turn on a saved flow reads its slots as the model wrote them, so its
+    # request asks for no declarations.
+    read_declarations = flow is None
     classification_input = admit_slot_classification_input(
         classification_input=classification_input,
         attachment_context=attachment_context,
@@ -740,6 +743,7 @@ async def build_runtime_discovery_context(
         litellm_model=completion_model_route.litellm_model,
         capacity=capacity,
         budget_policy=budget_policy,
+        read_declarations=read_declarations,
     )
     prior_named_result_classification = _latest_matching_named_result_classification(
         conversation,
@@ -758,6 +762,7 @@ async def build_runtime_discovery_context(
         capacity=capacity,
         safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
         structured_output_mode=structured_output_mode,
+        read_declarations=read_declarations,
     )
     attempt = await classify_slots(
         litellm_client=litellm_client,
@@ -774,6 +779,7 @@ async def build_runtime_discovery_context(
         before_provider_call=before_provider_call,
         capacity=capacity,
         budget_policy=budget_policy,
+        read_declarations=read_declarations,
     )
     if attempt.outcome != "resolved":
         return _complete_runtime_discovery_context(

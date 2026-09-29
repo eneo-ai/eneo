@@ -116,6 +116,12 @@ class QuestionOption:
     without a runtime lookup. `value` is the canonical answer token the
     planner matches against.
 
+    `meaning` is what the option means to the classifier: one language
+    (English), not localised, precise about what the words in a request can
+    and cannot decide. It is the only option text the classifier reads, so a
+    change to the UI copy above never moves a classification. Every value the
+    classifier offers has one.
+
     `example_*` says what choosing this option produces — the file the user
     ends up with, or what the flow does at run time — for a reader meeting
     the choice for the first time. It is optional and empty by default: some
@@ -133,6 +139,7 @@ class QuestionOption:
     value: str
     example_sv: str = ""
     example_en: str = ""
+    meaning: str = ""
 
     def __post_init__(self) -> None:
         if not self.id or not self.id.strip():
@@ -250,6 +257,7 @@ def _option(
     value: str,
     example_sv: str = "",
     example_en: str = "",
+    meaning: str = "",
 ) -> QuestionOption:
     return QuestionOption(
         id=id,
@@ -260,6 +268,7 @@ def _option(
         value=value,
         example_sv=example_sv,
         example_en=example_en,
+        meaning=meaning,
     )
 
 
@@ -282,6 +291,7 @@ _PRIMARY_RUNTIME_INPUT = QuestionTemplate(
             label_en="Audio",
             description_sv="Ladda upp en ljudfil som ska transkriberas i flödet.",
             description_en="Upload an audio file that should be transcribed in the flow.",
+            meaning="Speech to transcribe, uploaded as an audio file or recorded when the flow runs.",
             value="audio",
             example_sv="Flödet transkriberar ljudfilen till text före nästa steg.",
             example_en=(
@@ -294,6 +304,10 @@ _PRIMARY_RUNTIME_INPUT = QuestionTemplate(
             label_en="Documents",
             description_sv="Ladda upp dokument som PDF, Word eller liknande filer.",
             description_en="Upload documents such as PDF or Word files.",
+            meaning=(
+                "Files uploaded when the flow runs, such as PDF, Word, Excel, CSV or "
+                "JSON, other than a recording uploaded for transcription (audio)."
+            ),
             value="documents",
             example_sv=(
                 "Körningen börjar med att användaren laddar upp filer, till "
@@ -309,6 +323,11 @@ _PRIMARY_RUNTIME_INPUT = QuestionTemplate(
             label_en="JSON",
             description_sv="Ta emot strukturerad JSON-data vid körning.",
             description_en="Accept structured JSON data at runtime.",
+            meaning=(
+                "JSON data sent in by an integration or pasted into a field. Nobody "
+                "uploads a file. Not JSON the flow extracts from documents or delivers "
+                "only as its final output."
+            ),
             value="json",
             example_sv="Ett annat system skickar in data; ingen fil laddas upp.",
             example_en="Another system sends in the data; no file is uploaded.",
@@ -319,6 +338,7 @@ _PRIMARY_RUNTIME_INPUT = QuestionTemplate(
             label_en="Text",
             description_sv="Klistra in materialet direkt som text.",
             description_en="Paste the source material as text.",
+            meaning="Text pasted or typed in when the flow runs.",
             value="text",
             example_sv=(
                 "Användaren klistrar in texten i ett fält i stället för att "
@@ -334,6 +354,7 @@ _PRIMARY_RUNTIME_INPUT = QuestionTemplate(
             label_en="Both text and documents",
             description_sv="Stöd både inklistrad text och uppladdade dokument.",
             description_en="Support both pasted text and uploaded documents.",
+            meaning="Both pasted text and uploaded files in the same run.",
             value="text_and_documents",
             example_sv=(
                 "Användaren kan både klistra in text och bifoga filer i samma körning."
@@ -376,6 +397,7 @@ _TERMINAL_OUTPUT = QuestionTemplate(
             label_en="Structured text output",
             description_sv="Ett läsbart memo, rapport eller sammanfattning direkt i flödet.",
             description_en="A readable memo, report, or summary in the flow output.",
+            meaning="A readable memo, report or summary is the final output.",
             value="structured_text",
             example_sv="Resultatet visas som läsbar text i flödet; ingen fil skapas.",
             example_en=(
@@ -388,6 +410,7 @@ _TERMINAL_OUTPUT = QuestionTemplate(
             label_en="PDF document",
             description_sv="Generera en PDF som slutresultat.",
             description_en="Generate a PDF document as the final output.",
+            meaning="A PDF document is the final output.",
             value="pdf_document",
             example_sv=(
                 "Körningen slutar med en PDF-fil, till exempel Mötesrapport.pdf."
@@ -400,6 +423,7 @@ _TERMINAL_OUTPUT = QuestionTemplate(
             label_en="DOCX document",
             description_sv="Generera ett Word-dokument som slutresultat.",
             description_en="Generate a Word document as the final output.",
+            meaning="A Word document is the final output.",
             value="docx_document",
             example_sv="Körningen slutar med en Word-fil som går att redigera vidare.",
             example_en="The run ends with a Word file that can be edited further.",
@@ -410,6 +434,11 @@ _TERMINAL_OUTPUT = QuestionTemplate(
             label_en="Structured JSON",
             description_sv="Maskinläsbara fält för vidare automation eller system.",
             description_en="Produce machine-readable fields for downstream systems.",
+            meaning=(
+                "Machine-readable fields for downstream systems are the final output "
+                "itself. JSON named only as intermediate or API context guides the "
+                "output fields and is not this."
+            ),
             value="structured_json",
             example_sv=(
                 "Resultatet innehåller fält som kan skickas vidare till ett "
@@ -559,6 +588,7 @@ _DOCUMENT_MATERIAL_SCOPE = QuestionTemplate(
             label_en="One main document per run",
             description_sv="Varje körning analyserar normalt ett primärt dokument.",
             description_en="Each run usually analyzes one primary PDF or document.",
+            meaning="Each run usually analyzes one primary PDF or document.",
             value="single_document_case",
             example_sv="Uppladdningen tar emot en fil per körning.",
             example_en="The upload step takes one file per run.",
@@ -574,6 +604,7 @@ _DOCUMENT_MATERIAL_SCOPE = QuestionTemplate(
             description_en=(
                 "Each run should handle a document package with multiple related files."
             ),
+            meaning="Each run should handle a document package with multiple related files.",
             value="multiple_documents_case",
             example_sv=(
                 "Uppladdningen tar emot flera filer och flödet läser dem tillsammans."
@@ -588,6 +619,7 @@ _DOCUMENT_MATERIAL_SCOPE = QuestionTemplate(
             label_en="Either one or several documents",
             description_sv="Flödet ska fungera både för en enskild fil och ett dokumentpaket.",
             description_en="The flow should work for both a single file and a document package.",
+            meaning="The flow should work for both a single file and a document package.",
             value="flexible_document_case",
             example_sv=(
                 "Samma flöde fungerar både för en enskild fil och för ett helt paket."
@@ -628,6 +660,7 @@ _COMPARISON_SCOPE = QuestionTemplate(
             label_en="Compare documents in the same run",
             description_sv="Ladda upp flera dokument tillsammans och jämför dem direkt.",
             description_en="Upload several documents together and compare them directly.",
+            meaning="Material given together in one run is compared with one another.",
             value="same_run_compare",
             example_sv=(
                 "Dokumenten som laddas upp tillsammans ställs mot varandra i "
@@ -644,6 +677,7 @@ _COMPARISON_SCOPE = QuestionTemplate(
             label_en="Compare against earlier saved material",
             description_sv="Ladda upp ett dokument och jämför det mot tidigare material.",
             description_en="Upload one document and compare it to stored earlier material.",
+            meaning="New material is compared with earlier stored material.",
             value="compare_previous_material",
         ),
         _option(
@@ -652,6 +686,7 @@ _COMPARISON_SCOPE = QuestionTemplate(
             label_en="No direct comparison needed",
             description_sv="Analysera ett dokument i taget utan uttrycklig jämförelse.",
             description_en="Analyze one document at a time without explicit comparison.",
+            meaning="Nothing is compared, however many files or texts there are.",
             value="no_direct_compare",
             example_sv=(
                 "Inget jämförelsesteg läggs till; varje dokument bedöms för sig."
@@ -692,6 +727,7 @@ _REPORT_DISPOSITION = QuestionTemplate(
             label_en="Sections per source",
             description_sv="Skriv ett tydligt rapportavsnitt för varje uppladdat dokument.",
             description_en="Write a clear report section for each uploaded document.",
+            meaning="A separate report section or record for each uploaded source.",
             value="per_source_sections",
             example_sv="Rapporten får en rubrik per uppladdat dokument.",
             example_en="The report gets one heading per uploaded document.",
@@ -702,6 +738,7 @@ _REPORT_DISPOSITION = QuestionTemplate(
             label_en="Synthesized overview",
             description_sv="Slå ihop källorna till en gemensam sammanfattning eller analys.",
             description_en="Combine the sources into one shared summary or analysis.",
+            meaning="The sources are combined into one shared summary or analysis.",
             value="synthesized_overview",
             example_sv="Rapporten blir en sammanhållen text utan avsnitt per dokument.",
             example_en=(
@@ -714,6 +751,7 @@ _REPORT_DISPOSITION = QuestionTemplate(
             label_en="Both",
             description_sv="Ha källspecifika avsnitt och avsluta med en samlad slutsats.",
             description_en="Use source-specific sections and end with a synthesized conclusion.",
+            meaning="Source-specific sections, then a shared overview, comparison or conclusion.",
             value="both",
             example_sv=(
                 "Rapporten får avsnitt per dokument och avslutas med en samlad "
@@ -758,6 +796,7 @@ _POST_PROCESSING_GOAL = QuestionTemplate(
             label_en="Only the primary result",
             description_sv="Stanna efter exempelvis transkription eller konvertering.",
             description_en="Stop after the transcript, conversion, or other primary result.",
+            meaning="Stop after the transcript, conversion, or other primary result.",
             value="stop_after_primary_operation",
             example_sv=(
                 "Du får grundresultatet, till exempel transkriptionen, utan "
@@ -774,6 +813,7 @@ _POST_PROCESSING_GOAL = QuestionTemplate(
             label_en="Summarize or give an overview",
             description_sv="Skapa en kortare sammanfattning eller översikt.",
             description_en="Create a shorter summary or overview.",
+            meaning="Create a shorter summary or overview.",
             value="summarize_or_overview",
             example_sv=(
                 "Flödet lägger till ett steg som kortar ner materialet till en "
@@ -789,6 +829,7 @@ _POST_PROCESSING_GOAL = QuestionTemplate(
             label_en="Extract key information",
             description_sv="Hämta ut viktiga fakta, fält, datum, belopp eller liknande.",
             description_en="Extract important facts, fields, dates, amounts, or similar details.",
+            meaning="Extract important facts, fields, dates, amounts, or similar details.",
             value="extract_key_information",
             example_sv=(
                 "Flödet plockar ut uppgifter som datum, belopp och namn ur materialet."
@@ -801,6 +842,7 @@ _POST_PROCESSING_GOAL = QuestionTemplate(
             label_en="Structure the material",
             description_sv="Gör materialet till tydliga anteckningar, memo eller rapport.",
             description_en="Turn the material into clear notes, a memo, or a report.",
+            meaning="Turn the material into clear notes, a memo, or a report.",
             value="structure_key_information",
             example_sv="Materialet skrivs om till ett ordnat memo med rubriker.",
             example_en="The material is rewritten as an ordered memo with headings.",
@@ -811,6 +853,7 @@ _POST_PROCESSING_GOAL = QuestionTemplate(
             label_en="Decisions, next steps, and follow-up",
             description_sv="Plocka ut beslut, åtgärder, ansvariga, deadlines och öppna frågor.",
             description_en="Extract decisions, actions, owners, deadlines, and open questions.",
+            meaning="Extract decisions, actions or next steps, owners, deadlines, and open questions.",
             value="action_followup",
             example_sv=(
                 "Resultatet blir en lista med beslut, åtgärder, ansvariga och datum."
@@ -825,6 +868,7 @@ _POST_PROCESSING_GOAL = QuestionTemplate(
             label_en="Recommendations and guidance",
             description_sv="Ta fram rekommendationer eller nästa möjliga vägval.",
             description_en="Create recommendations or next possible choices.",
+            meaning="Create recommendations or next possible choices.",
             value="decision_support",
             example_sv="Flödet föreslår vägval och motiverar dem utifrån materialet.",
             example_en=(
@@ -838,6 +882,7 @@ _POST_PROCESSING_GOAL = QuestionTemplate(
             label_en="Review risks or issues",
             description_sv="Identifiera risker, avvikelser, osäkerheter eller problem.",
             description_en="Identify risks, deviations, uncertainty, or problems.",
+            meaning="Identify risks, issues, deviations, red flags, uncertainty, or problems.",
             value="risk_or_issue_review",
             example_sv=(
                 "Resultatet blir en genomgång av risker och avvikelser i materialet."
@@ -852,6 +897,7 @@ _POST_PROCESSING_GOAL = QuestionTemplate(
             label_en="Compare or validate",
             description_sv="Jämför mot annat underlag, regler, schema eller checklista.",
             description_en="Compare against other material, rules, a schema, or a checklist.",
+            meaning="Compare or validate against other material, rules, a schema, or a checklist.",
             value="compare_or_validate",
             example_sv=(
                 "Flödet ställer materialet mot regler eller annat underlag och "
@@ -894,6 +940,7 @@ _STRUCTURED_IO_CONTRACT = QuestionTemplate(
             label_en="Map to a new schema",
             description_sv="Välj, döp om eller flytta fält till en ny JSON-struktur.",
             description_en="Select, rename, or move fields into a new JSON shape.",
+            meaning="Select, rename, or move fields into a new JSON shape.",
             value="map_to_new_schema",
             example_sv=(
                 "Utdatan får de fältnamn och den struktur du anger, inte de inkommande."
@@ -909,6 +956,7 @@ _STRUCTURED_IO_CONTRACT = QuestionTemplate(
             label_en="Validate against schema or rules",
             description_sv="Kontrollera datan mot ett schema, regler eller krav.",
             description_en="Check the data against a schema, rules, or requirements.",
+            meaning="Check the data against a schema, rules, or requirements.",
             value="validate_against_schema_or_rules",
             example_sv="Körningen rapporterar vad som saknas eller bryter mot reglerna.",
             example_en=(
@@ -921,6 +969,7 @@ _STRUCTURED_IO_CONTRACT = QuestionTemplate(
             label_en="Extract or compute fields",
             description_sv="Plocka ut, kombinera eller beräkna värden i JSON.",
             description_en="Extract, combine, or compute values in JSON.",
+            meaning="Extract, combine, or compute values in JSON.",
             value="extract_or_compute_fields",
             example_sv=(
                 "Utdatan innehåller uträknade eller sammanställda värden, till "
@@ -936,6 +985,7 @@ _STRUCTURED_IO_CONTRACT = QuestionTemplate(
             label_en="Normalize or enrich",
             description_sv="Städa, standardisera eller komplettera payloaden.",
             description_en="Clean, standardize, or enrich the payload.",
+            meaning="Clean, standardize, or enrich the payload.",
             value="normalize_or_enrich",
             example_sv=(
                 "Utdatan får enhetliga format och fylls i där uppgifter saknas."
@@ -950,6 +1000,7 @@ _STRUCTURED_IO_CONTRACT = QuestionTemplate(
             label_en="Classify or tag",
             description_sv="Lägg till kategori, status, etiketter eller routingfält.",
             description_en="Add category, status, labels, or routing fields.",
+            meaning="Add category, status, labels, or routing fields.",
             value="classify_or_tag",
             example_sv=(
                 "Varje post får ett extra fält, till exempel kategori eller status."
@@ -964,6 +1015,7 @@ _STRUCTURED_IO_CONTRACT = QuestionTemplate(
             label_en="Custom schema or rules",
             description_sv="Följ ett särskilt kontrakt som användaren beskriver.",
             description_en="Follow a specific contract described by the user.",
+            meaning="Follow a specific contract described by the user.",
             value="custom_schema_or_rules",
         ),
     ),
@@ -1000,6 +1052,11 @@ _RUNTIME_METADATA_FIELDS = QuestionTemplate(
             label_en="No extra fields",
             description_sv="Använd bara de uppladdade dokumenten som indata.",
             description_en="Use only the uploaded documents as input.",
+            meaning=(
+                "Everything comes from the source material, whatever its kind: uploaded "
+                "files, pasted text, a recording, or JSON sent in by an integration. "
+                "Nobody fills in separate fields."
+            ),
             value="no_extra_metadata",
             example_sv=(
                 "Användaren fyller inte i något formulär innan körningen startar."
@@ -1012,6 +1069,7 @@ _RUNTIME_METADATA_FIELDS = QuestionTemplate(
             label_en="A few basic fields",
             description_sv="Den som kör flödet fyller i några enkla fält före körningen.",
             description_en="The person running the flow fills in a few simple fields before the run.",
+            meaning="A few simple separate fields are filled in before the run.",
             value="basic_runtime_metadata",
             example_sv=(
                 "Några fält fylls i före körningen, till exempel ett referensnummer."
@@ -1033,6 +1091,7 @@ _RUNTIME_METADATA_FIELDS = QuestionTemplate(
                 "Collect several reusable inputs such as references, "
                 "language, focus, dates, or responsible department."
             ),
+            meaning="Several separate fields are filled in before the run, such as references, language, focus, dates or responsible department.",
             value="detailed_runtime_metadata",
             example_sv=(
                 "Formuläret före körning får flera fält, som referensnummer, "

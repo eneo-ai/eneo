@@ -301,13 +301,20 @@ def _resolved_provider_slot(
     value: str,
     source: SlotClassificationSource,
 ) -> dict[str, object]:
+    evidence = {"source_id": source.source_id, "quote": source.text}
     return {
         "slot_name": slot_name,
         "value": value,
         "confidence": "high",
         "reason": "The cited source states the constrained choice.",
-        "evidence": [{"source_id": source.source_id, "quote": source.text}],
+        "evidence": [evidence],
         "evidence_level": "explicit",
+        # The fact the input follows (the response schema asks for it).
+        **(
+            {"uploaded_at_run_time": False}
+            if slot_name == "primary_runtime_input"
+            else {}
+        ),
     }
 
 

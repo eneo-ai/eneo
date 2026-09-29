@@ -8,7 +8,7 @@ import unicodedata
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from typing import Any, Literal, assert_never, cast, get_args
+from typing import Any, Literal, NamedTuple, assert_never, cast, get_args
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -422,6 +422,9 @@ class SlotClassificationResult:
     schema_direction: ClassifiedSchemaDirection | None = None
     secondary_obligations: tuple[ResultObligation, ...] = ()
     cached: bool = False
+    # Slots whose reading a declaration regraded. In memory and logged only:
+    # the stored metadata schema does not carry it.
+    regraded_slots: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -500,7 +503,18 @@ def parse_slot_classification_response(
     allowed_slot_values: Mapping[str, Collection[str]],
     classification_input: SlotClassificationInput,
     schema_candidate_fingerprints: Collection[str] = (),
+    schema_sent: bool = True,
+    read_declarations: bool = True,
 ) -> SlotClassificationResult | None:
+    """Read a classifier reply.
+
+    schema_sent says the response schema went with the request, so a
+    resolved entry lacking a declaration it requires is unresolved.
+    read_declarations is off for a turn on a saved flow: the request then asks
+    for no declarations, one the reply carries anyway changes neither a slot's
+    value, grade nor evidence, and the slot is what the reply's own entry says.
+    """
+
     try:
         raw = _decode_slot_classification_json(content)
     except (json.JSONDecodeError, _DuplicateJsonKey):
@@ -542,6 +556,7 @@ def parse_slot_classification_response(
         )
     slot_outcomes: dict[str, SlotClassificationOutcome] = {}
     diagnostics: list[SlotClassificationDiagnostic] = []
+    regraded_slots: list[str] = []
     for slot_name in slot_values:
         entries = raw_slot_entries.get(slot_name, ())
         if not entries:
@@ -581,7 +596,7 @@ def parse_slot_classification_response(
                     slot_name=slot_name,
                 )
             )
-        graded = _resolved_entry_with_omitted_grades(raw_entry)
+        graded = _resolved_entry_with_omitted_grades(slot_name, raw_entry)
         if graded is not None:
             raw_entry = graded
             diagnostics.append(
@@ -590,14 +605,16 @@ def parse_slot_classification_response(
                     slot_name=slot_name,
                 )
             )
-        outcome = _parse_slot_outcome(
+        parsed = _parse_slot_outcome(
             slot_name=slot_name,
             raw_value=raw_entry,
             legacy_entry=entries[0].legacy_entry,
             allowed_values=slot_values[slot_name],
             classification_input=classification_input,
+            schema_sent=schema_sent,
+            read_declarations=read_declarations,
         )
-        if outcome is None:
+        if parsed is None:
             slot_outcomes[slot_name] = AbsentSlotClassificationOutcome()
             diagnostics.append(
                 SlotClassificationDiagnostic(
@@ -606,7 +623,9 @@ def parse_slot_classification_response(
                 )
             )
             continue
-        slot_outcomes[slot_name] = outcome
+        slot_outcomes[slot_name], regraded = parsed
+        if regraded:
+            regraded_slots.append(slot_name)
 
     file_roles = _parse_file_roles(
         raw_dict.get("file_roles", []),
@@ -648,6 +667,7 @@ def parse_slot_classification_response(
     return SlotClassificationResult(
         slot_outcomes=slot_outcomes,
         diagnostics=tuple(diagnostics),
+        regraded_slots=tuple(regraded_slots),
         file_roles=file_roles,
         checkpoint_updates=checkpoint_updates,
         checkpoint_diagnostics=checkpoint_diagnostics,
@@ -844,10 +864,26 @@ _RESOLVED_SLOT_ENTRY_KEYS = frozenset(
     {"outcome", "value", "confidence", "reason", "evidence", "evidence_level"}
 )
 _OMITTABLE_RESOLVED_SLOT_ENTRY_KEYS = frozenset({"confidence", "reason"})
+# The fact a slot's value follows, declared beside the value; see
+# _reading_from_declaration.
+_UPLOADED_AT_RUN_TIME = "uploaded_at_run_time"
+_SLOT_DECLARATION_KEYS: Mapping[str, frozenset[str]] = {
+    "primary_runtime_input": frozenset({_UPLOADED_AT_RUN_TIME}),
+}
+# By their catalog meanings json and text are sent or pasted in, documents are
+# uploaded files, and a recording is neither: audio is read without one.
+_INPUTS_WITHOUT_UPLOAD = frozenset({"json", "text"})
 _OMITTED_CONFIDENCE: SlotClassificationConfidence = "medium"
 
 
+def _declared_entry_keys(slot_name: str) -> frozenset[str]:
+    return _RESOLVED_SLOT_ENTRY_KEYS | _SLOT_DECLARATION_KEYS.get(
+        slot_name, frozenset()
+    )
+
+
 def _resolved_entry_with_omitted_grades(
+    slot_name: str,
     raw_value: object,
 ) -> dict[str, object] | None:
     """Read a resolved entry that left out its confidence.
@@ -864,7 +900,7 @@ def _resolved_entry_with_omitted_grades(
     if (
         item.get("outcome") != "resolved"
         or "confidence" in item
-        or not keys <= _RESOLVED_SLOT_ENTRY_KEYS
+        or not keys <= _declared_entry_keys(slot_name)
         or not _RESOLVED_SLOT_ENTRY_KEYS - _OMITTABLE_RESOLVED_SLOT_ENTRY_KEYS <= keys
     ):
         return None
@@ -878,7 +914,11 @@ def _parse_slot_outcome(
     legacy_entry: bool,
     allowed_values: Collection[str],
     classification_input: SlotClassificationInput,
-) -> SlotClassificationOutcome | None:
+    schema_sent: bool,
+    read_declarations: bool,
+) -> tuple[SlotClassificationOutcome, bool] | None:
+    """The outcome one entry states, and whether its declaration regraded it."""
+
     if not isinstance(raw_value, dict):
         return None
     item = cast(dict[str, Any], raw_value)
@@ -886,13 +926,13 @@ def _parse_slot_outcome(
     if outcome_kind == "absent":
         if not legacy_entry and set(item) != {"outcome"}:
             return None
-        return AbsentSlotClassificationOutcome()
+        return AbsentSlotClassificationOutcome(), False
     if (
         legacy_entry
         and outcome_kind is None
         and item.get("value") == UNKNOWN_SLOT_VALUE
     ):
-        return AbsentSlotClassificationOutcome()
+        return AbsentSlotClassificationOutcome(), False
     if outcome_kind == "explicitly_uncertain":
         if set(item) != {"outcome", "evidence"} or not _evidence_item_is_exact(
             item.get("evidence")
@@ -911,11 +951,13 @@ def _parse_slot_outcome(
             source_kinds_by_id=source_kinds,
         ):
             return None
-        return ExplicitlyUncertainSlotClassificationOutcome(quote=evidence[0])
+        return ExplicitlyUncertainSlotClassificationOutcome(quote=evidence[0]), False
     if outcome_kind != "resolved" and not (legacy_entry and outcome_kind is None):
         return None
     if not legacy_entry and not (
-        _RESOLVED_SLOT_ENTRY_KEYS - {"reason"} <= set(item) <= _RESOLVED_SLOT_ENTRY_KEYS
+        _RESOLVED_SLOT_ENTRY_KEYS - {"reason"}
+        <= set(item)
+        <= _declared_entry_keys(slot_name)
     ):
         return None
     value = item.get("value")
@@ -941,6 +983,22 @@ def _parse_slot_outcome(
         )
     ):
         return None
+    # A declaration is read only beside the slot's own verified evidence: it
+    # never stands in for evidence the reading lacks.
+    reading = (
+        _reading_from_declaration(
+            slot_name,
+            item,
+            value=value.strip(),
+            evidence=evidence,
+            schema_sent=schema_sent,
+        )
+        if read_declarations and evidence
+        else _DeclaredReading(value.strip(), evidence, False)
+    )
+    if reading is None or reading.value not in allowed_values:
+        return None
+    value, evidence = reading.value, reading.evidence
     raw_evidence_level = item.get("evidence_level", "inferred")
     if not legacy_entry and raw_evidence_level not in {"explicit", "inferred"}:
         return None
@@ -961,19 +1019,83 @@ def _parse_slot_outcome(
         )
     ):
         return None
-    return ResolvedSlotClassificationOutcome(
-        value=value.strip(),
-        confidence=_downgrade_unsupported_confidence(
-            cast(SlotClassificationConfidence, confidence),
-            evidence,
+    graded = _downgrade_unsupported_confidence(
+        cast(SlotClassificationConfidence, confidence),
+        evidence,
+    )
+    regraded = reading.regraded
+    if regraded:
+        graded = "low" if graded == "low" else "medium"
+        evidence_level = "inferred"
+    return (
+        ResolvedSlotClassificationOutcome(
+            value=value,
+            confidence=graded,
+            reason=(
+                reason.strip()
+                if isinstance(reason, str) and reason.strip()
+                else "slot classification"
+            ),
+            evidence=evidence,
+            evidence_level=evidence_level,
         ),
-        reason=(
-            reason.strip()
-            if isinstance(reason, str) and reason.strip()
-            else "slot classification"
-        ),
-        evidence=evidence,
-        evidence_level=evidence_level,
+        regraded,
+    )
+
+
+class _DeclaredReading(NamedTuple):
+    value: str
+    evidence: tuple[ClassifiedEvidence, ...]
+    # The parser derived the value, or the declaration contradicts the model's
+    # own, or it cannot be used: only a suggestion for the person to confirm.
+    regraded: bool
+
+
+def _reading_from_declaration(
+    slot_name: str,
+    item: Mapping[str, object],
+    *,
+    value: str,
+    evidence: tuple[ClassifiedEvidence, ...],
+    schema_sent: bool,
+) -> _DeclaredReading | None:
+    """The value the model's declared fact decides, and whether it regrades it.
+
+    A single value lets the salient word pick it: an uploaded JSON export
+    reads as json. So primary_runtime_input also declares whether the source
+    material is uploaded when the flow runs, and the value follows that
+    fact. A file the person uploads when the flow runs is document input,
+    a JSON export included, so a declared upload turns json or text into
+    documents, and no declared upload contradicts documents and
+    text_and_documents. An upload proves only the file half of
+    text_and_documents, so that value is asked either way. A recording is
+    neither, so audio is read as the model wrote it, whatever the
+    declaration says or lacks. What the parser derived, or what the
+    declaration contradicts, is regraded and asked about; only a value the
+    declaration agrees with keeps the model's grade.
+
+    The caller reads a declaration only beside the reading's own verified
+    evidence. A declaration that is absent leaves a reply sent with the
+    response schema unresolved and keeps the value of one sent without it.
+    One that is not a boolean is unresolved with the schema and regraded
+    without it.
+    """
+
+    if slot_name != "primary_runtime_input" or value == "audio":
+        return _DeclaredReading(value, evidence, False)
+    if _UPLOADED_AT_RUN_TIME not in item:
+        return None if schema_sent else _DeclaredReading(value, evidence, False)
+    uploaded = item[_UPLOADED_AT_RUN_TIME]
+    if not isinstance(uploaded, bool):
+        return None if schema_sent else _DeclaredReading(value, evidence, True)
+    if uploaded and value in _INPUTS_WITHOUT_UPLOAD:
+        return _DeclaredReading("documents", evidence, True)
+    # An upload proves the file half of text_and_documents, never the pasted
+    # text beside it; no upload contradicts both.
+    return _DeclaredReading(
+        value,
+        evidence,
+        value == "text_and_documents" or (not uploaded and value == "documents"),
     )
 
 
@@ -2574,17 +2696,21 @@ def slot_classification_json_schema(
     *,
     schema_candidate_fingerprints: Collection[str] = (),
     has_uploaded_files: bool = True,
+    declarations: bool = True,
 ) -> dict[str, object]:
     """The response schema sent to the provider.
 
     Without an uploaded-file source there is nothing to give a file role or an
     example's form, so those two properties are not requested. The parser
     still reads the whole contract and treats either one as empty when absent.
+    A request whose declarations are not read (a turn on a saved flow) does
+    not ask for them.
     """
 
     properties = _slot_classification_top_level_properties(
         allowed_slot_values,
         schema_candidate_fingerprints=schema_candidate_fingerprints,
+        declarations=declarations,
     )
     if not has_uploaded_files:
         properties = {
@@ -2605,11 +2731,13 @@ def slot_classification_tool_parameters(
     *,
     schema_candidate_fingerprints: Collection[str] = (),
     has_uploaded_files: bool = True,
+    declarations: bool = True,
 ) -> dict[str, Any]:
     schema = slot_classification_json_schema(
         allowed_slot_values,
         schema_candidate_fingerprints=schema_candidate_fingerprints,
         has_uploaded_files=has_uploaded_files,
+        declarations=declarations,
     )
     properties = cast(dict[str, Any], schema["properties"])
     slots = cast(dict[str, Any], properties["slots"]["properties"])
@@ -2632,11 +2760,14 @@ def _slot_classification_top_level_properties(
     allowed_slot_values: Mapping[str, Collection[str]],
     *,
     schema_candidate_fingerprints: Collection[str] = (),
+    declarations: bool = True,
 ) -> dict[str, dict[str, object]]:
     normalized_values = normalize_slot_classification_values(allowed_slot_values)
     normalized_fingerprints = tuple(sorted(set(schema_candidate_fingerprints)))
     return {
-        "slots": _slot_classification_slot_schema(normalized_values),
+        "slots": _slot_classification_slot_schema(
+            normalized_values, declarations=declarations
+        ),
         "file_roles": {
             "type": "array",
             "items": _classified_file_role_schema(),
@@ -2800,11 +2931,23 @@ def _classified_schema_direction_schema(
     }
 
 
+def _slot_declaration_schema(slot_name: str) -> dict[str, object]:
+    """The fact the slot's value follows (_reading_from_declaration)."""
+
+    if slot_name == "primary_runtime_input":
+        return {_UPLOADED_AT_RUN_TIME: {"type": "boolean"}}
+    return {}
+
+
 def _slot_classification_slot_schema(
     allowed_slot_values: Mapping[str, Collection[str]],
+    *,
+    declarations: bool,
 ) -> dict[str, object]:
-    properties = {
-        slot_name: {
+    properties: dict[str, object] = {}
+    for slot_name, values in sorted(allowed_slot_values.items()):
+        declaration = _slot_declaration_schema(slot_name) if declarations else {}
+        properties[slot_name] = {
             "oneOf": [
                 {
                     "type": "object",
@@ -2816,6 +2959,7 @@ def _slot_classification_slot_schema(
                         "reason",
                         "evidence",
                         "evidence_level",
+                        *declaration,
                     ],
                     "properties": {
                         "outcome": {"const": "resolved"},
@@ -2824,6 +2968,7 @@ def _slot_classification_slot_schema(
                         "reason": _classification_reason_schema(),
                         "evidence": _classification_evidence_array_schema(),
                         "evidence_level": _classification_evidence_level_schema(),
+                        **declaration,
                     },
                 },
                 {
@@ -2843,8 +2988,6 @@ def _slot_classification_slot_schema(
                 },
             ]
         }
-        for slot_name, values in sorted(allowed_slot_values.items())
-    }
     return {
         "type": "object",
         "additionalProperties": False,

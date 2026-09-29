@@ -58,7 +58,9 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ResolvedSlotClassificationOutcome,
     SlotClassificationAttempt,
     SlotClassificationDiagnostic,
+    SlotClassificationDiagnosticCode,
     SlotClassificationInput,
+    SlotClassificationResult,
     SlotClassificationSource,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import LLM_RESOLVABLE_SLOT_NAMES
@@ -1367,6 +1369,44 @@ def test_slot_classification_writer_persists_total_outcomes_and_diagnostics() ->
         "slot_outcome_malformed",
         "slot_outcome_omitted",
     ]
+
+
+def test_a_regraded_reading_is_stored_in_the_vocabulary_older_builds_read() -> None:
+    # A stored diagnostic code an older build's validator does not know makes
+    # that build drop the whole stored classification, so what a regrade adds
+    # stays out of the stored schema: the grades it sets are the existing ones.
+    assert set(get_args(SlotClassificationDiagnosticCode)) == {
+        "slot_outcome_duplicate",
+        "slot_outcome_malformed",
+        "slot_outcome_omitted",
+        "slot_outcome_value_as_outcome",
+        "slot_outcome_outside_slots",
+        "slot_outcome_confidence_omitted",
+    }
+    result = SlotClassificationResult(
+        slot_outcomes={
+            "primary_runtime_input": ResolvedSlotClassificationOutcome(
+                value="documents",
+                confidence="medium",
+                reason="regraded",
+                evidence=(_classified_evidence("uploads the export"),),
+                evidence_level="inferred",
+            )
+        },
+        regraded_slots=("primary_runtime_input",),
+    )
+
+    stored = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
+        prompt_hash="a" * 64,
+        classification_input=_classification_input("uploads the export"),
+        model="openai/gpt-test",
+        provider="openai",
+    )
+
+    assert stored is not None
+    assert stored.diagnostics == []
+    assert "regraded" not in stored.model_dump_json(exclude={"slot_outcomes"})
 
 
 def test_slot_classification_writer_persists_refused_duplicate() -> None:

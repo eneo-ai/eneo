@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import NamedTuple, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -18,6 +19,7 @@ from eneo.completion_models.infrastructure.completion_service import (
 )
 from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder import ai_builder_discovery_runtime as runtime
+from eneo.flows.ai_builder import ai_builder_slot_classifier as classifier_module
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
@@ -34,6 +36,7 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     render_ai_builder_attachment_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    SlotClassificationMetadata,
     SlotClassificationNamedResultEvidenceMetadata,
     metadata_with_slot_classification,
     slot_classification_metadata_from_attempt,
@@ -43,6 +46,7 @@ from eneo.flows.ai_builder.ai_builder_create_compile_context import (
 )
 from eneo.flows.ai_builder.ai_builder_discovery import (
     analyze_discovery,
+    build_registry_question_followup,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
     _targeted_classification_bias,
@@ -62,6 +66,8 @@ from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
     build_plan_proposal_system_prompt,
 )
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
+    _named_result_summary_line,  # noqa: PLC2701
+    _whole_evidence_value,  # noqa: PLC2701
     build_requirements_disclosure,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
@@ -112,6 +118,7 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
+from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from tests.unittests.flows.ai_builder.slot_classification_test_support import (
@@ -1013,6 +1020,620 @@ async def test_runtime_planning_state_classifies_weak_existing_slots(
         state.resolved_slots["runtime_metadata_fields"].value
         == "basic_runtime_metadata"
     )
+
+
+_PAYLOAD_REQUEST = (
+    "MittSverige Vatten skickar driftlägesdata som JSON. Vid körning tar flödet "
+    "emot den payloaden och ska svara med en kort text."
+)
+_PASTED_REQUEST = (
+    "Vid körning klistrar jag in anteckningarna från ett besök och vill ha "
+    "tillbaka en kort text."
+)
+_UPLOAD_REQUEST = (
+    "Vid körning laddar jag bara upp e-tjänstexporten (json). Jag vill ha en "
+    "kort text tillbaka."
+)
+_FIELDS = "Det ska bli JSON med tur, datum och hållplats."
+_REPORT = "Sedan en kort avvikelserapport som text"
+
+
+def _tool_call_response(payload: dict[str, object]) -> MagicMock:
+    """The reply of a route that sent the strict response schema."""
+
+    function = MagicMock()
+    function.name = classifier_module.SLOT_CLASSIFICATION_TOOL_NAME
+    function.arguments = json.dumps(
+        {
+            "slots": {},
+            "file_roles": [],
+            "checkpoint_updates": [],
+            "form_intake": None,
+            "named_result_evidence": None,
+            "example_output_constraints": None,
+            "schema_direction": None,
+            "secondary_obligations": [],
+            **payload,
+        }
+    )
+    call = MagicMock(id="call-1", type="function", function=function)
+    choice = MagicMock(
+        finish_reason="tool_calls",
+        message=MagicMock(content=None, tool_calls=[call]),
+    )
+    return MagicMock(choices=[choice], usage=None)
+
+
+def _reading(
+    slot_name: str, value: str, quote: str, **declaration: object
+) -> dict[str, object]:
+    return {
+        "outcome": "resolved",
+        "value": value,
+        "confidence": "high",
+        "reason": "The request states it.",
+        "evidence": [_cited(quote)],
+        "evidence_level": "explicit",
+        **declaration,
+    }
+
+
+def _next_user_message_id(earlier: "_Turn | None") -> str:
+    said = earlier.conversation if earlier is not None else []
+    return f"user-{sum(message.role == 'user' for message in said) + 1}"
+
+
+class _Turn(NamedTuple):
+    state: PlanningState
+    questions: set[str]
+    stored: SlotClassificationMetadata | None
+    conversation: list[ConversationMessage]
+
+
+async def _discover(
+    request: str,
+    payload: dict[str, object],
+    *,
+    flow: Flow | None = None,
+    strict: bool = False,
+    earlier: _Turn | None = None,
+) -> _Turn:
+    """One discovery turn over a classifier reply: what it leaves behind.
+
+    After an `earlier` turn, the new message follows that turn's conversation,
+    whose last message carries the classification stored for it.
+    """
+
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = (
+        _tool_call_response(payload) if strict else _make_response(json.dumps(payload))
+    )
+    route = ResolvedCompletionModelRoute(
+        litellm_model="gpt-test",
+        provider_type="openai",
+        litellm_kwargs={},
+        supported_model_kwargs=SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True, control="slider")
+        ),
+        supports_strict_tool_schema=strict,
+    )
+    # The classifier caches by request text: each reading gets its own.
+    conversation = [
+        ConversationMessage(
+            message_id=_next_user_message_id(earlier),
+            role="user",
+            content=f"{request} ({uuid4().hex})",
+        )
+    ]
+    if earlier is not None:
+        *before, last = earlier.conversation
+        conversation = [
+            *before,
+            last.model_copy(
+                update={
+                    "metadata": metadata_with_slot_classification(
+                        last.metadata, earlier.stored
+                    )
+                }
+            ),
+            ConversationMessage(role="assistant", content="Något mer?"),
+            *conversation,
+        ]
+    elif flow is not None:
+        conversation = [
+            ConversationMessage(role="user", content="Ändra flödet."),
+            ConversationMessage(role="assistant", content="Vad vill du ändra?"),
+            *conversation,
+        ]
+    context = await build_runtime_discovery_context(
+        conversation,
+        flow=flow,
+        litellm_client=litellm_client,
+        completion_model_route=route,
+        tenant_id=uuid4(),
+        capacity=ModelCapacity(100_000, 2_000),
+    )
+    state = context.planning_state
+    analysis = analyze_discovery(conversation, flow=flow, planning_state=state)
+    return _Turn(
+        state,
+        set(analysis.selected_question_ids),
+        context.slot_classification_metadata,
+        conversation,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("strict", [False, True])
+@pytest.mark.parametrize(
+    ("request_text", "quote", "value", "uploaded", "kept", "asks"),
+    [
+        # A reading the declaration agrees with is settled: no question.
+        (
+            _PAYLOAD_REQUEST,
+            "tar flödet emot den payloaden",
+            "json",
+            False,
+            "json",
+            False,
+        ),
+        (
+            _PASTED_REQUEST,
+            "klistrar jag in anteckningarna",
+            "text",
+            False,
+            "text",
+            False,
+        ),
+        (
+            _UPLOAD_REQUEST,
+            "laddar jag bara upp e-tjänstexporten",
+            "documents",
+            True,
+            "documents",
+            False,
+        ),
+        # A JSON payload or pasted text declared uploaded is not silently
+        # turned into documents, nor is an uploaded export read as json: the
+        # derived documents reading is a suggestion the person confirms.
+        (
+            _PAYLOAD_REQUEST,
+            "tar flödet emot den payloaden",
+            "json",
+            True,
+            "documents",
+            True,
+        ),
+        (
+            _PASTED_REQUEST,
+            "klistrar jag in anteckningarna",
+            "text",
+            True,
+            "documents",
+            True,
+        ),
+        (
+            _UPLOAD_REQUEST,
+            "laddar jag bara upp e-tjänstexporten",
+            "json",
+            True,
+            "documents",
+            True,
+        ),
+        # A declaration that contradicts the value leaves it in question.
+        (
+            _UPLOAD_REQUEST,
+            "laddar jag bara upp e-tjänstexporten",
+            "documents",
+            False,
+            "documents",
+            True,
+        ),
+        # Sent with the response schema and not declared: no model reading, so
+        # the input question is asked instead of committing the model's word.
+        (_PAYLOAD_REQUEST, "tar flödet emot den payloaden", "json", None, None, True),
+        (_PASTED_REQUEST, "klistrar jag in anteckningarna", "text", None, None, True),
+    ],
+)
+async def test_a_material_reading_is_settled_or_asked_by_its_declaration(
+    request_text: str,
+    quote: str,
+    value: str,
+    uploaded: bool | None,
+    kept: str | None,
+    asks: bool,
+    strict: bool,
+) -> None:
+    declaration = {} if uploaded is None else {"uploaded_at_run_time": uploaded}
+    payload = {
+        "slots": {
+            "primary_runtime_input": _reading(
+                "primary_runtime_input", value, quote, **declaration
+            )
+        }
+    }
+
+    turn = await _discover(request_text, payload, strict=strict)
+    state, questions = turn.state, turn.questions
+
+    slot = state.resolved_slots.get("primary_runtime_input")
+    if kept is None:
+        if not strict:
+            return  # Without the schema an undeclared reading is kept as given.
+        assert slot is None or (slot.source == "heuristic" and not slot.is_commit_grade)
+    else:
+        assert slot is not None and slot.value == kept
+        assert slot.is_commit_grade is not asks
+    assert ("primary_runtime_input" in questions) is asks
+
+
+def _report_after_json() -> dict[str, object]:
+    reading = _reading("terminal_output", "structured_text", _REPORT)
+    return {"slots": {"terminal_output": reading}}
+
+
+_JSON_THEN_REPORT = (
+    f"Varje måndag laddar jag upp veckorapporten. {_FIELDS} {_REPORT} som jag mejlar."
+)
+
+
+@pytest.mark.asyncio
+async def test_named_fields_of_a_json_step_reach_the_planner_not_the_reports_claim() -> (
+    None
+):
+    payload = _report_after_json()
+    payload["named_result_evidence"] = {
+        "operation": "update",
+        "upserts": [
+            {"name": name, "segments": [], "evidence": [_cited(_FIELDS)]}
+            for name in ("tur", "datum", "hållplats")
+        ],
+        "removals": [],
+        "confidence": "high",
+        "reason": "Personen räknar upp innehållet.",
+        "evidence": [_cited(_FIELDS)],
+    }
+
+    state = (await _discover(_JSON_THEN_REPORT, payload)).state
+
+    line = _named_result_summary_line(
+        state,
+        "sv",
+        render_value=_whole_evidence_value,
+        is_edit_mode=False,
+        include_details=True,
+    )
+    assert [item.name for item in state.named_result_evidence] == [
+        "tur",
+        "datum",
+        "hallplats",
+    ]
+    assert line == 'Användaren har namngett innehåll: "tur", "datum", "hallplats".'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("slot_name", "request_text", "payload", "value"),
+    [
+        # The parser derived documents from a declared upload.
+        (
+            "primary_runtime_input",
+            _UPLOAD_REQUEST,
+            {
+                "slots": {
+                    "primary_runtime_input": _reading(
+                        "primary_runtime_input",
+                        "json",
+                        "laddar jag bara upp e-tjänstexporten",
+                        uploaded_at_run_time=True,
+                    )
+                }
+            },
+            "documents",
+        ),
+        # An upload proves the files, not the pasted text beside them.
+        (
+            "primary_runtime_input",
+            _UPLOAD_REQUEST,
+            {
+                "slots": {
+                    "primary_runtime_input": _reading(
+                        "primary_runtime_input",
+                        "text_and_documents",
+                        "laddar jag bara upp e-tjänstexporten",
+                        uploaded_at_run_time=True,
+                    )
+                }
+            },
+            "text_and_documents",
+        ),
+    ],
+)
+async def test_a_reading_left_open_is_read_the_same_way_by_every_reader(
+    slot_name: str, request_text: str, payload: dict[str, object], value: str
+) -> None:
+    turn = await _discover(request_text, payload)
+
+    # Merge: the reading is in the state, below commit grade.
+    slot = turn.state.resolved_slots[slot_name]
+    assert (slot.value, slot.source, slot.confidence, slot.evidence_level) == (
+        value,
+        "model",
+        "medium",
+        "inferred",
+    )
+    assert turn.state.commit_grade_slot_value(slot_name) is None
+    # Discovery: the person is asked.
+    assert slot_name in turn.questions
+    # Disclosure: an assumption the person can reopen, not a decision they made.
+    disclosure = build_requirements_disclosure(turn.state, ui_language="sv")
+    assert [
+        row.value for row in disclosure.assumption_rows if row.slot_name == slot_name
+    ] == [value]
+    assert not [d for d in disclosure.key_decisions if d.question_id == slot_name]
+    # Telemetry: the stored classification carries the grades, and nothing else
+    # that older builds could not read.
+    assert turn.stored is not None
+    assert [
+        (s.slot_name, s.value, s.confidence, s.evidence_level)
+        for s in turn.stored.slots
+    ] == [(slot_name, value, "medium", "inferred")]
+    assert [d for d in turn.stored.diagnostics if d.slot_name == slot_name] == []
+    # Replay: a later turn rebuilds the same reading from what was stored.
+    *earlier, last = turn.conversation
+    replayed = build_planning_state_from_conversation(
+        [
+            *earlier,
+            ConversationMessage(
+                message_id=last.message_id,
+                role="user",
+                content=last.content,
+                metadata=metadata_with_slot_classification(last.metadata, turn.stored),
+            ),
+        ]
+    ).resolved_slots[slot_name]
+    assert (replayed.value, replayed.confidence, replayed.evidence_level) == (
+        value,
+        "medium",
+        "inferred",
+    )
+
+
+_SENT_JSON = "Ett system skickar in ansökan som JSON vid körning."
+_NOW_UPLOADED = "Nu laddar jag i stället upp e-tjänstexporten som fil."
+_SETTLED_UPLOAD = "Vid körning laddar jag upp ansökan som PDF."
+
+
+def _input_turn_reading(
+    value: str, quote: str, *, uploaded: bool, message_id: str = "user-1"
+) -> dict[str, object]:
+    return {
+        "slots": {
+            "primary_runtime_input": {
+                **_reading("primary_runtime_input", value, quote),
+                "evidence": [_cited(quote, message_id=message_id)],
+                "uploaded_at_run_time": uploaded,
+            }
+        }
+    }
+
+
+def _recommended_input(turn: _Turn) -> str | None:
+    followup = build_registry_question_followup(
+        "primary_runtime_input", turn.conversation, planning_state=turn.state
+    )
+    assert followup is not None
+    return next(
+        (
+            option.value
+            for option in followup.question_data.options
+            if option.id == followup.question_data.recommended_option_id
+        ),
+        None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_later_tentative_input_reading_is_asked_with_it_preselected() -> None:
+    # Settled as sent JSON; the person now uploads the export as a file and the
+    # reply reads json with a declared upload, which derives documents.
+    first = await _discover(
+        _SENT_JSON,
+        _input_turn_reading("json", "skickar in ansökan som JSON", uploaded=False),
+    )
+    assert first.state.resolved_slots["primary_runtime_input"].is_commit_grade
+
+    later = await _discover(
+        _NOW_UPLOADED,
+        _input_turn_reading(
+            "json",
+            "laddar jag i stället upp e-tjänstexporten som fil",
+            uploaded=True,
+            message_id="user-2",
+        ),
+        earlier=first,
+    )
+
+    slot = later.state.resolved_slots["primary_runtime_input"]
+    assert (slot.value, slot.is_commit_grade) == ("documents", False)
+    assert "primary_runtime_input" in later.questions
+    assert _recommended_input(later) == "documents"
+
+
+@pytest.mark.asyncio
+async def test_a_noisy_re_read_of_a_settled_input_asks_to_confirm_it_again() -> None:
+    # Known residue: a later reply re-reads the settled sentence and its
+    # declaration contradicts it, so the settled value is asked about again.
+    quote = "laddar jag upp ansökan som PDF"
+    first = await _discover(
+        _SETTLED_UPLOAD, _input_turn_reading("documents", quote, uploaded=True)
+    )
+    assert first.state.resolved_slots["primary_runtime_input"].is_commit_grade
+
+    later = await _discover(
+        "Sammanfatta ansökan.",
+        _input_turn_reading("documents", quote, uploaded=False),
+        earlier=first,
+    )
+
+    slot = later.state.resolved_slots["primary_runtime_input"]
+    assert (slot.value, slot.is_commit_grade) == ("documents", False)
+    assert "primary_runtime_input" in later.questions
+    assert _recommended_input(later) == "documents"
+
+
+def _saved_flow(input_type: str, output_type: str = "text") -> Flow:
+    step = FlowStep(
+        id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=uuid4(),
+        assistant_id=uuid4(),
+        step_order=1,
+        user_description="Läs underlaget",
+        input_source="flow_input",
+        input_type=input_type,
+        output_mode="pass_through",
+        output_type=output_type,
+        input_config=(
+            {"runtime_input": {"enabled": True, "max_files": 1}}
+            if input_type == "file"
+            else None
+        ),
+    )
+    return Flow(
+        id=uuid4(),
+        name="Läs",
+        description="Läser underlaget.",
+        tenant_id=uuid4(),
+        user_id=uuid4(),
+        space_id=uuid4(),
+        steps=[step],
+        metadata_json=None,
+        published=False,
+        published_version=None,
+        draft_revision=3,
+    )
+
+
+def _without_declarations(payload: dict[str, object]) -> dict[str, object]:
+    slots = cast(dict[str, dict[str, object]], payload["slots"])
+    return {
+        "slots": {
+            name: {
+                key: entry
+                for key, entry in reading.items()
+                if key != "uploaded_at_run_time"
+            }
+            for name, reading in slots.items()
+        }
+    }
+
+
+def _slots_of(turn: _Turn) -> dict[str, tuple[object, ...]]:
+    return {
+        name: (
+            slot.value,
+            slot.source,
+            slot.confidence,
+            slot.evidence_level,
+            tuple(ref for ref in slot.evidence if ref.startswith("quote:")),
+        )
+        for name, slot in turn.state.resolved_slots.items()
+        if name in ("primary_runtime_input", "terminal_output")
+    }
+
+
+_SWAP_TO_JSON = "Byt så att flödet tar emot JSON istället för filer."
+_SWAP_QUOTE = "tar emot JSON istället för filer"
+
+
+def _input_reply(value: str) -> dict[str, object]:
+    reading = _reading(
+        "primary_runtime_input", value, _SWAP_QUOTE, uploaded_at_run_time=True
+    )
+    return {"slots": {"primary_runtime_input": reading}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("flow_io", "request_text", "payload", "own_value"),
+    [
+        # The explicit swap to JSON is not dropped, and an upload declaration
+        # does not turn what the model calls json or text into documents.
+        (("file", "text"), _SWAP_TO_JSON, _input_reply("json"), "json"),
+        (("text", "text"), _SWAP_TO_JSON, _input_reply("json"), "json"),
+        (("audio", "text"), _SWAP_TO_JSON, _input_reply("text"), "text"),
+        (("json", "json"), _SWAP_TO_JSON, _input_reply("json"), "json"),
+        (("document", "text"), _SWAP_TO_JSON, _input_reply("text"), "text"),
+        # A slot whose own citation failed is not read, whatever the declaration.
+        (
+            ("file", "text"),
+            _SWAP_TO_JSON,
+            {
+                "slots": {
+                    "primary_runtime_input": _reading(
+                        "primary_runtime_input",
+                        "json",
+                        "helt påhittat citat",
+                        uploaded_at_run_time=True,
+                    )
+                }
+            },
+            None,
+        ),
+    ],
+)
+async def test_a_turn_on_a_saved_flow_reads_its_slots_as_the_model_wrote_them(
+    flow_io: tuple[str, str],
+    request_text: str,
+    payload: dict[str, object],
+    own_value: str | None,
+) -> None:
+    flow = _saved_flow(*flow_io)
+
+    declared = await _discover(request_text, payload, flow=flow)
+    plain = await _discover(request_text, _without_declarations(payload), flow=flow)
+
+    # What the reply says without its declarations, slot for slot.
+    assert _slots_of(declared) == _slots_of(plain)
+    slot = declared.state.resolved_slots[next(iter(payload["slots"]))]  # type: ignore[call-overload]
+    if own_value is None:
+        assert slot.source != "model"
+    else:
+        assert (slot.value, slot.source, slot.is_commit_grade) == (
+            own_value,
+            "model",
+            True,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("saved", [False, True])
+async def test_a_turn_on_a_saved_flow_measures_names_and_sends_a_request_without_declarations(
+    saved: bool,
+) -> None:
+    # Admission measures, the stored prompt hash names, and the provider gets
+    # one and the same request: on a saved flow it asks for no declarations.
+    prompts = MagicMock(wraps=classifier_module._build_slot_classification_prompt)  # noqa: SLF001
+    formats = MagicMock(wraps=classifier_module._slot_classification_request_format)  # noqa: SLF001
+    with (
+        patch.object(classifier_module, "_build_slot_classification_prompt", prompts),
+        patch.object(classifier_module, "_slot_classification_request_format", formats),
+    ):
+        await _discover(
+            _SWAP_TO_JSON,
+            _input_reply("json"),
+            flow=_saved_flow("file") if saved else None,
+        )
+
+    built = [
+        call.kwargs.get("read_declarations", True) for call in prompts.call_args_list
+    ]
+    shaped = [
+        call.kwargs.get("read_declarations", True) for call in formats.call_args_list
+    ]
+    assert built and shaped
+    assert set(built) == set(shaped) == {not saved}
 
 
 @pytest.mark.asyncio
