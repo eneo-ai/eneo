@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -22,9 +23,25 @@ _SCHEMA_TRAVERSAL_STOP_KEYS = frozenset({"$ref", "oneOf", "anyOf", "allOf"})
 StructuredOutputValue = JsonObject | list[JsonValue]
 
 
+# How many paths a diagnostic names; the counts beside them stay exact.
+MAX_REPORTED_KEY_PATHS = 20
+
+
 @dataclass(frozen=True, slots=True)
-class StrictSchemaPruneResult:
+class KeyConformResult:
     dropped_paths: tuple[str, ...]
+    renamed_count: int
+    # (model-written path, contract path) of the first renames only.
+    renamed_sample: tuple[tuple[str, str], ...]
+
+
+@dataclass(slots=True)
+class _KeyConformLog:
+    dropped: list[str]
+    renamed_count: int
+    renamed_sample: list[tuple[str, str]]
+    # Declared names by folded spelling, built once per object schema.
+    declared_by_spelling: dict[int, dict[str, list[str]]]
 
 
 def _parse_json_candidate(raw_text: str) -> StructuredOutputValue:
@@ -101,21 +118,38 @@ def validate_against_contract(data: Any, schema: dict[str, Any], *, label: str) 
         ) from exc
 
 
-def prune_extras_to_strict_schema(
+def conform_keys_to_schema(
     data: StructuredOutputValue,
     schema: JsonObject,
-) -> StrictSchemaPruneResult:
-    """Drop only undeclared model-output keys under explicit additionalProperties:false."""
-    dropped_paths: list[str] = []
-    _prune_extras_to_strict_schema_node(data, schema, "", dropped_paths)
-    return StrictSchemaPruneResult(dropped_paths=tuple(dropped_paths))
+) -> KeyConformResult:
+    """Make model-output keys the contract's keys, in place.
+
+    An undeclared key that differs from a missing required key only by canonically
+    equivalent forms, combining marks and case (`bedömning` for `bedomning`) is that
+    field written another way, so its value is kept under the declared name. Only a missing required key is a target:
+    the contract already fails there, so a rename can only trade one failure for
+    another. Every other key, respelled optional keys included, is treated as the
+    pruning always did: dropped under an explicit additionalProperties:false, kept
+    otherwise. Like the pruning, this reads properties and array items only:
+    composition keywords, $ref, prefixItems and typed additionalProperties values
+    are not walked.
+    """
+    log = _KeyConformLog(
+        dropped=[], renamed_count=0, renamed_sample=[], declared_by_spelling={}
+    )
+    _conform_node(data, schema, "", log)
+    return KeyConformResult(
+        dropped_paths=tuple(log.dropped),
+        renamed_count=log.renamed_count,
+        renamed_sample=tuple(log.renamed_sample),
+    )
 
 
-def _prune_extras_to_strict_schema_node(
+def _conform_node(
     data: object,
     schema: object,
     path: str,
-    dropped_paths: list[str],
+    log: _KeyConformLog,
 ) -> None:
     if not isinstance(schema, dict):
         return
@@ -125,7 +159,7 @@ def _prune_extras_to_strict_schema_node(
 
     if isinstance(data, dict):
         data_object = cast(dict[object, object], data)
-        _prune_object_extras(data_object, schema_node, path, dropped_paths)
+        _conform_object_keys(data_object, schema_node, path, log)
         return
 
     if isinstance(data, list):
@@ -134,35 +168,32 @@ def _prune_extras_to_strict_schema_node(
         if isinstance(item_schema, dict):
             typed_item_schema = cast(dict[str, object], item_schema)
             for index, item in enumerate(data_items):
-                _prune_extras_to_strict_schema_node(
-                    item,
-                    typed_item_schema,
-                    f"{path}/{index}",
-                    dropped_paths,
-                )
+                _conform_node(item, typed_item_schema, f"{path}/{index}", log)
 
 
 def _schema_has_traversal_stop(schema: dict[str, object]) -> bool:
     return any(key in schema for key in _SCHEMA_TRAVERSAL_STOP_KEYS)
 
 
-def _prune_object_extras(
+def _conform_object_keys(
     data: dict[object, object],
     schema: dict[str, object],
     path: str,
-    dropped_paths: list[str],
+    log: _KeyConformLog,
 ) -> None:
     properties = schema.get("properties")
     typed_properties = (
         cast(dict[str, object], properties) if isinstance(properties, dict) else {}
     )
 
+    _rename_respelled_keys(data, schema, typed_properties, path, log)
+
     if schema.get("additionalProperties") is False:
         allowed_keys = set(typed_properties)
         for key in list(data):
             if isinstance(key, str) and key not in allowed_keys:
                 del data[key]
-                dropped_paths.append(f"{path}/{_json_pointer_token(key)}")
+                log.dropped.append(f"{path}/{_json_pointer_token(key)}")
 
     for key, value in list(data.items()):
         if not isinstance(key, str):
@@ -170,12 +201,90 @@ def _prune_object_extras(
         child_schema = typed_properties.get(key)
         if child_schema is None:
             continue
-        _prune_extras_to_strict_schema_node(
+        _conform_node(
             value,
             child_schema,
             f"{path}/{_json_pointer_token(key)}",
-            dropped_paths,
+            log,
         )
+
+
+def _spelling(name: str) -> str:
+    """The name after canonical decomposition, without combining marks, case-folded.
+
+    Two names have the same spelling when they differ only by canonically
+    equivalent forms (the Kelvin sign is `k`, the Angstrom sign `å`), combining
+    marks and case. Compatibility forms, other letters, symbols and separators
+    stay different: `①` is not `1`, `kø` is not `k` and `Andel (%)` is not `andel`.
+    """
+    decomposed = unicodedata.normalize("NFD", name)
+    return "".join(
+        character for character in decomposed if not unicodedata.combining(character)
+    ).casefold()
+
+
+def _rename_respelled_keys(
+    data: dict[object, object],
+    schema: dict[str, object],
+    properties: dict[str, object],
+    path: str,
+    log: _KeyConformLog,
+) -> None:
+    """Rename a key that respells a missing required key.
+
+    Declined when two declared keys share the spelling and when several keys claim
+    one name. A declared key is never folded: it cannot be a respelling.
+    """
+    required = schema.get("required")
+    if not isinstance(required, list):
+        return
+    missing = {
+        name
+        for name in cast(list[object], required)
+        if isinstance(name, str) and name in properties and name not in data
+    }
+    if not missing:
+        return
+
+    declared_by_spelling = log.declared_by_spelling.get(id(properties))
+    if declared_by_spelling is None:
+        declared_by_spelling = dict[str, list[str]]()
+        for name in properties:
+            declared_by_spelling.setdefault(_spelling(name), []).append(name)
+        log.declared_by_spelling[id(properties)] = declared_by_spelling
+
+    spellings_by_declared: dict[str, list[str]] = {}
+    for key in data:
+        if not isinstance(key, str) or key in properties:
+            continue
+        declared = declared_by_spelling.get(_spelling(key), [])
+        if len(declared) == 1 and declared[0] in missing:
+            spellings_by_declared.setdefault(declared[0], []).append(key)
+    renames = {
+        spellings[0]: declared
+        for declared, spellings in spellings_by_declared.items()
+        if len(spellings) == 1
+    }
+    if not renames:
+        return
+
+    # Rebuild in order so a renamed key keeps its position.
+    items = list(data.items())
+    data.clear()
+    for key, value in items:
+        if isinstance(key, str) and key in renames:
+            declared = renames[key]
+            log.renamed_count += 1
+            if log.renamed_count <= MAX_REPORTED_KEY_PATHS:
+                log.renamed_sample.append(
+                    (
+                        f"{path}/{_json_pointer_token(key)}",
+                        f"{path}/{_json_pointer_token(declared)}",
+                    )
+                )
+            data[declared] = value
+        else:
+            data[key] = value
 
 
 def _json_pointer_token(token: str) -> str:

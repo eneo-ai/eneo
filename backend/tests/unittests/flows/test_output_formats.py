@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject
@@ -156,6 +158,207 @@ def test_json_output_format_prunes_and_validates_when_compiled_validator_exists(
         "typed_output_extra_properties_dropped"
     ]
     assert validate_payloads == [result.structured_output]
+
+
+_ALL_STRUCTURED_SPECS = [
+    JsonOutputFormatSpec(),
+    DocxOutputFormatSpec(),
+    PdfOutputFormatSpec(),
+]
+
+
+def _process_structured(
+    spec: OutputFormatSpec,
+    parsed: StructuredOutputValue,
+    contract: FlowPersistedJsonObject,
+    raw_text: str = "{}",
+):
+    def _parse(raw_text: str) -> StructuredOutputValue:
+        return parsed
+
+    def _validate(data: object, schema: FlowPersistedJsonObject, *, label: str) -> None:
+        pass
+
+    def _render_structured(
+        data: StructuredOutputValue,
+        rendered_output_type: str,
+        *,
+        step_order: int,
+        title: str,
+        schema: FlowPersistedJsonObject | None = None,
+    ) -> tuple[bytes, str]:
+        return b"rendered", "application/test"
+
+    return spec.process_model_output(
+        raw_text,
+        step_order=4,
+        output_contract=contract,
+        context=_context(
+            parse_json_output=_parse,
+            validate_against_contract=_validate,
+            render_structured_document=_render_structured,
+            json_contract_validation_enabled=True,
+        ),
+    )
+
+
+def _avvikelser_contract(item_keys: list[str]) -> FlowPersistedJsonObject:
+    return {
+        "type": "object",
+        "required": ["avvikelser"],
+        "properties": {
+            "avvikelser": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": item_keys,
+                    "properties": {key: {"type": "string"} for key in item_keys},
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "additionalProperties": False,
+    }
+
+
+@pytest.mark.parametrize("spec", _ALL_STRUCTURED_SPECS)
+def test_structured_output_formats_rename_respelled_keys_and_report_them(
+    spec: OutputFormatSpec,
+) -> None:
+    parsed: StructuredOutputValue = {
+        "avvikelser": [
+            {"vad_vi_avser_att_forelagga_om": "Rätta"},
+            {"vad_vi_avser_att_forelägga_om": "Komplettera"},
+        ]
+    }
+
+    result = _process_structured(
+        spec, parsed, _avvikelser_contract(["vad_vi_avser_att_forelagga_om"])
+    )
+
+    assert result.structured_output == {
+        "avvikelser": [
+            {"vad_vi_avser_att_forelagga_om": "Rätta"},
+            {"vad_vi_avser_att_forelagga_om": "Komplettera"},
+        ]
+    }
+    assert [
+        (diagnostic.code, diagnostic.severity) for diagnostic in result.diagnostics
+    ] == [("typed_output_keys_renamed", "warning")]
+    assert result.diagnostics[0].message == (
+        "Renamed 1 field to the contract spelling: "
+        "/avvikelser/1/vad_vi_avser_att_forelägga_om -> "
+        "/avvikelser/1/vad_vi_avser_att_forelagga_om"
+    )
+    # The text the step persists is the conformed value, serialised like the
+    # assembled output of the mapped steps.
+    assert result.conformed_text == json.dumps(
+        result.structured_output, ensure_ascii=False
+    )
+
+
+@pytest.mark.parametrize("spec", _ALL_STRUCTURED_SPECS)
+def test_structured_output_formats_keep_the_model_text_when_nothing_is_renamed(
+    spec: OutputFormatSpec,
+) -> None:
+    exact: StructuredOutputValue = {"avvikelser": [{"avvikelse": "Rätta"}]}
+    pruned: StructuredOutputValue = {
+        "avvikelser": [{"avvikelse": "Rätta", "extra": "dropped"}]
+    }
+    contract = _avvikelser_contract(["avvikelse"])
+
+    exact_result = _process_structured(spec, exact, contract)
+    pruned_result = _process_structured(spec, pruned, contract)
+
+    assert exact_result.conformed_text is None
+    assert exact_result.diagnostics == ()
+    assert pruned_result.conformed_text is None
+    assert [d.code for d in pruned_result.diagnostics] == [
+        "typed_output_extra_properties_dropped"
+    ]
+
+
+def test_renamed_keys_message_counts_and_pluralises() -> None:
+    parsed: StructuredOutputValue = {
+        "avvikelser": [{"vad_vi_avser_att_forelägga_om": f"V{i}"} for i in range(4)]
+    }
+
+    result = _process_structured(
+        JsonOutputFormatSpec(),
+        parsed,
+        _avvikelser_contract(["vad_vi_avser_att_forelagga_om"]),
+    )
+
+    message = result.diagnostics[0].message
+    assert message.startswith("Renamed 4 fields to the contract spelling: ")
+    assert message.count(" -> ") == 4
+
+
+def test_dropped_keys_message_counts_and_pluralises() -> None:
+    parsed: StructuredOutputValue = {"avvikelser": [{"avvikelse": "A", "x": 1, "y": 2}]}
+
+    result = _process_structured(
+        JsonOutputFormatSpec(), parsed, _avvikelser_contract(["avvikelse"])
+    )
+
+    assert result.diagnostics[0].message == (
+        "Dropped 2 undeclared fields: /avvikelser/0/x, /avvikelser/0/y"
+    )
+
+
+def test_reported_paths_stop_at_twenty_and_say_how_many_more() -> None:
+    parsed: StructuredOutputValue = {
+        "avvikelser": [{"avvikelse": "A", "extra": "x"} for _ in range(25)]
+    }
+    renamed: StructuredOutputValue = {
+        "avvikelser": [{"Avvikelse": "A"} for _ in range(25)]
+    }
+    contract = _avvikelser_contract(["avvikelse"])
+
+    dropped_message = (
+        _process_structured(JsonOutputFormatSpec(), parsed, contract)
+        .diagnostics[0]
+        .message
+    )
+    renamed_message = (
+        _process_structured(JsonOutputFormatSpec(), renamed, contract)
+        .diagnostics[0]
+        .message
+    )
+
+    assert dropped_message.startswith("Dropped 25 undeclared fields: ")
+    assert dropped_message.endswith("; 5 more omitted")
+    assert dropped_message.count("/extra") == 20
+    assert renamed_message.startswith("Renamed 25 fields to the contract spelling: ")
+    assert renamed_message.endswith("; 5 more omitted")
+    assert renamed_message.count(" -> ") == 20
+
+
+def test_a_reported_path_is_cut_at_two_hundred_characters() -> None:
+    long_key = "z" * 300
+    parsed: StructuredOutputValue = {"avvikelser": [{"avvikelse": "A", long_key: 1}]}
+
+    result = _process_structured(
+        JsonOutputFormatSpec(), parsed, _avvikelser_contract(["avvikelse"])
+    )
+
+    reported = result.diagnostics[0].message.split(": ", 1)[1]
+    assert len(reported) == 200
+    assert reported.startswith("/avvikelser/0/zzz")
+    assert reported.endswith("...")
+
+
+def test_the_whole_reported_message_is_cut_at_sixteen_hundred_characters() -> None:
+    keys = [f"{index:02d}" + "k" * 150 for index in range(20)]
+    parsed: StructuredOutputValue = {
+        "avvikelser": [{"avvikelse": "A", **{k: 1 for k in keys}}]
+    }
+
+    result = _process_structured(
+        JsonOutputFormatSpec(), parsed, _avvikelser_contract(["avvikelse"])
+    )
+
+    assert len(result.diagnostics[0].message) == 1600
 
 
 def test_pdf_output_format_preserves_raw_pdf_bytes() -> None:

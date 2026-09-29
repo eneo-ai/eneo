@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import tracemalloc
+
 import pytest
 
 from eneo.flows.output_processing import (
     compile_validators,
+    conform_keys_to_schema,
     parse_json_output,
-    prune_extras_to_strict_schema,
     validate_against_contract,
     validate_schema_syntax,
 )
@@ -145,7 +147,7 @@ def test_contract_error_bounds_record_content_and_escapes_json_pointer():
     assert len(str(exc_info.value)) < 500
 
 
-def test_prune_extras_to_strict_schema_drops_extra_item_property():
+def test_conform_keys_to_schema_drops_extra_item_property():
     schema = {
         "type": "object",
         "required": ["beslutslista"],
@@ -179,27 +181,27 @@ def test_prune_extras_to_strict_schema_drops_extra_item_property():
         ]
     }
 
-    result = prune_extras_to_strict_schema(data, schema)
+    result = conform_keys_to_schema(data, schema)
 
     assert result.dropped_paths == ("/beslutslista/0/rubrik_kommentar",)
     assert "rubrik_kommentar" not in data["beslutslista"][0]
     validate_against_contract(data, schema, label="Step 4 output")
 
 
-def test_prune_extras_to_strict_schema_leaves_permissive_schemas_unchanged():
+def test_conform_keys_to_schema_leaves_permissive_schemas_unchanged():
     schema = {
         "type": "object",
         "properties": {"rubrik": {"type": "string"}},
     }
     data = {"rubrik": "Budget", "rubrik_kommentar": "kept"}
 
-    result = prune_extras_to_strict_schema(data, schema)
+    result = conform_keys_to_schema(data, schema)
 
     assert result.dropped_paths == ()
     assert data["rubrik_kommentar"] == "kept"
 
 
-def test_prune_extras_to_strict_schema_is_deep_and_idempotent():
+def test_conform_keys_to_schema_is_deep_and_idempotent():
     schema = {
         "type": "object",
         "properties": {
@@ -234,8 +236,8 @@ def test_prune_extras_to_strict_schema_is_deep_and_idempotent():
         ],
     }
 
-    first = prune_extras_to_strict_schema(data, schema)
-    second = prune_extras_to_strict_schema(data, schema)
+    first = conform_keys_to_schema(data, schema)
+    second = conform_keys_to_schema(data, schema)
 
     assert first.dropped_paths == (
         "/sections/0/section_extra",
@@ -245,7 +247,7 @@ def test_prune_extras_to_strict_schema_is_deep_and_idempotent():
     assert data == {"sections": [{"items": [{"title": "One"}]}]}
 
 
-def test_prune_extras_to_strict_schema_skips_composition_nodes():
+def test_conform_keys_to_schema_skips_composition_nodes():
     schema = {
         "oneOf": [
             {
@@ -257,7 +259,7 @@ def test_prune_extras_to_strict_schema_skips_composition_nodes():
     }
     data = {"title": "One", "unexpected": "kept"}
 
-    result = prune_extras_to_strict_schema(data, schema)
+    result = conform_keys_to_schema(data, schema)
 
     assert result.dropped_paths == ()
     assert data["unexpected"] == "kept"
@@ -272,7 +274,7 @@ def test_pruned_output_still_fails_missing_required():
     }
     data = {"rubrik_kommentar": "drop"}
 
-    result = prune_extras_to_strict_schema(data, schema)
+    result = conform_keys_to_schema(data, schema)
 
     assert result.dropped_paths == ("/rubrik_kommentar",)
     with pytest.raises(TypedIOValidationException, match="'rubrik' is a required"):
@@ -288,11 +290,481 @@ def test_pruned_output_still_fails_wrong_type():
     }
     data = {"omrostning": "nej", "extra": "drop"}
 
-    result = prune_extras_to_strict_schema(data, schema)
+    result = conform_keys_to_schema(data, schema)
 
     assert result.dropped_paths == ("/extra",)
     with pytest.raises(TypedIOValidationException, match="is not of type"):
         validate_against_contract(data, schema, label="Step output")
+
+
+# --- key spelling: a key that differs from a contract key only by canonically
+# equivalent forms, combining marks or case ---
+
+
+def _bedomning_contract(*, closed: bool) -> dict:
+    contract: dict = {
+        "type": "object",
+        "required": ["krav", "bedomning"],
+        "properties": {"krav": {"type": "string"}, "bedomning": {"type": "string"}},
+    }
+    if closed:
+        contract["additionalProperties"] = False
+    return contract
+
+
+@pytest.mark.parametrize("closed", [True, False])
+def test_conform_keys_renames_a_respelled_key_at_the_root(closed):
+    data = {"krav": "K1", "bedömning": "Avvikelse"}
+    schema = _bedomning_contract(closed=closed)
+
+    result = conform_keys_to_schema(data, schema)
+
+    assert data == {"krav": "K1", "bedomning": "Avvikelse"}
+    assert result.renamed_sample == (("/bedömning", "/bedomning"),)
+    assert result.dropped_paths == ()
+    validate_against_contract(data, schema, label="Step 2 output")
+
+
+@pytest.mark.parametrize(
+    ("declared", "written"),
+    [
+        ("bedomning", "bedömning"),
+        ("bedomning", "Bedomning"),
+        ("bedomning", "BEDÖMNING"),
+        ("aland", "Åland"),
+        ("overgang", "Övergång"),
+        ("resume", "résumé"),
+        ("forelagga", "FÖRELÄGGA"),
+        # The declared key may itself carry the accent or the capital.
+        ("bedömning", "Bedomning"),
+        ("Bedomning", "bedömning"),
+        ("Åland", "aland"),
+        # Canonically equivalent forms are the same letter: Kelvin, Angstrom, Ohm.
+        ("k", "\u212a"),
+        ("a", "\u212b"),
+        ("\u03c9", "\u2126"),
+    ],
+)
+def test_conform_keys_renames_canonically_equivalent_spellings(declared, written):
+    schema = {
+        "type": "object",
+        "required": [declared],
+        "properties": {declared: {"type": "string"}},
+    }
+    data = {written: "värde"}
+
+    result = conform_keys_to_schema(data, schema)
+
+    assert data == {declared: "värde"}
+    assert result.renamed_sample == ((f"/{written}", f"/{declared}"),)
+
+
+@pytest.mark.parametrize(
+    ("declared", "written"),
+    [
+        # Symbols, other letters and separators are not diacritics or case.
+        ("andel", "Andel (%)"),
+        ("k", "kø"),
+        ("id", "名前_id"),
+        ("total_summa", "Total-Summa"),
+        ("total_summa", "total summa"),
+        ("bedomning", "bedomning_"),
+        # A compatibility form is not canonically equivalent: circled and fullwidth.
+        ("1", "\u2460"),
+        ("1", "\uff11"),
+        ("a", "\uff41"),
+    ],
+)
+def test_conform_keys_never_renames_a_key_that_is_more_than_a_respelling(
+    declared, written
+):
+    schema = {
+        "type": "object",
+        "required": [declared],
+        "properties": {declared: {"type": "string"}},
+    }
+    data = {written: "värde"}
+
+    result = conform_keys_to_schema(data, schema)
+
+    assert data == {written: "värde"}
+    assert result.renamed_sample == ()
+
+
+def test_conform_keys_keeps_the_renamed_key_at_its_position():
+    data = {"krav": "K1", "bedömning": "Avvikelse", "omrade": "O"}
+    schema = {
+        "type": "object",
+        "required": ["bedomning"],
+        "properties": {
+            "krav": {"type": "string"},
+            "bedomning": {"type": "string"},
+            "omrade": {"type": "string"},
+        },
+    }
+
+    conform_keys_to_schema(data, schema)
+
+    assert list(data) == ["krav", "bedomning", "omrade"]
+
+
+def test_conform_keys_leaves_other_undeclared_keys_of_an_open_object_alone():
+    data = {"krav": "K1", "bedömning": "Avvikelse", "fri_anmarkning": "kept"}
+
+    result = conform_keys_to_schema(data, _bedomning_contract(closed=False))
+
+    assert data == {"krav": "K1", "bedomning": "Avvikelse", "fri_anmarkning": "kept"}
+    assert result.dropped_paths == ()
+
+
+def test_conform_keys_renames_a_respelled_key_in_a_nested_object():
+    schema = {
+        "type": "object",
+        "required": ["bilaga"],
+        "properties": {
+            "bilaga": {
+                "type": "object",
+                "required": ["underlag_och_osakerhet"],
+                "properties": {"underlag_och_osakerhet": {"type": ["string", "null"]}},
+                "additionalProperties": False,
+            }
+        },
+        "additionalProperties": False,
+    }
+    data = {"bilaga": {"underlag_och_osäkerhet": "Ritning saknas"}}
+
+    result = conform_keys_to_schema(data, schema)
+
+    assert data == {"bilaga": {"underlag_och_osakerhet": "Ritning saknas"}}
+    assert result.renamed_sample == (
+        ("/bilaga/underlag_och_osäkerhet", "/bilaga/underlag_och_osakerhet"),
+    )
+    validate_against_contract(data, schema, label="Step 3 output")
+
+
+def test_conform_keys_conforms_the_children_of_a_renamed_key_too():
+    schema = {
+        "type": "object",
+        "required": ["bilaga"],
+        "properties": {
+            "bilaga": {
+                "type": "object",
+                "required": ["underlag_och_osakerhet"],
+                "properties": {"underlag_och_osakerhet": {"type": ["string", "null"]}},
+                "additionalProperties": False,
+            }
+        },
+        "additionalProperties": False,
+    }
+    data = {"Bilaga": {"underlag_och_osäkerhet": "Ritning saknas", "extra": 1}}
+
+    result = conform_keys_to_schema(data, schema)
+
+    assert data == {"bilaga": {"underlag_och_osakerhet": "Ritning saknas"}}
+    assert result.renamed_sample == (
+        ("/Bilaga", "/bilaga"),
+        ("/bilaga/underlag_och_osäkerhet", "/bilaga/underlag_och_osakerhet"),
+    )
+    assert result.dropped_paths == ("/bilaga/extra",)
+    validate_against_contract(data, schema, label="Step 3 output")
+
+
+def test_conform_keys_renames_every_drifted_item_of_an_array_and_only_those():
+    schema = {
+        "type": "object",
+        "required": ["avvikelser"],
+        "properties": {
+            "avvikelser": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["vad_vi_avser_att_forelagga_om"],
+                    "properties": {
+                        "vad_vi_avser_att_forelagga_om": {"type": ["string", "null"]}
+                    },
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "additionalProperties": False,
+    }
+    data = {
+        "avvikelser": [
+            {"vad_vi_avser_att_forelagga_om": "Rätta"},
+            {"vad_vi_avser_att_forelägga_om": "Komplettera"},
+            {"vad_vi_avser_att_forelägga_om": "Redovisa"},
+            {"vad_vi_avser_att_forelägga_om": "Åtgärda"},
+        ]
+    }
+
+    result = conform_keys_to_schema(data, schema)
+
+    assert [item["vad_vi_avser_att_forelagga_om"] for item in data["avvikelser"]] == [
+        "Rätta",
+        "Komplettera",
+        "Redovisa",
+        "Åtgärda",
+    ]
+    assert result.renamed_sample == tuple(
+        (
+            f"/avvikelser/{index}/vad_vi_avser_att_forelägga_om",
+            f"/avvikelser/{index}/vad_vi_avser_att_forelagga_om",
+        )
+        for index in (1, 2, 3)
+    )
+    assert result.dropped_paths == ()
+    validate_against_contract(data, schema, label="Step 4 output")
+
+
+def test_conform_keys_prunes_a_second_spelling_only_as_a_closed_object_always_did():
+    data = {"krav": "K1", "bedomning": "Avvikelse", "bedömning": "Godkänd"}
+
+    result = conform_keys_to_schema(data, _bedomning_contract(closed=True))
+
+    assert data == {"krav": "K1", "bedomning": "Avvikelse"}
+    assert result.renamed_sample == ()
+    assert result.dropped_paths == ("/bedömning",)
+
+
+@pytest.mark.parametrize(
+    ("schema", "data"),
+    [
+        (
+            _bedomning_contract(closed=False),
+            {"krav": "K1", "bedomning": "", "bedömning": "Avvikelse"},
+        ),
+        (
+            {"type": "object", "properties": {"andel": {"type": "number"}}},
+            {"andel": 5, "Andel": 12},
+        ),
+        (
+            {"type": "object", "additionalProperties": {"type": "integer"}},
+            {"Örebro": 1, "orebro": 2},
+        ),
+        (
+            {
+                "type": "object",
+                "properties": {"x_a": {"type": "integer"}},
+                "patternProperties": {"^x_": {"type": "integer"}},
+            },
+            {"x_a": 2, "x_A": 1},
+        ),
+    ],
+)
+def test_conform_keys_keeps_both_spellings_of_an_open_object(schema, data):
+    before = dict(data)
+
+    result = conform_keys_to_schema(data, schema)
+
+    assert data == before
+    assert result.renamed_sample == ()
+    assert result.dropped_paths == ()
+
+
+def test_conform_keys_is_a_no_op_when_every_key_is_the_contract_key():
+    for closed in (True, False):
+        data = {"bedomning": "Avvikelse", "krav": "K1"}
+
+        result = conform_keys_to_schema(data, _bedomning_contract(closed=closed))
+
+        assert list(data.items()) == [("bedomning", "Avvikelse"), ("krav", "K1")]
+        assert result.renamed_sample == ()
+        assert result.dropped_paths == ()
+
+
+def test_conform_keys_never_renames_a_different_word():
+    schema = {
+        "type": "object",
+        "required": ["utgaaende_tillgangar"],
+        "properties": {"utgaaende_tillgangar": {"type": "array"}},
+        "additionalProperties": False,
+    }
+    data = {"utgaaande_tillgangar": [], "bedomningar": []}
+
+    result = conform_keys_to_schema(data, schema)
+
+    assert data == {}
+    assert result.renamed_sample == ()
+    assert result.dropped_paths == ("/utgaaande_tillgangar", "/bedomningar")
+    with pytest.raises(TypedIOValidationException, match="'utgaaende_tillgangar'"):
+        validate_against_contract(data, schema, label="Step 1 output")
+
+
+def test_conform_keys_never_renames_a_different_word_in_an_open_object():
+    schema = _bedomning_contract(closed=False)
+    data = {"krav": "K1", "bedomningar": "annat ord"}
+
+    result = conform_keys_to_schema(data, schema)
+
+    assert data == {"krav": "K1", "bedomningar": "annat ord"}
+    assert result.renamed_sample == ()
+
+
+def test_conform_keys_renames_nothing_when_two_spellings_claim_the_same_key():
+    data = {"krav": "K1", "bedömning": "Avvikelse", "Bedömning": "Godkänd"}
+
+    result = conform_keys_to_schema(data, _bedomning_contract(closed=False))
+
+    assert data == {"krav": "K1", "bedömning": "Avvikelse", "Bedömning": "Godkänd"}
+    assert result.renamed_sample == ()
+
+
+# A pass must never become a failure: only a required key that is missing is ever
+# renamed. The contract already fails there, so a rename can only trade one failure
+# for another. Every other key is left to the pruning, respelled or not.
+
+
+@pytest.mark.parametrize("closed", [True, False])
+@pytest.mark.parametrize(
+    ("declared", "written", "value"),
+    [
+        ("kommentar", "Kommentar", "Bra"),
+        ("kommentar", "Kommentar", None),
+        ("antal", "Antal", 3),
+    ],
+)
+def test_conform_keys_treats_a_respelled_optional_key_exactly_as_the_pruning_did(
+    declared, written, value, closed
+):
+    schema = {
+        "type": "object",
+        "required": ["summary"],
+        "properties": {"summary": {"type": "string"}, declared: {}},
+    }
+    if closed:
+        schema["additionalProperties"] = False
+    data = {"summary": "s", written: value}
+
+    result = conform_keys_to_schema(data, schema)
+
+    assert result.renamed_sample == ()
+    if closed:
+        assert data == {"summary": "s"}
+        assert result.dropped_paths == (f"/{written}",)
+    else:
+        assert data == {"summary": "s", written: value}
+        assert result.dropped_paths == ()
+    validate_against_contract(data, schema, label="Step 1 output")
+
+
+@pytest.mark.parametrize("closed", [True, False])
+def test_conform_keys_leaves_a_respelled_optional_parent_and_its_children_as_they_were(
+    closed,
+):
+    schema = {
+        "type": "object",
+        "properties": {
+            "bilaga": {
+                "type": "object",
+                "required": ["bedomning"],
+                "properties": {"bedomning": {"type": "string"}},
+            }
+        },
+    }
+    if closed:
+        schema["additionalProperties"] = False
+    data = {"Bilaga": {"bedömning": "A"}}
+
+    result = conform_keys_to_schema(data, schema)
+
+    assert result.renamed_sample == ()
+    assert data == ({} if closed else {"Bilaga": {"bedömning": "A"}})
+
+
+def test_conform_keys_declines_when_two_declared_keys_share_a_spelling():
+    schema = {
+        "type": "object",
+        "required": ["bedomning", "Bedomning"],
+        "properties": {
+            "bedomning": {"type": "string"},
+            "Bedomning": {"type": "string"},
+        },
+    }
+    respelled = {"bedömning": "x"}
+    exact_capital = {"Bedomning": "x"}
+
+    assert conform_keys_to_schema(respelled, schema).renamed_sample == ()
+    assert conform_keys_to_schema(exact_capital, schema).renamed_sample == ()
+    assert respelled == {"bedömning": "x"}
+    assert exact_capital == {"Bedomning": "x"}
+
+
+def test_conform_keys_renames_a_required_key_even_when_its_value_does_not_fit():
+    schema = {
+        "type": "object",
+        "required": ["antal"],
+        "properties": {"antal": {"type": "integer"}},
+        "additionalProperties": False,
+    }
+    data = {"Antal": "tre"}
+
+    result = conform_keys_to_schema(data, schema)
+
+    assert data == {"antal": "tre"}
+    assert result.renamed_sample == (("/Antal", "/antal"),)
+    with pytest.raises(TypedIOValidationException, match="is not of type"):
+        validate_against_contract(data, schema, label="Step 1 output")
+
+
+def _drifted_rows(count: int) -> tuple[dict, dict]:
+    schema = {
+        "type": "object",
+        "required": ["rows"],
+        "properties": {
+            "rows": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["bedomning"],
+                    "properties": {"bedomning": {"type": "string"}},
+                    "additionalProperties": False,
+                },
+            }
+        },
+    }
+    return schema, {"rows": [{"bedömning": "x"} for _ in range(count)]}
+
+
+def test_conform_keys_counts_every_rename_but_reports_a_bounded_sample():
+    schema, data = _drifted_rows(100_000)
+
+    result = conform_keys_to_schema(data, schema)
+
+    assert result.renamed_count == 100_000
+    assert len(result.renamed_sample) == 20
+    assert result.renamed_sample[0] == ("/rows/0/bedömning", "/rows/0/bedomning")
+    assert result.renamed_sample[-1] == ("/rows/19/bedömning", "/rows/19/bedomning")
+    assert data["rows"][-1] == {"bedomning": "x"}
+
+
+def _peak_additional_bytes(count: int) -> int:
+    schema, data = _drifted_rows(count)
+    tracemalloc.start()
+    try:
+        before, _ = tracemalloc.get_traced_memory()
+        conform_keys_to_schema(data, schema)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    return peak - before
+
+
+def test_conform_keys_memory_does_not_grow_with_the_number_of_renames():
+    few = _peak_additional_bytes(400)
+    many = _peak_additional_bytes(4_000)
+
+    # Ten times the rows, the same bounded record.
+    assert many < 3 * few
+
+
+def test_conform_keys_skips_composition_nodes_like_the_pruner():
+    schema = {"oneOf": [_bedomning_contract(closed=True)]}
+    data = {"krav": "K1", "bedömning": "Avvikelse"}
+
+    result = conform_keys_to_schema(data, schema)
+
+    assert data == {"krav": "K1", "bedömning": "Avvikelse"}
+    assert result.renamed_sample == ()
 
 
 # --- validate_schema_syntax ---

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.runtime.output_formats.base import (
+    ConformedModelOutput,
     OutputFormatProcessingContext,
     OutputFormatProcessingResult,
+    conform_model_output_keys,
     json_schema_instructions,
-    prune_model_output_extras,
 )
 
 
@@ -29,9 +30,9 @@ class JsonOutputFormatSpec:
         context: OutputFormatProcessingContext,
     ) -> OutputFormatProcessingResult:
         structured_output = context.parse_json_output(full_text)
-        diagnostics = ()
+        conformed = ConformedModelOutput(diagnostics=(), conformed_text=None)
         if output_contract is not None and context.json_contract_validation_enabled:
-            diagnostics = prune_model_output_extras(structured_output, output_contract)
+            conformed = conform_model_output_keys(structured_output, output_contract)
             context.validate_against_contract(
                 structured_output,
                 output_contract,
@@ -39,5 +40,6 @@ class JsonOutputFormatSpec:
             )
         return OutputFormatProcessingResult(
             structured_output=structured_output,
-            diagnostics=diagnostics,
+            diagnostics=conformed.diagnostics,
+            conformed_text=conformed.conformed_text,
         )

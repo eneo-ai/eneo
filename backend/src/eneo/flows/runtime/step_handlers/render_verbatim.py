@@ -70,8 +70,9 @@ class RenderVerbatimStepHandler:
                 effective_prompt=prepared.effective_prompt,
             ) from exc
 
+        output_text = typed_output.persisted_text(prepared.step_input.text)
         persisted_text, generated_file_ids = await deps.apply_output_cap(
-            text=prepared.step_input.text,
+            text=output_text,
             run=run,
             step=step,
         )
@@ -93,7 +94,7 @@ class RenderVerbatimStepHandler:
                 source_text=prepared.step_input.source_text,
                 input_source=prepared.step_input.input_source,
                 used_question_binding=prepared.step_input.used_question_binding,
-                full_text=prepared.step_input.text,
+                full_text=output_text,
                 persisted_text=persisted_text,
                 generated_file_ids=generated_file_ids,
                 tool_calls_metadata=None,

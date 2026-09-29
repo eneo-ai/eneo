@@ -2050,6 +2050,7 @@ async def _complete_step_execution(
     diagnostics.extend(typed_output.diagnostics)
     structured_output = typed_output.structured_output
     artifacts = typed_output.artifacts
+    full_text = typed_output.persisted_text(full_text)
 
     if deps.logger is not None:
         deps.logger.info(

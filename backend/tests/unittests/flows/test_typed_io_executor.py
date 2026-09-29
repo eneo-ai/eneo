@@ -36,11 +36,15 @@ from eneo.files.text import (
     TEXT_EXTRACTION_WARNINGS,
     TextExtractor,
 )
+from eneo.flows.ai_builder.ai_builder_flow_review_sample import _recorded_text
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_step_input_bindings,
     derive_input_contract,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import PreviousFieldRef
+from eneo.flows.application.flow_run_export_json import (
+    _build_step_output_summary,
+)
 from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.flow import (
     FlowRun,
@@ -49,7 +53,7 @@ from eneo.flows.domain.flow import (
     FlowStepResultStatus,
 )
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
-from eneo.flows.domain.step_output import OUTPUT_TEXT_OVERFLOW_KEY
+from eneo.flows.domain.step_output import OUTPUT_TEXT_OVERFLOW_KEY, interpret_step_text
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -68,9 +72,13 @@ from eneo.flows.runtime.executor import (
 )
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
 from eneo.flows.runtime.generated_file_names import GeneratedFileNames
+from eneo.flows.runtime.http_orchestration import deliver_webhook
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.runtime.output_formats.base import append_output_format_instructions
-from eneo.flows.runtime.step_execution_runtime import json_mode_cache_key
+from eneo.flows.runtime.step_execution_runtime import (
+    build_output_payload,
+    json_mode_cache_key,
+)
 from eneo.flows.runtime.step_input_resolution import (
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE,
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_PLACEHOLDER,
@@ -84,6 +92,9 @@ from eneo.main.exceptions import (
     TypedIOValidationException,
 )
 from eneo.object_content.content import ObjectContentUnavailableError
+from tests.unittests.flows.test_http_orchestration import _make_deps as _webhook_deps
+from tests.unittests.flows.test_http_orchestration import _Run as _WebhookRun
+from tests.unittests.flows.test_http_orchestration import _Step as _WebhookStep
 
 _LIKELY_REVERSED_PDF_TEXT = (
     "[PAGE 1]\n" + "hco tta ted ned mos dem llit relle aks rah nak etni " * 4
@@ -5531,3 +5542,457 @@ async def test_receipt_exhausting_budget_has_no_provider_work_in_terminal_error(
     else:
         assert "Raise the step's timeout_seconds" in public.error.message
         assert "run's total budget was exhausted" not in public.error.message
+
+
+# --- a model-written key that differs from the contract key only by diacritics or case ---
+
+
+def _string_fields_contract(names: list[str], *, nullable: bool = False) -> dict:
+    leaf: dict = {"type": ["string", "null"] if nullable else "string"}
+    return {
+        "type": "object",
+        "properties": {name: dict(leaf) for name in names},
+        "required": list(names),
+    }
+
+
+def _array_contract(array_key: str, item_contract: dict) -> dict:
+    return {
+        "type": "object",
+        "properties": {array_key: {"type": "array", "items": item_contract}},
+        "required": [array_key],
+        "additionalProperties": False,
+    }
+
+
+def _closed(contract: dict) -> dict:
+    return {**contract, "additionalProperties": False}
+
+
+async def _completed_json_step(user, *, output_contract: dict, response: dict | str):
+    """Run one real single-call JSON step; return what its readers see."""
+    executor, _, _, _ = _build_executor(user)
+    response_text = response if isinstance(response, str) else json.dumps(response)
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step(response_text=response_text)
+    )
+    step = _runtime_step(output_type="json", output_contract=output_contract)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+    payload = build_output_payload(output)
+    persisted = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text=payload["text"],
+        structured=payload.get("structured"),
+    )
+    return executor, run, output, payload, persisted
+
+
+async def _execute_json_step(user, *, output_contract: dict, response: dict | str):
+    return (
+        await _completed_json_step(
+            user, output_contract=output_contract, response=response
+        )
+    )[2]
+
+
+_DRIFT_SHAPES = {
+    # Open root, one required key spelled with a diacritic.
+    "root": (
+        _string_fields_contract(["krav", "omrade", "bedomning", "iakttagelser"]),
+        {"krav": "K", "omrade": "O", "bedömning": "Avvikelse", "iakttagelser": "I"},
+        {"krav": "K", "omrade": "O", "bedomning": "Avvikelse", "iakttagelser": "I"},
+    ),
+    # Items 0-3 use the contract key, items 4-7 the diacritic spelling.
+    "late_items": (
+        _array_contract(
+            "avstandskontroller",
+            _closed(
+                _string_fields_contract(
+                    ["krav", "underlag_och_osakerhet"], nullable=True
+                )
+            ),
+        ),
+        {
+            "avstandskontroller": [
+                {
+                    "krav": f"K{index}",
+                    (
+                        "underlag_och_osakerhet"
+                        if index < 4
+                        else "underlag_och_osäkerhet"
+                    ): f"U{index}",
+                }
+                for index in range(8)
+            ]
+        },
+        {
+            "avstandskontroller": [
+                {"krav": f"K{index}", "underlag_och_osakerhet": f"U{index}"}
+                for index in range(8)
+            ]
+        },
+    ),
+    # Item 0 is right, items 1-3 drift.
+    "later_items": (
+        _array_contract(
+            "avvikelser",
+            _closed(
+                _string_fields_contract(
+                    ["avvikelse", "vad_vi_avser_att_forelagga_om"], nullable=True
+                )
+            ),
+        ),
+        {
+            "avvikelser": [
+                {"avvikelse": "A0", "vad_vi_avser_att_forelagga_om": "V0"},
+                *(
+                    {
+                        "avvikelse": f"A{index}",
+                        "vad_vi_avser_att_forelägga_om": f"V{index}",
+                    }
+                    for index in (1, 2, 3)
+                ),
+            ]
+        },
+        {
+            "avvikelser": [
+                {"avvikelse": f"A{index}", "vad_vi_avser_att_forelagga_om": f"V{index}"}
+                for index in range(4)
+            ]
+        },
+    ),
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shape", sorted(_DRIFT_SHAPES))
+async def test_json_step_keeps_the_value_of_a_key_that_differs_only_by_diacritics(
+    user, shape
+):
+    contract, model_output, expected = _DRIFT_SHAPES[shape]
+
+    _, _, output, payload, _ = await _completed_json_step(
+        user, output_contract=contract, response=model_output
+    )
+
+    assert output.structured_output == expected
+    assert [
+        diagnostic.code
+        for diagnostic in output.diagnostics
+        if diagnostic.code.startswith("typed_output_")
+    ] == ["typed_output_keys_renamed"]
+    # One view of the output: the persisted text is the conformed value, not
+    # the model's spelling.
+    assert output.full_text == json.dumps(expected, ensure_ascii=False)
+    assert payload["text"] == output.full_text
+    assert payload["structured"] == expected
+
+
+_LAST_MILE_CONTRACT = _string_fields_contract(["krav", "bedomning"])
+_LAST_MILE_RESPONSE = {"krav": "K1", "bedömning": "Avvikelse"}
+_LAST_MILE_CONFORMED = {"krav": "K1", "bedomning": "Avvikelse"}
+
+
+@pytest.mark.asyncio
+async def test_webhook_body_is_the_conformed_output(user):
+    _, _, _, payload, _ = await _completed_json_step(
+        user, output_contract=_LAST_MILE_CONTRACT, response=_LAST_MILE_RESPONSE
+    )
+    # The delivery reads the persisted text exactly like this and posts it as the
+    # body when the webhook config has no body of its own.
+    text_payload = interpret_step_text(payload).text
+    send_http_request = AsyncMock(
+        return_value=httpx.Response(
+            200, request=httpx.Request("POST", "https://example.org/webhook")
+        )
+    )
+    deps = _webhook_deps(send_http_request=send_http_request)
+
+    await deliver_webhook(
+        step=_WebhookStep(
+            step_order=2,
+            step_id="step-2",
+            input_type="text",
+            input_source="previous_step",
+            output_config={
+                "url": "https://example.org/webhook",
+                "auth": {"mode": "none"},
+            },
+        ),
+        text_payload=text_payload,
+        run=_WebhookRun(id="run-1", flow_id="flow-1", tenant_id="tenant-1"),
+        context={},
+        deps=deps,
+        idempotency_key="run-1:step-2:1:webhook",
+    )
+
+    body = send_http_request.await_args.kwargs["body_bytes"]
+    assert json.loads(body) == _LAST_MILE_CONFORMED
+
+
+@pytest.mark.asyncio
+async def test_step_output_text_variable_shows_the_conformed_output(user):
+    executor, run, _, _, persisted = await _completed_json_step(
+        user, output_contract=_LAST_MILE_CONTRACT, response=_LAST_MILE_RESPONSE
+    )
+    context = executor.variable_resolver.build_context(
+        run.input_payload_json, [persisted]
+    )
+
+    rendered = executor.variable_resolver.interpolate("{{step_1.output.text}}", context)
+
+    assert json.loads(rendered) == _LAST_MILE_CONFORMED
+
+
+@pytest.mark.asyncio
+async def test_text_input_with_a_contract_receives_the_conformed_output(user):
+    executor, run, _, _, persisted = await _completed_json_step(
+        user, output_contract=_LAST_MILE_CONTRACT, response=_LAST_MILE_RESPONSE
+    )
+    state = RunExecutionState(
+        completed_by_order={1: persisted},
+        prior_results=[persisted],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    reader = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="text",
+        input_contract=_LAST_MILE_CONTRACT,
+    )
+
+    output = (
+        await executor._execute_step(step=reader, run=run, state=state, attempt_no=1)
+    ).output
+
+    assert json.loads(output.input_text) == _LAST_MILE_CONFORMED
+    assert output.contract_validation is not None
+    assert output.contract_validation["parse_succeeded"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_export_preview_shows_the_conformed_output(user):
+    _, _, _, payload, _ = await _completed_json_step(
+        user, output_contract=_LAST_MILE_CONTRACT, response=_LAST_MILE_RESPONSE
+    )
+
+    preview = _build_step_output_summary(payload)
+
+    assert preview is not None
+    assert json.loads(preview["preview"]) == _LAST_MILE_CONFORMED
+
+
+@pytest.mark.asyncio
+async def test_flow_review_sample_shows_the_conformed_output(user):
+    _, _, _, payload, _ = await _completed_json_step(
+        user, output_contract=_LAST_MILE_CONTRACT, response=_LAST_MILE_RESPONSE
+    )
+
+    recorded = _recorded_text({"output_payload_json": payload}, "output")
+
+    assert recorded is not None
+    assert json.loads(recorded[0]) == _LAST_MILE_CONFORMED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("contract", "raw_text"),
+    [
+        # Exact keys, in the model's own layout.
+        (
+            _LAST_MILE_CONTRACT,
+            json.dumps(_LAST_MILE_CONFORMED, indent=2, ensure_ascii=False),
+        ),
+        # A pruned extra key is not a rename: the model text stays as written.
+        (
+            _closed(_LAST_MILE_CONTRACT),
+            '{"krav":"K1",   "bedomning":"Avvikelse", "extra":"dropped"}',
+        ),
+        # A second spelling next to the declared key is left as it always was.
+        (
+            _closed(_LAST_MILE_CONTRACT),
+            '{"krav":"K1","bedomning":"Avvikelse","bedömning":"Godkänd"}',
+        ),
+    ],
+)
+async def test_json_step_text_is_byte_identical_when_no_key_was_renamed(
+    user, contract, raw_text
+):
+    _, _, output, payload, _ = await _completed_json_step(
+        user, output_contract=contract, response=raw_text
+    )
+
+    assert output.full_text == raw_text
+    assert payload["text"] == raw_text
+    assert "typed_output_keys_renamed" not in {d.code for d in output.diagnostics}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "object_rule",
+    [
+        # Each rule reads the whole object, so a rename of an optional key would
+        # turn this passing output into a failure.
+        {"propertyNames": {"pattern": "^[A-Z]"}},
+        {"dependentRequired": {"antal": ["enhet"]}},
+        {"patternProperties": {"^a": {"type": "string"}}},
+    ],
+)
+async def test_json_step_that_passed_before_still_passes_when_an_optional_key_is_respelled(
+    user, object_rule
+):
+    contract = {
+        "type": "object",
+        "properties": {"antal": {"type": "integer"}},
+        **object_rule,
+    }
+    raw_text = '{"Antal": 3}'
+
+    _, _, output, payload, _ = await _completed_json_step(
+        user, output_contract=contract, response=raw_text
+    )
+
+    assert output.structured_output == {"Antal": 3}
+    assert payload["text"] == raw_text
+    assert "typed_output_keys_renamed" not in {d.code for d in output.diagnostics}
+
+
+@pytest.mark.asyncio
+async def test_json_step_still_fails_on_a_misspelling_that_is_not_a_respelling(user):
+    contract = _array_contract(
+        "utgaaende_tillgangar",
+        _closed(_string_fields_contract(["tillgang", "varde"])),
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await _execute_json_step(
+            user,
+            output_contract=contract,
+            response={"utgaaande_tillgangar": [{"tillgang": "Konto", "varde": "1"}]},
+        )
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
+    assert "'utgaaende_tillgangar' is a required property" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_json_step_does_not_let_a_drifted_key_overwrite_the_contract_key(user):
+    contract = _closed(_string_fields_contract(["krav", "bedomning"]))
+
+    output = await _execute_json_step(
+        user,
+        output_contract=contract,
+        response={"krav": "K", "bedomning": "Avvikelse", "bedömning": "Godkänd"},
+    )
+
+    assert output.structured_output == {"krav": "K", "bedomning": "Avvikelse"}
+    assert [
+        diagnostic.code
+        for diagnostic in output.diagnostics
+        if diagnostic.code.startswith("typed_output_")
+    ] == ["typed_output_extra_properties_dropped"]
+
+
+@pytest.mark.asyncio
+async def test_per_source_reader_keeps_the_value_of_a_key_that_differs_only_by_diacritics(
+    user,
+):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=3
+    )
+    file_id = uuid4()
+    executor.file_service.get_files_by_ids.side_effect = None
+    executor.file_service.get_files_by_ids.return_value = [
+        _runtime_file(file_id=file_id, text="Kontrollrapport", name="kontroll.pdf")
+    ]
+    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
+    model_document = {
+        "avvikelser": [
+            {"vad_vi_avser_att_forelagga_om": "V0"},
+            {"vad_vi_avser_att_forelägga_om": "V1"},
+        ]
+    }
+    assistant = _mock_assistant_for_execute_step(
+        response_text=json.dumps({"documents": [model_document]})
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "source_label": {"type": "string"},
+                            "source_file_id": {"type": "string"},
+                            "extraction_warnings": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                                },
+                            },
+                            "avvikelser": {
+                                "type": "array",
+                                "items": _closed(
+                                    _string_fields_contract(
+                                        ["vad_vi_avser_att_forelagga_om"]
+                                    )
+                                ),
+                            },
+                        },
+                        "required": [
+                            "source_label",
+                            "source_file_id",
+                            "extraction_warnings",
+                            "avvikelser",
+                        ],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["documents"],
+            "additionalProperties": False,
+        },
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 1,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+
+    assistant.get_response.assert_awaited_once()
+    assert output.structured_output == {
+        "documents": [
+            {
+                "avvikelser": [
+                    {"vad_vi_avser_att_forelagga_om": "V0"},
+                    {"vad_vi_avser_att_forelagga_om": "V1"},
+                ],
+                "source_label": "kontroll.pdf",
+                "source_file_id": str(file_id),
+                "extraction_warnings": [],
+            }
+        ]
+    }
+    assert json.loads(output.full_text) == output.structured_output
+    assert "typed_output_keys_renamed" in {
+        diagnostic.code for diagnostic in output.diagnostics
+    }

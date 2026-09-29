@@ -8,16 +8,17 @@ from typing import Protocol
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.runtime import StepDiagnostic
 from eneo.flows.output_processing import (
+    MAX_REPORTED_KEY_PATHS,
     StructuredOutputValue,
-    prune_extras_to_strict_schema,
+    conform_keys_to_schema,
 )
 from eneo.flows.runtime.document_rendering.guidance import (
     document_markdown_guidance,
 )
+from eneo.flows.runtime.structured_output_budget import structured_output_json
 
-_MAX_DROPPED_PATHS_REPORTED = 20
-_MAX_DROPPED_PATH_LENGTH = 200
-_MAX_DROPPED_PATHS_MESSAGE_LENGTH = 1600
+_MAX_REPORTED_PATH_LENGTH = 200
+_MAX_REPORTED_PATHS_MESSAGE_LENGTH = 1600
 
 
 class ParseJsonOutputFn(Protocol):
@@ -72,6 +73,9 @@ class OutputFormatProcessingResult:
     structured_output: StructuredOutputValue | None = None
     artifact: RenderedOutputArtifact | None = None
     diagnostics: tuple[StepDiagnostic, ...] = ()
+    # The text the step persists instead of the model's own, set only when a key
+    # was renamed: every reader of the step's text then sees the structured value.
+    conformed_text: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,18 +166,49 @@ def document_requests_structured_output(
     return output_contract is not None
 
 
-def prune_model_output_extras(
+@dataclass(frozen=True, slots=True)
+class ConformedModelOutput:
+    diagnostics: tuple[StepDiagnostic, ...]
+    conformed_text: str | None
+
+
+def conform_model_output_keys(
     structured_output: StructuredOutputValue,
     output_contract: FlowPersistedJsonObject,
-) -> tuple[StepDiagnostic, ...]:
-    result = prune_extras_to_strict_schema(structured_output, output_contract)
-    if not result.dropped_paths:
-        return ()
-    return (
-        StepDiagnostic(
-            code="typed_output_extra_properties_dropped",
-            message=_format_dropped_paths_message(result.dropped_paths),
-            severity="warning",
+) -> ConformedModelOutput:
+    result = conform_keys_to_schema(structured_output, output_contract)
+    diagnostics: list[StepDiagnostic] = []
+    if result.renamed_count:
+        count = result.renamed_count
+        diagnostics.append(
+            StepDiagnostic(
+                code="typed_output_keys_renamed",
+                message=_format_reported_paths(
+                    f"Renamed {count} field{'' if count == 1 else 's'} to the "
+                    "contract spelling",
+                    tuple(f"{old} -> {new}" for old, new in result.renamed_sample),
+                    total=count,
+                ),
+                severity="warning",
+            )
+        )
+    if result.dropped_paths:
+        count = len(result.dropped_paths)
+        diagnostics.append(
+            StepDiagnostic(
+                code="typed_output_extra_properties_dropped",
+                message=_format_reported_paths(
+                    f"Dropped {count} undeclared field{'' if count == 1 else 's'}",
+                    result.dropped_paths,
+                    total=count,
+                ),
+                severity="warning",
+            )
+        )
+    return ConformedModelOutput(
+        diagnostics=tuple(diagnostics),
+        conformed_text=(
+            structured_output_json(structured_output) if result.renamed_count else None
         ),
     )
 
@@ -187,7 +222,7 @@ def process_structured_document_output(
     context: OutputFormatProcessingContext,
 ) -> OutputFormatProcessingResult:
     structured_output = context.parse_json_output(full_text)
-    diagnostics = prune_model_output_extras(structured_output, output_contract)
+    conformed = conform_model_output_keys(structured_output, output_contract)
     context.validate_against_contract(
         structured_output,
         output_contract,
@@ -203,7 +238,8 @@ def process_structured_document_output(
     return OutputFormatProcessingResult(
         structured_output=structured_output,
         artifact=RenderedOutputArtifact(blob=blob, mimetype=mimetype),
-        diagnostics=diagnostics,
+        diagnostics=conformed.diagnostics,
+        conformed_text=conformed.conformed_text,
     )
 
 
@@ -225,22 +261,17 @@ def render_document_output(
     )
 
 
-def _format_dropped_paths_message(dropped_paths: tuple[str, ...]) -> str:
-    shown_paths = tuple(
-        _truncate_path(path) for path in dropped_paths[:_MAX_DROPPED_PATHS_REPORTED]
-    )
+def _format_reported_paths(summary: str, paths: tuple[str, ...], *, total: int) -> str:
+    shown_paths = tuple(_truncate_path(path) for path in paths[:MAX_REPORTED_KEY_PATHS])
     suffix = ""
-    hidden_count = len(dropped_paths) - len(shown_paths)
+    hidden_count = total - len(shown_paths)
     if hidden_count > 0:
         suffix = f"; {hidden_count} more omitted"
-    message = (
-        f"Dropped {len(dropped_paths)} undeclared field"
-        f"{'' if len(dropped_paths) == 1 else 's'}: {', '.join(shown_paths)}{suffix}"
-    )
-    return message[:_MAX_DROPPED_PATHS_MESSAGE_LENGTH]
+    message = f"{summary}: {', '.join(shown_paths)}{suffix}"
+    return message[:_MAX_REPORTED_PATHS_MESSAGE_LENGTH]
 
 
 def _truncate_path(path: str) -> str:
-    if len(path) <= _MAX_DROPPED_PATH_LENGTH:
+    if len(path) <= _MAX_REPORTED_PATH_LENGTH:
         return path
-    return f"{path[: _MAX_DROPPED_PATH_LENGTH - 3]}..."
+    return f"{path[: _MAX_REPORTED_PATH_LENGTH - 3]}..."

@@ -100,6 +100,11 @@ class TypedOutputProcessingResult:
     structured_output: StructuredOutputValue | None
     artifacts: list[dict[str, str | int]] | None
     diagnostics: list[StepDiagnostic]
+    conformed_text: str | None = None
+
+    def persisted_text(self, model_text: str) -> str:
+        """The text a step persists: the conformed value when a key was renamed."""
+        return model_text if self.conformed_text is None else self.conformed_text
 
 
 @dataclass(frozen=True)
@@ -157,6 +162,7 @@ async def process_typed_output(
         structured_output=format_result.structured_output,
         artifacts=artifacts,
         diagnostics=list(format_result.diagnostics),
+        conformed_text=format_result.conformed_text,
     )
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import cast
@@ -41,6 +42,7 @@ from eneo.flows.runtime.step_handlers.base import PreparedAssistantStep
 from eneo.flows.runtime.step_handlers.compose_text import ComposeTextStepHandler
 from eneo.flows.runtime.step_handlers.http_post import HttpPostStepHandler
 from eneo.flows.runtime.step_handlers.pass_through import PassThroughStepHandler
+from eneo.flows.runtime.step_handlers.render_verbatim import RenderVerbatimStepHandler
 from eneo.flows.runtime.step_handlers.template_fill import TemplateFillStepHandler
 from eneo.flows.runtime.step_handlers.transcribe_only import TranscribeOnlyStepHandler
 from eneo.flows.variable_resolver import FlowVariableResolver
@@ -426,6 +428,56 @@ async def test_compose_text_handler_skips_llm_and_rag() -> None:
         diagnostic.code == "compose_text_used"
         for diagnostic in result.output.diagnostics
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("handler_type", "output_mode", "output_type"),
+    [
+        (ComposeTextStepHandler, "compose_text", "text"),
+        (RenderVerbatimStepHandler, "render_verbatim", "docx"),
+    ],
+)
+async def test_non_model_text_handlers_persist_the_conformed_text_when_a_key_was_renamed(
+    handler_type, output_mode, output_type
+) -> None:
+    conformed = '{"bedomning": "Avvikelse"}'
+    process_typed_output = AsyncMock(
+        return_value=TypedOutputProcessingResult(
+            structured_output={"bedomning": "Avvikelse"},
+            artifacts=None,
+            diagnostics=[],
+            conformed_text=conformed,
+        )
+    )
+    apply_output_cap = AsyncMock(return_value=(conformed, []))
+    prepared_step = _prepared_assistant_step(
+        apply_output_cap=apply_output_cap,
+        process_typed_output=process_typed_output,
+    )
+
+    async def _prepare(
+        *,
+        step: RuntimeStep,
+        run: FlowRun,
+        state: RunExecutionState,
+        version_metadata: dict[str, object] | None,
+        attempt_no: int,
+    ) -> PreparedAssistantStep:
+        return prepared_step
+
+    result = await handler_type(prepare_assistant_step=_prepare).execute(
+        step=replace(_step(output_mode=output_mode), output_type=output_type),
+        run=_run(),
+        state=_state(),
+        version_metadata=None,
+        attempt_no=1,
+    )
+
+    assert apply_output_cap.await_args.kwargs["text"] == conformed
+    assert result.output.full_text == conformed
+    assert result.output.persisted_text == conformed
+    assert result.output.structured_output == {"bedomning": "Avvikelse"}
 
 
 @pytest.mark.asyncio
