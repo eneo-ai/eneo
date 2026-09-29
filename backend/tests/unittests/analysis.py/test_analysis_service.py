@@ -335,6 +335,79 @@ async def test_ask_question_personal_space_with_access(service: AnalysisService)
         from_date=from_date,
         to_date=to_date,
     )
+    service.space_service.actor_manager.get_space_actor_from_space.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("method_name", "repository_method", "extra_arguments"),
+    [
+        ("get_questions_since", "get_assistant_sessions_since", {}),
+        (
+            "get_assistant_question_history_page",
+            "get_assistant_question_history_page",
+            {"include_followups": False, "limit": 20},
+        ),
+        (
+            "ask_question_on_questions",
+            "get_assistant_question_texts_since",
+            {"question": "What was asked?", "stream": False},
+        ),
+    ],
+)
+async def test_shared_assistant_question_access_is_checked_before_query(
+    service: AnalysisService,
+    mock_actor: SpaceActor,
+    method_name: str,
+    repository_method: str,
+    extra_arguments: dict[str, object],
+):
+    assistant_id = uuid4()
+    space_id = uuid4()
+    assistant = MagicMock(id=assistant_id, space_id=space_id)
+    space = MagicMock()
+    space.is_personal.return_value = False
+    space.get_assistant.return_value = assistant
+    service.assistant_service.get_assistant.return_value = (assistant, [])
+    service.space_service.get_space.return_value = space
+    mock_actor.can_access_insight_assistant.return_value = False
+
+    with pytest.raises(UnauthorizedException, match="Insights are not enabled"):
+        await getattr(service, method_name)(
+            assistant_id=assistant_id,
+            from_date=datetime(2026, 2, 1),
+            to_date=datetime(2026, 2, 11),
+            **extra_arguments,
+        )
+
+    service.space_service.get_space.assert_awaited_once_with(space_id)
+    space.get_assistant.assert_called_once_with(assistant_id=assistant_id)
+    mock_actor.can_access_insight_assistant.assert_called_once_with(assistant=assistant)
+    getattr(service.repo, repository_method).assert_not_awaited()
+
+
+async def test_shared_assistant_question_access_allows_insight_reader(
+    service: AnalysisService,
+    mock_actor: SpaceActor,
+):
+    assistant_id = uuid4()
+    assistant = MagicMock(id=assistant_id, space_id=uuid4())
+    space = MagicMock()
+    space.is_personal.return_value = False
+    space.get_assistant.return_value = assistant
+    service.assistant_service.get_assistant.return_value = (assistant, [])
+    service.space_service.get_space.return_value = space
+    service.repo.get_assistant_sessions_since.return_value = []
+    mock_actor.can_access_insight_assistant.return_value = True
+
+    questions = await service.get_questions_since(
+        assistant_id=assistant_id,
+        from_date=datetime(2026, 2, 1),
+        to_date=datetime(2026, 2, 11),
+    )
+
+    assert questions == []
+    mock_actor.can_access_insight_assistant.assert_called_once_with(assistant=assistant)
+    service.repo.get_assistant_sessions_since.assert_awaited_once()
 
 
 async def test_get_questions_since_passes_tenant_id(service: AnalysisService):

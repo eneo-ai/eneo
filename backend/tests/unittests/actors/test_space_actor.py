@@ -243,6 +243,33 @@ def shared_space(organization_space, viewer_user, editor_user, admin_user):
     )
 
 
+@pytest.mark.parametrize(
+    ("role", "insight_enabled", "can_view_insights"),
+    [
+        (MockSpaceRole.VIEWER, True, False),
+        (MockSpaceRole.EDITOR, True, True),
+        (MockSpaceRole.EDITOR, False, False),
+    ],
+)
+def test_shared_assistant_insights_require_role_and_enabled_resource(
+    shared_space: MockSpace,
+    role: str,
+    insight_enabled: bool,
+    can_view_insights: bool,
+):
+    user = MockUser(
+        id=uuid4(),
+        permissions={Permission.SHARED_SPACES, Permission.ASSISTANTS},
+    )
+    shared_space.members[user.id] = MockGroupMember(id=user.id, role=role)
+    assistant = MagicMock(id=uuid4(), published=True, insight_enabled=insight_enabled)
+    shared_space.assistants = [assistant]
+    actor = _actor(user, shared_space)
+
+    assert actor.can_read_assistants()
+    assert actor.can_access_insight_assistant(assistant=assistant) is can_view_insights
+
+
 def test_owner_can_read_personal_space(owner_user: MockUser, personal_space: MockSpace):
     actor = _actor(owner_user, personal_space)
     assert actor.can_perform_action(

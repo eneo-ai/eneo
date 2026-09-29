@@ -31,7 +31,7 @@ ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="CrawlRunService enforces access to the parent website and space.",
+    reason="WebsiteCrudService checks read access to the run's parent space and website.",
 )
 async def get_crawl_run(
     id: Annotated[

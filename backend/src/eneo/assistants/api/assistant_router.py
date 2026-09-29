@@ -184,7 +184,10 @@ async def create_assistant(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason=_ASSISTANT_ACCESS_REASON,
+    reason=(
+        "Lists caller-created assistants. Tenant-wide listing requires admin "
+        "permission and rejects resource-scoped API keys."
+    ),
 )
 async def get_assistants(
     request: Request,

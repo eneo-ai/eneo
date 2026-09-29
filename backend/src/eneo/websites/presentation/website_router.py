@@ -112,7 +112,7 @@ async def create_website(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason=_WEBSITE_SERVICE_ACCESS_REASON,
+    reason="The lookup reads the caller's tenant organization space for an existing URL.",
 )
 async def check_existing_website_url(
     container: ContainerDep,
