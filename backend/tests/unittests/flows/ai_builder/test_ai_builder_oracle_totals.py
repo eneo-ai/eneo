@@ -1641,6 +1641,7 @@ def _report_args(
     *,
     rerun_of: list[str] | None = None,
     evidence: list[str] | None = None,
+    probe_suite: str | None = None,
 ) -> argparse.Namespace:
     freeze = world.tmp / "freeze.json"
     freeze.write_text(json.dumps(world.freeze))
@@ -1653,6 +1654,7 @@ def _report_args(
         ],
         rerun_of=rerun_of,
         evidence_leg=evidence,
+        probe_suite=probe_suite,
         audit=None,
     )
 
@@ -1778,6 +1780,37 @@ def test_an_evidence_receipt_of_another_configuration_is_reported_and_never_deci
     )
     assert clash["decision"]["outcome"] == "NO_DECISION"
     assert any("repeats a decision leg" in p for p in clash["decision"]["problems"])
+
+
+def test_an_evidence_leg_with_a_decision_legs_label_never_overwrites_its_question_counts(
+    world: _World,
+) -> None:
+    decision_rows = _rows(12)
+    _with_questions(decision_rows, {"case-0": ["docx_output_mode"]})
+    a = _leg(world.totals, world.tmp, "A_luna6", "builder", decision_rows)
+    o = _leg(world.totals, world.tmp, "O_luna6", "oracle", _rows(24))
+    evidence_rows = _rows(1)
+    _with_questions(evidence_rows, {"case-0": ["runtime_metadata_field_details"]})
+    evidence = _leg_dir(world.tmp, "A-evidence", evidence_rows, arm="builder")
+
+    result = world.totals.report(
+        _report_args(world, a, o, evidence=[f"A_luna6:builder:gpt-6-luna={evidence}"])
+    )
+
+    assert result["decision"]["outcome"] == "NO_DECISION"  # the clash is still refused
+    counts = result["question_counts"]
+    assert counts["A_luna6"]["case-0"]["by_question_id"] == {"docx_output_mode": 3}
+    assert counts["A_luna6 (evidence, not decided on)"]["case-0"]["by_question_id"] == {
+        "runtime_metadata_field_details": 3
+    }
+    markdown = world.totals.render_markdown(result)
+    assert (
+        "| case | A_luna6 | O_luna6 | A_luna6 (evidence, not decided on) |" in markdown
+    )
+    assert _rendered_row(markdown, "case-0")[0] == "3/3 (docx_output_mode x3)"
+    assert _rendered_row(markdown, "case-0")[2] == (
+        "3/3 (runtime_metadata_field_details x3)"
+    )
 
 
 # ------------------------------- a leg is read only through a verified receipt
@@ -2306,6 +2339,127 @@ def test_an_invalid_experiment_is_reported_raw_and_never_re_scored(
     assert result["totals"]["A_luna6"]["fulfilled"] == 12  # raw counts still shown
 
 
+def _with_questions(rows: list[dict[str, Any]], asked: dict[str, list[str]]) -> None:
+    """The question events a Builder row carries (`event_summary`), by case."""
+
+    for row in rows:
+        if row["case_id"] in asked:
+            row["event_summary"] = {"question_event_ids": asked[row["case_id"]]}
+
+
+def test_the_report_counts_the_questions_per_case_and_leg_from_verified_rows(
+    world: _World,
+) -> None:
+    both = ["docx_output_mode", "runtime_metadata_field_details"]
+    builder_rows = _rows(12)
+    _with_questions(builder_rows, {"case-0": both, "case-1": ["docx_output_mode"]})
+    a = _leg(world.totals, world.tmp, "A_luna6", "builder", builder_rows)
+    o = _leg(world.totals, world.tmp, "O_luna6", "oracle", _rows(24))
+
+    result = world.totals.report(_report_args(world, a, o))
+
+    counts = result["question_counts"]
+    assert counts["A_luna6"]["case-0"] == {
+        "rows": 3,
+        "questions": 6,
+        "by_question_id": {"docx_output_mode": 3, "runtime_metadata_field_details": 3},
+        "rows_without_record": 0,
+    }
+    assert counts["A_luna6"]["case-1"]["by_question_id"] == {"docx_output_mode": 3}
+    # An oracle row carries no question record, which is not zero questions.
+    assert counts["O_luna6"]["case-0"] == {
+        "rows": 3,
+        "questions": 0,
+        "by_question_id": {},
+        "rows_without_record": 3,
+    }
+    markdown = world.totals.render_markdown(result)
+    assert "6/3 (docx_output_mode x3, runtime_metadata_field_details x3)" in markdown
+    # No record is unknown, never a measured zero: case-2 (Builder rows without
+    # a record) and every oracle cell.
+    cells = _rendered_row(markdown, "case-2")
+    assert cells == ["UNKNOWN", "UNKNOWN"]
+    assert "0/3" not in markdown
+
+
+def _rendered_row(markdown: str, case_id: str) -> list[str]:
+    """The cells of a case's line in the question table (after its case column)."""
+
+    marker = "Questions the Builder raised"
+    table = markdown[markdown.index(marker) :]
+    line = next(l for l in table.splitlines() if l.startswith(f"| {case_id} |"))
+    return [cell.strip() for cell in line.strip().strip("|").split("|")[1:]]
+
+
+def test_the_rendered_report_shows_how_many_rows_lack_a_question_record(
+    world: _World,
+) -> None:
+    rows = _rows(12)
+    _with_questions(rows, {"case-3": ["docx_output_mode"]})
+    for row in rows:
+        if row["case_id"] == "case-3" and row["repetition"] != 1:
+            row.pop("event_summary")  # two of the three repetitions have no record
+    a = _leg(world.totals, world.tmp, "A_luna6", "builder", rows)
+    o = _leg(world.totals, world.tmp, "O_luna6", "oracle", _rows(24))
+
+    result = world.totals.report(_report_args(world, a, o))
+
+    assert result["question_counts"]["A_luna6"]["case-3"]["rows_without_record"] == 2
+    markdown = world.totals.render_markdown(result)
+    assert _rendered_row(markdown, "case-3")[0] == (
+        "1/1 (docx_output_mode x1), 2 of 3 rows without a record"
+    )
+
+
+def test_a_tampered_row_is_refused_whole_and_its_questions_are_not_counted(
+    world: _World,
+) -> None:
+    rows = _rows(12)
+    _with_questions(rows, {"case-0": ["docx_output_mode"]})
+    a = _leg(world.totals, world.tmp, "A_luna6", "builder", rows)
+    o = _leg(world.totals, world.tmp, "O_luna6", "oracle", _rows(24))
+    summary_path = Path(a.directory) / "suite-summary.json"
+    summary = json.loads(summary_path.read_text())
+    for row in summary["results"]:
+        if row["case_id"] == "case-0":
+            row["event_summary"] = {"question_event_ids": []}  # hides the questions
+    summary_path.write_text(json.dumps(summary))
+    tampered = world.totals.parse_leg(f"A_luna6:builder:gpt-6-luna={a.directory}")
+
+    result = world.totals.report(_report_args(world, tampered, o))
+
+    assert result["totals"]["A_luna6"]["receipt_integrity_error"]
+    assert result["question_counts"]["A_luna6"] == {}
+    assert result["decision"]["outcome"] == "NO_DECISION"
+
+
+def test_the_report_shows_the_probes_original_criterion_beside_the_amended_one(
+    world: _World, tmp_path: Path
+) -> None:
+    world.freeze["intake_message_sha256_by_id"][PROBE_CASE] = hashlib.sha256(
+        PROBE_CASE.encode()
+    ).hexdigest()
+    suite = _probe_suite(
+        tmp_path,
+        "smoke",
+        asked=[ASKED_AND_ANSWERED] * 3,
+        context=_probe_context(),
+    )
+    a, o = world.legs()
+
+    result = world.totals.report(_report_args(world, a, o, probe_suite=str(suite)))
+
+    probe = result["intake_probe"]
+    assert probe["passed"] is True
+    assert probe["original_criterion"]["passed"] is False
+    assert probe["first_message_uptake"] == "unknown"
+    markdown = world.totals.render_markdown(result)
+    assert "amended criterion" in markdown and "**PASS**" in markdown
+    assert "original criterion" in markdown and "**FAIL**" in markdown
+    assert "first-message uptake: **UNKNOWN**" in markdown
+    assert "intake_probe" not in world.totals.report(_report_args(world, a, o))
+
+
 def test_the_selection_has_no_association_check_so_the_audit_needs_none() -> None:
     corpus = _corpus()
     for entry in _selection_file()["cases"]:
@@ -2322,6 +2476,8 @@ def _probe_suite(
     *,
     plans: list[dict[str, str]] | None = None,
     asked: list[list[str]] | None = None,
+    answered: list[list[str]] | None = None,
+    recorded: list[list[str]] | None = None,
     case_ids: list[str] | None = None,
     repetitions: list[int] | None = None,
     context: dict[str, Any] | None = None,
@@ -2339,6 +2495,10 @@ def _probe_suite(
     repetitions = repetitions or [1, 2, 3]
     plans = plans or [PROBE_FIELDS] * len(repetitions)
     asked = asked or [[]] * len(repetitions)
+    # The harness answers a question from the configured answers unless told otherwise.
+    answered = answered if answered is not None else asked
+    # The journey records what the harness saw; it agrees with the events unless told otherwise.
+    recorded = recorded if recorded is not None else asked
     case_ids = case_ids or [PROBE_CASE] * len(repetitions)
     answer = [
         {"value": {"name": n, "type": t, "label": n, "required": True, "options": []}}
@@ -2367,6 +2527,23 @@ def _probe_suite(
                 }
             },
             "event_summary": {"question_event_ids": asked[index]},
+            "journey": {
+                "questions": [
+                    {
+                        "ordinal": ordinal,
+                        "turn": ordinal,
+                        "question_id": question_id,
+                        "answerable": question_id in answered[index],
+                        "answer_turn": ordinal + 1
+                        if question_id in answered[index]
+                        else None,
+                        "answer_source": "case_override"
+                        if question_id in answered[index]
+                        else None,
+                    }
+                    for ordinal, question_id in enumerate(recorded[index], start=1)
+                ]
+            },
         }
     revision = SOURCE
     _write_receipt(
@@ -2430,6 +2607,9 @@ def test_the_builder_smoke_passes_on_the_one_receipt_it_is_defined_on(
 
     assert outcome["refusals"] == [] and outcome["passed"] is True
     assert [r["repetition"] for r in outcome["results"]] == [1, 2, 3]
+    # No question came before the plan: the first message alone carried the fields.
+    assert outcome["first_message_uptake"] == "observed"
+    assert outcome["original_criterion"]["passed"] is True
     # The names are ones the prompt does not contain: the answer was read.
     assert outcome["results"][0]["names_absent_from_prompt"] == [
         "anstallning",
@@ -2438,35 +2618,122 @@ def test_the_builder_smoke_passes_on_the_one_receipt_it_is_defined_on(
     ]
 
 
-def test_the_smoke_fails_when_any_repetition_loses_the_prose_answer(
+ASKED_AND_ANSWERED = ["docx_output_mode", "runtime_metadata_field_details"]
+
+
+def test_an_ask_and_answer_bundle_passes_with_the_uptake_unknown_and_the_original_failing(
     totals: ModuleType, tmp_path: Path, probe_freeze: dict[str, Any]
 ) -> None:
-    for name, plans, asked in (
-        (
-            "invented",
-            [
-                PROBE_FIELDS,
-                {
-                    "namn": "text",
-                    **{k: v for k, v in PROBE_FIELDS.items() if k != "bestallare_namn"},
-                },
-                PROBE_FIELDS,
-            ],
-            None,
-        ),
-        (
-            "type",
-            [PROBE_FIELDS, PROBE_FIELDS, {**PROBE_FIELDS, "intygsdatum": "text"}],
-            None,
-        ),
-        ("asked", None, [[], ["runtime_metadata_field_details"], []]),
+    """The Builder asks for the fields, the harness answers from the configured
+    answers, the plan is right: eventual correctness holds, first-message uptake
+    is not shown, and the original 'did not ask again' criterion stays failed."""
+
+    suite = _probe_suite(
+        tmp_path,
+        "ask-and-answer",
+        asked=[ASKED_AND_ANSWERED] * 3,
+        context=_probe_context(),
+    )
+
+    outcome = totals.probe_builder_intake(suite, freeze=probe_freeze)
+
+    assert outcome["refusals"] == [] and outcome["passed"] is True
+    assert "eventual field correctness" in outcome["claim"]
+    assert outcome["first_message_uptake"] == "unknown"
+    assert outcome["original_criterion"]["passed"] is False
+    for result in outcome["results"]:
+        assert result["asked_again"] is True
+        assert result["field_question_answered_from_configured_answers"] is True
+        assert result["first_message_uptake"] == "unknown"
+        assert result["original_passed"] is False
+
+
+def test_the_smoke_fails_when_any_repetitions_eventual_fields_differ(
+    totals: ModuleType, tmp_path: Path, probe_freeze: dict[str, Any]
+) -> None:
+    invented = {
+        "namn": "text",
+        **{k: v for k, v in PROBE_FIELDS.items() if k != "bestallare_namn"},
+    }
+    retyped = {**PROBE_FIELDS, "intygsdatum": "text"}
+    for name, plans, matching in (
+        ("invented", [PROBE_FIELDS, invented, PROBE_FIELDS], [True, False, True]),
+        ("type", [PROBE_FIELDS, PROBE_FIELDS, retyped], [True, True, False]),
     ):
+        # Answered from the configured answers, and still wrong.
         suite = _probe_suite(
-            tmp_path, name, plans=plans, asked=asked, context=_probe_context()
+            tmp_path,
+            name,
+            plans=plans,
+            asked=[ASKED_AND_ANSWERED] * 3,
+            context=_probe_context(),
         )
         outcome = totals.probe_builder_intake(suite, freeze=probe_freeze)
-        assert outcome["refusals"] == []  # a valid receipt that shows prose was lost
+        assert outcome["refusals"] == []  # a valid receipt that shows wrong fields
         assert outcome["passed"] is False, name
+        assert [r["eventual_fields_match"] for r in outcome["results"]] == matching
+
+
+def test_the_smoke_fails_when_a_field_question_was_not_answered_from_the_configured_answers(
+    totals: ModuleType, tmp_path: Path, probe_freeze: dict[str, Any]
+) -> None:
+    suite = _probe_suite(
+        tmp_path,
+        "unanswered",
+        asked=[[], ["runtime_metadata_field_details"], []],
+        answered=[[], [], []],
+        context=_probe_context(),
+    )
+
+    outcome = totals.probe_builder_intake(suite, freeze=probe_freeze)
+
+    assert outcome["refusals"] == []
+    assert outcome["passed"] is False
+    assert [
+        r["field_question_answered_from_configured_answers"] for r in outcome["results"]
+    ] == [None, False, None]
+
+
+def test_every_field_question_event_needs_its_own_answered_record(
+    totals: ModuleType, tmp_path: Path, probe_freeze: dict[str, Any]
+) -> None:
+    field = "runtime_metadata_field_details"
+    suite = _probe_suite(
+        tmp_path,
+        "unrecorded",
+        asked=[[field, field], [], []],
+        recorded=[[field], [], []],  # the second occurrence has no record
+        context=_probe_context(),
+    )
+
+    outcome = totals.probe_builder_intake(suite, freeze=probe_freeze)
+
+    assert outcome["passed"] is False
+    assert (
+        outcome["results"][0]["field_question_answered_from_configured_answers"]
+        is False
+    )
+
+
+def test_a_plan_that_missed_the_fields_with_no_question_asked_is_not_observed(
+    totals: ModuleType, tmp_path: Path, probe_freeze: dict[str, Any]
+) -> None:
+    suite = _probe_suite(
+        tmp_path,
+        "missed",
+        plans=[PROBE_FIELDS, {"namn": "text"}, PROBE_FIELDS],
+        context=_probe_context(),
+    )
+
+    outcome = totals.probe_builder_intake(suite, freeze=probe_freeze)
+
+    assert outcome["passed"] is False
+    assert [r["first_message_uptake"] for r in outcome["results"]] == [
+        "observed",
+        "not_observed",
+        "observed",
+    ]
+    assert outcome["first_message_uptake"] == "unknown"  # a mix establishes nothing
 
 
 @pytest.mark.parametrize(

@@ -38,7 +38,7 @@ usage:
       --leg A_luna6:builder:gpt-6-luna=SUITE_DIR \\
       --leg O_luna6:oracle:gpt-6-luna=SUITE_DIR \\
       --leg O_gemma:oracle:gemma4-31b-it=SUITE_DIR \\
-      [--audit audit.json] [--format markdown|json]
+      [--audit audit.json] [--probe-suite SMOKE_SUITE_DIR] [--format markdown|json]
 
 Legs are `label:arm:runtime-model=suite-dir`. The decision reads the legs
 labelled `A_luna6` and `O_luna6`; other legs are reported, never decided on.
@@ -1220,6 +1220,42 @@ def parse_rerun(text: str, legs: Sequence[Leg]) -> Leg:
     return parse_leg(f"{label}:{owner.arm}:{owner.runtime_model}={directory}")
 
 
+EVIDENCE_SUFFIX = " (evidence, not decided on)"
+
+
+def question_counts(leg: Leg) -> dict[str, JsonObject]:
+    """Per case, the question events the leg's VERIFIED rows carry, by question id.
+
+    A row is read only through `verified_receipt`, so a leg whose receipt fails
+    it has no rows and no counts (its integrity error is in its totals). A row
+    that carries no question record (an oracle-arm row asks nothing) is counted
+    apart, never as zero questions.
+    """
+
+    counts: dict[str, JsonObject] = {}
+    for row in leg.rows:
+        entry = counts.setdefault(
+            str(row["case_id"]),
+            {"rows": 0, "questions": 0, "by_question_id": {}, "rows_without_record": 0},
+        )
+        entry["rows"] += 1
+        ids = (row.get("event_summary") or {}).get("question_event_ids")
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+            entry["rows_without_record"] += 1
+            continue
+        entry["questions"] += len(ids)
+        for question_id in ids:
+            by_id = cast(dict[str, int], entry["by_question_id"])
+            by_id[question_id] = by_id.get(question_id, 0) + 1
+    return {
+        case_id: {
+            **entry,
+            "by_question_id": dict(sorted(entry["by_question_id"].items())),
+        }
+        for case_id, entry in sorted(counts.items())
+    }
+
+
 def _display_labels(legs: Sequence[Leg]) -> list[str]:
     """Unique keys for a report; a repeated label shows its receipt's position."""
 
@@ -1289,6 +1325,19 @@ def report(args: argparse.Namespace) -> JsonObject:
             if leg.label not in refused_evidence(evidence)
         },
         "refused_evidence": refused_evidence(evidence),
+        # The questions the Builder raised, reported and never gating: the
+        # extra questions a complete brief still draws are part of what arm A
+        # measures.
+        # Evidence legs live under their own display keys, so an evidence leg
+        # that shares a decision leg's label never replaces its counts.
+        "question_counts": {
+            **{key: question_counts(leg) for key, leg in zip(keys, legs)},
+            **{
+                f"{key}{EVIDENCE_SUFFIX}": question_counts(leg)
+                for key, leg in zip(_display_labels(evidence), evidence)
+                if leg.label not in refused_evidence(evidence)
+            },
+        },
         "corrections": [
             {
                 "case_id": c.case_id,
@@ -1302,6 +1351,9 @@ def report(args: argparse.Namespace) -> JsonObject:
         ],
         "decision": decision,
     }
+    probe_suite = getattr(args, "probe_suite", None)
+    if probe_suite:
+        result["intake_probe"] = probe_builder_intake(Path(probe_suite), freeze=freeze)
     return result
 
 
@@ -1334,7 +1386,7 @@ def render_markdown(result: Mapping[str, Any]) -> str:
             *result["totals"].items(),
             *(result.get("superseded_receipts") or {}).items(),
             *(
-                (f"{name} (evidence, not decided on)", total)
+                (f"{name}{EVIDENCE_SUFFIX}", total)
                 for name, total in (result.get("evidence_legs") or {}).items()
             ),
         )
@@ -1376,7 +1428,61 @@ def render_markdown(result: Mapping[str, Any]) -> str:
             )
             + " |"
         )
+    counts = result.get("question_counts") or {}
+    if any(counts.values()):
+        lines += [
+            "",
+            "Questions the Builder raised (verified rows: asked over rows with a record, by question id; UNKNOWN when no row has a record):",
+        ]
+        count_labels = list(counts)
+        lines += [
+            "| case | " + " | ".join(count_labels) + " |",
+            "|---|" + "---|" * len(count_labels),
+        ]
+        for case_id in sorted({c for per in counts.values() for c in per}):
+            lines.append(
+                f"| {case_id} | "
+                + " | ".join(
+                    _question_cell(counts[label].get(case_id)) for label in count_labels
+                )
+                + " |"
+            )
+    probe = result.get("intake_probe")
+    if probe:
+        lines += ["", *_probe_lines(probe)]
     return "\n".join(lines) + "\n"
+
+
+def _question_cell(entry: Mapping[str, Any] | None) -> str:
+    if not entry:
+        return " "
+    missing = entry["rows_without_record"]
+    recorded = entry["rows"] - missing
+    if recorded == 0:
+        # A row with no record says nothing about its questions: not a zero.
+        return "UNKNOWN"
+    detail = ", ".join(f"{qid} x{n}" for qid, n in entry["by_question_id"].items())
+    return (
+        f"{entry['questions']}/{recorded}"
+        + (f" ({detail})" if detail else "")
+        + (f", {missing} of {entry['rows']} rows without a record" if missing else "")
+    )
+
+
+def _probe_lines(probe: Mapping[str, Any]) -> list[str]:
+    if probe["refusals"]:
+        return [
+            "Intake probe REFUSED (not evaluated): " + "; ".join(probe["refusals"]),
+        ]
+    original = probe["original_criterion"]
+    return [
+        f"Intake probe, claim: {probe['claim']}",
+        f"- amended criterion ({probe['criterion']}): "
+        f"**{'PASS' if probe['passed'] else 'FAIL'}**",
+        f"- original criterion ({original['criterion']}): "
+        f"**{'PASS' if original['passed'] else 'FAIL'}**",
+        f"- first-message uptake: **{str(probe['first_message_uptake']).upper()}**",
+    ]
 
 
 def _tree_scorer_identity(tree: Path) -> tuple[int, str]:
@@ -1684,45 +1790,107 @@ def _probe_refusals(
     return refusals
 
 
+# The Builder's field-collection question: the turn controller asks it while
+# the confirmed input fields are absent (`_runtime_input_field_details_required`
+# in ai_builder_turn_controller.py), and the harness answers it from the
+# case's configured answers (`_configured_question_answer`).
+FIELD_COLLECTION_QUESTION_ID = "runtime_metadata_field_details"
+
+PROBE_CLAIM = (
+    "eventual field correctness: the plan's form fields equal the configured "
+    "answers. It says nothing about whether the first message alone was read."
+)
+PROBE_CRITERION = (
+    "the plan's form fields equal the answer's fields (names and types) in all "
+    "three repetitions, and every field-collection question the Builder asked "
+    "was answered from the same configured answers"
+)
+PROBE_ORIGINAL_CRITERION = (
+    "the plan's form fields equal the answer's fields (names and types) and "
+    "the Builder did not ask for them again, in all three repetitions"
+)
+
+
+def _probe_outcome(
+    refusals: list[str], results: list[JsonObject], *, passed: bool
+) -> JsonObject:
+    """The probe's answer: the amended criterion, and beside it the original one.
+
+    The original criterion (fields equal AND no field question asked) is kept
+    in every answer so a reader still sees that the Builder asked again.
+    """
+
+    uptakes = {str(r["first_message_uptake"]) for r in results}
+    return {
+        "claim": PROBE_CLAIM,
+        "criterion": PROBE_CRITERION,
+        "refusals": refusals,
+        "results": results,
+        "passed": passed,
+        # Known only when no structured answer preceded the plan; a mix of
+        # states establishes nothing.
+        "first_message_uptake": uptakes.pop() if len(uptakes) == 1 else "unknown",
+        "original_criterion": {
+            "criterion": PROBE_ORIGINAL_CRITERION,
+            "passed": bool(results) and all(r["original_passed"] for r in results),
+        },
+    }
+
+
+def _journey_questions(bundle: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    journey = cast(Mapping[str, Any], bundle.get("journey") or {})
+    return [
+        q
+        for q in cast(list[Any], journey.get("questions") or [])
+        if isinstance(q, dict)
+    ]
+
+
+def _answered_from_configured_answers(question: Mapping[str, Any]) -> bool:
+    """The harness answered this question, and from the case's configured answers
+    (`configured_answer_source` is set only on that path)."""
+
+    return (
+        question.get("answer_source") is not None
+        and question.get("answer_turn") is not None
+    )
+
+
 def probe_builder_intake(suite_dir: Path, *, freeze: Mapping[str, Any]) -> JsonObject:
-    """The behavioural criterion of the Builder smoke with answers up front.
+    """The behavioural check of the Builder smoke with answers up front.
 
     Defined on one suite directory: the Builder's complete, verified, up-front
     receipt of three repetitions of the preregistered case
     `mc_nar07_arbetsgivarintyg` (`_probe_refusals`; a receipt that is not that,
     or that fails the receipt reader's integrity checks, is refused, not
-    evaluated, and no other case can be probed). For each of its bundles the
-    plan's form fields must be exactly the fields the case's answer names, with
-    their types, and the Builder must not have asked that question again. The
-    answer names fields the prompt does not contain, so an exact match means the
-    prose answer was read. Any failing bundle means prose is lost for this
-    Builder and a structured channel is the fix.
+    evaluated, and no other case can be probed).
+
+    The claim is eventual field correctness, not prose uptake. The harness
+    answers a field-collection question the Builder asks from the same
+    configured answers the first message states, so a plan whose fields equal
+    the answers after that structured answer does not show what the first
+    message alone carried. A bundle passes when its plan's form fields are
+    exactly the fields the case's answer names, with their types, and every
+    field-collection question the Builder asked was answered from the
+    configured answers. First-message uptake is reported `unknown` whenever a
+    structured answer preceded the plan. The original criterion (the same
+    fields and no question asked) is reported beside it, per bundle and overall.
     """
 
     case_id = DESIGNATED_PROBE_CASE
-    criterion = (
-        "the plan's form fields equal the answer's fields (names and types) and "
-        "the Builder did not ask for them again, in all three repetitions"
-    )
     try:
         verified = verified_receipt(suite_dir)
     except receipt.ReceiptError as error:
-        return {
-            "criterion": criterion,
-            "refusals": [f"the receipt is not an intact record of its run: {error}"],
-            "results": [],
-            "passed": False,
-        }
+        return _probe_outcome(
+            [f"the receipt is not an intact record of its run: {error}"],
+            [],
+            passed=False,
+        )
     summary = verified.summary
     rows = [dict(observation.row) for observation in verified.observations]
     refusals = _probe_refusals(summary, rows, freeze=freeze)
     if refusals:
-        return {
-            "criterion": criterion,
-            "refusals": refusals,
-            "results": [],
-            "passed": False,
-        }
+        return _probe_outcome(refusals, [], passed=False)
     results: list[JsonObject] = []
     for row in sorted(rows, key=lambda r: int(r["repetition"])):
         bundle = _read_bundle(suite_dir, row)
@@ -1730,7 +1898,7 @@ def probe_builder_intake(suite_dir: Path, *, freeze: Mapping[str, Any]) -> JsonO
         answered = cast(
             Mapping[str, Any],
             (case.get("configured_question_answers") or {}).get(
-                "runtime_metadata_field_details"
+                FIELD_COLLECTION_QUESTION_ID
             )
             or {},
         )
@@ -1745,6 +1913,28 @@ def probe_builder_intake(suite_dir: Path, *, freeze: Mapping[str, Any]) -> JsonO
         asked = list(
             (bundle.get("event_summary") or {}).get("question_event_ids") or []
         )
+        field_questions = [
+            q
+            for q in _journey_questions(bundle)
+            if q.get("question_id") == FIELD_COLLECTION_QUESTION_ID
+        ]
+        asked_field_question = FIELD_COLLECTION_QUESTION_ID in asked
+        # Every occurrence in the event record needs its own answered record.
+        field_answered = (
+            len(field_questions) == asked.count(FIELD_COLLECTION_QUESTION_ID)
+            and all(_answered_from_configured_answers(q) for q in field_questions)
+            if asked_field_question
+            else None
+        )
+        structured_answer_first = any(
+            _answered_from_configured_answers(q) for q in _journey_questions(bundle)
+        )
+        identified = (
+            case.get("id") == case_id
+            and bundle.get("repetition") == row["repetition"]
+            and bool(wanted)
+        )
+        fields_match = identified and planned == wanted
         prompt = str(case.get("prompt") or "")
         results.append(
             {
@@ -1755,20 +1945,21 @@ def probe_builder_intake(suite_dir: Path, *, freeze: Mapping[str, Any]) -> JsonO
                     n for n in wanted if n not in prompt
                 ),
                 "planned": planned,
-                "asked_again": "runtime_metadata_field_details" in asked,
-                "passed": case.get("id") == case_id
-                and bundle.get("repetition") == row["repetition"]
-                and bool(wanted)
-                and planned == wanted
-                and "runtime_metadata_field_details" not in asked,
+                "eventual_fields_match": fields_match,
+                "asked_again": asked_field_question,
+                "field_question_answered_from_configured_answers": field_answered,
+                "first_message_uptake": (
+                    "unknown"
+                    if structured_answer_first
+                    else ("observed" if fields_match else "not_observed")
+                ),
+                "original_passed": fields_match and not asked_field_question,
+                "passed": fields_match and field_answered is not False,
             }
         )
-    return {
-        "criterion": criterion,
-        "refusals": [],
-        "results": results,
-        "passed": all(r["passed"] for r in results),
-    }
+    return _probe_outcome(
+        [], results, passed=bool(results) and all(r["passed"] for r in results)
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1797,6 +1988,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     rep.add_argument("--audit", default=None)
+    rep.add_argument(
+        "--probe-suite",
+        default=None,
+        help="the Builder smoke's suite directory: its intake probe is reported, never decided on",
+    )
     rep.add_argument("--format", choices=("markdown", "json"), default="markdown")
     probe = sub.add_parser(
         "intake-probe", help="the behavioural check of the Builder smoke"
