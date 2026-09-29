@@ -13,6 +13,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
 from eneo.authentication import auth
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.main.config import Settings, get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
@@ -233,6 +238,11 @@ class ListCredentialsResponse(BaseModel):
     "Azure requires api_key, endpoint, and api_version.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason="Deployment administration requires the configured super API key.",
+)
 async def set_tenant_credential(
     tenant_id: UUID,
     provider: Provider,
@@ -297,6 +307,11 @@ async def set_tenant_credential(
     "System admin only.",
     responses=responses.get_responses([403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason="Deployment administration requires the configured super API key.",
+)
 async def delete_tenant_credential(
     tenant_id: UUID,
     provider: Provider,
@@ -345,6 +360,11 @@ async def delete_tenant_credential(
     "Shows last 4 characters of API key for verification and encryption state for security auditing. "
     "System admin only.",
     responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SYSADMIN,
+    authorization=Authorization.SYSADMIN,
+    reason="Deployment administration requires the configured super API key.",
 )
 async def list_tenant_credentials(
     tenant_id: UUID,

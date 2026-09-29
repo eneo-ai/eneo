@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import Request, Security
 from fastapi.security import APIKeyHeader
 
+from eneo.authentication.endpoint_access import Authentication, authenticates
 from eneo.main.config import get_settings
 from eneo.main.exceptions import AuthenticationException
 from eneo.main.logging import get_logger
@@ -25,6 +26,7 @@ def _resolve_api_key(request: Request, provided: str | None) -> str | None:
     return provided
 
 
+@authenticates(Authentication.SYSADMIN)
 def authenticate_super_api_key(
     request: Request,
     api_key_header: Annotated[str | None, Security(SUPER_API_KEY_SCHEME)],

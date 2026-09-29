@@ -308,7 +308,10 @@ async def test_download_file_signed_raises_not_found_for_missing_content(monkeyp
 
     with pytest.raises(NotFoundException, match="File content not found"):
         await file_router.download_file_signed(
-            id=file_id, token="token", range=None, container=Container()
+            id=file_id,
+            access=file_router.authorize_signed_file(id=file_id, token="token"),
+            range=None,
+            container=Container(),
         )
 
 
@@ -377,7 +380,9 @@ async def test_original_download_rejects_processing_token(monkeypatch):
     with pytest.raises(AuthenticationException, match="Invalid or expired token"):
         await file_router.download_original_file_signed(
             id=file_id,
-            token="token",
+            access=file_router.authorize_original_signed_file(
+                id=file_id, token="token"
+            ),
             range=None,
             container=object(),
         )
@@ -397,7 +402,9 @@ async def test_original_download_rejects_token_for_another_file(monkeypatch):
     with pytest.raises(UnauthorizedException, match="not valid for this file"):
         await file_router.download_original_file_signed(
             id=requested_file_id,
-            token="token",
+            access=file_router.authorize_original_signed_file(
+                id=requested_file_id, token="token"
+            ),
             range=None,
             container=object(),
         )
@@ -429,7 +436,7 @@ async def test_unsatisfiable_original_range_uses_known_size_without_reopening(
 
     response = await file_router.download_original_file_signed(
         id=file_id,
-        token="token",
+        access=file_router.authorize_original_signed_file(id=file_id, token="token"),
         range="bytes=999-",
         container=Container(),
     )
@@ -499,7 +506,7 @@ async def test_original_download_audits_the_redemption(monkeypatch):
 
     response = await file_router.download_original_file_signed(
         id=file_id,
-        token="token",
+        access=file_router.authorize_original_signed_file(id=file_id, token="token"),
         range=None,
         container=Container(),
     )
@@ -568,7 +575,7 @@ async def test_original_download_is_served_when_audit_storage_fails(monkeypatch)
 
     response = await file_router.download_original_file_signed(
         id=file_id,
-        token="token",
+        access=file_router.authorize_original_signed_file(id=file_id, token="token"),
         range=None,
         container=Container(),
     )
@@ -601,7 +608,7 @@ async def test_legacy_unsatisfiable_range_preserves_empty_response(monkeypatch):
 
     response = await file_router.download_file_signed(
         id=file_id,
-        token="token",
+        access=file_router.authorize_signed_file(id=file_id, token="token"),
         range="bytes=999-",
         container=Container(),
     )

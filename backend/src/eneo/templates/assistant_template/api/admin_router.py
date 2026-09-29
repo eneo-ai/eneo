@@ -6,7 +6,9 @@ from fastapi import APIRouter, Depends
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.main.container.container import Container
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.templates.assistant_template.api.assistant_template_models import (
@@ -40,6 +42,11 @@ List all active (non-deleted) assistant templates owned by your tenant.
 Use this endpoint for the admin template management page.
     """,
     responses=responses.get_responses([401, 403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
 )
 async def list_templates(container: Container = USER_CONTAINER):
     """List all active assistant templates for the tenant with usage counts."""
@@ -122,6 +129,11 @@ Create a new assistant template for your tenant.
 ```
     """,
     responses=responses.get_responses([400, 401, 403, 409, 424]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
 )
 async def create_template(
     data: AssistantTemplateAdminCreate,
@@ -210,6 +222,11 @@ async def create_template(
     summary="Update assistant template",
     description="Updates an existing assistant template (admin only)",
     responses=responses.get_responses([400, 401, 403, 404, 409]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
 )
 async def update_template(
     template_id: "UUID",
@@ -315,6 +332,11 @@ Toggle an assistant template as featured/default.
     """,
     responses=responses.get_responses([400, 401, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def toggle_default(
     template_id: UUID,
     data: AssistantTemplateToggleDefaultRequest,
@@ -389,6 +411,11 @@ Soft-delete an assistant template (marks with deleted_at timestamp).
     """,
     responses=responses.get_responses([400, 401, 403, 404, 409]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def delete_template(
     template_id: "UUID",
     container: Container = USER_CONTAINER,
@@ -428,6 +455,11 @@ async def delete_template(
     summary="Rollback assistant template",
     description="Restores template to original snapshot (admin only)",
     responses=responses.get_responses([400, 401, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
 )
 async def rollback_template(
     template_id: "UUID",
@@ -478,6 +510,11 @@ async def rollback_template(
     description="Restores a soft-deleted template (admin only)",
     responses=responses.get_responses([400, 401, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def restore_template(
     template_id: "UUID",
     container: Container = USER_CONTAINER,
@@ -527,6 +564,11 @@ async def restore_template(
     description="Permanently removes a soft-deleted template from database (admin only)",
     responses=responses.get_responses([401, 403, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
+)
 async def permanent_delete_template(
     template_id: "UUID",
     container: Container = USER_CONTAINER,
@@ -548,6 +590,11 @@ async def permanent_delete_template(
     summary="List deleted assistant templates",
     description="Returns soft-deleted templates for audit trail (admin only)",
     responses=responses.get_responses([401, 403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason="Organization administration requires the admin permission.",
 )
 async def list_deleted_templates(
     container: Container = USER_CONTAINER,

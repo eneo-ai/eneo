@@ -11,8 +11,8 @@
   import WebsiteEditor from "./WebsiteEditor.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getEneo } from "$lib/core/Eneo";
-  import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   export let website: WebsiteSparse;
 
@@ -25,8 +25,20 @@
   $: isOrgSpace = $currentSpace.organization === true;
 
   async function deleteWebsite() {
-    await eneo.websites.delete({ id: website.id });
-    refreshCurrentSpace();
+    const result = await eneo.websites.bulkDelete({ website_ids: [website.id] });
+
+    if (result.deleted === 1) {
+      toast.success(m.websites_removed({ count: 1 }));
+    } else if (result.errors.some((error) => error.error === "crawl_stop_requested")) {
+      toast.info(m.website_remove_stopping());
+    } else if (result.errors.some((error) => error.error === "crawl_cleanup_pending")) {
+      toast.info(m.website_remove_cleanup_pending());
+    } else if (result.not_found === 1) {
+      toast.info(m.websites_already_removed());
+    } else {
+      toast.error(m.bulk_website_remove_failed());
+    }
+    await refreshCurrentSpace("knowledge");
   }
 
   async function moveWebsite(targetSpace: { id: string }) {
@@ -34,7 +46,7 @@
     refreshCurrentSpace();
   }
 
-  const showEditDialog = writable(false);
+  let showEditDialog = false;
   let showDeleteDialog = false;
   let showMoveDialog = false;
 </script>
@@ -48,7 +60,7 @@
     {/snippet}
   </DropdownMenu.Trigger>
   <DropdownMenu.Content align="end">
-    <DropdownMenu.Item onSelect={() => ($showEditDialog = true)}>
+    <DropdownMenu.Item onSelect={() => (showEditDialog = true)}>
       <IconEdit size="sm" />
       {m.edit()}
     </DropdownMenu.Item>
@@ -65,24 +77,21 @@
   </DropdownMenu.Content>
 </DropdownMenu.Root>
 
-{#snippet deleteDescription()}
-  {m.confirm_delete_crawl_start()}
-  <span class="italic">
-    {website.name ? `${website.name} (${website.url})` : website.url}
-  </span>{m.confirm_delete_crawl_end()}
-{/snippet}
-
 <ConfirmDialog
   bind:open={showDeleteDialog}
-  title={m.delete_crawl()}
-  description={deleteDescription}
-  confirmLabel={m.delete()}
+  title={m.remove_website_title()}
+  description={m.remove_website_description()}
+  confirmLabel={m.remove_website_confirm()}
   pendingLabel={m.deleting()}
-  errorContext={m.could_not_delete_crawl()}
+  errorContext={m.bulk_website_remove_failed()}
   onConfirm={deleteWebsite}
-/>
+>
+  <p class="text-foreground text-sm font-medium break-all">
+    {website.name ? `${website.name} (${website.url})` : website.url}
+  </p>
+</ConfirmDialog>
 
-<WebsiteEditor mode="update" {website} showDialog={showEditDialog}></WebsiteEditor>
+<WebsiteEditor mode="update" {website} bind:showDialog={showEditDialog}></WebsiteEditor>
 
 <MoveToSpaceDialog
   bind:open={showMoveDialog}

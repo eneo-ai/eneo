@@ -377,6 +377,7 @@ class CommitHookTests(unittest.TestCase):
             '    description="Transfer resource",\n'
             "    responses=responses.get_responses([404]),\n"
             ")\n"
+            "@endpoint_access(authentication=Authentication.USER, authorization=Permission.ADMIN, reason='Transfer requires admin')\n"
             "async def transfer_demo():\n"
             "    return None\n",
             encoding="utf-8",
@@ -384,6 +385,78 @@ class CommitHookTests(unittest.TestCase):
 
         result = run_script(ROUTE_METADATA_CHECK, str(router))
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_route_access_decision_is_required_on_each_endpoint(self) -> None:
+        root = self.make_repo()
+        router = root / "backend" / "src" / "eneo" / "demo_router.py"
+        router.write_text(
+            '@router.get("/declared", response_model=str, responses={})\n'
+            "@endpoint_access(authentication=Authentication.USER, authorization=Permission.ADMIN, reason='Admin access')\n"
+            "async def declared():\n"
+            "    return 'ok'\n\n"
+            '@router.get("/forgotten", response_model=str, responses={})\n'
+            "async def forgotten():\n"
+            "    return 'ok'\n",
+            encoding="utf-8",
+        )
+        result = run_script(ROUTE_METADATA_CHECK, str(router))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("endpoint forgotten requires an explicit endpoint_access", result.stderr)
+        self.assertNotIn("endpoint declared requires", result.stderr)
+
+    def test_route_access_requires_both_decisions_and_a_reason(self) -> None:
+        root = self.make_repo()
+        router = root / "backend" / "src" / "eneo" / "demo_router.py"
+        for arguments in (
+            "authentication=Authentication.USER, reason='Tenant member'",
+            "authorization=Permission.ADMIN, reason='Admin'",
+            "authentication=Authentication.USER, authorization=Permission.ADMIN",
+        ):
+            with self.subTest(arguments=arguments):
+                router.write_text(
+                    '@router.get("/partial", response_model=str, responses={})\n'
+                    f"@endpoint_access({arguments})\n"
+                    "async def partial():\n"
+                    "    return 'ok'\n",
+                    encoding="utf-8",
+                )
+                result = run_script(ROUTE_METADATA_CHECK, str(router))
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("endpoint partial requires", result.stderr)
+
+    def test_endpoint_cannot_add_a_second_permission_or_session_gate(self) -> None:
+        root = self.make_repo()
+        router = root / "backend" / "src" / "eneo" / "demo_router.py"
+        for signature, body in (
+            ("user", "validate_permission(user, Permission.ADMIN)"),
+            ("user", "permissions.validate_permission(user, Permission.ADMIN)"),
+            ("user=Depends(require_permission(Permission.ADMIN))", "pass"),
+            ("guard=Depends(require_session_auth)", "pass"),
+        ):
+            with self.subTest(signature=signature, body=body):
+                router.write_text(
+                    '@router.get("/admin", response_model=str, responses={})\n'
+                    "@endpoint_access(authentication=Authentication.SESSION, authorization=Permission.ADMIN, reason='Admin')\n"
+                    f"async def endpoint({signature}):\n    {body}\n",
+                    encoding="utf-8",
+                )
+                result = run_script(ROUTE_METADATA_CHECK, str(router))
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("duplicates admission", result.stderr)
+
+    def test_websocket_requires_an_explicit_access_decision(self) -> None:
+        root = self.make_repo()
+        router = root / "backend" / "src" / "eneo" / "demo_router.py"
+        router.write_text(
+            '@router.websocket("/ws")\n'
+            "async def socket(websocket):\n"
+            "    await websocket.accept()\n",
+            encoding="utf-8",
+        )
+        result = run_script(ROUTE_METADATA_CHECK, str(router))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("endpoint socket requires", result.stderr)
+        self.assertNotIn("response_model", result.stderr)
 
     def test_route_metadata_check_can_scope_to_changed_blocks_only(self) -> None:
         root = self.make_repo()
@@ -401,6 +474,7 @@ class CommitHookTests(unittest.TestCase):
             '    description="Create new thing",\n'
             "    responses=responses.get_responses([400]),\n"
             ")\n"
+            "@endpoint_access(authentication=Authentication.USER, authorization=Permission.ADMIN, reason='Create requires admin')\n"
             "async def new_route():\n"
             "    return {}\n",
             encoding="utf-8",
@@ -421,6 +495,7 @@ class CommitHookTests(unittest.TestCase):
             '    description="Create new thing safely",\n'
             "    responses=responses.get_responses([400]),\n"
             ")\n"
+            "@endpoint_access(authentication=Authentication.USER, authorization=Permission.ADMIN, reason='Create requires admin')\n"
             "async def new_route():\n"
             "    return {}\n",
             encoding="utf-8",

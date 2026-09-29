@@ -1,14 +1,14 @@
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from eneo.authentication.auth_dependencies import (
-    require_session_auth,
-    require_storage_administration,
+    require_active_storage_identity,
     require_user_identity,
 )
+from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
 from eneo.object_content.object_store_connection import (
@@ -18,6 +18,7 @@ from eneo.object_content.object_store_connection import (
     StoredObjectStoreConnection,
 )
 from eneo.object_content.runtime import object_content_runtime
+from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
@@ -34,29 +35,21 @@ _ConnectionAdminContainer = Annotated[
 ]
 
 
-async def _require_connection_session_auth(
-    request: Request,
-    container: _ConnectionAdminContainer,
-) -> None:
-    await require_session_auth(container.user(), request)
-
-
 async def _require_connection_user_identity(
     container: _ConnectionAdminContainer,
 ) -> None:
     await require_user_identity(container.user())
 
 
-async def _require_connection_storage_admin(
+async def _require_connection_active_identity(
     container: _ConnectionAdminContainer,
 ) -> None:
-    await require_storage_administration(container.user())
+    await require_active_storage_identity(container.user())
 
 
 _STORAGE_ADMIN_DEPENDENCIES = [
-    Depends(_require_connection_session_auth),
     Depends(_require_connection_user_identity),
-    Depends(_require_connection_storage_admin),
+    Depends(_require_connection_active_identity),
 ]
 
 
@@ -179,6 +172,11 @@ def _public_stored_connection(
     dependencies=_STORAGE_ADMIN_DEPENDENCIES,
     responses=responses.get_responses([403, 503]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.STORAGE,
+    reason="Storage administration requires an active user session with storage permission.",
+)
 async def get_object_store_connection() -> ObjectStoreConnectionPublic:
     await object_content_runtime.refresh_object_store_configuration()
     connection = _public_connection()
@@ -204,6 +202,11 @@ async def get_object_store_connection() -> ObjectStoreConnectionPublic:
     ),
     dependencies=_STORAGE_ADMIN_DEPENDENCIES,
     responses=responses.get_responses([400, 403, 409, 503]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.STORAGE,
+    reason="Storage administration requires an active user session with storage permission.",
 )
 async def create_object_store_connection(
     candidate: ObjectStoreConnectionInput,
@@ -234,6 +237,11 @@ async def create_object_store_connection(
     ),
     dependencies=_STORAGE_ADMIN_DEPENDENCIES,
     responses=responses.get_responses([400, 403, 409, 503]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.STORAGE,
+    reason="Storage administration requires an active user session with storage permission.",
 )
 async def rotate_object_store_credentials(
     replacement: ObjectStoreCredentialRotation,
@@ -278,6 +286,11 @@ async def rotate_object_store_credentials(
     dependencies=_STORAGE_ADMIN_DEPENDENCIES,
     responses=responses.get_responses([400, 403, 409, 503]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.STORAGE,
+    reason="Storage administration requires an active user session with storage permission.",
+)
 async def replace_object_store_destination(
     candidate: ObjectStoreConnectionInput,
     container: _ConnectionAdminContainer,
@@ -308,6 +321,11 @@ async def replace_object_store_destination(
     ),
     dependencies=_STORAGE_ADMIN_DEPENDENCIES,
     responses=responses.get_responses([400, 403, 404, 409, 503]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.STORAGE,
+    reason="Storage administration requires an active user session with storage permission.",
 )
 async def switch_back_object_store_destination(
     intent: ObjectStoreSwitchBackInput,
@@ -340,6 +358,11 @@ async def switch_back_object_store_destination(
     dependencies=_STORAGE_ADMIN_DEPENDENCIES,
     responses=responses.get_responses([403, 404, 409, 503]),
 )
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.STORAGE,
+    reason="Storage administration requires an active user session with storage permission.",
+)
 async def forget_previous_object_store_destination(
     container: _ConnectionAdminContainer,
     expected_revision: int = Query(
@@ -371,6 +394,11 @@ async def forget_previous_object_store_destination(
     ),
     dependencies=_STORAGE_ADMIN_DEPENDENCIES,
     responses=responses.get_responses([403, 404, 409, 503]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.STORAGE,
+    reason="Storage administration requires an active user session with storage permission.",
 )
 async def abandon_pending_object_store_destination(
     container: _ConnectionAdminContainer,

@@ -7,6 +7,11 @@ from fastapi import APIRouter, Depends
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
 from eneo.integration.presentation.models import (
     AuthCallbackParams,
     AuthUrlPublic,
@@ -26,6 +31,11 @@ router = APIRouter()
     description="Generate the OAuth2 authorization URL for an integration in the current tenant.",
     responses=responses.get_responses([400, 404]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="OAuth2Service binds the integration and callback state to the caller.",
+)
 async def gen_url(
     tenant_integration_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -43,6 +53,11 @@ async def gen_url(
     response_model=UserIntegration,
     description="Complete the OAuth2 callback for an integration in the current tenant.",
     responses=responses.get_responses([400, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="OAuth2Service binds the integration and callback state to the caller.",
 )
 async def on_auth_callback(
     params: AuthCallbackParams,
