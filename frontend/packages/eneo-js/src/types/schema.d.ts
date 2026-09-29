@@ -5610,7 +5610,7 @@ export interface paths {
     put?: never;
     /**
      * Add Tenant Integration
-     * @description Add an integration to the tenant.
+     * @description Add an integration to the tenant. Requires administrator permission.
      */
     post: operations["add_tenant_integration_api_v1_integrations_tenant_add__integration_id___post"];
     delete?: never;
@@ -5631,7 +5631,7 @@ export interface paths {
     post?: never;
     /**
      * Remove Tenant Integration
-     * @description Remove an integration from the tenant.
+     * @description Remove an integration from the tenant. Requires administrator permission.
      */
     delete: operations["remove_tenant_integration_api_v1_integrations_tenant_remove__tenant_integration_id___delete"];
     options?: never;
@@ -41307,6 +41307,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -41344,6 +41353,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Not Found */
       404: {
