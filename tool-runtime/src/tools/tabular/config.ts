@@ -16,6 +16,8 @@ export const tabularConfigSchema = z
       .max(128 * 1024 * 1024)
       .default(64 * 1024 * 1024),
     max_sheets: z.number().int().min(1).max(50).default(20),
+    // Rows query_table writes to a CSV file when asked to export its result.
+    export_row_limit: z.number().int().min(1).max(1_000_000).default(200_000),
     max_upload_bytes: z
       .number()
       .int()

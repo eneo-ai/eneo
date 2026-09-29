@@ -71,6 +71,8 @@ export async function executeIngest(job: IngestJob): Promise<{ sheets: SheetMeta
 
 export async function executeQuery(job: QueryJob): Promise<QueryJobResult> {
   const results: QueryJobResult["results"] = [];
+  const limits = queryLimits(job.config);
+  const exporting = job.export !== undefined && job.statements.length === 1 && !job.explain;
   for (const sql of job.statements) {
     try {
       const outcome = await runQuery({
@@ -78,8 +80,28 @@ export async function executeQuery(job: QueryJob): Promise<QueryJobResult> {
         sql,
         tables: job.tables,
         explainOnly: job.explain,
-        ...queryLimits(job.config),
+        ...limits,
+        ...(exporting ? { rowLimit: job.export!.rowLimit } : {}),
       });
+      if (exporting) {
+        await writeFile(job.export!.outputPath, toCsv(outcome.columns, outcome.rows), {
+          mode: 0o600,
+        });
+        // The caller still gets a bounded preview; the file carries every row.
+        const preview = outcome.rows.slice(0, limits.rowLimit);
+        results.push({
+          ok: true,
+          outcome: {
+            ...outcome,
+            rows: preview,
+            returnedRows: preview.length,
+            truncated: outcome.truncated || outcome.rows.length > preview.length,
+            exportedRows: outcome.rows.length,
+            exportTruncated: outcome.truncated,
+          },
+        });
+        continue;
+      }
       results.push({ ok: true, outcome });
     } catch (error) {
       // QueryRejectedError text is ours and tells the model what to change. Other DuckDB
@@ -97,4 +119,14 @@ export async function executeQuery(job: QueryJob): Promise<QueryJobResult> {
     }
   }
   return { results };
+}
+
+/** RFC 4180 CSV; values are written exactly as the query returned them. */
+export function toCsv(columns: string[], rows: unknown[][]): string {
+  const field = (value: unknown): string => {
+    if (value === null || value === undefined) return "";
+    const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+    return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+  };
+  return [columns, ...rows].map((row) => row.map(field).join(",")).join("\r\n") + "\r\n";
 }

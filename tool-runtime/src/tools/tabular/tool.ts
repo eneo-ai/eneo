@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { ToolError } from "../../errors";
-import type { CallContext, ToolDefinition } from "../types";
+import { RichResult, type CallContext, type ToolDefinition } from "../types";
 import { SheetCache } from "./cache";
 import type { DownloadPolicy, TabularConfig } from "./config";
 import { downloadFile } from "./download";
@@ -27,6 +28,23 @@ export type TabularDeps = {
   /** Replaceable in tests; production downloads through the pinned, bounded client. */
   download?: typeof downloadFile;
 };
+
+// An exported result travels as a file; Eneo admits generated files up to 20 MiB by default.
+const MAX_EXPORT_BYTES = 20 * 1024 * 1024;
+
+/** A download name for an exported result; never a path, always .csv. */
+export function exportFilename(input: string | undefined): string {
+  const base = (input ?? "")
+    .normalize("NFC")
+    .replace(/\.csv$/i, "")
+    .replace(/[\u0000-\u001f\u007f-\u009f"\\/:;*?<>|]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^\.+/, "")
+    .slice(0, 100)
+    .trim();
+  return `${base || "resultat"}.csv`;
+}
 
 // Eneo's signed original-download link: /api/v1/files/{id}/original/download/?token=…
 const FILE_PATH = /^\/api\/v1\/files\/([0-9a-f-]{36})\/original\/download\/?$/;
@@ -188,6 +206,17 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
         .describe(
           "Return the query plan instead of results. Leave false when the user needs data.",
         ),
+      export: z
+        .boolean()
+        .default(false)
+        .describe(
+          `Also deliver the complete result (up to ${deps.config.export_row_limit} rows) as a CSV file attached for the user. Its reference url comes back with the result: pass it to create_spreadsheet or create_chart instead of copying rows.`,
+        ),
+      export_filename: z
+        .string()
+        .max(100)
+        .optional()
+        .describe("File name for the exported CSV, without extension."),
     })
     .strict();
   const assertInput = z
@@ -246,31 +275,71 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
       name: "query_table",
       title: "Query table",
       description:
-        "Calculate totals, counts, averages, rankings, grouped summaries, comparisons or filtered rows over the full parsed CSV/Excel table, instead of doing arithmetic over sample rows or a text preview. Call inspect_table first for the actual sheet and column names. Runs one read-only DuckDB SELECT over table t; pass sheet for multi-sheet workbooks. To combine attachments, list them under files with an alias and JOIN them. Pass the signed url and filename unchanged on every call. Results report truncation (a row-limited result is not the whole table) and parsed/rejected coverage.",
+        "Calculate totals, counts, averages, rankings, grouped summaries, comparisons or filtered rows over the full parsed CSV/Excel table, instead of doing arithmetic over sample rows or a text preview. Call inspect_table first for the actual sheet and column names. Runs one read-only DuckDB SELECT over table t; pass sheet for multi-sheet workbooks. To combine attachments, list them under files with an alias and JOIN them. Pass the signed url and filename unchanged on every call. Results report truncation (a row-limited result is not the whole table) and parsed/rejected coverage. When the user needs the rows themselves (a filtered list, a table for Excel or a chart), set export=true: the complete result becomes a CSV file and its reference url comes back for the next tool.",
       inputSchema: queryInput.shape,
       readOnly: true,
       async execute(raw, ctx) {
         const args = queryInput.parse(raw);
         const input = await tables(args.file, args.files, ctx);
-        const { results } = await deps.executor.query({
-          kind: "tabular_query",
-          csvPath: input.csvPath,
-          tables: input.tables,
-          statements: [args.sql],
-          explain: args.explain,
-          config: deps.config,
-        });
-        const result = results[0]!;
-        if (!result.ok) throw new ToolError(result.code, result.message);
-        const outcome = result.outcome;
-        return {
-          sheet: input.sheet.name,
-          columns: outcome.columns,
-          rows: outcome.rows,
-          returned_rows: outcome.returnedRows,
-          truncated: outcome.truncated,
-          ...coverage(outcome),
-        };
+        const exporting = args.export && !args.explain;
+        // The child writes the export into a directory this process owns.
+        const directory = exporting
+          ? await mkdtemp(join(tmpdir(), "eneo-tool-runtime-export-"))
+          : undefined;
+        try {
+          const outputPath = directory ? join(directory, "result.csv") : undefined;
+          const { results } = await deps.executor.query({
+            kind: "tabular_query",
+            csvPath: input.csvPath,
+            tables: input.tables,
+            statements: [args.sql],
+            explain: args.explain,
+            config: deps.config,
+            ...(outputPath
+              ? { export: { outputPath, rowLimit: deps.config.export_row_limit } }
+              : {}),
+          });
+          const result = results[0]!;
+          if (!result.ok) throw new ToolError(result.code, result.message);
+          const outcome = result.outcome;
+          const structured = {
+            sheet: input.sheet.name,
+            columns: outcome.columns,
+            rows: outcome.rows,
+            returned_rows: outcome.returnedRows,
+            truncated: outcome.truncated,
+            ...coverage(outcome),
+          };
+          if (!outputPath) return structured;
+          const csv = await readFile(outputPath);
+          if (csv.length > MAX_EXPORT_BYTES)
+            throw new ToolError(
+              "EXPORT_TOO_LARGE",
+              "The exported result exceeds the file size limit. Select fewer columns or filter the rows.",
+            );
+          const filename = exportFilename(args.export_filename);
+          return new RichResult(
+            {
+              ...structured,
+              export: {
+                filename,
+                rows: outcome.exportedRows ?? 0,
+                truncated: outcome.exportTruncated ?? false,
+                delivered:
+                  "The full result is attached as a CSV file for the user. Use its reference url for further tools; the rows above are only a preview.",
+              },
+            },
+            [
+              {
+                uri: `eneo-tool-runtime://tabular/${crypto.randomUUID()}/${encodeURIComponent(filename)}`,
+                mimeType: "text/csv",
+                blob: csv.toString("base64"),
+              },
+            ],
+          );
+        } finally {
+          if (directory) await rm(directory, { recursive: true, force: true });
+        }
       },
     },
     {

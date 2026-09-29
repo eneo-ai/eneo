@@ -8,10 +8,10 @@ import { runIsolated } from "../../src/sandbox";
 import { SheetCache } from "../../src/tools/tabular/cache";
 import { tabularConfigSchema } from "../../src/tools/tabular/config";
 import type { downloadFile } from "../../src/tools/tabular/download";
-import { executeIngest, executeQuery } from "../../src/tools/tabular/execute";
+import { executeIngest, executeQuery, toCsv } from "../../src/tools/tabular/execute";
 import type { QueryJobResult, SheetMetadata } from "../../src/tools/tabular/ports";
-import { tabularTools, type TabularExecutor } from "../../src/tools/tabular/tool";
-import type { CallContext, ToolDefinition } from "../../src/tools/types";
+import { exportFilename, tabularTools, type TabularExecutor } from "../../src/tools/tabular/tool";
+import { RichResult, type CallContext, type ToolDefinition } from "../../src/tools/types";
 
 const ORIGIN = "http://backend:8000";
 const FILE_A = "11111111-1111-4111-8111-111111111111";
@@ -45,7 +45,11 @@ beforeAll(async () => {
 afterAll(() => rm(root, { recursive: true, force: true }));
 
 type Downloads = { calls: string[]; denied: Set<string> };
-function setup(dir: string, allowedFileOrigins: string[] = []) {
+function setup(
+  dir: string,
+  allowedFileOrigins: string[] = [],
+  limits: Partial<typeof config> = {},
+) {
   const downloads: Downloads = { calls: [], denied: new Set() };
   const ingests: string[] = [];
   const download = (async (raw: string) => {
@@ -69,7 +73,7 @@ function setup(dir: string, allowedFileOrigins: string[] = []) {
     query: (job) => executeQuery(job),
   };
   const tools = tabularTools({
-    config,
+    config: { ...config, ...limits },
     allowedFileOrigins,
     cache: new SheetCache(join(root, dir), config.cache_ttl_ms, config.cache_max_bytes),
     executor,
@@ -238,6 +242,57 @@ describe("inspect and query", () => {
           alice,
         ),
       ).rejects.toMatchObject({ code: "QUERY_REJECTED" });
+  });
+});
+
+describe("export", () => {
+  test("the full result becomes a CSV file while the inline rows stay a preview", async () => {
+    const { tool } = setup("export", [], { row_limit: 1, export_row_limit: 10 });
+    const result = await tool("query_table").execute(
+      {
+        file: { url: url(FILE_A), filename: "sales.csv" },
+        sql: "SELECT region, amount FROM t ORDER BY amount",
+        export: true,
+        export_filename: "Försäljning/2026",
+      },
+      alice,
+    );
+
+    expect(result).toBeInstanceOf(RichResult);
+    const { structured, files } = result as RichResult;
+    expect(structured).toMatchObject({
+      returned_rows: 1,
+      truncated: true,
+      export: { filename: "Försäljning2026.csv", rows: 3, truncated: false },
+    });
+    expect(files[0]!.mimeType).toBe("text/csv");
+    expect(Buffer.from(files[0]!.blob, "base64").toString()).toBe(
+      "region,amount\r\nnorth,50\r\nnorth,100\r\nsouth,250.5\r\n",
+    );
+  });
+
+  test("an export at its row limit says so", async () => {
+    const { tool } = setup("export-limit", [], { export_row_limit: 2 });
+    const { structured } = (await tool("query_table").execute(
+      { file: { url: url(FILE_A), filename: "sales.csv" }, sql: "SELECT * FROM t", export: true },
+      alice,
+    )) as RichResult;
+    expect(structured).toMatchObject({ export: { rows: 2, truncated: true } });
+  });
+
+  test("CSV quoting round-trips commas, quotes, newlines and nulls", () => {
+    expect(
+      toCsv(
+        ["a", "b"],
+        [
+          ["x,y", 'say "hi"'],
+          ["line\nbreak", null],
+          [1.5, true],
+        ],
+      ),
+    ).toBe('a,b\r\n"x,y","say ""hi"""\r\n"line\nbreak",\r\n1.5,true\r\n');
+    expect(exportFilename(undefined)).toBe("resultat.csv");
+    expect(exportFilename("../x.csv")).toBe("x.csv");
   });
 });
 

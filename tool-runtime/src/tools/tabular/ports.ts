@@ -29,6 +29,8 @@ export type QueryJob = {
   statements: string[];
   explain: boolean;
   config: TabularConfig;
+  /** Write the single statement's full result (up to `rowLimit` rows) as CSV here. */
+  export?: { outputPath: string; rowLimit: number };
 };
 
 export type QueryOutcome = {
@@ -38,6 +40,9 @@ export type QueryOutcome = {
   truncated: boolean;
   parsedRows: number;
   rejectedRows: number;
+  /** Rows written to the export file, and whether the export hit its row limit. */
+  exportedRows?: number;
+  exportTruncated?: boolean;
 };
 
 /** Per statement: a result, or the safe reason it was rejected. */
