@@ -64,7 +64,11 @@ endpoints.push(
   {
     slug: "spreadsheets",
     toolTimeoutMs: renderTimeoutMs + 5_000,
-    tools: spreadsheetTools(config.documents, render),
+    tools: spreadsheetTools(config.documents, render, {
+      allowedFileOrigins: config.tabular.allowedFileOrigins,
+      maxBytes: tabular.max_upload_bytes,
+      timeoutMs: tabular.download_timeout_ms,
+    }),
   },
 );
 

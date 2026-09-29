@@ -2,12 +2,14 @@
 import { writeFile } from "node:fs/promises";
 import { ToolError } from "../../errors";
 import { RenderError, renderDocument } from "./engine/render";
+import { resolveSources } from "./sources";
 import type { RenderJob, RenderResult } from "./ports";
 
 export async function executeRender(job: RenderJob): Promise<RenderResult> {
+  const document = await resolveSources(job.document);
   let rendered;
   try {
-    rendered = await renderDocument(job.format, job.document, {
+    rendered = await renderDocument(job.format, document, {
       organisationName: job.organisationName,
     });
   } catch (error) {

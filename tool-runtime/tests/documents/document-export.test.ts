@@ -214,9 +214,98 @@ describe("tools", () => {
     requests.push(job);
     return executeRender(job);
   });
+  const ORIGIN = "http://backend:8000";
+  const SOURCE_ID = "11111111-1111-4111-8111-111111111111";
+  const sources = new Map<string, { bytes: Buffer; contentType: string }>();
+  const access = {
+    allowedFileOrigins: [],
+    maxBytes: 20 * 1024 * 1024,
+    timeoutMs: 5_000,
+    download: (async (raw: string) => {
+      const file = sources.get(new URL(raw).searchParams.get("token")!);
+      if (!file) throw new Error("response:403");
+      return { ...file, name: "source" };
+    }) as never,
+  };
+  const sourceUrl = (token: string) =>
+    `${ORIGIN}/api/v1/files/${SOURCE_ID}/original/download/?token=${token}`;
+  const withOrigin: CallContext = { ...context, fileOrigin: ORIGIN };
   const tools = Object.fromEntries(
-    [...documentTools(config, render), ...spreadsheetTools(config, render)].map((t) => [t.name, t]),
+    [...documentTools(config, render), ...spreadsheetTools(config, render, access)].map((t) => [
+      t.name,
+      t,
+    ]),
   );
+  const cellsOf = async (result: RichResult) => {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(
+      Buffer.from(result.files[0]!.blob, "base64") as unknown as ArrayBuffer,
+    );
+    return workbook.worksheets.map((sheet) => ({
+      name: sheet.name,
+      rows: sheet
+        .getSheetValues()
+        .slice(1)
+        .map((row) => (row as unknown[]).slice(1)),
+    }));
+  };
+
+  test("a sheet copied from a CSV source keeps every row and its number types", async () => {
+    const rows = Array.from({ length: 6000 }, (_, i) => `R${i},${i},${i + 0.5}`);
+    sources.set("csv", {
+      bytes: Buffer.from(["name,count,amount", ...rows].join("\n")),
+      contentType: "text/csv",
+    });
+    const result = (await tools.create_spreadsheet!.execute(
+      {
+        title: "Export",
+        sheets: [
+          { name: "Data", source: { url: sourceUrl("csv"), filename: "result.csv" } },
+          { name: "Notes", columns: ["note"], rows: [["inline"]] },
+        ],
+      },
+      withOrigin,
+    )) as RichResult;
+
+    const [data, notes] = await cellsOf(result);
+    // More rows than inline rows may carry, all of them present.
+    expect(data!.rows).toHaveLength(6001);
+    expect(data!.rows[0]).toEqual(["name", "count", "amount"]);
+    expect(data!.rows[6000]).toEqual(["R5999", 5999, 5999.5]);
+    expect(notes!.rows[1]).toEqual(["inline"]);
+  });
+
+  test("an XLSX source with several sheets needs the sheet named", async () => {
+    const book = new ExcelJS.Workbook();
+    book.addWorksheet("A").addRow(["x"]);
+    book.addWorksheet("B").addRow(["y"]);
+    sources.set("xlsx", {
+      bytes: Buffer.from(await book.xlsx.writeBuffer()),
+      contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const call = (sheet?: string) =>
+      tools.create_spreadsheet!.execute(
+        {
+          title: "Kopia",
+          sheets: [
+            {
+              name: "Kopia",
+              source: { url: sourceUrl("xlsx"), filename: "in.xlsx", ...(sheet ? { sheet } : {}) },
+            },
+          ],
+        },
+        withOrigin,
+      );
+    await expect(call()).rejects.toMatchObject({ code: "SHEET_REQUIRED" });
+    const [copy] = await cellsOf((await call("B")) as RichResult);
+    expect(copy!.rows[0]).toEqual(["y"]);
+  });
+
+  test("a sheet needs either a source or columns", async () => {
+    await expect(
+      tools.create_spreadsheet!.execute({ title: "x", sheets: [{ name: "Tom" }] }, withOrigin),
+    ).rejects.toThrow("either a source file, or columns and rows");
+  });
 
   test("returns the document as an embedded resource with a sanitised name", async () => {
     const result = await tools.create_document!.execute(
