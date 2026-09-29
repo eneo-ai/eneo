@@ -1957,6 +1957,12 @@ class SpaceRepository:
         if info_blob.tenant_id != self.user.tenant_id:
             return []
         source, source_id = knowledge_source_for(info_blob)
+        return await self.get_knowledge_source_read_access(source, source_id)
+
+    async def get_knowledge_source_read_access(
+        self, source: KnowledgeSource, source_id: UUID
+    ) -> list[SpaceAccessFacts]:
+        """Reader memberships for a source in this tenant, including distribution."""
         source_space_ids = source.spaces_seeing(source_id, self.user.tenant_id)
         user_group_ids = sa.select(UserGroups.id).where(
             UserGroups.id.in_(self.user.user_groups_ids),
@@ -2036,6 +2042,38 @@ class SpaceRepository:
             )
             for space_id, user_id, tenant_space_id, role in spaces
         ]
+
+    async def get_knowledge_source_owner_access(
+        self, source: KnowledgeSource, source_id: UUID
+    ) -> SpaceAccessFacts | None:
+        """The owning space of a source in this tenant, without membership facts.
+
+        For service API keys, which have no memberships and authorize through
+        their scope and permission in ``SpaceActor``.
+        """
+        query = (
+            sa.select(Spaces.id, Spaces.user_id, Spaces.tenant_space_id)
+            .join(source.table, source.table.space_id == Spaces.id)
+            .where(
+                source.table.id == source_id,
+                source.table.tenant_id == self.user.tenant_id,
+                Spaces.tenant_id == self.user.tenant_id,
+            )
+        )
+        space = (await self.session.execute(query)).tuples().one_or_none()
+        if space is None:
+            return None
+        space_id, user_id, tenant_space_id = space
+        return SpaceAccessFacts(
+            id=space_id,
+            user_id=user_id,
+            tenant_space_id=tenant_space_id,
+            members={},
+            group_members={},
+            default_assistant_id=None,
+            assistant_ids=frozenset(),
+            app_ids=frozenset(),
+        )
 
     async def get_space_by_collection(self, collection_id: UUID) -> Space:
         query = (

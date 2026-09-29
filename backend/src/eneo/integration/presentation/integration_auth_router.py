@@ -28,7 +28,7 @@ router = APIRouter()
     "/{tenant_integration_id}/url/",
     response_model=AuthUrlPublic,
     status_code=200,
-    description="Generate the OAuth2 authorization URL for a tenant integration.",
+    description="Generate the OAuth2 authorization URL for an integration in the current tenant.",
     responses=responses.get_responses([400, 404]),
 )
 @endpoint_access(
@@ -43,18 +43,15 @@ async def gen_url(
     # The backend generates and stores its own single-use CSRF state (see
     # oauth2_service.start_auth); callers no longer pass one in.
     oauth2_service = container.oauth2_service()
-    user = container.user()
 
-    return await oauth2_service.start_auth(
-        tenant_integration_id=tenant_integration_id, user_id=user.id
-    )
+    return await oauth2_service.start_auth(tenant_integration_id=tenant_integration_id)
 
 
 @router.post(
     "/callback/token/",
     status_code=200,
     response_model=UserIntegration,
-    description="Complete the OAuth2 callback by exchanging the auth code for a user integration.",
+    description="Complete the OAuth2 callback for an integration in the current tenant.",
     responses=responses.get_responses([400, 404]),
 )
 @endpoint_access(
@@ -71,7 +68,6 @@ async def on_auth_callback(
     assembler = container.user_integration_assembler()
 
     integration = await oauth2_service.auth_integration(
-        user_id=user.id,
         tenant_integration_id=params.tenant_integration_id,
         auth_code=params.auth_code,
         state=params.state,

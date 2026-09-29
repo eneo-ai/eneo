@@ -5905,7 +5905,7 @@ export interface paths {
     put?: never;
     /**
      * Add Tenant Integration
-     * @description Add an integration to the tenant.
+     * @description Add an integration to the tenant. Requires administrator permission.
      */
     post: operations["add_tenant_integration_api_v1_integrations_tenant_add__integration_id___post"];
     delete?: never;
@@ -5926,7 +5926,7 @@ export interface paths {
     post?: never;
     /**
      * Remove Tenant Integration
-     * @description Remove an integration from the tenant.
+     * @description Remove an integration from the tenant. Requires administrator permission.
      */
     delete: operations["remove_tenant_integration_api_v1_integrations_tenant_remove__tenant_integration_id___delete"];
     options?: never;
@@ -7615,7 +7615,7 @@ export interface paths {
     };
     /**
      * Gen Url
-     * @description Generate the OAuth2 authorization URL for a tenant integration.
+     * @description Generate the OAuth2 authorization URL for an integration in the current tenant.
      */
     get: operations["gen_url_api_v1_integrations_auth__tenant_integration_id__url__get"];
     put?: never;
@@ -7637,7 +7637,7 @@ export interface paths {
     put?: never;
     /**
      * On Auth Callback
-     * @description Complete the OAuth2 callback by exchanging the auth code for a user integration.
+     * @description Complete the OAuth2 callback for an integration in the current tenant.
      */
     post: operations["on_auth_callback_api_v1_integrations_auth_callback_token__post"];
     delete?: never;
@@ -42912,6 +42912,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -42949,6 +42958,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Not Found */
       404: {
@@ -43111,6 +43129,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedSyncLogList"];
         };
       };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -43151,6 +43178,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -43174,7 +43210,7 @@ export interface operations {
   get_sharepoint_folder_tree_api_v1_integrations__user_integration_id__sharepoint_tree__get: {
     parameters: {
       query: {
-        /** @description Space ID (for auth routing) */
+        /** @description Space ID (requires integration import rights) */
         space_id: string;
         /** @description SharePoint site ID (required for SharePoint) */
         site_id?: string | null;
@@ -43204,6 +43240,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
