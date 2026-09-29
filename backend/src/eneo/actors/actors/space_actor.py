@@ -37,6 +37,7 @@ class SpaceRoleFact:
 @dataclass(frozen=True, slots=True)
 class SpaceAccessFacts:
     id: UUID | None
+    tenant_id: UUID | None
     user_id: UUID | None
     tenant_space_id: UUID | None
     members: Mapping[UUID, SpaceRoleFact]
@@ -61,6 +62,7 @@ class SpaceAccessFacts:
     def from_space(cls, space: "Space") -> "SpaceAccessFacts":
         return cls(
             id=space.id,
+            tenant_id=space.tenant_id,
             user_id=space.user_id,
             tenant_space_id=space.tenant_space_id,
             members={
@@ -547,10 +549,11 @@ class SpaceActor:
         """Derive a space role from the active API key's scope and permission.
 
         Applies to both service and user-owned keys. Returns None when no
-        key is active, or when the key's scope does not cover this space.
+        key is active, when the space belongs to another tenant than the
+        key, or when the key's scope does not cover this space.
 
-        Scope → access:
-          - tenant-scoped     → every space in the tenant
+        Scope → access (always within the key's own tenant):
+          - tenant-scoped     → every space in the key's tenant
           - space-scoped      → only the matching space
           - assistant/app     → only the parent space of that resource
 
@@ -563,12 +566,17 @@ class SpaceActor:
         if key is None:
             return None
 
+        # A key never reaches outside its own tenant, whatever its scope.
+        # Facts without a tenant cannot prove membership, so they deny.
+        if self.space.tenant_id is None or key.tenant_id != self.space.tenant_id:
+            return None
+
         scope_type = key.scope_type
         if hasattr(scope_type, "value"):
             scope_type = scope_type.value
 
         if scope_type == "tenant":
-            pass  # tenant keys cover every space
+            pass  # tenant keys cover every space in their own tenant
         elif scope_type == "space":
             if key.scope_id != self.space.id:
                 return None

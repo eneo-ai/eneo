@@ -1091,12 +1091,9 @@ class UserService:
                 )
                 raise
 
-        # Scope enforcement (always active)
+        # Scope enforcement (always active, for every scope type)
         scope_config = getattr(request.state, "_scope_check_config", None)
-        if (
-            scope_config is not None
-            and resolved.key.scope_type != ApiKeyScopeType.TENANT.value
-        ):
+        if scope_config is not None:
             try:
                 await self._enforce_api_key_scope(
                     request,
@@ -1216,6 +1213,60 @@ class UserService:
         )
 
     # --- Scope enforcement (Phase 3) ---
+
+    async def _require_tenant_key_resource_in_tenant(
+        self,
+        *,
+        request: Request,
+        key: ApiKeyV2InDB,
+        resource_type: str,
+        path_param: str | None,
+    ) -> None:
+        """Reject a tenant-scoped key that addresses another tenant's resource.
+
+        Resources that cannot be resolved to a space are left to the handler,
+        which answers with its usual not-found response. Files are bound to
+        the calling identity rather than to a space and are checked by the
+        file service.
+        """
+        if resource_type in ("admin", "file"):
+            return
+
+        resource_id, resolved_param = self._extract_scoped_resource_id(
+            request=request,
+            resource_type=resource_type,
+            path_param=path_param,
+        )
+        if resource_id is None:
+            return
+
+        space_ids: set[UUID]
+        if resource_type == "prompt":
+            space_ids = await self._resolve_prompt_space_ids(resource_id)
+        elif resource_type == "info_blob" and resolved_param == "space_id":
+            space_ids = {resource_id}
+        else:
+            space_id = await self._resolve_space_id_for_resource(
+                resource_type, resource_id
+            )
+            space_ids = {space_id} if space_id is not None else set()
+
+        if not space_ids:
+            return
+
+        tenant_ids = await self._resolve_tenant_ids_for_spaces(space_ids)
+        if tenant_ids and key.tenant_id not in tenant_ids:
+            raise ApiKeyValidationError(
+                status_code=403,
+                code="insufficient_scope",
+                message="API key is not scoped to this tenant.",
+            )
+
+    async def _resolve_tenant_ids_for_spaces(self, space_ids: set[UUID]) -> set[UUID]:
+        rows = await self.repo.session.scalars(
+            sa.select(Spaces.tenant_id).where(Spaces.id.in_(space_ids))
+        )
+        return set(rows.all())
 
     async def _resolve_space_id_for_resource(
         self,
@@ -1401,15 +1452,24 @@ class UserService:
     ) -> None:
         """Enforce API key scope restrictions.
 
-        Called after authentication when scope config is set on the route
-        and the key is non-tenant scoped.
+        Called after authentication when scope config is set on the route.
+        Tenant-scoped keys are confined to their own tenant; narrower scopes
+        are additionally confined to their space, assistant or app.
         """
         resource_type = cast(str, scope_config["resource_type"])
         path_param = cast("str | None", scope_config["path_param"])
         scope_type = ApiKeyScopeType(key.scope_type)
 
-        # 1. Tenant-scoped keys always pass (fast path)
+        # 1. Tenant-scoped keys: the addressed resource must live in the key's
+        #    tenant. Admin routes and list routes carry no resource id; the
+        #    handlers behind them are already tenant-filtered.
         if scope_type == ApiKeyScopeType.TENANT:
+            await self._require_tenant_key_resource_in_tenant(
+                request=request,
+                key=key,
+                resource_type=resource_type,
+                path_param=path_param,
+            )
             return
 
         # 2. Admin/key-management routes: deny all non-tenant keys

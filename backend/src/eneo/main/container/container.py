@@ -1214,6 +1214,7 @@ class Container(containers.DeclarativeContainer):
     )
     resource_mover_service = providers.Factory(
         ResourceMoverService,
+        user=user,
         space_repo=space_repo,
         space_service=space_service,
         actor_manager=actor_manager,
