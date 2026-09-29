@@ -435,9 +435,6 @@ class ModelProviderService:
         provider = await self.repository.get_by_id(provider_id, for_update=True)
 
         merged_config = {**provider.config, **(config or {})}
-        self._require_replacement_key_for_new_destination(
-            provider, merged_config, credentials
-        )
         next_credentials = (
             credentials if credentials is not None else provider.credentials
         )
@@ -449,6 +446,11 @@ class ModelProviderService:
             # Locking the provider also blocks new model attachments until the
             # semantic edit commits. Model locks coordinate knowledge assignments.
             await guard_embedding_provider_update(self.repository.session, provider_id)
+        # A frozen embedding route is refused above; an allowed destination
+        # change still has to come with its own key.
+        self._require_replacement_key_for_new_destination(
+            provider, merged_config, credentials
+        )
 
         # Check for duplicate names if name is being changed
         if name is not None and name != provider.name:
