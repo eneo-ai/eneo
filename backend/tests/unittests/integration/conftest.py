@@ -24,6 +24,7 @@ from eneo.integration.domain.repositories.tenant_sharepoint_app_repo import (
 from eneo.integration.domain.repositories.user_integration_repo import (
     UserIntegrationRepository,
 )
+from eneo.integration.presentation.integration_auth_router import router as auth_router
 from eneo.integration.presentation.integration_router import router
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
@@ -39,9 +40,10 @@ from eneo.users.user import UserInDB
 def authenticated_integration_app() -> Callable[[Container], FastAPI]:
     def create_app(container: Container) -> FastAPI:
         app = FastAPI()
+        app.include_router(auth_router, prefix="/integrations/auth")
         app.include_router(router, prefix="/integrations")
         add_exception_handlers(app)
-        for route in router.routes:
+        for route in (*auth_router.routes, *router.routes):
             if isinstance(route, APIRoute):
                 for dependency in route.dependant.dependencies:
                     if (

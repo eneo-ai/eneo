@@ -7347,7 +7347,7 @@ export interface paths {
     };
     /**
      * Gen Url
-     * @description Generate the OAuth2 authorization URL for a tenant integration.
+     * @description Generate the OAuth2 authorization URL for an integration in the current tenant.
      */
     get: operations["gen_url_api_v1_integrations_auth__tenant_integration_id__url__get"];
     put?: never;
@@ -7369,7 +7369,7 @@ export interface paths {
     put?: never;
     /**
      * On Auth Callback
-     * @description Complete the OAuth2 callback by exchanging the auth code for a user integration.
+     * @description Complete the OAuth2 callback for an integration in the current tenant.
      */
     post: operations["on_auth_callback_api_v1_integrations_auth_callback_token__post"];
     delete?: never;
