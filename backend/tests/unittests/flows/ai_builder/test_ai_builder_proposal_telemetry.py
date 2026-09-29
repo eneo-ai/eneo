@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import get_args
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -43,6 +44,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     APPLY_TELEMETRY_LOG_KEY,
     APPLY_TELEMETRY_SCHEMA_VERSION,
+    FAILED_TURN_EVIDENCE_KEYS,
     PROPOSAL_TELEMETRY_LOG_KEY,
     PROPOSAL_TELEMETRY_SCHEMA_VERSION,
     ChangesetCountSummary,
@@ -66,7 +68,10 @@ from eneo.flows.ai_builder.ai_builder_settings import (
 from eneo.flows.ai_builder.ai_builder_telemetry import (
     planner_call_records_from_metadata,
 )
-from eneo.flows.ai_builder.ai_builder_token_usage import CompletionTokenUsage
+from eneo.flows.ai_builder.ai_builder_token_usage import (
+    CompletionTokenUsage,
+    completion_token_usage_from_response,
+)
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.application.flow_authoring_command import FlowAuthoringPreview
 from eneo.observability.failure_events import (
@@ -1330,3 +1335,325 @@ def test_a_refused_request_is_a_failed_call_and_its_replacement() -> None:
     assert tracker.call_records[0].provider_status_class == "4xx"
     assert replacement.attempt == 2
     assert replacement.call_kind == "slot_classification"
+
+
+def _failed_turn_tracker() -> tuple[
+    ProposalTurnTelemetry, AIBuilderResolvedRequestBudget
+]:
+    request_budget = AIBuilderRequestBudget(
+        capacity=ModelCapacity(32_000, 16_000),
+        safety_buffer_tokens=2_000,
+        timeout_seconds=180.0,
+    ).resolve_whole(input_tokens=6_000)
+    assert request_budget is not None
+    return (
+        ProposalTurnTelemetry(
+            request_id="req-failed-turn",
+            model="openai/gpt-5.4-nano",
+            target_kind=TargetKind.EDIT,
+        ),
+        request_budget,
+    )
+
+
+def test_a_truncated_call_reports_its_usage_provenance_and_cap() -> None:
+    telemetry, request_budget = _failed_turn_tracker()
+    telemetry.start_attempt(counts_as_repair=False, request_budget=request_budget)
+    telemetry.record_response(
+        finish_reason="length",
+        usage=CompletionTokenUsage(
+            9_000, 4_000, 13_000, source="provider", reasoning_tokens=3_900
+        ),
+    )
+    telemetry.record_attempt_failure(failure_kind="provider_truncation")
+
+    assert telemetry.failed_turn_details() == {
+        "llm_calls": 1,
+        "calls_without_usage": 0,
+        "token_usage_source": "provider",
+        "turn_prompt_tokens": 9_000,
+        "turn_completion_tokens": 4_000,
+        "turn_reasoning_tokens": 3_900,
+        "last_response_finish_reason": "length",
+        "last_call_output_cap_tokens": request_budget.provider_output_cap_tokens,
+    }
+
+
+def test_a_call_without_provider_usage_is_reported_unknown_never_zero() -> None:
+    telemetry, request_budget = _failed_turn_tracker()
+    telemetry.start_attempt(counts_as_repair=False, request_budget=request_budget)
+    telemetry.record_attempt_failure(failure_kind="internal_error")
+
+    details = telemetry.failed_turn_details()
+
+    assert details == {
+        "llm_calls": 1,
+        "calls_without_usage": 1,
+        "token_usage_source": "none",
+        "last_call_output_cap_tokens": request_budget.provider_output_cap_tokens,
+    }
+
+
+def test_an_estimated_usage_is_labelled_and_reports_no_reasoning() -> None:
+    telemetry, request_budget = _failed_turn_tracker()
+    telemetry.start_attempt(counts_as_repair=False, request_budget=request_budget)
+    telemetry.record_response(
+        finish_reason="length",
+        usage=CompletionTokenUsage(5, 2, 7, source="litellm_estimate", estimated=True),
+    )
+
+    details = telemetry.failed_turn_details()
+
+    assert details["token_usage_source"] == "litellm_estimate"
+    # An estimate counts as reported usage; only a call with no counts is missing.
+    assert details["calls_without_usage"] == 0
+    assert details["turn_prompt_tokens"] == 5
+    assert "turn_reasoning_tokens" not in details
+
+
+def test_a_turn_that_never_called_the_provider_has_no_call_details() -> None:
+    telemetry, _ = _failed_turn_tracker()
+
+    assert telemetry.failed_turn_details() == {}
+
+
+def _record_call(
+    telemetry: ProposalTurnTelemetry,
+    request_budget: AIBuilderResolvedRequestBudget,
+    usage: CompletionTokenUsage | None,
+    *,
+    finish_reason: str | None = "stop",
+) -> None:
+    telemetry.start_attempt(counts_as_repair=False, request_budget=request_budget)
+    if usage is None:
+        telemetry.record_attempt_failure(failure_kind="internal_error")
+    else:
+        telemetry.record_response(finish_reason=finish_reason, usage=usage)
+
+
+def test_a_total_only_usage_publishes_no_prompt_or_completion_counts() -> None:
+    telemetry, request_budget = _failed_turn_tracker()
+    _record_call(
+        telemetry,
+        request_budget,
+        CompletionTokenUsage(None, None, 140, source="provider"),
+    )
+
+    details = telemetry.failed_turn_details()
+
+    assert details["token_usage_source"] == "provider"
+    assert "turn_prompt_tokens" not in details
+    assert "turn_completion_tokens" not in details
+
+
+def test_a_count_is_published_only_when_every_observed_call_reported_it() -> None:
+    telemetry, request_budget = _failed_turn_tracker()
+    _record_call(
+        telemetry,
+        request_budget,
+        CompletionTokenUsage(10, 5, 15, source="provider", reasoning_tokens=3),
+    )
+    _record_call(
+        telemetry, request_budget, CompletionTokenUsage(20, 8, 28, source="provider")
+    )
+    _record_call(telemetry, request_budget, None)
+
+    details = telemetry.failed_turn_details()
+
+    assert details["llm_calls"] == 3
+    assert details["calls_without_usage"] == 1
+    assert details["turn_prompt_tokens"] == 30
+    assert details["turn_completion_tokens"] == 13
+    assert "turn_reasoning_tokens" not in details
+
+
+def test_reasoning_tokens_are_summed_when_every_observed_call_reported_them() -> None:
+    telemetry, request_budget = _failed_turn_tracker()
+    for reasoning in (3, 4):
+        _record_call(
+            telemetry,
+            request_budget,
+            CompletionTokenUsage(
+                10, 5, 15, source="provider", reasoning_tokens=reasoning
+            ),
+        )
+
+    assert telemetry.failed_turn_details()["turn_reasoning_tokens"] == 7
+
+
+def test_an_unrecognised_finish_reason_is_published_as_other() -> None:
+    telemetry, request_budget = _failed_turn_tracker()
+    _record_call(
+        telemetry,
+        request_budget,
+        CompletionTokenUsage(10, 5, 15, source="provider"),
+        finish_reason="the provider wrote a sentence here",
+    )
+
+    assert telemetry.failed_turn_details()["last_response_finish_reason"] == "other"
+
+
+def test_a_negative_provider_count_is_never_published_as_call_evidence() -> None:
+    telemetry, request_budget = _failed_turn_tracker()
+    _record_call(
+        telemetry,
+        request_budget,
+        CompletionTokenUsage(10, 5, 15, source="provider", reasoning_tokens=3),
+    )
+    malformed = SimpleNamespace(
+        usage=SimpleNamespace(
+            prompt_tokens=-4_000,
+            completion_tokens=4_000,
+            total_tokens=-1,
+            completion_tokens_details=SimpleNamespace(reasoning_tokens=-1),
+        )
+    )
+    _record_call(
+        telemetry,
+        request_budget,
+        completion_token_usage_from_response(
+            malformed, model_name="openai/gpt-5.4", messages=[]
+        ),
+    )
+
+    details = telemetry.failed_turn_details()
+    per_call = telemetry.build_planner_telemetry()["call_records"][-1]
+
+    assert details["turn_completion_tokens"] == 4_005
+    assert "turn_prompt_tokens" not in details
+    assert "turn_reasoning_tokens" not in details
+    assert "prompt_tokens" not in per_call
+    assert per_call["completion_tokens"] == 4_000
+    assert all(
+        value >= 0 for value in details.values() if isinstance(value, int | float)
+    )
+
+
+def test_a_provider_and_an_estimate_are_summed_and_labelled_as_an_estimate() -> None:
+    telemetry, request_budget = _failed_turn_tracker()
+    _record_call(
+        telemetry,
+        request_budget,
+        CompletionTokenUsage(1_000, 500, 1_500, source="provider", reasoning_tokens=9),
+    )
+    _record_call(
+        telemetry,
+        request_budget,
+        CompletionTokenUsage(50, 20, 70, source="litellm_estimate", estimated=True),
+    )
+
+    details = telemetry.failed_turn_details()
+
+    assert details["token_usage_source"] == "litellm_estimate"
+    assert details["calls_without_usage"] == 0
+    assert details["turn_prompt_tokens"] == 1_050
+    assert details["turn_completion_tokens"] == 520
+    assert "turn_reasoning_tokens" not in details
+
+
+def test_the_evidence_is_a_closed_set_published_in_priority_order() -> None:
+    # The order is the priority a shared details bound keeps: the per-call
+    # facts, then the qualifiers every token sum needs, then the sums, then the
+    # call count. A sum is what gets dropped under key pressure, never the
+    # source and missing-usage qualifier it is read with.
+    assert FAILED_TURN_EVIDENCE_KEYS == (
+        "last_response_finish_reason",
+        "last_call_output_cap_tokens",
+        "token_usage_source",
+        "calls_without_usage",
+        "turn_reasoning_tokens",
+        "turn_completion_tokens",
+        "turn_prompt_tokens",
+        "llm_calls",
+    )
+    telemetry, request_budget = _failed_turn_tracker()
+    _record_call(
+        telemetry,
+        request_budget,
+        CompletionTokenUsage(
+            9_000, 4_000, 13_000, source="provider", reasoning_tokens=1
+        ),
+        finish_reason="length",
+    )
+    assert tuple(telemetry.failed_turn_details()) == FAILED_TURN_EVIDENCE_KEYS
+
+
+def test_absent_figures_leave_the_remaining_evidence_in_priority_order() -> None:
+    telemetry, request_budget = _failed_turn_tracker()
+    _record_call(
+        telemetry,
+        request_budget,
+        CompletionTokenUsage(None, None, 140, source="provider"),
+        finish_reason="length",
+    )
+
+    details = telemetry.failed_turn_details()
+
+    assert "turn_prompt_tokens" not in details
+    assert list(details) == [key for key in FAILED_TURN_EVIDENCE_KEYS if key in details]
+
+
+def test_the_output_cap_is_the_last_calls_and_the_finish_reason_the_last_response() -> (
+    None
+):
+    telemetry, first_budget = _failed_turn_tracker()
+    second_budget = AIBuilderRequestBudget(
+        capacity=ModelCapacity(32_000, 8_000),
+        safety_buffer_tokens=2_000,
+        timeout_seconds=180.0,
+    ).resolve_whole(input_tokens=6_000)
+    assert second_budget is not None
+    assert second_budget.provider_output_cap_tokens != (
+        first_budget.provider_output_cap_tokens
+    )
+    _record_call(
+        telemetry,
+        first_budget,
+        CompletionTokenUsage(9_000, 4_000, 13_000, source="provider"),
+        finish_reason="length",
+    )
+    telemetry.start_attempt(counts_as_repair=True, request_budget=second_budget)
+    pending = telemetry.call_records[-1]
+    telemetry.fail_call(
+        call=pending,
+        failure=classify_ai_builder_provider_failure(
+            RateLimitError(message="slow down", llm_provider="openai", model="gpt"),
+            stage="proposal_completion",
+        ),
+    )
+
+    details = telemetry.failed_turn_details()
+
+    assert details["llm_calls"] == 2
+    assert details["calls_without_usage"] == 1
+    assert details["last_response_finish_reason"] == "length"
+    assert (
+        details["last_call_output_cap_tokens"]
+        == second_budget.provider_output_cap_tokens
+    )
+    assert details["turn_prompt_tokens"] == 9_000
+
+
+def test_an_oversized_provider_count_is_never_published_as_call_evidence() -> None:
+    telemetry, request_budget = _failed_turn_tracker()
+    oversized = SimpleNamespace(
+        usage=SimpleNamespace(
+            prompt_tokens=10**200,
+            completion_tokens=10**30,
+            total_tokens=10**200,
+        )
+    )
+    _record_call(
+        telemetry,
+        request_budget,
+        completion_token_usage_from_response(
+            oversized,
+            model_name="openai/gpt-5.4",
+            messages=[{"role": "user", "content": "Build a flow"}],
+        ),
+    )
+
+    details = telemetry.failed_turn_details()
+
+    assert details["token_usage_source"] == "litellm_estimate"
+    assert all(value < 10**6 for value in details.values() if isinstance(value, int))

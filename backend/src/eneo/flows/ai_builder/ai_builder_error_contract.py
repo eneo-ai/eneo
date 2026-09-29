@@ -1347,7 +1347,7 @@ def normalize_ai_builder_error_details(
             break
         if not key:
             continue
-        if not _is_json_scalar(value):
+        if not _is_json_scalar(value) or not _is_serialisable(value):
             continue
         if isinstance(value, str):
             normalized[key] = value[:_MAX_DETAILS_STRING_LENGTH]
@@ -1364,6 +1364,29 @@ def normalize_ai_builder_error_details(
         normalized.pop(next(reversed(normalized)))
 
     return None
+
+
+def with_ai_builder_call_evidence(
+    event: AIBuilderErrorEvent, evidence: Mapping[str, object]
+) -> AIBuilderErrorEvent:
+    """Append a turn's call evidence into the capacity the own details leave.
+
+    The persisted bound stays 10 keys and 1024 bytes, which older builds also
+    validate. Own details come first and are never overwritten or displaced; the
+    evidence follows in the order given and stops at the first key the bound
+    cannot hold, so an error with many own keys carries fewer evidence keys.
+    Values that cannot be serialised are dropped; this never raises.
+    """
+
+    own = event.data.details or {}
+    details = normalize_ai_builder_error_details(
+        {**own, **{key: value for key, value in evidence.items() if key not in own}}
+    )
+    if details == event.data.details:
+        return event
+    return event.model_copy(
+        update={"data": event.data.model_copy(update={"details": details})}
+    )
 
 
 def normalize_ai_builder_diagnostic_context(
@@ -1510,6 +1533,15 @@ def _is_json_scalar(value: object) -> TypeGuard[JsonScalar]:
     return value is None or isinstance(value, str | int | float | bool)
 
 
+def _is_serialisable(value: JsonScalar) -> bool:
+    # An integer beyond the interpreter's digit limit raises when serialised.
+    try:
+        json.dumps(value)
+    except ValueError:
+        return False
+    return True
+
+
 __all__ = [
     "AI_BUILDER_ERROR_REGISTRY",
     "AIBuilderDiagnosticContext",
@@ -1527,4 +1559,5 @@ __all__ = [
     "normalize_ai_builder_diagnostic_context",
     "normalize_ai_builder_error_details",
     "split_ai_builder_error_context",
+    "with_ai_builder_call_evidence",
 ]

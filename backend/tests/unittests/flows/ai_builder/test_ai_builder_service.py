@@ -1646,6 +1646,10 @@ class TestSendMessage:
             "provider_disposition": "known_rejection",
             "provider_exception_class": expected_exception_class,
             "retry_scope": "new_turn",
+            "llm_calls": 1,
+            "calls_without_usage": 1,
+            "token_usage_source": "none",
+            "last_call_output_cap_tokens": 16_384,
         }
         assert "sensitive-provider-material" not in json.dumps(public_error)
         repo.complete_session_turn.assert_awaited_once()

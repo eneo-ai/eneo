@@ -16,10 +16,10 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from time import monotonic_ns
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, get_args
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -49,6 +49,7 @@ if TYPE_CHECKING:
         AIBuilderProviderFailureKind,
         AIBuilderProviderStatusClass,
         AIBuilderProviderTurnState,
+        JsonScalar,
     )
     from eneo.flows.application.flow_authoring_command import FlowAuthoringPreview
 
@@ -223,6 +224,44 @@ def _call_record_metadata(record: ProposalCallRecord) -> PlannerCallRecordMetada
         provider_status_class=record.provider_status_class,
         provider_turn_state=record.provider_turn_state,
     )
+
+
+# The failed-turn call evidence: a closed set, in priority order. It shares the
+# persisted error-details bound with the error's own details, so an error with
+# many own keys keeps only the leading keys. The per-call facts come first, then
+# the qualifiers, then the token sums, then the call count: a published token sum
+# always carries its source and missing-usage qualifier, and sums are what gets
+# dropped under key pressure.
+FailedTurnEvidenceKey = Literal[
+    "last_response_finish_reason",
+    "last_call_output_cap_tokens",
+    "token_usage_source",
+    "calls_without_usage",
+    "turn_reasoning_tokens",
+    "turn_completion_tokens",
+    "turn_prompt_tokens",
+    "llm_calls",
+]
+FAILED_TURN_EVIDENCE_KEYS: tuple[FailedTurnEvidenceKey, ...] = get_args(
+    FailedTurnEvidenceKey
+)
+
+PUBLISHED_FINISH_REASONS = frozenset(
+    {"stop", "length", "tool_calls", "content_filter", "function_call"}
+)
+
+
+def _published_finish_reason(finish_reason: str | None) -> str | None:
+    if finish_reason is None:
+        return None
+    return finish_reason if finish_reason in PUBLISHED_FINISH_REASONS else "other"
+
+
+def _summed_when_reported(counts: Iterable[int | None]) -> int | None:
+    reported = list(counts)
+    if not reported or None in reported:
+        return None
+    return sum(count for count in reported if count is not None)
 
 
 @dataclass
@@ -443,6 +482,58 @@ class ProposalTurnTelemetry:
         self.admission_normalization_hits[family] = (
             self.admission_normalization_hits.get(family, 0) + 1
         )
+
+    def failed_turn_details(self) -> dict[str, JsonScalar]:
+        """Content-free call evidence for a proposal turn that ended in an error.
+
+        Reported for a streamed error event, a known provider rejection and an
+        oversized planning state; an ambiguous provider outcome (timeout, 5xx,
+        transport) is rebuilt by the router and does not carry it. The keys are
+        ``FAILED_TURN_EVIDENCE_KEYS`` in that order; an absent figure has no key.
+
+        ``turn_*_tokens`` sum every recorded call, auxiliary ones such as the
+        slot classifier included, and a sum is published only when every call
+        that reported counts reported that one, so an absent figure is never
+        read as zero. ``calls_without_usage`` counts calls with no counts at all
+        (an estimate counts as reported) and ``token_usage_source`` is
+        ``litellm_estimate`` when any counted call was estimated. Both always
+        precede the sums, so a published token sum always carries its source and
+        missing-usage qualifier; under key pressure the sums are dropped.
+        ``last_call_output_cap_tokens`` is the last call's; after a rejected
+        later call ``last_response_finish_reason`` is an earlier call's.
+        """
+        if not self.call_records:
+            return {}
+        reported = [usage for usage in self.token_usages if usage.has_tokens]
+        last_call_output_cap_tokens = next(
+            (
+                record.request_budget.provider_output_cap_tokens
+                for record in reversed(self.call_records)
+                if record.request_budget is not None
+            ),
+            None,
+        )
+        evidence: dict[FailedTurnEvidenceKey, JsonScalar] = {
+            "last_response_finish_reason": _published_finish_reason(self.finish_reason),
+            "last_call_output_cap_tokens": last_call_output_cap_tokens,
+            "token_usage_source": combine_token_usage(reported).source,
+            "calls_without_usage": len(self.call_records) - len(reported),
+            "turn_reasoning_tokens": _summed_when_reported(
+                usage.reasoning_tokens for usage in reported
+            ),
+            "turn_completion_tokens": _summed_when_reported(
+                usage.completion_tokens for usage in reported
+            ),
+            "turn_prompt_tokens": _summed_when_reported(
+                usage.prompt_tokens for usage in reported
+            ),
+            "llm_calls": self.llm_calls_made,
+        }
+        return {
+            key: evidence[key]
+            for key in FAILED_TURN_EVIDENCE_KEYS
+            if evidence[key] is not None
+        }
 
     def build_planner_telemetry(self, *, tool_call_count: int = 0) -> dict[str, Any]:
         if self._attempt_started_ns is not None:

@@ -36,9 +36,9 @@ from eneo.flows.ai_builder.ai_builder_provider_call import (
     complete_with_silence_deadline,
 )
 from eneo.flows.ai_builder.ai_builder_token_usage import (
-    TOKEN_USAGE_SOURCE_PROVIDER,
     CompletionTokenUsage,
     completion_token_usage_from_response,
+    provider_token_usage,
 )
 from eneo.main.logging import get_logger
 
@@ -279,7 +279,7 @@ def normalize_litellm_completion_response(response: Any) -> LLMCompletionRespons
         )
     return LLMCompletionResponse(
         choices=tuple(choices),
-        usage=_normalized_completion_usage(_object_field(response, "usage")),
+        usage=provider_token_usage(_object_field(response, "usage")),
     )
 
 
@@ -348,29 +348,6 @@ def completion_messages_for_usage(
     return messages
 
 
-def _normalized_completion_usage(usage: Any) -> CompletionTokenUsage | None:
-    if usage is None:
-        return None
-    prompt_tokens = _safe_int(_object_field(usage, "prompt_tokens"))
-    completion_tokens = _safe_int(_object_field(usage, "completion_tokens"))
-    total_tokens = _safe_int(_object_field(usage, "total_tokens"))
-    if prompt_tokens is None and completion_tokens is None and total_tokens is None:
-        return None
-    if (
-        total_tokens is None
-        and prompt_tokens is not None
-        and completion_tokens is not None
-    ):
-        total_tokens = prompt_tokens + completion_tokens
-    return CompletionTokenUsage(
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=total_tokens,
-        source=TOKEN_USAGE_SOURCE_PROVIDER,
-        estimated=False,
-    )
-
-
 def _sequence_field(value: Any, field_name: str) -> tuple[object, ...]:
     field_value = _object_field(value, field_name)
     if isinstance(field_value, Sequence) and not isinstance(field_value, (str, bytes)):
@@ -392,10 +369,6 @@ def _string_field(value: Any, field_name: str) -> str:
 
 def _string_or_none(value: object) -> str | None:
     return value if isinstance(value, str) else None
-
-
-def _safe_int(value: object) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 __all__ = [

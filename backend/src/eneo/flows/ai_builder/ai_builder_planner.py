@@ -40,6 +40,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorPhase,
     AIBuilderKnownProviderRejectionException,
     build_ai_builder_error_event,
+    with_ai_builder_call_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderStatus,
@@ -178,9 +179,14 @@ class AIBuilderPlanner:
         *,
         turn: "SessionSendTurn",
         error: AIBuilderKnownProviderRejectionException,
+        usage_tracker: ProposalTurnTelemetry,
     ) -> AIBuilderErrorEvent:
-        await self.repo.complete_session_turn(turn=turn, error=error.public_error)
-        return AIBuilderErrorEvent(data=error.public_error)
+        event = with_ai_builder_call_evidence(
+            AIBuilderErrorEvent(data=error.public_error),
+            usage_tracker.failed_turn_details(),
+        )
+        await self.repo.complete_session_turn(turn=turn, error=event.data)
+        return event
 
     async def _complete_planning_state_payload_too_large(
         self,
@@ -188,16 +194,20 @@ class AIBuilderPlanner:
         turn: "SessionSendTurn",
         error: PlanningStatePayloadTooLargeError,
         request_id: str,
+        usage_tracker: ProposalTurnTelemetry,
     ) -> AIBuilderErrorEvent:
-        event = build_ai_builder_error_event(
-            message="The AI Builder planning state is too large to save.",
-            code=AIBuilderErrorCode.PLANNING_STATE_PAYLOAD_TOO_LARGE,
-            phase=AIBuilderErrorPhase.PLANNER,
-            request_id=request_id,
-            details={
-                "payload_bytes": error.byte_size,
-                "payload_cap_bytes": error.cap_bytes,
-            },
+        event = with_ai_builder_call_evidence(
+            build_ai_builder_error_event(
+                message="The AI Builder planning state is too large to save.",
+                code=AIBuilderErrorCode.PLANNING_STATE_PAYLOAD_TOO_LARGE,
+                phase=AIBuilderErrorPhase.PLANNER,
+                request_id=request_id,
+                details={
+                    "payload_bytes": error.byte_size,
+                    "payload_cap_bytes": error.cap_bytes,
+                },
+            ),
+            usage_tracker.failed_turn_details(),
         )
         await self.repo.complete_session_turn(turn=turn, error=event.data)
         return event
@@ -256,16 +266,25 @@ class AIBuilderPlanner:
                 if isinstance(event, AIBuilderStatusEvent):
                     yield event
                     continue
-                events.append(event)
+                events.append(
+                    with_ai_builder_call_evidence(
+                        event, usage_tracker.failed_turn_details()
+                    )
+                    if isinstance(event, AIBuilderErrorEvent)
+                    else event
+                )
         except PlanningStatePayloadTooLargeError as error:
             yield await self._complete_planning_state_payload_too_large(
                 turn=turn,
                 error=error,
                 request_id=request_id,
+                usage_tracker=usage_tracker,
             )
             return
         except AIBuilderKnownProviderRejectionException as error:
-            yield await self._complete_known_provider_rejection(turn=turn, error=error)
+            yield await self._complete_known_provider_rejection(
+                turn=turn, error=error, usage_tracker=usage_tracker
+            )
             return
         error = next(
             (event.data for event in events if isinstance(event, AIBuilderErrorEvent)),
@@ -616,6 +635,7 @@ class AIBuilderPlanner:
                 yield await self._complete_known_provider_rejection(
                     turn=turn,
                     error=error,
+                    usage_tracker=usage_tracker,
                 )
                 yield build_done_event()
                 return
@@ -677,6 +697,7 @@ class AIBuilderPlanner:
                         turn=turn,
                         error=error,
                         request_id=request_id,
+                        usage_tracker=usage_tracker,
                     )
                     yield build_done_event()
                     return
@@ -750,6 +771,7 @@ class AIBuilderPlanner:
                             turn=turn,
                             error=error,
                             request_id=request_id,
+                            usage_tracker=usage_tracker,
                         )
                         yield build_done_event()
                         return

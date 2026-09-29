@@ -63,8 +63,15 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
+    AIBuilderErrorEvent,
+    AIBuilderErrorPhase,
     AIBuilderKnownProviderRejectionException,
+    AIBuilderProviderOutcomeUnknownException,
+    AIBuilderPublicError,
+    JsonScalar,
     build_ai_builder_error_event,
+    classify_ai_builder_provider_failure,
+    with_ai_builder_call_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderStatus,
@@ -152,6 +159,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationResult,
     SlotClassificationSource,
 )
+from eneo.flows.ai_builder.ai_builder_token_usage import CompletionTokenUsage
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     DECLINE_FLOW_CHANGE_TOOL_NAME,
     PROPOSE_FLOW_TOOL_NAME,
@@ -213,7 +221,11 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotRef,
 )
 from eneo.flows.input_binding_contract_rules import source_ref_bindings
-from eneo.main.exceptions import BadRequestException, ErrorCodes
+from eneo.main.exceptions import (
+    BadRequestException,
+    ErrorCodes,
+    ProviderRejectedRequestException,
+)
 from eneo.tokens.token_utils import (
     count_message_tokens,
     count_tool_tokens,
@@ -4176,13 +4188,8 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
     assert events[-1] == {"event": "done", "data": ""}
 
 
-@pytest.mark.asyncio
-async def test_stream_proposal_events_commits_planning_state_payload_too_large(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    planner = _make_planner()
-    turn = cast(Any, SimpleNamespace())
-    proposal_request = ProposalPrepared(
+def _stream_proposal_request() -> ProposalPrepared:
+    return ProposalPrepared(
         requirements_state=_requirements_state_confirmed(),
         ui_language="sv",
         message_groups=(
@@ -4206,6 +4213,15 @@ async def test_stream_proposal_events_commits_planning_state_payload_too_large(
             prior_bindings=(),
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_stream_proposal_events_commits_planning_state_payload_too_large(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    turn = cast(Any, SimpleNamespace())
+    proposal_request = _stream_proposal_request()
 
     async def reject_oversized_state(
         **_: object,
@@ -4254,6 +4270,531 @@ async def test_stream_proposal_events_commits_planning_state_payload_too_large(
         turn=turn,
         error=error_event.data,
     )
+
+
+async def _stream_proposal_error_turn(
+    planner: AIBuilderPlanner,
+    *,
+    usage_tracker: ProposalTurnTelemetry,
+    turn: Any,
+) -> list[AIBuilderStreamEvent]:
+    return [
+        event
+        async for event in planner._stream_proposal_events(  # pyright: ignore[reportPrivateUsage]
+            turn=turn,
+            conversation=[],
+            new_messages_start=0,
+            proposal_request=_stream_proposal_request(),
+            completion_model_route=_route(),
+            request_id="failed-proposal-turn",
+            usage_tracker=usage_tracker,
+            flow=None,
+            assistant_snapshots=None,
+            before_provider_call=AsyncMock(),
+        )
+    ]
+
+
+_FAILED_PROPOSAL_BUDGET = (
+    AIBuilderRequestBudget(
+        capacity=ModelCapacity(32_000, 16_000),
+        safety_buffer_tokens=2_000,
+        timeout_seconds=180.0,
+    )
+).resolve_whole(input_tokens=6_000)
+
+
+def _failed_proposal_output_cap() -> int:
+    assert _FAILED_PROPOSAL_BUDGET is not None
+    return _FAILED_PROPOSAL_BUDGET.provider_output_cap_tokens
+
+
+def _failed_proposal_evidence() -> dict[str, JsonScalar]:
+    """All eight keys, in the priority order the telemetry publishes them."""
+    return {
+        "last_response_finish_reason": "length",
+        "last_call_output_cap_tokens": _failed_proposal_output_cap(),
+        "token_usage_source": "provider",
+        "calls_without_usage": 0,
+        "turn_reasoning_tokens": 3_900,
+        "turn_completion_tokens": 4_000,
+        "turn_prompt_tokens": 9_000,
+        "llm_calls": 1,
+    }
+
+
+def _failed_proposal_tracker() -> ProposalTurnTelemetry:
+    tracker = ProposalTurnTelemetry(
+        request_id="failed-proposal-turn",
+        model="openai/gpt-5.4",
+        target_kind=TargetKind.EDIT,
+    )
+    tracker.start_attempt(
+        counts_as_repair=False, request_budget=_FAILED_PROPOSAL_BUDGET
+    )
+    tracker.record_response(
+        finish_reason="length",
+        usage=CompletionTokenUsage(
+            9_000, 4_000, 13_000, source="provider", reasoning_tokens=3_900
+        ),
+    )
+    tracker.record_attempt_failure(failure_kind="provider_truncation")
+    return tracker
+
+
+@pytest.mark.asyncio
+async def test_a_truncated_proposal_turn_streams_and_commits_its_call_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    turn = cast(Any, SimpleNamespace())
+
+    async def truncated_proposal(
+        *, request_id: str, **_: object
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
+        yield build_ai_builder_error_event(
+            message="The AI planner output was cut off.",
+            code=AIBuilderErrorCode.PLANNER_OUTPUT_TOO_LONG,
+            phase=AIBuilderErrorPhase.PROPOSAL,
+            request_id=request_id,
+        )
+
+    monkeypatch.setattr(
+        planner._proposal_submission,  # pyright: ignore[reportPrivateUsage]
+        "run_active_submission_attempt",
+        truncated_proposal,
+    )
+
+    events = await _stream_proposal_error_turn(
+        planner, usage_tracker=_failed_proposal_tracker(), turn=turn
+    )
+
+    assert len(events) == 1
+    error_event = events[0]
+    assert isinstance(error_event, AIBuilderErrorEvent)
+    assert error_event.data.code == AIBuilderErrorCode.PLANNER_OUTPUT_TOO_LONG
+    assert error_event.data.details == _failed_proposal_evidence()
+    planner.repo.complete_session_turn.assert_awaited_once_with(
+        turn=turn, error=error_event.data
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_oversized_state_after_a_recorded_response_keeps_the_call_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    turn = cast(Any, SimpleNamespace())
+
+    async def reject_oversized_state(
+        **_: object,
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
+        raise PlanningStatePayloadTooLargeError(byte_size=131_073, cap_bytes=131_072)
+        yield
+
+    monkeypatch.setattr(
+        planner._proposal_submission,  # pyright: ignore[reportPrivateUsage]
+        "run_active_submission_attempt",
+        reject_oversized_state,
+    )
+
+    events = await _stream_proposal_error_turn(
+        planner, usage_tracker=_failed_proposal_tracker(), turn=turn
+    )
+
+    error_event = cast(AIBuilderErrorEvent, events[0])
+    assert error_event.data.details == {
+        "payload_bytes": 131_073,
+        "payload_cap_bytes": 131_072,
+        **_failed_proposal_evidence(),
+    }
+    planner.repo.complete_session_turn.assert_awaited_once_with(
+        turn=turn, error=error_event.data
+    )
+
+
+def _rate_limited_provider_error() -> AIBuilderPublicError:
+    return classify_ai_builder_provider_failure(
+        litellm.exceptions.RateLimitError(
+            message="slow down", llm_provider="openai", model="gpt"
+        ),
+        stage="proposal_completion",
+        request_id="failed-proposal-turn",
+    ).public_error
+
+
+def _unsupported_reasoning_provider_error() -> AIBuilderPublicError:
+    return classify_ai_builder_provider_failure(
+        ProviderRejectedRequestException(
+            "The route cannot honour the requested reasoning effort.",
+            code="provider_rejected_request",
+            details={"reason": "reasoning_effort_unsupported", "retryable": False},
+        ),
+        stage="proposal_completion",
+        request_id="failed-proposal-turn",
+    ).public_error
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider_error", "own_detail_keys", "kept_evidence_keys"),
+    [
+        pytest.param(
+            _rate_limited_provider_error,
+            4,
+            [
+                "last_response_finish_reason",
+                "last_call_output_cap_tokens",
+                "token_usage_source",
+                "calls_without_usage",
+                "turn_reasoning_tokens",
+                "turn_completion_tokens",
+            ],
+            id="four-own-keys",
+        ),
+        pytest.param(
+            _unsupported_reasoning_provider_error,
+            5,
+            [
+                "last_response_finish_reason",
+                "last_call_output_cap_tokens",
+                "token_usage_source",
+                "calls_without_usage",
+                "turn_reasoning_tokens",
+            ],
+            id="five-own-keys",
+        ),
+    ],
+)
+async def test_a_provider_rejection_keeps_the_leading_evidence_its_own_details_leave_room_for(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_error: Callable[[], AIBuilderPublicError],
+    own_detail_keys: int,
+    kept_evidence_keys: list[str],
+) -> None:
+    planner = _make_planner()
+    turn = cast(Any, SimpleNamespace())
+    rejection = provider_error()
+    assert len(rejection.details or {}) == own_detail_keys
+
+    async def rejected_repair(
+        **_: object,
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
+        raise AIBuilderKnownProviderRejectionException(rejection)
+        yield
+
+    monkeypatch.setattr(
+        planner._proposal_submission,  # pyright: ignore[reportPrivateUsage]
+        "run_active_submission_attempt",
+        rejected_repair,
+    )
+
+    events = await _stream_proposal_error_turn(
+        planner, usage_tracker=_failed_proposal_tracker(), turn=turn
+    )
+
+    error_event = cast(AIBuilderErrorEvent, events[0])
+    full_evidence = _failed_proposal_evidence()
+    assert error_event.data.details == {
+        **(rejection.details or {}),
+        **{key: full_evidence[key] for key in kept_evidence_keys},
+    }
+    assert len(error_event.data.details or {}) == 10
+    planner.repo.complete_session_turn.assert_awaited_once_with(
+        turn=turn, error=error_event.data
+    )
+
+
+def _own_details_error(own_keys: int) -> AIBuilderPublicError:
+    return build_ai_builder_error_event(
+        message="The planner failed.",
+        code=AIBuilderErrorCode.PLANNER_REJECTED,
+        request_id="failed-proposal-turn",
+        details={f"own_{index}": index for index in range(own_keys)},
+    ).data
+
+
+def test_every_real_error_shape_with_evidence_stays_inside_the_persisted_bound() -> (
+    None
+):
+    # Builds before this one validate a persisted error against exactly 10 keys
+    # and 1024 bytes, so no error shape may need more; a wider bound would make
+    # their session reads fail.
+    shapes = {
+        "truncation": build_ai_builder_error_event(
+            message="The AI planner output was cut off.",
+            code=AIBuilderErrorCode.PLANNER_OUTPUT_TOO_LONG,
+            phase=AIBuilderErrorPhase.PROPOSAL,
+            request_id="failed-proposal-turn",
+        ).data,
+        "oversized_state": build_ai_builder_error_event(
+            message="The AI Builder planning state is too large to save.",
+            code=AIBuilderErrorCode.PLANNING_STATE_PAYLOAD_TOO_LARGE,
+            request_id="failed-proposal-turn",
+            details={"payload_bytes": 131_073, "payload_cap_bytes": 131_072},
+        ).data,
+        "rate_limited": _rate_limited_provider_error(),
+        "unsupported_reasoning": _unsupported_reasoning_provider_error(),
+        "ten_own_keys": _own_details_error(10),
+    }
+    evidence = _failed_proposal_tracker().failed_turn_details()
+    assert len(evidence) == 8
+
+    for name, error in shapes.items():
+        own = error.details or {}
+        enriched = with_ai_builder_call_evidence(
+            AIBuilderErrorEvent(data=error), evidence
+        ).data
+        details = enriched.details or {}
+
+        assert len(details) <= 10, name
+        assert len(json.dumps(details, ensure_ascii=False).encode()) <= 1024, name
+        assert list(details)[: len(own)] == list(own), name
+        assert len(details) == min(10, len(own) + len(evidence)), name
+
+
+_TOKEN_SUM_KEYS = {
+    "turn_reasoning_tokens",
+    "turn_completion_tokens",
+    "turn_prompt_tokens",
+}
+_TOKEN_SUM_QUALIFIERS = {"token_usage_source", "calls_without_usage"}
+
+
+def _estimated_response_then_rate_limited_repair_tracker() -> ProposalTurnTelemetry:
+    tracker = ProposalTurnTelemetry(
+        request_id="failed-proposal-turn",
+        model="openai/gpt-5.4",
+        target_kind=TargetKind.EDIT,
+    )
+    tracker.start_attempt(
+        counts_as_repair=False, request_budget=_FAILED_PROPOSAL_BUDGET
+    )
+    tracker.record_response(
+        finish_reason="stop",
+        usage=CompletionTokenUsage(
+            50, 20, 70, source="litellm_estimate", estimated=True
+        ),
+    )
+    tracker.start_attempt(counts_as_repair=True, request_budget=_FAILED_PROPOSAL_BUDGET)
+    tracker.fail_call(
+        call=tracker.call_records[-1],
+        failure=classify_ai_builder_provider_failure(
+            litellm.exceptions.RateLimitError(
+                message="slow down", llm_provider="openai", model="gpt"
+            ),
+            stage="proposal_completion",
+            request_id="failed-proposal-turn",
+        ),
+    )
+    return tracker
+
+
+@pytest.mark.parametrize(
+    "tracker_factory",
+    [
+        pytest.param(_failed_proposal_tracker, id="provider-usage"),
+        pytest.param(
+            _estimated_response_then_rate_limited_repair_tracker,
+            id="estimate-then-rejected-repair",
+        ),
+    ],
+)
+def test_a_published_token_sum_always_carries_its_source_and_missing_usage_qualifier(
+    tracker_factory: Callable[[], ProposalTurnTelemetry],
+) -> None:
+    evidence = tracker_factory().failed_turn_details()
+    assert _TOKEN_SUM_KEYS & evidence.keys()
+
+    for own_key_count in range(11):
+        own = {f"own_{index}": index for index in range(own_key_count)}
+        event = build_ai_builder_error_event(
+            message="The planner failed.",
+            code=AIBuilderErrorCode.PLANNER_REJECTED,
+            request_id="failed-proposal-turn",
+            details=own,
+        )
+
+        details = with_ai_builder_call_evidence(event, evidence).data.details or {}
+
+        assert list(details)[:own_key_count] == list(own)
+        assert len(details) <= 10
+        if _TOKEN_SUM_KEYS & details.keys():
+            assert _TOKEN_SUM_QUALIFIERS <= details.keys(), own_key_count
+
+
+@pytest.mark.asyncio
+async def test_a_rate_limited_repair_after_an_estimated_response_labels_its_token_sums() -> (
+    None
+):
+    planner = _make_planner()
+    planner.litellm_client.acompletion.side_effect = [
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="I would build a summary flow.", tool_calls=None
+                    ),
+                    finish_reason="stop",
+                )
+            ]
+        ),
+        litellm.exceptions.RateLimitError(
+            message="slow down", llm_provider="openai", model="gpt"
+        ),
+    ]
+    turn = cast(Any, SimpleNamespace(session_id=uuid4()))
+    usage_tracker = ProposalTurnTelemetry(
+        request_id="failed-proposal-turn",
+        model="openai/gpt-5.4",
+        target_kind=TargetKind.EDIT,
+    )
+
+    events = await _stream_proposal_error_turn(
+        planner, usage_tracker=usage_tracker, turn=turn
+    )
+
+    streamed = cast(AIBuilderErrorEvent, events[-1])
+    assert planner.litellm_client.acompletion.await_count == 2
+    planner.repo.complete_session_turn.assert_awaited_once_with(
+        turn=turn, error=streamed.data
+    )
+    # Both the streamed and the committed error are the same one.
+    details = streamed.data.details or {}
+    assert details["provider_disposition"] == "known_rejection"
+    assert details["token_usage_source"] == "litellm_estimate"
+    assert details["calls_without_usage"] == 1
+    assert _TOKEN_SUM_KEYS & details.keys()
+    assert _TOKEN_SUM_QUALIFIERS <= details.keys()
+    assert len(details) <= 10
+    assert len(json.dumps(details, ensure_ascii=False).encode()) <= 1024
+    assert (
+        AIBuilderPublicError.model_validate(streamed.data.model_dump(mode="json"))
+        == streamed.data
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_ambiguous_provider_outcome_still_reaches_the_router_without_call_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Known residue: a timeout, 5xx or transport failure is not enriched here.
+
+    The planner lets the exception through; the router rebuilds the error event
+    from the exception context, so the turn tracker's evidence is not reported.
+    """
+    planner = _make_planner()
+    ambiguous = classify_ai_builder_provider_failure(
+        litellm.exceptions.Timeout(
+            "provider deadline", model="gpt", llm_provider="openai"
+        ),
+        stage="proposal_completion",
+        request_id="failed-proposal-turn",
+    ).as_exception()
+    assert isinstance(ambiguous, AIBuilderProviderOutcomeUnknownException)
+
+    async def unknown_outcome(
+        **_: object,
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
+        raise ambiguous
+        yield
+
+    monkeypatch.setattr(
+        planner._proposal_submission,  # pyright: ignore[reportPrivateUsage]
+        "run_active_submission_attempt",
+        unknown_outcome,
+    )
+
+    with pytest.raises(AIBuilderProviderOutcomeUnknownException) as raised:
+        await _stream_proposal_error_turn(
+            planner,
+            usage_tracker=_failed_proposal_tracker(),
+            turn=cast(Any, SimpleNamespace()),
+        )
+
+    assert raised.value is ambiguous
+    assert raised.value.public_error is not None
+    assert "llm_calls" not in (raised.value.public_error.details or {})
+    planner.repo.complete_session_turn.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_truncated_provider_response_reaches_the_committed_and_streamed_error() -> (
+    None
+):
+    planner = _make_planner()
+    planner.litellm_client.acompletion.return_value = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content=None, tool_calls=None),
+                finish_reason="length",
+            )
+        ],
+        usage=SimpleNamespace(
+            prompt_tokens=9_000,
+            completion_tokens=4_000,
+            total_tokens=13_000,
+            completion_tokens_details=SimpleNamespace(reasoning_tokens=3_900),
+        ),
+    )
+    turn = cast(Any, SimpleNamespace(session_id=uuid4()))
+    usage_tracker = ProposalTurnTelemetry(
+        request_id="failed-proposal-turn",
+        model="openai/gpt-5.4",
+        target_kind=TargetKind.EDIT,
+    )
+
+    events = await _stream_proposal_error_turn(
+        planner, usage_tracker=usage_tracker, turn=turn
+    )
+
+    error_event = cast(AIBuilderErrorEvent, events[-1])
+    assert error_event.data.code == AIBuilderErrorCode.PLANNER_OUTPUT_TOO_LONG
+    provider_calls = planner.litellm_client.acompletion.await_count
+    budget = usage_tracker.call_records[0].request_budget
+    assert budget is not None
+    assert error_event.data.details == {
+        **_failed_proposal_evidence(),
+        "llm_calls": provider_calls,
+        "last_call_output_cap_tokens": budget.provider_output_cap_tokens,
+    }
+    planner.repo.complete_session_turn.assert_awaited_once_with(
+        turn=turn, error=error_event.data
+    )
+
+
+@pytest.mark.asyncio
+async def test_call_evidence_is_added_after_the_errors_own_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+
+    async def rejected_proposal(
+        *, request_id: str, **_: object
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
+        yield build_ai_builder_error_event(
+            message="Invalid proposal",
+            code=AIBuilderErrorCode.PLANNER_REJECTED,
+            request_id=request_id,
+            details={"quality_failure_codes": "missing_source_refs"},
+        )
+
+    monkeypatch.setattr(
+        planner._proposal_submission,  # pyright: ignore[reportPrivateUsage]
+        "run_active_submission_attempt",
+        rejected_proposal,
+    )
+
+    events = await _stream_proposal_error_turn(
+        planner,
+        usage_tracker=_failed_proposal_tracker(),
+        turn=cast(Any, SimpleNamespace()),
+    )
+
+    details = cast(AIBuilderErrorEvent, events[0]).data.details
+    assert details is not None
+    assert list(details)[0] == "quality_failure_codes"
+    assert details["turn_reasoning_tokens"] == 3_900
 
 
 @pytest.mark.asyncio

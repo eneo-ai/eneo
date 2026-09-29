@@ -6,10 +6,13 @@ import pytest
 from pydantic import ValidationError
 
 from eneo.flows.ai_builder.ai_builder_error_contract import (
+    _MAX_DETAILS_JSON_BYTES,  # pyright: ignore[reportPrivateUsage]
+    _MAX_DETAILS_KEYS,  # pyright: ignore[reportPrivateUsage]
     AI_BUILDER_ERROR_REGISTRY,
     AIBuilderBadRequestException,
     AIBuilderDiagnosticContext,
     AIBuilderErrorCode,
+    AIBuilderErrorEvent,
     AIBuilderErrorPhase,
     AIBuilderNotFoundException,
     AIBuilderPublicError,
@@ -17,6 +20,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     build_ai_builder_error,
     build_ai_builder_error_event,
     split_ai_builder_error_context,
+    with_ai_builder_call_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
 from eneo.main.exceptions import ErrorCodes
@@ -125,6 +129,131 @@ def test_error_details_reject_nested_or_oversized_values(
             request_id="req-context",
             details=details,
         )
+
+
+# The turn's call evidence in the priority order the telemetry owns.
+_CALL_EVIDENCE: dict[str, object] = {
+    "last_response_finish_reason": "content_filter",
+    "last_call_output_cap_tokens": 10**9,
+    "token_usage_source": "litellm_estimate",
+    "calls_without_usage": 99,
+    "turn_reasoning_tokens": 10**14,
+    "turn_completion_tokens": 10**14,
+    "turn_prompt_tokens": 10**14,
+    "llm_calls": 99,
+}
+
+
+def _error_with_details(details: dict[str, object]) -> AIBuilderErrorEvent:
+    return build_ai_builder_error_event(
+        message="The AI planner failed.",
+        code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
+        request_id="req-evidence",
+        details=details,
+    )
+
+
+def _json_size(details: dict[str, object]) -> int:
+    return len(json.dumps(details, ensure_ascii=False).encode("utf-8"))
+
+
+def test_the_persisted_details_bound_is_ten_keys_and_1024_bytes() -> None:
+    # Older builds validate a persisted error against this exact bound, so call
+    # evidence has to fit inside it; widening it makes their session reads fail.
+    assert (_MAX_DETAILS_KEYS, _MAX_DETAILS_JSON_BYTES) == (10, 1024)
+
+
+def _public_error_with_details(details: dict[str, object]) -> AIBuilderPublicError:
+    return AIBuilderPublicError(
+        message="Sized details",
+        code=AIBuilderErrorCode.BAD_REQUEST,
+        category=AI_BUILDER_ERROR_REGISTRY[AIBuilderErrorCode.BAD_REQUEST].category,
+        phase=AIBuilderErrorPhase.ROUTER,
+        eneo_error_code=ErrorCodes.BAD_REQUEST,
+        request_id="req-sized",
+        details=details,
+    )
+
+
+def _details_of_json_size(size: int) -> dict[str, object]:
+    details: dict[str, object] = {f"k{i}": "x" * 200 for i in range(4)}
+    # `, "k4": ""` adds ten bytes around the padding.
+    details["k4"] = "y" * (size - _json_size(details) - 10)
+    assert _json_size(details) == size
+    return details
+
+
+def test_error_details_are_bounded_at_1024_bytes() -> None:
+    assert _public_error_with_details(_details_of_json_size(1024)).details
+
+    with pytest.raises(ValidationError, match="1024 bytes"):
+        _public_error_with_details(_details_of_json_size(1025))
+
+
+@pytest.mark.parametrize("own_key_count", [0, 1, 2, 3, 5, 9, 10])
+def test_call_evidence_fills_the_capacity_the_own_details_leave(
+    own_key_count: int,
+) -> None:
+    own = {f"own_{i}": i for i in range(own_key_count)}
+    event = _error_with_details(own)
+    room = _MAX_DETAILS_KEYS - own_key_count
+    kept = dict(list(_CALL_EVIDENCE.items())[:room])
+
+    enriched = with_ai_builder_call_evidence(event, _CALL_EVIDENCE)
+
+    assert enriched.data.details == ({**own, **kept} or None)
+    assert list(enriched.data.details or {}) == [*own, *kept]
+    if not kept:
+        assert enriched is event
+    # The enriched error still fits the bound older builds validate against.
+    assert (
+        AIBuilderPublicError.model_validate(enriched.data.model_dump(mode="json"))
+        == enriched.data
+    )
+
+
+def test_call_evidence_stops_at_the_first_key_the_byte_bound_cannot_hold() -> None:
+    own = {f"own_{i}": "x" * 250 for i in range(3)}
+    event = _error_with_details(own)
+    assert event.data.details == own
+    fitting: dict[str, object] = {}
+    for key, value in _CALL_EVIDENCE.items():
+        if _json_size({**own, **fitting, key: value}) > _MAX_DETAILS_JSON_BYTES:
+            break
+        fitting[key] = value
+    # The bytes, not the ten keys, are what stops the evidence.
+    assert 0 < len(fitting) < _MAX_DETAILS_KEYS - len(own)
+
+    enriched = with_ai_builder_call_evidence(event, _CALL_EVIDENCE)
+
+    assert enriched.data.details == {**own, **fitting}
+
+
+def test_call_evidence_never_overwrites_an_own_detail_key() -> None:
+    own = {"llm_calls": "own value", "retry_scope": "new_turn"}
+
+    enriched = with_ai_builder_call_evidence(_error_with_details(own), _CALL_EVIDENCE)
+
+    assert enriched.data.details is not None
+    assert enriched.data.details["llm_calls"] == "own value"
+    assert list(enriched.data.details)[:2] == ["llm_calls", "retry_scope"]
+    assert {
+        key: value for key, value in enriched.data.details.items() if key not in own
+    } == {key: value for key, value in _CALL_EVIDENCE.items() if key not in own}
+
+
+def test_an_unserialisable_count_is_dropped_never_raised() -> None:
+    too_many_digits = 10**4300
+    evidence = {**_CALL_EVIDENCE, "turn_prompt_tokens": too_many_digits}
+
+    enriched = with_ai_builder_call_evidence(_error_with_details({}), evidence)
+
+    assert enriched.data.details == {
+        key: value for key, value in evidence.items() if key != "turn_prompt_tokens"
+    }
+    assert _error_with_details({"own": too_many_digits, "kept": 1}).data.details == {
+        "kept": 1
+    }
 
 
 @pytest.mark.parametrize(
