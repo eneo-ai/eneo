@@ -18,6 +18,7 @@ import pytest
 from eneo.integration.application.integration_knowledge_service import (
     IntegrationKnowledgeService,
 )
+from eneo.integration.application.user_integration_service import UserIntegrationService
 from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
@@ -43,6 +44,9 @@ def space():
 def integration_knowledge(space):
     """Create a mock integration knowledge entity."""
     user_integration = MagicMock()
+    user_integration.user_id = TEST_USER.id
+    user_integration.tenant_integration.tenant_id = TEST_USER.tenant_id
+    user_integration.authenticated = True
     user_integration.id = uuid4()
     user_integration.auth_type = "user_oauth"
     user_integration.tenant_app_id = None
@@ -79,7 +83,13 @@ def service(actor: MagicMock, space: MagicMock, integration_knowledge: MagicMock
         space_repo=space_repo,
         integration_knowledge_repo=integration_knowledge_repo,
         embedding_model_repo=AsyncMock(),
-        user_integration_repo=AsyncMock(),
+        user_integration_service=UserIntegrationService(
+            user_integration_repo=AsyncMock(),
+            tenant_integration_repo=AsyncMock(),
+            user=TEST_USER,
+            actor_manager=actor_manager,
+            tenant_sharepoint_app_repo=AsyncMock(),
+        ),
         actor_manager=actor_manager,
         sharepoint_subscription_service=AsyncMock(),
         tenant_sharepoint_app_repo=AsyncMock(),
@@ -111,6 +121,9 @@ class TestTenantAppAdminPermission:
     def tenant_app_knowledge(self, space):
         """Knowledge item backed by tenant_app auth."""
         user_integration = MagicMock()
+        user_integration.user_id = TEST_USER.id
+        user_integration.tenant_integration.tenant_id = TEST_USER.tenant_id
+        user_integration.authenticated = True
         user_integration.id = uuid4()
         user_integration.auth_type = "tenant_app"
         user_integration.tenant_app_id = uuid4()
@@ -129,6 +142,9 @@ class TestTenantAppAdminPermission:
     def user_oauth_knowledge(self, space):
         """Knowledge item backed by user_oauth auth."""
         user_integration = MagicMock()
+        user_integration.user_id = TEST_USER.id
+        user_integration.tenant_integration.tenant_id = TEST_USER.tenant_id
+        user_integration.authenticated = True
         user_integration.id = uuid4()
         user_integration.auth_type = "user_oauth"
         user_integration.tenant_app_id = None
@@ -167,7 +183,13 @@ class TestTenantAppAdminPermission:
             space_repo=space_repo,
             integration_knowledge_repo=integration_knowledge_repo,
             embedding_model_repo=AsyncMock(),
-            user_integration_repo=AsyncMock(),
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=AsyncMock(),
+                tenant_integration_repo=AsyncMock(),
+                user=user,
+                actor_manager=actor_manager,
+                tenant_sharepoint_app_repo=AsyncMock(),
+            ),
             actor_manager=actor_manager,
             sharepoint_subscription_service=AsyncMock(),
             tenant_sharepoint_app_repo=AsyncMock(),
@@ -408,6 +430,9 @@ class TestWrapperOperations:
         actor.can_edit_integrations.return_value = True
 
         user_integration = MagicMock()
+        user_integration.user_id = TEST_USER.id
+        user_integration.tenant_integration.tenant_id = TEST_USER.tenant_id
+        user_integration.authenticated = True
         user_integration.auth_type = "user_oauth"
 
         wrapper_id = uuid4()
@@ -444,7 +469,13 @@ class TestWrapperOperations:
             space_repo=space_repo,
             integration_knowledge_repo=integration_knowledge_repo,
             embedding_model_repo=AsyncMock(),
-            user_integration_repo=AsyncMock(),
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=AsyncMock(),
+                tenant_integration_repo=AsyncMock(),
+                user=TEST_USER,
+                actor_manager=actor_manager,
+                tenant_sharepoint_app_repo=AsyncMock(),
+            ),
             actor_manager=actor_manager,
             sharepoint_subscription_service=AsyncMock(),
             tenant_sharepoint_app_repo=AsyncMock(),
@@ -466,6 +497,9 @@ class TestWrapperOperations:
         actor.can_delete_integrations.return_value = True
 
         user_integration = MagicMock()
+        user_integration.user_id = TEST_USER.id
+        user_integration.tenant_integration.tenant_id = TEST_USER.tenant_id
+        user_integration.authenticated = True
         user_integration.auth_type = "user_oauth"
 
         wrapper_id = uuid4()
@@ -496,7 +530,13 @@ class TestWrapperOperations:
             space_repo=space_repo,
             integration_knowledge_repo=AsyncMock(),
             embedding_model_repo=AsyncMock(),
-            user_integration_repo=AsyncMock(),
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=AsyncMock(),
+                tenant_integration_repo=AsyncMock(),
+                user=TEST_USER,
+                actor_manager=actor_manager,
+                tenant_sharepoint_app_repo=AsyncMock(),
+            ),
             actor_manager=actor_manager,
             sharepoint_subscription_service=AsyncMock(),
             tenant_sharepoint_app_repo=AsyncMock(),
@@ -527,6 +567,9 @@ class TestRemoveKnowledge:
     def user_integration_user_oauth(self):
         """Create a mock user_oauth integration."""
         user_integration = MagicMock()
+        user_integration.user_id = TEST_USER.id
+        user_integration.tenant_integration.tenant_id = TEST_USER.tenant_id
+        user_integration.authenticated = True
         user_integration.id = uuid4()
         user_integration.auth_type = "user_oauth"
         user_integration.tenant_app_id = None
@@ -536,6 +579,9 @@ class TestRemoveKnowledge:
     def user_integration_tenant_app(self):
         """Create a mock tenant_app integration (app oauth)."""
         user_integration = MagicMock()
+        user_integration.user_id = TEST_USER.id
+        user_integration.tenant_integration.tenant_id = TEST_USER.tenant_id
+        user_integration.authenticated = True
         user_integration.id = uuid4()
         user_integration.auth_type = "tenant_app"
         user_integration.tenant_app_id = uuid4()
@@ -611,7 +657,13 @@ class TestRemoveKnowledge:
             space_repo=space_repo,
             integration_knowledge_repo=AsyncMock(),
             embedding_model_repo=AsyncMock(),
-            user_integration_repo=AsyncMock(),
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=AsyncMock(),
+                tenant_integration_repo=AsyncMock(),
+                user=TEST_USER,
+                actor_manager=actor_manager,
+                tenant_sharepoint_app_repo=AsyncMock(),
+            ),
             actor_manager=actor_manager,
             sharepoint_subscription_service=AsyncMock(),
             tenant_sharepoint_app_repo=AsyncMock(),
@@ -660,7 +712,13 @@ class TestRemoveKnowledge:
             space_repo=space_repo,
             integration_knowledge_repo=AsyncMock(),
             embedding_model_repo=AsyncMock(),
-            user_integration_repo=AsyncMock(),
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=AsyncMock(),
+                tenant_integration_repo=AsyncMock(),
+                user=TEST_USER,
+                actor_manager=actor_manager,
+                tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
+            ),
             actor_manager=actor_manager,
             sharepoint_subscription_service=AsyncMock(),
             tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
@@ -708,7 +766,13 @@ class TestRemoveKnowledge:
             space_repo=space_repo,
             integration_knowledge_repo=AsyncMock(),
             embedding_model_repo=AsyncMock(),
-            user_integration_repo=AsyncMock(),
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=AsyncMock(),
+                tenant_integration_repo=AsyncMock(),
+                user=TEST_USER,
+                actor_manager=actor_manager,
+                tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
+            ),
             actor_manager=actor_manager,
             sharepoint_subscription_service=AsyncMock(),
             tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
@@ -762,7 +826,13 @@ class TestRemoveKnowledge:
             space_repo=space_repo,
             integration_knowledge_repo=integration_knowledge_repo,
             embedding_model_repo=AsyncMock(),
-            user_integration_repo=AsyncMock(),
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=AsyncMock(),
+                tenant_integration_repo=AsyncMock(),
+                user=TEST_USER,
+                actor_manager=actor_manager,
+                tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
+            ),
             actor_manager=actor_manager,
             sharepoint_subscription_service=AsyncMock(),
             tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
@@ -800,12 +870,16 @@ class TestCreateSpaceIntegrationKnowledge:
         space.tenant_id = TEST_USER.tenant_id
         space.tenant_space_id = uuid4()  # Not an org space (skip distribution)
         space.is_embedding_model_in_space.return_value = True
+        space.is_personal.return_value = False
         return space
 
     @pytest.fixture
     def user_integration_user_oauth(self):
         """Create a mock user_oauth integration."""
         user_integration = MagicMock()
+        user_integration.user_id = TEST_USER.id
+        user_integration.tenant_integration.tenant_id = TEST_USER.tenant_id
+        user_integration.authenticated = True
         user_integration.id = uuid4()
         user_integration.auth_type = "user_oauth"
         user_integration.integration_type = "sharepoint"
@@ -816,6 +890,9 @@ class TestCreateSpaceIntegrationKnowledge:
     def user_integration_tenant_app(self):
         """Create a mock tenant_app integration."""
         user_integration = MagicMock()
+        user_integration.user_id = TEST_USER.id
+        user_integration.tenant_integration.tenant_id = TEST_USER.tenant_id
+        user_integration.authenticated = True
         user_integration.id = uuid4()
         user_integration.auth_type = "tenant_app"
         user_integration.integration_type = "sharepoint"
@@ -905,7 +982,13 @@ class TestCreateSpaceIntegrationKnowledge:
             space_repo=space_repo,
             integration_knowledge_repo=integration_knowledge_repo,
             embedding_model_repo=embedding_model_repo,
-            user_integration_repo=user_integration_repo,
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=user_integration_repo,
+                tenant_integration_repo=AsyncMock(),
+                user=TEST_USER,
+                actor_manager=MagicMock(),
+                tenant_sharepoint_app_repo=AsyncMock(),
+            ),
             actor_manager=MagicMock(),
             sharepoint_subscription_service=sharepoint_subscription_service,
             tenant_sharepoint_app_repo=AsyncMock(),
@@ -973,7 +1056,13 @@ class TestCreateSpaceIntegrationKnowledge:
             space_repo=space_repo,
             integration_knowledge_repo=integration_knowledge_repo,
             embedding_model_repo=embedding_model_repo,
-            user_integration_repo=user_integration_repo,
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=user_integration_repo,
+                tenant_integration_repo=AsyncMock(),
+                user=TEST_USER,
+                actor_manager=MagicMock(),
+                tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
+            ),
             actor_manager=MagicMock(),
             sharepoint_subscription_service=sharepoint_subscription_service,
             tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
@@ -1047,7 +1136,13 @@ class TestCreateSpaceIntegrationKnowledge:
             space_repo=space_repo,
             integration_knowledge_repo=integration_knowledge_repo,
             embedding_model_repo=embedding_model_repo,
-            user_integration_repo=user_integration_repo,
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=user_integration_repo,
+                tenant_integration_repo=AsyncMock(),
+                user=TEST_USER,
+                actor_manager=MagicMock(),
+                tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
+            ),
             actor_manager=MagicMock(),
             sharepoint_subscription_service=sharepoint_subscription_service,
             tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
@@ -1106,7 +1201,13 @@ class TestCreateSpaceIntegrationKnowledge:
             space_repo=space_repo,
             integration_knowledge_repo=AsyncMock(),
             embedding_model_repo=embedding_model_repo,
-            user_integration_repo=user_integration_repo,
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=user_integration_repo,
+                tenant_integration_repo=AsyncMock(),
+                user=non_admin_user,
+                actor_manager=MagicMock(),
+                tenant_sharepoint_app_repo=AsyncMock(),
+            ),
             actor_manager=MagicMock(),
             sharepoint_subscription_service=AsyncMock(),
             tenant_sharepoint_app_repo=AsyncMock(),
@@ -1150,7 +1251,13 @@ class TestCreateSpaceIntegrationKnowledge:
             space_repo=space_repo,
             integration_knowledge_repo=AsyncMock(),
             embedding_model_repo=AsyncMock(),
-            user_integration_repo=AsyncMock(),
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=AsyncMock(),
+                tenant_integration_repo=AsyncMock(),
+                user=TEST_USER,
+                actor_manager=actor_manager,
+                tenant_sharepoint_app_repo=AsyncMock(),
+            ),
             actor_manager=actor_manager,
             sharepoint_subscription_service=AsyncMock(),
             tenant_sharepoint_app_repo=AsyncMock(),
@@ -1168,7 +1275,7 @@ class TestCreateSpaceIntegrationKnowledge:
             )
 
         # The user_integration_repo should NOT have been called — blocked before reaching it
-        service.user_integration_repo.one.assert_not_called()
+        service.user_integration_service.user_integration_repo.one.assert_not_called()
 
     async def test_create_knowledge_editor_without_admin_blocked_for_tenant_app(
         self,
@@ -1210,7 +1317,13 @@ class TestCreateSpaceIntegrationKnowledge:
             space_repo=space_repo,
             integration_knowledge_repo=AsyncMock(),
             embedding_model_repo=embedding_model_repo,
-            user_integration_repo=user_integration_repo,
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=user_integration_repo,
+                tenant_integration_repo=AsyncMock(),
+                user=editor_user,
+                actor_manager=actor_manager,
+                tenant_sharepoint_app_repo=AsyncMock(),
+            ),
             actor_manager=actor_manager,
             sharepoint_subscription_service=AsyncMock(),
             tenant_sharepoint_app_repo=AsyncMock(),
@@ -1281,7 +1394,13 @@ class TestCreateSpaceIntegrationKnowledge:
             space_repo=space_repo,
             integration_knowledge_repo=integration_knowledge_repo,
             embedding_model_repo=embedding_model_repo,
-            user_integration_repo=user_integration_repo,
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=user_integration_repo,
+                tenant_integration_repo=AsyncMock(),
+                user=TEST_USER,
+                actor_manager=MagicMock(),
+                tenant_sharepoint_app_repo=AsyncMock(),
+            ),
             actor_manager=MagicMock(),
             sharepoint_subscription_service=sharepoint_subscription_service,
             tenant_sharepoint_app_repo=AsyncMock(),
@@ -1353,7 +1472,13 @@ class TestCreateSpaceIntegrationKnowledge:
             space_repo=space_repo,
             integration_knowledge_repo=integration_knowledge_repo,
             embedding_model_repo=embedding_model_repo,
-            user_integration_repo=user_integration_repo,
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=user_integration_repo,
+                tenant_integration_repo=AsyncMock(),
+                user=TEST_USER,
+                actor_manager=MagicMock(),
+                tenant_sharepoint_app_repo=AsyncMock(),
+            ),
             actor_manager=MagicMock(),
             sharepoint_subscription_service=sharepoint_subscription_service,
             tenant_sharepoint_app_repo=AsyncMock(),
@@ -1427,7 +1552,13 @@ class TestCreateSpaceIntegrationKnowledge:
             space_repo=space_repo,
             integration_knowledge_repo=integration_knowledge_repo,
             embedding_model_repo=embedding_model_repo,
-            user_integration_repo=user_integration_repo,
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=user_integration_repo,
+                tenant_integration_repo=AsyncMock(),
+                user=TEST_USER,
+                actor_manager=MagicMock(),
+                tenant_sharepoint_app_repo=AsyncMock(),
+            ),
             actor_manager=MagicMock(),
             sharepoint_subscription_service=sharepoint_subscription_service,
             tenant_sharepoint_app_repo=AsyncMock(),
@@ -1616,6 +1747,9 @@ class TestTriggerFullSync:
         knowledge.sharepoint_subscription_id = None
 
         user_integration = MagicMock()
+        user_integration.user_id = TEST_USER.id
+        user_integration.tenant_integration.tenant_id = TEST_USER.tenant_id
+        user_integration.authenticated = True
         user_integration.id = uuid4()
         user_integration.auth_type = "user_oauth"
         user_integration.tenant_app_id = None
@@ -1637,6 +1771,9 @@ class TestTriggerFullSync:
         knowledge.sharepoint_subscription_id = None
 
         user_integration = MagicMock()
+        user_integration.user_id = TEST_USER.id
+        user_integration.tenant_integration.tenant_id = TEST_USER.tenant_id
+        user_integration.authenticated = True
         user_integration.id = uuid4()
         user_integration.auth_type = "tenant_app"
         user_integration.tenant_app_id = uuid4()
@@ -1679,7 +1816,13 @@ class TestTriggerFullSync:
             space_repo=space_repo,
             integration_knowledge_repo=integration_knowledge_repo,
             embedding_model_repo=AsyncMock(),
-            user_integration_repo=AsyncMock(),
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=AsyncMock(),
+                tenant_integration_repo=AsyncMock(),
+                user=TEST_USER,
+                actor_manager=actor_manager,
+                tenant_sharepoint_app_repo=AsyncMock(),
+            ),
             actor_manager=actor_manager,
             sharepoint_subscription_service=sharepoint_subscription_service,
             tenant_sharepoint_app_repo=AsyncMock(),
@@ -1745,7 +1888,13 @@ class TestTriggerFullSync:
             space_repo=space_repo,
             integration_knowledge_repo=AsyncMock(),
             embedding_model_repo=AsyncMock(),
-            user_integration_repo=AsyncMock(),
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=AsyncMock(),
+                tenant_integration_repo=AsyncMock(),
+                user=TEST_USER,
+                actor_manager=actor_manager,
+                tenant_sharepoint_app_repo=AsyncMock(),
+            ),
             actor_manager=actor_manager,
             sharepoint_subscription_service=sharepoint_subscription_service,
             tenant_sharepoint_app_repo=AsyncMock(),
@@ -1789,7 +1938,13 @@ class TestTriggerFullSync:
             space_repo=space_repo,
             integration_knowledge_repo=AsyncMock(),
             embedding_model_repo=AsyncMock(),
-            user_integration_repo=AsyncMock(),
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=AsyncMock(),
+                tenant_integration_repo=AsyncMock(),
+                user=non_admin_user,
+                actor_manager=actor_manager,
+                tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
+            ),
             actor_manager=actor_manager,
             sharepoint_subscription_service=AsyncMock(),
             tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
@@ -1833,7 +1988,13 @@ class TestTriggerFullSync:
             space_repo=space_repo,
             integration_knowledge_repo=AsyncMock(),
             embedding_model_repo=AsyncMock(),
-            user_integration_repo=AsyncMock(),
+            user_integration_service=UserIntegrationService(
+                user_integration_repo=AsyncMock(),
+                tenant_integration_repo=AsyncMock(),
+                user=TEST_USER,
+                actor_manager=actor_manager,
+                tenant_sharepoint_app_repo=AsyncMock(),
+            ),
             actor_manager=actor_manager,
             sharepoint_subscription_service=AsyncMock(),
             tenant_sharepoint_app_repo=AsyncMock(),

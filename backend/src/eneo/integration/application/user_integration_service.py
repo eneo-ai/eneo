@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional, cast
 
 from eneo.integration.domain.entities.user_integration import (
@@ -7,7 +8,11 @@ from eneo.integration.domain.entities.user_integration import (
 from eneo.integration.infrastructure.content_service.types import (
     SharePointTokenProtocol,
 )
-from eneo.main.exceptions import UnauthorizedException
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from eneo.main.logging import get_logger
 from eneo.roles.permissions import Permission
 
@@ -16,6 +21,7 @@ logger = get_logger(__name__)
 if TYPE_CHECKING:
     from uuid import UUID
 
+    from eneo.actors import ActorManager
     from eneo.integration.domain.entities.tenant_sharepoint_app import (
         TenantSharePointApp,
     )
@@ -38,12 +44,21 @@ if TYPE_CHECKING:
     from eneo.users.user import UserInDB
 
 
+@dataclass(frozen=True)
+class AuthorizedIntegration:
+    """An interactive caller's approved connection, with its exact app if any."""
+
+    integration: UserIntegration
+    tenant_app: "TenantSharePointApp | None" = None
+
+
 class UserIntegrationService:
     def __init__(
         self,
         user_integration_repo: "UserIntegrationRepository",
         tenant_integration_repo: "TenantIntegrationRepository",
         user: "UserInDB",
+        actor_manager: "ActorManager",
         tenant_sharepoint_app_repo: Optional["TenantSharePointAppRepository"] = None,
         oauth_token_repo: Optional["OauthTokenRepository"] = None,
         sharepoint_subscription_service: Optional[
@@ -54,9 +69,72 @@ class UserIntegrationService:
         self.user_integration_repo = user_integration_repo
         self.tenant_integration_repo = tenant_integration_repo
         self.user = user
+        self.actor_manager = actor_manager
         self.tenant_sharepoint_app_repo = tenant_sharepoint_app_repo
         self.oauth_token_repo = oauth_token_repo
         self.sharepoint_subscription_service = sharepoint_subscription_service
+
+    def require_space_import_access(self, space: "Space") -> None:
+        """Browsing remote content requires import rights, not knowledge read rights."""
+        if space.tenant_id != self.user.tenant_id:
+            raise NotFoundException("Space not found")
+        actor = self.actor_manager.get_space_actor_from_space(space)
+        if not actor.can_read_space():
+            raise NotFoundException("Space not found")
+        if not actor.can_create_integrations():
+            raise UnauthorizedException(
+                "You cannot import integrations into this space"
+            )
+
+    async def get_authorized_integration(
+        self, id: "UUID", *, space: "Space | None" = None
+    ) -> AuthorizedIntegration:
+        """Authorize a connection before preview, browsing or creating an import.
+
+        Background synchronization of existing knowledge has a separate lifecycle;
+        it does not borrow the interactive caller's connection authorization.
+        """
+        if space is not None:
+            self.require_space_import_access(space)
+
+        integration = await self.user_integration_repo.one(
+            id=id, tenant_id=self.user.tenant_id
+        )
+        if integration.tenant_integration.tenant_id != self.user.tenant_id:
+            raise NotFoundException("Integration not found")
+
+        tenant_app = None
+        if integration.auth_type == "user_oauth":
+            if integration.user_id != self.user.id:
+                raise NotFoundException("Integration not found")
+        elif integration.auth_type == "tenant_app":
+            if Permission.ADMIN not in self.user.permissions:
+                raise UnauthorizedException(
+                    "Admin permission is required to use organization-wide integrations"
+                )
+            if space is not None and space.is_personal():
+                raise BadRequestException(
+                    "Organization-wide integrations require a shared or organization space"
+                )
+            if (
+                integration.integration_type != "sharepoint"
+                or integration.tenant_app_id is None
+                or self.tenant_sharepoint_app_repo is None
+            ):
+                raise BadRequestException(
+                    "Invalid organization integration configuration"
+                )
+            tenant_app = await self.tenant_sharepoint_app_repo.one(
+                id=integration.tenant_app_id, tenant_id=self.user.tenant_id
+            )
+            if not tenant_app.is_active:
+                raise BadRequestException("Organization integration is inactive")
+        else:
+            raise BadRequestException("Unsupported integration authentication method")
+
+        if not integration.authenticated:
+            raise BadRequestException("Integration is not authenticated")
+        return AuthorizedIntegration(integration=integration, tenant_app=tenant_app)
 
     async def get_my_integrations(
         self,
@@ -216,6 +294,7 @@ class UserIntegrationService:
         - Shared/Organization spaces: Only authenticated tenant_app integrations (admin-only).
           This allows admins to import organization-wide knowledge into both org and shared spaces.
         """
+        self.require_space_import_access(space)
         all_integrations = await self.get_my_integrations(
             user_id=self.user.id,
             tenant_id=self.user.tenant_id,
