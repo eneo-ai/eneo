@@ -1,7 +1,23 @@
 "use client";
 
+import {
+  DropdownMenu,
+  DropdownMenuDivider,
+  DropdownMenuItem
+} from "@astryxdesign/core/DropdownMenu";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Minus, Pencil, Plus, RotateCcw, Search, Star, Trash2, Users } from "lucide-react";
+import {
+  Check,
+  Minus,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  RotateCcw,
+  Search,
+  Star,
+  Trash2,
+  Users
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
@@ -525,81 +541,104 @@ function RoleRow({
   const granted = new Set(role.permissions);
   return (
     <article role="listitem" className="space-y-4 p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="font-semibold">{role.name}</h2>
-            {isDefault && (
-              <Badge>
-                <Star className="size-3" />
-                {t("roles_default_badge")}
-              </Badge>
-            )}
-            {role.predefined_source && (
-              <Badge
-                variant="outline"
-                title={t("roles_template_badge_tooltip", { name: role.predefined_source })}
-              >
-                {t("roles_template_badge_named", { name: role.predefined_source })}
-              </Badge>
-            )}
-          </div>
-          <ul className="flex flex-wrap gap-1.5" aria-label={t("roles_group_summary_label")}>
-            {groups.map((group) => {
-              const count = group.permissions.filter((entry) => granted.has(entry.name)).length;
-              return (
-                <li key={group.id}>
-                  <Badge variant={count === group.permissions.length ? "secondary" : "outline"}>
-                    {count === group.permissions.length ? (
-                      <Check className="size-3" />
-                    ) : count === 0 ? (
-                      <Minus className="size-3" />
-                    ) : null}
-                    {t(GROUP_KEYS[group.id].short)}{" "}
-                    <span className="tabular-nums">
-                      {count}/{group.permissions.length}
-                    </span>
-                  </Badge>
-                </li>
-              );
-            })}
-          </ul>
+      <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <h2 className="min-w-0 font-semibold [overflow-wrap:anywhere]">{role.name}</h2>
+          {isDefault && (
+            <Badge title={t("roles_cannot_delete_default")}>
+              <Star className="size-3" />
+              {t("roles_default_badge")}
+            </Badge>
+          )}
+          {role.predefined_source && (
+            <Badge
+              variant="outline"
+              className="max-w-full break-words whitespace-normal"
+              title={t("roles_template_badge_tooltip", { name: role.predefined_source })}
+            >
+              {t("roles_template_badge_named", { name: role.predefined_source })}
+            </Badge>
+          )}
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex shrink-0 items-center gap-1.5 sm:justify-self-end">
           <Button variant="outline" size="sm" onClick={onEdit}>
             <Pencil className="size-4" />
             {t("edit")}
           </Button>
-          <Button variant="ghost" size="sm" asChild>
-            <Link href={`/admin/users?role_id=${encodeURIComponent(role.id)}`}>
+          <Button variant="ghost" size="sm" className="pointer-coarse:min-w-11" asChild>
+            <Link
+              href={`/admin/users?role_id=${encodeURIComponent(role.id)}`}
+              aria-label={t("roles_view_users")}
+              title={t("roles_view_users")}
+            >
               <Users className="size-4" />
-              {t("roles_view_users")}
+              <span className="hidden lg:inline">{t("roles_view_users")}</span>
             </Link>
           </Button>
-          {!isDefault && (
-            <Button variant="ghost" size="sm" onClick={() => onAction("default")}>
-              <Star className="size-4" />
-              {t("set_as_default_role")}
-            </Button>
+          {(!isDefault || role.predefined_source) && (
+            <DropdownMenu
+              button={{
+                label: t("ui_more_actions_for", { name: role.name }),
+                tooltip: t("ui_more_actions_for", { name: role.name }),
+                icon: <MoreHorizontal className="size-4" aria-hidden="true" />,
+                isIconOnly: true,
+                variant: "ghost",
+                size: "sm",
+                className: "pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+              }}
+              hasChevron={false}
+              alignment="end"
+            >
+              {!isDefault && (
+                <DropdownMenuItem
+                  icon={Star}
+                  label={t("set_as_default_role")}
+                  className="pointer-coarse:min-h-11"
+                  onClick={() => onAction("default")}
+                />
+              )}
+              {role.predefined_source && (
+                <DropdownMenuItem
+                  icon={RotateCcw}
+                  label={t("reset_to_template")}
+                  className="pointer-coarse:min-h-11"
+                  onClick={() => onAction("reset")}
+                />
+              )}
+              {!isDefault && <DropdownMenuDivider />}
+              {!isDefault && (
+                <DropdownMenuItem
+                  icon={Trash2}
+                  label={t("delete_role")}
+                  variant="destructive"
+                  className="pointer-coarse:min-h-11"
+                  onClick={() => onAction("delete")}
+                />
+              )}
+            </DropdownMenu>
           )}
-          {role.predefined_source && (
-            <Button variant="ghost" size="sm" onClick={() => onAction("reset")}>
-              <RotateCcw className="size-4" />
-              {t("reset_to_template")}
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={isDefault}
-            title={isDefault ? t("roles_cannot_delete_default") : undefined}
-            onClick={() => onAction("delete")}
-          >
-            <Trash2 className="size-4" />
-            {t("delete_role")}
-          </Button>
         </div>
       </div>
+      <ul className="flex flex-wrap gap-1.5" aria-label={t("roles_group_summary_label")}>
+        {groups.map((group) => {
+          const count = group.permissions.filter((entry) => granted.has(entry.name)).length;
+          return (
+            <li key={group.id}>
+              <Badge variant={count === group.permissions.length ? "secondary" : "outline"}>
+                {count === group.permissions.length ? (
+                  <Check className="size-3" />
+                ) : count === 0 ? (
+                  <Minus className="size-3" />
+                ) : null}
+                {t(GROUP_KEYS[group.id].short)}{" "}
+                <span className="tabular-nums">
+                  {count}/{group.permissions.length}
+                </span>
+              </Badge>
+            </li>
+          );
+        })}
+      </ul>
       <details className="text-sm">
         <summary className="text-muted-foreground cursor-pointer select-none">
           {t("roles_show_permissions", { name: role.name })}

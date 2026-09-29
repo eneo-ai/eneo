@@ -2,6 +2,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { expectNoAxeViolations } from "@/test/axe";
 
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
@@ -60,6 +61,16 @@ function show() {
       <RolesPage />
     </QueryClientProvider>
   );
+}
+
+function openActions(row: HTMLElement) {
+  const trigger = within(row).getByRole("button", { name: "ui_more_actions_for" });
+  trigger.focus();
+  // jsdom does not turn Enter into a click; Astryx opens menus on the key.
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  const menu = document.getElementById(trigger.getAttribute("aria-controls")!);
+  if (!menu) throw new Error("Role actions menu missing");
+  return { trigger, menu };
 }
 
 describe("role administration", () => {
@@ -138,10 +149,11 @@ describe("role administration", () => {
     const defaultRow = (await screen.findByText("Everyone")).closest("article");
     const customRow = screen.getByText("Manager").closest("article");
     if (!defaultRow || !customRow) throw new Error("Role row missing");
-    expect(
-      within(defaultRow).getByRole("button", { name: "delete_role" }).hasAttribute("disabled")
-    ).toBe(true);
-    fireEvent.click(within(customRow).getByRole("button", { name: "set_as_default_role" }));
+    expect(within(defaultRow).queryByRole("button", { name: "ui_more_actions_for" })).toBeNull();
+    const { menu } = openActions(customRow);
+    expect(within(menu).getByRole("menuitem", { name: "reset_to_template" })).toBeTruthy();
+    expect(within(menu).getByRole("menuitem", { name: "delete_role" })).toBeTruthy();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "set_as_default_role" }));
     expect(post).not.toHaveBeenCalled();
     fireEvent.click(
       within(screen.getByRole("alertdialog")).getByRole("button", { name: "confirm" })
@@ -152,5 +164,20 @@ describe("role administration", () => {
       })
     );
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps user navigation as a link and returns focus to the role menu trigger", async () => {
+    show();
+    const row = (await screen.findByText("Manager")).closest("article");
+    if (!row) throw new Error("Role row missing");
+    const users = within(row).getByRole("link", { name: "roles_view_users" });
+    expect(users.getAttribute("href")).toBe("/admin/users?role_id=custom");
+
+    const { trigger, menu } = openActions(row);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(menu.getAttribute("role")).toBe("menu");
+    await expectNoAxeViolations(document.body);
+    fireEvent.keyDown(document.activeElement ?? menu, { key: "Escape" });
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 });
