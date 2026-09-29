@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
@@ -42,10 +43,9 @@ from eneo.object_content.content import (
     ObjectContentStateError,
     StorageKind,
 )
-from eneo.object_content.s3_object_store import (
-    MultipartUpload,
-    RemoteObject,
-)
+
+if TYPE_CHECKING:
+    from eneo.object_content.s3_object_store import MultipartUpload, RemoteObject
 
 
 @dataclass(frozen=True, slots=True)

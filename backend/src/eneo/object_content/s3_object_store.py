@@ -6,9 +6,7 @@ from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from enum import StrEnum
 from hashlib import sha256
-from secrets import token_hex
 from tempfile import SpooledTemporaryFile
 from time import monotonic
 from typing import TYPE_CHECKING, BinaryIO, Final, Mapping, TypeVar, cast
@@ -33,6 +31,18 @@ from eneo.object_content.content import (
     verification_chunk_window,
 )
 from eneo.object_content.lease import OperationCheckpoint
+from eneo.object_content.object_store_contract import (
+    ObjectStoreBindingError,
+    ObjectStoreError,
+    ObjectStoreFailureKind,
+    ObjectStoreIntegrityError,
+    ObjectStoreNotFoundError,
+    ObjectStoreProbeCleanupError,
+    ObjectStoreUnavailableError,
+)
+from eneo.object_content.object_store_contract import (
+    new_object_key as new_object_key,
+)
 
 if TYPE_CHECKING:
     from botocore.response import StreamingBody
@@ -47,37 +57,6 @@ _SHA256_BYTES: Final = 32
 _BINDING_MEDIA_TYPE: Final = "application/vnd.eneo.object-content-binding"
 _BINDING_PREAMBLE: Final = b"eneo-object-content-binding-v1\n"
 _BINDING_PROBE_ID: Final = UUID(int=0)
-
-
-class ObjectStoreError(RuntimeError):
-    """Base exception for the private object-content boundary."""
-
-
-class ObjectStoreUnavailableError(ObjectStoreError):
-    pass
-
-
-class ObjectStoreNotFoundError(ObjectStoreError):
-    pass
-
-
-class ObjectStoreIntegrityError(ObjectStoreError):
-    pass
-
-
-class ObjectStoreBindingError(ObjectStoreError):
-    pass
-
-
-class ObjectStoreProbeCleanupError(ObjectStoreError):
-    pass
-
-
-class ObjectStoreFailureKind(StrEnum):
-    AUTHENTICATION = "authentication"
-    TLS = "tls"
-    CONNECTION = "connection"
-    UNAVAILABLE = "unavailable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,11 +165,6 @@ class _FileSlice(io.RawIOBase):
         chunk = self._source.read(read_size)
         self._position += len(chunk)
         return chunk
-
-
-def new_object_key(settings: ObjectContentSettings) -> str:
-    """Create an opaque key with only a deployment namespace and random token."""
-    return f"{settings.object_key_prefix}{token_hex(16)}"
 
 
 def _client_error_code(error: ClientError) -> str:

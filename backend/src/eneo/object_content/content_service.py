@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterable, Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -5,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from secrets import token_hex
 from time import monotonic
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import Select
@@ -43,24 +46,26 @@ from eneo.object_content.content_repository import (
 )
 from eneo.object_content.inline_content_store import InlineContentStore
 from eneo.object_content.lease import OperationLeaseCheckpoint
-from eneo.object_content.object_store_provider import (
-    ObjectStoreLease,
-    ObjectStoreProvider,
-)
-from eneo.object_content.reconciliation_repository import (
-    ObjectContentReconciliationRepository,
-    PublicationReservation,
-)
-from eneo.object_content.s3_object_store import (
+from eneo.object_content.object_store_contract import (
     ObjectStoreIntegrityError,
     ObjectStoreNotFoundError,
     ObjectStoreUnavailableError,
     new_object_key,
 )
+from eneo.object_content.reconciliation_repository import (
+    ObjectContentReconciliationRepository,
+    PublicationReservation,
+)
 from eneo.object_content.store_binding import (
     ensure_store_binding_ready,
     require_store_generation,
 )
+
+if TYPE_CHECKING:
+    from eneo.object_content.object_store_provider import (
+        ObjectStoreLease,
+        ObjectStoreProvider,
+    )
 
 
 def retry_delay_seconds(
