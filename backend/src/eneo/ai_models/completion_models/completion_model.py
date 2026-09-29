@@ -175,6 +175,10 @@ class Completion:
     generated_images: Optional[list[GeneratedFile]] = None  # Non-streaming
     response_type: Optional[ResponseType] = None
     generated_file: Optional[File] = None
+    # FILES events (streaming): a signed reference URL for the saved file,
+    # set once it is stored so the model can hand it to another tool in the
+    # same turn. Never persisted.
+    reference_url: Optional[str] = None
     stop: bool = False
     error: Optional[str] = None
     error_code: Optional[int] = None

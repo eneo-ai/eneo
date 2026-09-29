@@ -51,14 +51,19 @@ DOCX_MIME_TYPE = (
 )
 XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 PDF_MIME_TYPE = "application/pdf"
+CSV_MIME_TYPE = "text/csv"
 GENERATED_FILE_TYPES_BY_PURPOSE: dict[str, frozenset[str]] = {
     "document_creation": frozenset({DOCX_MIME_TYPE, PDF_MIME_TYPE}),
     "spreadsheet_creation": frozenset({XLSX_MIME_TYPE}),
+    # A full query result, so large data moves between tools as a file
+    # instead of through the model.
+    "tabular_analysis": frozenset({CSV_MIME_TYPE}),
 }
 _GENERATED_FILE_EXTENSIONS: dict[str, str] = {
     DOCX_MIME_TYPE: "docx",
     XLSX_MIME_TYPE: "xlsx",
     PDF_MIME_TYPE: "pdf",
+    CSV_MIME_TYPE: "csv",
 }
 _UNSAFE_FILENAME_CHARACTERS = re.compile(r"[\x00-\x1f\x7f/\\:*?\"<>|]+")
 

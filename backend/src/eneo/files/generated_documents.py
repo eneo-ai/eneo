@@ -1,4 +1,4 @@
-"""Admission checks for documents a tool generated (DOCX, XLSX, PDF).
+"""Admission checks for documents a tool generated (DOCX, XLSX, PDF, CSV).
 
 A generated document is untrusted provider output that Eneo will store and
 offer for download. Before it becomes a File its bytes must match the declared
@@ -14,6 +14,7 @@ import re
 import zipfile
 
 from eneo.mcp_servers.domain.entities.mcp_server import (
+    CSV_MIME_TYPE,
     DOCX_MIME_TYPE,
     PDF_MIME_TYPE,
     XLSX_MIME_TYPE,
@@ -55,6 +56,8 @@ def validate_generated_document(data: bytes, mime_type: str) -> None:
     """Raise ``GeneratedDocumentRejected`` unless ``data`` is a safe ``mime_type``."""
     if mime_type == PDF_MIME_TYPE:
         _validate_pdf(data)
+    elif mime_type == CSV_MIME_TYPE:
+        _validate_csv(data)
     elif mime_type in _REQUIRED_PART:
         _validate_ooxml(data, _REQUIRED_PART[mime_type])
     else:
@@ -69,6 +72,18 @@ def _validate_pdf(data: bytes) -> None:
     # of scope for a structural check.
     if _PDF_ACTIVE_CONTENT.search(data):
         raise GeneratedDocumentRejected("PDF contains active content")
+
+
+def _validate_csv(data: bytes) -> None:
+    # Values stay exactly as produced (a leading "=" or "-" is data here);
+    # spreadsheet formula injection is the concern of whoever opens the file
+    # in a spreadsheet, and Eneo's own spreadsheet renderer keeps text as text.
+    if not data or b"\x00" in data:
+        raise GeneratedDocumentRejected("Not a text CSV file")
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise GeneratedDocumentRejected("CSV files must use UTF-8") from exc
 
 
 def _validate_ooxml(data: bytes, required_part: str) -> None:

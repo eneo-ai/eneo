@@ -10,6 +10,7 @@ from eneo.files.generated_documents import (
     validate_generated_document,
 )
 from eneo.mcp_servers.domain.entities.mcp_server import (
+    CSV_MIME_TYPE,
     DOCX_MIME_TYPE,
     PDF_MIME_TYPE,
     XLSX_MIME_TYPE,
@@ -128,6 +129,22 @@ class TestPdf:
     def test_rejects_non_pdf_or_active_content(self, data):
         with pytest.raises(GeneratedDocumentRejected):
             validate_generated_document(data, PDF_MIME_TYPE)
+
+
+class TestCsv:
+    def test_accepts_utf8_csv_with_data_that_looks_like_formulas(self):
+        validate_generated_document(
+            "region,diff\nNorrmalm,-316\n=SUM,1\nÅre,2\n".encode(), CSV_MIME_TYPE
+        )
+
+    @pytest.mark.parametrize(
+        "data",
+        [b"", b"a,b\n1,\x002\n", "a;b\n1;2\n".encode("utf-16")],
+        ids=["empty", "nul-byte", "utf-16"],
+    )
+    def test_rejects_empty_binary_or_non_utf8(self, data):
+        with pytest.raises(GeneratedDocumentRejected):
+            validate_generated_document(data, CSV_MIME_TYPE)
 
 
 def test_rejects_undeclared_types():

@@ -9,7 +9,10 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from eneo.ai_models.completion_models.completion_model import ResponseType
+from eneo.ai_models.completion_models.completion_model import (
+    GeneratedFile,
+    ResponseType,
+)
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     MCP_IMAGE_PLACEHOLDER_TEMPLATE,
     PROVIDER_UNAVAILABLE_CODE,
@@ -18,6 +21,7 @@ from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import 
     PreparedModelStream,
     TenantModelAdapter,
     _build_tool_result_with_references,
+    _GeneratedFileChunks,
     _ToolResultBudget,
 )
 from eneo.main.exceptions import OpenAIException
@@ -330,6 +334,24 @@ def test_build_tool_result_with_references_turns_file_blocks_into_generated_file
     assert "[Image 1 (image/png)" in llm_text
     assert "[File 1 (report.pdf) was created" in llm_text
     assert encoded not in llm_text
+
+
+def test_saved_files_give_the_model_same_turn_reference_urls():
+    csv = GeneratedFile(data=b"a\n1\n", mime_type="text/csv", filename="result.csv")
+    png = GeneratedFile(data=b"png", mime_type="image/png")
+    unsaved = GeneratedFile(data=b"x", mime_type="text/csv", filename="late.csv")
+    generated = _GeneratedFileChunks([csv, png, unsaved])
+    # The ask path saves each file and the service sets its reference URL.
+    generated.chunks[0].reference_url = "https://x/csv"
+    generated.chunks[1].reference_url = "https://x/png"
+
+    text = generated.append_references("[File 1 (result.csv) was created]")
+
+    assert text == (
+        "[File 1 (result.csv) was created]\n"
+        "Reference url for File 1: https://x/csv\n"
+        "Reference url for Image 1: https://x/png"
+    )
 
 
 def test_build_tool_result_with_references_skips_undecodable_image_blocks():

@@ -308,6 +308,35 @@ def _build_tool_result_with_references(
     return llm_text, display_text, refs, images
 
 
+class _GeneratedFileChunks:
+    """The FILES chunks of one tool result, and the reference lines they earn.
+
+    The consumer saves each file when its chunk is yielded and the service
+    then sets ``reference_url`` on that same chunk. Lines follow the result's
+    "[Image N ...]" and "[File N ...]" placeholders, like history replay.
+    """
+
+    def __init__(self, files: list[GeneratedFile]) -> None:
+        self.chunks = [
+            Completion(response_type=ResponseType.FILES, image=file) for file in files
+        ]
+
+    def append_references(self, text: str) -> str:
+        lines: list[str] = []
+        pictures = documents = 0
+        for chunk in self.chunks:
+            assert chunk.image is not None
+            if chunk.image.filename is None:
+                pictures += 1
+                label = f"Image {pictures}"
+            else:
+                documents += 1
+                label = f"File {documents}"
+            if chunk.reference_url:
+                lines.append(f"Reference url for {label}: {chunk.reference_url}")
+        return "\n".join([text, *lines]) if text else "\n".join(lines)
+
+
 class _LiteLLMUsageDetails(Protocol):
     reasoning_tokens: int | None
 
@@ -2331,13 +2360,15 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 existing_prefixes=seen_prefixes,
                             )
                             captured_refs.extend(refs_for_call)
-                            # Generated images ride their own chunks so the
+                            # Generated files ride their own chunks so the
                             # ask path can persist each as a file before the
                             # tool-call metadata that references it arrives.
-                            for image in images_for_call:
-                                yield Completion(
-                                    response_type=ResponseType.FILES, image=image
-                                )
+                            # Once saved, a chunk carries the file's reference
+                            # URL, which the model gets with this result so it
+                            # can pass the file to another tool in this turn.
+                            generated = _GeneratedFileChunks(images_for_call)
+                            for chunk in generated.chunks:
+                                yield chunk
                             result_status = "succeeded"
                             if result_data.get("is_error"):
                                 error_payload = json.dumps(
@@ -2346,6 +2377,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 llm_text = error_payload
                                 display_text = error_payload
                                 result_status = "failed"
+                            else:
+                                llm_text = generated.append_references(llm_text)
                             messages.append(
                                 {
                                     "role": "tool",
