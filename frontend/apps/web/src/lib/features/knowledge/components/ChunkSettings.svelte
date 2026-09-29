@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { Input } from "@eneo/ui";
+  import { useId } from "bits-ui";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Slider } from "$lib/components/ui/slider/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getAppContext } from "$lib/core/AppContext";
 
@@ -17,6 +21,9 @@
   /** Whether this source already holds indexed material — changing the chunking
    * then costs a full re-index, so the copy becomes a warning. */
   export let hasIndexedContent: boolean = false;
+
+  const customizeId = useId();
+  const sizeId = useId();
 
   // Overlap is chosen as a share of the chunk size, so it survives a size change.
   const OVERLAP_STEP_PERCENT = 5;
@@ -125,7 +132,7 @@
         Math.floor(sizeValue * policy.max_overlap_fraction)
       );
 
-  // The thumb can only sit on a step; any other value would snap, fire onInput
+  // The thumb can only sit on a step; any other value would snap, fire a change
   // and mark the overlap explicit without anyone touching it.
   $: defaultPercentOnStep = Math.min(
     Math.round(((policy.default_chunk_overlap / sizeValue) * 100) / OVERLAP_STEP_PERCENT) *
@@ -151,11 +158,23 @@
   $: isCustomized = customize && !rangeCollapsed && (!sizeIsDefault || !overlapIsDefault);
   $: chunkSize = isCustomized ? sizeValue : null;
   $: chunkOverlap = isCustomized ? overlapTokens : null;
+
+  function onOverlapChange(next: number) {
+    overlapPercent = next;
+    // The slider is now the source of truth for this field.
+    exactOverlapTokens = null;
+    overlapIsDefault = false;
+  }
 </script>
 
-<Input.Switch bind:value={customize} class="border-default hover:bg-hover-dimmer p-4 px-6">
-  {m.chunk_settings_customize()}
-</Input.Switch>
+<Field.Field
+  orientation="horizontal"
+  class="border-default hover:bg-hover-dimmer p-4 px-6"
+  data-tour="chunk-settings"
+>
+  <Field.Label for={customizeId}>{m.chunk_settings_customize()}</Field.Label>
+  <Switch id={customizeId} bind:checked={customize} />
+</Field.Field>
 
 {#if customize}
   <p class="text-secondary border-default border-b px-6 pb-3 text-sm">
@@ -165,22 +184,27 @@
   <div class="border-default flex gap-4 border-b p-4">
     <div class="flex-1" on:input={() => (sizeIsDefault = false)}>
       {#if sizeMax >= sizeMin}
-        <Input.Number
-          bind:value={sizeValue}
-          min={sizeMin}
-          max={sizeMax}
-          step={10}
-          labelClass="text-sm">{m.chunk_size_label()}</Input.Number
-        >
-        <p class="text-secondary mt-1 pl-3 text-xs">
-          {m.chunk_size_description()}
-          {#if ceiling}
-            {m.chunk_size_ceiling_note({ ceiling })}
-          {/if}
-        </p>
+        <Field.Field>
+          <Field.Label for={sizeId}>{m.chunk_size_label()}</Field.Label>
+          <Input
+            id={sizeId}
+            type="number"
+            bind:value={sizeValue}
+            min={sizeMin}
+            max={sizeMax}
+            step={10}
+            aria-describedby={`${sizeId}-description`}
+          />
+          <Field.Description id={`${sizeId}-description`}>
+            {m.chunk_size_description()}
+            {#if ceiling}
+              {m.chunk_size_ceiling_note({ ceiling })}
+            {/if}
+          </Field.Description>
+        </Field.Field>
       {:else}
         <p class="text-sm">{m.chunk_size_label()}</p>
-        <p class="text-secondary mt-1 pl-3 text-xs">
+        <p class="text-secondary mt-1 text-xs">
           {m.chunk_size_no_valid_range({ ceiling: sizeMax })}
         </p>
       {/if}
@@ -189,31 +213,27 @@
     <div class="flex-1">
       <p class="text-sm">{m.chunk_overlap_label()}</p>
       <div class="flex items-center gap-3 pt-3">
-        <Input.Slider
-          label={m.chunk_overlap_label()}
-          ariaValueText={overlapValueText}
+        <Slider
+          type="single"
+          aria-label={m.chunk_overlap_label()}
+          aria-valuetext={overlapValueText}
           value={overlapIsDefault ? defaultPercentOnStep : overlapPercent}
           min={0}
           max={maxOverlapPercent}
           step={OVERLAP_STEP_PERCENT}
-          onInput={(next) => {
-            overlapPercent = next;
-            // The slider is now the source of truth for this field.
-            exactOverlapTokens = null;
-            overlapIsDefault = false;
-          }}
+          onValueChange={onOverlapChange}
         />
         <span class="text-secondary w-28 shrink-0 text-right text-xs">
           {overlapValueText}
         </span>
       </div>
-      <p class="text-secondary mt-1 pl-3 text-xs">{m.chunk_overlap_description()}</p>
+      <p class="text-secondary mt-1 text-xs">{m.chunk_overlap_description()}</p>
     </div>
   </div>
 
   {#if hasIndexedContent}
     <div
-      class="bg-label-dimmer border-label-default text-label-stronger mx-4 my-3 rounded-md border px-3 py-2 text-sm"
+      class="label-warning border-label-default bg-label-dimmer text-label-stronger mx-4 my-3 rounded-md border px-3 py-2 text-sm"
       role="status"
     >
       <span class="font-medium">{m.chunk_settings_reindex_warning_title()}</span>
@@ -221,7 +241,7 @@
     </div>
   {:else}
     <div
-      class="bg-info-dimmer border-info-default text-info-stronger mx-4 my-3 rounded-md border px-3 py-2 text-sm"
+      class="label-info border-label-default bg-label-dimmer text-label-stronger mx-4 my-3 rounded-md border px-3 py-2 text-sm"
     >
       {m.chunk_settings_reembed_note()}
     </div>

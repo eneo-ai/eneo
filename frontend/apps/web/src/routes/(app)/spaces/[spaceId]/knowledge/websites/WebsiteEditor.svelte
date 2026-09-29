@@ -2,6 +2,7 @@
   import { makeEditable } from "$lib/core/editable";
   import { getEneo } from "$lib/core/Eneo";
   import SelectEmbeddingModel from "$lib/features/ai-models/components/SelectEmbeddingModel.svelte";
+  import ChunkSettings from "$lib/features/knowledge/components/ChunkSettings.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { type Website } from "@eneo/eneo-js";
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
@@ -38,7 +39,7 @@
 
   export let mode: "update" | "create" = "create";
   export let website: Omit<Website, "embedding_model"> & {
-    embedding_model?: { id: string } | null;
+    embedding_model?: { id: string; max_input?: number | null } | null;
   } = emptyWebsite();
   export let showDialog: Writable<boolean> = writable(false);
 
@@ -55,6 +56,20 @@
   const downloadFilesId = useId();
   const crawlTypeId = useId();
   const updateIntervalId = useId();
+
+  // Bumped after a successful create so ChunkSettings remounts with fresh state.
+  let chunkSettingsKey = 0;
+
+  // The backend clamps chunk size against the source's embedding model.
+  // Same as the collection editor: a deprecated model is absent from the space list,
+  // so fall back to the limit carried by the website's own model.
+  $: chunkMaxInput =
+    $currentSpace.embedding_models.find((model) => model.id === editableWebsite.embedding_model?.id)
+      ?.max_input ?? website.embedding_model?.max_input;
+
+  // Chunk configuration (null = use platform defaults).
+  let chunkSize: number | null = website.chunk_size ?? null;
+  let chunkOverlap: number | null = website.chunk_overlap ?? null;
 
   // HTTP Basic Authentication state
   let httpAuthEnabled = website?.requires_http_auth ?? false;
@@ -217,6 +232,8 @@
 
       // Handle HTTP auth fields
       const editsAny = edits as Record<string, unknown>;
+      editsAny.chunk_size = chunkSize;
+      editsAny.chunk_overlap = chunkOverlap;
       if (httpAuthEnabled && httpAuthUsername) {
         editsAny.http_auth_username = httpAuthUsername;
         if (httpAuthPassword) {
@@ -250,7 +267,9 @@
       const websiteData: any = {
         spaceId: $currentSpace.id,
         ...editableWebsite,
-        name: websiteName === "" ? null : websiteName
+        name: websiteName === "" ? null : websiteName,
+        chunk_size: chunkSize,
+        chunk_overlap: chunkOverlap
       };
 
       // Add HTTP auth if enabled
@@ -265,6 +284,11 @@
       httpAuthEnabled = false;
       httpAuthUsername = "";
       httpAuthPassword = "";
+      // The dialog is reused for the next website; the key below remounts
+      // ChunkSettings so its internal state resets with these bindings.
+      chunkSize = null;
+      chunkOverlap = null;
+      chunkSettingsKey += 1;
       refreshCurrentSpace();
       $showDialog = false;
     } catch (e) {
@@ -567,6 +591,15 @@
               selectableModels={$currentSpace.embedding_models}
             ></SelectEmbeddingModel>
           {/if}
+
+          {#key chunkSettingsKey}
+            <ChunkSettings
+              bind:chunkSize
+              bind:chunkOverlap
+              maxInput={chunkMaxInput}
+              hasIndexedContent={mode === "update"}
+            />
+          {/key}
         </div>
       </div>
 

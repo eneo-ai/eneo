@@ -33,6 +33,7 @@
   import { toastError } from "$lib/core/errors";
   import SharePointFixtureBanner from "./SharePointFixtureBanner.svelte";
   import SharePointFolderTree from "./SharePointFolderTree.svelte";
+  import ChunkSettings from "$lib/features/knowledge/components/ChunkSettings.svelte";
   import { formatFileSize } from "./format";
   import { buildSharePointSelectionKey, normalizeSharePointPath } from "./selectionKey";
   import {
@@ -121,6 +122,9 @@
   let sourceFilter = $state("");
   let selectedSite = $state<CategorizedIntegrationKnowledgePreview | null>(null);
   let selectedEmbeddingModel = $state<{ id: string } | null>(null);
+  // Chunk configuration (null = use platform defaults).
+  let chunkSize = $state<number | null>(null);
+  let chunkOverlap = $state<number | null>(null);
   let selectedItems = $state<SelectedImportItem[]>([]);
   let wrapperName = $state("");
   let wrapperNameTouched = $state(false);
@@ -278,6 +282,10 @@
     selectedItems = [];
     wrapperName = "";
     wrapperNameTouched = false;
+    // The dialog is reused for the next import, so the chunk state resets
+    // with the rest of the form.
+    chunkSize = null;
+    chunkOverlap = null;
   }
 
   function resetFlow() {
@@ -386,6 +394,10 @@
   );
 
   let embeddingModels = $derived($currentSpace.embedding_models);
+  // The backend clamps chunk size against the source's embedding model.
+  let chunkMaxInput = $derived(
+    embeddingModels.find((model) => model.id === selectedEmbeddingModel?.id)?.max_input
+  );
   let stableEmbeddingModels = $derived(
     embeddingModels.filter((model: EmbeddingModel) => model.stability === "stable")
   );
@@ -443,7 +455,9 @@
         items: batchItems,
         wrapper_name: requiresWrapperName ? wrapperName.trim() : undefined,
         embedding_model: selectedEmbeddingModel,
-        space: $currentSpace
+        space: $currentSpace,
+        chunk_size: chunkSize,
+        chunk_overlap: chunkOverlap
       });
       const createdItems = response.items.filter((item) => item.status === "created");
       const failedItems = response.items.filter((item) => item.status === "failed");
@@ -757,6 +771,9 @@
                 </Select.Root>
               </Field.Field>
             {/if}
+            <div class="flex flex-col rounded-lg border">
+              <ChunkSettings bind:chunkSize bind:chunkOverlap maxInput={chunkMaxInput} />
+            </div>
           {/if}
 
           <div class="flex flex-col gap-3">

@@ -162,7 +162,7 @@ describe("ChunkSettings", () => {
       new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })
     );
 
-    // Reaching the displayed value proves onInput fired despite Slider's mount guard.
+    // Reaching the displayed value proves the keyboard step reached onValueChange.
     await expect
       .element(page.getByText(m.chunk_overlap_value({ percent: 15, tokens: 60 })))
       .toBeInTheDocument();

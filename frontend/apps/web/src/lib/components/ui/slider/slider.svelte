@@ -9,6 +9,7 @@
     class: className,
     "aria-label": ariaLabel,
     "aria-labelledby": ariaLabelledby,
+    "aria-valuetext": ariaValueText,
     ...restProps
   }: WithoutChildrenOrChild<SliderPrimitive.RootProps> = $props();
 </script>
@@ -45,13 +46,15 @@ get along, so we shut typescript up by casting `value` to `never`.
         )}
       />
     </span>
-    <!-- NOTE: the accessible name goes on the thumbs (role="slider"), not on the root span. -->
+    <!-- NOTE: the accessible name goes on the thumbs (role="slider"), not on the root span.
+      `aria-valuetext` travels with it, for a slider whose unit differs from its value. -->
     {#each thumbItems as thumb (thumb.index)}
       <SliderPrimitive.Thumb
         data-slot="slider-thumb"
         index={thumb.index}
         aria-label={ariaLabel}
         aria-labelledby={ariaLabelledby}
+        aria-valuetext={ariaValueText}
         class="border-ring ring-ring/50 relative size-3 rounded-full border bg-background transition-[color,box-shadow] after:absolute after:-inset-2 hover:ring-3 focus-visible:ring-3 focus-visible:outline-hidden active:ring-3 block shrink-0 select-none disabled:pointer-events-none disabled:opacity-50"
       />
     {/each}

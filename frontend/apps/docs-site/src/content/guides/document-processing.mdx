@@ -207,7 +207,7 @@ Content is extracted from source formats:
 ### 2. Chunking
 
 Text is split with LangChain's `RecursiveCharacterTextSplitter`. Chunk size is
-measured in **tokens**, not characters:
+measured in **tokens**, not characters. The platform defaults are:
 
 - **Chunk size**: 200 tokens
 - **Overlap**: 40 tokens
@@ -215,11 +215,30 @@ measured in **tokens**, not characters:
 Tokens are counted with LiteLLM's model-aware tokenizer, falling back to a
 four-characters-per-token estimate if counting fails.
 
+Each knowledge source can override the defaults. Turn on **Customize chunk
+settings** when creating or editing a collection or website, when importing
+from Confluence or SharePoint, or from an imported source's actions menu.
+Larger chunks keep more context per match; smaller chunks give more precise
+matches. A source left on the defaults follows the platform, including any
+later change to it.
+
+Overrides are bounded: the chunk size must be at least 50 tokens and the
+overlap at most 25 % of the chunk size. A chunk size above 60 % of the
+embedding model's input limit is lowered to that limit when the source is
+saved.
+
 <Callout type="info">
-  The splitter reads `CHUNK_SIZE` and `CHUNK_OVERLAP` from the worker's
-  environment if they are set, but they are not part of the deployment
-  templates and changing them only affects documents processed afterwards.
-  Existing chunks are not rebuilt.
+  Changing a source's chunking takes effect the next time its material is
+  processed: websites at their next crawl, Confluence and SharePoint sources at
+  their next sync, uploaded files only when they are uploaded again. Until
+  then the source holds material chunked two ways, which skews retrieval
+  because all chunks in an assistant's scope are ranked together. Reprocessing
+  embeds every document again, which costs provider usage.
+</Callout>
+
+<Callout type="info">
+  The platform defaults come from `CHUNK_SIZE` and `CHUNK_OVERLAP` in the
+  worker's environment when set. They are not part of the deployment templates.
 </Callout>
 
 ### 3. Embedding
