@@ -303,7 +303,7 @@ from eneo.prompts.prompt_factory import PromptFactory
 from eneo.prompts.prompt_repo import PromptRepository
 from eneo.prompts.prompt_service import PromptService
 from eneo.questions.questions_repo import QuestionRepository
-from eneo.redis.connection import build_redis_pool_kwargs
+from eneo.redis.connection import build_redis_pool_kwargs, build_redis_url
 from eneo.roles.roles_repo import RolesRepository
 from eneo.roles.roles_service import RolesService
 from eneo.scim.repositories.token_repository import ScimTokenRepository
@@ -405,7 +405,7 @@ _logger = get_logger(__name__)
 
 def _create_redis_client() -> aioredis.Redis:
     settings = get_settings()
-    url = f"redis://{settings.redis_host}:{settings.redis_port}"
+    url = build_redis_url(settings)
     kwargs = build_redis_pool_kwargs(settings, decode_responses=False)
 
     # redis-py stubs declare Redis.from_url(**kwargs: Unknown), so pyright marks the

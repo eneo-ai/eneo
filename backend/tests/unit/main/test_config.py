@@ -50,3 +50,28 @@ def test_settings_validation_errors_never_echo_values() -> None:
         )
 
     assert secret not in str(exc_info.value)
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_blank_redis_credentials_mean_no_authentication(blank: str) -> None:
+    settings = Settings.model_validate(
+        {
+            **get_settings().model_dump(),
+            "redis_username": blank,
+            "redis_password": blank,
+        }
+    )
+
+    assert settings.redis_username is None
+    assert settings.redis_password is None
+
+
+def test_redis_username_requires_a_password() -> None:
+    with pytest.raises(ValidationError, match="REDIS_USERNAME"):
+        Settings.model_validate(
+            {
+                **get_settings().model_dump(),
+                "redis_username": "eneo",
+                "redis_password": None,
+            }
+        )

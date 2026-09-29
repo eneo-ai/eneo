@@ -24,7 +24,7 @@ import redis.asyncio as aioredis
 from eneo.database.affected_rows import affected_row_count
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
-from eneo.redis.connection import build_redis_pool_kwargs
+from eneo.redis.connection import build_redis_pool_kwargs, build_redis_url
 from eneo.tenants.crawler_settings_helper import get_crawler_setting
 from eneo.worker.feeder.capacity import CapacityManager
 from eneo.worker.feeder.election import LeaderElection
@@ -321,7 +321,7 @@ class CrawlFeeder:
 
         # Create own Redis client (long-running service manages its own lifecycle)
         try:
-            redis_url = f"redis://{self.settings.redis_host}:{self.settings.redis_port}"
+            redis_url = build_redis_url(self.settings)
             redis_kwargs = build_redis_pool_kwargs(
                 self.settings,
                 decode_responses=False,

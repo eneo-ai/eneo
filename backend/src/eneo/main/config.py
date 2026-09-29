@@ -262,6 +262,10 @@ class Settings(BaseSettings):
     postgres_db: str
     redis_host: str
     redis_port: int
+    # Optional Redis authentication. Unset or blank connects without
+    # credentials; a username requires a password (Redis ACL user).
+    redis_username: str | None = None
+    redis_password: str | None = None
     # Redis connection resilience defaults
     # Safe defaults avoid aggressive timeouts during transient network blips
     redis_conn_timeout: int = 5
@@ -789,9 +793,18 @@ class Settings(BaseSettings):
 
         return self
 
+    @field_validator("redis_username", "redis_password", mode="before")
+    @classmethod
+    def blank_redis_credential_is_unset(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @model_validator(mode="after")
     def validate_redis_settings(self):
         """Ensure Redis connection settings are sane."""
+        if self.redis_username is not None and self.redis_password is None:
+            raise ValueError("REDIS_USERNAME requires REDIS_PASSWORD to be set.")
         if self.redis_conn_timeout <= 0:
             logging.error(
                 "REDIS_CONN_TIMEOUT must be greater than zero. Current value: %s",

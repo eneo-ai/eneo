@@ -36,6 +36,7 @@ from eneo.integration.presentation.admin_models import (
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
+from eneo.redis.connection import build_redis_auth_kwargs, build_redis_url
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.server.dependencies.container import get_container
 from eneo.settings.encryption_service import EncryptionService
@@ -115,9 +116,10 @@ class _SimpleGraphToken:
 async def _get_redis_client() -> Redis:
     settings = get_settings()
     return Redis.from_url(  # pyright: ignore[reportUnknownMemberType]  # redis stubs incomplete
-        f"redis://{settings.redis_host}:{settings.redis_port}",
+        build_redis_url(settings),
         encoding="utf8",
         decode_responses=True,
+        **build_redis_auth_kwargs(settings),
     )
 
 
