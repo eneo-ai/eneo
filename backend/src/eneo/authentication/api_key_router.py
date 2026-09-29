@@ -73,6 +73,12 @@ from eneo.server.dependencies.container import get_container
 from eneo.users.user import UserInDB
 
 router = APIRouter(tags=["API Keys"])
+_API_KEY_POLICY_ACCESS_REASON = (
+    "API key policy authorizes ownership, scope and the requested key operation."
+)
+_API_KEY_NOTIFICATION_ACCESS_REASON = (
+    "Notification preferences and subscriptions are scoped to the authenticated user."
+)
 ApiKeyMutationContainer = Annotated[
     Container,
     Depends(get_container(with_user=True, transaction_scope="function")),
@@ -461,7 +467,7 @@ async def _collect_manageable_keys_for_page(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="API key policy authorizes ownership, scope and the requested key operation.",
+    reason="Authenticated users may read their tenant's API key policy constraints.",
 )
 async def get_policy_constraints(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -493,7 +499,7 @@ async def get_policy_constraints(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="API key policy authorizes ownership, scope and the requested key operation.",
+    reason=_API_KEY_NOTIFICATION_ACCESS_REASON,
 )
 async def get_notification_preferences(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -523,7 +529,7 @@ async def get_notification_preferences(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="API key policy authorizes ownership, scope and the requested key operation.",
+    reason=_API_KEY_NOTIFICATION_ACCESS_REASON,
 )
 async def update_notification_preferences(
     request: Annotated[
@@ -586,7 +592,7 @@ async def update_notification_preferences(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="API key policy authorizes ownership, scope and the requested key operation.",
+    reason=_API_KEY_NOTIFICATION_ACCESS_REASON,
 )
 async def list_notification_subscriptions(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -616,7 +622,7 @@ async def list_notification_subscriptions(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="API key policy authorizes ownership, scope and the requested key operation.",
+    reason="API key policy checks the target before updating the caller's subscriptions.",
 )
 async def upsert_notification_subscription(
     target_type: ApiKeyNotificationTargetType,
@@ -685,7 +691,7 @@ async def upsert_notification_subscription(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="API key policy authorizes ownership, scope and the requested key operation.",
+    reason=_API_KEY_NOTIFICATION_ACCESS_REASON,
 )
 async def delete_notification_subscription(
     target_type: ApiKeyNotificationTargetType,
@@ -788,7 +794,7 @@ def _build_expiring_summary(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="API key policy authorizes ownership, scope and the requested key operation.",
+    reason=_API_KEY_POLICY_ACCESS_REASON,
 )
 async def get_expiring_keys(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -890,7 +896,7 @@ async def get_expiring_keys(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="API key policy authorizes ownership, scope and the requested key operation.",
+    reason=_API_KEY_POLICY_ACCESS_REASON,
 )
 async def get_api_key_usage(
     id: UUID,
@@ -991,7 +997,7 @@ async def create_api_key(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="API key policy authorizes ownership, scope and the requested key operation.",
+    reason=_API_KEY_POLICY_ACCESS_REASON,
 )
 async def list_api_keys(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1115,7 +1121,7 @@ async def list_api_keys(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="API key policy authorizes ownership, scope and the requested key operation.",
+    reason=_API_KEY_POLICY_ACCESS_REASON,
 )
 async def get_api_key(
     id: UUID,
@@ -1156,7 +1162,7 @@ async def get_api_key(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="API key policy authorizes ownership, scope and the requested key operation.",
+    reason=_API_KEY_POLICY_ACCESS_REASON,
 )
 async def update_api_key(
     id: UUID,
@@ -1198,7 +1204,7 @@ async def update_api_key(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="API key policy authorizes ownership, scope and the requested key operation.",
+    reason=_API_KEY_POLICY_ACCESS_REASON,
 )
 async def revoke_api_key_deprecated(
     id: UUID,
@@ -1234,7 +1240,7 @@ async def revoke_api_key_deprecated(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="API key policy authorizes ownership, scope and the requested key operation.",
+    reason=_API_KEY_POLICY_ACCESS_REASON,
 )
 async def revoke_api_key(
     id: UUID,
@@ -1272,7 +1278,7 @@ async def revoke_api_key(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="API key policy authorizes ownership, scope and the requested key operation.",
+    reason=_API_KEY_POLICY_ACCESS_REASON,
 )
 async def rotate_api_key(
     id: UUID,
@@ -1310,7 +1316,7 @@ async def rotate_api_key(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="API key policy authorizes ownership, scope and the requested key operation.",
+    reason=_API_KEY_POLICY_ACCESS_REASON,
 )
 async def extend_api_key_expiration(
     id: UUID,
@@ -1350,7 +1356,7 @@ async def extend_api_key_expiration(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="API key policy authorizes ownership, scope and the requested key operation.",
+    reason=_API_KEY_POLICY_ACCESS_REASON,
 )
 async def purge_api_key(
     id: UUID,
@@ -1388,7 +1394,7 @@ async def purge_api_key(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="API key policy authorizes ownership, scope and the requested key operation.",
+    reason=_API_KEY_POLICY_ACCESS_REASON,
 )
 async def suspend_api_key(
     id: UUID,
@@ -1426,7 +1432,7 @@ async def suspend_api_key(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="API key policy authorizes ownership, scope and the requested key operation.",
+    reason=_API_KEY_POLICY_ACCESS_REASON,
 )
 async def reactivate_api_key(
     id: UUID,

@@ -67,6 +67,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+_SPACE_OPERATION_ACCESS_REASON = (
+    "SpaceService enforces membership and the requested space operation."
+)
+_INTEGRATION_KNOWLEDGE_ACCESS_REASON = "IntegrationKnowledgeService enforces the space actor's permission for this operation."
 ApiKeyRevokingContainer = Annotated[
     Container,
     Depends(get_container(with_user=True, transaction_scope="function")),
@@ -168,7 +172,7 @@ async def create_space(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_SPACE_OPERATION_ACCESS_REASON,
 )
 async def get_space(
     id: UUID,
@@ -194,7 +198,7 @@ async def get_space(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_SPACE_OPERATION_ACCESS_REASON,
 )
 async def update_space(
     id: UUID,
@@ -367,7 +371,7 @@ async def update_space(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_SPACE_OPERATION_ACCESS_REASON,
 )
 async def get_security_classification_impact_analysis(
     id: UUID,
@@ -395,7 +399,7 @@ async def get_security_classification_impact_analysis(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_SPACE_OPERATION_ACCESS_REASON,
 )
 async def delete_space(
     id: UUID,
@@ -432,7 +436,7 @@ async def delete_space(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_SPACE_OPERATION_ACCESS_REASON,
 )
 async def get_spaces(
     request: Request,
@@ -475,7 +479,7 @@ async def get_spaces(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_SPACE_OPERATION_ACCESS_REASON,
 )
 async def get_space_applications(
     id: UUID, container: Annotated[Container, Depends(get_container(with_user=True))]
@@ -498,7 +502,7 @@ async def get_space_applications(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_SPACE_OPERATION_ACCESS_REASON,
 )
 async def create_space_assistant(
     id: UUID,
@@ -555,7 +559,7 @@ async def create_space_assistant(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_SPACE_OPERATION_ACCESS_REASON,
 )
 async def create_group_chat(
     id: UUID,
@@ -604,7 +608,7 @@ async def create_group_chat(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_SPACE_OPERATION_ACCESS_REASON,
 )
 async def create_app(
     id: UUID,
@@ -654,7 +658,7 @@ async def create_app(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_SPACE_OPERATION_ACCESS_REASON,
 )
 async def create_space_services(
     id: UUID,
@@ -682,7 +686,7 @@ async def create_space_services(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_SPACE_OPERATION_ACCESS_REASON,
 )
 async def get_space_knowledge(
     id: UUID, container: Annotated[Container, Depends(get_container(with_user=True))]
@@ -710,7 +714,7 @@ async def get_space_knowledge(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_SPACE_OPERATION_ACCESS_REASON,
 )
 async def create_space_groups(
     id: UUID,
@@ -796,7 +800,7 @@ async def create_space_groups(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_SPACE_OPERATION_ACCESS_REASON,
 )
 async def create_space_websites(
     id: UUID,
@@ -871,7 +875,7 @@ async def create_space_websites(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_INTEGRATION_KNOWLEDGE_ACCESS_REASON,
 )
 async def create_space_integration_knowledge(
     id: UUID,
@@ -942,7 +946,7 @@ async def create_space_integration_knowledge(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_INTEGRATION_KNOWLEDGE_ACCESS_REASON,
 )
 async def create_space_integration_knowledge_batch(
     id: UUID,
@@ -1059,7 +1063,7 @@ async def create_space_integration_knowledge_batch(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_INTEGRATION_KNOWLEDGE_ACCESS_REASON,
 )
 async def delete_space_integration_knowledge(
     id: UUID,
@@ -1110,7 +1114,7 @@ async def delete_space_integration_knowledge(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_INTEGRATION_KNOWLEDGE_ACCESS_REASON,
 )
 async def update_integration_knowledge_wrapper(
     id: UUID,
@@ -1139,7 +1143,7 @@ async def update_integration_knowledge_wrapper(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_INTEGRATION_KNOWLEDGE_ACCESS_REASON,
 )
 async def delete_integration_knowledge_wrapper(
     id: UUID,
@@ -1162,7 +1166,7 @@ async def delete_integration_knowledge_wrapper(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_INTEGRATION_KNOWLEDGE_ACCESS_REASON,
 )
 async def update_integration_knowledge(
     id: UUID,
@@ -1189,7 +1193,7 @@ async def update_integration_knowledge(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_INTEGRATION_KNOWLEDGE_ACCESS_REASON,
 )
 async def trigger_integration_full_sync(
     id: UUID,
@@ -1235,7 +1239,7 @@ async def trigger_integration_full_sync(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_SPACE_OPERATION_ACCESS_REASON,
 )
 async def add_space_member(
     id: UUID,
@@ -1308,7 +1312,7 @@ async def add_space_member(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_SPACE_OPERATION_ACCESS_REASON,
 )
 async def change_role_of_member(
     id: UUID,
@@ -1394,7 +1398,7 @@ async def change_role_of_member(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_SPACE_OPERATION_ACCESS_REASON,
 )
 async def remove_space_member(
     id: UUID,
@@ -1468,7 +1472,7 @@ async def remove_space_member(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_SPACE_OPERATION_ACCESS_REASON,
 )
 async def get_space_group_members(
     id: UUID,
@@ -1494,7 +1498,7 @@ async def get_space_group_members(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_SPACE_OPERATION_ACCESS_REASON,
 )
 async def add_space_group_member(
     id: UUID,
@@ -1555,7 +1559,7 @@ async def add_space_group_member(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_SPACE_OPERATION_ACCESS_REASON,
 )
 async def change_group_member_role(
     id: UUID,
@@ -1631,7 +1635,7 @@ async def change_group_member_role(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason=_SPACE_OPERATION_ACCESS_REASON,
 )
 async def remove_space_group_member(
     id: UUID,
@@ -1697,7 +1701,7 @@ async def remove_space_group_member(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="SpaceService enforces membership and the requested space operation.",
+    reason="Personal space lookup and creation are scoped to the authenticated user.",
 )
 async def get_personal_space(
     container: Annotated[Container, Depends(get_container(with_user=True))],

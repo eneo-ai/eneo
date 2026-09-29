@@ -69,6 +69,9 @@ if TYPE_CHECKING:
     from eneo.main.models import NotProvided
 
 router = APIRouter()
+_ASSISTANT_ACCESS_REASON = (
+    "AssistantService enforces assistant permissions and space membership."
+)
 logger = logging.getLogger(__name__)
 ApiKeyRevokingContainer = Annotated[
     Container,
@@ -85,7 +88,7 @@ ApiKeyRevokingContainer = Annotated[
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AssistantService enforces assistant permissions and space membership.",
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def create_assistant(
     request: Request,
@@ -181,7 +184,7 @@ async def create_assistant(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AssistantService enforces assistant permissions and space membership.",
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def get_assistants(
     request: Request,
@@ -261,7 +264,7 @@ async def _assistant_response(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AssistantService enforces assistant permissions and space membership.",
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def get_assistant(
     id: UUID,
@@ -604,7 +607,7 @@ def _build_assistant_update_changes(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AssistantService enforces assistant permissions and space membership.",
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def update_assistant(
     id: UUID,
@@ -802,7 +805,7 @@ async def update_assistant(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AssistantService enforces assistant permissions and space membership.",
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def delete_assistant(
     id: UUID,
@@ -884,7 +887,7 @@ async def delete_assistant(
 @endpoint_access(
     authentication=Authentication.ASSISTANT,
     authorization=Authorization.AUTHENTICATED,
-    reason="AssistantService enforces assistant permissions and space membership.",
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def ask_assistant(
     id: UUID,
@@ -970,7 +973,7 @@ async def ask_assistant(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AssistantService enforces assistant permissions and space membership.",
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def get_assistant_sessions(
     id: UUID,
@@ -1009,7 +1012,7 @@ async def get_assistant_sessions(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AssistantService enforces assistant permissions and space membership.",
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def get_assistant_session(
     id: UUID,
@@ -1034,7 +1037,7 @@ async def get_assistant_session(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AssistantService enforces assistant permissions and space membership.",
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def delete_assistant_session(
     id: UUID,
@@ -1097,7 +1100,7 @@ async def delete_assistant_session(
 @endpoint_access(
     authentication=Authentication.ASSISTANT,
     authorization=Authorization.AUTHENTICATED,
-    reason="AssistantService enforces assistant permissions and space membership.",
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def ask_followup(
     id: UUID,
@@ -1145,7 +1148,7 @@ async def ask_followup(
 @endpoint_access(
     authentication=Authentication.ASSISTANT,
     authorization=Authorization.AUTHENTICATED,
-    reason="AssistantService enforces assistant permissions and space membership.",
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def leave_feedback(
     id: UUID,
@@ -1176,7 +1179,7 @@ async def leave_feedback(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AssistantService enforces assistant permissions and space membership.",
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def transfer_assistant_to_space(
     id: UUID,
@@ -1253,7 +1256,7 @@ async def transfer_assistant_to_space(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AssistantService enforces assistant permissions and space membership.",
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def get_prompts(
     id: UUID, container: Annotated[Container, Depends(get_container(with_user=True))]
@@ -1276,7 +1279,7 @@ async def get_prompts(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AssistantService enforces assistant permissions and space membership.",
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def publish_assistant(
     id: UUID,
@@ -1352,7 +1355,7 @@ async def publish_assistant(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AssistantService enforces assistant permissions and space membership.",
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def get_assistant_mcp_servers(
     id: UUID,
@@ -1386,7 +1389,7 @@ async def get_assistant_mcp_servers(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AssistantService enforces assistant permissions and space membership.",
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def add_mcp_to_assistant(
     id: UUID,
@@ -1436,7 +1439,7 @@ async def add_mcp_to_assistant(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AssistantService enforces assistant permissions and space membership.",
+    reason=_ASSISTANT_ACCESS_REASON,
 )
 async def remove_mcp_from_assistant(
     id: UUID,

@@ -44,6 +44,10 @@ from eneo.server.protocol import responses
 from eneo.spaces.api.space_models import TransferRequest
 from eneo.users.user import UserInDB
 
+_COLLECTION_SERVICE_ACCESS_REASON = (
+    "Collection services enforce collection permissions and space membership."
+)
+
 router = APIRouter()
 
 
@@ -59,7 +63,7 @@ router = APIRouter()
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Collection services enforce collection permissions and space membership.",
+    reason="Legacy group listing filters by user or the active API key's space scope.",
 )
 async def get_groups(
     request: Request,
@@ -82,7 +86,7 @@ async def get_groups(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Collection services enforce collection permissions and space membership.",
+    reason=_COLLECTION_SERVICE_ACCESS_REASON,
 )
 async def get_group_by_id(
     id: UUID,
@@ -106,7 +110,7 @@ async def get_group_by_id(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Collection services enforce collection permissions and space membership.",
+    reason=_COLLECTION_SERVICE_ACCESS_REASON,
 )
 async def create_group(
     group: CreateGroupRequest,
@@ -132,7 +136,7 @@ async def create_group(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Collection services enforce collection permissions and space membership.",
+    reason=_COLLECTION_SERVICE_ACCESS_REASON,
 )
 async def update_group(
     id: UUID,
@@ -199,7 +203,7 @@ async def update_group(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Collection services enforce collection permissions and space membership.",
+    reason=_COLLECTION_SERVICE_ACCESS_REASON,
 )
 async def delete_group_by_id(
     id: UUID,
@@ -265,7 +269,7 @@ async def delete_group_by_id(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Collection services enforce collection permissions and space membership.",
+    reason=_COLLECTION_SERVICE_ACCESS_REASON,
 )
 async def add_info_blobs(
     id: UUID,
@@ -355,7 +359,7 @@ async def add_info_blobs(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Collection services enforce collection permissions and space membership.",
+    reason=_COLLECTION_SERVICE_ACCESS_REASON,
 )
 async def get_info_blobs(
     id: UUID,
@@ -382,7 +386,7 @@ async def get_info_blobs(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Collection services enforce collection permissions and space membership.",
+    reason=_COLLECTION_SERVICE_ACCESS_REASON,
 )
 async def upload_file(
     id: UUID,
@@ -459,7 +463,7 @@ async def upload_file(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Collection services enforce collection permissions and space membership.",
+    reason=_COLLECTION_SERVICE_ACCESS_REASON,
 )
 async def run_semantic_search(
     id: UUID,
@@ -491,7 +495,7 @@ async def run_semantic_search(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Collection services enforce collection permissions and space membership.",
+    reason=_COLLECTION_SERVICE_ACCESS_REASON,
 )
 async def transfer_group_to_space(
     id: UUID,

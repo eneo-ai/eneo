@@ -99,6 +99,9 @@ router = APIRouter(
     # can return 401. Declared once here instead of per-route get_responses.
     responses=responses.get_responses([401]),
 )
+_DEPLOYMENT_ADMIN_ACCESS_REASON = (
+    "Deployment administration requires the configured super API key."
+)
 
 
 class OIDCDebugToggleRequest(BaseModel):
@@ -145,7 +148,7 @@ class OIDCDebugToggleResponse(BaseModel):
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def register_new_user(
     new_user: UserAddSuperAdmin,
@@ -193,7 +196,7 @@ async def register_new_user(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def get_all_users(
     container: Annotated[Container, Depends(get_container())],
@@ -213,7 +216,7 @@ async def get_all_users(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def get_user(
     user_id: UUID,
@@ -232,7 +235,7 @@ async def get_user(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def delete_user(
     user_id: UUID,
@@ -280,7 +283,7 @@ async def delete_user(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def update_user(
     user_id: UUID,
@@ -338,7 +341,7 @@ async def update_user(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def get_access_token(
     user_id: UUID,
@@ -361,7 +364,7 @@ async def get_access_token(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def get_tenants(
     container: Annotated[Container, Depends(get_container())],
@@ -400,7 +403,7 @@ async def get_tenants(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def create_tenant(
     tenant: TenantBase,
@@ -446,7 +449,7 @@ async def create_tenant(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def update_tenant(
     id: UUID,
@@ -507,7 +510,7 @@ async def update_tenant(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def delete_tenant_by_id(
     id: UUID,
@@ -556,7 +559,7 @@ async def delete_tenant_by_id(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def get_predefined_roles():
     from eneo.server.dependencies.predefined_roles import (
@@ -575,7 +578,7 @@ async def get_predefined_roles():
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def crawl_all_weekly_websites(
     container: Annotated[Container, Depends(get_container())],
@@ -609,7 +612,7 @@ def _get_storage_backend(redis_client: object | None) -> str:
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def toggle_oidc_debug(
     payload: OIDCDebugToggleRequest,
@@ -658,7 +661,7 @@ async def toggle_oidc_debug(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def get_oidc_debug_status(
     container: Annotated[Container, Depends(get_container_for_sysadmin())],
@@ -683,7 +686,7 @@ async def get_oidc_debug_status(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def get_embedding_models(
     embedding_model_repo: Annotated[
@@ -703,7 +706,7 @@ async def get_embedding_models(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def get_completion_models(
     completion_model_repo: Annotated[
@@ -727,7 +730,7 @@ async def get_completion_models(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def enable_completion_model(
     id: UUID,
@@ -785,7 +788,7 @@ async def enable_completion_model(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def enable_embedding_model(
     id: UUID,
@@ -843,7 +846,7 @@ async def enable_embedding_model(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def add_origin(
     origin: AllowedOriginCreate,
@@ -880,7 +883,7 @@ async def add_origin(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def get_origins(
     container: Annotated[Container, Depends(get_container())],
@@ -905,7 +908,7 @@ async def get_origins(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def delete_origin(
     id: UUID,
@@ -942,7 +945,7 @@ async def delete_origin(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def recalculate_tenant_usage_statistics(
     tenant_id: UUID,
@@ -994,7 +997,7 @@ async def recalculate_tenant_usage_statistics(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def recalculate_all_tenants_usage_statistics(
     container: Annotated[Container, Depends(get_container_for_sysadmin())],
@@ -1045,7 +1048,7 @@ async def recalculate_all_tenants_usage_statistics(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def migrate_completion_model_for_tenant(
     tenant_id: UUID,
@@ -1193,7 +1196,7 @@ async def migrate_completion_model_for_tenant(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def migrate_completion_model_for_all_tenants(
     model_id: UUID,
@@ -1447,7 +1450,7 @@ async def migrate_completion_model_for_all_tenants(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def create_completion_model(
     model_data: CompletionModelCreate,
@@ -1492,7 +1495,7 @@ async def create_completion_model(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def update_completion_model_metadata(
     id: UUID,
@@ -1541,7 +1544,7 @@ async def update_completion_model_metadata(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def delete_completion_model(
     id: UUID,
@@ -1597,7 +1600,7 @@ async def delete_completion_model(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def create_embedding_model(
     model_data: EmbeddingModelCreate,
@@ -1636,7 +1639,7 @@ async def create_embedding_model(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def update_embedding_model_metadata(
     id: UUID,
@@ -1685,7 +1688,7 @@ async def update_embedding_model_metadata(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def delete_embedding_model(
     id: UUID,
@@ -1792,7 +1795,7 @@ async def delete_embedding_model(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def create_scim_token(
     tenant_id: UUID,
@@ -1818,7 +1821,7 @@ async def create_scim_token(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def get_scim_token_status(
     tenant_id: UUID,
@@ -1843,7 +1846,7 @@ async def get_scim_token_status(
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
     authorization=Authorization.SYSADMIN,
-    reason="Deployment administration requires the configured super API key.",
+    reason=_DEPLOYMENT_ADMIN_ACCESS_REASON,
 )
 async def delete_scim_token(
     tenant_id: UUID,

@@ -64,6 +64,11 @@ from eneo.sessions.session_protocol import (
     to_sessions_paginated_response,
 )
 
+_CONVERSATION_SERVICE_ACCESS_REASON = (
+    "Conversation services enforce access to the requested conversation."
+)
+_CHAT_ACCESS_REASON = "Chat access is checked against the selected assistant, group chat or existing session."
+
 logger = get_logger(__name__)
 
 router = APIRouter()
@@ -282,7 +287,7 @@ async def _authorize_session_access(container: Container, session: SessionInDB) 
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Conversation services enforce access to the requested conversation.",
+    reason=_CHAT_ACCESS_REASON,
 )
 async def chat(
     request: ConversationRequest,
@@ -432,7 +437,7 @@ async def get_chat_turn_diagnostics(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Conversation services enforce access to the requested conversation.",
+    reason=_CHAT_ACCESS_REASON,
 )
 async def preflight_tokens(
     request: PreflightRequest,
@@ -515,7 +520,7 @@ async def preflight_tokens(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Conversation services enforce access to the requested conversation.",
+    reason=_CONVERSATION_SERVICE_ACCESS_REASON,
 )
 async def list_conversations(
     http_request: Request,
@@ -606,7 +611,7 @@ async def list_conversations(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Conversation services enforce access to the requested conversation.",
+    reason=_CONVERSATION_SERVICE_ACCESS_REASON,
 )
 async def get_conversation(
     session_id: Annotated[
@@ -633,7 +638,7 @@ async def get_conversation(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Conversation services enforce access to the requested conversation.",
+    reason=_CONVERSATION_SERVICE_ACCESS_REASON,
 )
 async def get_tool_call_result(
     session_id: Annotated[
@@ -670,7 +675,7 @@ async def get_tool_call_result(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Conversation services enforce access to the requested conversation.",
+    reason=_CONVERSATION_SERVICE_ACCESS_REASON,
 )
 async def delete_conversation(
     session_id: Annotated[
@@ -706,7 +711,7 @@ async def delete_conversation(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Conversation services enforce access to the requested conversation.",
+    reason=_CONVERSATION_SERVICE_ACCESS_REASON,
 )
 async def leave_feedback(
     feedback: SessionFeedback,
@@ -749,7 +754,7 @@ async def leave_feedback(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Conversation services enforce access to the requested conversation.",
+    reason=_CONVERSATION_SERVICE_ACCESS_REASON,
 )
 async def set_title_of_conversation(
     session_id: UUID,
@@ -779,7 +784,7 @@ async def set_title_of_conversation(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Conversation services enforce access to the requested conversation.",
+    reason="Tool approval checks the approval owner and the conversation's resource scope.",
 )
 async def approve_tools(
     http_request: Request,
@@ -961,7 +966,7 @@ async def approve_tools(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Conversation services enforce access to the requested conversation.",
+    reason=_CONVERSATION_SERVICE_ACCESS_REASON,
 )
 async def rename_conversation(
     payload: ConversationRenameRequest,

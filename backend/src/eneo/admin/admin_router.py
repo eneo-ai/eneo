@@ -75,6 +75,9 @@ from eneo.users.user import (
 
 logger = get_logger(__name__)
 router = APIRouter()
+_ORGANIZATION_ADMIN_ACCESS_REASON = (
+    "Organization administration requires the admin permission."
+)
 AdminContainer = Annotated[Container, Depends(get_container(with_user=True))]
 AdminApiKeyMutationContainer = Annotated[
     Container,
@@ -269,7 +272,7 @@ GET /api/v1/admin/users/?sort_by=email&sort_order=asc
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def get_users(
     query_params: Annotated[AdminUsersQueryParams, Depends()],
@@ -326,7 +329,7 @@ async def get_users(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def register_user(
     new_user: UserAddAdmin,
@@ -428,7 +431,7 @@ async def register_user(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def get_user(
     username: str,
@@ -488,7 +491,7 @@ async def get_user(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def update_user(
     username: str,
@@ -634,7 +637,7 @@ async def update_user(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def delete_user(username: str, container: AdminApiKeyMutationContainer):
     """
@@ -720,7 +723,7 @@ async def delete_user(username: str, container: AdminApiKeyMutationContainer):
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def deactivate_user(
     username: str,
@@ -792,7 +795,7 @@ async def deactivate_user(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def reactivate_user(username: str, container: AdminContainer):
     """
@@ -861,7 +864,7 @@ async def reactivate_user(username: str, container: AdminContainer):
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def get_inactive_users(
     container: AdminContainer,
@@ -904,7 +907,7 @@ async def get_inactive_users(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def get_deleted_users(
     container: AdminContainer,
@@ -950,7 +953,7 @@ async def get_deleted_users(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def get_predefined_roles(container: AdminContainer):
     """Get all default roles for your tenant (backward-compatible endpoint)."""
@@ -971,7 +974,7 @@ async def get_predefined_roles(container: AdminContainer):
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def update_privacy_policy(url: PrivacyPolicy, container: AdminContainer):
     service = container.admin_service()
@@ -1170,7 +1173,7 @@ async def _enrich_api_keys_with_user_snapshots(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def get_api_key_policy(
     container: AdminContainer,
@@ -1212,7 +1215,7 @@ async def get_api_key_policy(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def update_api_key_policy(
     request: Annotated[
@@ -1286,7 +1289,7 @@ async def update_api_key_policy(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def get_api_key_notification_policy(
     container: AdminContainer,
@@ -1319,7 +1322,7 @@ async def get_api_key_notification_policy(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def update_api_key_notification_policy(
     request: Annotated[
@@ -1407,7 +1410,7 @@ async def update_api_key_notification_policy(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def update_model_pricing_visibility(
     request: ModelPricingVisibility,
@@ -1470,7 +1473,7 @@ async def update_model_pricing_visibility(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def get_super_api_key_status(
     container: AdminContainer,
@@ -1502,7 +1505,7 @@ async def get_super_api_key_status(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def list_api_keys_admin(
     query: Annotated[AdminApiKeysQueryParams, Depends()],
@@ -1587,7 +1590,7 @@ async def list_api_keys_admin(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def get_expiring_keys_admin(
     query: Annotated[AdminExpiringKeysQueryParams, Depends()],
@@ -1631,7 +1634,7 @@ async def get_expiring_keys_admin(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def lookup_api_key_admin(
     payload: ApiKeyExactLookupRequest,
@@ -1688,7 +1691,7 @@ async def lookup_api_key_admin(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def get_api_key_usage_admin(
     id: UUID,
@@ -1746,7 +1749,7 @@ async def get_api_key_usage_admin(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def get_api_key_admin(
     id: UUID,
@@ -1790,7 +1793,7 @@ async def get_api_key_admin(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def update_api_key_admin(
     id: UUID,
@@ -1828,7 +1831,7 @@ async def update_api_key_admin(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def revoke_api_key_admin_deprecated(
     id: UUID,
@@ -1869,7 +1872,7 @@ async def revoke_api_key_admin_deprecated(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def revoke_api_key_admin(
     id: UUID,
@@ -1914,7 +1917,7 @@ async def revoke_api_key_admin(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def suspend_api_key_admin(
     id: UUID,
@@ -1955,7 +1958,7 @@ async def suspend_api_key_admin(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def reactivate_api_key_admin(
     id: UUID,
@@ -1993,7 +1996,7 @@ async def reactivate_api_key_admin(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def rotate_api_key_admin(
     id: UUID,
@@ -2033,7 +2036,7 @@ async def rotate_api_key_admin(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def extend_api_key_expiration_admin(
     id: UUID,
@@ -2076,7 +2079,7 @@ async def extend_api_key_expiration_admin(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def purge_api_key_admin(
     id: UUID,

@@ -37,6 +37,10 @@ from eneo.skills.presentation.skill_models import (
     SkillSparse,
 )
 
+_SKILL_SERVICE_ACCESS_REASON = (
+    "Skill service enforces actor permissions and space or assistant membership."
+)
+
 router = APIRouter(
     prefix="/spaces",
     tags=["skills"],
@@ -55,7 +59,7 @@ _MAX_REVISION_PAGE_LIMIT = 100
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Skill service enforces actor permissions and space or assistant membership.",
+    reason=_SKILL_SERVICE_ACCESS_REASON,
 )
 async def list_skills(
     space_id: UUID,
@@ -102,7 +106,7 @@ async def list_skills(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Skill service enforces actor permissions and space or assistant membership.",
+    reason=_SKILL_SERVICE_ACCESS_REASON,
 )
 async def create_skill(
     space_id: UUID,
@@ -128,7 +132,7 @@ async def create_skill(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Skill service enforces actor permissions and space or assistant membership.",
+    reason=_SKILL_SERVICE_ACCESS_REASON,
 )
 async def get_skill(
     space_id: UUID,
@@ -150,7 +154,7 @@ async def get_skill(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Skill service enforces actor permissions and space or assistant membership.",
+    reason=_SKILL_SERVICE_ACCESS_REASON,
 )
 async def list_skill_revisions(
     space_id: UUID,
@@ -189,7 +193,7 @@ async def list_skill_revisions(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Skill service enforces actor permissions and space or assistant membership.",
+    reason=_SKILL_SERVICE_ACCESS_REASON,
 )
 async def get_skill_revision(
     space_id: UUID,
@@ -224,7 +228,7 @@ async def get_skill_revision(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Skill service enforces actor permissions and space or assistant membership.",
+    reason=_SKILL_SERVICE_ACCESS_REASON,
 )
 async def create_skill_revision(
     space_id: UUID,
@@ -287,7 +291,7 @@ async def create_skill_revision(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Skill service enforces actor permissions and space or assistant membership.",
+    reason=_SKILL_SERVICE_ACCESS_REASON,
 )
 async def restore_skill_revision(
     space_id: UUID,
@@ -356,7 +360,7 @@ async def restore_skill_revision(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Skill service enforces actor permissions and space or assistant membership.",
+    reason=_SKILL_SERVICE_ACCESS_REASON,
 )
 async def set_skill_active(
     space_id: UUID,
@@ -404,7 +408,7 @@ async def set_skill_active(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Skill service enforces actor permissions and space or assistant membership.",
+    reason=_SKILL_SERVICE_ACCESS_REASON,
 )
 async def delete_skill(
     space_id: UUID, skill_id: UUID, container: _ContainerWithUser
@@ -437,7 +441,7 @@ async def delete_skill(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Skill service enforces actor permissions and space or assistant membership.",
+    reason=_SKILL_SERVICE_ACCESS_REASON,
 )
 async def list_assistant_skill_bindings(
     space_id: UUID,
@@ -459,7 +463,7 @@ async def list_assistant_skill_bindings(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Skill service enforces actor permissions and space or assistant membership.",
+    reason=_SKILL_SERVICE_ACCESS_REASON,
 )
 async def get_assistant_skill_configuration(
     space_id: UUID,
@@ -481,7 +485,7 @@ async def get_assistant_skill_configuration(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Skill service enforces actor permissions and space or assistant membership.",
+    reason=_SKILL_SERVICE_ACCESS_REASON,
 )
 async def list_app_skill_bindings(
     space_id: UUID, app_id: UUID, container: _ContainerWithUser

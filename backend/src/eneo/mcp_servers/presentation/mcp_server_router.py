@@ -49,6 +49,9 @@ from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
 router = APIRouter()
+_ORGANIZATION_ADMIN_ACCESS_REASON = (
+    "Organization administration requires the admin permission."
+)
 
 _WITH_USER = Depends(get_container(with_user=True))
 _TAGS_QUERY = Query(None)
@@ -120,7 +123,7 @@ async def get_tenant_mcp_settings(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def enable_mcp_for_tenant(
     mcp_server_id: UUID,
@@ -162,7 +165,7 @@ async def enable_mcp_for_tenant(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def update_mcp_settings(
     mcp_server_id: UUID,
@@ -190,7 +193,7 @@ async def update_mcp_settings(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def disable_mcp_for_tenant(
     mcp_server_id: UUID,
@@ -231,7 +234,7 @@ async def disable_mcp_for_tenant(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def update_tenant_tool_enabled(
     tool_id: UUID,
@@ -313,7 +316,7 @@ async def get_mcp_server(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def create_mcp_server(
     data: MCPServerCreate,
@@ -417,7 +420,7 @@ async def create_mcp_server(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def update_mcp_server(
     id: UUID,
@@ -568,7 +571,7 @@ async def update_mcp_server(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def delete_mcp_server(
     id: UUID,
@@ -613,7 +616,7 @@ async def delete_mcp_server(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def activate_capability_provider(
     id: UUID,
@@ -669,7 +672,7 @@ async def activate_capability_provider(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def deactivate_capability_provider(
     id: UUID,
@@ -738,7 +741,7 @@ async def get_mcp_server_tools(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def sync_mcp_server_tools(
     id: UUID,
@@ -795,7 +798,7 @@ async def sync_mcp_server_tools(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def approve_tool_changes(
     id: UUID,
@@ -845,7 +848,7 @@ async def approve_tool_changes(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def reject_tool_changes(
     id: UUID,
@@ -896,7 +899,7 @@ async def reject_tool_changes(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def approve_all_tool_changes(
     id: UUID,
@@ -936,7 +939,7 @@ async def approve_all_tool_changes(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def update_tool_display_name(
     id: UUID,
@@ -993,7 +996,7 @@ async def update_tool_display_name(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Organization administration requires the admin permission.",
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def update_tool_default_enabled(
     id: UUID,

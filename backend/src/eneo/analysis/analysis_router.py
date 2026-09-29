@@ -48,6 +48,11 @@ from eneo.sessions.session_protocol import (
     to_session_public,
 )
 
+_TENANT_ANALYTICS_ACCESS_REASON = "Tenant analytics require the insights permission."
+_RESOURCE_INSIGHTS_ACCESS_REASON = (
+    "AnalysisService authorizes insights for the requested assistant or space."
+)
+
 logger = get_logger(__name__)
 
 router = APIRouter()
@@ -102,7 +107,7 @@ def _default_analytics_range(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AnalysisService authorizes insights for the requested assistant or space.",
+    reason=_TENANT_ANALYTICS_ACCESS_REASON,
 )
 async def get_counts(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -121,7 +126,7 @@ async def get_counts(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AnalysisService authorizes insights for the requested assistant or space.",
+    reason=_TENANT_ANALYTICS_ACCESS_REASON,
 )
 async def get_metadata(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -156,7 +161,7 @@ async def get_metadata(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AnalysisService authorizes insights for the requested assistant or space.",
+    reason=_TENANT_ANALYTICS_ACCESS_REASON,
 )
 async def get_assistant_activity(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -192,7 +197,7 @@ async def get_assistant_activity(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AnalysisService authorizes insights for the requested assistant or space.",
+    reason=_TENANT_ANALYTICS_ACCESS_REASON,
 )
 async def get_metadata_aggregated(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -223,7 +228,7 @@ async def get_metadata_aggregated(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AnalysisService authorizes insights for the requested assistant or space.",
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
 )
 async def get_most_recent_questions(
     assistant_id: UUID,
@@ -275,7 +280,7 @@ async def get_most_recent_questions(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AnalysisService authorizes insights for the requested assistant or space.",
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
 )
 async def get_most_recent_questions_paginated(
     assistant_id: UUID,
@@ -329,7 +334,7 @@ async def get_most_recent_questions_paginated(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AnalysisService authorizes insights for the requested assistant or space.",
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
 )
 async def ask_question_about_questions(
     assistant_id: UUID,
@@ -397,7 +402,7 @@ async def ask_question_about_questions(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AnalysisService authorizes insights for the requested assistant or space.",
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
 )
 async def ask_unified_questions_about_questions(
     ask_analysis: AskAnalysis,
@@ -537,7 +542,7 @@ async def ask_unified_questions_about_questions(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AnalysisService authorizes insights for the requested assistant or space.",
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
 )
 async def get_conversation_insights(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -607,7 +612,7 @@ async def get_conversation_insight_job(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AnalysisService authorizes insights for the requested assistant or space.",
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
 )
 async def get_conversation_insight_sessions(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -704,7 +709,7 @@ async def get_conversation_insight_sessions(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="AnalysisService authorizes insights for the requested assistant or space.",
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
 )
 async def get_conversation_insight_session(
     session_id: UUID,

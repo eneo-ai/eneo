@@ -37,6 +37,9 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 settings_admin_router = APIRouter()
+_TENANT_SETTINGS_ADMIN_ACCESS_REASON = (
+    "Administering tenant settings requires the admin permission."
+)
 
 
 @settings_admin_router.get(
@@ -49,7 +52,7 @@ settings_admin_router = APIRouter()
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Administering tenant settings requires the admin permission.",
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def get_skill_execution_block(
     skill_id: UUID,
@@ -74,7 +77,7 @@ async def get_skill_execution_block(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Administering tenant settings requires the admin permission.",
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def block_skill_execution(
     skill_id: UUID,
@@ -100,7 +103,7 @@ async def block_skill_execution(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Administering tenant settings requires the admin permission.",
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def unblock_skill_execution(
     skill_id: UUID,
@@ -129,7 +132,7 @@ async def unblock_skill_execution(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Administering tenant settings requires the admin permission.",
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def get_skill_runtime_policy(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -152,7 +155,7 @@ async def get_skill_runtime_policy(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Administering tenant settings requires the admin permission.",
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def update_skill_runtime_policy(
     data: SkillRuntimePolicyUpdate,
@@ -175,7 +178,7 @@ async def update_skill_runtime_policy(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Administering tenant settings requires the admin permission.",
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def reset_skill_runtime_policy(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -198,7 +201,7 @@ async def reset_skill_runtime_policy(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Administering tenant settings requires the admin permission.",
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def get_skill_runtime_model_projections(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -236,7 +239,7 @@ async def get_settings(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Administering tenant settings requires the admin permission.",
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def upsert_settings(
     settings: SettingsBase,
@@ -330,7 +333,7 @@ Enable or disable the template management feature for your tenant.
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Administering tenant settings requires the admin permission.",
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def update_template_setting(
     data: ToggleSettingUpdate,
@@ -383,7 +386,7 @@ Enable or disable global audit logging for your tenant.
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Administering tenant settings requires the admin permission.",
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def update_audit_logging_setting(
     data: ToggleSettingUpdate,
@@ -436,7 +439,7 @@ Enable or disable JIT (Just-In-Time) user provisioning for your tenant.
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Administering tenant settings requires the admin permission.",
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def update_provisioning_setting(
     data: ToggleSettingUpdate,
@@ -466,7 +469,7 @@ Toggle API key expiry notifications for your tenant.
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Administering tenant settings requires the admin permission.",
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def update_api_key_expiry_notifications_setting(
     data: ToggleSettingUpdate,
@@ -497,7 +500,7 @@ Toggle the What's new page, release announcement and menu indicator for your ten
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Administering tenant settings requires the admin permission.",
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
 )
 async def update_whats_new_setting(
     data: ToggleSettingUpdate,

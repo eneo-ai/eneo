@@ -45,6 +45,10 @@ from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
+_AUDIT_ADMIN_ACCESS_REASON = (
+    "This operation requires Permission.ADMIN before accessing tenant resources."
+)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/audit", tags=["audit"])
@@ -215,7 +219,7 @@ async def reset_rate_limit(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+    reason=_AUDIT_ADMIN_ACCESS_REASON,
 )
 async def create_access_session(
     request: AccessJustificationRequest,
@@ -358,7 +362,7 @@ async def create_access_session(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+    reason=_AUDIT_ADMIN_ACCESS_REASON,
 )
 async def list_audit_logs(
     request: Request,
@@ -587,7 +591,7 @@ async def list_audit_logs(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+    reason=_AUDIT_ADMIN_ACCESS_REASON,
 )
 async def get_user_logs(
     user_id: Annotated[UUID, Path(..., description="User ID for GDPR export")],
@@ -695,7 +699,7 @@ async def get_user_logs(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+    reason=_AUDIT_ADMIN_ACCESS_REASON,
 )
 async def export_audit_logs(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -932,7 +936,7 @@ async def export_audit_logs(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+    reason=_AUDIT_ADMIN_ACCESS_REASON,
 )
 async def request_async_export(
     request: ExportJobRequest,
@@ -1050,7 +1054,7 @@ async def request_async_export(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+    reason=_AUDIT_ADMIN_ACCESS_REASON,
 )
 async def get_export_status(
     job_id: Annotated[UUID, Path(..., description="Export job ID")],
@@ -1115,7 +1119,7 @@ async def get_export_status(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+    reason=_AUDIT_ADMIN_ACCESS_REASON,
 )
 async def download_export(
     job_id: Annotated[UUID, Path(..., description="Export job ID")],
@@ -1190,7 +1194,7 @@ async def download_export(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+    reason=_AUDIT_ADMIN_ACCESS_REASON,
 )
 async def cancel_export(
     job_id: Annotated[UUID, Path(..., description="Export job ID")],
@@ -1246,7 +1250,7 @@ async def cancel_export(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+    reason=_AUDIT_ADMIN_ACCESS_REASON,
 )
 async def get_retention_policy(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1280,7 +1284,7 @@ async def get_retention_policy(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+    reason=_AUDIT_ADMIN_ACCESS_REASON,
 )
 async def update_retention_policy(
     request: RetentionPolicyUpdateRequest,

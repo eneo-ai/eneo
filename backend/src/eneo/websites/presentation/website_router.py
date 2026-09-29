@@ -30,6 +30,13 @@ from eneo.websites.presentation.website_models import (
     WebsiteUpdate,
 )
 
+_DEPRECATED_WEBSITE_ACCESS_REASON = (
+    "Authenticated callers receive 410 for this deprecated endpoint."
+)
+_WEBSITE_SERVICE_ACCESS_REASON = (
+    "WebsiteService enforces website permissions and space membership."
+)
+
 router = APIRouter()
 
 ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
@@ -45,7 +52,7 @@ ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="WebsiteService enforces website permissions and space membership.",
+    reason=_DEPRECATED_WEBSITE_ACCESS_REASON,
 )
 async def get_websites(
     container: ContainerDep,
@@ -67,7 +74,7 @@ async def get_websites(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="WebsiteService enforces website permissions and space membership.",
+    reason=_DEPRECATED_WEBSITE_ACCESS_REASON,
 )
 async def create_website(
     crawl: WebsiteCreateRequestDeprecated,
@@ -100,7 +107,7 @@ async def create_website(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="WebsiteService enforces website permissions and space membership.",
+    reason=_WEBSITE_SERVICE_ACCESS_REASON,
 )
 async def check_existing_website_url(
     container: ContainerDep,
@@ -162,7 +169,7 @@ async def check_existing_website_url(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="WebsiteService enforces website permissions and space membership.",
+    reason=_WEBSITE_SERVICE_ACCESS_REASON,
 )
 async def bulk_run_crawl(
     request: BulkCrawlRequest,
@@ -207,7 +214,7 @@ async def bulk_run_crawl(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="WebsiteService enforces website permissions and space membership.",
+    reason=_WEBSITE_SERVICE_ACCESS_REASON,
 )
 async def get_website(
     id: Annotated[UUID, Path(description="Unique identifier of the website")],
@@ -228,7 +235,7 @@ async def get_website(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="WebsiteService enforces website permissions and space membership.",
+    reason=_WEBSITE_SERVICE_ACCESS_REASON,
 )
 async def update_website(
     website_update: WebsiteUpdate,
@@ -279,7 +286,7 @@ async def update_website(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="WebsiteService enforces website permissions and space membership.",
+    reason=_WEBSITE_SERVICE_ACCESS_REASON,
 )
 async def delete_website(
     id: Annotated[UUID, Path(description="Unique identifier of the website to delete")],
@@ -338,7 +345,7 @@ async def delete_website(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="WebsiteService enforces website permissions and space membership.",
+    reason=_WEBSITE_SERVICE_ACCESS_REASON,
 )
 async def run_crawl(
     id: Annotated[UUID, Path(description="Unique identifier of the website to crawl")],
@@ -361,7 +368,7 @@ async def run_crawl(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="WebsiteService enforces website permissions and space membership.",
+    reason=_WEBSITE_SERVICE_ACCESS_REASON,
 )
 async def get_crawl_runs(
     id: Annotated[UUID, Path(description="Unique identifier of the website")],
@@ -384,7 +391,7 @@ async def get_crawl_runs(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="WebsiteService enforces website permissions and space membership.",
+    reason=_WEBSITE_SERVICE_ACCESS_REASON,
 )
 async def transfer_website_to_space(
     transfer_req: TransferRequest,
@@ -432,7 +439,7 @@ async def transfer_website_to_space(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="WebsiteService enforces website permissions and space membership.",
+    reason=_WEBSITE_SERVICE_ACCESS_REASON,
 )
 async def get_info_blobs(
     id: Annotated[UUID, Path(description="Unique identifier of the website")],

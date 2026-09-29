@@ -60,6 +60,10 @@ router = APIRouter(
     prefix="/skills",
     tags=["skills"],
 )
+_CATALOGUE_SKILL_ACCESS_REASON = "Organization Skill service restricts catalogue reads to published skills in the caller's tenant."
+_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON = (
+    "Organization Skill service enforces tenant scope and administrator access."
+)
 
 _ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))]
 _DEFAULT_PAGE_LIMIT = 25
@@ -75,7 +79,7 @@ _MAX_PAGE_LIMIT = 100
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Organization Skill service enforces tenant, publication and actor permissions.",
+    reason=_CATALOGUE_SKILL_ACCESS_REASON,
 )
 async def list_catalogue(
     container: _ContainerWithUser,
@@ -105,7 +109,7 @@ async def list_catalogue(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Organization Skill service enforces tenant, publication and actor permissions.",
+    reason=_CATALOGUE_SKILL_ACCESS_REASON,
 )
 async def get_catalogue_skill(
     skill_id: UUID,
@@ -126,7 +130,7 @@ async def get_catalogue_skill(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Organization Skill service enforces tenant, publication and actor permissions.",
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def list_organization_skills(
     container: _ContainerWithUser,
@@ -162,7 +166,7 @@ async def list_organization_skills(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Organization Skill service enforces tenant, publication and actor permissions.",
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def create_organization_skill(
     payload: SkillCreateRequest,
@@ -191,7 +195,7 @@ async def create_organization_skill(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Organization Skill service enforces tenant, publication and actor permissions.",
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def get_organization_skill(
     skill_id: UUID,
@@ -217,7 +221,7 @@ async def get_organization_skill(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Organization Skill service enforces tenant, publication and actor permissions.",
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def get_organization_skill_adoption(
     skill_id: UUID,
@@ -252,7 +256,7 @@ async def get_organization_skill_adoption(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Organization Skill service enforces tenant, publication and actor permissions.",
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def list_organization_skill_revisions(
     skill_id: UUID,
@@ -286,7 +290,7 @@ async def list_organization_skill_revisions(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Organization Skill service enforces tenant, publication and actor permissions.",
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def get_organization_skill_revision(
     skill_id: UUID,
@@ -319,7 +323,7 @@ async def get_organization_skill_revision(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Organization Skill service enforces tenant, publication and actor permissions.",
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def create_organization_skill_revision(
     skill_id: UUID,
@@ -378,7 +382,7 @@ async def create_organization_skill_revision(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Organization Skill service enforces tenant, publication and actor permissions.",
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def restore_organization_skill_revision(
     skill_id: UUID,
@@ -444,7 +448,7 @@ async def restore_organization_skill_revision(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Organization Skill service enforces tenant, publication and actor permissions.",
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def publish_organization_skill(
     skill_id: UUID,
@@ -506,7 +510,7 @@ async def publish_organization_skill(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Organization Skill service enforces tenant, publication and actor permissions.",
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def advance_personal_chat_binding(
     skill_id: UUID,
@@ -572,7 +576,7 @@ async def advance_personal_chat_binding(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Organization Skill service enforces tenant, publication and actor permissions.",
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def advance_assistant_bindings(
     skill_id: UUID,
@@ -616,7 +620,7 @@ async def advance_assistant_bindings(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Organization Skill service enforces tenant, publication and actor permissions.",
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def advance_app_bindings(
     skill_id: UUID,
@@ -657,7 +661,7 @@ async def advance_app_bindings(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Organization Skill service enforces tenant, publication and actor permissions.",
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def unpublish_organization_skill(
     skill_id: UUID,
@@ -711,7 +715,7 @@ async def unpublish_organization_skill(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Organization Skill service enforces tenant, publication and actor permissions.",
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def delete_organization_skill(
     skill_id: UUID,
@@ -735,7 +739,7 @@ async def delete_organization_skill(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Organization Skill service enforces tenant, publication and actor permissions.",
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def detach_organization_skill_bindings(
     skill_id: UUID,
@@ -768,7 +772,7 @@ async def detach_organization_skill_bindings(
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Organization Skill service enforces tenant, publication and actor permissions.",
+    reason=_ORGANIZATION_SKILL_ADMIN_ACCESS_REASON,
 )
 async def remove_organization_skills(
     payload: SkillRemovalRequest,

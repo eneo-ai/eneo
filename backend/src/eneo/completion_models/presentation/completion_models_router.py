@@ -37,6 +37,10 @@ from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.users.user import UserInDB
 
+_COMPLETION_MODEL_ADMIN_ACCESS_REASON = (
+    "This operation requires Permission.ADMIN before accessing tenant resources."
+)
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -78,7 +82,7 @@ def get_pagination_query(request: Request) -> PaginationQuery:
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+    reason="Admin permission gates the global and tenant completion model catalogue.",
 )
 async def get_completion_models(
     user: Annotated[UserInDB, Depends(get_current_active_user)],
@@ -101,7 +105,7 @@ async def get_completion_models(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+    reason=_COMPLETION_MODEL_ADMIN_ACCESS_REASON,
 )
 async def update_completion_model(
     id: UUID,
@@ -189,7 +193,7 @@ async def update_completion_model(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+    reason=_COMPLETION_MODEL_ADMIN_ACCESS_REASON,
 )
 async def get_model_usage(
     model_id: UUID,
@@ -209,7 +213,7 @@ async def get_model_usage(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+    reason=_COMPLETION_MODEL_ADMIN_ACCESS_REASON,
 )
 async def get_model_usage_details(
     model_id: UUID,
@@ -232,7 +236,7 @@ async def get_model_usage_details(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+    reason=_COMPLETION_MODEL_ADMIN_ACCESS_REASON,
 )
 async def validate_migration(
     model_id: UUID,
@@ -258,7 +262,7 @@ async def validate_migration(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+    reason=_COMPLETION_MODEL_ADMIN_ACCESS_REASON,
 )
 async def migrate_model_usage(
     model_id: UUID,
@@ -356,7 +360,7 @@ async def migrate_model_usage(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+    reason=_COMPLETION_MODEL_ADMIN_ACCESS_REASON,
 )
 async def get_all_models_usage_summary(
     user: Annotated[UserInDB, Depends(get_current_active_user)],
@@ -375,7 +379,7 @@ async def get_all_models_usage_summary(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+    reason=_COMPLETION_MODEL_ADMIN_ACCESS_REASON,
 )
 async def get_model_migration_history(
     model_id: UUID,
@@ -399,7 +403,7 @@ async def get_model_migration_history(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+    reason=_COMPLETION_MODEL_ADMIN_ACCESS_REASON,
 )
 async def get_all_migration_history(
     query: Annotated[PaginationQuery, Depends(get_pagination_query)],
@@ -421,7 +425,7 @@ async def get_all_migration_history(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="This operation requires Permission.ADMIN before accessing tenant resources.",
+    reason=_COMPLETION_MODEL_ADMIN_ACCESS_REASON,
 )
 async def get_migration_history_by_id(
     migration_id: UUID,
