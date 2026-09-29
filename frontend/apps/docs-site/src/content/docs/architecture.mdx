@@ -452,7 +452,8 @@ where Eneo stores the original File bytes. Object storage remains optional.
 
 1. **Username and password** (`POST /api/v1/users/login/token/`): the backend
    verifies the credentials and mints a JWT signed with `JWT_SECRET` using
-   `JWT_ALGORITHM`, with `JWT_AUDIENCE`, `JWT_ISSUER`, and `JWT_EXPIRY_TIME`.
+   `JWT_ALGORITHM`, with `JWT_AUDIENCE`, `JWT_ISSUER`, and `JWT_EXPIRY_TIME`
+   (the session lifetime in minutes; `1440` is 24 hours).
 2. **OIDC federation** (`/api/v1/auth/federation-status`, `/auth/tenants`,
    `/auth/initiate`, `/auth/callback`): per-tenant identity providers configured in the tenant's
    `federation_config`, with a signed state parameter. See

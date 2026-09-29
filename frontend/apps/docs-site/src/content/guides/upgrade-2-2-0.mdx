@@ -45,6 +45,22 @@ grep -n -E 'INTRIC_|SUPER_DUPER' env_backend.env env_frontend.env
 If you pass variables another way, such as Compose `environment:` entries or a
 secret store, check there too.
 
+### Session lifetime
+
+`JWT_EXPIRY_TIME` is the login session lifetime in **minutes**. Earlier
+environment templates labelled the value as seconds while the backend applied
+it as minutes, so the template value `86400` produced sessions of roughly 60
+days. The unit has not changed and existing values are not reinterpreted: a
+deployment that keeps `86400` keeps 60-day sessions. Set the value you intend,
+for example `1440` for 24 hours. The backend refuses to start when the value is
+zero or negative.
+
+A shorter lifetime applies to sessions issued after the restart. Sessions
+issued earlier stay valid until they expire, unless the user changes their
+password, an administrator resets it, or the user calls
+`POST /api/v1/users/me/sessions/invalidate/`, each of which rejects every
+session issued before that moment.
+
 ### What you see at startup
 
 | Situation                                         | `db-init`, backend and worker                   | Web app                                    |
