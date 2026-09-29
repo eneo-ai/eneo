@@ -423,7 +423,7 @@ async def deliver_webhook(
             error_message=err_msg,
             duration_ms=duration_ms,
         )
-        raise BadRequestException(err_msg) from exc
+        raise BadRequestException(err_msg, code=exc.code) from exc
     except httpx.TimeoutException as exc:
         duration_ms = (time.monotonic() - start_time) * 1000
         err_msg = f"Webhook delivery timed out after {timeout_seconds:g}s."

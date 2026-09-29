@@ -6,8 +6,6 @@ from datetime import datetime, timedelta
 from time import monotonic
 from typing import Any
 
-import httpx
-
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
@@ -69,13 +67,16 @@ from eneo.users.user_repo import UsersRepository
 
 logger = logging.getLogger(__name__)
 
-# Typed failures of compiling the delivery from the published definition: the
-# same definition compiles the same way on every attempt, so they are not retried.
+# Typed failures that repeat on every attempt, so they are not retried: compiling
+# the delivery from the published definition, and a destination the sender
+# refuses (the address is not allowed, or the URL is not one a flow may send to).
 _PERMANENT_DELIVERY_ERROR_CODES = frozenset(
     {
         FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
         FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
         FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
+        FlowApiErrorCode.TYPED_IO_HTTP_INVALID_URL.value,
+        FlowApiErrorCode.TYPED_IO_HTTP_SSRF_BLOCKED.value,
     }
 )
 
@@ -512,7 +513,7 @@ class FlowRunWebhookDeliveryService:
             variable_resolver=self.variable_resolver,
             resolve_timeout_seconds=self.http_runtime.resolve_timeout_seconds,
             read_response_text=self.http_runtime.read_response_text,
-            send_http_request=self._send_http_request,
+            send_http_request=self.http_runtime.send_request,
             audit_http_outbound=audit_http_outbound,
         )
         await deliver_webhook(
@@ -649,30 +650,6 @@ class FlowRunWebhookDeliveryService:
             )
 
         raise ValueError("Webhook delivery run has an unsupported principal type.")
-
-    async def _send_http_request(
-        self,
-        *,
-        method: str,
-        url: str,
-        headers: dict[str, str],
-        timeout_seconds: float,
-        body_bytes: bytes | None = None,
-        json_body: dict[str, Any] | list[Any] | None = None,
-        read_response_body: bool = True,
-    ) -> httpx.Response:
-        preflight_resolved_ips = await self.http_runtime.assert_url_allowed(url)
-        return await self.http_runtime.send_request(
-            method=method,
-            url=url,
-            headers=headers,
-            timeout_seconds=timeout_seconds,
-            body_bytes=body_bytes,
-            json_body=json_body,
-            read_response_body=read_response_body,
-            preflight_resolved_ips=preflight_resolved_ips,
-            assert_connected_peer_allowed=self.http_runtime.assert_connected_peer_allowed,
-        )
 
     async def _audit_http_outbound(
         self,

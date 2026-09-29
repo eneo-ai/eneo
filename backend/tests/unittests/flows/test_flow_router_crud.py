@@ -226,12 +226,6 @@ async def test_test_flow_http_round_trips_stored_bearer_secret(monkeypatch):
         def __init__(self, **_kwargs):
             pass
 
-        async def assert_url_allowed(self, url: str):
-            return {"203.0.113.10"}
-
-        def assert_connected_peer_allowed(self, *, response, preflight_resolved_ips):
-            return None
-
         async def send_request(self, **kwargs):
             sent["headers"] = dict(kwargs["headers"])
             request = httpx.Request(
@@ -291,14 +285,6 @@ async def test_test_flow_http_interpolates_variables_with_real_executor(monkeypa
         def __init__(self, **kwargs):
             guard_calls["resolver_class"] = type(kwargs["variable_resolver"]).__name__
 
-        async def assert_url_allowed(self, url: str):
-            guard_calls["preflight_url"] = url
-            return {"203.0.113.10"}
-
-        def assert_connected_peer_allowed(self, *, response, preflight_resolved_ips):
-            guard_calls["peer_status"] = response.status_code
-            guard_calls["peer_ips"] = preflight_resolved_ips
-
         async def send_request(self, **kwargs):
             sent.update(
                 {
@@ -312,12 +298,7 @@ async def test_test_flow_http_interpolates_variables_with_real_executor(monkeypa
             request = httpx.Request(
                 method=kwargs["method"], url=kwargs["url"], headers=kwargs["headers"]
             )
-            response = httpx.Response(status_code=200, text="ok", request=request)
-            kwargs["assert_connected_peer_allowed"](
-                response=response,
-                preflight_resolved_ips=kwargs["preflight_resolved_ips"],
-            )
-            return response
+            return httpx.Response(status_code=200, text="ok", request=request)
 
     monkeypatch.setattr(
         flow_http_test_router_module,
@@ -364,8 +345,6 @@ async def test_test_flow_http_interpolates_variables_with_real_executor(monkeypa
     assert sent["url"] == "https://example.org/api/alex"
     assert sent["json"] == {"message": "hello"}
     assert guard_calls["resolver_class"] == "FlowVariableResolver"
-    assert guard_calls["preflight_url"] == "https://example.org/api/alex"
-    assert guard_calls["peer_status"] == 200
     container.audit_service.return_value.log_async.assert_awaited_once()
 
 
@@ -424,7 +403,7 @@ async def test_create_flow_pins_audit_entity_ids(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_test_flow_http_applies_ssrf_runtime_guards(monkeypatch):
+async def test_test_flow_http_sends_through_the_flow_http_runtime(monkeypatch):
     container = MagicMock()
     flow_id = uuid4()
     user = _user()
@@ -444,16 +423,8 @@ async def test_test_flow_http_applies_ssrf_runtime_guards(monkeypatch):
         def __init__(self, **kwargs):
             guard_calls["init"] = kwargs
 
-        async def assert_url_allowed(self, url: str):
-            guard_calls["preflight_url"] = url
-            return {"203.0.113.10"}
-
-        def assert_connected_peer_allowed(self, *, response, preflight_resolved_ips):
-            guard_calls["peer_status"] = response.status_code
-            guard_calls["peer_ips"] = preflight_resolved_ips
-
-        # The peer-check lifecycle itself is proven against the real owner in
-        # test_http_runtime_transport; this fake only records delegation.
+        # The destination policy is proven against the real sender in
+        # test_flow_http_sender; this fake only records delegation.
         async def send_request(
             self,
             *,
@@ -463,21 +434,10 @@ async def test_test_flow_http_applies_ssrf_runtime_guards(monkeypatch):
             timeout_seconds,
             body_bytes,
             json_body,
-            preflight_resolved_ips,
-            assert_connected_peer_allowed,
         ):
             guard_calls["transport_url"] = url
             request = httpx.Request(method=method, url=url, headers=headers)
-            response = httpx.Response(
-                status_code=200,
-                content=b"ok",
-                request=request,
-            )
-            assert_connected_peer_allowed(
-                response=response,
-                preflight_resolved_ips=preflight_resolved_ips,
-            )
-            return response
+            return httpx.Response(status_code=200, content=b"ok", request=request)
 
     async def _reject_bespoke_request(*_args, **_kwargs):
         raise AssertionError("router must send through FlowHttpRuntimeHelper")
@@ -533,10 +493,13 @@ async def test_test_flow_http_applies_ssrf_runtime_guards(monkeypatch):
     )
 
     assert response.success is True
-    assert guard_calls["preflight_url"] == "https://example.org/api"
     assert guard_calls["transport_url"] == "https://example.org/api"
-    assert guard_calls["peer_status"] == 200
-    assert guard_calls["peer_ips"] == {"203.0.113.10"}
+    init = guard_calls["init"]
+    assert isinstance(init, dict)
+    assert (
+        init["allow_private_networks"]
+        is flow_http_test_router_module.get_settings().flow_http_allow_private_networks
+    )
 
 
 @pytest.mark.asyncio

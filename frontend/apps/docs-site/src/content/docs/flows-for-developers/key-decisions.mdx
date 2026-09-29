@@ -100,6 +100,28 @@ and developer pages are maintained by hand at the level of ownership and
 behavior. Tests should exercise the lowest layer that owns behavior rather than
 restating every enum, column, or Markdown line.
 
+## 13. Flows reach the network through one egress package
+
+Every connection to a destination a flow author chose (HTTP input, terminal
+webhook output, the editor's connection test) goes through
+`eneo.flows.runtime.egress`. The address classification is shared with the
+crawler (`eneo.main.destination_policy`); flows accept less: public unicast, plus
+RFC 1918 and unique-local IPv6 when `FLOW_HTTP_ALLOW_PRIVATE_NETWORKS` is set.
+The check runs inside the connection the client opens, on the address it will
+use, so nothing is sent before a vetted connection exists and a DNS answer that
+changes between lookups is not an attack. One deadline covers resolution and
+every TCP connection attempt (the TLS handshake and the response are timed
+separately), and name resolution runs on its own bounded thread pool
+(`FLOW_HTTP_DNS_WORKERS`) so stalled destinations cannot starve the rest of the
+process. A DNS answer longer than 64 entries is treated as unresolvable. A destination the sender refuses is not retried by webhook delivery. A
+new transport (SFTP, FTP, SMTP) must connect to an address from the same
+vetting, never resolve a name itself, and vet follow-up connections such as FTP
+passive data channels. A test fails when flow code imports a network client, a
+process API or an unlisted third-party package anywhere else; it guards known
+sinks only, and dynamic imports are outside it. Two transcription endpoints are
+named exceptions: the external service an operator configures, and the provider
+`api_base` a tenant administrator sets for live transcription.
+
 ## Related
 
 - [The data schema](/docs/flows-for-developers/data-schema)

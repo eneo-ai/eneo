@@ -4,7 +4,6 @@ import logging
 from typing import Annotated, Any, cast
 from uuid import UUID
 
-import httpx
 from fastapi import APIRouter, Depends, Path, Request, status
 
 from eneo.audit.application.audit_metadata import AuditMetadata
@@ -99,28 +98,6 @@ async def test_flow_http(
         except BadRequestException as exc:
             raise HttpTemplateInterpolationError(str(exc)) from exc
 
-    async def _send(
-        *,
-        method: str,
-        url: str,
-        headers: dict[str, str],
-        timeout_seconds: float,
-        body_bytes: bytes | None = None,
-        json_body: dict[str, Any] | list[Any] | None = None,
-        **_kwargs: object,
-    ) -> httpx.Response:
-        preflight_resolved_ips = await http_runtime.assert_url_allowed(url)
-        return await http_runtime.send_request(
-            method=method,
-            url=url,
-            headers=headers,
-            timeout_seconds=timeout_seconds,
-            body_bytes=body_bytes,
-            json_body=json_body,
-            preflight_resolved_ips=preflight_resolved_ips,
-            assert_connected_peer_allowed=http_runtime.assert_connected_peer_allowed,
-        )
-
     result = await execute_http_test(
         config=config,
         direction=body.direction,
@@ -129,7 +106,7 @@ async def test_flow_http(
         stored_config=stored_config,
         encryption_service=encryption_service,
         interpolate=_interpolate_http_test_template,
-        send_http_request=_send,
+        send_http_request=http_runtime.send_request,
         max_timeout=float(settings.flow_http_max_timeout_seconds),
     )
 

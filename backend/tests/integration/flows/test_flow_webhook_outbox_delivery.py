@@ -62,6 +62,7 @@ from eneo.flows.runtime.step_execution_result import (
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.main.container.container import Container
+from eneo.main.exceptions import TypedIOValidationException
 from tests.flow_snapshot_fixtures import assistant_snapshot
 
 
@@ -718,7 +719,7 @@ async def test_flow_webhook_delivery_reclaims_expired_claim_after_pre_send_crash
         )
         request = httpx.Request("POST", "https://example.org/hook/case-123")
         send_http_request = AsyncMock(return_value=httpx.Response(200, request=request))
-        service._send_http_request = send_http_request
+        service.http_runtime.send_request = send_http_request
 
         recovered = await service.deliver_due(now=now + timedelta(seconds=121))
         delivery_state = (
@@ -781,7 +782,7 @@ async def test_flow_webhook_delivery_reposts_after_expired_success_claim_with_st
             sent_idempotency_keys.append(kwargs["headers"]["Idempotency-Key"])
             return httpx.Response(200, request=request)
 
-        service._send_http_request = _send_http_request
+        service.http_runtime.send_request = _send_http_request
         now = datetime.now(timezone.utc)
 
         outcome_commit_lost = await service.deliver_due(now=now)
@@ -942,7 +943,7 @@ async def test_flow_webhook_delivery_sends_outside_transaction_and_completes_run
             assert len(kwargs["headers"]["Idempotency-Key"]) == 64
             return httpx.Response(200, request=request)
 
-        service._send_http_request = _send_http_request
+        service.http_runtime.send_request = _send_http_request
 
         result = await service.deliver_due(now=datetime.now(timezone.utc))
         delivery_state = (
@@ -1034,7 +1035,7 @@ async def test_flow_webhook_delivery_rejects_file_backed_preview_without_http(
             webhook_repo=webhook_repo,
         )
         send_http_request = AsyncMock()
-        service._send_http_request = send_http_request
+        service.http_runtime.send_request = send_http_request
 
         result = await service.deliver_due(now=datetime.now(timezone.utc))
         delivery_state = (
@@ -1152,7 +1153,7 @@ async def test_flow_webhook_delivery_dead_letters_a_config_the_runtime_rejects_w
             webhook_repo=webhook_repo,
         )
         send_http_request = AsyncMock()
-        service._send_http_request = send_http_request
+        service.http_runtime.send_request = send_http_request
         now = datetime.now(timezone.utc)
 
         result = await service.deliver_due(now=now)
@@ -1233,7 +1234,7 @@ async def test_flow_webhook_delivery_dead_letters_file_backed_template_reference
             webhook_repo=webhook_repo,
         )
         send_http_request = AsyncMock()
-        service._send_http_request = send_http_request
+        service.http_runtime.send_request = send_http_request
         now = datetime.now(timezone.utc)
 
         result = await service.deliver_due(now=now)
@@ -1313,7 +1314,7 @@ async def test_flow_webhook_delivery_audits_failed_http_response(
             assert not session.in_transaction()
             return httpx.Response(503, request=request)
 
-        service._send_http_request = _send_http_request
+        service.http_runtime.send_request = _send_http_request
 
         result = await service.deliver_due(now=datetime.now(timezone.utc))
         delivery_state = (
@@ -1392,7 +1393,7 @@ async def test_flow_webhook_delivery_decrypts_encrypted_headers(
             assert kwargs["headers"]["X-Plain"] == "visible"
             return httpx.Response(200, request=request)
 
-        service._send_http_request = _send_http_request
+        service.http_runtime.send_request = _send_http_request
 
         result = await service.deliver_due(now=datetime.now(timezone.utc))
 
@@ -1437,7 +1438,7 @@ async def test_flow_webhook_delivery_rolls_back_step_result_when_success_claim_l
         async def _send_http_request(**kwargs):
             return httpx.Response(200, request=request)
 
-        service._send_http_request = _send_http_request
+        service.http_runtime.send_request = _send_http_request
 
         result = await service.deliver_due(now=datetime.now(timezone.utc))
         delivery_state = (
@@ -1504,7 +1505,7 @@ async def test_flow_webhook_delivery_dead_letters_cancelled_run_without_http(
             webhook_repo=webhook_repo,
         )
         send_http_request = AsyncMock()
-        service._send_http_request = send_http_request
+        service.http_runtime.send_request = send_http_request
 
         result = await service.deliver_due(now=datetime.now(timezone.utc))
         delivery_state = (
@@ -1588,7 +1589,7 @@ async def test_flow_webhook_delivery_dead_letters_checksum_drift_without_http(
         send_http_request = AsyncMock(
             side_effect=AssertionError("checksum drift must fail before HTTP")
         )
-        service._send_http_request = send_http_request
+        service.http_runtime.send_request = send_http_request
         now = datetime.now(timezone.utc)
 
         result = await service.deliver_due(now=now)
@@ -1682,7 +1683,7 @@ async def test_flow_webhook_delivery_dead_letters_malformed_definition_without_h
         send_http_request = AsyncMock(
             side_effect=AssertionError("malformed definition must fail before HTTP")
         )
-        service._send_http_request = send_http_request
+        service.http_runtime.send_request = send_http_request
         now = datetime.now(timezone.utc)
 
         result = await service.deliver_due(now=now)
@@ -1764,7 +1765,7 @@ async def test_flow_webhook_delivery_rolls_back_step_result_when_failure_claim_l
         async def _send_http_request(**kwargs):
             return httpx.Response(503, request=request)
 
-        service._send_http_request = _send_http_request
+        service.http_runtime.send_request = _send_http_request
 
         result = await service.deliver_due(now=datetime.now(timezone.utc))
         delivery_state = (
@@ -1797,6 +1798,94 @@ async def test_flow_webhook_delivery_rolls_back_step_result_when_failure_claim_l
     assert delivery_state.claim_token is not None
     assert run_state == FlowRunStatus.RUNNING.value
     assert result_payload == {"text": "done"}
+
+
+@pytest.mark.parametrize(
+    ("error_code", "message", "expected_retry", "expected_dead_letter"),
+    [
+        ("typed_io_http_ssrf_blocked", "HTTP URL blocked by SSRF policy.", 0, 1),
+        ("typed_io_http_invalid_url", "HTTP URL is not valid.", 0, 1),
+        (
+            "typed_io_http_connection_error",
+            "Unable to resolve HTTP host 'hook.example.test'.",
+            1,
+            0,
+        ),
+    ],
+)
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_delivery_does_not_retry_a_destination_the_sender_refuses(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    error_code: str,
+    message: str,
+    expected_retry: int,
+    expected_dead_letter: int,
+):
+    # A refused destination (policy or URL) is refused the same way on every
+    # attempt, so it is dead-lettered on the first; a name that did not resolve
+    # may resolve later and is retried.
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+        )
+        flow, run, step = await _create_running_webhook_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
+        delivery_id = await webhook_repo.insert_pending_delivery(
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            intent=_intent(run_id=run.id, step_id=step.id),
+        )
+        service = _delivery_service(
+            session=session,
+            container=container,
+            webhook_repo=webhook_repo,
+        )
+        service.http_runtime.send_request = AsyncMock(
+            side_effect=TypedIOValidationException(message, code=error_code)
+        )
+
+        now = datetime.now(timezone.utc)
+        result = await service.deliver_due(now=now)
+        repeated = await service.deliver_due(now=now + timedelta(seconds=1))
+        delivery_state = (
+            await session.execute(
+                sa.select(
+                    FlowRunWebhookDeliveries.delivery_status,
+                    FlowRunWebhookDeliveries.delivery_attempts,
+                ).where(FlowRunWebhookDeliveries.id == delivery_id)
+            )
+        ).one()
+        run_status = await session.scalar(
+            sa.select(FlowRuns.status).where(FlowRuns.id == run.id)
+        )
+
+    assert result.attempted_count == 1
+    assert result.retry_scheduled_count == expected_retry
+    assert result.dead_lettered_count == expected_dead_letter
+    if expected_dead_letter:
+        assert repeated.attempted_count == 0
+        assert delivery_state.delivery_attempts == 1
+        assert (
+            delivery_state.delivery_status
+            == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+        )
+        assert run_status == FlowRunStatus.FAILED.value
+    else:
+        assert delivery_state.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
+        assert run_status == FlowRunStatus.RUNNING.value
 
 
 @pytest.mark.parametrize(
@@ -1840,7 +1929,7 @@ async def test_flow_webhook_delivery_applies_http_status_retry_policy(
             webhook_repo=webhook_repo,
         )
         request = httpx.Request("POST", "https://example.org/hook/case-123")
-        service._send_http_request = AsyncMock(
+        service.http_runtime.send_request = AsyncMock(
             return_value=httpx.Response(status_code, request=request)
         )
 
@@ -1906,7 +1995,7 @@ async def test_flow_webhook_delivery_five_claims_then_converges_without_sixth_po
         )
         request = httpx.Request("POST", "https://example.org/hook/case-123")
         send_http_request = AsyncMock(return_value=httpx.Response(503, request=request))
-        service._send_http_request = send_http_request
+        service.http_runtime.send_request = send_http_request
         now = datetime.now(timezone.utc)
 
         for delivery_attempt in range(1, FLOW_WEBHOOK_MAX_ATTEMPTS + 1):
@@ -1988,7 +2077,7 @@ async def test_flow_webhook_delivery_redacts_url_secrets_from_persisted_error(
             webhook_repo=webhook_repo,
         )
         request = httpx.Request("POST", "https://example.org/hook/case-123")
-        service._send_http_request = AsyncMock(
+        service.http_runtime.send_request = AsyncMock(
             side_effect=httpx.ConnectError(
                 "POST https://user:pass@example.org/hook?token=secret-value failed",
                 request=request,
@@ -2073,11 +2162,7 @@ async def test_flow_webhook_outbox_reaches_but_never_exceeds_invocation_concurre
             request=httpx.Request("POST", "https://example.org/hook/case-123"),
         )
 
-    monkeypatch.setattr(
-        FlowRunWebhookDeliveryService,
-        "_send_http_request",
-        _send_http_request,
-    )
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _send_http_request)
 
     result = await tasks_module._deliver_flow_webhook_outbox(limit=row_count)
 

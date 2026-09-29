@@ -1,36 +1,32 @@
 from __future__ import annotations
 
-import asyncio
-import ipaddress
-import socket
-from typing import TYPE_CHECKING, Any, Protocol, cast
-from urllib.parse import urlsplit
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.http_transport.effective_url import (
+    InvalidHttpUrl,
+    parse_effective_http_url,
+)
+from eneo.flows.runtime.egress.http import ClientFactory, build_http_client
+from eneo.flows.runtime.egress.policy import (
+    DestinationRefused,
+    DestinationUnresolvable,
+    FlowDestinationPolicy,
+)
 from eneo.main.config import get_settings
 from eneo.main.exceptions import TypedIOValidationException
 
 if TYPE_CHECKING:
     from eneo.flows.variable_resolver import FlowVariableResolver
 
-IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
-
-
-class AssertConnectedPeerAllowedFn(Protocol):
-    def __call__(
-        self,
-        *,
-        response: httpx.Response,
-        preflight_resolved_ips: set[IPAddress] | None,
-    ) -> None: ...
-
 
 class FlowHttpRuntimeHelper:
-    """The Flow HTTP transport owner: SSRF preflight and peer re-check,
-    streamed size caps, and request sending for every Flow HTTP surface
-    (input fetch, webhook delivery, and the authoring test endpoint)."""
+    """The Flow HTTP transport owner: URL reading, the destination policy (via
+    the egress client), streamed size caps, and request sending for every Flow
+    HTTP surface (input fetch, webhook delivery, and the authoring test
+    endpoint)."""
 
     def __init__(
         self,
@@ -39,11 +35,16 @@ class FlowHttpRuntimeHelper:
         request_timeout_seconds: float,
         max_timeout_seconds: float,
         allow_private_networks: bool,
+        client_factory: ClientFactory = build_http_client,
     ) -> None:
         self.variable_resolver = variable_resolver
         self.request_timeout_seconds = request_timeout_seconds
         self.max_timeout_seconds = max_timeout_seconds
         self.allow_private_networks = allow_private_networks
+        self.destination_policy = FlowDestinationPolicy(
+            allow_private_networks=allow_private_networks
+        )
+        self._client_factory = client_factory
 
     def resolve_timeout_seconds(
         self,
@@ -97,11 +98,17 @@ class FlowHttpRuntimeHelper:
         body_bytes: bytes | None = None,
         json_body: dict[str, Any] | list[Any] | None = None,
         read_response_body: bool = True,
-        preflight_resolved_ips: set[IPAddress] | None = None,
-        assert_connected_peer_allowed: AssertConnectedPeerAllowedFn,
     ) -> httpx.Response:
-        timeout = httpx.Timeout(timeout_seconds)
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+        try:
+            target = parse_effective_http_url(url)
+        except InvalidHttpUrl as exc:
+            raise TypedIOValidationException(
+                str(exc),
+                code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_URL.value,
+            ) from exc
+        async with self._client_factory(
+            policy=self.destination_policy, timeout_seconds=timeout_seconds
+        ) as client:
             # The size cap must bound raw response-body bytes: a compressed
             # body can expand by orders of magnitude in one decode call, so
             # this transport requests identity encoding (replacing any
@@ -111,20 +118,23 @@ class FlowHttpRuntimeHelper:
             request_headers["Accept-Encoding"] = "identity"
             request = client.build_request(
                 method,
-                url,
+                target.url,
                 headers=request_headers,
                 content=body_bytes,
                 json=json_body,
             )
-            response = await client.send(request, stream=True)
             try:
-                assert_connected_peer_allowed(
-                    response=response,
-                    preflight_resolved_ips=preflight_resolved_ips,
-                )
-            except Exception:
-                await response.aclose()
-                raise
+                response = await client.send(request, stream=True)
+            except DestinationRefused as exc:
+                raise TypedIOValidationException(
+                    "HTTP URL blocked by SSRF policy.",
+                    code=FlowApiErrorCode.TYPED_IO_HTTP_SSRF_BLOCKED.value,
+                ) from exc
+            except DestinationUnresolvable as exc:
+                raise TypedIOValidationException(
+                    f"Unable to resolve HTTP host '{exc.host}'.",
+                    code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value,
+                ) from exc
 
             if not read_response_body:
                 detached = httpx.Response(
@@ -165,124 +175,3 @@ class FlowHttpRuntimeHelper:
             )
             await response.aclose()
             return detached
-
-    async def assert_url_allowed(self, url: str) -> set[IPAddress] | None:
-        parsed = urlsplit(url)
-        if parsed.scheme not in {"http", "https"}:
-            raise TypedIOValidationException(
-                f"Unsupported HTTP URL scheme: '{parsed.scheme}'.",
-                code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_URL.value,
-            )
-        host = parsed.hostname
-        if not host:
-            raise TypedIOValidationException(
-                "HTTP URL must include a hostname.",
-                code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_URL.value,
-            )
-        host_lower = host.strip().lower()
-        if host_lower in {"localhost", "localhost.localdomain"}:
-            raise TypedIOValidationException(
-                "HTTP URL blocked by SSRF policy.",
-                code=FlowApiErrorCode.TYPED_IO_HTTP_SSRF_BLOCKED.value,
-            )
-        if self.allow_private_networks:
-            return None
-
-        resolved_ips: list[IPAddress]
-        try:
-            resolved_ips = self.resolve_ip_literal(host_lower)
-        except ValueError:
-            resolved_ips = await self.resolve_host_ips(
-                host=host_lower,
-                port=parsed.port or (443 if parsed.scheme == "https" else 80),
-            )
-
-        if any(self.is_private_or_local_ip(item) for item in resolved_ips):
-            raise TypedIOValidationException(
-                "HTTP URL blocked by SSRF policy.",
-                code=FlowApiErrorCode.TYPED_IO_HTTP_SSRF_BLOCKED.value,
-            )
-        return set(resolved_ips)
-
-    def assert_connected_peer_allowed(
-        self,
-        *,
-        response: httpx.Response,
-        preflight_resolved_ips: set[IPAddress] | None,
-    ) -> None:
-        if self.allow_private_networks:
-            return
-
-        network_stream = response.extensions.get("network_stream")
-        if network_stream is None:
-            raise TypedIOValidationException(
-                "Unable to verify HTTP peer address.",
-                code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value,
-            )
-
-        server_addr = network_stream.get_extra_info("server_addr")
-        if not isinstance(server_addr, tuple) or not server_addr:
-            raise TypedIOValidationException(
-                "Unable to verify HTTP peer address.",
-                code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value,
-            )
-
-        peer_value = cast(str, server_addr[0])
-
-        try:
-            peer_ip = ipaddress.ip_address(peer_value)
-        except ValueError as exc:
-            raise TypedIOValidationException(
-                "Unable to verify HTTP peer address.",
-                code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value,
-            ) from exc
-
-        if self.is_private_or_local_ip(peer_ip):
-            raise TypedIOValidationException(
-                "HTTP URL blocked by SSRF policy.",
-                code=FlowApiErrorCode.TYPED_IO_HTTP_SSRF_BLOCKED.value,
-            )
-
-        if preflight_resolved_ips and peer_ip not in preflight_resolved_ips:
-            raise TypedIOValidationException(
-                "HTTP URL blocked by SSRF policy.",
-                code=FlowApiErrorCode.TYPED_IO_HTTP_SSRF_BLOCKED.value,
-            )
-
-    @staticmethod
-    def resolve_ip_literal(host: str) -> list[IPAddress]:
-        return [ipaddress.ip_address(host)]
-
-    @staticmethod
-    async def resolve_host_ips(*, host: str, port: int) -> list[IPAddress]:
-        loop = asyncio.get_running_loop()
-        try:
-            infos = await loop.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-        except socket.gaierror as exc:
-            raise TypedIOValidationException(
-                f"Unable to resolve HTTP host '{host}'.",
-                code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value,
-            ) from exc
-        resolved: list[IPAddress] = []
-        for _, _, _, _, sockaddr in infos:
-            try:
-                resolved.append(ipaddress.ip_address(sockaddr[0]))
-            except ValueError:
-                continue
-        if not resolved:
-            raise TypedIOValidationException(
-                f"Unable to resolve HTTP host '{host}'.",
-                code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value,
-            )
-        return resolved
-
-    @staticmethod
-    def is_private_or_local_ip(value: IPAddress) -> bool:
-        return (
-            value.is_loopback
-            or value.is_private
-            or value.is_link_local
-            or value.is_multicast
-            or value.is_reserved
-            or value.is_unspecified
-        )

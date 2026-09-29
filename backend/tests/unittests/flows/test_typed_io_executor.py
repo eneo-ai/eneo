@@ -7,7 +7,6 @@ input contract validation, file resolution, canary flag, error propagation.
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 import json
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -2281,7 +2280,7 @@ async def test_resolve_step_input_http_get_uses_interpolated_url_and_timeout(use
         },
     )
     request = httpx.Request("GET", "https://example.org/items/42?q=budget")
-    executor._send_http_request = AsyncMock(
+    executor.http_runtime.send_request = AsyncMock(
         return_value=httpx.Response(200, request=request, text="remote text")
     )
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
@@ -2296,7 +2295,7 @@ async def test_resolve_step_input_http_get_uses_interpolated_url_and_timeout(use
     assert resolved.text == "remote text"
     assert resolved.source_text == "remote text"
     assert resolved.input_source == "http_get"
-    executor._send_http_request.assert_awaited_once()
+    executor.http_runtime.send_request.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -2309,7 +2308,7 @@ async def test_resolve_step_input_http_get_timeout_maps_typed_error(user):
         input_type="text",
         input_config={"url": "https://example.org", "auth": {"mode": "none"}},
     )
-    executor._send_http_request = AsyncMock(
+    executor.http_runtime.send_request = AsyncMock(
         side_effect=httpx.TimeoutException("timeout")
     )
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
@@ -2336,7 +2335,7 @@ async def test_resolve_step_input_http_get_non_200_maps_typed_error(user):
         input_config={"url": "https://example.org", "auth": {"mode": "none"}},
     )
     request = httpx.Request("GET", "https://example.org")
-    executor._send_http_request = AsyncMock(
+    executor.http_runtime.send_request = AsyncMock(
         return_value=httpx.Response(503, request=request, text="service unavailable")
     )
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
@@ -2363,7 +2362,7 @@ async def test_resolve_step_input_http_json_malformed_response_maps_typed_error(
         input_config={"url": "https://example.org/json", "auth": {"mode": "none"}},
     )
     request = httpx.Request("GET", "https://example.org/json")
-    executor._send_http_request = AsyncMock(
+    executor.http_runtime.send_request = AsyncMock(
         return_value=httpx.Response(200, request=request, text="not-json")
     )
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
@@ -2395,7 +2394,7 @@ async def test_resolve_step_input_rejects_legacy_http_post_before_send(user):
             "auth": {"mode": "none"},
         },
     )
-    executor._send_http_request = AsyncMock()
+    executor.http_runtime.send_request = AsyncMock()
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     with pytest.raises(BadRequestException, match="Unsupported input source"):
@@ -2406,7 +2405,7 @@ async def test_resolve_step_input_rejects_legacy_http_post_before_send(user):
             prior_results=[],
         )
 
-    executor._send_http_request.assert_not_awaited()
+    executor.http_runtime.send_request.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2499,238 +2498,6 @@ async def test_resolve_step_input_adds_underlag_summary_diagnostic(user):
     )
 
     assert any(d.code == "flow_underlag_summary" for d in resolved.diagnostics)
-
-
-@pytest.mark.asyncio
-async def test_send_http_request_stream_cap_raises_typed_error(user, monkeypatch):
-    """Streamed HTTP body should enforce max inline bytes before full buffering."""
-    executor, _, _, _ = _build_executor(user)
-    executor._assert_http_url_allowed = AsyncMock(return_value=None)
-
-    class _FakeNetworkStream:
-        def get_extra_info(self, info: str):
-            if info == "server_addr":
-                return ("93.184.216.34", 443)
-            return None
-
-    class _FakeStreamResponse:
-        def __init__(self) -> None:
-            self.status_code = 200
-            self.headers = {}
-            self.extensions = {"network_stream": _FakeNetworkStream()}
-
-        async def aiter_raw(self):
-            yield b"1234"
-            yield b"56789"
-
-        async def aclose(self) -> None:
-            return None
-
-    class _FakeClient:
-        def __init__(self, *args, **kwargs) -> None:
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        def build_request(self, method, url, headers=None, content=None, json=None):
-            return httpx.Request(
-                method, url, headers=headers, content=content, json=json
-            )
-
-        async def send(self, request, stream=True):
-            return _FakeStreamResponse()
-
-    settings = executor_module.get_settings()
-    original_max = settings.flow_max_inline_text_bytes
-    monkeypatch.setattr(settings, "flow_max_inline_text_bytes", 8)
-    monkeypatch.setattr(executor_module.httpx, "AsyncClient", _FakeClient)
-
-    with pytest.raises(TypedIOValidationException) as exc:
-        await executor._send_http_request(
-            method="GET",
-            url="https://example.org/capped",
-            headers={},
-            timeout_seconds=5,
-        )
-
-    assert exc.value.code == "typed_io_http_response_too_large"
-    monkeypatch.setattr(settings, "flow_max_inline_text_bytes", original_max)
-
-
-@pytest.mark.asyncio
-async def test_send_http_request_webhook_mode_skips_body_read(user, monkeypatch):
-    """Webhook-mode requests should not read/accumulate response bodies."""
-    executor, _, _, _ = _build_executor(user)
-    executor._assert_http_url_allowed = AsyncMock(return_value=None)
-
-    class _FakeNetworkStream:
-        def get_extra_info(self, info: str):
-            if info == "server_addr":
-                return ("93.184.216.34", 443)
-            return None
-
-    class _FakeStreamResponse:
-        def __init__(self) -> None:
-            self.status_code = 204
-            self.headers = {"X-Test": "1"}
-            self.extensions = {"network_stream": _FakeNetworkStream()}
-
-        async def aiter_raw(self):
-            raise AssertionError(
-                "aiter_raw should not be called when read_response_body=False"
-            )
-
-        async def aclose(self) -> None:
-            return None
-
-    class _FakeClient:
-        def __init__(self, *args, **kwargs) -> None:
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        def build_request(self, method, url, headers=None, content=None, json=None):
-            return httpx.Request(
-                method, url, headers=headers, content=content, json=json
-            )
-
-        async def send(self, request, stream=True):
-            return _FakeStreamResponse()
-
-    monkeypatch.setattr(executor_module.httpx, "AsyncClient", _FakeClient)
-    response = await executor._send_http_request(
-        method="POST",
-        url="https://example.org/webhook",
-        headers={},
-        timeout_seconds=5,
-        read_response_body=False,
-    )
-
-    assert response.status_code == 204
-
-
-@pytest.mark.asyncio
-async def test_send_http_request_blocks_rebound_private_peer(user, monkeypatch):
-    """Connection-time peer validation should block DNS rebind to private/local addresses."""
-    executor, _, _, _ = _build_executor(user)
-    executor._assert_http_url_allowed = AsyncMock(
-        return_value={ipaddress.ip_address("93.184.216.34")}
-    )
-
-    class _FakeNetworkStream:
-        def get_extra_info(self, info: str):
-            if info == "server_addr":
-                return ("127.0.0.1", 8080)
-            return None
-
-    class _FakeStreamResponse:
-        def __init__(self) -> None:
-            self.status_code = 200
-            self.headers = {}
-            self.extensions = {"network_stream": _FakeNetworkStream()}
-
-        async def aiter_raw(self):
-            yield b"ok"
-
-        async def aclose(self) -> None:
-            return None
-
-    class _FakeClient:
-        def __init__(self, *args, **kwargs) -> None:
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        def build_request(self, method, url, headers=None, content=None, json=None):
-            return httpx.Request(
-                method, url, headers=headers, content=content, json=json
-            )
-
-        async def send(self, request, stream=True):
-            return _FakeStreamResponse()
-
-    monkeypatch.setattr(executor_module.httpx, "AsyncClient", _FakeClient)
-
-    with pytest.raises(TypedIOValidationException) as exc:
-        await executor._send_http_request(
-            method="GET",
-            url="https://example.org/rebind",
-            headers={},
-            timeout_seconds=5,
-        )
-
-    assert exc.value.code == "typed_io_http_ssrf_blocked"
-
-
-@pytest.mark.asyncio
-async def test_send_http_request_blocks_peer_not_in_preflight_resolution(
-    user, monkeypatch
-):
-    """Connection-time peer must match the preflight DNS set when SSRF guard is enabled."""
-    executor, _, _, _ = _build_executor(user)
-    executor._assert_http_url_allowed = AsyncMock(
-        return_value={ipaddress.ip_address("93.184.216.34")}
-    )
-
-    class _FakeNetworkStream:
-        def get_extra_info(self, info: str):
-            if info == "server_addr":
-                return ("93.184.216.35", 443)
-            return None
-
-    class _FakeStreamResponse:
-        def __init__(self) -> None:
-            self.status_code = 200
-            self.headers = {}
-            self.extensions = {"network_stream": _FakeNetworkStream()}
-
-        async def aiter_raw(self):
-            yield b"ok"
-
-        async def aclose(self) -> None:
-            return None
-
-    class _FakeClient:
-        def __init__(self, *args, **kwargs) -> None:
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        def build_request(self, method, url, headers=None, content=None, json=None):
-            return httpx.Request(
-                method, url, headers=headers, content=content, json=json
-            )
-
-        async def send(self, request, stream=True):
-            return _FakeStreamResponse()
-
-    monkeypatch.setattr(executor_module.httpx, "AsyncClient", _FakeClient)
-
-    with pytest.raises(TypedIOValidationException) as exc:
-        await executor._send_http_request(
-            method="GET",
-            url="https://example.org/rebind",
-            headers={},
-            timeout_seconds=5,
-        )
-
-    assert exc.value.code == "typed_io_http_ssrf_blocked"
 
 
 # --- Runtime guards for unsupported types ---
@@ -5113,7 +4880,7 @@ async def test_http_input_audit_logged_on_success(user):
         input_config={"url": "https://example.org/data", "auth": {"mode": "none"}},
     )
     request = httpx.Request("GET", "https://example.org/data")
-    executor._send_http_request = AsyncMock(
+    executor.http_runtime.send_request = AsyncMock(
         return_value=httpx.Response(200, request=request, text="fetched")
     )
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
@@ -5164,7 +4931,7 @@ async def test_resolve_http_input_decrypts_authored_header_secrets(user):
         },
     )
     request = httpx.Request("GET", "https://example.org/data")
-    executor._send_http_request = AsyncMock(
+    executor.http_runtime.send_request = AsyncMock(
         return_value=httpx.Response(200, request=request, text="ok")
     )
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
@@ -5176,8 +4943,8 @@ async def test_resolve_http_input_decrypts_authored_header_secrets(user):
         prior_results=[],
     )
 
-    executor._send_http_request.assert_awaited_once()
-    headers = executor._send_http_request.await_args.kwargs["headers"]
+    executor.http_runtime.send_request.assert_awaited_once()
+    headers = executor.http_runtime.send_request.await_args.kwargs["headers"]
     assert headers["Authorization"] == "Bearer token456"
     assert headers["X-Plain"] == "visible"
     executor.encryption_service.decrypt.assert_called_once_with("enc:token456")

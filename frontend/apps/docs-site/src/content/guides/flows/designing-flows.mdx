@@ -14,6 +14,8 @@ A Flow is a published graph of steps. Each step declares `input_source`, `input_
 
 Flow input can use HTTP GET, but Flow does not support HTTP POST input or MCP servers and tools. Terminal HTTP POST output remains available through the durable webhook outbox.
 
+HTTP steps send to `http` or `https` URLs without credentials in the address, and only to public addresses. An administrator can allow private networks; loopback, link-local and cloud-metadata addresses are never allowed. Redirects are not followed. An HTTP input step that points at a blocked destination fails with `typed_io_http_ssrf_blocked`. A webhook delivery to one is not retried: it is dead-lettered on the first attempt and the run fails with `flow_webhook_delivery_failed`.
+
 | Input mode | Output artifact | Output types | Output modes                | Use it when                                                                       |
 | ---------- | --------------- | ------------ | --------------------------- | --------------------------------------------------------------------------------- |
 | text       | structured_text | text         | pass_through                | Use for form fields, pasted text, and final text answers.                         |

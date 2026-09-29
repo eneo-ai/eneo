@@ -470,7 +470,7 @@ async def test_deliver_webhook_maps_typed_transport_error_to_bad_request() -> No
     )
     deps = _make_deps(send_http_request=send_http_request)
 
-    with pytest.raises(BadRequestException, match="SSRF policy"):
+    with pytest.raises(BadRequestException, match="SSRF policy") as exc:
         await deliver_webhook(
             step=step,
             text_payload="payload",
@@ -480,6 +480,8 @@ async def test_deliver_webhook_maps_typed_transport_error_to_bad_request() -> No
             idempotency_key="run-42:step-42:1:webhook",
         )
 
+    # The typed code travels with the failure: delivery decides retry by it.
+    assert exc.value.code == "typed_io_http_ssrf_blocked"
     deps.audit_http_outbound.assert_awaited_once()
     audit_kwargs = deps.audit_http_outbound.await_args.kwargs
     assert audit_kwargs["call_type"] == "webhook_delivery"
@@ -909,3 +911,100 @@ async def test_http_input_refuses_an_effective_url_that_is_not_absolute_http() -
     assert exc_info.value.code == "typed_io_http_invalid_config"
     assert "input_config.url" in str(exc_info.value)
     send_http_request.assert_not_awaited()
+
+
+class _NoClient:
+    """A sender client factory that fails the test if a client is ever built."""
+
+    def __call__(self, **_kwargs: object) -> object:
+        raise AssertionError("a client must not exist for a malformed URL")
+
+
+def _real_sender() -> FlowHttpRuntimeHelper:
+    return FlowHttpRuntimeHelper(
+        variable_resolver=FlowVariableResolver(),
+        request_timeout_seconds=5,
+        max_timeout_seconds=5,
+        allow_private_networks=False,
+        client_factory=_NoClient(),
+    )
+
+
+@pytest.mark.parametrize("port", ["abc", "0", "99999", "80:81"])
+@pytest.mark.asyncio
+async def test_http_input_reports_a_malformed_interpolated_port_as_invalid_config(
+    port: str,
+) -> None:
+    """The step's own check runs before the sender: a URL that is malformed once
+    variables are filled is the step's invalid config, and nothing is sent."""
+    step = _Step(
+        step_order=1,
+        step_id="s1",
+        input_type="text",
+        input_source="http_get",
+        input_config={
+            "url": "http://example.com:{{ flow_input.port }}/",
+            "auth": {"mode": "none"},
+        },
+    )
+    resolver = FlowVariableResolver()
+    deps = _make_deps(
+        send_http_request=_real_sender().send_request, variable_resolver=resolver
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await resolve_http_input_source_text(
+            step=step,
+            run=_Run(id="run-1", flow_id="flow-1", tenant_id="tenant-1"),
+            context=resolver.build_context_with_evidence({"port": port}, []),
+            deps=deps,
+        )
+
+    assert exc_info.value.code == "typed_io_http_invalid_config"
+    assert "input_config.url" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("port", ["abc", "99999"])
+@pytest.mark.asyncio
+async def test_webhook_reports_a_malformed_interpolated_port_as_invalid_config(
+    port: str,
+) -> None:
+    step = _Step(
+        step_order=2,
+        step_id="s2",
+        input_type="text",
+        input_source="previous_step",
+        output_config={
+            "url": "http://example.com:{{ step_1.output.text }}/hook",
+            "auth": {"mode": "none"},
+        },
+    )
+    deps = _make_deps(send_http_request=_real_sender().send_request)
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await deliver_webhook(
+            step=step,
+            text_payload="done",
+            run=_Run(id="run-1", flow_id="flow-1", tenant_id="tenant-1"),
+            context={"step_1": {"output": {"text": port}}},
+            deps=deps,
+            idempotency_key="run-1:s2:1:webhook",
+        )
+
+    assert exc_info.value.code == "typed_io_http_invalid_config"
+
+
+@pytest.mark.asyncio
+async def test_the_sender_reports_the_same_url_as_invalid_url_when_it_is_reached() -> (
+    None
+):
+    """A request that reaches the sender without the step's check (a direct
+    send) is refused by the same parse, under the sender's own code."""
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await _real_sender().send_request(
+            method="GET",
+            url="http://example.com:abc/",
+            headers={},
+            timeout_seconds=1,
+        )
+    assert exc_info.value.code == "typed_io_http_invalid_url"

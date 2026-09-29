@@ -352,6 +352,10 @@ class Settings(BaseSettings):
     flow_http_request_timeout_seconds: int = 30
     flow_http_max_timeout_seconds: int = 120
     flow_http_allow_private_networks: bool = False
+    # Threads that resolve host names for flow HTTP. A lookup that stalls holds
+    # its thread, so this bounds how much name resolution a burst of unreachable
+    # flow destinations can occupy; a lookup past it fails at once and is retried.
+    flow_http_dns_workers: int = Field(default=16, gt=0)
     flow_audio_max_duration_seconds: int = 5 * 60 * 60
     flow_audio_max_decoded_bytes: int = 2 * 1024 * 1024 * 1024
     # The longest recording a tenant admin may let flows take (the flow-settings

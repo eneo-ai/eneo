@@ -431,6 +431,19 @@ value and a comment.
     the same limit as an uploaded recording. To set up a model for live
     transcription, see [Live transcription](/guides/ai-providers#live-transcription).
 
+    **Flows HTTP destinations:**
+
+    | Variable | Default | Description |
+    |----------|---------|-------------|
+    | `FLOW_HTTP_ALLOW_PRIVATE_NETWORKS` | `false` | Lets a flow's HTTP input, HTTP output (webhook) and the editor's connection test reach private networks: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` and IPv6 unique-local `fc00::/7`. Off, they reach public addresses only |
+    | `FLOW_HTTP_DNS_WORKERS` | `16` | Threads that resolve host names for flow HTTP, separate from every other lookup in the process. A lookup that stalls keeps its thread until the resolver answers, so this bounds what unreachable flow destinations can occupy; a lookup with no free thread fails at once and is retried later |
+
+    <Callout type="warning">
+      **Flow network access.** A flow may only send to `http` or `https` URLs, and only to the addresses above. Loopback, link-local (including the cloud metadata address `169.254.169.254`), carrier-grade NAT (`100.64.0.0/10`), `0.0.0.0/8`, `240.0.0.0/4`, `192.0.0.0/24`, the documentation, benchmarking and 6to4-relay blocks, multicast, unspecified and IPv6 site-local addresses, and the Azure WireServer address `168.63.129.16` are refused whatever this setting says. So are the IPv4-mapped (`::ffff:0:0/96`), 6to4 (`2002::/16`), Teredo (`2001::/32`) and NAT64 well-known (`64:ff9b::/96`) prefixes, wherever they point. A network-specific NAT64 prefix (RFC 6052 section 3.4) inside global unicast is an ordinary address to this check, which does not look up translator prefixes or the IPv4 address behind them: keep such a translator from mapping to internal IPv4 ranges. The check runs on the address the connection actually uses, so a host name that changes its answer between lookups cannot reach an internal host, and redirects are not followed. A request's connect timeout covers resolving the host name and the TCP connection attempts (at most three addresses); the TLS handshake and the response are timed separately. Flow requests ignore `HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY` (a warning is logged when one is set) and still trust `SSL_CERT_FILE` and `SSL_CERT_DIR`. Before this release `true` switched every check off; set it only if flows must call services on your private network. Set it on backend and worker.
+    </Callout>
+
+    **Known limitation:** the IPv4-mapped, 6to4, Teredo and NAT64 well-known prefixes are refused even when they stand for a public IPv4 host. On an IPv6-only network whose DNS64 uses the well-known prefix `64:ff9b::/96`, flows cannot call IPv4-only sites; a network-specific prefix is not refused.
+
     **Dynamic Credential Management:**
 
     | Variable | Default | Description |

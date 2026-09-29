@@ -442,6 +442,20 @@ FLOW_AUDIO_MEASUREMENT_TIMEOUT_SECONDS=600
 # FLOW_AUDIO_MAX_DURATION_SECONDS of audio.
 FLOW_LIVE_TRANSCRIPTION_IDLE_TIMEOUT_SECONDS=300
 FLOW_LIVE_TRANSCRIPTION_FINAL_TEXT_TIMEOUT_SECONDS=60
+# Flow HTTP input, HTTP output (webhook) and the editor's connection test reach
+# public addresses only. true also allows private networks: 10.0.0.0/8,
+# 172.16.0.0/12, 192.168.0.0/16 and fc00::/7. Loopback, link-local (cloud
+# metadata), 100.64.0.0/10, 0.0.0.0/8, 240.0.0.0/4, 192.0.0.0/24, multicast,
+# unspecified, site-local, 168.63.129.16 and the IPv4-mapped (::ffff:0:0/96),
+# 6to4 (2002::/16), Teredo (2001::/32) and NAT64 well-known (64:ff9b::/96)
+# prefixes are refused either way; a network-specific NAT64 prefix is not
+# recognised. Only http(s) is used, redirects are not followed, and HTTP(S)_PROXY /
+# ALL_PROXY are ignored. Set on backend and worker.
+FLOW_HTTP_ALLOW_PRIVATE_NETWORKS=false
+# Threads that resolve host names for flow HTTP, separate from every other lookup
+# in the process. A stalled lookup keeps its thread until the resolver answers;
+# a lookup with no free thread fails at once and is retried later.
+FLOW_HTTP_DNS_WORKERS=16
 # Provider silence deadline, not total proposal duration; classification inherits.
 AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS=300
 

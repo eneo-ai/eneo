@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from urllib.parse import urlparse
 
 from eneo.flows.http_transport.authored_config import (
     HttpAuthApiKey,
@@ -12,9 +11,12 @@ from eneo.flows.http_transport.authored_config import (
     HttpBodyMode,
     is_secret_sentinel,
 )
+from eneo.flows.http_transport.effective_url import (
+    HTTP_URL_SCHEMES,
+    InvalidHttpUrl,
+    parse_effective_http_url,
+)
 from eneo.flows.http_transport.errors import HttpTransportError
-
-_HTTP_SCHEMES = ("http", "https")
 
 
 def validate_authored_config(
@@ -82,7 +84,7 @@ def authored_url_error(url: str) -> HttpTransportError | None:
     fixed_prefix = url.split("{{", 1)[0].strip()
     if "://" in fixed_prefix:
         scheme = fixed_prefix.split("://", 1)[0].lower()
-        if scheme not in _HTTP_SCHEMES:
+        if scheme not in HTTP_URL_SCHEMES:
             return HttpTransportError.INVALID_URL
     if contains_url_userinfo(url):
         return HttpTransportError.INVALID_URL
@@ -93,12 +95,8 @@ def validate_http_url(url: str) -> HttpTransportError | None:
     if not url.strip():
         return HttpTransportError.MISSING_URL
     try:
-        parsed = urlparse(url.strip())
-    except Exception:
-        return HttpTransportError.INVALID_URL
-    if parsed.scheme not in _HTTP_SCHEMES or not parsed.netloc:
-        return HttpTransportError.INVALID_URL
-    if contains_url_userinfo(url):
+        parse_effective_http_url(url)
+    except InvalidHttpUrl:
         return HttpTransportError.INVALID_URL
     return None
 

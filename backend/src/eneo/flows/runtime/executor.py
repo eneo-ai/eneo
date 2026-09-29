@@ -10,7 +10,6 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, Iterable, Sequence, assert_never, cast
 from uuid import UUID
 
-import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -174,7 +173,7 @@ from eneo.flows.runtime.http_orchestration import (
 from eneo.flows.runtime.http_orchestration import (
     resolve_http_input_source_text as resolve_http_input_source_text_orchestrated,
 )
-from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper, IPAddress
+from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from eneo.flows.runtime.output_runtime import (
     OutputRuntimeDeps,
     TypedOutputProcessingResult,
@@ -2647,7 +2646,7 @@ class FlowRunExecutor:
             variable_resolver=self.variable_resolver,
             resolve_timeout_seconds=self.http_runtime.resolve_timeout_seconds,
             read_response_text=self.http_runtime.read_response_text,
-            send_http_request=self._send_http_request,
+            send_http_request=self.http_runtime.send_request,
             audit_http_outbound=self._audit_http_outbound,
         )
         return await resolve_http_input_source_text_orchestrated(
@@ -2655,44 +2654,6 @@ class FlowRunExecutor:
             run=run,
             context=context,
             deps=deps,
-        )
-
-    async def _send_http_request(
-        self,
-        *,
-        method: str,
-        url: str,
-        headers: dict[str, str],
-        timeout_seconds: float,
-        body_bytes: bytes | None = None,
-        json_body: dict[str, Any] | list[Any] | None = None,
-        read_response_body: bool = True,
-    ) -> httpx.Response:
-        preflight_resolved_ips = await self._assert_http_url_allowed(url)
-        return await self.http_runtime.send_request(
-            method=method,
-            url=url,
-            headers=headers,
-            timeout_seconds=timeout_seconds,
-            body_bytes=body_bytes,
-            json_body=json_body,
-            read_response_body=read_response_body,
-            preflight_resolved_ips=preflight_resolved_ips,
-            assert_connected_peer_allowed=self._assert_http_connected_peer_allowed,
-        )
-
-    async def _assert_http_url_allowed(self, url: str) -> set[IPAddress] | None:
-        return await self.http_runtime.assert_url_allowed(url)
-
-    def _assert_http_connected_peer_allowed(
-        self,
-        *,
-        response: httpx.Response,
-        preflight_resolved_ips: set[IPAddress] | None,
-    ) -> None:
-        self.http_runtime.assert_connected_peer_allowed(
-            response=response,
-            preflight_resolved_ips=preflight_resolved_ips,
         )
 
     async def _load_assistant(
