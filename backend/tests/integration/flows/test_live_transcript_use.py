@@ -11,6 +11,7 @@ from dependency_injector import providers
 from eneo.database.database import sessionmanager
 from eneo.flows.api import flow_run_lifecycle_router
 from eneo.flows.flow_input_limits import resolve_flow_input_limits
+from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from eneo.flows.infrastructure.flow_transcript_source_repo import (
     FlowTranscriptSourceRepository,
 )
@@ -89,7 +90,7 @@ async def _admit(container, case):
         flow_id=UUID(case.flow.flow_id),
         input_payload_json=None,
         step_inputs={
-            UUID(case.flow.step_id): SimpleNamespace(
+            UUID(case.flow.step_id): FlowRunStepInputFiles(
                 file_ids=(case.file.id,),
                 live_transcript_id=case.transcript_id,
             )

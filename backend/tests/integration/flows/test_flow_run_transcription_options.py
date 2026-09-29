@@ -166,6 +166,7 @@ async def test_without_a_service_the_contract_offers_live_preview_but_no_speaker
         "live": {"available": True, "reason": None},
         "speaker_labels": {"selectable": False, "required": False, "default": True},
         "max_speakers": None,
+        "single_recording": True,
     }
 
 
@@ -210,6 +211,7 @@ async def test_with_a_service_a_run_may_choose_and_the_flow_sets_the_default(
         "live": {"available": True, "reason": None},
         "speaker_labels": {"selectable": True, "required": False, "default": False},
         "max_speakers": {"form_field": None, "participants_field": None},
+        "single_recording": True,
     }
 
 
