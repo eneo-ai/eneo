@@ -116,6 +116,11 @@
         ) ?? effectiveConfig.locked_model)
       : null
   );
+  // The model whose tool-calling support gates the tool pickers: a policy-locked
+  // model overrides the assistant's pick at ask time, the space catalog entry
+  // carries the capability flags, and the stored sparse model is the fallback
+  // when the model is no longer offered in the space.
+  const toolModel = $derived(lockedModel ?? selectedCompletionModel ?? $update.completion_model);
   const mcpEnforced = $derived(effectiveConfig?.mcp_enforced === true);
   const availableMCPServers = $derived(
     mcpEnforced ? (effectiveConfig?.available_mcp_servers ?? []) : undefined
@@ -575,7 +580,7 @@
               <SelectMCPServers
                 bind:selectedMCPServers={$update.mcp_servers}
                 bind:selectedMCPTools={$update.mcp_tools}
-                selectedModel={$update.completion_model}
+                selectedModel={toolModel}
                 allowedMCPServers={availableMCPServers}
               />
             </div>
@@ -594,7 +599,7 @@
               {#each CAPABILITIES as capability (capability.purpose)}
                 <CapabilityToggle
                   {capability}
-                  selectedModel={$update.completion_model}
+                  selectedModel={toolModel}
                   bind:enabledCapabilities={$update.enabled_capabilities}
                 />
               {/each}
@@ -604,7 +609,7 @@
       {:else if effectiveConfig}
         <Settings.Group title={m.capabilities()}>
           <Settings.Row title={m.capabilities()} description={m.functions_policy_description()}>
-            <PolicyFunctions config={effectiveConfig} selectedModel={$update.completion_model} />
+            <PolicyFunctions config={effectiveConfig} selectedModel={toolModel} />
           </Settings.Row>
         </Settings.Group>
       {/if}

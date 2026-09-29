@@ -4034,6 +4034,7 @@
   "tools_readiness_permission": "Du saknar behörighet till funktionen.",
   "tools_readiness_space_disabled": "Funktionen är avstängd i ytans inställningar.",
   "tools_readiness_server_disabled": "Verktyget är inaktiverat av administratören.",
+  "tools_readiness_model_no_tool_calling": "Modellen stödjer inte verktygsanrop.",
   "mcp_purpose_general_tools": "Allmänna verktyg",
   "mcp_function_source_hint": "Servern är en källa under fliken Funktioner, där du kan aktivera, avaktivera och byta källa.",
   "tools_show_function_servers": "Visa funktionsservrar",
