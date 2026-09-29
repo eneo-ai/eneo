@@ -190,7 +190,7 @@ async def get_user_integrations(
     response_model=UserIntegrationList,
     status_code=200,
     description="List integrations available for a specific space.",
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([404]),
 )
 async def get_available_integrations_for_space(
     space_id: UUID,
