@@ -20,7 +20,10 @@ export const actions: Actions = {
     const redirectUrl = resolveSafeLoginDestination(next);
 
     if (username && password) {
-      const { success, correlationId } = await loginWithEneo(username, password);
+      const { success, correlationId, attemptsRemaining, retryAfterSeconds } = await loginWithEneo(
+        username,
+        password
+      );
 
       if (success) {
         clearOidcLoginDestination(event.cookies);
@@ -28,7 +31,12 @@ export const actions: Actions = {
       }
 
       // Return correlation ID for error tracking
-      return fail(400, { failed: true, correlationId });
+      return fail(400, {
+        failed: true,
+        correlationId,
+        attemptsRemaining: attemptsRemaining ?? null,
+        retryAfterSeconds: retryAfterSeconds ?? null
+      });
     }
 
     return fail(400, { failed: true, correlationId: null });

@@ -53,6 +53,50 @@ describe("login resume", () => {
     expect(cookies.delete).toHaveBeenCalledWith("oidc-login-resume", { path: "/" });
   });
 
+  test("a failed username/password login reports the attempt limit's standing", async () => {
+    const form = new FormData();
+    form.set("email", "user@example.com");
+    form.set("password", "wrong");
+    mocks.loginWithEneo.mockResolvedValue({
+      success: false,
+      correlationId: "trace-1",
+      attemptsRemaining: 0,
+      retryAfterSeconds: 540
+    });
+
+    const result = await actions.login!({
+      request: new Request("https://eneo.example/login?/login", { method: "POST", body: form }),
+      cookies: { delete: vi.fn() }
+    } as never);
+
+    expect(result).toMatchObject({
+      status: 400,
+      data: {
+        failed: true,
+        correlationId: "trace-1",
+        attemptsRemaining: 0,
+        retryAfterSeconds: 540
+      }
+    });
+  });
+
+  test("a failure without limit details reports none", async () => {
+    const form = new FormData();
+    form.set("email", "user@example.com");
+    form.set("password", "wrong");
+    mocks.loginWithEneo.mockResolvedValue({ success: false, correlationId: null });
+
+    const result = await actions.login!({
+      request: new Request("https://eneo.example/login?/login", { method: "POST", body: form }),
+      cookies: { delete: vi.fn() }
+    } as never);
+
+    expect(result).toMatchObject({
+      status: 400,
+      data: { failed: true, attemptsRemaining: null, retryAfterSeconds: null }
+    });
+  });
+
   test("username/password rejects an external post-login destination", async () => {
     const form = new FormData();
     form.set("email", "user@example.com");
