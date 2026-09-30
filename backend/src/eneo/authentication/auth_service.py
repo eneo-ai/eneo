@@ -29,6 +29,11 @@ JWT_EXPIRY_TIME_MINUTES = get_settings().jwt_expiry_time
 JWT_SECRET = get_settings().jwt_secret
 OIDC_CLOCK_LEEWAY_SECONDS = get_settings().oidc_clock_leeway_seconds
 
+# Audience of the tokens Eneo mints for its own loopback MCP servers. It is
+# distinct from the session audience, so such a token authenticates on the
+# loopback endpoints only and every other API route refuses it.
+INTERNAL_MCP_AUDIENCE = "eneo-internal-mcp"
+
 
 class AuthService:
     # Dummy hash for timing attack mitigation
@@ -129,13 +134,15 @@ class AuthService:
         """Mint a short-lived access token for a loopback MCP server.
 
         Eneo attaches an ephemeral MCP server pointing at its own loopback
-        endpoint, authenticated with this token. The token authenticates as
-        ``user`` exactly like a normal access token (so the loopback endpoint
-        reuses ``authenticate``), and additionally carries an ``assistant_id``
-        claim so tools need no scope argument and cannot be redirected to
-        another assistant. Unknown claims ride through ``JWTPayload`` (which
-        ignores them on decode) and are read out separately by the loopback
-        endpoint.
+        endpoint, authenticated with this token. The token identifies ``user``
+        with the same claims as a normal access token, but is minted for
+        ``INTERNAL_MCP_AUDIENCE``: only the loopback endpoints accept it (via
+        ``UserService.authenticate_internal_mcp_token``), so it cannot be
+        replayed against the rest of the API. It additionally carries an
+        ``assistant_id`` claim so tools need no scope argument and cannot be
+        redirected to another assistant. Unknown claims ride through
+        ``JWTPayload`` (which ignores them on decode) and are read out
+        separately by the loopback endpoint.
 
         ``mcp_server_id`` is set for a built-in provider: the loopback tool
         reads its configuration from that ``mcp_servers`` row, so the row
@@ -145,7 +152,10 @@ class AuthService:
         if mcp_server_id is not None:
             claims["mcp_server_id"] = str(mcp_server_id)
         return self.create_access_token_for_user(
-            user, expires_in=expires_in, extra_claims=claims
+            user,
+            audience=INTERNAL_MCP_AUDIENCE,
+            expires_in=expires_in,
+            extra_claims=claims,
         )
 
     @staticmethod
