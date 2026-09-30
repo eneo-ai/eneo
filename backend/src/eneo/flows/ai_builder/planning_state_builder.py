@@ -70,7 +70,6 @@ from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
 )
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     AttestedDisclosure,
-    RequirementsState,
     resolve_attested_disclosure,
     resolve_requirements_state,
 )
@@ -1987,10 +1986,7 @@ def _resolve_slots(
     requirements_summary_values = attested_requirement_values(
         requirements_state.attested_summary
     )
-    freeform_text = _semantic_planning_text(
-        aggregate_unprompted_user_text(conversation),
-        requirements_state,
-    )
+    freeform_text = aggregate_unprompted_user_text(conversation)
     flow_defaults = build_flow_discovery_defaults(flow)
     chosen_input = chosen_primary_runtime_input(conversation)
     input_intent = resolve_input_intent(
@@ -2220,22 +2216,6 @@ def _resolve_slots(
         )
 
     return slots
-
-
-def _semantic_planning_text(
-    freeform_text: str,
-    requirements_state: RequirementsState,
-) -> str:
-    latest_summary = requirements_state.latest_summary
-    if latest_summary is None:
-        return freeform_text
-    summary_parts = (
-        latest_summary.input_description,
-        latest_summary.output_description,
-        latest_summary.summary,
-    )
-    summary_text = " ".join(part for part in summary_parts if part)
-    return " ".join(part for part in (freeform_text, summary_text) if part)
 
 
 def _build_slot(

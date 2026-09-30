@@ -140,6 +140,10 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationResult,
     SlotClassificationSource,
 )
+from eneo.flows.ai_builder.ai_builder_slot_interaction_policy import (
+    SLOT_INTERACTION_POLICIES,
+    evaluate_slot_interaction,
+)
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from eneo.flows.ai_builder.planning_state import (
@@ -182,6 +186,9 @@ from eneo.roles.role import RoleCreate
 from eneo.users.user import UserUpdate
 from tests.fixtures import mint_v2_api_key
 from tests.integration.flows.conftest import assert_call_evidence_after_own_details
+from tests.unittests.flows.ai_builder.requirements_card_test_support import (
+    pending_card_message,
+)
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
@@ -11372,3 +11379,166 @@ async def test_ai_builder_api_answer_to_a_replaced_question_is_refused_and_the_s
     assert not any(event["event"] == "error" for event in answered_events), (
         _builder_event_outline(answered_events)
     )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_commit_turn_gains_no_evidence_from_a_pending_cards_prose(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Commit Turn Card Prose",
+    )
+    user_text = "Jag vill ha hjälp med mina ärenden."
+    card = pending_card_message(
+        runtime_input="documents", terminal_output="docx_document"
+    )
+
+    async def persisted_after(reply: ConversationMessage) -> PlanningState:
+        async with db_container() as container:
+            repo = AIBuilderRepository(container.session())
+            user = container.user()
+            session = await repo.create_session(
+                tenant_id=user.tenant_id,
+                space_id=UUID(space_id),
+                actor_user_id=user.id,
+                target_kind=TargetKind.CREATE,
+                flow_id=None,
+            )
+            turn = await _claim_session_send_turn(
+                repo=repo,
+                session_id=session.id,
+                tenant_id=user.tenant_id,
+                message_content=user_text,
+            )
+            await repo.commit_turn(
+                turn=turn,
+                new_messages=[reply],
+                planning_state=PlanningState.empty(),
+            )
+            loaded = await repo.load_planning_state(
+                session_id=session.id, tenant_id=user.tenant_id
+            )
+        assert loaded is not None
+        return loaded
+
+    plain = await persisted_after(
+        ConversationMessage(role="assistant", content="Requirements presented to user.")
+    )
+    with_card = await persisted_after(card)
+
+    assert with_card.resolved_slots == plain.resolved_slots == {}
+    assert {
+        name: evaluate_slot_interaction(policy, with_card, freeform_text=user_text)
+        for name, policy in SLOT_INTERACTION_POLICIES.items()
+    } == {
+        name: evaluate_slot_interaction(policy, plain, freeform_text=user_text)
+        for name, policy in SLOT_INTERACTION_POLICIES.items()
+    }
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_commit_turn_keeps_a_pinned_architecture_beside_a_pending_card(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """Regression guard, green before the fix by design.
+
+    Card prose only ever produced heuristic slots, and the pin derives from
+    commit-grade slots, so this cannot fail on the old read; it pins the bead's
+    "a second commit beside a pending card does not raise" boundary.
+    """
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Commit Turn Pinned Beside Card",
+    )
+    text_input_answer = _structured_answer_message(
+        question_id="primary_runtime_input", value="text", content="Text"
+    )
+    text_output_answer = _structured_answer_message(
+        question_id="terminal_output",
+        value="structured_text",
+        content="Strukturerad text",
+    )
+    prior_state = build_planning_state_from_conversation(
+        [text_input_answer, text_output_answer]
+    )
+    prior_draft = derive_architecture_commit_draft(prior_state)
+    assert prior_draft is not None
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        first_turn = await _claim_session_send_turn(
+            repo=repo, session_id=session.id, tenant_id=user.tenant_id
+        )
+        await repo.commit_turn(
+            turn=first_turn,
+            new_messages=[
+                text_input_answer,
+                text_output_answer,
+                ConversationMessage(role="assistant", content="Architecture pinned"),
+            ],
+            architecture_commit=finalize_architecture_commit(prior_draft),
+            planning_state=prior_state,
+        )
+        await repo.release_session_send(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lease=first_turn.lease,
+        )
+        pinned = await repo.load_planning_state(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+
+    assert pinned is not None and pinned.architecture_commit is not None
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        second_turn = await _claim_session_send_turn(
+            repo=repo, session_id=session.id, tenant_id=user.tenant_id
+        )
+        await repo.commit_turn(
+            turn=second_turn,
+            new_messages=[
+                pending_card_message(
+                    runtime_input="documents", terminal_output="pdf_document"
+                )
+            ],
+            planning_state=PlanningState.empty(),
+        )
+        after = await repo.load_planning_state(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+
+    assert after is not None
+    assert after.architecture_commit == pinned.architecture_commit
+    assert {
+        name: (slot.value, slot.source)
+        for name, slot in after.resolved_slots.items()
+        if name in ("primary_runtime_input", "terminal_output")
+    } == {
+        "primary_runtime_input": ("text", "structured_answer"),
+        "terminal_output": ("structured_text", "structured_answer"),
+    }
