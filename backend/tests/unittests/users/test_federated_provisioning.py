@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 from eneo.authentication.auth_models import AccessToken, FederatedIdentity
 from eneo.main.config import Settings
-from eneo.main.exceptions import FederatedLoginDenied
+from eneo.main.exceptions import AuthenticationException, FederatedLoginDenied
 from eneo.settings.credential_resolver import CredentialResolver
 from eneo.tenants.tenant import TenantInDB, TenantState
 from eneo.users.user import UserAdd, UserInDB, UserState
@@ -258,7 +258,7 @@ async def test_invalid_domain_configuration_fails_closed(
     assert users.created == []
 
 
-@pytest.mark.parametrize("verified", [None, False, "true", "false", 1, 0])
+@pytest.mark.parametrize("verified", [None, "true", "false", 1, 0])
 async def test_jit_requires_boolean_true_verification(
     monkeypatch, tenant, entrypoint, verified
 ):
@@ -283,7 +283,7 @@ async def test_provisioning_false_blocks_new_accounts_in_both_paths(
     assert users.created == []
 
 
-@pytest.mark.parametrize("verified", [None, False])
+@pytest.mark.parametrize("verified", [None, True])
 async def test_existing_scim_member_can_sign_in_without_jit_requirements(
     monkeypatch, tenant, entrypoint, verified
 ):
@@ -361,6 +361,34 @@ def test_verification_must_cover_the_selected_email(mapped_email):
         {**CLAIMS, "mail": mapped_email}, email_claim="mail"
     )
     assert identity.email_verified is (mapped_email == CLAIMS["email"])
+
+
+@pytest.mark.parametrize("existing", [False, True])
+async def test_explicitly_unverified_email_is_rejected_before_account_admission(
+    monkeypatch, tenant, entrypoint, existing
+):
+    member = existing_user(tenant) if existing else None
+    users = UsersInMemory(tenant, [member] if member else [])
+    claims = {**CLAIMS, "email_verified": False}
+    rejection = ValueError if entrypoint == "federation" else AuthenticationException
+    with pytest.raises(rejection):
+        await sign_in(monkeypatch, tenant, users, claims, ["example.com"], entrypoint)
+    assert users.created == []
+    if member:
+        assert member.state == UserState.ACTIVE
+
+
+def test_custom_directory_claim_is_not_rejected_by_unrelated_email_verification():
+    identity = FederatedIdentity.from_claims(
+        {
+            "email": "unverified@external.example",
+            "email_verified": False,
+            "upn": "employee@municipality.example",
+        },
+        email_claim="upn",
+    )
+    assert identity.email == "employee@municipality.example"
+    assert identity.email_verified is False
 
 
 @pytest.mark.parametrize("email", [None, 123, "", "invalid", "user@", "@example.com"])
