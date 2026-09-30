@@ -1,10 +1,7 @@
-import os
-import pathlib
 from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
-import yaml
 
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
@@ -15,8 +12,9 @@ from eneo.database.database import sessionmanager
 from eneo.main.logging import get_logger
 from eneo.roles.role import RoleCreate
 from eneo.roles.roles_repo import RolesRepository
-
-PREDEFINED_ROLES_FILE_NAME = "predefined_roles.yml"
+from eneo.server.dependencies.predefined_role_config import (
+    load_predefined_roles_from_config,
+)
 
 # Stable int64 key for pg_advisory_lock — ensures only one gunicorn worker
 # seeds at a time during concurrent boot. Value is bytes of "ENEO_SED"
@@ -24,15 +22,6 @@ PREDEFINED_ROLES_FILE_NAME = "predefined_roles.yml"
 _SEED_ADVISORY_LOCK_KEY = int.from_bytes(b"ENEO_SED", "big", signed=True)
 
 logger = get_logger(__name__)
-
-
-def load_predefined_roles_from_config() -> list[dict[str, Any]]:
-    config_path = os.path.join(
-        pathlib.Path(__file__).parent.resolve(), PREDEFINED_ROLES_FILE_NAME
-    )
-    with open(config_path, "r") as file:
-        data = yaml.safe_load(file)
-        return data["roles"]
 
 
 async def _seed_tenant_roles(
