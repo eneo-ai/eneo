@@ -371,7 +371,8 @@ class TestResolveCapabilityServers:
         toolless = _server("image_generation", tools=[_tool(approved=False)])
 
         async def lookup(session, tenant_id, purpose):
-            return [{"web_search": web_search, "image_generation": toolless}[purpose]]
+            providers = {"web_search": web_search, "image_generation": toolless}
+            return [providers[purpose]] if purpose in providers else []
 
         monkeypatch.setattr(
             capability_resolver, "get_active_capability_servers", lookup

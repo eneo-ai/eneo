@@ -293,6 +293,11 @@ async def update_tenant_tool_enabled(
     response_model=BundledToolList,
     responses=responses.get_responses([403]),
 )
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
 async def get_bundled_tools(container: Container = _WITH_USER):
     """List the bundled tool runtime's servers and whether they are added."""
     service = container.mcp_server_service()
@@ -319,6 +324,11 @@ async def get_bundled_tools(container: Container = _WITH_USER):
     ),
     response_model=MCPServerCreateResponse,
     responses=responses.get_responses([400, 403, 404, 409]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
 )
 async def create_bundled_mcp_server(
     tool: str,

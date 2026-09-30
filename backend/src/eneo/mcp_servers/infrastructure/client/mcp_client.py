@@ -29,6 +29,7 @@ from eneo.main.exceptions import MCPAuthenticationError, MCPClientError
 from eneo.main.logging import get_logger
 from eneo.mcp_servers.domain.entities.mcp_server import (
     MCPServer,
+    bundled_tool_name,
     is_builtin_provider,
     is_bundled_server,
 )
@@ -616,6 +617,19 @@ def loopback_endpoint(name: str) -> str:
     return f"{base}/internal-mcp/{name}/mcp"
 
 
+def bundled_endpoint(tool: str) -> str | None:
+    """URL of ``tool`` in the bundled tool runtime, if one is configured."""
+    settings = get_settings()
+    if not settings.tool_runtime_url or not settings.tool_runtime_token:
+        return None
+    return f"{settings.tool_runtime_url.rstrip('/')}/mcp/{tool}"
+
+
+def _bundled_endpoint_of(mcp_server: MCPServer) -> str | None:
+    tool = bundled_tool_name(mcp_server.http_url)
+    return bundled_endpoint(tool) if tool else None
+
+
 def endpoint_url(mcp_server: MCPServer) -> str:
     """URL to connect to for ``mcp_server``.
 
@@ -624,9 +638,16 @@ def endpoint_url(mcp_server: MCPServer) -> str:
     The URL stored on its row is the value from the last time the row was
     saved: it goes stale when the setting changes, and the scoped token minted
     for a built-in provider must only ever reach Eneo itself.
+
+    A bundled server likewise follows ``TOOL_RUNTIME_URL`` as it is configured
+    now; its stored URL only names the runtime tool it serves. While the
+    runtime is not configured the stored URL is returned for display, and
+    connecting is refused (see ``_build_auth_headers``).
     """
     if is_builtin_provider(mcp_server.http_auth_type):
         return loopback_endpoint(mcp_server.purpose)
+    if is_bundled_server(mcp_server.http_auth_type):
+        return _bundled_endpoint_of(mcp_server) or mcp_server.http_url
     return mcp_server.http_url
 
 
@@ -718,10 +739,15 @@ class MCPClient:
         elif is_bundled_server(self.mcp_server.http_auth_type):
             # The bundled tool runtime shares one deployment secret with the
             # backend; it is read from settings on every connect so rotating
-            # it needs only a redeploy of both sides.
+            # it needs only a redeploy of both sides. The secret is sent only
+            # to the runtime as the deployment configures it now, never to
+            # whatever URL the row still carries.
+            if self.endpoint_url != _bundled_endpoint_of(self.mcp_server):
+                raise MCPClientError(
+                    "The bundled tool runtime is not configured for this deployment"
+                )
             settings = get_settings()
-            if settings.tool_runtime_token:
-                headers["Authorization"] = f"Bearer {settings.tool_runtime_token}"
+            headers["Authorization"] = f"Bearer {settings.tool_runtime_token}"
             # Where Eneo's signed file links point. The runtime fetches files
             # only from this origin, so a model-supplied URL can never steer it
             # elsewhere, and the deployment configures the origin once.

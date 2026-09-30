@@ -31,6 +31,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     MCPServer,
     MCPServerAudienceGroup,
     MCPServerTool,
+    bundled_tool_name,
     is_builtin_provider,
     is_bundled_server,
     is_capability_purpose,
@@ -38,6 +39,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
+    bundled_endpoint,
     endpoint_url,
     loopback_endpoint,
 )
@@ -372,16 +374,17 @@ class MCPServerService:
 
     @staticmethod
     def bundled_tool_url(tool: str) -> str | None:
-        """Endpoint of ``tool`` in the bundled tool runtime, if one is configured."""
-        settings = get_settings()
-        if not settings.tool_runtime_url or not settings.tool_runtime_token:
-            return None
-        return f"{settings.tool_runtime_url.rstrip('/')}/mcp/{tool}"
+        """Endpoint of ``tool`` in the bundled tool runtime, if one is configured.
+
+        Stored on the row to name the tool it serves: connections resolve the
+        endpoint again each time (``endpoint_url``), so a changed
+        ``TOOL_RUNTIME_URL`` takes effect without adding the server again.
+        """
+        return bundled_endpoint(tool)
 
     @staticmethod
     def _bundled_tool_name(http_url: str) -> str | None:
-        tool = http_url.rstrip("/").rsplit("/", 1)[-1]
-        return tool if tool in BUNDLED_TOOLS else None
+        return bundled_tool_name(http_url)
 
     @classmethod
     def _bundled_tool_of(cls, server: MCPServer) -> str | None:

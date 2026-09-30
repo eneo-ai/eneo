@@ -139,6 +139,12 @@ def is_bundled_server(http_auth_type: str | None) -> bool:
     return http_auth_type == BUNDLED_AUTH_TYPE
 
 
+def bundled_tool_name(http_url: str) -> str | None:
+    """The runtime tool a bundled row serves: the last segment of its URL."""
+    tool = http_url.rstrip("/").rsplit("/", 1)[-1]
+    return tool if tool in BUNDLED_TOOLS else None
+
+
 @dataclass(frozen=True)
 class MCPServerBackingModel:
     """Read-only projection of the catalog model a built-in provider runs on."""

@@ -50,12 +50,14 @@ class TestAuthHeaderConstruction:
     ):
         settings = get_settings().model_copy(
             update={
+                "tool_runtime_url": "http://tool-runtime:8080",
                 "tool_runtime_token": "runtime-secret",
                 "file_reference_base_url": "http://backend:8000/",
             }
         )
         monkeypatch.setattr(client_module, "get_settings", lambda: settings)
         server = _make_server()
+        server.http_url = "http://tool-runtime:8080/mcp/compute"
         server.http_auth_type = "bundled"
         # Stored credentials are ignored: the row never carries one.
         client = MCPClient(server, {"token": "stored"})

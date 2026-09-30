@@ -18,12 +18,12 @@ from eneo.main.exceptions import (
     NameCollisionException,
     NotFoundException,
 )
-from eneo.mcp_servers.application import mcp_server_service as service_module
 from eneo.mcp_servers.application.mcp_server_service import (
     ConnectionResult,
     MCPServerService,
 )
 from eneo.mcp_servers.domain.entities.mcp_server import BUNDLED_AUTH_TYPE, MCPServer
+from eneo.mcp_servers.infrastructure.client import mcp_client as client_module
 
 RUNTIME_URL = "http://tool-runtime:3010"
 
@@ -33,7 +33,7 @@ def runtime_configured(monkeypatch):
     settings = get_settings().model_copy(
         update={"tool_runtime_url": RUNTIME_URL, "tool_runtime_token": "t" * 40}
     )
-    monkeypatch.setattr(service_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(client_module, "get_settings", lambda: settings)
 
 
 def _make_service(monkeypatch):
@@ -84,7 +84,7 @@ class TestCreateBundled:
         settings = get_settings().model_copy(
             update={"tool_runtime_url": RUNTIME_URL, "tool_runtime_token": None}
         )
-        monkeypatch.setattr(service_module, "get_settings", lambda: settings)
+        monkeypatch.setattr(client_module, "get_settings", lambda: settings)
         service, repo, _ = _make_service(monkeypatch)
 
         with pytest.raises(BadRequestException):
@@ -181,7 +181,7 @@ class TestListBundled:
 
     async def test_unconfigured_runtime_is_unavailable(self, monkeypatch):
         settings = get_settings().model_copy(update={"tool_runtime_url": None})
-        monkeypatch.setattr(service_module, "get_settings", lambda: settings)
+        monkeypatch.setattr(client_module, "get_settings", lambda: settings)
         service, _, _ = _make_service(monkeypatch)
 
         tools = await service.list_bundled_tools()
