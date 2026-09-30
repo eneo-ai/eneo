@@ -7,7 +7,6 @@ export const EneoIdTokenCookie = "auth";
 export const EneoAccessTokenCookie = "acc";
 export const OidcLoginAttemptCookie = "oidc-login-resume";
 
-const OIDC_LOGIN_ATTEMPT_MAX_AGE_SECONDS = 10 * 60;
 // Leave room for the cookie name and attributes below the common 4 KiB limit.
 const OIDC_LOGIN_ATTEMPT_MAX_ENCODED_LENGTH = 3000;
 
@@ -248,16 +247,21 @@ const OIDC_ATTEMPT_ID_PATTERN =
 export function startOidcLoginAttempt(
   cookies: Cookies,
   destination: unknown,
-  attemptId: string
+  attemptId: string,
+  expiresAt: number
 ): void {
   if (!OIDC_ATTEMPT_ID_PATTERN.test(attemptId)) {
     throw new Error("Invalid OIDC login attempt ID");
+  }
+  const maxAge = expiresAt - Math.floor(Date.now() / 1000);
+  if (!Number.isSafeInteger(expiresAt) || maxAge <= 0) {
+    throw new Error("Invalid OIDC login attempt expiry");
   }
 
   const attempt: OidcLoginAttempt = {
     attemptId,
     destination: resolveValidatedLoginDestination(destination),
-    expiresAt: Math.floor(Date.now() / 1000) + OIDC_LOGIN_ATTEMPT_MAX_AGE_SECONDS
+    expiresAt
   };
 
   try {
@@ -273,7 +277,7 @@ export function startOidcLoginAttempt(
   cookies.set(OidcLoginAttemptCookie, JSON.stringify(attempt), {
     path: "/",
     httpOnly: true,
-    maxAge: OIDC_LOGIN_ATTEMPT_MAX_AGE_SECONDS,
+    maxAge,
     secure: !dev,
     sameSite: "lax"
   });

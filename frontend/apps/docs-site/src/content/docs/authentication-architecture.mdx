@@ -130,11 +130,15 @@ An expired state is rejected with `400 Authorization session expired. Please try
 
 ### Browser Login Binding
 
-Generic OIDC login also requires a browser-bound attempt. `/login` creates a random
-attempt ID and stores it in the HttpOnly `oidc-login-resume` cookie, even when no
-`next` destination was requested. The same ID is passed as `frontend_state` inside
-the backend-signed state. The cookie expires after 10 minutes and uses `Path=/`,
-`SameSite=Lax`, and `Secure` outside development.
+Generic OIDC login also requires a browser-bound attempt. Starting authentication
+through the `/login` page's `oidc` POST action creates a random attempt ID and
+passes it as `frontend_state` to the backend. After successful initiation, the
+action stores the same ID in the HttpOnly `oidc-login-resume` cookie, even when no
+`next` destination was requested. Its expiry follows the backend-signed state's
+`exp`: the default is 10 minutes from initiation, rather than from opening the
+login page. The cookie uses `Path=/`, `SameSite=Lax`, and `Secure` outside
+development. Single-tenant automatic login, tenant selection, and retries use
+this same action so each starts a fresh attempt.
 
 Both `/login/callback` and its `/auth/callback` alias require a matching, unexpired
 attempt before exchanging the authorization code or writing a session cookie.
@@ -150,9 +154,10 @@ an unbound login. Module handoff destinations retain their original encoding.
 
 The cookie is host-only: start login on the same public origin as the configured
 callback. Login started on an alternate hostname cannot finish on the canonical
-hostname. Only the latest attempt started in a browser is stored; an older tab's
-mismatched callback does not consume the newer binding. Opening or retrying the
-login page starts a new attempt. After deploying this change, attempts started
+hostname. Only the latest authentication attempt started in a browser is stored.
+An older tab's mismatched callback and its error-page redirect preserve the newer
+binding. Viewing the login page and a failed initiation do not replace an attempt;
+starting authentication again does. After deploying this change, attempts started
 with an older cookie format must restart login.
 
 The legacy Zitadel and MobilityGuard flows continue to use their existing local

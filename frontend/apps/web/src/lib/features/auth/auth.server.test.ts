@@ -113,7 +113,12 @@ describe("generic OIDC browser login attempt", () => {
     const destination = "/module-login?state=opaque%2526value";
     const cookies = cookieJar();
 
-    startOidcLoginAttempt(cookies as never, destination, ATTEMPT_A);
+    startOidcLoginAttempt(
+      cookies as never,
+      destination,
+      ATTEMPT_A,
+      Math.floor(Date.now() / 1000) + 600
+    );
 
     expect(cookies.set).toHaveBeenCalledWith(OidcLoginAttemptCookie, expect.any(String), {
       path: "/",
@@ -139,7 +144,12 @@ describe("generic OIDC browser login attempt", () => {
   test("does not consume a parallel login attempt's destination", async () => {
     const destination = "/module-login?state=attempt-a";
     const cookies = cookieJar();
-    startOidcLoginAttempt(cookies as never, destination, ATTEMPT_A);
+    startOidcLoginAttempt(
+      cookies as never,
+      destination,
+      ATTEMPT_A,
+      Math.floor(Date.now() / 1000) + 600
+    );
 
     await expect(
       consumeOidcLoginAttempt(cookies as never, callbackState(ATTEMPT_B, destination))
@@ -156,7 +166,12 @@ describe("generic OIDC browser login attempt", () => {
     "keeps authentication bound when the optional destination is absent or discarded",
     async (destination) => {
       const cookies = cookieJar();
-      startOidcLoginAttempt(cookies as never, destination, ATTEMPT_A);
+      startOidcLoginAttempt(
+        cookies as never,
+        destination,
+        ATTEMPT_A,
+        Math.floor(Date.now() / 1000) + 600
+      );
 
       await expect(
         consumeOidcLoginAttempt(cookies as never, callbackState(ATTEMPT_A, null))
