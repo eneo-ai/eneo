@@ -3,7 +3,8 @@
 A service key authenticates as a synthetic user with no ``users`` row. The
 scoped token Eneo mints for its loopback servers must authenticate that
 principal on the tool side, exactly like it authenticates a real user, and
-must stop doing so once the key is no longer active.
+must stop doing so once the key is no longer active. The token is good for
+the loopback servers only: the rest of the API refuses it.
 """
 
 from __future__ import annotations
@@ -78,6 +79,17 @@ async def test_scoped_token_authenticates_the_service_principal(
         assert tool_context.user.id == service_principal_token.key_id
         assert tool_context.user.tenant_id == service_principal_token.tenant_id
         assert is_service_api_key(tool_context.user)
+
+
+async def test_scoped_token_is_refused_by_the_rest_of_the_api(
+    client, service_principal_token
+):
+    resp = await client.get(
+        "/api/v1/assistants/",
+        headers={"Authorization": f"Bearer {service_principal_token.token}"},
+    )
+
+    assert resp.status_code == 401, resp.text
 
 
 async def test_revoked_service_key_no_longer_authenticates(

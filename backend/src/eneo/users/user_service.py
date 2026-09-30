@@ -34,7 +34,7 @@ from eneo.authentication.auth_models import (
     JWTPayload,
     compute_effective_state,
 )
-from eneo.authentication.auth_service import AuthService
+from eneo.authentication.auth_service import INTERNAL_MCP_AUDIENCE, AuthService
 from eneo.authentication.endpoint_access import authorize_user
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
@@ -755,14 +755,16 @@ class UserService:
 
         return user_in_db, access_token
 
-    async def _get_user_from_token(self, token: str):
+    def _get_token_payload(self, token: str, *, aud: str) -> JWTPayload:
         settings = get_settings()
-        payload = self.auth_service.get_jwt_payload(
+        return self.auth_service.get_jwt_payload(
             token,
             key=str(settings.jwt_secret),
-            aud=settings.jwt_audience,
+            aud=aud,
             algs=[settings.jwt_algorithm],
         )
+
+    async def _get_user_from_payload(self, payload: JWTPayload):
         user = await self.repo.get_user_by_id_and_tenant_id(
             payload.user_id, tenant_id=payload.tenant_id
         )
@@ -770,8 +772,32 @@ class UserService:
             self.auth_service.validate_local_credential_version(
                 payload.credential_version, user
             )
-            return user
-        return await self._get_service_principal_from_token(payload)
+        return user
+
+    async def _get_user_from_token(self, token: str):
+        payload = self._get_token_payload(token, aud=get_settings().jwt_audience)
+        return await self._get_user_from_payload(payload)
+
+    async def authenticate_internal_mcp_token(self, token: str) -> "UserInDB":
+        """Authenticate the principal behind a scoped loopback MCP token.
+
+        The loopback MCP endpoints are the only callers. The token must carry
+        ``INTERNAL_MCP_AUDIENCE`` (see ``AuthService.create_scoped_mcp_token``),
+        so a session token is refused here just as a loopback token is refused
+        by ``authenticate``. Unlike a session, the principal may be a service
+        key: see ``_get_service_principal_from_token``.
+        """
+        payload = self._get_token_payload(token, aud=INTERNAL_MCP_AUDIENCE)
+        user = await self._get_user_from_payload(payload)
+        if user is None:
+            user = await self._get_service_principal_from_token(payload)
+        if user is None:
+            raise AuthenticationException("No authenticated user.")
+
+        await self._check_user_and_tenant_state(
+            user, correlation_id="internal-mcp-auth"
+        )
+        return user
 
     async def _get_service_principal_from_token(
         self, payload: JWTPayload
@@ -779,15 +805,14 @@ class UserService:
         """Rebuild the synthetic user behind a token minted for a service key.
 
         A service key authenticates as a synthetic user whose id is the key id
-        and that has no ``users`` row. Eneo mints access tokens for such a
-        principal only for its own loopback MCP servers (see
-        ``AuthService.create_scoped_mcp_token``), whose endpoints authenticate
-        them like any other bearer token, so the user lookup falls through to
-        the key itself. The key must still be active: revoking, suspending or
-        expiring it ends the principal's access before the token expires.
-        Origin and IP guardrails do not apply here, the loopback caller is
-        Eneo itself, and no usage is recorded: the API call that minted the
-        token already was.
+        and that has no ``users`` row. Eneo mints tokens for such a principal
+        only for its own loopback MCP servers, so only
+        ``authenticate_internal_mcp_token`` falls through to the key itself;
+        session authentication never does. The key must still be active:
+        revoking, suspending or expiring it ends the principal's access before
+        the token expires. Origin and IP guardrails do not apply here, the
+        loopback caller is Eneo itself, and no usage is recorded: the API call
+        that minted the token already was.
         """
         key = await self.api_key_v2_repo.get(
             key_id=payload.user_id, tenant_id=payload.tenant_id
