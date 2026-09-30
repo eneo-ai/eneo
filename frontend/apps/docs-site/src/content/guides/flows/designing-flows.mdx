@@ -102,7 +102,8 @@ before publishing it.
 
 Eneo fills Word content controls. To mark a place in your existing template:
 
-1. Open the template in desktop Word and enable the **Developer** tab.
+1. Open the template in Word for Windows. Enable **Developer** under **File >
+   Options > Customize Ribbon**.
 2. Insert a **Rich Text Content Control** for a section, or a **Plain Text Content
    Control** for a short field. For a section, select the whole paragraph,
    including its paragraph mark, before inserting the control.
@@ -120,8 +121,18 @@ the file extension does not convert them.
 
 **How to prepare your template** beside the upload button explains these steps.
 **Download example template** provides a working template with one rich section
-tagged `dokument`, copied from the standard document template. You can open it
-in Word, inspect its properties and adapt its layout.
+named **Dokument** and tagged `dokument`. It includes headings, setup instructions
+and links to Microsoft. The instructions sit inside the section, so filling it
+replaces them with the flow's text.
+
+Word for Mac can use prepared content controls, but its Developer tab does not
+offer the same tools to create them or change their tags. Keep the example's
+prepared control, or prepare new fields in Word for Windows. Mac's legacy form
+fields do not replace the content controls Eneo needs. To show the tab on Mac,
+choose **Word > Preferences > Ribbon & Toolbar > Main Tabs > Developer > Save**.
+
+Microsoft explains how to [show the Developer tab on Windows and Mac](https://support.microsoft.com/en-gb/word/show-the-developer-tab-in-word)
+and [create a form in Word](https://support.microsoft.com/en-us/word/create-a-form-in-word-that-users-can-complete-or-print).
 
 If checking the template fails, its existing field mappings remain available.
 For a connection failure, use **Try again**. For an invalid template, correct the

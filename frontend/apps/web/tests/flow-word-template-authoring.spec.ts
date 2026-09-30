@@ -131,10 +131,28 @@ test("simple mode exposes Word guidance, a valid example and editable field mapp
     .getByRole("button", { name: /^(How to prepare your template|Så förbereder du mallen)$/ })
     .click();
   await expect(page.getByText(/unique tag|unik tagg/)).toBeVisible();
+  await expect(page.getByText(/Word for Mac can use|Word för Mac kan använda/)).toBeVisible();
+  await expect(
+    page.locator(
+      'a[href="https://support.microsoft.com/en-gb/word/show-the-developer-tab-in-word"]'
+    )
+  ).toBeVisible();
+  await expect(
+    page.locator(
+      'a[href="https://support.microsoft.com/en-us/word/create-a-form-in-word-that-users-can-complete-or-print"]'
+    )
+  ).toBeVisible();
   await page.getByText(/unique tag|unik tagg/).scrollIntoViewIfNeeded();
   await page.screenshot({ path: test.info().outputPath("word-setup-guide.png"), fullPage: true });
   await upload(page);
   await expect(page.getByRole("button", { name: SOURCE })).toBeVisible();
+  const exampleText = page.getByRole("button", {
+    name: /^(Show template text|Visa texten i mallen)$/
+  });
+  await expect(exampleText).toHaveAttribute("aria-expanded", "false");
+  await exampleText.click();
+  await expect(exampleText).toHaveAttribute("aria-expanded", "true");
+  await exampleText.click();
   await mapText(page);
   await expect
     .poll(async () => (await savedTemplate(page, request, flow.id))?.bindings?.dokument)

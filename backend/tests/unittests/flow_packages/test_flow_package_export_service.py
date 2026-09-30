@@ -172,7 +172,6 @@ async def test_export_service_records_persisted_flow_mcp_as_one_typed_omission()
     "input_config",
     [
         {"token": "plaintext-do-not-export"},
-        {"runtime_input": {"enabled": True}},
         {"item_map": {"enabled": True, "max_items": 3}},
         {"runtime_input": {"enabled": False, "unknown": "secret"}},
         {"item_map": {"enabled": False, "unknown": "secret"}},
@@ -378,6 +377,51 @@ def test_export_text_processing_round_trip(mode: str) -> None:
     )
     assert imported == envelope
     assert write_flow_package(imported) == write_flow_package(envelope)
+
+
+@pytest.mark.parametrize(
+    "input_source", ["flow_input", "previous_step", "all_previous_steps"]
+)
+def test_export_preserves_runtime_upload_on_text_steps(input_source: str) -> None:
+    first_assistant_id = uuid4()
+    upload_assistant_id = uuid4()
+    input_config: FlowPersistedJsonObject = {
+        "runtime_input": {
+            "enabled": True,
+            "required": False,
+            "input_format": "document",
+            "max_files": 3,
+            "label": "Övriga dokument",
+            "description": "Ladda upp bilagor till utredningen.",
+        }
+    }
+    flow = _flow(
+        steps=[
+            _step(1, assistant_id=first_assistant_id),
+            _step(
+                2,
+                assistant_id=upload_assistant_id,
+                input_source=input_source,
+                input_type="text",
+                input_config=input_config,
+            ),
+        ]
+    )
+
+    envelope = _build_envelope(
+        flow=flow,
+        assistant_snapshots={
+            first_assistant_id: _snapshot(model_ref=None),
+            upload_assistant_id: _snapshot(model_ref=None),
+        },
+        resource_bindings=tuple(),
+    )
+
+    imported = read_flow_package(write_flow_package(envelope))
+    normalized = normalize_flow_package_spec(imported.spec)
+    assert normalized.steps[1].input_config == input_config
+    assert normalized.steps[1].input_source.value == input_source
+    assert flow.steps[1].input_config == input_config
 
 
 @pytest.mark.parametrize("max_items", [0, -1, True, "12"])

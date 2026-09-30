@@ -345,7 +345,7 @@ def _step_spec(
     )
     return StepSpec(
         plan_step_ref=usage.step_ref,
-        name=step.user_description or usage.step_ref,
+        name=step.user_description or "",
         assistant_spec=assistant_spec,
         input_source=input_source,
         input_type=input_type,
@@ -381,17 +381,13 @@ def _portable_input_config(step: FlowStep) -> FlowPersistedJsonObject | None:
 
     portable: FlowPersistedJsonObject = {}
     if parsed.runtime_input is not None:
-        supported = (
+        # Runtime files supplement any portable input source, including text
+        # from prior steps. The run form and executor both read this config.
+        if parsed.runtime_input.enabled or (
             step.input_source is FlowInputSource.FLOW_INPUT
             and step.input_type
             in {FlowInputType.AUDIO, FlowInputType.DOCUMENT, FlowInputType.FILE}
-        )
-        if parsed.runtime_input.enabled and not supported:
-            raise _step_config_not_portable(
-                step_order=step.step_order,
-                config_field="input_config",
-            )
-        if supported:
+        ):
             portable["runtime_input"] = parsed.runtime_input.model_dump(
                 mode="json",
                 exclude_unset=True,

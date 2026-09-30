@@ -135,11 +135,39 @@ test("step navigation remains usable during slow flow and instruction saves", as
   expect(nextAssistant.prompt.text).toBe("Preserve source text for step 2.");
 });
 
-test("exported flow imports as a draft with its retrieval policy and instructions", async ({
+test("exported flow imports as a draft with text-step uploads, retrieval policy and instructions", async ({
   page,
   request
 }) => {
   const flow = await createFlow(page, request);
+  const runtimeInput = {
+    runtime_input: {
+      enabled: true,
+      required: false,
+      input_format: "document",
+      max_files: 3,
+      label: "Additional documents"
+    }
+  };
+  const uploadResponse = await backendFetch(page, request, `/api/v1/flows/${flow.id}/`, {
+    method: "PATCH",
+    data: {
+      expected_revision: flow.draft_revision,
+      steps: flow.steps.map((step: FlowStep) => ({
+        id: step.id,
+        assistant_id: step.assistant_id,
+        step_order: step.step_order,
+        user_description: step.user_description,
+        input_source: step.input_source,
+        input_type: step.input_type,
+        output_mode: step.output_mode,
+        output_type: step.output_type,
+        input_config: step.step_order === 2 ? runtimeInput : step.input_config,
+        output_config: step.output_config
+      }))
+    }
+  });
+  await expectOk(uploadResponse, "enabling optional documents on the second text step");
   await page.goto(`/spaces/personal/flows/${flow.id}?stage=4`);
   await page.waitForLoadState("networkidle");
   await page.getByRole("button", { name: EXPORT, exact: true }).click();
@@ -192,6 +220,7 @@ test("exported flow imports as a draft with its retrieval policy and instruction
   const imported = await api(page, request, `/api/v1/flows/${importedId}/`);
   expect(imported.published_version).toBeNull();
   expect(imported.steps).toHaveLength(8);
+  expect(imported.steps[1].input_config).toEqual(runtimeInput);
   expect(imported.steps[2].output_config.retrieval_policy).toEqual({
     version: 1,
     mode: "fail_closed"
