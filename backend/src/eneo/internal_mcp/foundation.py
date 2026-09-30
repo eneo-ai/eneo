@@ -35,6 +35,7 @@ from eneo.authentication.auth_service import INTERNAL_MCP_AUDIENCE, AuthService
 from eneo.database.database import sessionmanager
 from eneo.main.config import get_settings
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+from eneo.mcp_servers.infrastructure.client.mcp_client import loopback_endpoint
 
 
 class ToolContext(NamedTuple):
@@ -133,7 +134,6 @@ async def build_ephemeral_server(
     appends per-completion enrichment to the named tools' descriptions
     (enrichment only appends; the shared docstring always leads).
     """
-    settings = get_settings()
     server_id = uuid4()
     suffixes = tool_description_suffixes or {}
     tools = [
@@ -156,9 +156,7 @@ async def build_ephemeral_server(
         tenant_id=tenant_id,
         name=name,
         description=description,
-        http_url=(
-            f"{settings.internal_mcp_base_url.rstrip('/')}/internal-mcp/{name}/mcp"
-        ),
+        http_url=loopback_endpoint(name),
         http_auth_type="bearer",
         http_auth_config_schema={"token": token},
         is_enabled=True,
