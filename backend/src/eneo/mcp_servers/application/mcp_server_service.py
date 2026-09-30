@@ -6,7 +6,6 @@ from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 
-from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
     NameCollisionException,
@@ -36,6 +35,8 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
+    endpoint_url,
+    loopback_endpoint,
 )
 from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
 from eneo.model_providers.infrastructure.litellm_provider import (
@@ -305,9 +306,13 @@ class MCPServerService:
 
     @staticmethod
     def builtin_provider_url(purpose: str) -> str:
-        """Loopback endpoint of the built-in provider for ``purpose``."""
-        base = get_settings().internal_mcp_base_url.rstrip("/")
-        return f"{base}/internal-mcp/{purpose}/mcp"
+        """Loopback endpoint of the built-in provider for ``purpose``.
+
+        Stored on the row for display only: connections resolve the endpoint
+        again each time (``endpoint_url``), so a changed
+        ``INTERNAL_MCP_BASE_URL`` takes effect without saving the provider.
+        """
+        return loopback_endpoint(purpose)
 
     async def _resolve_builtin_image_model(
         self, purpose: str, image_model_id: UUID | None
@@ -840,7 +845,7 @@ class MCPServerService:
         """
         try:
             logger.info(
-                f"Testing connection to MCP server: {mcp_server.name} at {mcp_server.http_url}"
+                f"Testing connection to MCP server: {mcp_server.name} at {endpoint_url(mcp_server)}"
             )
 
             # Connect with shorter timeout for faster feedback during creation.
@@ -865,9 +870,9 @@ class MCPServerService:
         except MCPClientError as e:
             error_msg = str(e)
             if "Connection refused" in error_msg:
-                error_msg = f"Could not connect to {mcp_server.http_url}. Please verify the URL and that the server is running."
+                error_msg = f"Could not connect to {endpoint_url(mcp_server)}. Please verify the URL and that the server is running."
             elif "timed out" in error_msg.lower():
-                error_msg = f"Connection to {mcp_server.http_url} timed out. The server may be slow or unreachable."
+                error_msg = f"Connection to {endpoint_url(mcp_server)} timed out. The server may be slow or unreachable."
             logger.warning(f"Connection test failed for {mcp_server.name}: {e}")
             return [], ConnectionResult(success=False, error_message=error_msg)
 
@@ -920,9 +925,9 @@ class MCPServerService:
         except MCPClientError as e:
             error_msg = str(e)
             if "Connection refused" in error_msg:
-                error_msg = f"Could not connect to {mcp_server.http_url}. Please verify the URL and that the server is running."
+                error_msg = f"Could not connect to {endpoint_url(mcp_server)}. Please verify the URL and that the server is running."
             elif "timed out" in error_msg.lower():
-                error_msg = f"Connection to {mcp_server.http_url} timed out. The server may be slow or unreachable."
+                error_msg = f"Connection to {endpoint_url(mcp_server)} timed out. The server may be slow or unreachable."
             logger.warning(f"Failed to discover tools for {mcp_server.name}: {e}")
             return ToolSyncResult(
                 connection=ConnectionResult(success=False, error_message=error_msg)
