@@ -16,11 +16,11 @@ vi.mock("$app/server", () => ({
 import {
   authenticateUser,
   clearFrontendCookies,
-  consumeOidcLoginDestination,
+  consumeOidcLoginAttempt,
   encodeState,
   EneoAccessTokenCookie,
-  OidcLoginResumeCookie,
-  rememberOidcLoginDestination,
+  OidcLoginAttemptCookie,
+  startOidcLoginAttempt,
   resolveLoginStateDestination,
   resolveSafeLoginDestination,
   setFrontendAuthCookie
@@ -82,11 +82,11 @@ describe("resolveLoginStateDestination", () => {
   });
 });
 
-describe("generic OIDC login resume cookie", () => {
+describe("generic OIDC browser login attempt", () => {
   const ATTEMPT_A = "11111111-1111-4111-8111-111111111111";
   const ATTEMPT_B = "22222222-2222-4222-8222-222222222222";
 
-  function callbackState(attemptId: string, destination: string): string {
+  function callbackState(attemptId: string, destination: string | null): string {
     const frontendState = encodeState({ loginMethod: "oidc", next: destination, attemptId });
     const payload = btoa(JSON.stringify({ frontend_state: frontendState }))
       .replace(/\+/g, "-")
@@ -98,12 +98,12 @@ describe("generic OIDC login resume cookie", () => {
   function cookieJar(initialValue?: string) {
     let value = initialValue;
     const cookies = {
-      get: vi.fn((name: string) => (name === OidcLoginResumeCookie ? value : undefined)),
+      get: vi.fn((name: string) => (name === OidcLoginAttemptCookie ? value : undefined)),
       set: vi.fn((name: string, nextValue: string) => {
-        if (name === OidcLoginResumeCookie) value = nextValue;
+        if (name === OidcLoginAttemptCookie) value = nextValue;
       }),
       delete: vi.fn((name: string) => {
-        if (name === OidcLoginResumeCookie) value = undefined;
+        if (name === OidcLoginAttemptCookie) value = undefined;
       })
     };
     return cookies;
@@ -113,59 +113,95 @@ describe("generic OIDC login resume cookie", () => {
     const destination = "/module-login?state=opaque%2526value";
     const cookies = cookieJar();
 
-    rememberOidcLoginDestination(cookies as never, destination, ATTEMPT_A);
+    startOidcLoginAttempt(cookies as never, destination, ATTEMPT_A);
 
-    expect(cookies.set).toHaveBeenCalledWith(
-      OidcLoginResumeCookie,
-      JSON.stringify({ attemptId: ATTEMPT_A, destination }),
-      {
-        path: "/",
-        httpOnly: true,
-        maxAge: 600,
-        secure: expect.any(Boolean),
-        sameSite: "lax"
-      }
-    );
+    expect(cookies.set).toHaveBeenCalledWith(OidcLoginAttemptCookie, expect.any(String), {
+      path: "/",
+      httpOnly: true,
+      maxAge: 600,
+      secure: expect.any(Boolean),
+      sameSite: "lax"
+    });
+    expect(JSON.parse(cookies.get(OidcLoginAttemptCookie) ?? "{}")).toEqual({
+      attemptId: ATTEMPT_A,
+      destination,
+      expiresAt: expect.any(Number)
+    });
     await expect(
-      consumeOidcLoginDestination(cookies as never, callbackState(ATTEMPT_A, destination))
-    ).resolves.toBe(destination);
-    expect(cookies.delete).toHaveBeenCalledWith(OidcLoginResumeCookie, { path: "/" });
+      consumeOidcLoginAttempt(cookies as never, callbackState(ATTEMPT_A, destination))
+    ).resolves.toEqual({ status: "matched", destination });
+    expect(cookies.delete).toHaveBeenCalledWith(OidcLoginAttemptCookie, { path: "/" });
     await expect(
-      consumeOidcLoginDestination(cookies as never, callbackState(ATTEMPT_A, destination))
-    ).resolves.toBeNull();
+      consumeOidcLoginAttempt(cookies as never, callbackState(ATTEMPT_A, destination))
+    ).resolves.toEqual({ status: "missing" });
   });
 
   test("does not consume a parallel login attempt's destination", async () => {
     const destination = "/module-login?state=attempt-a";
     const cookies = cookieJar();
-    rememberOidcLoginDestination(cookies as never, destination, ATTEMPT_A);
+    startOidcLoginAttempt(cookies as never, destination, ATTEMPT_A);
 
     await expect(
-      consumeOidcLoginDestination(cookies as never, callbackState(ATTEMPT_B, destination))
-    ).resolves.toBeNull();
+      consumeOidcLoginAttempt(cookies as never, callbackState(ATTEMPT_B, destination))
+    ).resolves.toEqual({ status: "mismatch" });
     expect(cookies.delete).not.toHaveBeenCalled();
 
     await expect(
-      consumeOidcLoginDestination(cookies as never, callbackState(ATTEMPT_A, destination))
-    ).resolves.toBe(destination);
-    expect(cookies.delete).toHaveBeenCalledWith(OidcLoginResumeCookie, { path: "/" });
+      consumeOidcLoginAttempt(cookies as never, callbackState(ATTEMPT_A, destination))
+    ).resolves.toEqual({ status: "matched", destination });
+    expect(cookies.delete).toHaveBeenCalledWith(OidcLoginAttemptCookie, { path: "/" });
   });
 
-  test("deletes rather than using an invalid or oversized cookie destination", async () => {
-    const externalCookies = cookieJar("//evil.example/module-login");
+  test.each([null, "//evil.example/module-login", `/${"x".repeat(4000)}`])(
+    "keeps authentication bound when the optional destination is absent or discarded",
+    async (destination) => {
+      const cookies = cookieJar();
+      startOidcLoginAttempt(cookies as never, destination, ATTEMPT_A);
+
+      await expect(
+        consumeOidcLoginAttempt(cookies as never, callbackState(ATTEMPT_A, null))
+      ).resolves.toEqual({ status: "matched", destination: null });
+    }
+  );
+
+  test.each(["null", "not-json", JSON.stringify({ attemptId: ATTEMPT_A, destination: "/" })])(
+    "rejects malformed or pre-upgrade attempts without authentication fallback",
+    async (value) => {
+      const cookies = cookieJar(value);
+      await expect(
+        consumeOidcLoginAttempt(cookies as never, callbackState(ATTEMPT_A, null))
+      ).resolves.toEqual({ status: "invalid" });
+      expect(cookies.delete).toHaveBeenCalledWith(OidcLoginAttemptCookie, { path: "/" });
+    }
+  );
+
+  test("rejects an unsafe destination in a manipulated cookie", async () => {
+    const externalCookies = cookieJar(
+      JSON.stringify({
+        attemptId: ATTEMPT_A,
+        destination: "//evil.example/module-login",
+        expiresAt: Math.floor(Date.now() / 1000) + 600
+      })
+    );
 
     await expect(
-      consumeOidcLoginDestination(
-        externalCookies as never,
-        callbackState(ATTEMPT_A, "/module-login")
-      )
-    ).resolves.toBeNull();
-    expect(externalCookies.delete).toHaveBeenCalledWith(OidcLoginResumeCookie, { path: "/" });
+      consumeOidcLoginAttempt(externalCookies as never, callbackState(ATTEMPT_A, "/module-login"))
+    ).resolves.toEqual({ status: "invalid" });
+    expect(externalCookies.delete).toHaveBeenCalledWith(OidcLoginAttemptCookie, { path: "/" });
+  });
 
-    const oversizedCookies = cookieJar();
-    rememberOidcLoginDestination(oversizedCookies as never, `/${"x".repeat(4000)}`, ATTEMPT_A);
-    expect(oversizedCookies.set).not.toHaveBeenCalled();
-    expect(oversizedCookies.delete).toHaveBeenCalledWith(OidcLoginResumeCookie, { path: "/" });
+  test("rejects and clears an expired attempt even if the browser sends it", async () => {
+    const cookies = cookieJar(
+      JSON.stringify({
+        attemptId: ATTEMPT_A,
+        destination: null,
+        expiresAt: Math.floor(Date.now() / 1000) - 1
+      })
+    );
+    await expect(
+      consumeOidcLoginAttempt(cookies as never, callbackState(ATTEMPT_A, null))
+    ).resolves.toEqual({ status: "expired" });
+    expect(cookies.delete).toHaveBeenCalledWith(OidcLoginAttemptCookie, { path: "/" });
   });
 });
 

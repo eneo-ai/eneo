@@ -95,7 +95,7 @@ account merge or database migration is needed for this change. A recovery build
 must retain the identity validation; rolling back to username-based
 authentication reintroduces the vulnerability.
 
-### State Token (CSRF Protection)
+### Signed State Token
 
 The `state` parameter is a JWT signed with HS256:
 
@@ -127,6 +127,36 @@ signed_state = pyjwt.encode(
 | Correlation ID | 16 hex chars (8 bytes) | `secrets.token_hex(8)` |
 
 An expired state is rejected with `400 Authorization session expired. Please try logging in again.`; a state that fails signature validation is rejected with `400 Invalid state parameter`.
+
+### Browser Login Binding
+
+Generic OIDC login also requires a browser-bound attempt. `/login` creates a random
+attempt ID and stores it in the HttpOnly `oidc-login-resume` cookie, even when no
+`next` destination was requested. The same ID is passed as `frontend_state` inside
+the backend-signed state. The cookie expires after 10 minutes and uses `Path=/`,
+`SameSite=Lax`, and `Secure` outside development.
+
+Both `/login/callback` and its `/auth/callback` alias require a matching, unexpired
+attempt before exchanging the authorization code or writing a session cookie.
+A missing, malformed, expired, or mismatched attempt returns the user to login
+with `oidc_invalid_request`. A matched attempt is consumed, so a later callback
+without that cookie cannot exchange another code. The backend still verifies
+the state signature; reading its frontend payload for browser correlation does
+not replace that verification.
+
+The optional local `next` destination is separate from the required binding.
+Unsafe or oversized destinations are omitted from the cookie without allowing
+an unbound login. Module handoff destinations retain their original encoding.
+
+The cookie is host-only: start login on the same public origin as the configured
+callback. Login started on an alternate hostname cannot finish on the canonical
+hostname. Only the latest attempt started in a browser is stored; an older tab's
+mismatched callback does not consume the newer binding. Opening or retrying the
+login page starts a new attempt. After deploying this change, attempts started
+with an older cookie format must restart login.
+
+The legacy Zitadel and MobilityGuard flows continue to use their existing local
+PKCE verifier cookies.
 
 ### Redis State Cache
 

@@ -157,8 +157,42 @@ describe("login resume", () => {
     });
     expect(cookies.set).toHaveBeenCalledWith(
       "oidc-login-resume",
-      JSON.stringify({ attemptId: frontendState.attemptId, destination }),
+      expect.any(String),
       expect.objectContaining({ httpOnly: true, sameSite: "lax" })
     );
+    const attempt = JSON.parse(cookies.set.mock.calls[0][1]);
+    expect(attempt).toEqual({
+      attemptId: frontendState.attemptId,
+      destination,
+      expiresAt: expect.any(Number)
+    });
+  });
+
+  test("starts a browser-bound OIDC attempt without a next destination", async () => {
+    const cookies = { set: vi.fn(), delete: vi.fn() };
+    const result = await load({
+      url: new URL("https://eneo.example/login"),
+      locals: {
+        id_token: null,
+        featureFlags: {
+          newAuth: false,
+          federationStatus: {
+            has_single_tenant_federation: false,
+            has_global_oidc_config: false
+          }
+        }
+      },
+      fetch: vi.fn(),
+      cookies
+    } as never);
+
+    const frontendState = JSON.parse(result.oidcFrontendState);
+    const attempt = JSON.parse(cookies.set.mock.calls[0][1]);
+    expect(frontendState.next).toBeNull();
+    expect(attempt).toEqual({
+      attemptId: frontendState.attemptId,
+      destination: null,
+      expiresAt: expect.any(Number)
+    });
   });
 });

@@ -1,15 +1,16 @@
 import { env } from "$env/dynamic/private";
 import { getBackendUrl } from "$lib/core/environment.server";
 import {
-  clearOidcLoginDestination,
+  clearOidcLoginAttempt,
   encodeState,
-  rememberOidcLoginDestination,
+  startOidcLoginAttempt,
   resolveSafeLoginDestination
 } from "$lib/features/auth/auth.server";
 import { loginWithEneo } from "$lib/features/auth/eneo.server";
 import { getMobilityguardLink } from "$lib/features/auth/mobilityguard.server";
 import { getZitadelLink } from "$lib/features/auth/zitadel.server";
 import { redirect, fail, type Actions } from "@sveltejs/kit";
+import type { PageServerLoad } from "./$types";
 
 export const actions: Actions = {
   login: async (event) => {
@@ -26,7 +27,7 @@ export const actions: Actions = {
       );
 
       if (success) {
-        clearOidcLoginDestination(event.cookies);
+        clearOidcLoginAttempt(event.cookies);
         redirect(302, redirectUrl);
       }
 
@@ -70,7 +71,7 @@ async function getSingleTenantOidcLink(
   }
 }
 
-export const load = async (event) => {
+export const load = (async (event) => {
   let zitadelLink: string | undefined = undefined;
   let mobilityguardLink: string | undefined = undefined;
   let singleTenantOidcLink: string | undefined = undefined;
@@ -86,14 +87,13 @@ export const load = async (event) => {
 
   // If user is logged in already: forward to base url, as login doesn't make sense
   if (event.locals.id_token) {
-    clearOidcLoginDestination(event.cookies);
+    clearOidcLoginAttempt(event.cookies);
     redirect(302, resolveSafeLoginDestination(requestedDestination));
   }
 
-  // Generic OIDC returns a backend-signed state value that is intentionally
-  // opaque to this server until callback exchange. Keep the already validated
-  // local destination independently so provider errors can still resume it.
-  rememberOidcLoginDestination(event.cookies, requestedDestination, oidcAttemptId);
+  // The backend echoes this attempt in signed state. Require the same browser
+  // at callback, independently of the optional local destination.
+  startOidcLoginAttempt(event.cookies, requestedDestination, oidcAttemptId);
 
   if (event.locals.featureFlags.newAuth) {
     zitadelLink = await getZitadelLink(event);
@@ -124,4 +124,4 @@ export const load = async (event) => {
     oidcFrontendState,
     featureFlags: event.locals.featureFlags
   };
-};
+}) satisfies PageServerLoad;
