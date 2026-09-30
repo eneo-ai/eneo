@@ -6942,7 +6942,7 @@
   "tool_web_search_query_done": "Sökte på webben efter ”{query}”",
   "flow_template_fill_kind_rich": "Avsnitt",
   "flow_template_fill_kind_text": "Textfält",
-  "flow_template_fill_control_guidance": "Lägg till innehållskontroller i Word-mallen: på fliken Utvecklare väljer du Innehållskontroll för RTF-text för ett avsnitt (stycken, listor, tabeller) eller Innehållskontroll för oformaterad text för ett enstaka värde. Ange titel och tagg under Egenskaper. Taggen är namnet som flödet kopplar till, och platshållartexten i kontrollen blir instruktionen till AI-byggaren.",
+  "flow_template_fill_control_guidance": "Skapa innehållskontroller i Word för Windows: på fliken Utvecklare väljer du RTF-text för ett avsnitt eller oformaterad text för ett kort värde. Ange titel och unik tagg under Egenskaper. Word för Mac kan använda förberedda kontroller; använd exempelmallen eller förbered taggarna i Windows. Platshållartexten i kontrollen blir instruktionen till AI-byggaren.",
   "governance_files_heading": "Bilagor",
   "governance_files_section_desc": "Styr hur den personliga assistenten hanterar filer som användare bifogar i chatten.",
   "governance_files_summary_inactive": "Inaktiv · personliga inställningar gäller",
@@ -7153,7 +7153,7 @@
   "flow_template_fill_word_help_title": "Välj var texten ska hamna i Word",
   "flow_template_fill_word_help_intro": "Använd din befintliga .docx-mall. Markera platserna som ska fyllas i med namngivna innehållskontroller i Word innan du laddar upp den.",
   "flow_template_fill_word_help_open": "Så förbereder du mallen",
-  "flow_template_fill_word_help_step_one": "Öppna mallen i Word på datorn och visa fliken Utvecklare.",
+  "flow_template_fill_word_help_step_one": "Öppna mallen i Word för Windows. Visa fliken Utvecklare via Arkiv → Alternativ → Anpassa menyfliksområdet → Huvudflikar → Utvecklare → OK.",
   "flow_template_fill_word_help_step_two": "Markera platsen för texten och lägg till en innehållskontroll. Använd RTF för hela avsnitt och oformaterad text för korta fält. För ett avsnitt: markera hela stycket, inklusive stycketecknet.",
   "flow_template_fill_word_help_step_three": "Öppna kontrollens Egenskaper. Ange en tydlig titel och en unik tagg, till exempel bakgrund. Titeln visas här när du kopplar fältet.",
   "flow_template_fill_word_help_step_four": "Placera kontrollerna i dokumentets huvudtext, utanför tabeller, sidhuvud och sidfot. Undvik kapslade kontroller. Spara som .docx och ladda upp mallen.",
@@ -7165,5 +7165,13 @@
   "flow_template_fill_mapping_help": "Välj vilken text som ska fylla varje plats i mallen. Lämna tomt är ett avsiktligt val; Välj källa betyder att kopplingen saknas.",
   "flow_template_fill_ready_to_test": "Alla fält är kopplade. Provkör flödet och öppna Word-resultatet för att kontrollera textens placering och format.",
   "flow_template_fill_expression_label": "Fältuttryck",
-  "flow_template_fill_word_tag": "Tagg i Word: {name}"
+  "flow_template_fill_word_tag": "Tagg i Word: {name}",
+  "flow_template_fill_word_help_windows_title": "Skapa fält i Word för Windows",
+  "flow_template_fill_word_help_mac_title": "Använd mallen i Word för Mac",
+  "flow_template_fill_word_help_mac_tab": "Visa fliken via Word → Inställningar (Preferences) → Menyfliksområde och verktygsfält (Ribbon & Toolbar) → Huvudflikar → Utvecklare (Developer) → Spara.",
+  "flow_template_fill_word_help_mac_controls": "Word för Mac kan använda förberedda innehållskontroller, men har inte samma verktyg för att skapa dem eller ändra deras taggar. Börja med exempelmallen och behåll kontrollen, eller låt någon förbereda fälten i Word för Windows. De äldre formulärfälten på Mac ersätter inte innehållskontrollerna som Eneo behöver.",
+  "flow_template_fill_word_help_tab_link": "Microsoft: visa fliken Utvecklare i Windows och på Mac (öppnas i ny flik)",
+  "flow_template_fill_word_help_controls_link": "Microsoft: skapa formulär i Word (öppnas i ny flik)",
+  "flow_template_fill_example_help": "Exempelmallen har fältet Dokument med taggen dokument och instruktioner för båda systemen. Koppla fältet till text från ett steg. Hjälptexten i mallen ersätts när flödet fyller i dokumentet.",
+  "flow_template_fill_example_text_action": "Visa texten i mallen"
 }

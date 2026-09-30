@@ -1103,7 +1103,7 @@ async def test_export_install_preserves_upload_transcription_dependency(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("target_has_model", [False, True])
-async def test_install_preserves_previous_step_audio_upload_transcription(
+async def test_export_install_preserves_previous_step_audio_upload_transcription(
     target_has_model: bool,
 ) -> None:
     envelope = _envelope(
@@ -1126,7 +1126,40 @@ async def test_install_preserves_previous_step_audio_upload_transcription(
             )
         ],
     )
+    assistant_ids = [uuid4() for _ in envelope.spec.steps]
+    source = Flow(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        name="Audio upload after text",
+        steps=[
+            FlowStep(
+                assistant_id=assistant_id,
+                step_order=index,
+                user_description=step.name if index > 1 else None,
+                input_source=step.input_source.value,
+                input_type=step.input_type.value,
+                output_mode=step.output_mode.value,
+                output_type=step.output_type.value,
+                input_config=step.input_config,
+            )
+            for index, (assistant_id, step) in enumerate(
+                zip(assistant_ids, envelope.spec.steps), start=1
+            )
+        ],
+    )
+    envelope = build_flow_package_export_envelope(
+        flow=source,
+        assistant_snapshots={
+            assistant_id: AssistantAuthoringSnapshot(instructions="Pass through.")
+            for assistant_id in assistant_ids
+        },
+        resource_bindings=(),
+        manifest_metadata=envelope.manifest,
+        provenance=envelope.provenance,
+    )
     envelope = read_flow_package(write_flow_package(envelope))
+    assert envelope.spec.steps[0].name == ""
     target_model_id = uuid4() if target_has_model else None
     candidates = _candidates()
     plan = build_flow_package_import_plan(

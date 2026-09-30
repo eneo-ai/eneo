@@ -6942,7 +6942,7 @@
   "tool_web_search_query_done": "Searched the web for “{query}”",
   "flow_template_fill_kind_rich": "Section",
   "flow_template_fill_kind_text": "Text field",
-  "flow_template_fill_control_guidance": "Add content controls to the Word template: on the Developer tab, insert a Rich Text content control for a section (paragraphs, lists, tables) or a Plain Text content control for a single value. Set a title and a tag under Properties. The tag is the name the flow maps to, and the control's placeholder text becomes the instruction for the AI Builder.",
+  "flow_template_fill_control_guidance": "Create content controls in Word for Windows: on Developer, choose Rich Text for a section or Plain Text for a short value. Set a title and unique tag in Properties. Word for Mac can use prepared controls; use the example template or prepare the tags in Windows. Placeholder text inside a control becomes the AI Builder instruction.",
   "governance_files_heading": "Attachments",
   "governance_files_section_desc": "Control how the personal assistant handles files that users attach in the chat.",
   "governance_files_summary_inactive": "Inactive · personal settings apply",
@@ -7153,7 +7153,7 @@
   "flow_template_fill_word_help_title": "Choose where text goes in Word",
   "flow_template_fill_word_help_intro": "Use your existing .docx template. Before uploading it, mark the places to fill with named content controls in Word.",
   "flow_template_fill_word_help_open": "How to prepare your template",
-  "flow_template_fill_word_help_step_one": "Open the template in Word on your computer and show the Developer tab.",
+  "flow_template_fill_word_help_step_one": "Open the template in Word for Windows. Show Developer via File → Options → Customize Ribbon → Main Tabs → Developer → OK.",
   "flow_template_fill_word_help_step_two": "Select the place for the text and add a content control. Use Rich Text for sections and Plain Text for short fields. For a section, select the entire paragraph, including the paragraph mark.",
   "flow_template_fill_word_help_step_three": "Open the control’s Properties. Enter a clear title and a unique tag, such as background. The title appears here when you map the field.",
   "flow_template_fill_word_help_step_four": "Place controls in the document body, outside tables, headers and footers. Avoid nested controls. Save as .docx and upload the template.",
@@ -7165,5 +7165,13 @@
   "flow_template_fill_mapping_help": "Choose the text for each place in the template. Leave empty is an intentional choice; Select source means a mapping is missing.",
   "flow_template_fill_ready_to_test": "All fields are mapped. Test the flow and open the Word result to check text placement and formatting.",
   "flow_template_fill_expression_label": "Field expression",
-  "flow_template_fill_word_tag": "Word tag: {name}"
+  "flow_template_fill_word_tag": "Word tag: {name}",
+  "flow_template_fill_word_help_windows_title": "Create fields in Word for Windows",
+  "flow_template_fill_word_help_mac_title": "Use the template in Word for Mac",
+  "flow_template_fill_word_help_mac_tab": "Show the tab via Word → Preferences → Ribbon & Toolbar → Main Tabs → Developer → Save.",
+  "flow_template_fill_word_help_mac_controls": "Word for Mac can use prepared content controls, but does not have the same tools for creating them or changing their tags. Start with the example template and keep its control, or have someone prepare the fields in Word for Windows. The legacy form fields on Mac do not replace the content controls Eneo needs.",
+  "flow_template_fill_word_help_tab_link": "Microsoft: show Developer in Windows and on Mac (opens in a new tab)",
+  "flow_template_fill_word_help_controls_link": "Microsoft: create forms in Word (opens in a new tab)",
+  "flow_template_fill_example_help": "The example has a Dokument field tagged dokument and instructions for both systems. Map the field to text from a step. The help text in the template is replaced when the flow fills the document.",
+  "flow_template_fill_example_text_action": "Show template text"
 }

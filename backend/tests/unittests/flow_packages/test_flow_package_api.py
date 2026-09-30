@@ -2011,7 +2011,7 @@ def _zip_docs(docs: Mapping[str, JsonObject]) -> bytes:
 @pytest.mark.parametrize(
     "input_config",
     [
-        {"runtime_input": {"enabled": True}},
+        {"runtime_input": {"enabled": True, "max_files": 0}},
         {"item_map": {"enabled": True, "max_items": 3}},
         {"runtime_input": {"enabled": False, "unknown": "secret"}},
         {"auth": {"mode": "none"}},

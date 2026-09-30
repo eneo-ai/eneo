@@ -243,13 +243,37 @@
               {/snippet}
             </Collapsible.Trigger>
             <Collapsible.Content class="pt-3">
+              <p class="pb-2 font-medium">{m.flow_template_fill_word_help_windows_title()}</p>
               <ol class="flex list-decimal flex-col gap-2 pl-5">
                 <li>{m.flow_template_fill_word_help_step_one()}</li>
                 <li>{m.flow_template_fill_word_help_step_two()}</li>
                 <li>{m.flow_template_fill_word_help_step_three()}</li>
                 <li>{m.flow_template_fill_word_help_step_four()}</li>
               </ol>
+              <Alert.Root role="note" class="mt-3">
+                <Alert.Title>{m.flow_template_fill_word_help_mac_title()}</Alert.Title>
+                <Alert.Description class="flex flex-col gap-2">
+                  <p>{m.flow_template_fill_word_help_mac_tab()}</p>
+                  <p>{m.flow_template_fill_word_help_mac_controls()}</p>
+                </Alert.Description>
+              </Alert.Root>
               <p class="pt-3">{m.flow_template_fill_word_help_migration()}</p>
+              <div class="flex flex-col items-start gap-1 pt-3">
+                <Button
+                  variant="link"
+                  class="h-auto text-left whitespace-normal"
+                  href="https://support.microsoft.com/en-gb/word/show-the-developer-tab-in-word"
+                  target="_blank"
+                  rel="noopener noreferrer">{m.flow_template_fill_word_help_tab_link()}</Button
+                >
+                <Button
+                  variant="link"
+                  class="h-auto text-left whitespace-normal"
+                  href="https://support.microsoft.com/en-us/word/create-a-form-in-word-that-users-can-complete-or-print"
+                  target="_blank"
+                  rel="noopener noreferrer">{m.flow_template_fill_word_help_controls_link()}</Button
+                >
+              </div>
               <Alert.Root role="note" class="mt-3">
                 <Alert.Title>{m.flow_template_fill_accessibility_title()}</Alert.Title>
                 <Alert.Description>{m.flow_template_fill_accessibility_body()}</Alert.Description>
@@ -265,6 +289,7 @@
             <IconDownload data-icon="inline-start" />
             {m.flow_template_fill_example_action()}
           </Button>
+          <p>{m.flow_template_fill_example_help()}</p>
         </Alert.Description>
       </Alert.Root>
     </Card.Content>
@@ -357,7 +382,28 @@
                     })}</Card.Description
                   >
                 {/if}
-                {#if row.hint}<Card.Description>{row.hint}</Card.Description>{/if}
+                {#if row.hint && row.hint.length > 240}
+                  <Collapsible.Root>
+                    <Collapsible.Trigger>
+                      {#snippet child({ props })}
+                        <Button {...props} variant="outline" size="sm">
+                          {m.flow_template_fill_example_text_action()}
+                        </Button>
+                      {/snippet}
+                    </Collapsible.Trigger>
+                    <Collapsible.Content class="pt-2">
+                      <Card.Description
+                        class="max-h-64 overflow-auto whitespace-pre-wrap"
+                        tabindex={0}
+                        aria-label={m.flow_template_fill_example_text_action()}
+                      >
+                        {row.hint}
+                      </Card.Description>
+                    </Collapsible.Content>
+                  </Collapsible.Root>
+                {:else if row.hint}
+                  <Card.Description>{row.hint}</Card.Description>
+                {/if}
                 <div class="flex flex-wrap gap-2">
                   {#if row.kind}
                     <Badge variant="outline"
