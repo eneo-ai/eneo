@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.actors.actors.space_actor import SpaceActor, SpaceRole
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.api.assistant_models import (
     AssistantBase,
@@ -19,6 +20,7 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
 )
+from eneo.data_retention.constants import MAX_RETENTION_DAYS
 from eneo.files.file_models import FileType
 from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
 from eneo.main.exceptions import (
@@ -178,6 +180,78 @@ async def test_update_space_assistant_member(setup: Setup):
     assistant_update = AssistantUpdatePublic(name="new name!")
 
     await setup.service.update_assistant(assistant_update, TEST_UUID)
+
+
+@pytest.mark.parametrize("retention_actor", [SpaceRole.EDITOR], indirect=True)
+@pytest.mark.parametrize("days", [None, 1, MAX_RETENTION_DAYS])
+async def test_editor_cannot_change_assistant_retention(
+    setup: Setup, retention_actor: SpaceActor, days: int | None
+):
+    assistant = deepcopy(TEST_ASSISTANT)
+    assistant.data_retention_days = 30
+    space = setup.service.space_repo.get_space_by_assistant.return_value
+    space.is_personal.return_value = False
+    space.get_assistant.return_value = assistant
+    setup.service.actor_manager.get_space_actor_from_space.return_value = (
+        retention_actor
+    )
+
+    with pytest.raises(UnauthorizedException, match="retention"):
+        await setup.service.update_assistant(
+            assistant_id=assistant.id, name="Changed", data_retention_days=days
+        )
+
+    assert assistant.data_retention_days == 30
+    assert assistant.name == TEST_ASSISTANT.name
+
+
+@pytest.mark.parametrize(
+    "retention_actor", [SpaceRole.ADMIN, SpaceRole.OWNER], indirect=True
+)
+@pytest.mark.parametrize("days", [None, 1, MAX_RETENTION_DAYS])
+async def test_retention_admin_can_set_or_clear_assistant_override(
+    setup: Setup, retention_actor: SpaceActor, days: int | None
+):
+    assistant = deepcopy(TEST_ASSISTANT)
+    assistant.data_retention_days = 30
+    space = setup.service.space_repo.get_space_by_assistant.return_value
+    space.is_personal.return_value = retention_actor.space.is_personal()
+    space.default_assistant = None
+    space.data_retention_days = 30
+    space.get_assistant.return_value = assistant
+    setup.service.space_repo.update.return_value = space
+    setup.service.actor_manager.get_space_actor_from_space.return_value = (
+        retention_actor
+    )
+
+    updated, _ = await setup.service.update_assistant(
+        assistant_id=assistant.id, data_retention_days=days
+    )
+
+    assert updated.data_retention_days == days
+    assert space.data_retention_days == 30
+
+
+@pytest.mark.parametrize("retention_actor", [SpaceRole.EDITOR], indirect=True)
+async def test_editor_can_edit_assistant_when_retention_is_omitted(
+    setup: Setup, retention_actor: SpaceActor
+):
+    assistant = deepcopy(TEST_ASSISTANT)
+    assistant.data_retention_days = 30
+    space = setup.service.space_repo.get_space_by_assistant.return_value
+    space.is_personal.return_value = False
+    space.get_assistant.return_value = assistant
+    setup.service.space_repo.update.return_value = space
+    setup.service.actor_manager.get_space_actor_from_space.return_value = (
+        retention_actor
+    )
+
+    updated, _ = await setup.service.update_assistant(
+        assistant_id=assistant.id, name="Changed"
+    )
+
+    assert updated.name == "Changed"
+    assert updated.data_retention_days == 30
 
 
 async def test_is_help_assistant_true_when_active_role_exists(setup: Setup):

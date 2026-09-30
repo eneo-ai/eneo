@@ -1,13 +1,43 @@
 import uuid
+from copy import deepcopy
+from typing import cast
 
 import pytest
 
+from eneo.actors.actors.space_actor import (
+    SpaceAccessFacts,
+    SpaceActor,
+    SpaceRole,
+    SpaceRoleFact,
+)
 from eneo.ai_models.embedding_models.embedding_model import (
     EmbeddingModelLegacy,
 )
 from eneo.main.config import Settings, reset_settings
 from eneo.tenants.tenant import TenantInDB
 from eneo.users.user import UserInDB
+from tests.fixtures import TEST_USER
+
+
+@pytest.fixture
+def retention_actor(request: pytest.FixtureRequest) -> SpaceActor:
+    role = cast(SpaceRole, request.param)
+    user = deepcopy(TEST_USER)
+    personal = role == SpaceRole.OWNER
+    return SpaceActor(
+        user=user,
+        space=SpaceAccessFacts(
+            id=uuid.uuid4(),
+            tenant_id=user.tenant_id,
+            user_id=user.id if personal else None,
+            tenant_space_id=None if personal else uuid.uuid4(),
+            members={user.id: SpaceRoleFact(id=user.id, role=role)},
+            group_members={},
+            default_assistant_id=None,
+            assistant_ids=frozenset(),
+            app_ids=frozenset(),
+        ),
+    )
 
 
 @pytest.fixture(scope="session")

@@ -923,8 +923,9 @@ curl -fsS https://your-domain.com/api/healthz
 # Readiness alias of /api/healthz on current images (older released images only have /api/healthz)
 curl -fsS https://your-domain.com/api/readyz
 
-# Crawler queue and worker diagnostics
-curl -fsS https://your-domain.com/api/healthz/crawler
+# Detailed crawler diagnostics (requires the deployment's super API key)
+curl -fsS https://your-domain.com/api/healthz/crawler \
+  -H "X-API-Key: $ENEO_SUPER_API_KEY"
 
 # Running backend version
 curl -fsS https://your-domain.com/version

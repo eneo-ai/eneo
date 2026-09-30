@@ -1377,6 +1377,17 @@ class AssistantService:
             if not actor.can_toggle_insight():
                 raise UnauthorizedException("Only admins can toggle insights")
 
+        if is_provided(data_retention_days) and not actor.can_edit_retention():
+            raise UnauthorizedException(
+                "Only space admins can change conversation retention",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "update_retention",
+                    "auth_layer": "domain_policy",
+                },
+            )
+
         assistant = space.get_assistant(assistant_id=assistant_id)
 
         # Access to the personal default assistant requires PERSONAL_CHAT.

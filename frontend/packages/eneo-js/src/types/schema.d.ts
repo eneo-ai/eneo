@@ -9648,7 +9648,10 @@ export interface components {
       completion_model?: components["schemas"]["ModelId"] | null;
       completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
       transcription_model?: components["schemas"]["ModelId"] | null;
-      /** Data Retention Days */
+      /**
+       * Data Retention Days
+       * @description Conversation retention override. Requires space administration permission in shared and organization spaces. Set to null to inherit the space policy; omit to leave unchanged.
+       */
       data_retention_days?: number | null;
       /**
        * Icon Id
@@ -16414,7 +16417,10 @@ export interface components {
       inline_file_text?: boolean | null;
       /** @description How attached knowledge reaches the model: 'tool' exposes it as a searchable MCP tool the model calls on demand; 'inject' retrieves on every turn and packs results into the prompt. */
       knowledge_mode?: components["schemas"]["KnowledgeMode"] | null;
-      /** Data Retention Days */
+      /**
+       * Data Retention Days
+       * @description Conversation retention override. Requires space administration permission in shared and organization spaces. Set to null to inherit the space policy; omit to leave unchanged.
+       */
       data_retention_days?: number | null;
       /**
        * Metadata Json
@@ -50058,6 +50064,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CrawlerHealthResponse"];
+        };
+      };
+      /** @description Missing or invalid super API key */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */

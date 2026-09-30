@@ -7,16 +7,18 @@ from datetime import datetime, timezone
 from typing import Any, Optional, Protocol, cast
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Security
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 from eneo.allowed_origins.get_origin_callback import get_origin
+from eneo.authentication.auth import authenticate_super_api_key
 from eneo.internal_mcp import internal_mcp_mounts
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.main.models import GeneralError
 from eneo.main.observability import init_observability, instrument_fastapi
 from eneo.main.request_context import get_request_context
 from eneo.object_content.runtime import (
@@ -621,14 +623,21 @@ def get_application():
 
     @app.get(
         "/api/healthz/crawler",
+        dependencies=[Security(authenticate_super_api_key)],
         response_model=CrawlerHealthResponse,
         description="Get detailed crawler queue and worker diagnostics.",
-        responses={200: {"description": "Crawler diagnostics"}},
+        responses={
+            200: {"description": "Crawler diagnostics"},
+            401: {
+                "model": GeneralError,
+                "description": "Missing or invalid super API key",
+            },
+        },
     )
     async def crawler_health(include_all: bool = False) -> CrawlerHealthResponse:
         """Detailed crawler diagnostics. NOT for K8s probes.
 
-        Public endpoint - no auth required. Shows only job counts and tenant IDs.
+        Requires the deployment's super API key because diagnostics span tenants.
 
         Args:
             include_all: If True, return all tenant queue lengths instead of top-10.
