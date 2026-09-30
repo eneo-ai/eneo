@@ -7,7 +7,7 @@ Configurator and Owner roles (as with tabular analysis); custom roles are left
 unchanged for tenant admins to opt in. The YAML template in
 ``server/dependencies/predefined_roles.yml`` covers new tenants.
 
-Revision ID: 202609291000
+Revision ID: 202609301000
 Revises: 202609241000
 Create Date: 2026-09-29
 
@@ -18,7 +18,7 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "202609291000"
+revision = "202609301000"
 down_revision = "202609241000"
 branch_labels = None
 depends_on = None

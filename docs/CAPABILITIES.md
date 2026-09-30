@@ -168,7 +168,7 @@ Whether a capability should be served by a built-in loopback server at all, and 
 ## 6. Deployment and client changes
 
 Ship migrations **202609041000**, **202609241000** (`tabular_analysis`) and
-**202609291000** (`document_creation`, `spreadsheet_creation`), backend,
+**202609301000** (`document_creation`, `spreadsheet_creation`), backend,
 frontend and the bundled JavaScript client together. The migration backfills active and inactive capability
 attachments, collapses duplicate purposes, preserves a policy default as on
 when any duplicate was on, and removes obsolete provider attachments and
