@@ -89,7 +89,30 @@ curl -X POST "https://your-domain.com/api/v1/users/login/token/" \
 }
 ```
 
-Send the token as `Authorization: Bearer <access_token>`. Invalid credentials return `401`. Users of tenants that authenticate through OIDC federation obtain their token from the `/api/v1/auth/*` flow instead; see [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant).
+Send the token as `Authorization: Bearer <access_token>`. Invalid credentials return `401`.
+
+Failed attempts are limited to 5 per login name within 10 minutes. Each `401` reports how many remain, and once none remain every further attempt for that name returns `429` until the window ends, including one with the correct password. A successful login restores the full allowance. The limit counts the submitted name whether or not an account exists, so it does not reveal which names are registered.
+
+```json
+{
+  "code": "invalid_credentials",
+  "message": "Invalid credentials",
+  "attempts_remaining": 3
+}
+```
+
+```json
+{
+  "code": "too_many_login_attempts",
+  "message": "Too many failed login attempts. Try again later.",
+  "attempts_remaining": 0,
+  "retry_after_seconds": 412
+}
+```
+
+The `429` response also carries a `Retry-After` header. The limit applies to password login only; API keys and OIDC sign-in are unaffected.
+
+Users of tenants that authenticate through OIDC federation obtain their token from the `/api/v1/auth/*` flow instead; see [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant).
 
 If a request carries both an `Authorization: Bearer` token and an API key header, the bearer token is used and the API key is ignored.
 

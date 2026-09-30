@@ -40,6 +40,11 @@ from eneo.authentication.endpoint_access import (
     Authorization,
     endpoint_access,
 )
+from eneo.authentication.login_attempts import (
+    LoginAttempt,
+    clear_login_attempts,
+    count_login_attempt,
+)
 from eneo.main import config
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import validate_public_origin
@@ -248,7 +253,7 @@ async def _resolve_single_tenant_redirect_uri(
     response_model=AccessToken,
     name="Login",
     description="Authenticate with email and password (OAuth2 password flow).",
-    responses=responses.get_responses([401, 500]),
+    responses=responses.get_responses([401, 429, 500]),
 )
 @endpoint_access(
     authentication=Authentication.PUBLIC,
@@ -305,11 +310,56 @@ async def user_login_with_email_and_password(
             headers={"X-Correlation-ID": correlation_id},
         )
 
+    redis_client = container.redis_client()
+    attempt: LoginAttempt | None
+    try:
+        attempt = await count_login_attempt(redis_client, email)
+    except RateLimitServiceUnavailableError:
+        # Without Redis the limit cannot be kept; logging in must still work.
+        logger.warning(
+            "Login attempt limiter unavailable; attempt not counted",
+            extra={"correlation_id": correlation_id, "auth_method": "password"},
+        )
+        attempt = None
+
+    if attempt is not None and not attempt.allowed:
+        logger.warning(
+            "Login refused: too many failed attempts",
+            extra={
+                "correlation_id": correlation_id,
+                "auth_method": "password",
+                "email": email,
+                "source_ip": source_ip,
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "code": "too_many_login_attempts",
+                "message": "Too many failed login attempts. Try again later.",
+                "attempts_remaining": 0,
+                "retry_after_seconds": attempt.retry_after_seconds,
+            },
+            headers={
+                "X-Correlation-ID": correlation_id,
+                "Retry-After": str(attempt.retry_after_seconds),
+            },
+        )
+
     # Authenticate user
     service = container.user_service()
 
     try:
         result = await service.login(email, password, correlation_id, source_ip)
+
+        if attempt is not None:
+            try:
+                await clear_login_attempts(redis_client, email)
+            except RateLimitServiceUnavailableError:
+                logger.warning(
+                    "Login attempt limiter unavailable; earlier attempts not cleared",
+                    extra={"correlation_id": correlation_id},
+                )
 
         # Log successful authentication
         logger.info(
@@ -336,9 +386,17 @@ async def user_login_with_email_and_password(
                 "error": str(e),
             },
         )
+        detail: dict[str, object] = {
+            "code": "invalid_credentials",
+            "message": "Invalid credentials",  # Generic message for security
+        }
+        if attempt is not None:
+            detail["attempts_remaining"] = attempt.remaining
+            if attempt.remaining == 0:
+                detail["retry_after_seconds"] = attempt.retry_after_seconds
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",  # Generic message for security
+            detail=detail,
             headers={"X-Correlation-ID": correlation_id},
         )
 
