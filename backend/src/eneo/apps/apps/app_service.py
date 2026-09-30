@@ -357,7 +357,7 @@ class AppService:
         app = space.get_app(app_id=app_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
 
-        if not actor.can_read_apps():
+        if not actor.can_read_app(app=app):
             raise UnauthorizedException(
                 "You do not have permission to read apps in this space.",
                 code="forbidden_action",
