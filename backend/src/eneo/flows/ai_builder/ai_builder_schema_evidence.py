@@ -25,6 +25,7 @@ from eneo.flows.domain.canonical_json_hash import (
 )
 from eneo.flows.output_processing import (
     TypedIOValidationException,
+    normalize_pasted_schema,
     schema_yields_top_level_object,
     validate_schema_syntax,
 )
@@ -198,16 +199,10 @@ def parse_schema_candidate(raw_json: str) -> JsonObject | None:
         raise
     except ValueError:
         return None
+    candidate = normalize_pasted_schema(candidate)
     try:
         validate_schema_syntax(candidate, label="schema_evidence")
-    except (RecursionError, TypedIOValidationException) as error:
-        if isinstance(error, RecursionError):
-            raise SchemaLimitExceeded(
-                reason="depth",
-                max_value=SCHEMA_MAX_DEPTH,
-                actual_value=None,
-                schema_shaped=True,
-            ) from error
+    except TypedIOValidationException:
         return None
     if not schema_yields_top_level_object(candidate):
         return None

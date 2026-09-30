@@ -19,6 +19,7 @@ from eneo.audit.domain.outcome import Outcome
 from eneo.audit.domain.repositories.audit_log_repository import AuditLogRepository
 from eneo.flows.domain.step_config import clean_inactive_step_config
 from eneo.flows.flow_validators import (
+    retained_contracts,
     validate_steps,
     validate_variable_alias_collisions,
 )
@@ -55,7 +56,11 @@ async def repair_flow_step_config(
             if steps == flow.steps:
                 return "unchanged"
             try:
-                validate_steps(steps, metadata_json=flow.metadata_json)
+                validate_steps(
+                    steps,
+                    metadata_json=flow.metadata_json,
+                    retained=retained_contracts(steps, flow.steps),
+                )
                 validate_variable_alias_collisions(
                     steps=steps, metadata_json=flow.metadata_json
                 )

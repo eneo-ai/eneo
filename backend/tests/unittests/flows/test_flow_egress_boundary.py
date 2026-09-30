@@ -66,7 +66,10 @@ ALLOWED_THIRD_PARTY = {
     "docx2python": "Word documents, in memory",
     "fastapi": "the HTTP API flows serve",
     "httpx": "passive types and exceptions only, checked separately below",
-    "jsonschema": "validation",
+    "jsonschema": (
+        "validation; its own retrieval of a remote $ref is refused by the registry "
+        "in eneo.flows.output_processing, the only module that may import it"
+    ),
     "litellm": "model provider SDK; the destination is the tenant's provider setting",
     "lxml": "XML, in memory",
     "magic": "file type sniffing, in memory",
@@ -74,6 +77,12 @@ ALLOWED_THIRD_PARTY = {
     "opentelemetry": "telemetry to the operator's collector",
     "pydantic": "validation",
     "redis": "the operator's Redis; not a flow-author destination",
+    "referencing": (
+        "reference resolution for jsonschema. It has no network code: retrieval is a "
+        "callback the registry in eneo.flows.output_processing supplies and that "
+        "refuses every URI (test_schema_references); only that module may import it "
+        "(test_flow_architecture_guards)"
+    ),
     "sqlalchemy": "the operator's database",
     "sse_starlette": "server-sent events the API serves",
     "typing_extensions": "typing",

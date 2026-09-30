@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Literal, NotRequired, TypedDict, cast
 
 import jsonschema
-from jsonschema.validators import validator_for
 
 if TYPE_CHECKING:
     from eneo.flows.ai_builder.ai_builder_flow_review import ReviewEditScope
@@ -34,6 +33,8 @@ from eneo.flows.ai_builder.ai_builder_tool_parsing import (
     extract_assumptions,
     extract_plan_rationale,
 )
+from eneo.flows.output_processing import build_schema_validator, validate_schema_syntax
+from eneo.main.exceptions import TypedIOValidationException
 
 if TYPE_CHECKING:
     from eneo.flows.domain.flow import FlowStep
@@ -208,13 +209,10 @@ def validate_native_strict_schema(parameters: dict[str, Any]) -> None:
     keywords. A schema outside it is rejected before the request, so a provider
     rejection means the provider, not the schema.
     """
-    validator_class = validator_for(parameters)
     try:
-        validator_class.check_schema(parameters)
-    except jsonschema.SchemaError as error:
-        raise NativeStrictSchemaError(
-            f"invalid JSON Schema: {error.message}"
-        ) from error
+        validate_schema_syntax(parameters, label="tool parameters")
+    except TypedIOValidationException as error:
+        raise NativeStrictSchemaError(f"invalid JSON Schema: {error}") from error
     if parameters.get("type") != "object":
         raise NativeStrictSchemaError("tool parameters must be an object schema")
     _check_native_strict_node(parameters, path="$")
@@ -291,9 +289,8 @@ def validate_propose_flow_tool_arguments(
     tool_schema: ProposalToolSchema,
 ) -> None:
     parameters = tool_schema["function"]["parameters"]
-    validator_class = validator_for(parameters)
-    validator_class.check_schema(parameters)
-    error = next(validator_class(parameters).iter_errors(arguments), None)
+    validate_schema_syntax(parameters, label="tool parameters")
+    error = next(build_schema_validator(parameters).iter_errors(arguments), None)
     if error is None:
         return
 

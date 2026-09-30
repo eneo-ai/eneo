@@ -2567,6 +2567,13 @@ def _template_fill_over_contract(contract: dict, *, binding: str) -> list[FlowSt
     ]
 
 
+# The `$ref`s of the fixtures below are local: they must resolve, or the contract is
+# refused by the contract owner (a reference to nowhere) before the field is looked at.
+_LOCAL_TARGETS = {
+    "$defs": {name: {"type": "string"} for name in ("title", "details", "result", "t")}
+}
+
+
 def _nested(leaf: dict, *, above: dict | None = None) -> dict:
     """A step result with `leaf` at `details.title`; `above` overrides `details`."""
 
@@ -2614,7 +2621,8 @@ def test_template_fill_publish_rejects_a_field_without_exactly_one_type(
     # omission. Keywords only narrow a node, so exactly one non-null type
     # excludes null; without it, nothing on the node does.
     steps = _template_fill_over_contract(
-        _nested(leaf), binding="{{step_1.output.structured.details.title}}"
+        {**_nested(leaf), **_LOCAL_TARGETS},
+        binding="{{step_1.output.structured.details.title}}",
     )
 
     with pytest.raises(FlowStepValidationError) as exc_info:
@@ -2703,7 +2711,8 @@ def test_template_fill_publish_rejects_a_field_under_an_object_without_one_type(
     contract: dict,
 ) -> None:
     steps = _template_fill_over_contract(
-        contract, binding="{{step_1.output.structured.details.title}}"
+        {**contract, **_LOCAL_TARGETS},
+        binding="{{step_1.output.structured.details.title}}",
     )
 
     with pytest.raises(FlowStepValidationError) as exc_info:
@@ -3265,9 +3274,9 @@ def test_the_path_made_ok_repairs_a_contract_whose_required_extra_key_is_typed_b
 def test_a_remote_ref_is_never_resolved_by_publish_or_the_compiler(
     keyword: str, where: str
 ) -> None:
-    # jsonschema fetches a remote $ref when it validates. Neither the publish
-    # remedy nor the witness check may validate a schema that holds one, so a
-    # real listener sees no request at all.
+    # jsonschema fetches a remote $ref when it validates. Neither the contract
+    # check, the publish remedy nor the witness check may fetch one, so a real
+    # listener sees no request at all.
     path = ("details", "title")
     with local_listener() as (base, requested):
         ref = {keyword: f"{base}/x"}
@@ -3285,10 +3294,22 @@ def test_a_remote_ref_is_never_resolved_by_publish_or_the_compiler(
         )
         with pytest.raises(FlowStepValidationError) as exc_info:
             validate_steps(steps, require_complete_template_fill_config=True)
+        issues = collect_step_graph_issues(
+            flow_step_validation_views_from_flow_steps(steps),
+            require_complete_template_fill_config=True,
+        )
         made = template_bound_path_made_ok(contract, path)
 
-    # The advice follows the leaf's type alone: no validator runs on it.
-    assert "only if the field accepts one" in str(exc_info.value)
+    # The contract owner refuses the reference first, once, with its own code. The
+    # publish advice, which follows the leaf's type alone, is a second fact about
+    # the same flow and still runs without a validator.
+    assert exc_info.value.code == "invalid_output_contract_schema"
+    assert exc_info.value.step_order == 1
+    assert keyword in str(exc_info.value)
+    assert [issue.code.value for issue in issues].count(
+        "invalid_output_contract_schema"
+    ) == 1
+    assert any("only if the field accepts one" in issue.message for issue in issues)
     assert made is None
     assert requested == []
 
@@ -3450,7 +3471,7 @@ def test_the_publish_remedy_for_a_missing_value_fits_the_type_of_the_field(
     # or boolean is given a valid value, and a deliberately blank template
     # binding is how the placeholder stays empty.
     steps = _template_fill_over_contract(
-        _nested(leaf, above={"required": []}),
+        {**_nested(leaf, above={"required": []}), **_LOCAL_TARGETS},
         binding="{{step_1.output.structured.details.title}}",
     )
 

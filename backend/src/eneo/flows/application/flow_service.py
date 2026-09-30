@@ -47,6 +47,7 @@ from eneo.flows.flow_security_classification import (
 )
 from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
 from eneo.flows.flow_validators import (
+    retained_contracts,
     validate_step_count,
     validate_steps,
     validate_variable_alias_collisions,
@@ -252,7 +253,11 @@ class FlowService:
             )
         # A step's own defect is reported before the classification, which
         # reads its configuration (create and publish validate first too).
-        self._validate_steps(next_steps, metadata_json=next_metadata)
+        self._validate_steps(
+            next_steps,
+            metadata_json=next_metadata,
+            retained=retained_contracts(next_steps, existing.steps),
+        )
         self._validate_variable_alias_collisions(
             steps=next_steps,
             metadata_json=next_metadata,
@@ -559,12 +564,14 @@ class FlowService:
         metadata_json: FlowPersistedJsonObject | None = None,
         require_complete_template_fill_config: bool = False,
         prompt_templates: Mapping[int, str] | None = None,
+        retained: frozenset[tuple[int, str]] = frozenset(),
     ) -> None:
         validate_steps(
             steps,
             metadata_json=metadata_json,
             require_complete_template_fill_config=require_complete_template_fill_config,
             prompt_templates=prompt_templates,
+            retained=retained,
         )
 
     def _validate_variable_alias_collisions(

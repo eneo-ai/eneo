@@ -21,6 +21,7 @@ from eneo.flows.citation_sidecar import (
     CITATION_MODE_OFF,
     resolve_citation_mode,
 )
+from eneo.flows.domain.canonical_json_hash import json_values_differ
 from eneo.flows.domain.flow import (
     FLOW_STEP_RETRIEVAL_POLICY_KEY,
     FlowPersistedJsonObject,
@@ -138,6 +139,7 @@ __all__ = [
     "FLOW_AUDIO_TRANSCRIPTION_REQUIRED",
     "collect_step_graph_issues",
     "flow_run_input",
+    "retained_contracts",
     "run_input_alias_refusal",
     "step_limit_issue",
     "takes_runtime_files",
@@ -169,20 +171,44 @@ def validate_step_count(step_count: int) -> None:
         raise _to_exception(issue)
 
 
+def retained_contracts(
+    steps: Sequence[FlowStep], stored_steps: Sequence[FlowStep]
+) -> frozenset[tuple[int, str]]:
+    """The (step order, field) of every contract a save leaves as it was stored, as JSON."""
+    stored = {step.id: step for step in stored_steps if step.id is not None}
+    retained: set[tuple[int, str]] = set()
+    for step in steps:
+        before = stored.get(step.id) if step.id is not None else None
+        if before is None:
+            continue
+        for field in ("input_contract", "output_contract"):
+            contract = getattr(step, field)
+            if contract is not None and not json_values_differ(
+                getattr(before, field), contract
+            ):
+                retained.add((step.step_order, field))
+    return frozenset(retained)
+
+
 def validate_steps(
     steps: list[FlowStep],
     *,
     metadata_json: FlowPersistedJsonObject | None = None,
     require_complete_template_fill_config: bool = False,
     prompt_templates: Mapping[int, str] | None = None,
+    retained: frozenset[tuple[int, str]] = frozenset(),
 ) -> None:
-    """Validate the step graph; ``prompt_templates`` are the assistant prompts by step order."""
+    """Validate the step graph; ``prompt_templates`` are the assistant prompts by step order.
+
+    ``retained`` names the contracts (see retained_contracts) that keep the rules they
+    were saved under."""
     validate_step_graph(
         flow_step_validation_views_from_flow_steps(
             steps, prompt_templates=prompt_templates
         ),
         metadata_json=metadata_json,
         require_complete_template_fill_config=require_complete_template_fill_config,
+        retained=retained,
     )
 
 
@@ -191,11 +217,13 @@ def validate_step_graph(
     *,
     metadata_json: FlowPersistedJsonObject | None = None,
     require_complete_template_fill_config: bool = False,
+    retained: frozenset[tuple[int, str]] = frozenset(),
 ) -> None:
     issues = collect_step_graph_issues(
         steps,
         metadata_json=metadata_json,
         require_complete_template_fill_config=require_complete_template_fill_config,
+        retained=retained,
     )
     if issues:
         raise _to_exception(issues[0])
@@ -206,6 +234,7 @@ def collect_step_graph_issues(
     *,
     metadata_json: FlowPersistedJsonObject | None = None,
     require_complete_template_fill_config: bool = False,
+    retained: frozenset[tuple[int, str]] = frozenset(),
 ) -> list[FlowStepGraphIssue]:
     if not steps:
         return []
@@ -488,6 +517,7 @@ def collect_step_graph_issues(
                 contract=step.input_contract,
                 label=f"Step {step.step_order} input_contract",
                 step_order=step.step_order,
+                retained=(step.step_order, "input_contract") in retained,
             )
             if input_contract_valid:
                 _capture_flow_step_validation(
@@ -509,6 +539,7 @@ def collect_step_graph_issues(
                 contract=step.output_contract,
                 label=f"Step {step.step_order} output_contract",
                 step_order=step.step_order,
+                retained=(step.step_order, "output_contract") in retained,
             )
             if output_contract_valid:
                 _capture_flow_step_validation(
@@ -705,15 +736,17 @@ def _capture_contract_syntax(
     contract: FlowPersistedJsonObject,
     label: str,
     step_order: int,
+    retained: bool,
 ) -> bool:
     try:
-        validate_schema_syntax(contract, label=label)
+        validate_schema_syntax(contract, label=label, retained=retained)
     except TypedIOValidationException as exc:
         issues.append(
             _flow_step_issue(
                 code=code,
                 message=str(exc),
                 step_order=step_order,
+                context=exc.context,
             )
         )
         return False

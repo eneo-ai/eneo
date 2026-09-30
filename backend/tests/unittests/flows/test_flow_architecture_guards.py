@@ -1121,3 +1121,87 @@ def test_flow_api_provider_wiring_uses_typed_container_providers():
         "no private provider pass-through helpers, and no direct Flow service "
         "construction: " + ", ".join(offenders)
     )
+
+
+SCHEMA_ENGINE_OWNER = "output_processing.py"
+SCHEMA_ENGINE_PACKAGES = frozenset({"jsonschema", "referencing"})
+SCHEMA_ENGINE_ALLOWED_NAMES = frozenset({"ValidationError"})
+
+
+def _schema_engine_uses(tree: ast.AST) -> list[int]:
+    """Lines that reach the JSON Schema engine other than through its error type."""
+    lines: list[int] = []
+    aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "jsonschema":
+                    aliases.add(alias.asname or alias.name)
+                elif alias.name.split(".")[0] in SCHEMA_ENGINE_PACKAGES:
+                    lines.append(node.lineno)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            package = node.module.split(".")[0]
+            if package == "referencing" or (
+                package == "jsonschema"
+                and (
+                    node.module != "jsonschema"
+                    or any(
+                        a.name not in SCHEMA_ENGINE_ALLOWED_NAMES for a in node.names
+                    )
+                )
+            ):
+                lines.append(node.lineno)
+        elif isinstance(node, ast.Call):
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+            if name in {"import_module", "__import__"} and any(
+                isinstance(arg, ast.Constant)
+                and isinstance(arg.value, str)
+                and arg.value.split(".")[0] in SCHEMA_ENGINE_PACKAGES
+                for arg in node.args
+            ):
+                lines.append(node.lineno)
+        elif (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in aliases
+            and node.attr not in SCHEMA_ENGINE_ALLOWED_NAMES
+        ):
+            lines.append(node.lineno)
+    return sorted(lines)
+
+
+def test_only_the_contract_owner_uses_the_schema_engine():
+    """Every flows JSON Schema validator comes from build_schema_validator."""
+    offenders = [
+        f"{path.relative_to(FLOW_SOURCE_ROOT)}:{lineno}"
+        for path in _flow_python_files()
+        if path.name != SCHEMA_ENGINE_OWNER or path.parent != FLOW_SOURCE_ROOT
+        for lineno in _schema_engine_uses(ast.parse(path.read_text()))
+    ]
+    assert offenders == []
+
+
+def test_schema_engine_scanner_detects_every_way_to_build_a_validator():
+    tree = ast.parse(
+        "import jsonschema\n"
+        "jsonschema.validate({}, {})\n"
+        "jsonschema.Draft7Validator({})\n"
+        "import jsonschema as engine\n"
+        "engine.validators.validator_for({})\n"
+        "import jsonschema.validators\n"
+        "from jsonschema import Draft202012Validator\n"
+        "from jsonschema import ValidationError, validate\n"
+        "from jsonschema.validators import validator_for\n"
+        "import referencing\n"
+        "from referencing import Registry\n"
+        "from referencing.jsonschema import DRAFT202012\n"
+        "importlib.import_module('jsonschema.validators')\n"
+    )
+    assert _schema_engine_uses(tree) == [2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+    allowed = ast.parse(
+        "import jsonschema\n"
+        "from jsonschema import ValidationError\n"
+        "def f(error: jsonschema.ValidationError): ...\n"
+    )
+    assert _schema_engine_uses(allowed) == []

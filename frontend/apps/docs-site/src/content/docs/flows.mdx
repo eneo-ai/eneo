@@ -181,6 +181,56 @@ When a user records audio in the run dialog:
 
 If a published flow exposes form fields, the client sends those values inside `input_payload_json` using the published field names as keys. The backend validates the values against the published field types and required flags.
 
+### JSON Schema contract references
+
+Step `input_contract` and `output_contract` use JSON Schema 2020-12. A contract
+is one self-contained document:
+
+- `$id` is not allowed anywhere in a contract.
+- `$schema` may be left out. If present, it must be exactly
+  `https://json-schema.org/draft/2020-12/schema`.
+- `$ref` and `$dynamicRef` must point to a schema inside the same contract:
+  `#`, a pointer such as `#/$defs/value`, or a local `$anchor` or
+  `$dynamicAnchor` such as `#value`. A pointer into other content, such as
+  `default` or `examples`, is not a schema and is refused.
+
+Saving, publishing, importing, and the AI Builder reject a contract that breaks
+these rules. The schema error names the step and the JSON pointer of the
+keyword.
+
+A JSON Schema you paste or attach for the AI Builder may name draft 6, 7, or
+2019-09 in a top-level `$schema`. It becomes a 2020-12 contract, with that
+`$schema` dropped, only if every keyword in it is one of these, which all three
+drafts read as 2020-12 does: `type`, `properties`, `required`, `enum`, `const`,
+`items` with one schema, `additionalProperties`, `patternProperties`,
+`propertyNames`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`,
+`multipleOf`, `minLength`, `maxLength`, `pattern`, `format`, `minItems`,
+`maxItems`, `uniqueItems`, `minProperties`, `maxProperties`, `allOf`, `anyOf`,
+`oneOf`, `not`, `if`, `then`, `else` (not in draft 6), `title`, `description`,
+`default`, `examples`, `readOnly`, and `writeOnly`. A schema with anything else,
+such as `$id`, `$ref`, `definitions`, `$defs`, `dependencies`, or `contains`,
+and any draft 4 or draft 3 schema, is not converted, and the Builder does not
+use it as a declared schema. A 2020-12 schema, or one without `$schema`, is
+checked by the rules above as it is.
+
+A contract that was saved before these rules and that a later save leaves
+unchanged, compared as JSON, does not stop that save, so a flow can still be
+renamed or edited elsewhere. Such a contract skips the rules above (no `$id`,
+the 2020-12 `$schema`, references inside the contract), but it is still checked
+against the 2020-12 metaschema, so a draft 7 contract that uses the array form
+of `items` is still refused. Changing the contract applies every rule to it.
+Publishing checks every contract.
+
+Remote references are never fetched. Validation opens no network connection and
+reads no file for a reference, a dialect, or a vocabulary. A contract saved
+before these rules keeps the draft its `$schema` names. Its references resolve
+only inside the contract, except that a reference to one of the JSON Schema
+metaschemas that ship with the server, such as
+`https://json-schema.org/draft/2020-12/schema`, resolves from the server's own
+copy. Saving such a reference is refused, unless the contract is a saved one
+left unchanged. If a stored contract has a reference that cannot be resolved, or
+cannot be evaluated at all, the step fails with `typed_io_contract_violation`.
+
 ### Binding references at publish
 
 Publish validates questions and source references against the persisted form,

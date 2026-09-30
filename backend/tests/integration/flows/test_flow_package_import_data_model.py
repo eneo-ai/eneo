@@ -110,6 +110,7 @@ from eneo.flows.flow_resource_bindings import (
 from eneo.json_types import JsonObject
 from eneo.main.config import Settings, set_settings
 from eneo.main.container.container import Container
+from eneo.main.exceptions import BadRequestException
 from eneo.main.models import ModelId
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
@@ -406,7 +407,13 @@ def _package_bytes(*, require_model: bool = False) -> bytes:
     return _zip_docs(_package_docs(require_model=require_model))
 
 
-def _package_docs(*, require_model: bool = False) -> dict[str, JsonObject]:
+def _package_docs(
+    *,
+    require_model: bool = False,
+    contract_field: str | None = None,
+    contract: JsonObject | None = None,
+    producer_contract: JsonObject | None = None,
+) -> dict[str, JsonObject]:
     model_slot_ref = _model_slot_ref()
     spec = FlowDraftSpecCore(
         flow_name="Route Import Demo",
@@ -422,6 +429,26 @@ def _package_docs(*, require_model: bool = False) -> dict[str, JsonObject]:
             )
         ],
     )
+    if contract_field is not None:
+        spec.steps[0].output_type = OutputType.JSON
+        spec.steps[0].output_contract = producer_contract or {
+            "type": "object",
+            "properties": {"value": {"type": "object"}},
+        }
+        spec.steps.append(
+            StepSpec(
+                plan_step_ref="validate",
+                name="Validate",
+                assistant_spec=spec.steps[0].assistant_spec.model_copy(),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.JSON,
+                input_contract=contract if contract_field == "input_contract" else None,
+                output_contract=contract
+                if contract_field == "output_contract"
+                else None,
+            )
+        )
     requirements = FlowPackageRequirementSet(
         schema_version=1,
         requirements=[
@@ -551,6 +578,113 @@ def _patch_import_access(
         "build_flow_package_import_planner_candidates_for_space",
         fake_candidate_loader,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("field", ["input_contract", "output_contract"])
+@pytest.mark.parametrize(
+    ("value_schema", "refused_pointer"),
+    [
+        ({"$ref": "#/$defs/value"}, None),
+        ({"$ref": "https://example.com/schema"}, "/properties/value/$ref"),
+        (
+            {
+                "$schema": "http://json-schema.org/draft-07/schema#",
+                "dependencies": {"x": {"$ref": "https://example.com/schema"}},
+            },
+            "/properties/value/$schema",
+        ),
+    ],
+    ids=["same-document", "remote-reference", "nested-dialect"],
+)
+async def test_import_contract_references_stay_in_document(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+    monkeypatch,
+    field,
+    value_schema,
+    refused_pointer,
+) -> None:
+    from eneo.flows.output_processing import validate_against_contract
+
+    refused = refused_pointer is not None
+    contract: JsonObject = {
+        "type": "object",
+        "$defs": {"value": {"type": "object"}},
+        "properties": {"value": value_schema},
+    }
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, f"schema-ref-model-{uuid4()}")
+        space = await space_factory(session, f"Schema refs {uuid4()}", [model.id])
+        await _add_space_membership(
+            session=session, space_id=space.id, user_id=admin_user.id
+        )
+        _patch_import_access(
+            monkeypatch,
+            target_space_id=space.id,
+            candidates=FlowPackageImportPlannerCandidates(
+                models=[_model_candidate(model.id)]
+            ),
+        )
+        package = base64.b64encode(
+            _zip_docs(
+                _package_docs(
+                    require_model=True,
+                    contract_field=field,
+                    contract=contract,
+                    producer_contract=contract
+                    if not refused and field == "input_contract"
+                    else None,
+                )
+            )
+        ).decode("ascii")
+        if refused:
+            with pytest.raises(BadRequestException) as exc_info:
+                await flow_package_router.import_flow_package_as_draft(
+                    id=space.id,
+                    import_request=_import_request(
+                        package, selected_bindings=[_model_binding_request(model.id)]
+                    ),
+                    request=_request(),
+                    container=cast(Container, container),
+                )
+            assert exc_info.value.code == FlowPackageErrorCode.FLOW_DRAFT_INVALID.value
+            assert exc_info.value.context == {"reason": f"invalid_{field}_schema"}
+            assert "Step 2" in str(exc_info.value)
+            assert refused_pointer in str(exc_info.value)
+            assert (
+                await session.scalar(
+                    sa.select(sa.func.count(Flows.id)).where(Flows.space_id == space.id)
+                )
+                == 0
+            )
+        else:
+            response = await flow_package_router.import_flow_package_as_draft(
+                id=space.id,
+                import_request=_import_request(
+                    package, selected_bindings=[_model_binding_request(model.id)]
+                ),
+                request=_request(),
+                container=cast(Container, container),
+            )
+            assert not isinstance(response, JSONResponse)
+            service = container.flow_service()
+            flow = await service.get_flow(response.flow_id)
+            assert getattr(flow.steps[1], field) == contract
+            await service.update_flow(flow_id=response.flow_id, steps=flow.steps)
+            published = await service.publish_flow(flow_id=response.flow_id)
+            version = await container.flow_version_repo().get(
+                flow_id=response.flow_id,
+                version=published.published_version,
+                tenant_id=admin_user.tenant_id,
+            )
+            stored_contract = version.definition_json["steps"][1][field]
+            assert stored_contract == contract
+            validate_against_contract({"value": {}}, stored_contract, label="Step 2")
 
 
 @pytest.mark.asyncio
