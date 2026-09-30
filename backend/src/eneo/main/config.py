@@ -6,10 +6,16 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-from pydantic import Field, computed_field, field_validator, model_validator
+from pydantic import (
+    Field,
+    ValidationError,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from eneo.main.removed_env import check_removed_variables
+from eneo.main.removed_env import UPGRADE_GUIDE_URL, check_removed_variables
 
 # Version manifest lookup:
 # - Docker: Package is installed with --no-editable, so __file__ points to site-packages.
@@ -990,15 +996,38 @@ class Settings(BaseSettings):
 _settings: Optional[Settings] = None
 
 
+def _describe_configuration_errors(error: ValidationError) -> list[str]:
+    """One line per problem, naming the environment variable, never its value."""
+    lines: list[str] = []
+    for problem in error.errors(include_url=False, include_input=False):
+        variable = "_".join(str(part) for part in problem["loc"]).upper()
+        message = problem["msg"].removeprefix("Value error, ")
+        lines.append(
+            message if message.startswith(variable) else f"{variable}: {message}"
+        )
+    return lines
+
+
 def get_settings() -> Settings:
     """Get settings singleton, creating it if needed.
+
+    Exits with one readable message per configuration problem instead of a
+    traceback, so an operator reading the service log sees what to change.
 
     Returns:
         Settings: The application settings instance.
     """
     global _settings
     if _settings is None:
-        _settings = Settings()  # pyright: ignore[reportCallIssue]
+        try:
+            _settings = Settings()  # pyright: ignore[reportCallIssue]
+        except ValidationError as error:
+            logging.error(
+                "Eneo cannot start until its configuration is corrected:\n  %s\nSee %s",
+                "\n  ".join(_describe_configuration_errors(error)),
+                UPGRADE_GUIDE_URL,
+            )
+            sys.exit(1)
     return _settings
 
 

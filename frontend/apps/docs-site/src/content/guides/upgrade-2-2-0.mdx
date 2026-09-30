@@ -73,6 +73,7 @@ session issued before that moment.
 | Both the old and the new name are set             | Starts; warns that the old name is ignored      | Starts; warns that the old name is ignored |
 | `ENEO_SUPER_DUPER_API_KEY` or its old name is set | Starts; logs an error that it is no longer read | —                                          |
 | `ENEO_BACKEND_URL` is not set                     | —                                               | Does not start; says that it is required   |
+| `JWT_EXPIRY_TIME` is above `43200` (30 days)      | Does not start; names the limit and `1440`      | —                                          |
 
 A service that does not start logs, for example:
 

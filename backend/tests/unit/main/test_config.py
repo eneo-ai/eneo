@@ -194,3 +194,21 @@ def test_redis_username_requires_a_password() -> None:
                 "redis_password": None,
             }
         )
+
+
+def test_get_settings_exits_with_a_readable_message(monkeypatch, caplog) -> None:
+    from eneo.main import config
+
+    monkeypatch.setattr(config, "_settings", None)
+    monkeypatch.setenv("JWT_EXPIRY_TIME", "86400")
+
+    with pytest.raises(SystemExit) as exc_info:
+        with caplog.at_level("ERROR"):
+            config.get_settings()
+
+    assert exc_info.value.code == 1
+    message = caplog.text
+    assert "Eneo cannot start until its configuration is corrected" in message
+    assert "  JWT_EXPIRY_TIME is the session lifetime in minutes" in message
+    assert "86400" not in message
+    assert "Traceback" not in message
