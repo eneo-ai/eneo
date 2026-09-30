@@ -398,6 +398,7 @@ NonPlanKind: TypeAlias = Literal[
     "template_has_too_many_placeholders",
     "form_field_conflicts_with_run_input",
     "edit_blocked_by_custom_underlag",
+    "edit_blocked_by_unsupported_step",
 ]
 RequiredAction: TypeAlias = Literal[
     "none",

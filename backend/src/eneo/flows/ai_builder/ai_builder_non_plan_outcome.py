@@ -292,9 +292,29 @@ _USER_ACTION_MESSAGES: Final[dict[NonPlanKind, dict[str, str]]] = {
             "and try again."
         ),
     },
+    "edit_blocked_by_unsupported_step": {
+        "sv": (
+            "Steget {names} är av en typ som jag inte kan ändra här. Öppna "
+            "steget i stegredigeraren för att ändra det."
+        ),
+        "en": (
+            "The step {names} is of a kind I can't edit here. Open it in the "
+            "step editor to change it."
+        ),
+    },
 }
 # The same answers when they name more than one thing.
 _SEVERAL_NAMES_MESSAGES: Final[dict[NonPlanKind, dict[str, str]]] = {
+    "edit_blocked_by_unsupported_step": {
+        "sv": (
+            "Stegen {names} är av en typ som jag inte kan ändra här. Öppna "
+            "stegen i stegredigeraren för att ändra dem."
+        ),
+        "en": (
+            "The steps {names} are of a kind I can't edit here. Open them in "
+            "the step editor to change them."
+        ),
+    },
     "form_field_conflicts_with_run_input": {
         "sv": (
             "Formulärfälten {names} har samma namn som det flödet tar emot när det "
@@ -339,6 +359,37 @@ def user_action_answer(
         outcome=outcome,
         codes=frozenset({failure_code}),
     )
+
+
+_NO_EDIT_PROPOSALS_WHILE_THEY_EXIST: Final[dict[str, str]] = {
+    "sv": "Så länge de stegen finns kan jag inte föreslå ändringar i det här flödet.",
+    "en": "I can't propose edits to this flow while those steps exist.",
+}
+
+
+def saved_steps_not_editable_answer(
+    names: Sequence[str],
+    *,
+    ui_language: str | None,
+    edit_asked_for_another_step: bool = False,
+) -> ProposalAnswer:
+    """The answer for a saved flow the Builder can inspect but not edit.
+
+    A request to edit some other step is refused too, and says so: the steps
+    named are not the only thing standing in the way.
+    """
+
+    outcome = non_plan_outcome(
+        "edit_blocked_by_unsupported_step", "edit_in_step_editor", affected=names
+    )
+    language = "en" if _uses_english(ui_language) else "sv"
+    messages = _SEVERAL_NAMES_MESSAGES if len(names) > 1 else _USER_ACTION_MESSAGES
+    answer = messages[outcome.kind][language].format(
+        names=_name_list(outcome.affected, outcome.affected_remaining, language)
+    )
+    if edit_asked_for_another_step:
+        answer = f"{answer} {_NO_EDIT_PROPOSALS_WHILE_THEY_EXIST[language]}"
+    return ProposalAnswer(answer=answer, outcome=outcome)
 
 
 def _name_list(names: Sequence[str], remaining: int, language: str) -> str:

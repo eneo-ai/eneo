@@ -639,12 +639,15 @@ async def _send_builder_message(
     file_ids: list[str] | None = None,
     question_answer: dict[str, object] | None = None,
     acknowledge_duplicate_provider_spend: bool = False,
+    edit_context: dict[str, object] | None = None,
 ) -> list[dict[str, object]]:
     payload: dict[str, object] = {
         "client_turn_id": str(client_turn_id or uuid4()),
         "message": message,
         "ui_language": "sv",
     }
+    if edit_context is not None:
+        payload["edit_context"] = edit_context
     if acknowledge_duplicate_provider_spend:
         payload["acknowledge_duplicate_provider_spend"] = True
     if file_ids is not None:

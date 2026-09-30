@@ -54,6 +54,8 @@ In edit sessions, changes to a step's input source, input type, or selected form
 
 Existing Flow steps are preserved unless the approved edit proposal explicitly includes a modified version of the step or lists the step for removal.
 
+The Builder cannot edit a saved Flow that has a step which fetches data over HTTP, takes an image as input, or sends its result over HTTP. The Builder asks its usual questions first; when it would propose the edit, it instead answers with the names of those steps and a pointer to the step editor, where they are changed by hand, and no plan is proposed. A request to edit another step of the same Flow is refused the same way and the answer says that no edits can be proposed while those steps exist.
+
 ## Typical workflow
 
 1. Start an AI Builder session in a space.

@@ -58,12 +58,14 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
 )
 from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
     persist_non_plan_turn,
+    saved_steps_not_editable_answer,
     stale_saved_step_revision_message,
     unsettled_text_answer,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderEditContext,
     AIBuilderStepEditIntent,
+    ResolvedAIBuilderEditContext,
     names_same_edit_target,
     resolve_plan_edit_context,
 )
@@ -75,7 +77,9 @@ from eneo.flows.ai_builder.ai_builder_planner_failure_events import (
 )
 from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     PlannerRequestPreparationInput,
+    PreparedTurnOutcome,
     ProposalPrepared,
+    SavedStepsNotEditablePrepared,
     ServerOutputPrepared,
     build_proposal_prepared,
     prepare_planner_request,
@@ -101,6 +105,7 @@ from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     dispatch_server_decision,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import (
+    SessionSendLease,
     SessionTurnAcceptance,
     SessionTurnPreflight,
 )
@@ -117,6 +122,9 @@ from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
 from eneo.flows.ai_builder.planning_state import (
     PlanningState,
     PlanningStatePayloadTooLargeError,
+)
+from eneo.flows.application.flow_authoring_snapshot import (
+    UnsupportedSavedStepsError,
 )
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.flow import FlowPersistedJsonObject
@@ -293,6 +301,112 @@ class AIBuilderPlanner:
         await self.repo.complete_session_turn(turn=turn, error=error)
         for event in events:
             yield event
+
+    async def _store_reading_of_user_text(
+        self,
+        *,
+        prepared_request: PreparedTurnOutcome,
+        conversation: list[ConversationMessage],
+        user_message: ConversationMessage,
+        session_id: UUID,
+        lease: SessionSendLease,
+    ) -> None:
+        """Store what reading the turn paid for, whatever the turn answers.
+
+        The classification boundary: every user message the reading covered
+        keeps its reading status, older ones included, so a later turn does not
+        read the same text again.
+        """
+
+        user_message.metadata = metadata_with_slot_classification(
+            user_message.metadata,
+            prepared_request.slot_classification_metadata,
+        )
+        status_changes = text_status_changes(
+            conversation,
+            prepared_request.slot_classification_metadata,
+            planning_state=prepared_request.planning_state,
+        )
+        restated = [
+            covered for covered in conversation if covered.message_id in status_changes
+        ]
+        for covered in restated:
+            covered.metadata = metadata_with_text_status(
+                covered.metadata, status_changes[covered.message_id]
+            )
+        await self.repo.append_session_messages(
+            session_id=session_id,
+            tenant_id=self.user.tenant_id,
+            conversation=[
+                *(covered for covered in restated if covered is not user_message),
+                user_message,
+            ],
+            lease=lease,
+        )
+
+    async def _answer_saved_steps_not_editable(
+        self,
+        *,
+        error: UnsupportedSavedStepsError,
+        turn: "SessionSendTurn",
+        conversation: list[ConversationMessage],
+        new_messages_start: int,
+        planning_state: PlanningState,
+        flow: "Flow | None",
+        usage_tracker: ProposalTurnTelemetry,
+        plan_edit_context: ResolvedAIBuilderEditContext | None,
+        request_id: str,
+    ) -> tuple[AIBuilderStreamEvent, ...]:
+        """End an edit turn on a saved flow the Builder can inspect but not edit.
+
+        Stored and completed like any answered turn; no proposal-provider call
+        follows (the turn's classification may already have run). A planning
+        state over its cap completes the turn through the typed size error.
+        """
+
+        logger.info(
+            "Saved flow has steps outside the authoring vocabulary",
+            extra={
+                "steps": [
+                    {"step_order": step.step_order, "fields": dict(step.fields)}
+                    for step in error.steps
+                ]
+            },
+        )
+        answer = saved_steps_not_editable_answer(
+            [step.name for step in error.steps],
+            ui_language=resolve_ui_language(conversation),
+            edit_asked_for_another_step=(
+                plan_edit_context is not None
+                and plan_edit_context.scope == "step"
+                and plan_edit_context.target_existing_step_ref
+                not in {step.existing_step_ref for step in error.steps}
+            ),
+        )
+        try:
+            events = await persist_non_plan_turn(
+                repo=self.repo,
+                turn=turn,
+                conversation=conversation,
+                new_messages_start=new_messages_start,
+                message=answer.answer,
+                base_assistant_metadata=build_assistant_message_metadata(conversation),
+                usage_tracker=usage_tracker,
+                planning_state=planning_state,
+                flow=flow,
+                outcome=answer.outcome,
+            )
+        except PlanningStatePayloadTooLargeError as size_error:
+            return (
+                await self._complete_planning_state_payload_too_large(
+                    turn=turn,
+                    error=size_error,
+                    request_id=request_id,
+                    usage_tracker=usage_tracker,
+                ),
+            )
+        await self.repo.complete_session_turn(turn=turn, error=None)
+        return events
 
     async def send_message(
         self,
@@ -641,33 +755,11 @@ class AIBuilderPlanner:
                 return
             requirements_state = prepared_request.requirements_state
             ui_language = prepared_request.ui_language
-            user_message.metadata = metadata_with_slot_classification(
-                user_message.metadata,
-                prepared_request.slot_classification_metadata,
-            )
-            # The classification boundary: every user message the reading
-            # covered keeps its reading status, older ones included.
-            status_changes = text_status_changes(
-                conversation,
-                prepared_request.slot_classification_metadata,
-                planning_state=prepared_request.planning_state,
-            )
-            restated = [
-                covered
-                for covered in conversation
-                if covered.message_id in status_changes
-            ]
-            for covered in restated:
-                covered.metadata = metadata_with_text_status(
-                    covered.metadata, status_changes[covered.message_id]
-                )
-            await self.repo.append_session_messages(
+            await self._store_reading_of_user_text(
+                prepared_request=prepared_request,
+                conversation=conversation,
+                user_message=user_message,
                 session_id=session_id,
-                tenant_id=self.user.tenant_id,
-                conversation=[
-                    *(covered for covered in restated if covered is not user_message),
-                    user_message,
-                ],
                 lease=lease,
             )
 
@@ -803,36 +895,60 @@ class AIBuilderPlanner:
                                 dispatch_result.new_planning_state_version
                             ),
                         )
-                        proposal_request = build_proposal_prepared(
-                            requirements_state=requirements_state,
-                            ui_language=ui_language,
-                            slot_classification_metadata=(
-                                planner_turn_request.slot_classification_metadata
-                            ),
-                            conversation=conversation,
-                            planning_state=(
-                                dispatch_result.proposal_continuation.planning_state
-                            ),
-                            attachment_context=planner_turn_request.attachment_context,
-                            flow_context=planner_turn_request.flow_context,
-                            # The continuation rebuilds the proposal prompt; the
-                            # run excerpts travel with it like on the first build.
-                            review_evidence=review_evidence,
-                            is_edit_mode=flow is not None,
-                            resource_catalog=planner_turn_request.resource_catalog,
-                            flow=flow,
-                            assistant_snapshots=assistant_snapshots,
-                            plan_edit_context=plan_edit_context,
-                            prior_plan_for_revision=prior_plan_for_revision,
-                            litellm_model=litellm_model,
-                            capacity=capacity,
-                            budget_policy=budget_policy,
-                            attachment_file_count=len(attachment_files or []),
-                            current_turn_start=new_messages_start,
-                            architecture_revised_this_turn=(
-                                dispatch_result.action_kind == "revise_architecture"
-                            ),
-                        )
+                        try:
+                            proposal_request = build_proposal_prepared(
+                                requirements_state=requirements_state,
+                                ui_language=ui_language,
+                                slot_classification_metadata=(
+                                    planner_turn_request.slot_classification_metadata
+                                ),
+                                conversation=conversation,
+                                planning_state=(
+                                    dispatch_result.proposal_continuation.planning_state
+                                ),
+                                attachment_context=planner_turn_request.attachment_context,
+                                flow_context=planner_turn_request.flow_context,
+                                # The continuation rebuilds the proposal prompt; the
+                                # run excerpts travel with it like on the first build.
+                                review_evidence=review_evidence,
+                                is_edit_mode=flow is not None,
+                                resource_catalog=planner_turn_request.resource_catalog,
+                                flow=flow,
+                                assistant_snapshots=assistant_snapshots,
+                                plan_edit_context=plan_edit_context,
+                                prior_plan_for_revision=prior_plan_for_revision,
+                                litellm_model=litellm_model,
+                                capacity=capacity,
+                                budget_policy=budget_policy,
+                                attachment_file_count=len(attachment_files or []),
+                                current_turn_start=new_messages_start,
+                                architecture_revised_this_turn=(
+                                    dispatch_result.action_kind == "revise_architecture"
+                                ),
+                            )
+                        except UnsupportedSavedStepsError as error:
+                            # The dispatcher already committed the planning state;
+                            # the answer is stored on the continuation turn, at the
+                            # version that commit produced.
+                            answered = await self._answer_saved_steps_not_editable(
+                                error=error,
+                                turn=continuation_turn,
+                                conversation=conversation,
+                                new_messages_start=(
+                                    dispatch_result.proposal_continuation.new_messages_start
+                                ),
+                                planning_state=(
+                                    dispatch_result.proposal_continuation.planning_state
+                                ),
+                                flow=flow,
+                                usage_tracker=usage_tracker,
+                                plan_edit_context=plan_edit_context,
+                                request_id=request_id,
+                            )
+                            for event in (*pending_events, *answered):
+                                yield event
+                            yield build_done_event()
+                            return
                         async for event in self._stream_proposal_events(
                             turn=continuation_turn,
                             conversation=conversation,
@@ -865,6 +981,21 @@ class AIBuilderPlanner:
                             error=error,
                         )
                     for event in pending_events:
+                        yield event
+                    yield build_done_event()
+                    return
+                case SavedStepsNotEditablePrepared() as refused:
+                    for event in await self._answer_saved_steps_not_editable(
+                        error=refused.error,
+                        turn=turn,
+                        conversation=conversation,
+                        new_messages_start=new_messages_start,
+                        planning_state=refused.planning_state,
+                        flow=flow,
+                        usage_tracker=usage_tracker,
+                        plan_edit_context=plan_edit_context,
+                        request_id=request_id,
+                    ):
                         yield event
                     yield build_done_event()
                     return

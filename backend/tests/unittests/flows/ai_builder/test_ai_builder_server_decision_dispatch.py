@@ -1558,3 +1558,73 @@ async def test_a_shown_card_stores_the_token_its_event_carries_outside_its_versi
     assert stored is not None
     assert stored.instance_token == card.instance_token
     assert stored.requirements_version == disclosure.requirements_version
+
+
+@pytest.mark.asyncio
+async def test_a_scoped_edit_continuing_into_an_unsupported_saved_step_answers_on_its_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real dispatcher commits the revision, then the continuation reaches
+    the proposal boundary: no proposal call, and the typed answer is stored on
+    the continuation turn at the version the dispatcher committed."""
+
+    from dataclasses import replace
+
+    from eneo.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
+    from tests.unittests.flows.ai_builder import (
+        test_ai_builder_planner as planner_helpers,
+    )
+    from tests.unittests.flows.ai_builder import (
+        test_ai_builder_unsupported_saved_steps as unsupported,
+    )
+
+    planner: AIBuilderPlanner = planner_helpers._make_planner()
+    state = _revised_pdf_state()
+    draft = _draft_for_state(state)
+    state.architecture_commit = finalize_architecture_commit(
+        draft, now=lambda: datetime(2026, 4, 24, tzinfo=timezone.utc)
+    )
+    prepared = replace(
+        planner_helpers._server_output_prepared(),
+        requirements_state=planner_helpers._requirements_state_confirmed(),
+        server_decision=ReviseArchitecture(architecture_commit=draft),
+        planning_state=state,
+        requirements_confirmation_required=False,
+    )
+    planner_helpers._configure_minimal_send_message(planner, monkeypatch, prepared)
+    flow = unsupported._flow(
+        unsupported._step(1, **unsupported._SHAPES["http_get_input"]),
+        unsupported._step(2),
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.resolve_plan_edit_context",
+        AsyncMock(return_value=(unsupported._scoped_to(flow.steps[1]), None)),
+    )
+    planner.repo.commit_turn.side_effect = [5, 6]
+    planner.repo.load_planning_state.return_value = state
+    proposal_calls = AsyncMock()
+    monkeypatch.setattr(
+        planner._proposal_submission, "run_active_submission_attempt", proposal_calls
+    )
+    planner.litellm_client.acompletion.reset_mock()
+
+    events = await unsupported._send(planner, flow)
+
+    proposal_calls.assert_not_called()
+    planner.litellm_client.acompletion.assert_not_awaited()
+    assert [event.event for event in events][-1] == "done"
+    assert not [event for event in events if event.event == "error"]
+    text = next(event for event in events if event.event == "text").data.text
+    assert "föreslå ändringar i det här flödet" in text
+    dispatcher_commit, answer_commit = planner.repo.commit_turn.await_args_list
+    assert dispatcher_commit.kwargs["turn"].base_planning_state_version == 1
+    assert answer_commit.kwargs["turn"].base_planning_state_version == 5
+    [assistant] = [
+        message
+        for message in answer_commit.kwargs["new_messages"]
+        if message.role == "assistant"
+    ]
+    assert assistant.metadata["non_plan_outcome"]["kind"] == (
+        "edit_blocked_by_unsupported_step"
+    )
+    assert planner.repo.complete_session_turn.await_args.kwargs["error"] is None

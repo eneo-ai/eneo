@@ -151,7 +151,11 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     resolve_turn_control,
 )
 from eneo.flows.ai_builder.planning_state import PlanningState
-from eneo.flows.application.flow_authoring_snapshot import current_flow_authoring_spec
+from eneo.flows.application.flow_authoring_snapshot import (
+    UnsupportedSavedStepsError,
+    current_flow_authoring_spec,
+    unsupported_saved_steps,
+)
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
@@ -254,7 +258,18 @@ class ProposalPrepared(_PreparedBase):
         return flatten_proposal_message_groups(self.message_groups)
 
 
-PreparedTurnOutcome: TypeAlias = ServerOutputPrepared | ProposalPrepared
+@dataclass(frozen=True, slots=True)
+class SavedStepsNotEditablePrepared(_PreparedBase):
+    """The turn was read and would have proposed, but the saved flow holds
+    steps the Builder cannot edit. The reading is kept like any other turn's."""
+
+    error: UnsupportedSavedStepsError
+    planning_state: PlanningState
+
+
+PreparedTurnOutcome: TypeAlias = (
+    ServerOutputPrepared | ProposalPrepared | SavedStepsNotEditablePrepared
+)
 
 
 async def prepare_planner_request(
@@ -442,30 +457,39 @@ async def prepare_planner_request(
         )
 
     assert isinstance(turn_control.decision, GenerateProposal)
-    return build_proposal_prepared(
-        requirements_state=requirements_state,
-        ui_language=ui_language,
-        slot_classification_metadata=slot_classification_metadata,
-        conversation=request.conversation,
-        planning_state=rebuilt_planning_state,
-        attachment_context=attachment_context_result,
-        flow_context=flow_context,
-        review_evidence=request.review_evidence,
-        is_edit_mode=request.flow is not None,
-        resource_catalog=resource_catalog,
-        flow=request.flow,
-        assistant_snapshots=request.assistant_snapshots,
-        plan_edit_context=request.plan_edit_context,
-        prior_plan_for_revision=request.prior_plan_for_revision,
-        litellm_model=request.completion_model_route.litellm_model,
-        supports_strict_tool_schema=(
-            request.completion_model_route.supports_strict_tool_schema
-        ),
-        capacity=request.capacity,
-        budget_policy=request.budget_policy,
-        attachment_file_count=len(request.attachment_files),
-        current_turn_start=request.current_turn_start,
-    )
+    try:
+        return build_proposal_prepared(
+            requirements_state=requirements_state,
+            ui_language=ui_language,
+            slot_classification_metadata=slot_classification_metadata,
+            conversation=request.conversation,
+            planning_state=rebuilt_planning_state,
+            attachment_context=attachment_context_result,
+            flow_context=flow_context,
+            review_evidence=request.review_evidence,
+            is_edit_mode=request.flow is not None,
+            resource_catalog=resource_catalog,
+            flow=request.flow,
+            assistant_snapshots=request.assistant_snapshots,
+            plan_edit_context=request.plan_edit_context,
+            prior_plan_for_revision=request.prior_plan_for_revision,
+            litellm_model=request.completion_model_route.litellm_model,
+            supports_strict_tool_schema=(
+                request.completion_model_route.supports_strict_tool_schema
+            ),
+            capacity=request.capacity,
+            budget_policy=request.budget_policy,
+            attachment_file_count=len(request.attachment_files),
+            current_turn_start=request.current_turn_start,
+        )
+    except UnsupportedSavedStepsError as error:
+        return SavedStepsNotEditablePrepared(
+            requirements_state=requirements_state,
+            ui_language=ui_language,
+            slot_classification_metadata=slot_classification_metadata,
+            error=error,
+            planning_state=rebuilt_planning_state,
+        )
 
 
 def _acknowledged_disclosure(
@@ -601,6 +625,11 @@ def build_proposal_prepared(
     supports_strict_tool_schema: bool = False,
     architecture_revised_this_turn: bool = False,
 ) -> ProposalPrepared:
+    # The one boundary every proposal passes: a first build and a continuation
+    # after a server decision both enter here, so the refusal cannot be skipped.
+    # No edit of these steps is supported, and no proposal is paid for first.
+    if flow is not None and (unsupported := unsupported_saved_steps(flow.steps)):
+        raise UnsupportedSavedStepsError(unsupported)
     confirmed_requirements = latest_confirmed_requirements(conversation)
     # Only the user's own wording names an output topology. The disclosure
     # renders evidence back to the user — including headings observed in an

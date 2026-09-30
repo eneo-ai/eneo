@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from eneo.flows.application.flow_authoring_snapshot import (
+    UnsupportedSavedStepsError,
+    unsupported_saved_steps,
+)
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.flow_authoring_spec import (
     InputSource,
@@ -42,15 +46,15 @@ class FlowSemanticSignature(BaseModel):
         terminal_output_mode: str | None = None
         terminal_output_type: str | None = None
 
-        # Coerce every step so unsupported persisted vocabulary anywhere is loud.
+        # Unsupported persisted vocabulary anywhere is loud.
+        if unsupported := unsupported_saved_steps(steps):
+            raise UnsupportedSavedStepsError(unsupported)
         for step in steps:
-            input_source = InputSource(step.input_source).value
-            input_type = InputType(step.input_type).value
             terminal_output_mode = OutputMode(step.output_mode).value
             terminal_output_type = OutputType(step.output_type).value
             if entry_input_source is None:
-                entry_input_source = input_source
-                entry_input_type = input_type
+                entry_input_source = InputSource(step.input_source).value
+                entry_input_type = InputType(step.input_type).value
 
         return cls(
             entry_input_source=entry_input_source,

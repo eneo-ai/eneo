@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from enum import Enum
 
 from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringSnapshot,
@@ -22,6 +24,86 @@ from eneo.flows.http_transport import redact_persisted_config
 from eneo.flows.step_lineage import existing_step_ref_for_order
 
 AssistantSnapshotProjector = Callable[[AssistantAuthoringSnapshot], AssistantSpec]
+
+# The authoring vocabulary: a saved step outside one of these enums runs on the
+# platform but cannot be carried by an authoring spec.
+_AUTHORING_VALUES: dict[str, frozenset[str]] = {
+    field: frozenset(member.value for member in vocabulary)
+    for field, vocabulary in (
+        ("input_source", InputSource),
+        ("input_type", InputType),
+        ("output_mode", OutputMode),
+        ("output_type", OutputType),
+    )
+}
+
+
+@dataclass(frozen=True, slots=True)
+class UnsupportedSavedStep:
+    """A saved step the authoring vocabulary cannot carry, and why.
+
+    ``fields`` holds ``(field, raw enum value)`` pairs only: configuration and
+    credentials never travel with it.
+    """
+
+    step_order: int
+    existing_step_ref: str
+    name: str
+    fields: tuple[tuple[str, str], ...]
+
+
+class UnsupportedSavedStepsError(ValueError):
+    """Saved steps the authoring vocabulary cannot carry.
+
+    A ``ValueError`` so callers that already tolerate an unprojectable step keep
+    doing so; callers that can answer the user read ``steps`` instead.
+    """
+
+    def __init__(self, steps: Sequence[UnsupportedSavedStep]) -> None:
+        self.steps = tuple(steps)
+        super().__init__(
+            "Saved steps outside the authoring vocabulary: "
+            + "; ".join(
+                f"{step.existing_step_ref} "
+                + ", ".join(f"{field}={value}" for field, value in step.fields)
+                for step in self.steps
+            )
+        )
+
+
+def _saved_value(value: Enum | str) -> str:
+    return value.value if isinstance(value, Enum) else value
+
+
+def unsupported_saved_steps(
+    steps: Sequence[FlowStep],
+) -> tuple[UnsupportedSavedStep, ...]:
+    """Every saved step outside the authoring vocabulary, in step order."""
+
+    listed: list[UnsupportedSavedStep] = []
+    for step in steps:
+        saved = {
+            "input_source": _saved_value(step.input_source),
+            "input_type": _saved_value(step.input_type),
+            "output_mode": _saved_value(step.output_mode),
+            "output_type": _saved_value(step.output_type),
+        }
+        fields = tuple(
+            (field, value)
+            for field, value in saved.items()
+            if value not in _AUTHORING_VALUES[field]
+        )
+        if fields:
+            ref = existing_step_ref_for_order(step.step_order)
+            listed.append(
+                UnsupportedSavedStep(
+                    step_order=step.step_order,
+                    existing_step_ref=ref,
+                    name=step.user_description or ref,
+                    fields=fields,
+                )
+            )
+    return tuple(listed)
 
 
 def current_flow_authoring_spec(
@@ -77,6 +159,8 @@ def flow_step_to_authoring_spec(
     assistant_snapshots: AssistantAuthoringSnapshots | None = None,
     assistant_snapshot_projector: AssistantSnapshotProjector | None = None,
 ) -> StepSpec:
+    if unsupported := unsupported_saved_steps([step]):
+        raise UnsupportedSavedStepsError(unsupported)
     return StepSpec(
         plan_step_ref=plan_ref,
         existing_step_ref=existing_step_ref_for_order(step.step_order),
@@ -126,6 +210,9 @@ def _resolve_existing_assistant_spec(
 
 __all__ = [
     "AssistantSnapshotProjector",
+    "UnsupportedSavedStep",
+    "UnsupportedSavedStepsError",
     "current_flow_authoring_spec",
     "flow_step_to_authoring_spec",
+    "unsupported_saved_steps",
 ]
