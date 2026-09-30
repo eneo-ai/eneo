@@ -159,6 +159,10 @@ class AuthenticationException(Exception):
     pass
 
 
+class FederatedLoginDenied(AuthenticationException):
+    """A valid OIDC identity is not permitted to join or access this tenant."""
+
+
 class BadRequestException(Exception):
     pass
 

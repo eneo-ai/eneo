@@ -101,8 +101,14 @@ OIDC_DISCOVERY_ENDPOINT=
 OIDC_CLIENT_ID=
 OIDC_CLIENT_SECRET=
 
-# [OPTIONAL] OIDC tenant ID (for backward compatibility with user creation)
+# Eneo tenant ID required by the global OIDC/MobilityGuard login endpoint.
 OIDC_TENANT_ID=
+
+# Global OIDC email-domain restriction, as a JSON array.
+# [] allows existing members of OIDC_TENANT_ID to sign in without a domain filter.
+# JIT additionally requires tenant.provisioning=true and email_verified=true.
+# To admit new members through JIT, configure e.g. ["your-company.com"].
+OIDC_ALLOWED_DOMAINS=[]
 
 # FEDERATION MODE
 # ----------------------------------------------------------------------------
