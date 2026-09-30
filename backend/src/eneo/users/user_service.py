@@ -29,7 +29,10 @@ from eneo.authentication.auth_models import (
     ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyScopeType,
+    ApiKeyState,
     ApiKeyV2InDB,
+    JWTPayload,
+    compute_effective_state,
 )
 from eneo.authentication.auth_service import AuthService
 from eneo.authentication.endpoint_access import authorize_user
@@ -767,7 +770,39 @@ class UserService:
             self.auth_service.validate_local_credential_version(
                 payload.credential_version, user
             )
-        return user
+            return user
+        return await self._get_service_principal_from_token(payload)
+
+    async def _get_service_principal_from_token(
+        self, payload: JWTPayload
+    ) -> "UserInDB | None":
+        """Rebuild the synthetic user behind a token minted for a service key.
+
+        A service key authenticates as a synthetic user whose id is the key id
+        and that has no ``users`` row. Eneo mints access tokens for such a
+        principal only for its own loopback MCP servers (see
+        ``AuthService.create_scoped_mcp_token``), whose endpoints authenticate
+        them like any other bearer token, so the user lookup falls through to
+        the key itself. The key must still be active: revoking, suspending or
+        expiring it ends the principal's access before the token expires.
+        Origin and IP guardrails do not apply here, the loopback caller is
+        Eneo itself, and no usage is recorded: the API call that minted the
+        token already was.
+        """
+        key = await self.api_key_v2_repo.get(
+            key_id=payload.user_id, tenant_id=payload.tenant_id
+        )
+        if key is None or key.ownership != ApiKeyOwnership.SERVICE:
+            return None
+        effective_state = compute_effective_state(
+            revoked_at=key.revoked_at,
+            suspended_at=key.suspended_at,
+            expires_at=key.expires_at,
+            rotation_grace_until=key.rotation_grace_until,
+        )
+        if effective_state != ApiKeyState.ACTIVE:
+            return None
+        return await self._build_service_user(key)
 
     async def _resolve_space_id_for_scope(
         self, scope_type: str, scope_id: UUID
