@@ -162,4 +162,5 @@ async def build_ephemeral_server(
         http_auth_config_schema={"token": token},
         is_enabled=True,
         tools=tools,
+        is_internal=True,
     )
