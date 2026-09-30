@@ -35,7 +35,7 @@ settings = Settings()
 
 def _predefined_role_permissions(role_name: str) -> list[str]:
     """Load bootstrap permissions from the canonical predefined-role template."""
-    from eneo.server.dependencies.predefined_roles import (
+    from eneo.server.dependencies.predefined_role_config import (
         load_predefined_roles_from_config,
     )
 

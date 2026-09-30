@@ -109,6 +109,14 @@ function createFlowEditor(data: FlowEditorInitData) {
   type LoadedAssistant = Awaited<ReturnType<typeof data.eneo.flows.assistants.get>>;
   const assistantRevision = writable(0);
   const assistantReloadRevision = writable(0);
+  // A step keeps the identity it was created under: the client-only temporary
+  // id, even after its first save gave it the server's id. Work that outlives
+  // that save (a template inspection, an upload) finds its step by identity.
+  const creationIds = new Map<string, string>();
+  function stepIdentity(step: FlowStep): string {
+    if (!step.id) return step.assistant_id || `new:${step.step_order}`;
+    return creationIds.get(step.id) ?? step.id;
+  }
   const editor = createResourceEditor({
     eneo: data.eneo,
     resource: data.flow,
@@ -129,6 +137,12 @@ function createFlowEditor(data: FlowEditorInitData) {
         flow: resource,
         update: cleanChanges
       })) as Flow;
+
+      for (const step of get(editor.state.update).steps ?? []) {
+        if (!step.id?.startsWith("_temp_")) continue;
+        const savedId = findSavedStep(updated.steps ?? [], step)?.id;
+        if (savedId) creationIds.set(savedId, step.id);
+      }
 
       const currentActiveId = get(activeStepId);
       if (currentActiveId?.startsWith?.("_temp_")) {
@@ -188,7 +202,6 @@ function createFlowEditor(data: FlowEditorInitData) {
   const activeStepId = writable<string | null>(null);
   const validationErrors = writable<Map<string, string[]>>(new Map());
   const serverValidationIssue = writable<ReturnType<typeof parseServerValidationIdentity>>(null);
-  const saveStatus = writable<"saved" | "saving" | "unsaved">("saved");
   // The step the user just created: the editor opens its task chapter and hands
   // it over once (name focused and selected). `stepId` follows the temp→real id
   // reconciliation so the intent keeps pointing at the same step. Template steps
@@ -241,6 +254,17 @@ function createFlowEditor(data: FlowEditorInitData) {
   const isPublished = derived(editor.state.resource, ($resource) => {
     return $resource.published_version != null;
   });
+  // The flow's save state is what the editor holds, never a flag somebody
+  // remembered to set: a request in flight is "saving", an unsaved edit is
+  // "unsaved", and a published draft takes no edits of its own. Replacing the
+  // editable state (publish, an applied proposal) therefore settles it too.
+  const saveStatus = derived(
+    [editor.state.isSaving, editor.state.currentChanges, isPublished],
+    ([$saving, $changes, $published]): "saved" | "saving" | "unsaved" => {
+      if ($saving) return "saving";
+      return $changes.hasUnsavedChanges && !$published ? "unsaved" : "saved";
+    }
+  );
   const assistantErrorPrefix = "assistant:";
   const flowErrorPrefix = "flow:";
   const typedIOValidationPrefix = `${flowErrorPrefix}typed-io:`;
@@ -452,21 +476,15 @@ function createFlowEditor(data: FlowEditorInitData) {
     await editor.settled();
 
     const { hasUnsavedChanges } = get(editor.state.currentChanges);
-    if (!hasUnsavedChanges) {
-      settleFlowSaveStatus();
-      return;
-    }
+    if (!hasUnsavedChanges) return;
 
     if (!stepsAreSaveable(get(editor.state.update).steps ?? [])) {
-      saveStatus.set("unsaved");
       throw new FlowSaveIncompleteError();
     }
 
-    saveStatus.set("saving");
     const result = await editor.saveChanges();
 
     if (!result.saved) {
-      saveStatus.set("unsaved");
       if ("deferred" in result) throw new FlowSaveIncompleteError();
       if (result.handled) {
         // This save's structured rejection already lives in the banner.
@@ -477,10 +495,9 @@ function createFlowEditor(data: FlowEditorInitData) {
     // The server accepted the current state: earlier server-side
     // rejections no longer describe it.
     clearServerValidationErrors();
-    settleFlowSaveStatus();
     // Another save queued behind this one, or an edit made while it was in
     // flight: not done until those have landed too.
-    if (get(saveStatus) !== "saved") await flushFlowSaves();
+    if (hasPendingFlowSaves()) await flushFlowSaves();
   }
 
   /** Steps can be persisted once every step has its assistant and the typed
@@ -492,20 +509,23 @@ function createFlowEditor(data: FlowEditorInitData) {
     );
   }
 
-  /** One request succeeding does not make the editor saved: saves queued
-   *  behind it are still pending, and an edit made during the flight is
-   *  still unsaved. The status follows the editor's aggregate state. */
-  function settleFlowSaveStatus(): void {
-    if (get(editor.state.isSaving)) {
-      saveStatus.set("saving");
-      return;
-    }
-    saveStatus.set(get(editor.state.currentChanges).hasUnsavedChanges ? "unsaved" : "saved");
+  function hasPendingFlowSaves(): boolean {
+    return get(saveStatus) !== "saved";
+  }
+
+  function hasPendingAssistantSaves(): boolean {
+    const status = get(assistantSaveStatus);
+    return status === "pending" || status === "saving";
   }
 
   async function flushSaves(): Promise<void> {
-    await flushFlowSaves();
-    await flushAssistantSaves();
+    do {
+      await flushFlowSaves();
+      await flushAssistantSaves();
+      // A flow edit can arrive while an assistant save is in flight. Only
+      // work that is actually pending loops again: nothing here may keep
+      // waiting on a status that no save will ever change.
+    } while (hasPendingFlowSaves() || hasPendingAssistantSaves());
   }
 
   /**
@@ -665,19 +685,16 @@ function createFlowEditor(data: FlowEditorInitData) {
     const stepIssues = syncTypedIOValidation((get(editor.state.update).steps ?? []) as FlowStep[]);
     if (stepIssues.length > 0) {
       clearAutoSaveTimer();
-      if (get(saveStatus) !== "unsaved") saveStatus.set("unsaved");
       return;
     }
 
-    if (get(saveStatus) !== "unsaved") saveStatus.set("unsaved");
     clearAutoSaveTimer();
     autoSaveTimer = setTimeout(async () => {
       // Publication can happen during the debounce window.
       if (get(isPublished)) return;
 
-      saveStatus.set("saving");
-      // A failed save resolves unsaved (onSaveError has already routed a
-      // structured rejection into the banner or the default toast fired); a
+      // A failed save leaves the draft unsaved (onSaveError has already routed
+      // a structured rejection into the banner or the default toast fired); a
       // deferred one (a step still waiting for its assistant) stays unsaved
       // and is picked up by the autosave the finished step triggers.
       const result = await editor.saveChanges();
@@ -686,9 +703,6 @@ function createFlowEditor(data: FlowEditorInitData) {
         // longer describe it. Without this, a fixed draft that autosaves
         // cleanly would keep publish disabled forever.
         clearServerValidationErrors();
-        settleFlowSaveStatus();
-      } else {
-        saveStatus.set("unsaved");
       }
     }, 500);
   }
@@ -1102,6 +1116,8 @@ function createFlowEditor(data: FlowEditorInitData) {
 
   function setResource(value: Flow): void {
     assistantSaveManager.invalidate((value.steps ?? []).map((step) => step.assistant_id));
+    // The replaced state has no unsaved edits left to autosave.
+    clearAutoSaveTimer();
     editor.setResource(value);
     assistantReloadRevision.update((revision) => revision + 1);
   }
@@ -1119,6 +1135,7 @@ function createFlowEditor(data: FlowEditorInitData) {
       isPublished
     },
     setResource,
+    stepIdentity,
     takeNewStepFocus,
     clearNewStepOpenIntent,
     addStep,

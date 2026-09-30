@@ -215,6 +215,9 @@ async def test_export_service_rejects_nonportable_config_before_writing_bytes(
                         1,
                         assistant_id=assistant_id,
                         input_config=input_config,
+                        input_source="http_get"
+                        if "auth" in input_config
+                        else "flow_input",
                     )
                 ]
             ),
@@ -405,6 +408,29 @@ def test_export_rejects_item_map_without_positive_ceiling(max_items: object) -> 
     assert exc_info.value.context == {"step_order": 1, "config_field": "input_config"}
 
 
+@pytest.mark.parametrize("mode", ["best_effort", "fail_closed"])
+def test_export_preserves_retrieval_policy_through_package_intake(mode: str) -> None:
+    assistant_id = uuid4()
+    output_config = {
+        "retrieval_policy": {"version": 1, "mode": mode},
+        "citation_mode": "inline_inref_sidecar",
+    }
+    flow = _flow(
+        steps=[_step(1, assistant_id=assistant_id, output_config=output_config)]
+    )
+    envelope = _build_envelope(
+        flow=flow,
+        assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+        resource_bindings=tuple(),
+    )
+
+    imported = read_flow_package(write_flow_package(envelope))
+    normalized = normalize_flow_package_spec(imported.spec)
+    assert normalized.steps[0].output_config == output_config
+    assert imported == envelope
+    assert flow.steps[0].output_config == output_config
+
+
 def test_export_carries_speaker_mapping_config_through_the_package() -> None:
     transcript_assistant_id = uuid4()
     mapping_assistant_id = uuid4()
@@ -527,6 +553,7 @@ def test_export_omits_disabled_portable_config_when_mode_irrelevant() -> None:
         ),
         (
             {
+                "input_source": "http_get",
                 "input_config": {
                     "auth": {
                         "mode": "api_key",
@@ -540,6 +567,7 @@ def test_export_omits_disabled_portable_config_when_mode_irrelevant() -> None:
         ),
         (
             {
+                "output_mode": "http_post",
                 "output_config": {
                     "auth": {
                         "mode": "basic_auth",
@@ -553,6 +581,7 @@ def test_export_omits_disabled_portable_config_when_mode_irrelevant() -> None:
         ),
         (
             {
+                "output_mode": "http_post",
                 "output_config": {
                     "auth": {
                         "mode": "bearer_token",
@@ -593,8 +622,8 @@ def test_export_omits_disabled_portable_config_when_mode_irrelevant() -> None:
     ],
     ids=[
         "active-http-bearer",
-        "stale-http-encrypted-api-key",
-        "stale-http-basic-password",
+        "active-http-encrypted-api-key",
+        "active-http-basic-password",
         "stored-secret-sentinel",
         "unknown-top-level-field",
         "unknown-output-field",
@@ -1048,52 +1077,48 @@ def test_export_rejects_template_fill_steps() -> None:
     )
 
 
-def test_export_rejects_template_asset_refs_in_output_config() -> None:
+@pytest.mark.parametrize("template_ref", ["template_asset_id", "template_file_id"])
+def test_export_omits_inactive_mode_config_without_mutating_stored_flow(
+    template_ref: str,
+) -> None:
     assistant_id = uuid4()
-
-    with pytest.raises(FlowPackageExportError) as exc_info:
-        _build_envelope(
-            flow=_flow(
-                steps=[
-                    _step(
-                        1,
-                        assistant_id=assistant_id,
-                        output_config={"template_asset_id": str(uuid4())},
-                    )
-                ]
-            ),
-            assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
-            resource_bindings=tuple(),
-        )
-
-    assert (
-        exc_info.value.code
-        is FlowPackageExportErrorCode.TEMPLATE_ASSET_PAYLOAD_UNSUPPORTED
+    flow = _flow(
+        steps=[
+            _step(
+                1,
+                assistant_id=assistant_id,
+                input_config={
+                    "auth": {"mode": "bearer_token", "token": "obsolete-input-secret"},
+                    "runtime_input": False,
+                },
+                output_config={
+                    template_ref: str(uuid4()),
+                    "auth": {
+                        "mode": "basic_auth",
+                        "password": "obsolete-output-secret",
+                    },
+                    "url": "https://obsolete.example.test",
+                    "retrieval_policy": {"version": 1, "mode": "fail_closed"},
+                },
+            )
+        ]
     )
-
-
-def test_export_rejects_stale_template_file_refs_in_output_config() -> None:
-    assistant_id = uuid4()
-
-    with pytest.raises(FlowPackageExportError) as exc_info:
-        _build_envelope(
-            flow=_flow(
-                steps=[
-                    _step(
-                        1,
-                        assistant_id=assistant_id,
-                        output_config={"template_file_id": str(uuid4())},
-                    )
-                ]
-            ),
-            assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
-            resource_bindings=tuple(),
-        )
-
-    assert (
-        exc_info.value.code
-        is FlowPackageExportErrorCode.TEMPLATE_ASSET_PAYLOAD_UNSUPPORTED
+    before = flow.model_dump()
+    envelope = _build_envelope(
+        flow=flow,
+        assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+        resource_bindings=tuple(),
     )
+    assert envelope.spec.steps[0].input_config is None
+    assert envelope.spec.steps[0].output_config == {
+        "retrieval_policy": {"version": 1, "mode": "fail_closed"}
+    }
+    package_json = canonical_json_bytes(envelope.model_dump(mode="json"))
+    assert b"obsolete-input-secret" not in package_json
+    assert b"obsolete-output-secret" not in package_json
+    assert b"obsolete.example.test" not in package_json
+    assert flow.model_dump() == before
+    assert read_flow_package(write_flow_package(envelope)) == envelope
 
 
 def test_export_allocates_package_slots_for_unbound_snapshot_resources() -> None:

@@ -203,11 +203,8 @@ export class FlowStepAssistantState {
       this.loadFailed = false;
       this.loading = true;
       this.cancelUploadsAndClearQueue();
-      void (async () => {
-        await this.#flowEditor.flushAssistantSaves().catch(() => {});
-        if (this.#getActiveStep()?.assistant_id !== targetId) return;
-        await this.load(targetId);
-      })();
+      void this.#flowEditor.flushAssistantSaves().catch(() => {});
+      void this.load(targetId);
     } else if (!activeStep || !activeStep.assistant_id) {
       this.assistant = null;
       this.loadFailed = false;

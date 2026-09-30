@@ -91,6 +91,45 @@ Attach knowledge only to the step that needs it. Different steps may use differe
 
 Use DOCX template fill for fixed placeholders, DOCX create for generated documents, and PDF when the result is a final read-only artifact.
 
+### Fill an existing Word template
+
+Choose **Fill Word template**, then upload a `.docx` file and map each named
+template field to text from an earlier step or a form field. Template selection
+and field mapping are available in both editor modes. **Leave empty** deliberately
+omits a field; **Select source** means the mapping still needs to be completed.
+Test the flow and open the resulting Word document to check placement and styles
+before publishing it.
+
+Eneo fills Word content controls. To mark a place in your existing template:
+
+1. Open the template in desktop Word and enable the **Developer** tab.
+2. Insert a **Rich Text Content Control** for a section, or a **Plain Text Content
+   Control** for a short field. For a section, select the whole paragraph,
+   including its paragraph mark, before inserting the control.
+3. In the control's **Properties**, set a clear **Title** and a unique **Tag**,
+   such as `background`. The title identifies the field in Eneo; the tag stores
+   its mapping. Each place needs its own control.
+4. Keep controls in the document body, outside table cells, headers and footers.
+   Nested, XML-mapped and other control types are not supported.
+5. Save as `.docx`, upload it and choose the text for each field.
+
+Rich sections support paragraphs, headings, lists and tables using the template's
+styles. Inline text fields insert text within a paragraph. Ordinary text
+placeholders such as `{{name}}` need to be replaced with content controls; changing
+the file extension does not convert them.
+
+**How to prepare your template** beside the upload button explains these steps.
+**Download example template** provides a working template with one rich section
+tagged `dokument`, copied from the standard document template. You can open it
+in Word, inspect its properties and adapt its layout.
+
+If checking the template fails, its existing field mappings remain available.
+For a connection failure, use **Try again**. For an invalid template, correct the
+file in Word and upload it again. Switching steps during upload keeps the result
+attached to the step where the upload started, including when the step gets its
+first save meanwhile. If the upload or check fails while you are on another step,
+the error and **Try again** wait on the original step for when you return.
+
 ## Long material
 
 A step reads its whole input at once. When a transcript or a document is larger than the model can read, the step fails with a typed error that says so, and nothing is silently cut.

@@ -1087,6 +1087,32 @@ describe("FlowEditor save flushing", () => {
     }
   });
 
+  it("keeps a step's identity when its first save gives it the server's id", async () => {
+    const flowUpdate = vi.fn(async ({ flow, update }) => ({
+      ...(flow as Flow),
+      ...(update as Partial<Flow>),
+      steps: [makeStep(1), makeStep(2, { id: "step-real-2", assistant_id: "assistant-2" })]
+    }));
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1)] }),
+      eneo: makeEneo({ flowUpdate })
+    });
+    try {
+      const created = makeStep(2, { id: "_temp_new", assistant_id: "assistant-2" });
+      editor.state.update.update((flow) => ({ ...flow, steps: [...flow.steps, created] }));
+      const identity = editor.stepIdentity(created);
+
+      await editor.flushFlowSaves();
+
+      const saved = get(editor.state.update).steps[1];
+      expect(saved.id).toBe("step-real-2");
+      expect(editor.stepIdentity(saved)).toBe(identity);
+      expect(editor.stepIdentity(get(editor.state.update).steps[0])).not.toBe(identity);
+    } finally {
+      editor.destroy();
+    }
+  });
+
   it("hands a created step's name over once, across the save and any later mount", async () => {
     const flowUpdate = vi.fn(async ({ flow, update }) => ({
       ...(flow as Flow),
@@ -1735,6 +1761,112 @@ describe("FlowEditor server validation routing", () => {
       await flush;
       expect(get(editor.state.saveStatus)).toBe("saved");
       expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      editor.destroy();
+    }
+  });
+
+  it("drains flow changes made while an assistant flush is in flight", async () => {
+    vi.useFakeTimers();
+    let resolveAssistant!: (value: object) => void;
+    const assistantUpdate = vi.fn(
+      () => new Promise<object>((resolve) => (resolveAssistant = resolve))
+    );
+    const flowUpdate = vi.fn(async ({ flow, update }) => ({
+      ...flow,
+      ...update,
+      draft_revision: flow.draft_revision + 1
+    }));
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1)] }),
+      eneo: makeEneo({ flowUpdate, assistantUpdate })
+    });
+    try {
+      editor.recordAssistantDraft("assistant-1", { prompt: { text: "Updated instruction" } });
+      const flush = editor.flushSaves();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(assistantUpdate).toHaveBeenCalledTimes(1);
+
+      editor.setName("Edited during assistant save");
+      resolveAssistant({ id: "assistant-1", prompt: { text: "Updated instruction" } });
+      await flush;
+
+      expect(flowUpdate).toHaveBeenCalledTimes(1);
+      expect(get(editor.state.resource).name).toBe("Edited during assistant save");
+      expect(get(editor.state.saveStatus)).toBe("saved");
+      expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(false);
+    } finally {
+      editor.destroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports saved and lets a flush finish after a publish replaced an edited draft", async () => {
+    // The name input stays enabled while publication is pending. The publish
+    // response replaces the editable state, so the edit no longer exists and
+    // the status must say so; otherwise a flush waits for a save that nobody
+    // will ever send.
+    vi.useFakeTimers();
+    const flowUpdate = vi.fn();
+    const editor = createFlowEditor({ flow: makeFlow(), eneo: makeEneo({ flowUpdate }) });
+    try {
+      editor.setName("Typed while publishing");
+      expect(get(editor.state.saveStatus)).toBe("unsaved");
+
+      editor.setResource(makeFlow(null, { published_version: 1, draft_revision: 1 }));
+
+      expect(get(editor.state.saveStatus)).toBe("saved");
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(flowUpdate).not.toHaveBeenCalled();
+      await editor.flushSaves();
+    } finally {
+      vi.useRealTimers();
+      editor.destroy();
+    }
+  });
+
+  it("does not wait on edits a published draft cannot save", async () => {
+    vi.useFakeTimers();
+    const flowUpdate = vi.fn();
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { published_version: 1 }),
+      eneo: makeEneo({ flowUpdate })
+    });
+    try {
+      editor.setName("Edited although published");
+
+      expect(get(editor.state.saveStatus)).toBe("saved");
+      await editor.flushSaves();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(flowUpdate).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      editor.destroy();
+    }
+  });
+
+  it("reports saved after a save that failed once a publish replaced its draft", async () => {
+    vi.useFakeTimers();
+    let rejectSave!: (error: Error) => void;
+    const flowUpdate = vi.fn(
+      () =>
+        new Promise<Flow>((_resolve, reject) => {
+          rejectSave = reject;
+        })
+    );
+    const editor = createFlowEditor({ flow: makeFlow(), eneo: makeEneo({ flowUpdate }) });
+    try {
+      editor.setName("Typed while publishing");
+      await vi.advanceTimersByTimeAsync(600);
+      expect(get(editor.state.saveStatus)).toBe("saving");
+
+      editor.setResource(makeFlow(null, { published_version: 1, draft_revision: 1 }));
+      rejectSave(new Error("draft moved on"));
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(get(editor.state.saveStatus)).toBe("saved");
+      await editor.flushSaves();
     } finally {
       vi.useRealTimers();
       editor.destroy();

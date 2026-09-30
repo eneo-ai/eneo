@@ -238,16 +238,7 @@
     stepEditorScrollEl?.scrollTo({ top: 0 });
   });
 
-  async function selectProcessingStep(stepId: string | null) {
-    try {
-      await flowEditor.flushSaves();
-    } catch (error) {
-      if (!surfaceRoutedSaveRejection(error)) {
-        toast.error(
-          error instanceof EneoError ? error.getReadableMessage() : m.flow_step_save_failed()
-        );
-      }
-    }
+  function selectProcessingStep(stepId: string | null) {
     if (stepId) {
       flowEditor.selectStep(stepId);
       mobileStepsOpen = false;
@@ -545,21 +536,9 @@
     }
   });
 
-  let stageNavigating = $state(false);
-
-  async function navigateToStage(stage: BuilderStageId) {
-    if (stage === builderStage || stageNavigating) return;
-    stageNavigating = true;
-    try {
-      await flowEditor.flushSaves();
-      builderStage = stage;
-    } catch (e) {
-      if (!surfaceRoutedSaveRejection(e)) {
-        toast.error(e instanceof EneoError ? e.getReadableMessage() : String(e));
-      }
-    } finally {
-      stageNavigating = false;
-    }
+  function navigateToStage(stage: BuilderStageId) {
+    // These stages share the same draft owner, including rejected edits.
+    builderStage = stage;
   }
 
   function goToPreviousStage() {
@@ -848,7 +827,7 @@
           >
             <Button
               variant="outline"
-              disabled={!previousStage || stageNavigating}
+              disabled={!previousStage}
               aria-label={previousStage
                 ? `${m.flow_stage_previous()}: ${previousStage.labelKey()}`
                 : m.flow_stage_previous()}
@@ -863,7 +842,6 @@
             {#if nextStage}
               <Button
                 variant="default"
-                disabled={stageNavigating}
                 aria-label={`${m.flow_stage_next()}: ${nextStage.labelKey()}`}
                 title={`${m.flow_stage_next()}: ${nextStage.labelKey()}`}
                 onclick={goToNextStage}

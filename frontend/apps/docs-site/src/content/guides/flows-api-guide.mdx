@@ -100,6 +100,17 @@ declared optional may be omitted; in that case, the imported draft omits only
 that optional reference. Flow endpoints reject Assistant or App package kinds
 before interpreting Flow-specific package entries.
 
+Step citation settings and retrieval policy (`best_effort` or `fail_closed`)
+are preserved through export and import. Export excludes settings left over from
+inactive HTTP or template modes without changing the saved draft. Active HTTP
+integrations and template outputs remain unsupported; change those steps before
+exporting. Unknown settings are rejected rather than silently discarded.
+
+Within the builder, changing steps or sections does not wait for autosave.
+Pending edits remain tracked, and a failed save still allows navigation to the
+settings needed to correct it. Export, publish, and leaving the editor wait for
+both flow settings and step instructions to finish saving.
+
 Strict v1 provenance always contains `omissions`. Ordinary packages use an
 empty list. When source-local MCP server or tool associations exist on Flow
 step assistants, export still succeeds but omits those associations and records

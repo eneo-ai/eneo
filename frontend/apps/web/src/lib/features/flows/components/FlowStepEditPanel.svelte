@@ -553,7 +553,18 @@
   // ---------------------------------------------------------------------------
 
   function templateContext() {
-    return { activeStep: activeStep!, steps, formSchema, updateStep };
+    return templateState.contextFor(activeStep!, {
+      get steps() {
+        return steps;
+      },
+      get formSchema() {
+        return formSchema;
+      },
+      get isPublished() {
+        return isPublished;
+      },
+      replaceStep: (index, step) => onStepChanged?.({ index, step })
+    });
   }
 
   function applyAllTemplateSuggestions() {
@@ -861,25 +872,16 @@
       resolvedTemplateAssetId
     );
     if (assetToInspect && activeStep) {
-      void templateState.inspectFile(
-        assetToInspect,
-        { persist: false },
-        {
-          activeStep,
-          steps,
-          formSchema,
-          updateStep
-        }
-      );
+      void templateState.inspectFile(assetToInspect, { persist: false }, templateContext());
     }
   });
 
   $effect(() => {
     if (
-      isAdvancedMode &&
       isTemplateFill &&
       !templateState.filesLoaded &&
-      !templateState.filesLoading
+      !templateState.filesLoading &&
+      !templateState.filesError
     ) {
       void templateState.loadFiles();
     }
@@ -1245,12 +1247,14 @@
         >
           {#if isTemplateFill}
             <FlowStepTemplateFillSection
+              stepKey={activeStepStateKey}
               {isPublished}
               {isAdvancedMode}
               {templateFillConfig}
               templateInspection={templateState.inspection}
               templateInspecting={templateState.inspecting}
-              templateConfigError={templateState.configError}
+              templateConfigError={templateState.configError ?? templateState.filesError}
+              templateCanRetry={templateState.canRetry}
               templateFilesLoading={templateState.filesLoading}
               {templatePlaceholders}
               {templateBindingRows}
@@ -1270,6 +1274,7 @@
                 void templateState.handleFileSelection(detail.assetId, templateContext())}
               onTemplateUpload={(detail) =>
                 void templateState.handleUpload(detail.event, templateContext())}
+              onTemplateRetry={() => templateState.retry()}
               onTemplateDownload={() =>
                 resolvedTemplateAssetId && void templateState.download(resolvedTemplateAssetId)}
               onTemplateRefresh={() =>
