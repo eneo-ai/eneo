@@ -1806,3 +1806,41 @@ def test_a_step_the_edit_adds_is_never_judged() -> None:
     )
 
     assert changeset.compiled_steps[0].carried_columns == frozenset()
+
+
+@pytest.mark.parametrize(
+    "saved_type", ["password", None, 7], ids=["password", "null", "number"]
+)
+def test_every_reader_of_a_saved_unsupported_field_type_raises_the_persisted_read_error(
+    saved_type: object,
+) -> None:
+    saved = [
+        {"name": "ok", "type": "text", "label": "Ok", "order": 2},
+        {"name": "bad", "type": saved_type, "label": "Bad", "order": 1},
+    ]
+
+    with pytest.raises(BadRequestException) as from_builder:
+        extract_form_fields_from_metadata({"form_schema": {"fields": saved}})
+    with pytest.raises(BadRequestException) as from_compile:
+        _form_fields_after(_authored(("ok", "text", "Ok")), saved)
+
+    # The index names the saved array position, as the persisted read does.
+    assert "fields[1].type" in str(from_builder.value)
+    assert "fields[1].type" in str(from_compile.value)
+
+
+def test_a_saved_unsupported_field_type_is_reported_at_its_raw_array_index() -> None:
+    # Non-object entries are skipped but still occupy their saved array position.
+    saved = [
+        None,
+        {"name": "ok", "type": "text", "label": "Ok"},
+        {"name": "bad", "type": "password", "label": "Bad"},
+    ]
+
+    with pytest.raises(BadRequestException) as from_builder:
+        extract_form_fields_from_metadata({"form_schema": {"fields": saved}})
+    with pytest.raises(BadRequestException) as from_compile:
+        _form_fields_after(_authored(("ok", "text", "Ok")), saved)
+
+    assert "fields[2].type" in str(from_builder.value)
+    assert "fields[2].type" in str(from_compile.value)

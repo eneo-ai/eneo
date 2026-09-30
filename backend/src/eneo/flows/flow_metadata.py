@@ -503,7 +503,7 @@ def _parse_form_field(
     seen_orders: set[int],
 ) -> FlowFormField:
     field_name = _parse_field_name(field, index=index, mode=mode, seen_names=seen_names)
-    field_type = _parse_field_type(field, index=index)
+    field_type = parse_saved_form_field_type(field, index=index)
     required = _parse_required(field, index=index, mode=mode)
     order = _parse_order(field, index=index, mode=mode, seen_orders=seen_orders)
     options = _parse_options(field, index=index, field_type=field_type, mode=mode)
@@ -574,22 +574,42 @@ def _parse_field_name(
     return stripped_field_name
 
 
-def _parse_field_type(field: Mapping[str, object], *, index: int) -> FlowFormFieldType:
+class UnsupportedFlowFormFieldTypeError(ValueError):
+    def __init__(self, raw_type: str) -> None:
+        self.raw_type = raw_type
+        super().__init__(
+            f"Form field type {raw_type!r} is not supported; it must be one of "
+            f"{sorted(_FORM_FIELD_TYPES_BY_VALUE)}."
+        )
+
+
+def parse_flow_form_field_type(raw_type: str) -> FlowFormFieldType:
+    """The one rule for which form field types exist, for every writer."""
+
+    normalized_type = raw_type.strip().casefold()
+    parsed_type = _LEGACY_FORM_FIELD_TYPE_NORMALIZATION.get(normalized_type)
+    if parsed_type is None:
+        parsed_type = _FORM_FIELD_TYPES_BY_VALUE.get(normalized_type)
+    if parsed_type is None:
+        raise UnsupportedFlowFormFieldTypeError(raw_type)
+    return parsed_type
+
+
+def parse_saved_form_field_type(
+    field: Mapping[str, object], *, index: int
+) -> FlowFormFieldType:
     field_type = field.get("type")
     if not isinstance(field_type, str) or not field_type.strip():
         raise BadRequestException(
             f"metadata_json.form_schema.fields[{index}].type must be a non-empty string."
         )
-    normalized_type = field_type.strip().casefold()
-    parsed_type = _LEGACY_FORM_FIELD_TYPE_NORMALIZATION.get(normalized_type)
-    if parsed_type is None:
-        parsed_type = _FORM_FIELD_TYPES_BY_VALUE.get(normalized_type)
-    if parsed_type is None:
+    try:
+        return parse_flow_form_field_type(field_type)
+    except UnsupportedFlowFormFieldTypeError:
         raise BadRequestException(
             f"metadata_json.form_schema.fields[{index}].type must be one of "
             f"{sorted(_FORM_FIELD_TYPES_BY_VALUE)}."
-        )
-    return parsed_type
+        ) from None
 
 
 def _parse_required(

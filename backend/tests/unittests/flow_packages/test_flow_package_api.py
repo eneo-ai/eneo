@@ -1026,6 +1026,48 @@ async def test_import_flow_package_adapts_invalid_graph_without_import_record(
 
 
 @pytest.mark.anyio
+async def test_import_flow_package_rejects_unsupported_form_field_type_without_import_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target_space_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+    _patch_import_access(
+        monkeypatch,
+        target_space_id=target_space_id,
+        space=_FakeSpace(default_transcription_model_id=uuid4()),
+    )
+
+    class FailImportRepo:
+        def __init__(self, session: object) -> None:
+            raise AssertionError("an invalid draft must not create an import record")
+
+    monkeypatch.setattr(
+        flow_package_router, "FlowPackageImportRepository", FailImportRepo
+    )
+    docs = _package_docs()
+    spec = cast(JsonObject, cast(JsonObject, docs[reader.FLOW_DRAFT_PATH])["spec"])
+    spec["form_fields"] = [{"name": "secret", "type": "password", "label": "Secret"}]
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await flow_package_router.import_flow_package_as_draft(
+            id=target_space_id,
+            import_request=FlowPackageImportRequest(
+                package_base64=base64.b64encode(_zip_docs(docs)).decode("ascii"),
+                expected_content_checksum="0" * 64,
+                expected_target_state=FlowPackageImportTargetState(
+                    audio_transcription_required=False,
+                    default_transcription_model_id=None,
+                ),
+                selected_bindings=[],
+            ),
+            request=cast(Request, object()),
+            container=cast(Container, _FakeContainer(session=_FakeSession())),
+        )
+
+    assert exc_info.value.code == FlowPackageErrorCode.FLOW_DRAFT_INVALID.value
+    assert exc_info.value.context == {"reason": "form_field_type_unsupported"}
+
+
+@pytest.mark.anyio
 async def test_import_flow_package_reports_missing_audio_default_before_install(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

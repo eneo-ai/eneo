@@ -25,7 +25,6 @@ from eneo.flows.enums import (
     FlowOutputType,
     flow_output_mode_uses_completion_model,
 )
-from eneo.flows.flow_authoring_spec import _VALID_FORM_FIELD_TYPES
 from eneo.flows.flow_capability_manifest import (
     _TEMPORARY_REASON_MARKER,
     CAPABILITY_REGISTRY,
@@ -46,6 +45,7 @@ from eneo.flows.flow_capability_manifest import (
     resolve_document_generation_mode,
     supports_step_io_tuple,
 )
+from eneo.flows.flow_metadata import FlowFormFieldType
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES
 
 
@@ -64,7 +64,9 @@ def test_fcm_version_is_nine() -> None:
 
 
 def test_ai_builder_form_field_types_match_flow_authoring_values() -> None:
-    assert set(builder_form_field_type_values()) == _VALID_FORM_FIELD_TYPES
+    assert set(builder_form_field_type_values()) == {
+        field_type.value for field_type in FlowFormFieldType
+    }
 
 
 def test_flow_capability_is_frozen_with_engine_truth_fields() -> None:

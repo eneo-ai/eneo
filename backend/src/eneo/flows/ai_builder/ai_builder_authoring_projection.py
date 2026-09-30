@@ -317,7 +317,9 @@ def apply_existing_step_patch(
     if "output_fields" in fields:
         updates["output_contract"] = compile_output_contract(patch.output_fields)
     if "review_mode" in fields:
-        updates["review_policy"] = compile_review_policy(patch.review_mode)
+        updates["review_policy"] = compile_review_policy(
+            patch.review_mode, existing.review_policy
+        )
     if "assistant_spec" in fields:
         if patch.assistant_spec is None:
             raise AIBuilderBadRequestException(

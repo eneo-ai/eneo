@@ -42,6 +42,7 @@ from eneo.flow_packages.infrastructure import flow_package_zip_reader as reader
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
+    FormFieldSpec,
     InputSource,
     OutputMode,
     OutputType,
@@ -214,6 +215,39 @@ def test_legacy_http_post_input_is_rejected_before_package_install() -> None:
         reader.read_flow_package(_zip_docs(docs))
 
     assert exc_info.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+
+
+def _package_bytes_with_form_field_type(raw_type: str) -> bytes:
+    docs = _package_docs(
+        spec=FlowDraftSpecCore(
+            flow_name="Form flow",
+            steps=_flow_spec().steps,
+            form_fields=[FormFieldSpec(name="contact", type="text", label="Contact")],
+        )
+    )
+    flow_draft = cast(JsonObject, docs[reader.FLOW_DRAFT_PATH])
+    spec = cast(JsonObject, flow_draft["spec"])
+    cast(list[JsonObject], spec["form_fields"])[0]["type"] = raw_type
+    return _zip_docs(docs)
+
+
+@pytest.mark.parametrize("raw_type", ["password", "file", "radio", "datetime", "bogus"])
+def test_package_reader_rejects_unsupported_form_field_type_with_typed_reason(
+    raw_type: str,
+) -> None:
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        reader.read_flow_package(_package_bytes_with_form_field_type(raw_type))
+
+    assert exc_info.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+    assert exc_info.value.context == {"reason": "form_field_type_unsupported"}
+
+
+@pytest.mark.parametrize("raw_type", ["email", "string", "textarea"])
+def test_package_reader_imports_legacy_form_field_types_as_text(raw_type: str) -> None:
+    envelope = reader.read_flow_package(_package_bytes_with_form_field_type(raw_type))
+
+    assert envelope.spec.form_fields is not None
+    assert [field.type for field in envelope.spec.form_fields] == ["text"]
 
 
 def test_package_reader_rejects_draft_ref_not_declared_by_requirements() -> None:

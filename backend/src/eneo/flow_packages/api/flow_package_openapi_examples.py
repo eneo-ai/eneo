@@ -149,6 +149,15 @@ FLOW_PACKAGE_IMPORT_PLAN_BAD_REQUEST_EXAMPLES: dict[str, dict[str, object]] = {
             "context": {"reason": "duplicate_step_name"},
         },
     },
+    "form_field_type_unsupported": {
+        "summary": "Form field type is not one the platform accepts",
+        "value": {
+            "message": "Flow package form field type is not supported.",
+            "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+            "code": FlowPackageErrorCode.FLOW_DRAFT_INVALID.value,
+            "context": {"reason": "form_field_type_unsupported"},
+        },
+    },
 }
 
 FLOW_PACKAGE_VALIDATE_FORBIDDEN_EXAMPLES: dict[str, dict[str, object]] = {

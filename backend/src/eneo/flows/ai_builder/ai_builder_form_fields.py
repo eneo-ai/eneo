@@ -18,14 +18,17 @@ def extract_form_fields_from_metadata(
     raw_fields = cast(dict[str, Any], form_schema).get("fields")
     if not isinstance(raw_fields, list):
         return None
-    saved = [
-        cast(FlowPersistedJsonObject, field)
-        for field in cast(list[object], raw_fields)
-        if isinstance(field, dict)
-    ]
+    saved: list[FlowPersistedJsonObject] = []
+    saved_index: dict[int, int] = {}
+    for index, field in enumerate(cast(list[object], raw_fields)):
+        if isinstance(field, dict):
+            entry = cast(FlowPersistedJsonObject, field)
+            saved.append(entry)
+            saved_index[id(entry)] = index
     fields = [
         spec
         for field in form_fields_in_display_order(saved)
-        if (spec := authoring_form_field(field)) is not None
+        if (spec := authoring_form_field(field, index=saved_index[id(field)]))
+        is not None
     ]
     return fields or None

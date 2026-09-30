@@ -295,6 +295,77 @@ def test_edit_overlay_review_mode_replaces_existing_policy() -> None:
     )
 
 
+_SAVED_EXPIRY_SECONDS = 3600
+
+
+def _expiring_policy(mode: FlowStepReviewMode) -> FlowStepReviewPolicy:
+    return FlowStepReviewPolicy(mode=mode, expires_after_seconds=_SAVED_EXPIRY_SECONDS)
+
+
+def _compile_single_patch(saved: StepSpec, **patch: Any) -> StepSpec:
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(saved),
+        proposal=_edit_proposal(
+            steps=[
+                ModifyExistingStep.model_validate(
+                    {"existing_step_ref": "existing_step_1", **patch}
+                )
+            ],
+        ),
+    )
+    return result.steps[0]
+
+
+@pytest.mark.parametrize("mode", list(FlowStepReviewMode))
+def test_edit_overlay_review_mode_patch_keeps_saved_review_expiry(
+    mode: FlowStepReviewMode,
+) -> None:
+    saved = _step_with_review_policy(_expiring_policy(FlowStepReviewMode.VIEW))
+
+    compiled = _compile_single_patch(saved, review_mode=mode)
+
+    assert compiled.review_policy == _expiring_policy(mode)
+
+
+def test_edit_overlay_review_mode_none_clears_the_whole_policy() -> None:
+    saved = _step_with_review_policy(_expiring_policy(FlowStepReviewMode.VIEW))
+
+    assert _compile_single_patch(saved, review_mode=None).review_policy is None
+
+
+def test_edit_overlay_review_mode_on_step_without_policy_sets_mode_only() -> None:
+    compiled = _compile_single_patch(
+        _step("step_a", "existing_step_1", "First"),
+        review_mode=FlowStepReviewMode.VIEW,
+    )
+
+    assert compiled.review_policy == FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW)
+    assert compiled.review_policy.expires_after_seconds is None
+
+
+def test_edit_overlay_patch_restating_saved_value_leaves_the_step_unchanged() -> None:
+    """A patch that restates a saved scalar is not an edit of that scalar."""
+
+    saved = _step(
+        "step_a",
+        "existing_step_1",
+        "First",
+        review_policy=_expiring_policy(FlowStepReviewMode.EDIT),
+    )
+    restated: dict[str, Any] = {
+        "name": saved.name,
+        "input_source": saved.input_source,
+        "input_type": saved.input_type,
+        "output_type": saved.output_type,
+        "review_mode": saved.review_policy.mode if saved.review_policy else None,
+        "assistant_spec": {"instructions": saved.assistant_spec.instructions},
+    }
+
+    for field_name, value in restated.items():
+        compiled = _compile_single_patch(saved, **{field_name: value})
+        assert compiled == saved, field_name
+
+
 def test_edit_overlay_rejects_raw_review_policy_patch() -> None:
     with pytest.raises(ValueError):
         ModifyExistingStep.model_validate(

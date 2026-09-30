@@ -4447,6 +4447,7 @@
   "flow_package_error_flow_package_checksum_mismatch": "Paketfilen är skadad eller har ändrats efter exporten. Exportera paketet på nytt och försök igen.",
   "flow_package_error_flow_package_file_too_large": "Paketfilen är för stor för den här instansen.",
   "flow_package_error_flow_package_flow_draft_invalid": "Paketet innehåller ett ogiltigt flödesutkast. Exportera flödet på nytt innan du importerar det.",
+  "flow_package_error_form_field_type_unsupported": "Paketet använder en formulärfälttyp som Eneo inte stöder. Ändra fältet till text, number, date, select, multiselect eller list och importera igen.",
   "flow_package_error_flow_package_import_draft_references_undeclared_slot": "Paketet är inte komplett. Exportera flödet på nytt och försök igen.",
   "flow_package_error_flow_package_import_mcp_unsupported": "Paketet använder MCP-verktyg, vilket inte kan importeras automatiskt ännu.",
   "flow_package_error_flow_package_import_missing_required_resource_binding": "Välj en lokal resurs för varje obligatoriskt krav innan du importerar.",

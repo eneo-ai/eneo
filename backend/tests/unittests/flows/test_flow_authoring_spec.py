@@ -16,6 +16,7 @@ from eneo.flows.flow_authoring_spec import (
 from eneo.flows.flow_authoring_variable_rewriting import (
     flow_step_validation_views_from_draft_spec,
 )
+from eneo.flows.flow_metadata import UnsupportedFlowFormFieldTypeError
 from eneo.flows.flow_validators import collect_step_graph_issues
 
 _LOCAL_ID = "11111111-1111-4111-8111-111111111111"
@@ -42,22 +43,41 @@ def test_assistant_spec_rejects_local_resource_refs(field_name: str) -> None:
 @pytest.mark.parametrize(
     ("raw_type", "normalized_type"),
     [
-        ("string", "text"),
-        ("dropdown", "select"),
-        ("multi-select", "multiselect"),
-        ("tags", "list"),
+        ("text", "text"),
+        ("number", "number"),
+        ("date", "date"),
+        ("select", "select"),
+        ("multiselect", "multiselect"),
         ("list", "list"),
-        ("datetime", "date"),
-        ("unsupported", "text"),
+        ("string", "text"),
+        ("email", "text"),
+        ("textarea", "text"),
+        (" Select ", "select"),
     ],
 )
-def test_form_field_spec_normalizes_supported_input_types(
+def test_form_field_spec_accepts_exactly_the_platform_input_types(
     raw_type: str,
     normalized_type: str,
 ) -> None:
     field = FormFieldSpec(name="field", type=raw_type, label="Field")
 
     assert field.type == normalized_type
+
+
+@pytest.mark.parametrize(
+    "raw_type",
+    ["password", "file", "radio", "datetime", "dropdown", "tags", "unsupported", ""],
+)
+def test_form_field_spec_rejects_types_the_platform_does_not_accept(
+    raw_type: str,
+) -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        FormFieldSpec(name="field", type=raw_type, label="Field")
+
+    assert any(
+        isinstance(error.get("ctx", {}).get("error"), UnsupportedFlowFormFieldTypeError)
+        for error in exc_info.value.errors()
+    )
 
 
 def test_flow_draft_spec_hash_is_deterministic() -> None:

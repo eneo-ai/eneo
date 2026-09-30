@@ -30,6 +30,7 @@ from eneo.flows.flow_authoring_spec import (
     AssistantSpecLocalRefNotPortableError,
     has_flow_mcp_unsupported_error,
 )
+from eneo.flows.flow_metadata import UnsupportedFlowFormFieldTypeError
 from eneo.resource_packages.archive import (
     ResourcePackageArchiveError,
     ResourcePackageArchiveLimits,
@@ -169,10 +170,16 @@ def _parse_subdocument(
                 code=FlowPackageErrorCode.SCHEMA_UNSUPPORTED,
                 message="Flow package schema version is unsupported.",
             ) from exc
-        if _has_local_resource_ref_error(exc):
+        if _has_ctx_error(exc, AssistantSpecLocalRefNotPortableError):
             raise FlowPackageValidationError(
                 code=FlowPackageErrorCode.LOCAL_RESOURCE_REFS_NOT_PORTABLE,
                 message="Flow package draft contains source-local resource refs.",
+            ) from exc
+        if _has_ctx_error(exc, UnsupportedFlowFormFieldTypeError):
+            raise FlowPackageValidationError(
+                code=invalid_code,
+                message="Flow package form field type is not supported.",
+                context={"reason": "form_field_type_unsupported"},
             ) from exc
         if _has_removed_flow_mcp_field(exc):
             raise FlowPackageValidationError(
@@ -194,13 +201,10 @@ def _has_unsupported_schema_version(exc: ValidationError) -> bool:
     return False
 
 
-def _has_local_resource_ref_error(exc: ValidationError) -> bool:
+def _has_ctx_error(exc: ValidationError, error_type: type[Exception]) -> bool:
     for error in exc.errors():
         ctx = error.get("ctx")
-        if not isinstance(ctx, Mapping):
-            continue
-        original_error = ctx.get("error")
-        if isinstance(original_error, AssistantSpecLocalRefNotPortableError):
+        if isinstance(ctx, Mapping) and isinstance(ctx.get("error"), error_type):
             return True
     return False
 

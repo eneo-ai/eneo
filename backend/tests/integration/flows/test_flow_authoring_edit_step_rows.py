@@ -24,7 +24,7 @@ import sqlalchemy as sa
 from cryptography.fernet import Fernet
 
 from eneo.assistants.assistant_update import AssistantUpdateCommand
-from eneo.database.tables.flow_tables import FlowSteps, FlowVersions
+from eneo.database.tables.flow_tables import Flows, FlowSteps, FlowVersions
 from eneo.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthoringPolicy
 from eneo.flows.ai_builder.ai_builder_context import (
     serialize_space_kbs,
@@ -33,7 +33,10 @@ from eneo.flows.ai_builder.ai_builder_context import (
 from eneo.flows.ai_builder.ai_builder_create_compile_context import (
     create_compile_context_from_planning_state,
 )
-from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
+from eneo.flows.ai_builder.ai_builder_domain_models import (
+    FlowBuilderEditApproval,
+    TargetKind,
+)
 from eneo.flows.ai_builder.ai_builder_edit_proposal import process_edit_arguments
 from eneo.flows.ai_builder.ai_builder_plan_lifecycle import (
     _removed_existing_step_refs_for_apply,
@@ -366,10 +369,10 @@ async def _edit(
     saved: Saved,
     steps: list[dict[str, Any]],
     removed: tuple[str, ...] = (),
-) -> None:
+) -> FlowBuilderEditApproval:
     """The whole chain a plan goes through, from what the model sends: the real
     edit compile against the saved flow, the step lists the lifecycle derives
-    from the approval that compile made, and the apply."""
+    from the approval that compile made, and the apply. Returns that approval."""
 
     async with db_container() as container:
         service = container.flow_service()
@@ -410,6 +413,8 @@ async def _edit(
         ),  # type: ignore[arg-type]
         bindings=outcome.compiled.resource_bindings,
     )
+    assert content.edit is not None
+    return content.edit
 
 
 @pytest.fixture
@@ -818,6 +823,111 @@ async def test_a_step_the_edit_leaves_keeps_configuration_of_modes_it_does_not_u
     )
 
     assert (await _rows(db_container, frontend_saved.flow_id))[1] == before[1]
+
+
+_EXPIRING_POLICY = {"mode": "view", "expires_after_seconds": 3600}
+
+
+async def _saved_with_review_expiry(db_container, saved: Saved) -> list[Row]:
+    rows = await _rows(db_container, saved.flow_id)
+    await _set_raw(db_container, rows[1]["id"], review_policy=_EXPIRING_POLICY)
+    return await _rows(db_container, saved.flow_id)
+
+
+def _step_change(approval: FlowBuilderEditApproval, step_ref: str):
+    return next(c for c in approval.diff.step_changes if c.step_ref == step_ref)
+
+
+async def test_a_review_mode_patch_that_restates_the_saved_mode_changes_nothing(
+    db_container, saved: Saved
+) -> None:
+    """The model names `view` for a step saved as `view` with a one-hour
+    deadline. Nothing changed, so the diff says so and the row is what was
+    saved, deadline included."""
+
+    before = await _saved_with_review_expiry(db_container, saved)
+
+    approval = await _edit(
+        db_container, saved, [_keep(1), _keep(2, review_mode="view"), _keep(3)]
+    )
+
+    assert await _rows(db_container, saved.flow_id) == before
+    assert _step_change(approval, "existing_step_2").kind == "unchanged"
+
+
+async def test_a_review_mode_change_keeps_the_saved_review_deadline(
+    db_container, saved: Saved
+) -> None:
+    before = await _saved_with_review_expiry(db_container, saved)
+
+    approval = await _edit(
+        db_container, saved, [_keep(1), _keep(2, review_mode="edit"), _keep(3)]
+    )
+    after = await _rows(db_container, saved.flow_id)
+
+    assert after[1]["review_policy"] == {
+        "mode": "edit",
+        "expires_after_seconds": 3600,
+    }
+    assert {c for c in _ROW_COLUMNS if before[1][c] != after[1][c]} == {
+        "review_policy",
+        "updated_at",
+    }
+    assert after[0] == before[0] and after[2] == before[2]
+    (change,) = _step_change(approval, "existing_step_2").field_changes
+    assert change.field == "review_policy"
+    assert (change.previous, change.current) == ("view", "edit")
+    assert change.previous_detail is not None and change.current_detail is not None
+    assert change.previous_detail.replace("view", "edit") == change.current_detail
+
+
+async def test_review_mode_none_clears_the_policy_and_a_step_without_one_gets_the_mode(
+    db_container, saved: Saved
+) -> None:
+    await _saved_with_review_expiry(db_container, saved)
+
+    await _edit(
+        db_container,
+        saved,
+        [_keep(1, review_mode="view"), _keep(2, review_mode="none"), _keep(3)],
+    )
+    after = await _rows(db_container, saved.flow_id)
+
+    assert after[0]["review_policy"] == {"mode": "view"}
+    assert after[1]["review_policy"] is None
+
+
+async def test_an_edit_that_names_no_form_field_reports_no_form_change_for_a_legacy_type(
+    db_container, saved: Saved
+) -> None:
+    """`email` is a type an older writer saved; the platform reads it as text.
+    An edit that names no form field neither fails on it nor reports a form
+    change, and the field keeps its name, label and requiredness."""
+
+    field = {"name": "epost", "type": "email", "label": "E-post", "required": True}
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(Flows)
+            .where(Flows.id == saved.flow_id)
+            .values(metadata_json={"form_schema": {"fields": [field]}})
+        )
+
+    approval = await _edit(
+        db_container, saved, [_keep(1, name="Läs"), _keep(2), _keep(3)]
+    )
+
+    async with db_container() as container:
+        metadata = await container.session().scalar(
+            sa.select(Flows.metadata_json).where(Flows.id == saved.flow_id)
+        )
+    assert metadata is not None
+    (kept,) = metadata["form_schema"]["fields"]
+    assert {k: kept[k] for k in ("name", "label", "required")} == {
+        "name": "epost",
+        "label": "E-post",
+        "required": True,
+    }
+    assert approval.diff.form_changes == []
 
 
 async def _prompts(db_container, flow_id: UUID) -> list[str]:

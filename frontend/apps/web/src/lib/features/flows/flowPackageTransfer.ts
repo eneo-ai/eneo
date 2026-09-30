@@ -385,6 +385,13 @@ export function normalizeFlowPackageId(value: string): string {
 export function mapFlowPackageImportError(error: unknown): string | null {
   const code = getFlowPackageResponseCode(error);
   if (!code || !isFlowPackageImportErrorCode(code)) return null;
+  // Re-exporting cannot fix an unsupported field type, so this reason names the fix.
+  if (
+    code === "flow_package_flow_draft_invalid" &&
+    getFlowPackageResponseContext(error)?.reason === "form_field_type_unsupported"
+  ) {
+    return m.flow_package_error_form_field_type_unsupported();
+  }
   return FLOW_PACKAGE_ERROR_MESSAGES[code]();
 }
 

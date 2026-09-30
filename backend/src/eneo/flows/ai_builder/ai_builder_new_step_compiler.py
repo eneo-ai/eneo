@@ -308,10 +308,15 @@ def compile_output_config(step_draft: NewStepDraft) -> dict[str, Any] | None:
 
 def compile_review_policy(
     review_mode: FlowStepReviewMode | None,
+    saved: FlowStepReviewPolicy | None = None,
 ) -> FlowStepReviewPolicy | None:
+    """A patch names the mode; whatever else the saved policy carries stays."""
+
     if review_mode is None:
         return None
-    return FlowStepReviewPolicy(mode=review_mode)
+    if saved is None:
+        return FlowStepReviewPolicy(mode=review_mode)
+    return saved.model_copy(update={"mode": review_mode})
 
 
 def compile_input_bindings(

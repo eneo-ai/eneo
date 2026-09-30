@@ -170,7 +170,10 @@ duplicate. A new decision can still import another draft. Import never
 publishes the Flow; the operator reviews and publishes the new draft through
 the ordinary authoring journey. Flow packages do not carry Flow MCP or
 HTTP-mutation input behavior, and unsupported template assets fail before
-installation.
+installation. A form field type outside the six Flow form types (`text`, `number`, `date`,
+`select`, `multiselect`, `list`; `string`, `email` and `textarea` import as
+`text`) is refused with `flow_package_flow_draft_invalid`, whose `context.reason`
+is `form_field_type_unsupported`, instead of silently remapping the type as earlier versions did (for example `radio` to `select`, `datetime` to `date`, and an unknown type to `text`).
 
 ## Step limit
 

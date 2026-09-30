@@ -236,6 +236,21 @@ describe("flowPackageTransfer", () => {
     }
   });
 
+  it("says how to fix an unsupported form field type instead of asking for a re-export", () => {
+    const code = "flow_package_flow_draft_invalid";
+    const draftError = (context: unknown) =>
+      new EneoError(code, "RESPONSE", 400, 0, { code, context }, { endpoint: "POST@test" });
+
+    expect(mapFlowPackageImportError(draftError({ reason: "form_field_type_unsupported" }))).toBe(
+      m.flow_package_error_form_field_type_unsupported()
+    );
+    for (const context of [{ reason: "duplicate_step_name" }, {}, null]) {
+      expect(mapFlowPackageImportError(draftError(context))).toBe(
+        expectedFlowPackageErrorMessage(code)
+      );
+    }
+  });
+
   it("maps public export error codes to package-specific copy", () => {
     for (const code of FLOW_PACKAGE_EXPORT_ERROR_CODES) {
       const error = new EneoError(code, "RESPONSE", 400, 0, { code }, { endpoint: "POST@test" });

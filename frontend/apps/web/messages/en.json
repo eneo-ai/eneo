@@ -4447,6 +4447,7 @@
   "flow_package_error_flow_package_checksum_mismatch": "The package file is damaged or was changed after export. Export the package again and try again.",
   "flow_package_error_flow_package_file_too_large": "The package file is too large for this instance.",
   "flow_package_error_flow_package_flow_draft_invalid": "The package contains an invalid flow draft. Export the flow again before importing it.",
+  "flow_package_error_form_field_type_unsupported": "The package uses a form field type Eneo does not support. Change the field to text, number, date, select, multiselect or list and import again.",
   "flow_package_error_flow_package_import_draft_references_undeclared_slot": "The package is incomplete. Export the flow again and try again.",
   "flow_package_error_flow_package_import_mcp_unsupported": "This package uses MCP tools, which cannot be imported automatically yet.",
   "flow_package_error_flow_package_import_missing_required_resource_binding": "Choose a local resource for every required item before importing.",

@@ -666,16 +666,18 @@ def _keep_unauthored_form_keys(
     raw_fields = saved_schema.get("fields")
     if not isinstance(raw_fields, list):
         return authored
-    saved_fields = [
-        cast(FlowPersistedJsonObject, field)
-        for field in cast(list[object], raw_fields)
-        if isinstance(field, dict)
-    ]
-    saved_by_name = {
-        view.name: (field, authoring_form_field_payload(view))
-        for field in saved_fields
-        if (view := authoring_form_field(field)) is not None
-    }
+    saved_fields: list[FlowPersistedJsonObject] = []
+    saved_by_name: dict[
+        str, tuple[FlowPersistedJsonObject, FlowPersistedJsonObject]
+    ] = {}
+    for index, raw_field in enumerate(cast(list[object], raw_fields)):
+        if not isinstance(raw_field, dict):
+            continue
+        field = cast(FlowPersistedJsonObject, raw_field)
+        saved_fields.append(field)
+        view = authoring_form_field(field, index=index)
+        if view is not None:
+            saved_by_name[view.name] = (field, authoring_form_field_payload(view))
     authored_fields = cast(list[FlowPersistedJsonObject], authored["fields"])
     sequence_kept = [field["name"] for field in authored_fields] == [
         field.get("name") for field in form_fields_in_display_order(saved_fields)

@@ -27,6 +27,10 @@ from eneo.flows.enums import (
     FlowOutputType as OutputType,
 )
 from eneo.flows.flow_capability_manifest import requires_completion_model
+from eneo.flows.flow_metadata import (
+    parse_flow_form_field_type,
+    parse_saved_form_field_type,
+)
 from eneo.flows.flow_resource_bindings import is_uuid_shaped_resource_ref
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
 from eneo.flows.input_binding_contract_rules import validate_source_refs_binding
@@ -178,34 +182,6 @@ def strip_inapplicable_completion_model(step: StepSpec) -> StepSpec:
     return step
 
 
-_VALID_FORM_FIELD_TYPES = {"text", "number", "date", "select", "multiselect", "list"}
-
-_FORM_FIELD_TYPE_COERCIONS: dict[str, str] = {
-    "textarea": "text",
-    "string": "text",
-    "email": "text",
-    "url": "text",
-    "phone": "text",
-    "tel": "text",
-    "password": "text",
-    "integer": "number",
-    "float": "number",
-    "decimal": "number",
-    "dropdown": "select",
-    "radio": "select",
-    "enum": "select",
-    "checkbox": "multiselect",
-    "checkboxes": "multiselect",
-    "multi_select": "multiselect",
-    "multi-select": "multiselect",
-    "tags": "list",
-    "array": "list",
-    "chips": "list",
-    "datetime": "date",
-    "time": "date",
-}
-
-
 class FormFieldSpec(BaseModel):
     name: str
     type: str
@@ -215,14 +191,8 @@ class FormFieldSpec(BaseModel):
 
     @field_validator("type")
     @classmethod
-    def coerce_field_type(cls, v: str) -> str:
-        normalized = v.strip().casefold()
-        if normalized in _VALID_FORM_FIELD_TYPES:
-            return normalized
-        coerced = _FORM_FIELD_TYPE_COERCIONS.get(normalized)
-        if coerced is not None:
-            return coerced
-        return "text"
+    def accept_platform_field_type(cls, v: str) -> str:
+        return parse_flow_form_field_type(v).value
 
 
 class FlowDraftSpecCore(BaseModel):
@@ -268,9 +238,13 @@ class FlowDraftSpecCore(BaseModel):
         return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def authoring_form_field(field: Mapping[str, object]) -> FormFieldSpec | None:
-    """What the authoring view models of a saved form field; a field the editor
-    left unlabelled reads as its name, as the editor shows it."""
+def authoring_form_field(
+    field: Mapping[str, object], *, index: int
+) -> FormFieldSpec | None:
+    """What the authoring view models of a saved form field (index = its place
+    in the saved array); a field the editor left unlabelled reads as its name,
+    as the editor shows it. A saved type the platform does not accept raises the
+    persisted read's error."""
 
     name = str(field.get("name", "")).strip()
     if not name:
@@ -278,7 +252,7 @@ def authoring_form_field(field: Mapping[str, object]) -> FormFieldSpec | None:
     options = field.get("options")
     return FormFieldSpec(
         name=name,
-        type=str(field.get("type", "text")).strip() or "text",
+        type=parse_saved_form_field_type(field, index=index).value,
         label=str(field.get("label") or name).strip() or name,
         required=bool(field.get("required", False)),
         options=(
