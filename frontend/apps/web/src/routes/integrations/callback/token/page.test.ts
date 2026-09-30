@@ -9,7 +9,16 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 const source = readFileSync(new URL("./+page.svelte", import.meta.url), "utf8");
 const instance = parse(source, { modern: true }).instance;
 if (instance === null) throw new Error("Callback page has no instance script");
-const script = transpileModule(source.slice(instance.content.start, instance.content.end), {
+const content = instance.content;
+if (
+  !("start" in content) ||
+  !("end" in content) ||
+  typeof content.start !== "number" ||
+  typeof content.end !== "number"
+) {
+  throw new Error("Callback script has no source offsets");
+}
+const script = transpileModule(source.slice(content.start, content.end), {
   compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
 }).outputText;
 
