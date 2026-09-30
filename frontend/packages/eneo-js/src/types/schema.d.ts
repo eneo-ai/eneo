@@ -20243,6 +20243,8 @@ export interface components {
       mcp_tool_name?: string | null;
       /** Purpose */
       purpose?: string | null;
+      /** Is Internal */
+      is_internal?: boolean | null;
       /** Meta */
       meta?: {
         [key: string]: unknown;
@@ -27997,6 +27999,8 @@ export interface operations {
                     mcp_tool_name?: string | null;
                     /** Purpose */
                     purpose?: string | null;
+                    /** Is Internal */
+                    is_internal?: boolean | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;
@@ -28056,6 +28060,8 @@ export interface operations {
                     mcp_tool_name?: string | null;
                     /** Purpose */
                     purpose?: string | null;
+                    /** Is Internal */
+                    is_internal?: boolean | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;
@@ -28115,6 +28121,8 @@ export interface operations {
                     mcp_tool_name?: string | null;
                     /** Purpose */
                     purpose?: string | null;
+                    /** Is Internal */
+                    is_internal?: boolean | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;

@@ -583,6 +583,7 @@ async def test_non_streaming_populates_tool_calls_metadata_for_replay():
     assert succeeded.approved is True
     assert succeeded.result_status == "succeeded"
     assert succeeded.result == "tool-ok"
+    assert succeeded.is_internal is False
 
     assert failed.tool_call_id == "call_2"
     assert failed.arguments == {"q": "second"}
@@ -1072,6 +1073,93 @@ async def test_external_server_named_like_an_internal_one_still_needs_approval()
     )
     approval_manager.request_approval.assert_awaited_once()
     assert mcp_proxy.calls == []
+
+
+def _internal_flags(completions) -> set[bool | None]:
+    return {
+        metadata.is_internal
+        for completion in completions
+        for metadata in completion.tool_calls_metadata or []
+    }
+
+
+@pytest.mark.asyncio
+async def test_every_event_of_an_external_call_reports_it_as_external():
+    """Clients label Eneo's own tools from the flag on the call. For a server
+    named "knowledge" that an admin registered, the pending call, the approval
+    request and the denial all report it as external."""
+    adapter = _make_adapter()
+    approval_manager = AsyncMock()
+    approval_manager.wait_for_approval.return_value = ToolApprovalWaitResult(
+        decisions=[ToolApprovalDecision(tool_call_id="call_1", approved=False)],
+        timed_out=False,
+    )
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk(tool_name="knowledge__search_knowledge")],
+        eneo_context={
+            "mcp_proxy": _ExternalServerNamedKnowledgeProxy(),
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(
+            return_value=_AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+        ),
+    ):
+        completions = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=True,
+            approval_manager=approval_manager,
+            approval_context={
+                "tenant_id": uuid4(),
+                "user_id": uuid4(),
+                "session_id": uuid4(),
+                "assistant_id": uuid4(),
+            },
+            pending_approval_ids=set(),
+        )
+
+    assert any(
+        completion.response_type == ResponseType.TOOL_APPROVAL_REQUIRED
+        for completion in completions
+    )
+    assert _internal_flags(completions) == {False}
+
+
+@pytest.mark.asyncio
+async def test_every_event_of_an_internal_call_reports_it_as_internal():
+    adapter = _make_adapter()
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk(tool_name="knowledge__search_knowledge")],
+        eneo_context={
+            "mcp_proxy": _InternalMCPProxy(),
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(
+            return_value=_AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+        ),
+    ):
+        completions = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=True,
+            approval_manager=AsyncMock(),
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    assert _internal_flags(completions) == {True}
 
 
 @pytest.mark.asyncio
