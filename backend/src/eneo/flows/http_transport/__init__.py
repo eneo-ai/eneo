@@ -46,7 +46,10 @@ from eneo.flows.http_transport.secret_codec import (
     unprotected_persisted_secret_fields,
     unresolved_secret_sentinel_fields,
 )
-from eneo.flows.http_transport.step_configs import sent_step_http_configs
+from eneo.flows.http_transport.step_configs import (
+    sends_http_config,
+    sent_step_http_configs,
+)
 from eneo.flows.http_transport.validator import validate_authored_config
 
 __all__ = [
@@ -82,6 +85,7 @@ __all__ = [
     "protect_authored_secrets",
     "redact_authored_config",
     "redact_persisted_config",
+    "sends_http_config",
     "sent_step_http_configs",
     "secret_fields_holding_templates",
     "templated_secret_fields",

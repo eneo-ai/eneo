@@ -69,6 +69,8 @@ def test_every_site_is_read_in_order_with_its_origin():
                 {"step_ref": "step_b", "output": "text"},
             ],
         },
+        output_mode="template_fill",
+        output_type="docx",
         output_config={
             "bindings": {
                 "brodtext": "{{ föregående_steg }}",
@@ -276,6 +278,17 @@ def test_a_form_field_named_input_is_read_as_that_field(expression):
     assert (read.channel, read.path) == (FORM_FIELD, ("input",))
 
 
+@pytest.mark.parametrize("step_ref", ["step_2", "step_02", "step_\u0662", "step_b"])
+def test_a_source_ref_reads_the_producer_the_runtime_reads(step_ref: str):
+    step = _step(
+        input_bindings={"source_refs": [{"step_ref": step_ref, "output": "text"}]}
+    )
+
+    (read,) = _reads(step)
+
+    assert (read.producer_order, read.site) == (2, SOURCE_REF)
+
+
 def test_a_step_name_the_flow_does_not_resolve_has_no_producer():
     step = _step(
         "{{ step_x.output.text }}",
@@ -298,3 +311,60 @@ def test_template_sites_are_the_carriers_validation_iterates():
     assert iter_step_templates(step) == [
         template for _, template in step_template_sites(step)
     ]
+
+
+@pytest.mark.parametrize("output_mode", ["pass_through", "compose_text"])
+def test_an_output_config_the_runtime_does_not_interpolate_is_no_template_site(
+    output_mode: str,
+):
+    step = _step(output_mode=output_mode, output_config={"note": "{{ step_a }}"})
+
+    assert step_template_sites(step) == [(INSTRUCTIONS, "Svara.")]
+    assert [read.site for read in _reads(step)] == [IMPLICIT]
+
+
+def test_a_template_fill_is_read_at_its_bindings_only():
+    step = _step(
+        output_mode="template_fill",
+        output_type="docx",
+        output_config={
+            "bindings": {"a": "{{ step_a.output.text }}", "b": "Fast text"},
+            "note": "{{ step_b }}",
+        },
+    )
+
+    assert step_template_sites(step) == [
+        (INSTRUCTIONS, "Svara."),
+        (OUTPUT_CONFIG, "{{ step_a.output.text }}"),
+        (OUTPUT_CONFIG, "Fast text"),
+    ]
+
+
+def test_validation_judges_a_template_fill_binding_and_not_a_literal_key():
+    from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+    from eneo.flows.ai_builder.ai_builder_validation_references import (
+        validate_variable_references,
+    )
+    from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
+
+    def validate(**fields: object) -> SpecValidationResult:
+        first = _step().model_copy(update={"plan_step_ref": "step_a", "name": "A"})
+        reader = _step(**fields).model_copy(update={"plan_step_ref": "step_b"})
+        later = _step().model_copy(update={"plan_step_ref": "step_late", "name": "L"})
+        result = SpecValidationResult()
+        validate_variable_references(
+            FlowDraftSpecCore(flow_name="F", steps=[first, reader, later]), result
+        )
+        return result
+
+    forward = "{{ step_3.output.text }}"
+    literal = validate(output_config={"note": forward})
+    bound = validate(
+        output_mode="template_fill",
+        output_type="docx",
+        output_config={"bindings": {"a": forward}},
+    )
+
+    assert literal.valid, literal.errors
+    assert not bound.valid
+    assert [error.code for error in bound.errors] == ["future_step_reference"]

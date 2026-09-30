@@ -438,3 +438,17 @@ def test_runtime_binding_key_validation_accepts_typed_source_refs() -> None:
     )
     assert unsupported_input_binding_key({"source_refs": []}) is None
     assert unsupported_input_binding_key({1: "bad"}) == "1"
+
+
+def test_a_source_ref_template_reads_its_step_by_the_canonical_alias() -> None:
+    # The runtime reads `step_02` and `step_\u0662` as step 2; a template of the
+    # ref (classification, dedupe) must say the same step, in the alias the
+    # template grammar reads. A name that is no step number stays as written.
+    def expression(step_ref: str) -> str:
+        return SourceRefBinding(step_ref, "text").template_expression()
+
+    assert {expression(ref) for ref in ("step_2", "step_02", "step_\u0662")} == {
+        "{{ step_2.output.text }}"
+    }
+    assert expression("Sammanfatta") == "{{ Sammanfatta.output.text }}"
+    assert expression("step_\u00b2") == "{{ step_\u00b2.output.text }}"

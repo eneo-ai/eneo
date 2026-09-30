@@ -264,6 +264,27 @@ runtime input names, earlier steps, and their output contracts:
 - Authoring lowers `plan_step_ref` to `step_N` before persisting a `FlowStep`.
   `existing_step_ref` is edit identity only. Publish rejects either raw identity
   token if it survives authoring as binding syntax.
+- `step_N` is the saved position of the step it names. An edit that adds,
+  moves or removes steps keeps every read of a kept step on the step it read.
+  The alias is written with that step's new position in questions, source
+  references and template bindings, and in an HTTP input or delivery at the URL,
+  the auth header name and username, the non-secret header values and the active
+  body template. The same places are checked: if the edit removes the step, or
+  moves it to where the reader cannot read it (after the reader; an HTTP
+  delivery may also read its own step's result), the edit is refused with
+  `invalid_existing_step_ref` and nothing is written. A read that was already
+  invalid stays editable while it stays invalid; if the edit would make it name
+  a step the author never chose, the edit is refused with the same code.
+  In a template the alias is exactly `step_N` (ASCII digits, no leading zero);
+  any other spelling is no step and is refused. A source reference's number is
+  read as any decimal numeral, so `step_02` is
+  step 2; when its step moves, the edit writes it back as `step_N`, and it is
+  checked like any other read. Reads in a step's prompt (instructions) are
+  renumbered too, but only the AI Builder checks them, when it validates a
+  proposal. Inactive configuration, such as a body template with mode `none`,
+  and text that only looks like a reference (a metadata key of a pass-through
+  step's output configuration) stay as saved. `föregående_steg` and `previous_step` mean the step
+  before and keep meaning position.
 
 Publish errors identify the exact location: question errors point to
 `input_bindings.question`, and source-reference errors point to the indexed

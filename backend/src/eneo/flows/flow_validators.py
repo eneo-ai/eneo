@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import replace
@@ -88,6 +87,7 @@ from eneo.flows.input_binding_contract_rules import (
     item_template_field_names,
     question_binding,
     source_ref_bindings,
+    source_ref_step_order,
     unsupported_input_binding_key,
     validate_source_refs_binding,
 )
@@ -120,10 +120,12 @@ from eneo.flows.transcription_config import (
     parse_transcription_config,
 )
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES
-from eneo.flows.variable_resolver import iter_template_expressions
+from eneo.flows.variable_resolver import (
+    iter_template_expressions,
+    runtime_step_alias_order,
+)
 from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 
-_STEP_REFERENCE_PATTERN = re.compile(r"^step_(\d+)$")
 _ALLOWED_FLOW_INPUT_SOURCES = set(FLOW_STEP_INPUT_SOURCE_VALUES)
 _ALLOWED_FLOW_INPUT_TYPES = set(FLOW_STEP_INPUT_TYPE_VALUES)
 _ALLOWED_FLOW_OUTPUT_MODES = set(FLOW_STEP_OUTPUT_MODE_VALUES)
@@ -1668,7 +1670,7 @@ def _validate_binding_references(
                 continue
             if (
                 reference.head in step_ref_mapping
-                and _STEP_REFERENCE_PATTERN.match(reference.head) is None
+                and runtime_step_alias_order(reference.head) is None
                 and reference.tail
             ):
                 raise FlowStepValidationError(
@@ -1691,11 +1693,8 @@ def _validate_binding_references(
             )
     if publish_strict:
         for index, source_ref in enumerate(source_refs):
-            step_ref_match = _STEP_REFERENCE_PATTERN.match(source_ref.step_ref)
-            referenced_order = (
-                int(step_ref_match.group(1))
-                if step_ref_match is not None
-                else step_ref_mapping.get(source_ref.step_ref)
+            referenced_order = source_ref_step_order(
+                source_ref.step_ref, step_ref_mapping
             )
             ordered_references.append(
                 (
@@ -1784,8 +1783,10 @@ def _validate_binding_references(
     if publish_strict:
         return
 
-    expressions = [
-        (reference.expression, "input_bindings.question")
+    # A template head is read by the template grammar, a source ref's step_ref
+    # by the source-ref grammar: they differ on purpose.
+    expressions: list[tuple[str, str, Callable[[str], int | None]]] = [
+        (reference.expression, "input_bindings.question", runtime_step_alias_order)
         for reference in analyze_template(
             question or "",
             step_refs={},
@@ -1793,10 +1794,14 @@ def _validate_binding_references(
         )
     ]
     expressions.extend(
-        (source_ref.step_ref, f"input_bindings.source_refs[{index}].step_ref")
+        (
+            source_ref.step_ref,
+            f"input_bindings.source_refs[{index}].step_ref",
+            source_ref_step_order,
+        )
         for index, source_ref in enumerate(source_refs)
     )
-    for expression, field in expressions:
+    for expression, field, read_order in expressions:
         if expression.startswith("step_input"):
             continue
         if not expression.startswith("step_"):
@@ -1804,8 +1809,8 @@ def _validate_binding_references(
 
         context = _binding_reference_context(field, expression)
         head = expression.split(".", maxsplit=1)[0]
-        step_ref = _STEP_REFERENCE_PATTERN.match(head)
-        if step_ref is None:
+        referenced_order = read_order(head)
+        if referenced_order is None:
             raise FlowStepValidationError(
                 f"Invalid step reference '{head}' in input bindings.",
                 code=FlowGraphIssueCode.FLOW_INPUT_BINDING_INVALID_STEP_REFERENCE.value,
@@ -1813,7 +1818,6 @@ def _validate_binding_references(
                 step_order=current_step_order,
             )
 
-        referenced_order = int(step_ref.group(1))
         if referenced_order >= current_step_order:
             raise FlowStepValidationError(
                 "Input bindings may only reference outputs from earlier steps.",
@@ -2002,12 +2006,7 @@ def _referenced_step_for_source_ref(
     steps_by_order: dict[int, FlowStepValidationView],
     step_ref_mapping: dict[str, int],
 ) -> FlowStepValidationView | None:
-    step_ref = _STEP_REFERENCE_PATTERN.match(ref_step)
-    step_order = (
-        int(step_ref.group(1))
-        if step_ref is not None
-        else step_ref_mapping.get(ref_step)
-    )
+    step_order = source_ref_step_order(ref_step, step_ref_mapping)
     return steps_by_order.get(step_order) if step_order is not None else None
 
 

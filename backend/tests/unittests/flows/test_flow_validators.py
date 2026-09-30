@@ -1034,6 +1034,47 @@ def test_validate_steps_publish_rejects_invalid_numeric_label_and_authored_quest
     assert exc.context == _expected_boundary_context(exc, _expected_context)
 
 
+# A question's template head is read by the template grammar (`step_<order>`,
+# ASCII, no leading zero), a source ref's step_ref by the runtime's own (any
+# decimal numeral); neither raises on an unusual digit.
+@pytest.mark.parametrize(
+    ("location", "reference", "code"),
+    [
+        ("question", "step_01", "flow_input_binding_invalid_step_reference"),
+        ("question", "step_\u0661", "flow_input_binding_invalid_step_reference"),
+        ("question", "step_\u00b9", "flow_input_binding_invalid_step_reference"),
+        ("question", "step_\uff13", "flow_input_binding_invalid_step_reference"),
+        ("source_ref", "step_\u00b9", "flow_input_binding_invalid_step_reference"),
+        ("source_ref", "step_\uff13", "flow_input_binding_future_step_reference"),
+        ("source_ref", "step_03", "flow_input_binding_future_step_reference"),
+        ("source_ref", "step_00", "flow_input_binding_unknown_step_order"),
+        ("source_ref", "step_01", None),
+        ("source_ref", "step_\u0662", None),
+    ],
+)
+def test_validate_steps_draft_reads_each_binding_with_its_own_step_grammar(
+    location: str, reference: str, code: str | None
+) -> None:
+    if location == "question":
+        bindings = {"question": "Use {{ " + reference + ".output.text }}"}
+    else:
+        bindings = {"source_refs": [{"step_ref": reference, "output": "text"}]}
+    steps = [_step(1), _step(2), _step(3, input_bindings=bindings)]
+
+    if code is None:
+        validate_steps(steps, require_complete_template_fill_config=False)
+        return
+    exc = _assert_validate_steps_rejects(
+        steps,
+        expected_type=FlowStepValidationError,
+        match="step",
+        code=code,
+        step_order=3,
+        require_complete_template_fill_config=False,
+    )
+    assert exc.context is not None and exc.context["reference"].startswith(reference)
+
+
 @pytest.mark.parametrize("location", ["question", "source_ref"])
 @pytest.mark.parametrize(
     ("reference", "code"),
@@ -1769,7 +1810,10 @@ def _source_sections_contract() -> dict[str, object]:
     }
 
 
-@pytest.mark.parametrize("step_ref", ["step_1", "Collect intake"])
+# The runtime reads a source ref's number as any decimal numeral.
+@pytest.mark.parametrize(
+    "step_ref", ["step_1", "step_01", "step_\u0661", "Collect intake"]
+)
 def test_validate_steps_publish_accepts_prior_numeric_and_label_source_refs(
     step_ref: str,
 ) -> None:

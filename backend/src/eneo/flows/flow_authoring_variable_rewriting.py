@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import copy
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from dataclasses import dataclass
 from typing import Any, cast
 
 from eneo.flows.domain.flow_step_validation import FlowStepValidationView
@@ -12,10 +14,13 @@ from eneo.flows.enums import (
     FlowOutputType,
 )
 from eneo.flows.flow_authoring_spec import AssistantSpec, StepSpec
+from eneo.flows.http_transport.authored_config import ConfigPath
 from eneo.flows.input_binding_contract_rules import (
     SOURCE_REFS_BINDING_KEY,
     source_ref_bindings,
+    source_ref_step_order,
 )
+from eneo.flows.step_lineage import ConfigChannel
 from eneo.flows.variable_resolver import (
     TEMPLATE_VARIABLE_PATTERN,
     runtime_step_alias,
@@ -100,18 +105,44 @@ def flow_step_validation_views_from_draft_spec(
     ]
 
 
+def rewrite_step_alias_heads(
+    text: str, resolve: Callable[[int, str], str | None]
+) -> str:
+    """`text` with the runtime alias (`step_N`) at the head of each template
+    expression replaced by what `resolve(N, expression)` gives, or kept when it
+    gives None; nothing else changes, the author's spacing included. An
+    expression and an alias are what the runtime resolver reads as one, so an
+    unclosed expression, `step_02` or a numeral in another script is no read.
+    This is the one reader of which steps a text reads by alias."""
+
+    def replace(match: re.Match[str]) -> str:
+        whole = match.group(0)
+        expression = match.group(1)
+        name = expression.split(".", maxsplit=1)[0].strip()
+        order = runtime_step_alias_order(name)
+        if order is None or not expression.startswith(name):
+            return whole
+        head = resolve(order, expression.strip())
+        if head is None:
+            return whole
+        start = match.start(1) - match.start(0)
+        return whole[:start] + head + whole[start + len(name) :]
+
+    return TEMPLATE_VARIABLE_PATTERN.sub(replace, text)
+
+
 def renumber_step_aliases(value: Any, renumbering: Mapping[int, int]) -> Any:
-    """`value` with the runtime alias (`step_N`) at the head of each template
-    expression renumbered when its step changed position, and nothing else: the
-    author's spacing and every other character stay. An expression and an
-    alias are what the runtime resolver reads as one, so an unclosed
-    expression, `step_02` or a numeral in another script is left as it is."""
+    """`value` with the alias of each step that changed position (saved
+    position to new) renumbered in every string it holds."""
 
     if not renumbering:
         return value
     if isinstance(value, str):
-        return TEMPLATE_VARIABLE_PATTERN.sub(
-            lambda match: _renumber_expression(match, renumbering), value
+        return rewrite_step_alias_heads(
+            value,
+            lambda order, _: (
+                runtime_step_alias(renumbering[order]) if order in renumbering else None
+            ),
         )
     if isinstance(value, dict):
         return {
@@ -125,20 +156,118 @@ def renumber_step_aliases(value: Any, renumbering: Mapping[int, int]) -> Any:
     return value
 
 
-def _renumber_expression(match: re.Match[str], renumbering: Mapping[int, int]) -> str:
-    whole = match.group(0)
-    expression_start = match.start(1) - match.start(0)
-    expression = match.group(1)
-    head = expression.split(".", maxsplit=1)[0]
-    name = head.strip()
-    order = runtime_step_alias_order(name)
-    if order is None or order not in renumbering or not expression.startswith(name):
-        return whole
-    return (
-        whole[:expression_start]
-        + runtime_step_alias(renumbering[order])
-        + whole[expression_start + len(name) :]
+def renumber_config_aliases(
+    config: Any, channel: ConfigChannel | None, renumbering: Mapping[int, int]
+) -> Any:
+    """`config` with the aliases of moved steps renumbered at the strings the
+    runtime interpolates for the step's modes, `channel`'s sites; inactive
+    configuration, a disabled template and literal metadata keep what was
+    saved."""
+
+    if not renumbering:
+        return config
+    return rewrite_config_sites(
+        config, channel, lambda _, text: renumber_step_aliases(text, renumbering)
     )
+
+
+def rewrite_config_sites(
+    config: Any,
+    channel: ConfigChannel | None,
+    rewrite: Callable[[ConfigPath, str], str],
+) -> Any:
+    """`config` with each string of `channel`'s sites replaced by
+    `rewrite(path, text)`; everything else is kept as it is."""
+
+    if config is None or channel is None or channel.sites is None:
+        return config
+    edits = [
+        (path, rewritten)
+        for path, text in channel.sites
+        if (rewritten := rewrite(path, text)) != text
+    ]
+    if not edits:
+        return config
+    result = copy.deepcopy(config)
+    for path, rewritten in edits:
+        node = result
+        for key in path[:-1]:
+            node = node[key]
+        node[path[-1]] = rewritten
+    return result
+
+
+@dataclass(frozen=True, slots=True)
+class StepAliasRead:
+    """A read of a step by its alias: where it is, which step it names, and
+    that the steps before `visible_below` are the ones its channel shows."""
+
+    site: str
+    order: int
+    visible_below: int
+
+
+def input_binding_alias_reads(
+    input_bindings: Mapping[str, Any] | None, *, step_order: int
+) -> list[StepAliasRead]:
+    """The steps the underlag of the step at `step_order` reads by alias, in
+    its templates and in the `step_ref` of each source ref."""
+
+    if not input_bindings:
+        return []
+    reads = _alias_reads(
+        "input_bindings", _strings(input_bindings), visible_below=step_order
+    )
+    source_refs = input_bindings.get(SOURCE_REFS_BINDING_KEY)
+    for index, item in enumerate(
+        cast(list[Any], source_refs) if isinstance(source_refs, list) else []
+    ):
+        step_ref = (
+            cast(dict[str, Any], item).get("step_ref")
+            if isinstance(item, dict)
+            else None
+        )
+        order = source_ref_step_order(step_ref) if isinstance(step_ref, str) else None
+        if order is not None:
+            site = f"input_bindings.{SOURCE_REFS_BINDING_KEY}[{index}].step_ref"
+            reads.append(StepAliasRead(site, order, step_order))
+    return reads
+
+
+def config_alias_reads(channel: ConfigChannel | None) -> list[StepAliasRead]:
+    """The steps a configuration column reads by alias at the strings the
+    runtime interpolates, `channel`'s sites, none when it is not one."""
+
+    if channel is None or channel.sites is None:
+        return []
+    return _alias_reads(
+        channel.column, channel.sites, visible_below=channel.context_step_order
+    )
+
+
+def _strings(value: Any, path: ConfigPath = ()) -> Iterator[tuple[ConfigPath, str]]:
+    if isinstance(value, str):
+        yield path, value
+    elif isinstance(value, dict):
+        for key, inner in cast(dict[str, Any], value).items():
+            yield from _strings(inner, (*path, key))
+    elif isinstance(value, list):
+        for index, inner in enumerate(cast(list[Any], value)):
+            yield from _strings(inner, (*path, index))
+
+
+def _alias_reads(
+    column: str, sites: Iterable[tuple[ConfigPath, str]], *, visible_below: int
+) -> list[StepAliasRead]:
+    reads: list[StepAliasRead] = []
+    for path, text in sites:
+        orders: list[int] = []
+        rewrite_step_alias_heads(text, lambda order, _: orders.append(order))
+        where = column + "".join(
+            f"[{part}]" if isinstance(part, int) else f".{part}" for part in path
+        )
+        reads.extend(StepAliasRead(where, order, visible_below) for order in orders)
+    return reads
 
 
 def renumber_input_binding_aliases(
@@ -166,7 +295,7 @@ def _renumber_source_ref(source_ref: Any, renumbering: Mapping[int, int]) -> Any
         return source_ref
     payload = cast(dict[str, Any], source_ref)
     step_ref = payload.get("step_ref")
-    order = runtime_step_alias_order(step_ref) if isinstance(step_ref, str) else None
+    order = source_ref_step_order(step_ref) if isinstance(step_ref, str) else None
     if order is None or order not in renumbering:
         return payload
     return {**payload, "step_ref": runtime_step_alias(renumbering[order])}

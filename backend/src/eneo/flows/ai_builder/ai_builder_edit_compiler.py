@@ -7,7 +7,6 @@ that every existing step is either represented in order or explicitly removed.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, cast
@@ -72,6 +71,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceC
 from eneo.flows.ai_builder.ai_builder_step_reads import (
     form_fields_read,
     spec_step_refs,
+    step_output_channel,
 )
 from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
     StepNormalizationChange,
@@ -107,18 +107,20 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from eneo.flows.flow_authoring_variable_rewriting import (
+    rewrite_config_sites,
+    rewrite_step_alias_heads,
+)
 from eneo.flows.input_binding_contract_rules import (
     SOURCE_REFS_BINDING_KEY,
     question_binding,
     source_ref_bindings,
+    source_ref_step_order,
 )
 from eneo.flows.step_lineage import (
     existing_step_order_from_ref,
     existing_step_ref_for_order,
 )
-
-_RUNTIME_STEP_ALIAS_PATTERN = re.compile(r"\{\{\s*step_(\d+)(\.[^{}]+?)\s*\}\}")
-_RUNTIME_STEP_REF_PATTERN = re.compile(r"^step_(\d+)$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1599,7 +1601,7 @@ def _rewrite_runtime_aliases_for_existing_step(
         return guard.resolver(step, site)
 
     updates: dict[str, Any] = {}
-    rewritten_instructions = _rewrite_runtime_alias_string(
+    rewritten_instructions = rewrite_step_alias_heads(
         step.assistant_spec.instructions,
         resolve_at("instructions"),
     )
@@ -1620,20 +1622,23 @@ def _rewrite_runtime_aliases_for_existing_step(
             updates["input_bindings"] = rewritten_bindings
 
     if step.output_config is not None:
-        # A key normalization deletes reads nothing; the template's mappings
-        # are the attachment contract's when it runs.
+        # Only the strings the runtime interpolates for the step's mode are
+        # reads, found by the owner the platform uses; a metadata key is text.
+        # A key normalization deletes reads nothing, and the template's
+        # mappings are the attachment contract's when it runs.
+        channel = step_output_channel(step)
         unguarded = discarded_output_config_keys(step) | frozenset(
             ["bindings"] if guard is not None and guard.template_contract_runs else []
         )
-        rewritten_output_config = {
-            key: _rewrite_runtime_alias_value(
-                value,
-                _resolve_by(existing_order_to_plan_ref)
-                if key in unguarded
-                else resolve_at("output_config"),
-            )
-            for key, value in step.output_config.items()
-        }
+        by_plan_ref = _resolve_by(existing_order_to_plan_ref)
+        at_site = resolve_at("output_config")
+        rewritten_output_config = rewrite_config_sites(
+            step.output_config,
+            channel,
+            lambda path, text: rewrite_step_alias_heads(
+                text, by_plan_ref if path[0] in unguarded else at_site
+            ),
+        )
         if rewritten_output_config != step.output_config:
             updates["output_config"] = rewritten_output_config
 
@@ -1642,7 +1647,7 @@ def _rewrite_runtime_aliases_for_existing_step(
 
 def _rewrite_runtime_alias_value(value: Any, resolve: AliasResolver) -> Any:
     if isinstance(value, str):
-        return _rewrite_runtime_alias_string(value, resolve)
+        return rewrite_step_alias_heads(value, resolve)
     if isinstance(value, dict):
         return {
             key: _rewrite_runtime_alias_value(inner, resolve)
@@ -1679,32 +1684,16 @@ def _rewrite_source_ref_step_aliases(
             continue
         ref = cast(dict[str, Any], raw_ref)
         step_ref = ref.get("step_ref")
-        match = (
-            _RUNTIME_STEP_REF_PATTERN.match(step_ref)
-            if isinstance(step_ref, str)
-            else None
-        )
+        order = source_ref_step_order(step_ref) if isinstance(step_ref, str) else None
         path = (step_ref, "output", ref.get("output"), ref.get("field_path"))
         plan_ref = (
             resolve(
-                int(match.group(1)),
-                ".".join(part for part in path if isinstance(part, str) and part),
+                order, ".".join(part for part in path if isinstance(part, str) and part)
             )
-            if match is not None
+            if order is not None
             else None
         )
         rewritten_refs.append({**ref, "step_ref": plan_ref} if plan_ref else ref)
     if rewritten_refs == raw_refs:
         return bindings
     return {**bindings, SOURCE_REFS_BINDING_KEY: rewritten_refs}
-
-
-def _rewrite_runtime_alias_string(text: str, resolve: AliasResolver) -> str:
-    def _replace(match: re.Match[str]) -> str:
-        old_order = int(match.group(1))
-        plan_ref = resolve(old_order, f"step_{old_order}{match.group(2)}")
-        if plan_ref is None:
-            return match.group(0)
-        return "{{ " + plan_ref + match.group(2) + " }}"
-
-    return _RUNTIME_STEP_ALIAS_PATTERN.sub(_replace, text)

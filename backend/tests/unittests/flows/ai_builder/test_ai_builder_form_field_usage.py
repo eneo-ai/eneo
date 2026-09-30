@@ -10,6 +10,8 @@ from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     FormFieldSpec,
     InputSource,
+    OutputMode,
+    OutputType,
     StepSpec,
 )
 
@@ -23,6 +25,8 @@ def _step(
     *,
     input_bindings: dict[str, object] | None = None,
     output_config: dict[str, object] | None = None,
+    output_mode: OutputMode = OutputMode.PASS_THROUGH,
+    output_type: OutputType = OutputType.TEXT,
 ) -> StepSpec:
     return StepSpec(
         plan_step_ref="step_a",
@@ -31,6 +35,8 @@ def _step(
         input_source=InputSource.FLOW_INPUT,
         input_bindings=input_bindings,
         output_config=output_config,
+        output_mode=output_mode,
+        output_type=output_type,
     )
 
 
@@ -54,7 +60,12 @@ def _step(
         ),
         (
             [_field("doc_id")],
-            _step("Skriv svar.", output_config={"filename": "{{ doc_id }}.docx"}),
+            _step(
+                "Skriv svar.",
+                output_mode=OutputMode.TEMPLATE_FILL,
+                output_type=OutputType.DOCX,
+                output_config={"bindings": {"filename": "{{ doc_id }}.docx"}},
+            ),
             [],
         ),
         ([_field("priority")], _step("Skriv svar."), ["priority"]),

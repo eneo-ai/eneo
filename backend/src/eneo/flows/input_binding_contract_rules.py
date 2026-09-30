@@ -6,6 +6,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
+from eneo.flows.variable_resolver import runtime_step_alias
+
 FLOW_INPUT_BINDING_UNSUPPORTED_KEY = "flow_input_binding_unsupported_key"
 SOURCE_REFS_BINDING_KEY = "source_refs"
 SUPPORTED_INPUT_BINDING_KEYS = frozenset({"question", SOURCE_REFS_BINDING_KEY})
@@ -24,6 +26,25 @@ class InputBindingContractError(ValueError):
         super().__init__(message)
 
 
+def source_ref_step_order(
+    step_ref: str, named: Mapping[str, int] | None = None
+) -> int | None:
+    """The step order a source ref's `step_ref` reads. The runtime reads the
+    number after `step_` as it reads any decimal numeral (leading zeros and
+    other scripts included: `step_02`, `step_\u0662`), and otherwise takes the
+    order of the step `named` gives that name. The one reader of a source
+    ref's step: input resolution, validation, the Builder and materialization
+    all call it, so none of them can read a ref as another step."""
+
+    raw = step_ref.removeprefix("step_")
+    if raw != step_ref and raw.isdecimal():
+        try:
+            return int(raw)
+        except ValueError:  # more digits than Python converts
+            return None
+    return named.get(step_ref) if named else None
+
+
 @dataclass(frozen=True, slots=True)
 class SourceRefBinding:
     step_ref: str
@@ -33,8 +54,12 @@ class SourceRefBinding:
     item_template: str | None = None
 
     def template_expression(self) -> str:
+        # A template reads a step by its canonical alias; the source ref may
+        # spell the same number another way (`step_02`).
+        order = source_ref_step_order(self.step_ref)
+        head = runtime_step_alias(order) if order is not None else self.step_ref
         path = ".".join(("output", self.output, *self.field_path))
-        return f"{{{{ {self.step_ref}.{path} }}}}"
+        return f"{{{{ {head}.{path} }}}}"
 
     def dedupe_key(self) -> tuple[str, str | None]:
         return (self.template_expression(), self.item_template)

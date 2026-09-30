@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import pytest
 
 from eneo.flows.enums import FlowInputSource, FlowOutputMode
+from eneo.flows.input_binding_contract_rules import source_ref_step_order
 from eneo.flows.step_lineage import (
     build_step_ref_mapping,
     existing_step_order_from_ref,
@@ -672,3 +673,49 @@ def test_input_orders_do_not_read_config_channels() -> None:
         )
         == []
     )
+
+
+@pytest.mark.parametrize(
+    ("step_ref", "order"),
+    [
+        ("step_2", 2),
+        ("step_02", 2),
+        ("step_\u0662", 2),
+        ("step_\u0660\u0662", 2),
+        ("step_\uff12", 2),
+        ("step_12", 12),
+        ("step_0", 0),
+        ("step_\u00b2", None),
+        ("step_", None),
+        ("step_2x", None),
+        ("step_ 2", None),
+        ("step_2\n", None),
+        ("step_-2", None),
+        ("Step_2", None),
+        ("existing_step_2", None),
+        ("step_" + "9" * 5000, None),
+    ],
+)
+def test_a_source_ref_reads_the_step_number_the_runtime_reads(
+    step_ref: str, order: int | None
+) -> None:
+    assert source_ref_step_order(step_ref) == order
+
+
+def test_a_source_ref_that_is_no_step_number_reads_the_step_it_names() -> None:
+    names = {"Sammanfatta": 2, "step_3": 1}
+
+    assert source_ref_step_order("Sammanfatta", names) == 2
+    assert source_ref_step_order("Sammanfatta") is None
+    assert source_ref_step_order("Okänd", names) is None
+    # A step number wins over a step named like one, as it does at runtime.
+    assert source_ref_step_order("step_3", names) == 3
+
+
+@pytest.mark.parametrize("step_ref", ["step_2", "step_02", "step_٢"])
+def test_upstream_orders_read_a_source_ref_as_the_runtime_does(step_ref: str) -> None:
+    # The security classification counts what the runtime hands the step, so a
+    # source ref the runtime reads as step 2 is a read of step 2 in any form.
+    bindings = {"source_refs": [{"step_ref": step_ref, "output": "text"}]}
+
+    assert _upstream(input_bindings=bindings) == [2]

@@ -15,6 +15,7 @@ from enum import StrEnum
 from typing import Any
 
 from eneo.flows.domain.runtime_input import build_runtime_input_config
+from eneo.flows.enums import FlowInputSource, FlowOutputMode
 from eneo.flows.flow_authoring_spec import InputSource, InputType, OutputMode, StepSpec
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
 from eneo.flows.flow_variable_definitions import (
@@ -25,7 +26,9 @@ from eneo.flows.input_binding_contract_rules import (
     SourceRefBinding,
     question_binding,
     source_ref_bindings,
+    source_ref_step_order,
 )
+from eneo.flows.step_lineage import ConfigChannel, config_channel
 from eneo.flows.template_reference_analyzer import (
     TemplateReference,
     TemplateReferenceKind,
@@ -92,16 +95,30 @@ class StepRead:
 _RUN_INPUT_ALIASES = FLOW_INPUT_ALIASES | {FLOW_INPUT_TRANSCRIPTION_KEY}
 
 
+def step_output_channel(step: StepSpec) -> ConfigChannel | None:
+    """The strings of a step's output_config the runtime interpolates for its
+    modes, found by the owner the platform uses, None when it interpolates
+    none: any other key is literal text. The authoring modes have no delivery,
+    so the step's order does not matter here."""
+
+    return config_channel(
+        column="output_config",
+        config=step.output_config,
+        input_source=FlowInputSource(step.input_source.value),
+        output_mode=FlowOutputMode(step.output_mode.value),
+        step_order=1,
+    )
+
+
 def step_template_sites(step: StepSpec) -> list[tuple[ReadSite, str]]:
     """Every template carrier of a step, as text, with the site it is read at."""
 
     sites = [(ReadSite.INSTRUCTIONS, step.assistant_spec.instructions)]
-    for site, payload in (
-        (ReadSite.QUESTION, step.input_bindings),
-        (ReadSite.OUTPUT_CONFIG, step.output_config),
-    ):
-        if payload is not None:
-            sites.append((site, _template_text(payload)))
+    if step.input_bindings is not None:
+        sites.append((ReadSite.QUESTION, _template_text(step.input_bindings)))
+    channel = step_output_channel(step)
+    if channel is not None and channel.sites is not None:
+        sites.extend((ReadSite.OUTPUT_CONFIG, text) for _, text in channel.sites)
     return sites
 
 
@@ -135,7 +152,7 @@ def step_reads(
     source_refs = source_ref_bindings(step.input_bindings)
     reads = [
         StepRead(
-            step_refs.get(ref.step_ref),
+            source_ref_step_order(ref.step_ref, step_refs),
             ReadChannel.TEXT if ref.output == "text" else ReadChannel.STRUCTURED,
             ref.field_path,
             ReadSite.SOURCE_REF,

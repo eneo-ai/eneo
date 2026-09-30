@@ -61,6 +61,7 @@ from eneo.flows.flow_authoring_spec import (
 )
 from eneo.flows.flow_resource_bindings import LocalResourceBinding
 from eneo.flows.step_lineage import existing_step_ref_for_order
+from eneo.main.exceptions import BadRequestException
 from eneo.main.models import ModelId
 from eneo.prompts.api.prompt_models import PromptCreate
 from eneo.roles.permissions import Permission
@@ -926,12 +927,12 @@ async def test_a_moved_step_the_edit_leaves_keeps_its_credential_beside_a_renumb
         "url": "https://example.test/{{step_2.output.text}}",
         "auth": {"mode": "bearer_token", "token": stored},
     }
-    await _set_raw(db_container, rows[2]["id"], output_config=config)
+    await _set_raw(
+        db_container, rows[2]["id"], output_mode="http_post", output_config=config
+    )
 
     with _encryption(active):
-        await _edit(
-            db_container, frontend_saved, [_keep(1), _new_step(), _keep(2), _keep(3)]
-        )
+        await _keep_edit(db_container, frontend_saved, 1, "new", 2, 3)
 
     assert (await _rows(db_container, frontend_saved.flow_id))[3]["output_config"] == {
         **config,
@@ -981,3 +982,225 @@ async def test_a_saved_step_is_protected_only_in_what_its_author_typed(
     assert written.startswith(EncryptionService.VERSION_PREFIX)
     assert encryption is not None
     assert encryption.decrypt(written) == "nyskriven-hemlighet"
+
+
+# A step the edit keeps reads the step it read, or the edit is refused. An HTTP
+# input step cannot be projected into an authoring spec, so these edits are
+# written as the spec a caller that keeps the row would send.
+
+
+def _kept_spec(*order: int | str) -> FlowDraftSpecCore:
+    """The plan order of saved steps (by position) and added ones ("new")."""
+
+    steps = [
+        StepSpec(
+            plan_step_ref="new" if step == "new" else f"p{step}",
+            existing_step_ref=None
+            if step == "new"
+            else existing_step_ref_for_order(int(step)),
+            name="Ny" if step == "new" else f"Steg {step}",
+            assistant_spec=AssistantSpec(instructions="Gör uppgiften."),
+            input_source=InputSource.FLOW_INPUT
+            if position == 0
+            else InputSource.PREVIOUS_STEP,
+            input_type=InputType.TEXT,
+            input_bindings=_OWN_QUESTION if step == "new" and position else None,
+        )
+        for position, step in enumerate(order)
+    ]
+    return FlowDraftSpecCore(flow_name="Tre steg", steps=steps)
+
+
+def _http_input(url: str, **fields: Any) -> dict[str, Any]:
+    return {
+        "input_source": "http_get",
+        "input_bindings": None,
+        "input_config": {
+            "url": url,
+            "auth": {"mode": "none"},
+            "timeout_seconds": 30,
+            **fields,
+        },
+    }
+
+
+async def _keep_edit(
+    db_container,
+    saved: Saved,
+    *order: int | str,
+    removed: tuple[int, ...] = (),
+) -> None:
+    await _apply_spec(
+        db_container,
+        saved,
+        _kept_spec(*order),
+        removed=frozenset(existing_step_ref_for_order(n) for n in removed),
+        updated=frozenset(),
+    )
+
+
+def _by_id(rows: list[Row]) -> dict[UUID, Row]:
+    return {row["id"]: row for row in rows}
+
+
+@pytest.mark.parametrize(
+    "active", [True, False], ids=["encryption on", "encryption off"]
+)
+async def test_an_http_input_step_reads_its_producer_where_the_edit_puts_it(
+    db_container, frontend_saved: Saved, active: bool
+) -> None:
+    """A step is added before the producer of an HTTP input step. The step's
+    url and plain header name the producer's new place, its stored credential
+    is what was stored, and no other column changes."""
+
+    rows = await _rows(db_container, frontend_saved.flow_id)
+    stored = EncryptionService(_KEY).encrypt("lagrad-hemlighet")
+    await _set_raw(
+        db_container,
+        rows[2]["id"],
+        **_http_input(
+            "https://example.test/{{step_2.output.text}}",
+            auth={"mode": "bearer_token", "token": stored},
+            custom_headers=[
+                {"name": "X-Text", "value": "{{ step_2 }}", "secret": False},
+                {"name": "X-Key", "value": stored, "secret": True},
+            ],
+        ),
+    )
+    before = await _rows(db_container, frontend_saved.flow_id)
+
+    with _encryption(active):
+        await _keep_edit(db_container, frontend_saved, 1, "new", 2, 3)
+    after = _by_id(await _rows(db_container, frontend_saved.flow_id))
+
+    first, producer, http_step = (after[row["id"]] for row in before)
+    assert first == before[0]
+    assert (producer["step_order"], http_step["step_order"]) == (3, 4)
+    assert _differing(before[1], producer) == {"step_order", "updated_at"}
+    saved_config = before[2]["input_config"]
+    assert http_step["input_config"] == {
+        **saved_config,
+        "url": "https://example.test/{{step_3.output.text}}",
+        "custom_headers": [
+            {"name": "X-Text", "value": "{{ step_3 }}", "secret": False},
+            {"name": "X-Key", "value": stored, "secret": True},
+        ],
+    }
+    assert http_step["input_config"]["auth"] == saved_config["auth"]
+    assert _differing(before[2], http_step) == {
+        "step_order",
+        "input_config",
+        "updated_at",
+    }
+
+
+async def test_an_http_delivery_follows_its_producer_and_its_own_result(
+    db_container, frontend_saved: Saved
+) -> None:
+    rows = await _rows(db_container, frontend_saved.flow_id)
+    await _set_raw(
+        db_container,
+        rows[2]["id"],
+        output_mode="http_post",
+        output_config={
+            "url": "https://example.test/{{step_3}}/{{step_2.output.text}}",
+            "auth": {"mode": "none"},
+            "timeout_seconds": 30,
+            "body": {"mode": "json_template", "template": '{"t": "{{ step_2 }}"}'},
+        },
+    )
+    before = await _rows(db_container, frontend_saved.flow_id)
+
+    await _keep_edit(db_container, frontend_saved, 1, "new", 2, 3)
+    after = _by_id(await _rows(db_container, frontend_saved.flow_id))
+
+    assert after[before[2]["id"]]["output_config"] == {
+        **before[2]["output_config"],
+        "url": "https://example.test/{{step_4}}/{{step_3.output.text}}",
+        "body": {"mode": "json_template", "template": '{"t": "{{ step_3 }}"}'},
+    }
+
+
+@pytest.mark.parametrize(
+    ("order", "removed"),
+    [((1, 3), (2,)), ((1, 3, 2), ())],
+    ids=["the producer is removed", "the producer moves after its reader"],
+)
+async def test_an_edit_that_would_rebind_a_kept_read_writes_nothing(
+    db_container,
+    frontend_saved: Saved,
+    order: tuple[int, ...],
+    removed: tuple[int, ...],
+) -> None:
+    rows = await _rows(db_container, frontend_saved.flow_id)
+    await _set_raw(
+        db_container,
+        rows[2]["id"],
+        **_http_input("https://example.test/{{step_2.output.text}}"),
+    )
+    before = await _rows(db_container, frontend_saved.flow_id)
+    prompts = await _prompts(db_container, frontend_saved.flow_id)
+    versions = await _version_count(db_container, frontend_saved.flow_id)
+    async with db_container() as container:
+        flow = await container.flow_service().get_flow(frontend_saved.flow_id)
+    revision = flow.draft_revision
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await _keep_edit(db_container, frontend_saved, *order, removed=removed)
+
+    assert exc_info.value.code == "invalid_existing_step_ref"
+    assert exc_info.value.context == {
+        "reason": "kept_read_lost_its_producer",
+        "reader_ref": "existing_step_3",
+        "site": "input_config.url",
+        "producer_ref": "existing_step_2",
+    }
+    assert await _rows(db_container, frontend_saved.flow_id) == before
+    assert await _prompts(db_container, frontend_saved.flow_id) == prompts
+    assert await _version_count(db_container, frontend_saved.flow_id) == versions
+    async with db_container() as container:
+        flow = await container.flow_service().get_flow(frontend_saved.flow_id)
+    assert flow.draft_revision == revision
+
+
+async def test_an_edit_that_touches_no_active_read_leaves_the_http_row_as_saved(
+    db_container, frontend_saved: Saved
+) -> None:
+    """The producer is removed, and the only place the HTTP step names it is a
+    body template that is switched off."""
+
+    rows = await _rows(db_container, frontend_saved.flow_id)
+    await _set_raw(
+        db_container,
+        rows[2]["id"],
+        **_http_input(
+            "https://example.test/",
+            body={"mode": "none", "template": "{{step_2.output.text}}"},
+        ),
+    )
+    before = await _rows(db_container, frontend_saved.flow_id)
+
+    await _keep_edit(db_container, frontend_saved, 1, 3, removed=(2,))
+    after = await _rows(db_container, frontend_saved.flow_id)
+
+    assert _differing(before[2], after[1]) == {"step_order", "updated_at"}
+    assert after[1]["input_config"] == before[2]["input_config"]
+
+
+async def test_configuration_of_a_mode_the_step_does_not_run_is_not_renumbered(
+    db_container, frontend_saved: Saved
+) -> None:
+    """An older writer left an HTTP config on a step that delivers nothing. Its
+    text is data: the step moves and the config stays as saved."""
+
+    rows = await _rows(db_container, frontend_saved.flow_id)
+    leftover = {"url": "https://example.test/{{step_2.output.text}}", "note": "x"}
+    await _set_raw(db_container, rows[2]["id"], output_config=leftover)
+
+    await _edit(
+        db_container, frontend_saved, [_keep(1), _new_step(), _keep(2), _keep(3)]
+    )
+
+    assert (await _rows(db_container, frontend_saved.flow_id))[3][
+        "output_config"
+    ] == leftover

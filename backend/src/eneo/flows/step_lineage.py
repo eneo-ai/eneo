@@ -12,7 +12,9 @@ from eneo.flows.http_transport import (
     HTTP_CONFIG_KEYS,
     HttpAuthoredConfig,
     is_authored_config,
+    sends_http_config,
 )
+from eneo.flows.http_transport.authored_config import ConfigPath
 from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.template_reference_analyzer import TemplateReference, analyze_template
 
@@ -194,17 +196,25 @@ def resolve_step_upstream_orders(
             max_prior_step_order=max_prior_step_order,
         )
     )
-    channels = _config_channels(
-        input_source=FlowInputSource(input_source),
-        output_mode=FlowOutputMode(output_mode),
-        input_config=input_config,
-        output_config=output_config,
-        step_order=step_order,
+    source = FlowInputSource(input_source)
+    mode = FlowOutputMode(output_mode)
+    configs: tuple[tuple[ConfigColumn, Mapping[str, object] | None], ...] = (
+        ("output_config", output_config),
+        ("input_config", input_config),
     )
-    if channels is None:
-        return list(range(1, max_prior_step_order + 1))
-    for channel in channels:
-        for template in channel.templates:
+    for column, config in configs:
+        channel = config_channel(
+            column=column,
+            config=config,
+            input_source=source,
+            output_mode=mode,
+            step_order=step_order,
+        )
+        if channel is None:
+            continue
+        if channel.sites is None:
+            return list(range(1, max_prior_step_order + 1))
+        for _, template in channel.sites:
             orders.update(
                 resolve_reference_step_orders(
                     references=analyze_template(
@@ -217,59 +227,66 @@ def resolve_step_upstream_orders(
     return sorted(orders)
 
 
+ConfigColumn = Literal["input_config", "output_config"]
+
+
 @dataclass(frozen=True, slots=True)
-class _ConfigChannel:
-    templates: list[str]
-    # The runtime builds the variable context for the step at this order, and
-    # ``föregående_steg`` names the step before it.
+class ConfigChannel:
+    """The templates the runtime interpolates in one configuration column of
+    a step, each with its path in the column's object; None when the
+    configuration cannot be read."""
+
+    column: ConfigColumn
+    sites: list[tuple[ConfigPath, str]] | None
+    # The runtime builds the variable context for the step at this order: the
+    # steps before it are the ones its templates read, and ``föregående_steg``
+    # names the step before it.
     context_step_order: int
 
 
-def _config_channels(
+def config_channel(
     *,
+    column: ConfigColumn,
+    config: Mapping[str, object] | None,
     input_source: FlowInputSource,
     output_mode: FlowOutputMode,
-    input_config: Mapping[str, object] | None,
-    output_config: Mapping[str, object] | None,
     step_order: int,
-) -> list[_ConfigChannel] | None:
-    """The configured templates the runtime interpolates, or None if unreadable."""
-    channels: list[_ConfigChannel] = []
-    if output_mode is FlowOutputMode.TEMPLATE_FILL:
-        bindings = _template_fill_bindings(output_config)
-        if bindings is None:
-            return None
-        channels.append(_ConfigChannel(bindings, step_order))
-    if output_mode is FlowOutputMode.HTTP_POST:
-        templates = _http_config_templates(output_config)
-        if templates is None:
-            return None
-        # A webhook is built once the step has answered, so its context is the
-        # step's own: ``föregående_steg`` is the step's result there.
-        channels.append(_ConfigChannel(templates, step_order + 1))
-    if input_source is FlowInputSource.HTTP_GET:
-        templates = _http_config_templates(input_config)
-        if templates is None:
-            return None
-        channels.append(_ConfigChannel(templates, step_order))
-    return channels
+) -> ConfigChannel | None:
+    """The channel of ``column`` for the modes the step runs, or None when they
+    interpolate nothing in it: a configuration of a mode the step does not run
+    is literal data."""
+    if column == "output_config" and output_mode is FlowOutputMode.TEMPLATE_FILL:
+        return ConfigChannel(column, _template_fill_sites(config), step_order)
+    if not sends_http_config(column, input_source, output_mode, config):
+        return None
+    # A webhook is built once the step has answered, so its context is the
+    # step's own: ``föregående_steg`` is the step's result there.
+    return ConfigChannel(
+        column,
+        _http_config_sites(config),
+        step_order + 1 if column == "output_config" else step_order,
+    )
 
 
-def _template_fill_bindings(config: Mapping[str, object] | None) -> list[str] | None:
+def _template_fill_sites(
+    config: Mapping[str, object] | None,
+) -> list[tuple[ConfigPath, str]] | None:
     bindings = config.get("bindings") if config is not None else None
     if bindings is None:
         return []
     if not isinstance(bindings, Mapping):
         return None
-    values = list(cast(Mapping[object, object], bindings).values())
-    if not all(isinstance(value, str) for value in values):
+    items = cast(Mapping[str, object], bindings).items()
+    if not all(isinstance(value, str) for _, value in items):
         return None
-    return cast(list[str], values)
+    return [(("bindings", key), cast(str, value)) for key, value in items]
 
 
-def _http_config_templates(config: Mapping[str, object] | None) -> list[str] | None:
-    # The lineage reads the HTTP fields only. Other keys of the object (the
-    # retrieval policy, runtime input) hold no template of this channel.
+def _http_config_sites(
+    config: Mapping[str, object] | None,
+) -> list[tuple[ConfigPath, str]] | None:
+    # Only the HTTP fields are read. Other keys of the object (the retrieval
+    # policy, runtime input) hold no template of this channel.
     http_fields = {
         key: value for key, value in (config or {}).items() if key in HTTP_CONFIG_KEYS
     }
@@ -278,7 +295,9 @@ def _http_config_templates(config: Mapping[str, object] | None) -> list[str] | N
     if not is_authored_config(http_fields):
         return None
     try:
-        return HttpAuthoredConfig.model_validate(http_fields).interpolated_templates()
+        return HttpAuthoredConfig.model_validate(
+            http_fields
+        ).interpolated_template_sites()
     except ValidationError:
         return None
 

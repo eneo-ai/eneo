@@ -649,8 +649,10 @@ def _saved_step_authoring_fixture(total_steps: int = 10):
     steps[6].input_bindings = {"question": "Inspect {{ step_4.output.structured }}"}
     steps[7].input_bindings = {"question": "Independent input"}
     steps[8].input_bindings = {"question": "Independent input"}
+    steps[8].output_mode = "template_fill"
+    steps[8].output_type = "docx"
     steps[8].output_config = {
-        "nested": {"text": "{{ step_4.output.structured.report.summary }}"}
+        "bindings": {"text": "{{ step_4.output.structured.report.summary }}"}
     }
     snapshots = {
         step.assistant_id: AssistantAuthoringSnapshot(
@@ -935,7 +937,7 @@ def _saved_step_read_channels_fixture():
     [
         (
             lambda: _saved_step_authoring_fixture(total_steps=12),
-            "d7f1b98b462b59a5999250167549a4bb33c774d08c6ccb323a1fa64ce3584b07",
+            "7734ebe7ecd2d5865471aa69ad96aed73ce69d618dbc7a399343d4f33d98cd4f",
         ),
         (
             _saved_step_read_channels_fixture,

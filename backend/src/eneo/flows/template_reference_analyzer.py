@@ -13,7 +13,10 @@ from eneo.flows.flow_variable_definitions import (
     step_input_key_shape,
     variable_path_segments,
 )
-from eneo.flows.variable_resolver import iter_template_expressions
+from eneo.flows.variable_resolver import (
+    iter_template_expressions,
+    runtime_step_alias_order,
+)
 
 
 class TemplateReferenceKind(str, Enum):
@@ -130,7 +133,7 @@ def _analyze_expression(
             form_field_names=form_field_names,
         )
     if head.startswith("step_"):
-        step_order = _runtime_step_order(head)
+        step_order = runtime_step_alias_order(head)
         if step_order is not None:
             return _build_step_reference(
                 expression=expression,
@@ -284,10 +287,3 @@ def _validate_sequence_segments(
     if len(segments) > 1:
         return "runtime_scalar_nested_access", {"shape": VariableShape.SCALAR.value}
     return None, None
-
-
-def _runtime_step_order(head: str) -> int | None:
-    raw_index = head.removeprefix("step_")
-    if raw_index.isdigit():
-        return int(raw_index)
-    return None

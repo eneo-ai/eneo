@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import get_type_hints
+from collections.abc import Callable
+from typing import Any, NamedTuple, get_type_hints
 from uuid import UUID, uuid4
 
 import pytest
@@ -17,6 +18,7 @@ from eneo.flows.application.flow_draft_materialization import (
     validate_existing_step_ref_coverage,
 )
 from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.enums import FlowInputSource
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -30,6 +32,9 @@ from eneo.flows.flow_authoring_spec import (
 from eneo.flows.flow_metadata import normalize_flow_metadata_for_write
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from eneo.main.exceptions import BadRequestException
+from tests.unittests.flows.source_ref_runtime_test_support import (
+    runtime_source_ref_text,
+)
 
 
 def _step_spec(
@@ -957,7 +962,11 @@ def test_a_step_no_change_names_has_only_the_alias_of_a_moved_step_renumbered() 
                 "inte step_1 eller {{ step_10.x }}",
                 "source_refs": [{"step_ref": "step_1", "field": "svar"}],
             },
-            "output_config": {"footer": "{{step_1.output.text}}"},
+            "output_mode": "template_fill",
+            "output_config": {
+                "bindings": {"footer": "{{step_1.output.text}}"},
+                "note": "{{step_1.output.text}}",
+            },
         },
         consumer_spec={"input_bindings": {"question": "Skriv {{ p1.output.text }}"}},
         updated=frozenset(),
@@ -970,7 +979,11 @@ def test_a_step_no_change_names_has_only_the_alias_of_a_moved_step_renumbered() 
         "inte step_1 eller {{ step_10.x }}",
         "source_refs": [{"step_ref": "step_2", "field": "svar"}],
     }
-    assert consumer.output_config == {"footer": "{{step_2.output.text}}"}
+    # Only the bindings of a template fill are read; the other key is data.
+    assert consumer.output_config == {
+        "bindings": {"footer": "{{step_2.output.text}}"},
+        "note": "{{step_1.output.text}}",
+    }
 
 
 def test_a_step_the_edit_names_keeps_no_description_until_it_is_renamed() -> None:
@@ -1044,8 +1057,11 @@ def test_a_named_step_keeping_its_saved_output_config_reads_moved_steps_where_th
     template binding in it that reads a step that moved reads its new place."""
 
     changeset = _compile_pair(
-        {"output_config": {"bindings": {"sammanfattning": "{{step_1.output.text}}"}}},
-        consumer_spec={},
+        {
+            "output_mode": "template_fill",
+            "output_config": {"bindings": {"sammanfattning": "{{step_1.output.text}}"}},
+        },
+        consumer_spec={"output_mode": OutputMode.TEMPLATE_FILL},
         updated=frozenset({"existing_step_2"}),
         producer_first=True,
     )
@@ -1330,3 +1346,463 @@ def test_a_rename_of_a_step_sharing_an_assistant_updates_no_assistant() -> None:
     )
 
     assert changeset.assistants_to_update == []
+
+
+# A step the edit keeps reads the steps it read, or the edit is refused.
+#
+# Saved: 1 is the producer, 2 a step nothing reads, 3 the reader. The matrix
+# crosses what an edit does to the order with where the reader holds its read
+# and how it writes it. Its oracle is written here and reads no product code:
+# the alias is judged by the saved step it stands at after the edit.
+
+_TOPOLOGIES: dict[str, tuple[list[int | str], set[int]]] = {
+    "insert before the producer": (["new", 1, 2, 3], set()),
+    "insert between": ([1, "new", 2, 3], set()),
+    "move the producer later, still before the reader": ([2, 1, 3], set()),
+    "move the producer after the reader": ([2, 3, 1], set()),
+    "remove the producer": ([2, 3], {1}),
+    "remove an unrelated step": ([1, 3], {2}),
+}
+_FORMS = {
+    "tight": "x{{STEP.output.text}}y",
+    "spaced": "x{{ STEP.output.text }}y",
+    "bare": "x{{ STEP }}y",
+}
+
+
+def _http_config(**fields: object) -> dict[str, object]:
+    return {"url": "https://example.test/", "auth": {"mode": "none"}, **fields}
+
+
+class _Site(NamedTuple):
+    fields: Callable[[str], dict[str, Any]]
+    column: str
+    read_at: Callable[[dict[str, Any]], str]
+    producer: int = 1
+    sees_own_result: bool = False
+
+
+_SITES: dict[str, _Site] = {
+    "http_get url": _Site(
+        lambda text: {
+            "input_source": "http_get",
+            "input_config": _http_config(url=f"https://example.test/{text}"),
+        },
+        "input_config",
+        lambda column: column["url"],
+    ),
+    "http_get header": _Site(
+        lambda text: {
+            "input_source": "http_get",
+            "input_config": _http_config(
+                custom_headers=[{"name": "X-A", "value": text, "secret": False}]
+            ),
+        },
+        "input_config",
+        lambda column: column["custom_headers"][0]["value"],
+    ),
+    "http_get body template": _Site(
+        lambda text: {
+            "input_source": "http_get",
+            "input_config": _http_config(
+                body={"mode": "text_template", "template": text}
+            ),
+        },
+        "input_config",
+        lambda column: column["body"]["template"],
+    ),
+    "http_post url": _Site(
+        lambda text: {
+            "output_mode": "http_post",
+            "output_config": _http_config(url=f"https://example.test/{text}"),
+        },
+        "output_config",
+        lambda column: column["url"],
+    ),
+    "http_post own result": _Site(
+        lambda text: {
+            "output_mode": "http_post",
+            "output_config": _http_config(url=f"https://example.test/{text}"),
+        },
+        "output_config",
+        lambda column: column["url"],
+        producer=3,
+        sees_own_result=True,
+    ),
+    "template_fill binding": _Site(
+        lambda text: {
+            "output_mode": "template_fill",
+            "output_config": {"bindings": {"a": text}, "note": "{{ step_1 }}"},
+        },
+        "output_config",
+        lambda column: column["bindings"]["a"],
+    ),
+    "question": _Site(
+        lambda text: {"input_bindings": {"question": text}},
+        "input_bindings",
+        lambda column: column["question"],
+    ),
+    "source_ref": _Site(
+        lambda text: {"input_bindings": {"source_refs": [{"step_ref": text}]}},
+        "input_bindings",
+        lambda column: column["source_refs"][0]["step_ref"],
+    ),
+}
+
+
+def _text(form: str, order: int) -> str:
+    return _FORMS[form].replace("STEP", f"step_{order}")
+
+
+def _saved_with_reader(site: _Site, text: str) -> Flow:
+    reader = _flow_step(step_order=3).model_copy(update=site.fields(text))
+    return _flow(_flow_step(step_order=1), _flow_step(step_order=2), reader)
+
+
+def _keep_all(order: list[int | str]) -> FlowDraftSpecCore:
+    return FlowDraftSpecCore(
+        flow_name="Flow",
+        steps=[
+            _step_spec(plan_step_ref="new", name="Ny")
+            if kept == "new"
+            else _step_spec(
+                plan_step_ref=f"p{kept}",
+                existing_step_ref=f"existing_step_{kept}",
+                name=f"Existing {kept}",
+            )
+            for kept in order
+        ],
+    )
+
+
+def _compile_topology(flow: Flow, order: list[int | str], removed: set[int]):
+    return compile_flow_draft_changeset(
+        _keep_all(order),
+        current_flow=flow,
+        removed_existing_step_refs=frozenset(f"existing_step_{n}" for n in removed),
+        updated_existing_step_refs=frozenset(),
+    )
+
+
+@pytest.mark.parametrize("topology", list(_TOPOLOGIES))
+@pytest.mark.parametrize("form", list(_FORMS))
+@pytest.mark.parametrize("site_name", list(_SITES))
+def test_a_kept_read_follows_its_producer_or_the_edit_is_refused(
+    site_name: str, form: str, topology: str
+) -> None:
+    site = _SITES[site_name]
+    if site_name == "source_ref" and form != "tight":
+        pytest.skip("a source ref holds an alias, not a template")
+    order, removed = _TOPOLOGIES[topology]
+    text = _text(form, site.producer)
+    if site_name == "source_ref":
+        text = f"step_{site.producer}"
+    reader_position = order.index(3) + 1
+    producer_position = (
+        order.index(site.producer) + 1 if site.producer not in removed else None
+    )
+    readable = producer_position is not None and (
+        producer_position < reader_position
+        or (site.sees_own_result and producer_position == reader_position)
+    )
+    flow = _saved_with_reader(site, text)
+
+    if not readable:
+        with pytest.raises(BadRequestException) as exc_info:
+            _compile_topology(flow, order, removed)
+        assert exc_info.value.code == "invalid_existing_step_ref"
+        context = exc_info.value.context or {}
+        assert context["reason"] == "kept_read_lost_its_producer"
+        assert context["reader_ref"] == "existing_step_3"
+        assert context["producer_ref"] == f"existing_step_{site.producer}"
+        assert str(context["site"]).startswith(site.column)
+        return
+
+    changeset = _compile_topology(flow, order, removed)
+
+    reader = changeset.compiled_steps[reader_position - 1]
+    assert reader.saved_step is not None and reader.saved_step.step_order == 3
+    producer = changeset.compiled_steps[producer_position - 1]
+    assert producer.saved_step is not None
+    assert producer.saved_step.step_order == site.producer
+    followed = text.replace(f"step_{site.producer}", f"step_{producer_position}")
+    expected = flow.steps[2].model_copy(update=site.fields(followed))
+    assert getattr(reader, site.column) == getattr(expected, site.column)
+    assert followed in site.read_at(getattr(reader, site.column))
+
+
+# The runtime reads a source ref's step number in any script and with leading
+# zeros, so each of these is saved step 1; its oracle is the runtime's own
+# input resolution over what each step completed with.
+_SOURCE_REF_FORMS = [
+    "step_1",
+    "step_01",
+    "step_\u0661",
+    "step_\u0660\u0661",
+    "step_\uff11",
+]
+
+
+@pytest.mark.parametrize("topology", list(_TOPOLOGIES))
+@pytest.mark.parametrize("form", _SOURCE_REF_FORMS)
+def test_a_source_ref_in_any_form_the_runtime_reads_follows_its_producer_or_the_edit_is_refused(
+    form: str, topology: str
+) -> None:
+    order, removed = _TOPOLOGIES[topology]
+    flow = _flow(
+        _flow_step(step_order=1),
+        _flow_step(step_order=2),
+        _reader(
+            3,
+            output_mode="compose_text",
+            input_bindings={"source_refs": [{"step_ref": form, "output": "text"}]},
+        ),
+    )
+    reader_position = order.index(3) + 1
+
+    if 1 in removed or order.index(1) + 1 > reader_position:
+        with pytest.raises(BadRequestException) as exc_info:
+            _compile_topology(flow, order, removed)
+        assert (exc_info.value.context or {})["reason"] == (
+            "kept_read_lost_its_producer"
+        )
+        return
+
+    changeset = _compile_topology(flow, order, removed)
+
+    text_by_order = {
+        position: f"saved {step.saved_step.step_order}"
+        if step.saved_step is not None
+        else "new"
+        for position, step in enumerate(changeset.compiled_steps, 1)
+    }
+    reader = changeset.compiled_steps[reader_position - 1]
+    assert runtime_source_ref_text(
+        reader.input_bindings, reader_order=reader_position, text_by_order=text_by_order
+    ) == ("saved 1")
+
+
+def _reader(order: int, **fields: Any) -> FlowStep:
+    return _flow_step(step_order=order).model_copy(update=fields)
+
+
+def _http_get(url: str, **fields: object) -> dict[str, Any]:
+    return {
+        "input_source": "http_get",
+        "input_config": _http_config(url=url, **fields),
+    }
+
+
+def test_two_readers_that_trade_places_each_keep_reading_the_producer() -> None:
+    flow = _flow(
+        _flow_step(step_order=1),
+        _reader(2, **_http_get("https://a.test/{{ step_1 }}")),
+        _reader(3, **_http_get("https://b.test/{{step_1.output.text}}")),
+    )
+
+    changeset = _compile_topology(flow, [1, 3, 2], set())
+
+    assert [step.input_config["url"] for step in changeset.compiled_steps[1:]] == [
+        "https://b.test/{{step_1.output.text}}",
+        "https://a.test/{{ step_1 }}",
+    ]
+
+
+def test_a_read_that_was_not_valid_where_it_was_saved_is_not_judged() -> None:
+    # Step 2 reads step 3 (a forward read) and step 9 (none): both were
+    # refused by the validators already, and the flow stays editable.
+    flow = _flow(
+        _flow_step(step_order=1),
+        _reader(2, **_http_get("https://a.test/{{ step_3 }}{{ step_9 }}")),
+        _flow_step(step_order=3),
+    )
+
+    renamed = _compile_topology(flow, [1, 2, 3], set())
+    removed = _compile_topology(flow, [1, 2], {3})
+
+    for changeset in (renamed, removed):
+        assert changeset.compiled_steps[1].input_config == (
+            _http_config(url="https://a.test/{{ step_3 }}{{ step_9 }}")
+        )
+
+
+@pytest.mark.parametrize("site_name", list(_SITES))
+def test_a_read_that_named_no_step_when_saved_is_refused_once_the_edit_makes_it_name_one(
+    site_name: str,
+) -> None:
+    # Saved with three steps, the reader reads step 5: none. Three added steps
+    # before it make step 5 a real step the author never chose.
+    site = _SITES[site_name]
+    text = "step_5" if site_name == "source_ref" else "{{ step_5.output.text }}"
+    flow = _saved_with_reader(site, text)
+
+    with pytest.raises(BadRequestException) as exc_info:
+        _compile_topology(flow, ["new", "new", "new", 1, 2, 3], set())
+
+    assert exc_info.value.code == "invalid_existing_step_ref"
+    context = exc_info.value.context or {}
+    assert context["reason"] == "dangling_read_now_bound"
+    assert context["reader_ref"] == "existing_step_3"
+    assert str(context["site"]).startswith(site.column)
+
+    for order in ([1, 2, 3], ["new", 1, 2, 3]):
+        changeset = _compile_topology(flow, order, set())
+        assert text in site.read_at(getattr(changeset.compiled_steps[-1], site.column))
+
+
+def test_a_forward_read_of_a_step_the_edit_removes_is_refused_when_a_new_step_takes_its_place() -> (
+    None
+):
+    flow = _flow(
+        _flow_step(step_order=1),
+        _reader(2, **_http_get("https://a.test/{{ step_3 }}")),
+        _flow_step(step_order=3),
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        _compile_topology(flow, [1, "new", "new", 2], {3})
+
+    context = exc_info.value.context or {}
+    assert context["reason"] == "dangling_read_now_bound"
+    assert context["producer_ref"] == "existing_step_3"
+
+
+def test_a_forward_read_of_a_step_the_edit_moves_before_it_follows_that_step() -> None:
+    flow = _flow(
+        _flow_step(step_order=1),
+        _reader(2, **_http_get("https://a.test/{{ step_3 }}")),
+        _flow_step(step_order=3),
+    )
+
+    changeset = _compile_topology(flow, [1, 3, 2], set())
+
+    assert changeset.compiled_steps[2].input_config == _http_config(
+        url="https://a.test/{{ step_2 }}"
+    )
+
+
+def test_a_template_the_runtime_does_not_fill_is_not_a_read() -> None:
+    inactive = _http_config(
+        url="https://a.test/", body={"mode": "none", "template": "{{ step_1 }}"}
+    )
+    flow = _flow(
+        _flow_step(step_order=1),
+        _flow_step(step_order=2),
+        _reader(3, input_source="http_get", input_config=inactive),
+    )
+
+    for order, removed in ([2, 3], {1}), (["new", 1, 2, 3], set()):
+        changeset = _compile_topology(flow, order, removed)
+        assert changeset.compiled_steps[-1].input_config == inactive
+
+
+def test_metadata_that_only_looks_like_a_read_stays_as_saved() -> None:
+    literal = {"citation_mode": "off", "note": "{{ step_1.output.text }}"}
+    flow = _flow(
+        _flow_step(step_order=1),
+        _reader(2, output_mode="compose_text", output_config=literal),
+    )
+
+    removed = _compile_topology(flow, [2], {1})
+    moved = _compile_topology(flow, ["new", 1, 2], set())
+
+    assert removed.compiled_steps[0].output_config == literal
+    assert moved.compiled_steps[2].output_config == literal
+
+
+def test_only_the_alias_the_runtime_resolves_moves_with_its_producer() -> None:
+    url = (
+        "https://a.test/{{ step_10.output }}{{ step_01 }}{{ föregående_steg }}"
+        "{{ step_1x }}/{{step_1 .output.text}}"
+    )
+    flow = _flow(
+        _flow_step(step_order=1),
+        _flow_step(step_order=2),
+        _reader(3, **_http_get(url)),
+    )
+
+    changeset = _compile_topology(flow, ["new", 1, 2, 3], set())
+
+    assert changeset.compiled_steps[3].input_config == _http_config(
+        url=url.replace("{{step_1 .output", "{{step_2 .output")
+    )
+
+
+def test_a_positional_read_stays_positional_when_its_producer_moves() -> None:
+    question = "{{ föregående_steg }}"
+    flow = _flow(
+        _flow_step(step_order=1),
+        _reader(2, input_source="previous_step", input_bindings={"question": question}),
+    )
+
+    changeset = _compile_topology(flow, ["new", 1, 2], set())
+
+    assert changeset.compiled_steps[2].input_bindings == {"question": question}
+    assert changeset.compiled_steps[2].input_source is FlowInputSource.PREVIOUS_STEP
+
+
+def test_a_named_step_that_keeps_its_saved_read_is_judged_like_an_untouched_one() -> (
+    None
+):
+    saved = _flow(
+        _flow_step(step_order=1),
+        _reader(
+            2,
+            input_source="previous_step",
+            input_bindings={"question": "Skriv {{step_1.output.text}}"},
+        ),
+    )
+    spec = FlowDraftSpecCore(
+        flow_name="Flow",
+        steps=[
+            _step_spec(
+                plan_step_ref="p2",
+                existing_step_ref="existing_step_2",
+                name="Existing 2",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_bindings={"question": "Skriv {{ p1.output.text }}"},
+            ),
+            _step_spec(
+                plan_step_ref="p1",
+                existing_step_ref="existing_step_1",
+                name="Existing 1",
+            ),
+        ],
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        compile_flow_draft_changeset(
+            spec,
+            current_flow=saved,
+            updated_existing_step_refs=frozenset({"existing_step_2"}),
+        )
+
+    assert invalid_existing_step_ref_reason(exc_info.value) == (
+        "kept_read_lost_its_producer"
+    )
+    assert (exc_info.value.context or {})["site"] == "input_bindings.question"
+
+
+def test_a_step_the_edit_adds_is_never_judged() -> None:
+    flow = _flow(_flow_step(step_order=1))
+    spec = FlowDraftSpecCore(
+        flow_name="Flow",
+        steps=[
+            _step_spec(
+                plan_step_ref="new",
+                name="Ny",
+                input_bindings={"question": "{{ step_7.output.text }}"},
+            ),
+            _step_spec(
+                plan_step_ref="p1",
+                existing_step_ref="existing_step_1",
+                name="Existing 1",
+            ),
+        ],
+    )
+
+    changeset = compile_flow_draft_changeset(
+        spec, current_flow=flow, updated_existing_step_refs=frozenset()
+    )
+
+    assert changeset.compiled_steps[0].carried_columns == frozenset()

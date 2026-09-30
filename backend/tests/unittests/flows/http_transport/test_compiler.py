@@ -339,7 +339,7 @@ def _interpolated_by_the_compiler(cfg: HttpAuthoredConfig) -> list[str]:
 def test_interpolated_templates_are_exactly_what_the_compiler_interpolates(
     cfg: HttpAuthoredConfig,
 ) -> None:
-    assert sorted(cfg.interpolated_templates()) == sorted(
+    assert sorted(text for _, text in cfg.interpolated_template_sites()) == sorted(
         _interpolated_by_the_compiler(cfg)
     )
 
@@ -352,7 +352,7 @@ def test_interpolated_templates_skip_a_stored_secret_it_cannot_read() -> None:
         ],
     )
 
-    assert cfg.interpolated_templates() == ["https://example.org/api"]
+    assert cfg.interpolated_template_sites() == [(("url",), "https://example.org/api")]
 
 
 # --- A credential is a literal, never a template ---

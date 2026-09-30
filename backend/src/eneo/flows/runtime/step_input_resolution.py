@@ -81,6 +81,7 @@ from eneo.flows.input_binding_contract_rules import (
     item_template_field_names,
     question_binding,
     source_ref_bindings,
+    source_ref_step_order,
     structured_projection_destination_path,
 )
 from eneo.flows.runtime.http_orchestration import FlowHttpInputResolution
@@ -1208,13 +1209,9 @@ def _source_ref_step_order(
     *,
     state: RunExecutionState | None,
 ) -> int | None:
-    if step_ref.startswith("step_"):
-        step_number = step_ref.removeprefix("step_")
-        if step_number.isdigit():
-            return int(step_number)
-    if state is not None:
-        return state.step_ref_mapping.get(step_ref)
-    return None
+    return source_ref_step_order(
+        step_ref, state.step_ref_mapping if state is not None else None
+    )
 
 
 def _source_ref_runtime_value(

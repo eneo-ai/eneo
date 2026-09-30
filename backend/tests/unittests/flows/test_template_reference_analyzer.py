@@ -146,3 +146,46 @@ def test_list_index_takes_ascii_digits_only() -> None:
     )
 
     assert reference.path_error_code == "runtime_sequence_non_numeric_index"
+
+
+# The analyzer and the resolver read a template head as a step alias by one
+# rule: exactly `step_<order>`, ASCII digits, no leading zero. Any other head,
+# whatever its digits, is no step alias and raises nothing.
+@pytest.mark.parametrize(
+    ("head", "order"),
+    [
+        ("step_2", 2),
+        ("step_10", 10),
+        ("step_02", None),
+        ("step_٢", None),
+        ("step_٠٢", None),
+        ("step_２", None),
+        ("step_²", None),
+        ("step_", None),
+        ("step_2x", None),
+    ],
+)
+def test_the_analyzer_reads_a_step_head_as_the_resolver_does(
+    head: str, order: int | None
+) -> None:
+    from tests.unittests.flows.source_ref_runtime_test_support import completed_result
+
+    (reference,) = analyze_template(
+        "{{ " + head + ".output.text }}", step_refs={}, form_field_names=set()
+    )
+    resolver = FlowVariableResolver()
+    context = resolver.build_context(
+        flow_input={},
+        prior_results=[completed_result(2, "two"), completed_result(10, "ten")],
+    )
+
+    assert reference.step_order == order
+    if order is None:
+        with pytest.raises(TypedIOValidationException):
+            resolver.interpolate("{{ " + head + ".output.text }}", context)
+        assert reference.path_error_code == "invalid_step_reference_format"
+    else:
+        assert (
+            resolver.interpolate("{{ " + head + ".output.text }}", context)
+            == ({2: "two", 10: "ten"}[order])
+        )

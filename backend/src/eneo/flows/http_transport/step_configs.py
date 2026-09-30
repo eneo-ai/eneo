@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Literal
 
 from eneo.flows.domain.flow_step_validation import (
     FlowGraphIssueCode,
@@ -11,6 +12,24 @@ from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.http_transport.authored_config import HttpAuthoredConfig
 from eneo.flows.http_transport.normalizer import parse_authored_http_config
 from eneo.main.exceptions import TypedIOValidationException
+
+HttpConfigColumn = Literal["input_config", "output_config"]
+
+
+def sends_http_config(
+    column: HttpConfigColumn,
+    input_source: FlowInputSource | str,
+    output_mode: FlowOutputMode | str,
+    config: Mapping[str, object] | None = None,
+) -> bool:
+    """Whether a step sends an HTTP request from ``column``: the input of an
+    ``http_get`` step, the output of an ``http_post`` step (which sends nothing
+    without a config). The one owner of which column is HTTP for which mode."""
+    if column == "input_config":
+        return FlowInputSource(input_source) is FlowInputSource.HTTP_GET
+    return (
+        FlowOutputMode(output_mode) is FlowOutputMode.HTTP_POST and config is not None
+    )
 
 
 def sent_step_http_configs(
@@ -29,22 +48,13 @@ def sent_step_http_configs(
     ``FlowStepValidationError`` with ``typed_io_http_invalid_config``, naming the
     field and never the value.
     """
-    candidates = (
-        (
-            "input_config",
-            input_config,
-            FlowInputSource(input_source) is FlowInputSource.HTTP_GET,
-        ),
-        (
-            "output_config",
-            output_config,
-            FlowOutputMode(output_mode) is FlowOutputMode.HTTP_POST
-            and output_config is not None,
-        ),
+    candidates: tuple[tuple[HttpConfigColumn, Mapping[str, object] | None], ...] = (
+        ("input_config", input_config),
+        ("output_config", output_config),
     )
     configs: list[tuple[str, HttpAuthoredConfig]] = []
-    for label, config, is_sent in candidates:
-        if not is_sent:
+    for label, config in candidates:
+        if not sends_http_config(label, input_source, output_mode, config):
             continue
         try:
             parsed = parse_authored_http_config(

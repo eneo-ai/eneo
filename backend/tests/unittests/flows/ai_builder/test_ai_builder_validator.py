@@ -633,7 +633,9 @@ class TestSemanticVariableValidation:
                         ref="step_b",
                         name="Render",
                         input_source=InputSource.PREVIOUS_STEP,
-                        output_config={"body": "Use {{ step_a.text }}"},
+                        output_mode=OutputMode.TEMPLATE_FILL,
+                        output_type=OutputType.DOCX,
+                        output_config={"bindings": {"body": "Use {{ step_a.text }}"}},
                     ),
                 ]
             )

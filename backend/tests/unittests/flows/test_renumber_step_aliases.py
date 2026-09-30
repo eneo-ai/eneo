@@ -6,6 +6,9 @@ from eneo.flows.flow_authoring_variable_rewriting import (
     renumber_input_binding_aliases,
     renumber_step_aliases,
 )
+from tests.unittests.flows.source_ref_runtime_test_support import (
+    runtime_source_ref_text,
+)
 
 _MOVED = {1: 2, 2: 3}
 
@@ -101,10 +104,32 @@ def test_an_alias_the_runtime_reads_with_spaces_around_its_head_is_renumbered() 
     )
 
 
-def test_a_source_ref_the_runtime_would_not_find_keeps_its_step_ref() -> None:
-    bindings = {"source_refs": [{"step_ref": "step_02"}, {"step_ref": "step_\u0662"}]}
+@pytest.mark.parametrize(
+    "step_ref", ["step_2", "step_02", "step_\u0662", "step_\u0660\u0662", "step_\uff12"]
+)
+def test_a_source_ref_the_runtime_reads_as_a_step_moves_with_it(step_ref: str) -> None:
+    # The runtime reads the step number of a source ref in any script and with
+    # leading zeros; a moved producer's ref is written back as `step_N`.
+    bindings = {"source_refs": [{"step_ref": step_ref, "output": "text"}]}
 
-    assert renumber_input_binding_aliases(bindings, _MOVED) == bindings
+    renumbered = renumber_input_binding_aliases(bindings, {2: 3})
+
+    assert renumbered == {"source_refs": [{"step_ref": "step_3", "output": "text"}]}
+    assert runtime_source_ref_text(
+        renumbered, reader_order=4, text_by_order={3: "moved"}
+    ) == ("moved")
+
+
+@pytest.mark.parametrize(
+    "step_ref",
+    ["step_\u00b2", "step_", "step_2x", "Step_2", "existing_step_2", " step_2"],
+)
+def test_a_source_ref_the_runtime_does_not_read_as_a_step_keeps_its_step_ref(
+    step_ref: str,
+) -> None:
+    bindings = {"source_refs": [{"step_ref": step_ref}]}
+
+    assert renumber_input_binding_aliases(bindings, {2: 3}) == bindings
 
 
 def test_the_alias_owner_reads_exactly_the_names_the_runtime_gives_steps() -> None:

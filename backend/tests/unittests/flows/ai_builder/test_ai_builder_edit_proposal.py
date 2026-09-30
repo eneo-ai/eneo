@@ -1985,7 +1985,9 @@ async def test_ordered_step_diff_preserves_literal_aliases_after_insertion() -> 
             user_description="Use source",
             input_source="previous_step",
             input_bindings={"question": "{{ step_1.output.text }}"},
-            output_config={"template": "{{ step_1.output.text }}"},
+            output_mode="template_fill",
+            output_type="docx",
+            output_config={"bindings": {"template": "{{ step_1.output.text }}"}},
         ),
     )
 
@@ -2021,7 +2023,9 @@ async def test_ordered_step_diff_preserves_literal_aliases_after_insertion() -> 
     ]
     reordered_consumer = result.compiled.content.spec.steps[2]
     assert reordered_consumer.input_bindings == {"question": "{{ step_a.output.text }}"}
-    assert reordered_consumer.output_config == {"template": "{{ step_a.output.text }}"}
+    assert reordered_consumer.output_config == {
+        "bindings": {"template": "{{ step_a.output.text }}"}
+    }
 
 
 @pytest.mark.asyncio
@@ -2043,9 +2047,13 @@ async def test_ordered_step_diff_keeps_placeholder_named_step_ref_on_its_produce
             step_order=3,
             user_description="Render",
             input_source="previous_step",
+            output_mode="template_fill",
+            output_type="docx",
             output_config={
-                "step_ref": "{{ step_2.output.text }}",
-                "other": "{{ step_2.output.text }}",
+                "bindings": {
+                    "step_ref": "{{ step_2.output.text }}",
+                    "other": "{{ step_2.output.text }}",
+                }
             },
         ),
     )
@@ -2069,8 +2077,53 @@ async def test_ordered_step_diff_keeps_placeholder_named_step_ref_on_its_produce
     assert isinstance(result, ProposalReady)
     renderer = result.compiled.content.spec.steps[3]
     assert renderer.output_config == {
-        "step_ref": "{{ step_c.output.text }}",
-        "other": "{{ step_c.output.text }}",
+        "bindings": {
+            "step_ref": "{{ step_c.output.text }}",
+            "other": "{{ step_c.output.text }}",
+        }
+    }
+
+
+def _four_steps_with_a_note_reading_step_two(output_mode: str) -> SimpleNamespace:
+    return _flow(
+        _flow_step(step_order=1, user_description="Read"),
+        _flow_step(step_order=2, user_description="Summarize"),
+        _flow_step(step_order=3, user_description="Assess"),
+        _flow_step(
+            step_order=4,
+            user_description="Write",
+            input_source="previous_step",
+            output_mode=output_mode,
+            output_config={"note": "{{ step_2.output.text }}"},
+        ),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("output_mode", ["pass_through", "compose_text"])
+async def test_metadata_that_looks_like_a_read_does_not_refuse_the_proposal(
+    output_mode: str,
+) -> None:
+    # Only the strings the runtime interpolates for the step's mode are reads;
+    # this key of a pass-through or compose step is literal text, so dropping
+    # the step it names neither forward-references nor rebinds anything.
+    flow = _four_steps_with_a_note_reading_step_two(output_mode)
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Drop the two middle steps.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {"kind": "modify", "existing_step_ref": "existing_step_4"},
+            ],
+            "removed_existing_step_refs": ["existing_step_2", "existing_step_3"],
+        },
+    )
+
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.spec.steps[1].output_config == {
+        "note": "{{ step_2.output.text }}"
     }
 
 
@@ -5843,8 +5896,12 @@ def _saved_step_consumer_fixture(consumer_kind):
             },
         )
     else:
+        # Only a template fill's bindings are interpolated; a pass-through
+        # step's output_config is literal and reads nothing.
+        consumer.output_mode = "template_fill"
+        consumer.output_type = "docx"
         consumer.output_config = {
-            "nested": {"text": "{{ step_1.output.structured.report.summary }}"}
+            "bindings": {"text": "{{ step_1.output.structured.report.summary }}"}
         }
     flow = _flow(
         _flow_step(

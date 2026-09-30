@@ -9,6 +9,7 @@ from typing_extensions import TypedDict, TypeGuard
 SecretSentinel = TypedDict("SecretSentinel", {"$secret": Literal["stored"]})
 SecretValue: TypeAlias = str | SecretSentinel
 HttpMethod: TypeAlias = Literal["GET", "POST"]
+ConfigPath: TypeAlias = tuple[str | int, ...]
 HttpResponseFormat: TypeAlias = Literal["text", "json"]
 SECRET_SENTINEL: SecretSentinel = {"$secret": "stored"}
 
@@ -104,27 +105,30 @@ class HttpAuthoredConfig(BaseModel):
     custom_headers: list[CustomHeader] = Field(default_factory=_default_custom_headers)
     response_format: HttpResponseFormat | None = None
 
-    def interpolated_templates(self) -> list[str]:
-        """The strings the request compiler fills with run variables.
+    def interpolated_template_sites(self) -> list[tuple[ConfigPath, str]]:
+        """Where the request compiler fills run variables, and what it reads
+        there: each string and its path in this config object.
 
         Whatever a template reads, the request carries: this is the list of
         places a step's data can enter an HTTP call. A credential is never one:
         it is a literal, and the compiler refuses a template in it.
         """
-        candidates: list[SecretValue | None] = [self.url]
+        candidates: list[tuple[ConfigPath, SecretValue | None]] = [(("url",), self.url)]
         match self.auth:
             case HttpAuthApiKey(header_name=name):
-                candidates.append(name)
+                candidates.append((("auth", "header_name"), name))
             case HttpAuthBasicAuth(username=user):
-                candidates.append(user)
+                candidates.append((("auth", "username"), user))
             case HttpAuthBearer() | HttpAuthNone():
                 pass
         candidates.extend(
-            header.value for header in self.custom_headers if not header.secret
+            (("custom_headers", index, "value"), header.value)
+            for index, header in enumerate(self.custom_headers)
+            if not header.secret
         )
         if self.body.mode in (HttpBodyMode.JSON_TEMPLATE, HttpBodyMode.TEXT_TEMPLATE):
-            candidates.append(self.body.template)
-        return [value for value in candidates if isinstance(value, str)]
+            candidates.append((("body", "template"), self.body.template))
+        return [(path, value) for path, value in candidates if isinstance(value, str)]
 
 
 HTTP_CONFIG_KEYS = frozenset(HttpAuthoredConfig.model_fields)

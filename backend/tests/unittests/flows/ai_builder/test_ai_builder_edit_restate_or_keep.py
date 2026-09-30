@@ -1031,7 +1031,12 @@ SITE_CARRIERS: dict[ReadSite, dict[str, Any]] = {
         "assistant_spec": AssistantSpec(instructions=MAIN_TEXT_READ)
     },
     ReadSite.QUESTION: {"input_bindings": {"question": MAIN_TEXT_READ}},
-    ReadSite.OUTPUT_CONFIG: {"output_config": {"filename": MAIN_TEXT_READ}},
+    # Only a template fill's bindings are interpolated; other configuration is text.
+    ReadSite.OUTPUT_CONFIG: {
+        "output_mode": "template_fill",
+        "output_type": "docx",
+        "output_config": {"bindings": {"filename": MAIN_TEXT_READ}},
+    },
 }
 
 

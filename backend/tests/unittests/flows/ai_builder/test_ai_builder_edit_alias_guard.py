@@ -40,6 +40,13 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 )
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshot
 from eneo.flows.domain.flow import FlowStep
+from eneo.flows.flow_authoring_variable_rewriting import (
+    build_ref_to_order,
+    rewrite_step_spec_variables,
+)
+from tests.unittests.flows.source_ref_runtime_test_support import (
+    runtime_source_ref_text,
+)
 
 SEEDS = Path(__file__).resolve().parents[4] / "scripts/fixtures/ai_builder_battle"
 SUMMARY = "{{ step_2.output.text }}"
@@ -179,6 +186,111 @@ def test_a_kept_read_of_a_step_moved_but_still_before_it_follows_the_step(
     assert "step_2" not in json.dumps(writer.input_bindings)
 
 
+# The platform renumbers the bare form `{{ step_2 }}` as it does the dotted one,
+# so the guard reads both at every site.
+BARE_READS_OF_THE_SUMMARY = json.loads(
+    json.dumps(READS_OF_THE_SUMMARY).replace(SUMMARY, "{{ step_2 }}")
+)
+
+
+@pytest.mark.parametrize("site", list(BARE_READS_OF_THE_SUMMARY))
+def test_a_bare_read_of_a_removed_step_is_refused_at_every_site(site: str) -> None:
+    flow = _flow(**BARE_READS_OF_THE_SUMMARY[site])
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        _compile(flow, (1, 3, 4), removed=(2,))
+
+    assert exc_info.value.code is AIBuilderErrorCode.INVALID_PLAN_STEP_REF
+    assert exc_info.value.context == {"stale_read_count": 1}
+    message = str(exc_info.value)
+    assert site in message
+    assert "reads step_2" in message
+    assert '"Sammanfatta" is removed by this edit' in message
+
+
+@pytest.mark.parametrize("site", list(BARE_READS_OF_THE_SUMMARY))
+def test_a_bare_read_of_a_step_moved_after_it_is_refused_at_every_site(
+    site: str,
+) -> None:
+    message = _refused(_flow(**BARE_READS_OF_THE_SUMMARY[site]), (1, 3, 4, 2))
+
+    assert site in message
+    assert '"Sammanfatta" is moved after it' in message
+
+
+@pytest.mark.parametrize("site", ["source_refs", "question"])
+def test_a_bare_read_of_a_step_moved_but_still_before_it_follows_the_step(
+    site: str,
+) -> None:
+    result = _compile(_flow(**BARE_READS_OF_THE_SUMMARY[site]), (1, 3, 2, 4))
+
+    plan_ref = {s.existing_step_ref: s.plan_step_ref for s in result.spec.steps}
+    writer = result.spec.steps[3]
+    assert writer.input_bindings is not None
+    assert json.dumps(writer.input_bindings).count(plan_ref["existing_step_2"]) == 1
+    assert "step_2" not in json.dumps(writer.input_bindings)
+
+
+# The runtime reads a source ref's step number in any script and with leading
+# zeros (`step_02`, `step_\u0662`, full-width `step_\uff12` are all step 2), so
+# the guard and the renumbering read every one of them as the producer.
+SOURCE_REF_FORMS = [
+    "step_2",
+    "step_02",
+    "step_\u0662",
+    "step_\u0660\u0662",
+    "step_\uff12",
+]
+
+
+def _writer_reading_the_summary_as(step_ref: str) -> dict[str, Any]:
+    return {
+        "input_bindings": {"source_refs": [{"step_ref": step_ref, "output": "text"}]},
+        "output_mode": "compose_text",
+    }
+
+
+@pytest.mark.parametrize("form", SOURCE_REF_FORMS)
+def test_a_source_ref_in_any_form_the_runtime_reads_is_refused_when_its_producer_goes(
+    form: str,
+) -> None:
+    message = _refused(
+        _flow(**_writer_reading_the_summary_as(form)), (1, 3, 4), removed=(2,)
+    )
+
+    assert "source_refs" in message
+    assert '"Sammanfatta" is removed by this edit' in message
+
+
+@pytest.mark.parametrize("form", SOURCE_REF_FORMS)
+def test_a_source_ref_in_any_form_the_runtime_reads_is_refused_when_its_producer_moves_after(
+    form: str,
+) -> None:
+    message = _refused(_flow(**_writer_reading_the_summary_as(form)), (1, 3, 4, 2))
+
+    assert '"Sammanfatta" is moved after it' in message
+
+
+@pytest.mark.parametrize("form", SOURCE_REF_FORMS)
+def test_a_source_ref_in_any_form_the_runtime_reads_keeps_reading_its_producer(
+    form: str,
+) -> None:
+    flow = _flow(**_writer_reading_the_summary_as(form))
+    result = _compile(flow, (1, 3, 2, 4))
+
+    # What materialization writes for the edited flow, read by the runtime.
+    by_order = build_ref_to_order(result.spec.steps)
+    writer = rewrite_step_spec_variables(result.spec.steps[3], by_order)
+    text_by_order = {
+        order: f"saved {step.existing_step_ref}"
+        for order, step in enumerate(result.spec.steps, 1)
+    }
+
+    assert runtime_source_ref_text(
+        writer.input_bindings, reader_order=4, text_by_order=text_by_order
+    ) == ("saved existing_step_2")
+
+
 def test_an_attached_template_judges_its_own_placeholder_mappings() -> None:
     # The attachment contract refuses a retained placeholder whose producer is
     # gone, by placeholder name; the alias guard leaves that map to it.
@@ -194,6 +306,17 @@ def test_an_attached_template_judges_its_own_placeholder_mappings() -> None:
         )
 
     assert "sammanfattning" in str(exc_info.value)
+
+
+def test_a_literal_output_config_key_is_not_a_read() -> None:
+    # The platform reads an output config only where the runtime interpolates
+    # it for the step's mode; a metadata key of a pass-through step is text.
+    literal = {"note": SUMMARY}
+    flow = _flow(output_config=literal)
+
+    result = _compile(flow, (1, 3, 4), removed=(2,))
+
+    assert result.spec.steps[2].output_config == literal
 
 
 def test_a_placeholder_the_attached_template_drops_is_left_to_that_contract() -> None:
