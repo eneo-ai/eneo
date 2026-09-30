@@ -1,17 +1,57 @@
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID, uuid4
 
+from eneo.main.config import get_settings
 from eneo.main.exceptions import BadRequestException, NameCollisionException
 from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
 from eneo.model_providers.domain.model_provider import ModelProvider
+from eneo.model_providers.domain.outbound_header_destinations import (
+    DestinationProblem,
+    destination_problem,
+    parse_allow_list,
+)
+from eneo.model_providers.domain.outbound_header_writes import (
+    OutboundHeaderWrite,
+    apply_header_writes,
+)
+from eneo.model_providers.domain.outbound_headers import (
+    HeaderOutcome,
+    OutboundHeaderConfigError,
+    OutboundHeadersBlocked,
+    evaluate_headers,
+    request_headers,
+)
+from eneo.model_providers.infrastructure.litellm_provider import (
+    build_litellm_provider_kwargs,
+)
 from eneo.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
+)
+from eneo.model_providers.infrastructure.outbound_headers_runtime import (
+    decrypt_stored_headers,
+)
+from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
+    TenantModelCredentialResolver,
 )
 from eneo.settings.encryption_service import EncryptionService
 
 if TYPE_CHECKING:
-    pass
+    from eneo.users.user import UserInDB
+
+_DESTINATION_MESSAGES: dict[DestinationProblem, str] = {
+    "no_endpoint": (
+        "Outbound headers need an explicitly configured endpoint; without one, "
+        "requests go to the vendor's public default"
+    ),
+    "invalid_endpoint": "The provider endpoint is not a valid http(s) URL",
+    "credentials_in_url": "The provider endpoint must not contain credentials",
+    "not_allowed": (
+        "The provider endpoint is not in this deployment's allowed destinations "
+        "for outbound headers"
+    ),
+}
 
 
 # Default base URLs for providers that don't ask the user for one.
@@ -324,6 +364,54 @@ class ModelProviderService:
                         f"Field '{field['name']}' is required for provider '{provider_type}'"
                     )
 
+    def _apply_header_writes(
+        self,
+        stored: list[dict[str, Any]],
+        writes: Sequence[OutboundHeaderWrite],
+        provider_type: str,
+    ) -> list[dict[str, Any]]:
+        try:
+            return apply_header_writes(
+                stored,
+                writes,
+                provider_type=provider_type,
+                encrypt=self.encryption.encrypt,
+                decrypt=self.encryption.decrypt,
+            )
+        except OutboundHeaderConfigError as exc:
+            raise BadRequestException(str(exc)) from exc
+
+    def effective_endpoint(self, provider: ModelProvider) -> str | None:
+        """The endpoint this provider's requests go to.
+
+        Computed through the same kwargs builder the requests use, so an
+        ``endpoint`` in ``credentials`` shadowing the visible one in ``config``
+        is what gets checked.
+        """
+        resolver = TenantModelCredentialResolver(
+            provider_id=provider.id,
+            provider_type=provider.provider_type,
+            credentials=provider.credentials,
+            config=provider.config,
+            encryption_service=self.encryption,
+        )
+        return build_litellm_provider_kwargs(resolver).get("api_base")
+
+    def _header_destination_problem(
+        self, provider: ModelProvider
+    ) -> DestinationProblem | None:
+        allowed = parse_allow_list(get_settings().outbound_headers_allowed_destinations)
+        return destination_problem(self.effective_endpoint(provider), allowed)
+
+    def _check_header_destination(self, provider: ModelProvider) -> None:
+        """Refuse to save headers aimed at a disallowed destination — including
+        when only the endpoint changed. Re-checked at send as well."""
+        if not provider.outbound_headers:
+            return
+        problem = self._header_destination_problem(provider)
+        if problem is not None:
+            raise BadRequestException(_DESTINATION_MESSAGES[problem])
+
     async def create(
         self,
         tenant_id: UUID,
@@ -332,6 +420,7 @@ class ModelProviderService:
         credentials: dict[str, Any],
         config: dict[str, Any],
         is_active: bool = True,
+        outbound_headers: Sequence[OutboundHeaderWrite] = (),
     ) -> ModelProvider:
         """Create a new provider."""
         # Check for duplicate names
@@ -360,6 +449,10 @@ class ModelProviderService:
             created_at=now,
             updated_at=now,
         )
+        provider.outbound_headers = self._apply_header_writes(
+            [], outbound_headers, provider_type
+        )
+        self._check_header_destination(provider)
 
         return await self.repository.create(provider)
 
@@ -370,8 +463,15 @@ class ModelProviderService:
         credentials: Optional[dict[str, Any]] = None,
         config: Optional[dict[str, Any]] = None,
         is_active: Optional[bool] = None,
+        outbound_headers: Optional[Sequence[OutboundHeaderWrite]] = None,
     ) -> ModelProvider:
-        """Update an existing provider."""
+        """Update an existing provider.
+
+        ``outbound_headers`` replaces the header list (``None`` leaves it
+        unchanged). The destination is re-validated whenever headers are
+        configured, because an edit to ``config`` or ``credentials`` alone can
+        move where they are sent.
+        """
         # Get existing provider
         provider = await self.repository.get_by_id(provider_id)
 
@@ -395,7 +495,33 @@ class ModelProviderService:
         if is_active is not None:
             provider.is_active = is_active
 
+        if outbound_headers is not None:
+            provider.outbound_headers = self._apply_header_writes(
+                provider.outbound_headers, outbound_headers, provider.provider_type
+            )
+        self._check_header_destination(provider)
+
         return await self.repository.update(provider)
+
+    async def preview_outbound_headers(
+        self, provider_id: UUID, user: "UserInDB"
+    ) -> tuple[list[HeaderOutcome], DestinationProblem | None, bool, str | None]:
+        """What this provider's headers would do for ``user``, without sending.
+
+        Returns the per-header outcomes, any destination problem, whether the
+        user's requests would be blocked, and the reason the headers themselves
+        block them (e.g. ``total_size_exceeded``, which no single header
+        explains). Callers must not return a secret header's value.
+        """
+        provider = await self.repository.get_by_id(provider_id)
+        headers = decrypt_stored_headers(provider.outbound_headers, self.encryption)
+        outcomes = evaluate_headers(headers, user)
+        problem = self._header_destination_problem(provider) if headers else None
+        try:
+            request_headers(outcomes)
+        except OutboundHeadersBlocked as exc:
+            return outcomes, problem, True, exc.reason
+        return outcomes, problem, problem is not None, None
 
     async def delete(self, provider_id: UUID) -> None:
         """Delete a provider.

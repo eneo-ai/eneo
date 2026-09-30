@@ -174,6 +174,9 @@ class CompletionService:
             model=model,
             credential_resolver=credential_resolver,
             provider_type=provider.provider_type,
+            outbound_headers=provider.create_outbound_headers(
+                self.encryption_service, self.user
+            ),
         )
 
     async def prepare_skill_activation_preflight(

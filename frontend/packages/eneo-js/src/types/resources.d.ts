@@ -80,6 +80,11 @@ export type JobStatus = components["schemas"]["Status"];
 // Until the schema is fixed upstream we extend the type so consumers can use `tenant.id`.
 export type Tenant = components["schemas"]["TenantPublic"] & { id: string };
 export type ModelProviderPublic = components["schemas"]["ModelProviderPublic"];
+export type OutboundHeaderInput = components["schemas"]["OutboundHeaderInput"];
+export type OutboundHeaderPublic = components["schemas"]["OutboundHeaderPublic"];
+export type OutboundHeaderOptions = components["schemas"]["OutboundHeaderOptions"];
+export type OutboundHeaderPreview = components["schemas"]["OutboundHeaderPreview"];
+export type DynamicValuePublic = components["schemas"]["DynamicValuePublic"];
 export type AnalyticsData = components["schemas"]["MetadataStatistics"];
 export type AnalyticsAggregateRow = {
   created_at: string;

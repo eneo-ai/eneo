@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from eneo.database.database import AsyncSession
     from eneo.settings.encryption_service import EncryptionService
     from eneo.tenants.tenant import TenantInDB
+    from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
 
@@ -44,9 +45,13 @@ class CreateEmbeddingsService:
         config: Optional[Settings] = None,
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
+        user: Optional["UserInDB"] = None,
     ) -> None:
         super().__init__()
         self.tenant = tenant
+        # The acting user (in workers, the job's user: for a crawl, the website
+        # owner); the source of dynamic outbound-header values.
+        self.user = user
         self.config = config or SETTINGS
         self.encryption_service = encryption_service
         self.session = session
@@ -69,6 +74,9 @@ class CreateEmbeddingsService:
         from eneo.model_providers.domain.model_route import resolve_model_route
         from eneo.model_providers.infrastructure.litellm_provider import (
             load_active_litellm_provider,
+        )
+        from eneo.model_providers.infrastructure.outbound_headers_runtime import (
+            ProviderOutboundHeaders,
         )
         from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
             TenantModelCredentialResolver,
@@ -102,6 +110,15 @@ class CreateEmbeddingsService:
             litellm_model_name = resolve_model_route(
                 provider_type=provider_type,
                 model_name=model.name,
+            )
+            # Captured at crawl bootstrap alongside the credentials: a running
+            # crawl keeps the header configuration it started with (documented).
+            outbound_headers = ProviderOutboundHeaders.load(
+                provider_id=model.provider_id,
+                provider_type=provider_type,
+                stored=getattr(model, "provider_outbound_headers", None),
+                encryption=self.encryption_service,
+                user=self.user,
             )
         else:
             # DB lookup path: requires active session
@@ -141,6 +158,9 @@ class CreateEmbeddingsService:
                 model_name=model.name,
             )
             provider_type = provider.provider_type
+            outbound_headers = provider.create_outbound_headers(
+                self.encryption_service, self.user
+            )
 
         logger.info(
             f"Using LiteLLMEmbeddingAdapter for model '{model.name}'",
@@ -158,6 +178,7 @@ class CreateEmbeddingsService:
             model,
             credential_resolver=credential_resolver,
             litellm_model_name=litellm_model_name,
+            outbound_headers=outbound_headers,
         )
 
     async def get_embeddings(

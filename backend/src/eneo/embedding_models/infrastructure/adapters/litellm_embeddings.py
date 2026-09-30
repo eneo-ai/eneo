@@ -11,10 +11,16 @@ from typing_extensions import override
 from eneo.embedding_models.infrastructure.adapters.base import EmbeddingModelAdapter
 from eneo.files.chunk_embedding_list import ChunkEmbeddingList
 from eneo.main.config import get_settings
+from eneo.main.exceptions import ProviderRejectedRequestException
 from eneo.main.logging import get_logger
 from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
     build_litellm_provider_kwargs,
+)
+from eneo.model_providers.infrastructure.outbound_headers_runtime import (
+    ProviderOutboundHeaders,
+    apply_outbound_headers,
+    mask_outbound_headers,
 )
 from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
@@ -32,8 +38,8 @@ logger = get_logger(__name__)
 
 class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
     def _mask_sensitive_params(self, params: dict[str, object]) -> dict[str, object]:
-        """Return copy of params with masked API key for safe logging."""
-        safe_params = dict(params)
+        """Return copy of params with masked API key and header values for safe logging."""
+        safe_params = mask_outbound_headers(dict(params))
         if "api_key" in safe_params:
             key = safe_params["api_key"]
             if isinstance(key, str):
@@ -45,9 +51,11 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
         model: "EmbeddingModelLike",
         credential_resolver: Optional[TenantModelCredentialResolver] = None,
         litellm_model_name: Optional[str] = None,
+        outbound_headers: Optional[ProviderOutboundHeaders] = None,
     ) -> None:
         super().__init__(model)
         self.credential_resolver = credential_resolver
+        self.outbound_headers = outbound_headers
 
         # Use explicit litellm_model_name if provided (supports frozen dataclasses
         # like EmbeddingModelSpec where the name is constructed from provider info).
@@ -177,6 +185,9 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                         f"[LiteLLM] {self.litellm_model}: Injecting endpoint for {provider}: {endpoint}"
                     )
 
+            # After the endpoint is final, so the destination check sees it.
+            apply_outbound_headers(params, self.outbound_headers)
+
             safe_params = {k: v for k, v in params.items() if k != "input"}
             logger.debug(
                 f"[LiteLLM] {self.litellm_model}: Making embedding request with {len(texts)} texts and params: "
@@ -190,6 +201,10 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                 f"[LiteLLM] {self.litellm_model}: Embedding request successful"
             )
 
+        except ProviderRejectedRequestException:
+            # Raised before any network call (blocked outbound headers) and
+            # already logged; not a LiteLLM failure.
+            raise
         except Exception as e:
             logger.exception(
                 f"[LiteLLM] {self.litellm_model}: Unknown LiteLLM exception:"

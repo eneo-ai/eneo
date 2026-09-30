@@ -246,7 +246,12 @@ A `PATCH` is all-or-nothing. If any operation is invalid, the whole request is r
 
 ### Where the attributes are visible
 
-The attributes are provisioning data. They are returned over SCIM, but they are not shown in the Eneo admin interface or returned by the `/api/v1` API. They stay on the user record until your identity provider changes or removes them, including after the user is deprovisioned, because deprovisioning is a soft delete.
+The attributes are provisioning data. They are returned over SCIM, but they are not returned by the `/api/v1` user endpoints. They are used in two places:
+
+- **Outbound headers.** An administrator can configure a model provider to send some of them to its endpoint as HTTP headers. See [Outbound headers](/guides/ai-providers#outbound-headers). `manager` is never sent.
+- **The outbound header preview.** It shows an administrator what a chosen user's attributes resolve to for a provider. Each use is recorded in the audit log while audit logging for administrative actions is on, which is the default.
+
+They stay on the user record until your identity provider changes or removes them, including after the user is deprovisioned, because deprovisioning is a soft delete.
 
 ---
 

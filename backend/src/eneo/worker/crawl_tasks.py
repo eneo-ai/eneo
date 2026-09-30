@@ -14,6 +14,7 @@ from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.affected_rows import affected_row_count
+from eneo.database.tables.ai_models_table import EmbeddingModels
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
@@ -324,6 +325,57 @@ async def queue_website_crawls(container: Container):
                         "worker_id": scheduler_worker_id,
                     },
                 )
+
+
+def _embedding_model_spec(
+    orm_embedding_model: EmbeddingModels, provider_db: ModelProviders | None
+) -> EmbeddingModelSpec:
+    """The crawl's embedding model with its provider pre-resolved.
+
+    A snapshot: the crawl keeps these credentials and this header
+    configuration until it finishes, whatever is edited meanwhile.
+    """
+    provider_type = None
+    provider_credentials = None
+    provider_config = None
+    provider_outbound_headers = None
+    if provider_db and provider_db.is_active:
+        provider_type = provider_db.provider_type
+        provider_credentials = provider_db.credentials
+        provider_config = provider_db.config
+        provider_outbound_headers = provider_db.outbound_headers
+    elif provider_db and not provider_db.is_active:
+        logger.warning(
+            "Embedding model provider is inactive",
+            extra={
+                "model_name": orm_embedding_model.name,
+                "provider_id": str(orm_embedding_model.provider_id),
+            },
+        )
+
+    # Compute litellm_model_name: prefer provider-derived name,
+    # fall back to value stored on the model
+    litellm_model_name = orm_embedding_model.litellm_model_name
+    if provider_type:
+        litellm_model_name = f"{provider_type}/{orm_embedding_model.name}"
+
+    assert orm_embedding_model.max_input is not None
+
+    return EmbeddingModelSpec(
+        id=orm_embedding_model.id,
+        name=orm_embedding_model.name,
+        litellm_model_name=litellm_model_name,
+        family=orm_embedding_model.family or None,
+        max_input=orm_embedding_model.max_input,
+        max_batch_size=orm_embedding_model.max_batch_size,
+        dimensions=orm_embedding_model.dimensions,
+        open_source=orm_embedding_model.open_source,
+        provider_id=orm_embedding_model.provider_id,
+        provider_type=provider_type,
+        provider_credentials=provider_credentials,
+        provider_config=provider_config,
+        provider_outbound_headers=provider_outbound_headers,
+    )
 
 
 async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
@@ -824,12 +876,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 orm_embedding_model = website_row.embedding_model
                 embedding_model_spec: EmbeddingModelSpec | None = None
                 if orm_embedding_model:
-                    family_str: str | None = orm_embedding_model.family or None
-
                     # Pre-resolve provider data while session is active
-                    provider_type = None
-                    provider_credentials = None
-                    provider_config = None
+                    provider_db: ModelProviders | None = None
                     if orm_embedding_model.provider_id:
                         provider_result = await bootstrap_session.execute(
                             sa.select(ModelProviders).where(
@@ -837,42 +885,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             )
                         )
                         provider_db = provider_result.scalar_one_or_none()
-                        if provider_db and provider_db.is_active:
-                            provider_type = provider_db.provider_type
-                            provider_credentials = provider_db.credentials
-                            provider_config = provider_db.config
-                        elif provider_db and not provider_db.is_active:
-                            logger.warning(
-                                "Embedding model provider is inactive",
-                                extra={
-                                    "model_name": orm_embedding_model.name,
-                                    "provider_id": str(orm_embedding_model.provider_id),
-                                },
-                            )
-
-                    # Compute litellm_model_name: prefer provider-derived name,
-                    # fall back to value stored on the model
-                    litellm_model_name = orm_embedding_model.litellm_model_name
-                    if provider_type:
-                        litellm_model_name = (
-                            f"{provider_type}/{orm_embedding_model.name}"
-                        )
-
-                    assert orm_embedding_model.max_input is not None
-
-                    embedding_model_spec = EmbeddingModelSpec(
-                        id=orm_embedding_model.id,
-                        name=orm_embedding_model.name,
-                        litellm_model_name=litellm_model_name,
-                        family=family_str,
-                        max_input=orm_embedding_model.max_input,
-                        max_batch_size=orm_embedding_model.max_batch_size,
-                        dimensions=orm_embedding_model.dimensions,
-                        open_source=orm_embedding_model.open_source,
-                        provider_id=orm_embedding_model.provider_id,
-                        provider_type=provider_type,
-                        provider_credentials=provider_credentials,
-                        provider_config=provider_config,
+                    embedding_model_spec = _embedding_model_spec(
+                        orm_embedding_model, provider_db
                     )
 
                 # Build CrawlContext DTO from ORM objects
