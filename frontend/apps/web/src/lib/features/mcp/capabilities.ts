@@ -38,6 +38,8 @@ export type CapabilityDescriptor = {
   classificationHint: () => string;
   /** Eneo can serve this capability itself, through a catalog image model. */
   builtinProvider?: boolean;
+  /** What the bundled tool runtime's provider of this capability does, shown before it is added. */
+  bundledDescription?: () => string;
 };
 
 export const CAPABILITIES: readonly CapabilityDescriptor[] = [
@@ -79,7 +81,8 @@ export const CAPABILITIES: readonly CapabilityDescriptor[] = [
     spaceHint: m.tabular_analysis_space_group_hint,
     noActiveProviderHint: m.tabular_analysis_no_active_provider_hint,
     notAvailableHereHint: m.tabular_analysis_not_available_here_hint,
-    classificationHint: m.tabular_analysis_classification_hint
+    classificationHint: m.tabular_analysis_classification_hint,
+    bundledDescription: m.tools_builtin_tabular_analysis_description
   },
   {
     purpose: "document_creation",
@@ -92,7 +95,8 @@ export const CAPABILITIES: readonly CapabilityDescriptor[] = [
     spaceHint: m.document_creation_space_group_hint,
     noActiveProviderHint: m.document_creation_no_active_provider_hint,
     notAvailableHereHint: m.document_creation_not_available_here_hint,
-    classificationHint: m.document_creation_classification_hint
+    classificationHint: m.document_creation_classification_hint,
+    bundledDescription: m.tools_builtin_document_creation_description
   },
   {
     purpose: "spreadsheet_creation",
@@ -105,7 +109,8 @@ export const CAPABILITIES: readonly CapabilityDescriptor[] = [
     spaceHint: m.spreadsheet_creation_space_group_hint,
     noActiveProviderHint: m.spreadsheet_creation_no_active_provider_hint,
     notAvailableHereHint: m.spreadsheet_creation_not_available_here_hint,
-    classificationHint: m.spreadsheet_creation_classification_hint
+    classificationHint: m.spreadsheet_creation_classification_hint,
+    bundledDescription: m.tools_builtin_spreadsheet_creation_description
   }
 ];
 
