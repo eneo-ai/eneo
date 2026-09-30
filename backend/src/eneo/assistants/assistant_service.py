@@ -2299,6 +2299,7 @@ class AssistantService:
                                                 result=tc.result,
                                                 mcp_tool_name=tc.mcp_tool_name,
                                                 purpose=tc.purpose,
+                                                is_internal=tc.is_internal,
                                                 meta=tc.meta,
                                             )
                                         )
@@ -2343,6 +2344,7 @@ class AssistantService:
                                                 result_status=tc.result_status,
                                                 mcp_tool_name=tc.mcp_tool_name,
                                                 purpose=tc.purpose,
+                                                is_internal=tc.is_internal,
                                             )
                                         )
                             yield chunk
@@ -2380,6 +2382,7 @@ class AssistantService:
                                                 or "timeout_denied",
                                                 mcp_tool_name=tc.mcp_tool_name,
                                                 purpose=tc.purpose,
+                                                is_internal=tc.is_internal,
                                             )
                                         )
                             yield chunk
@@ -2582,6 +2585,7 @@ class AssistantService:
                             result=tc.result,
                             mcp_tool_name=tc.mcp_tool_name,
                             purpose=tc.purpose,
+                            is_internal=tc.is_internal,
                             meta=tc.meta,
                         )
                         for tc in non_streaming_tool_metadata

@@ -9,7 +9,7 @@
   import { browser } from "$app/environment";
   import { getChatService } from "../../ChatService.svelte";
   import { setMessageContext } from "../../MessageContext.svelte";
-  import { isInternalServer } from "../../internalToolLabels";
+  import { isInternalToolCall } from "../../internalToolLabels";
 
   interface Props {
     message: ConversationMessage;
@@ -71,8 +71,8 @@
     // so "Tänker..." never shows next to "Söker kunskap…".
     const toolCalls = ((message as Record<string, unknown>).mcp_tool_calls ??
       message.tool_calls ??
-      []) as Array<{ server_name: string }>;
-    const hasInternalToolActivity = toolCalls.some((tc) => isInternalServer(tc.server_name));
+      []) as Array<{ server_name: string; is_internal?: boolean | null }>;
+    const hasInternalToolActivity = toolCalls.some((tc) => isInternalToolCall(tc));
     // Show typing indicator only while waiting for text to start, not during streaming
     return (
       isLast &&
