@@ -1310,57 +1310,65 @@ async def test_worker_terminalizes_a_zero_page_crawl_as_empty(
 
 
 @pytest.mark.parametrize(
-    ("queued_url", "current_url", "binding", "allowed"),
+    ("queued_url", "current_url", "binding", "allowed", "expected_failures"),
     [
         (
             "https://source.example/docs",
             "https://source.example/docs",
             "https://source.example",
             True,
+            0,
         ),
         (
             "https://source.example/docs",
             "https://source.example/other",
             "source.example",
             True,
+            0,
         ),
         (
             "http://source.example/docs",
             "http://source.example/docs",
             "http://source.example",
             True,
+            0,
         ),
         (
             "http://source.example/docs",
             "http://source.example/docs",
             "source.example",
             False,
+            1,
         ),
         (
             "https://collector.example/docs",
             "https://collector.example/docs",
             "source.example",
             False,
+            1,
         ),
         (
             "https://source.example:8443/docs",
             "https://source.example:8443/docs",
             "https://source.example",
             False,
+            1,
         ),
         (
             "http://source.example/docs",
             "http://source.example/docs",
             "https://source.example",
             False,
+            1,
         ),
         (
             "https://source.example/docs",
             "https://collector.example/docs",
             "https://collector.example",
             False,
+            0,
         ),
-        ("https://source.example/docs", "https://source.example/docs", None, False),
+        ("https://source.example/docs", "https://source.example/docs", None, False, 1),
     ],
     ids=(
         "bound-https",
@@ -1381,6 +1389,7 @@ async def test_worker_checks_persisted_auth_against_queued_url_before_crawling(
     current_url: str,
     binding: str | None,
     allowed: bool,
+    expected_failures: int,
 ) -> None:
     class AuthRecordingEngine:
         request: CrawlRequest | None = None
@@ -1403,13 +1412,14 @@ async def test_worker_checks_persisted_auth_against_queued_url_before_crawling(
         record = await session.get(WebsitesTable, website.id)
         assert record is not None
         record.url = current_url
+        record.update_interval = UpdateInterval.DAILY
         record.http_auth_username = "employee"
         record.http_auth_domain = binding
         record.encrypted_auth_password = (
             container.http_auth_encryption_service().encrypt_password(
                 "synthetic-secret"
             )
-            if allowed
+            if allowed or expected_failures == 0
             else "not-encrypted-must-never-be-decrypted"
         )
         run = await _admit(session, website=website, user=admin_user)
@@ -1438,6 +1448,141 @@ async def test_worker_checks_persisted_auth_against_queued_url_before_crawling(
             assert failed.failure_code == CrawlFailureCode.PROCESSING_FAILED.value
             assert failed.failure_detail is not None
             assert "Re-enter" in failed.failure_detail
+            persisted = await session.get(WebsitesTable, website.id)
+            assert persisted is not None
+            assert persisted.consecutive_failures == expected_failures
+            assert persisted.update_interval == UpdateInterval.DAILY
+            assert persisted.last_crawled_at is None
+            if expected_failures:
+                assert failed.finished_at is not None
+                assert persisted.next_retry_at == failed.finished_at + timedelta(
+                    hours=1
+                )
+            else:
+                assert persisted.next_retry_at is None
+
+
+@pytest.mark.parametrize("prior_failures", [8, 9])
+async def test_rejected_current_credentials_use_backoff_and_stop_at_ten_failures(
+    db_session,
+    admin_user,
+    prior_failures: int,
+) -> None:
+    async with db_session() as session:
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Legacy HTTP backoff",
+        )
+        website.url = "http://intranet.example/docs"
+        record = await session.get(WebsitesTable, website.id)
+        assert record is not None
+        record.url = website.url
+        record.update_interval = UpdateInterval.DAILY
+        record.consecutive_failures = prior_failures
+        record.http_auth_username = "employee"
+        record.http_auth_domain = "intranet.example"
+        record.encrypted_auth_password = "must-never-be-decrypted"
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        task = CrawlTask.model_validate(attempt.dispatch_payload)
+        dispatch_id = attempt.dispatch_id
+        run_id = cast(UUID, run.id)
+
+    container = Container(session=providers.Object(SessionProxy()))
+    container.crawler.override(providers.Object(_EmptyCrawlEngine()))
+    with pytest.raises(HttpAuthDestinationError):
+        await crawl_task(job_id=dispatch_id, params=task, container=container)
+    duplicate = await crawl_task(job_id=dispatch_id, params=task, container=container)
+    assert duplicate["status"] == "stale_delivery"
+
+    async with db_session() as session:
+        persisted = await session.get(WebsitesTable, website.id)
+        finished = await CrawlRunRepository(session).one(run_id)
+        assert persisted is not None
+        assert persisted.consecutive_failures == prior_failures + 1
+        assert persisted.last_crawled_at is None
+        assert finished.outcome is CrawlOutcome.FAILED
+        if prior_failures == 9:
+            assert persisted.update_interval == UpdateInterval.NEVER
+            assert persisted.next_retry_at is None
+        else:
+            assert persisted.update_interval == UpdateInterval.DAILY
+            assert finished.finished_at is not None
+            assert persisted.next_retry_at == finished.finished_at + timedelta(hours=24)
+
+
+@pytest.mark.parametrize("correction", ["replace", "remove"])
+async def test_auth_failure_does_not_penalize_credentials_corrected_before_finish(
+    db_session,
+    admin_user,
+    correction: str,
+) -> None:
+    container = Container(session=providers.Object(SessionProxy()))
+    retry_at = datetime.now(timezone.utc) + timedelta(hours=7)
+    async with db_session() as session:
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Corrected HTTP credentials",
+        )
+        record = await session.get(WebsitesTable, website.id)
+        assert record is not None
+        record.update_interval = UpdateInterval.DAILY
+        record.consecutive_failures = 9
+        record.next_retry_at = retry_at
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        attempt_id = attempt.id
+        claimed = await CrawlRunRepository(session).claim_attempt(
+            attempt_id,
+            dispatch_id=attempt.dispatch_id,
+            lease_owner="auth-rejected-worker",
+            lease_duration=timedelta(minutes=5),
+        )
+        assert claimed is not None
+        record.http_auth_username = "employee"
+        record.http_auth_domain = "wrong.example"
+        record.encrypted_auth_password = "initial-invalid-credentials"
+
+    # The worker observed an unusable binding, but another request corrected
+    # or removed it before the terminal transition obtains the website lock.
+    async with db_session() as session:
+        record = await session.get(WebsitesTable, website.id)
+        assert record is not None
+        if correction == "replace":
+            record.http_auth_domain = "https://corrected-http-credentials.example.com"
+            record.encrypted_auth_password = (
+                container.http_auth_encryption_service().encrypt_password("new-secret")
+            )
+        else:
+            record.http_auth_username = None
+            record.http_auth_domain = None
+            record.encrypted_auth_password = None
+
+    async with db_session() as session:
+        repository = CrawlRunRepository(session)
+        assert await repository.finish_attempt(
+            attempt_id,
+            lease_owner="auth-rejected-worker",
+            outcome=CrawlOutcome.FAILED,
+            failure_code=CrawlFailureCode.PROCESSING_FAILED,
+            failure_detail=str(HttpAuthDestinationError()),
+            http_auth_rejected=True,
+        )
+        persisted = await session.get(WebsitesTable, website.id)
+        assert persisted is not None
+        assert persisted.consecutive_failures == 9
+        assert persisted.update_interval == UpdateInterval.DAILY
+        assert persisted.next_retry_at == retry_at
 
 
 async def test_file_crawl_reobserves_linked_files_before_stale_cleanup(

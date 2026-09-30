@@ -10,6 +10,7 @@ from eneo.websites.domain.http_auth_credentials import (
     HttpAuthDestinationError,
 )
 from eneo.websites.domain.website import UpdateInterval, Website
+from eneo.websites.presentation.website_models import WebsiteUpdate
 
 
 @pytest.fixture
@@ -158,6 +159,45 @@ def test_legacy_https_path_update_does_not_rebind_secret(website: Website) -> No
     )
     website.update(url="https://intranet.example/other")
     assert website.http_auth.auth_domain == "intranet.example"
+
+
+def test_legacy_http_site_can_pause_schedule_and_edit_metadata_from_ui(
+    website: Website,
+) -> None:
+    website.url = "http://intranet.example/docs"
+    website.update_interval = UpdateInterval.DAILY
+    website.http_auth = HttpAuthCredentials(
+        username="employee", password="stored-secret", auth_domain="intranet.example"
+    )
+    credentials = website.http_auth
+    # WebsiteEditor sends the unchanged URL and all metadata on every save,
+    # omitting auth fields when the user keeps the saved password.
+    update = WebsiteUpdate(
+        url=website.url,
+        name="Renamed municipal guidance",
+        crawl_type=CrawlType.SITEMAP,
+        update_interval=UpdateInterval.NEVER,
+        download_files=True,
+    )
+
+    website.update(
+        url=update.url,
+        name=update.name,
+        crawl_type=update.crawl_type,
+        update_interval=update.update_interval,
+        download_files=update.download_files,
+        http_auth_username=update.http_auth_username,
+        http_auth_password=update.http_auth_password,
+    )
+
+    assert website.url == "http://intranet.example/docs"
+    assert website.name == "Renamed municipal guidance"
+    assert website.update_interval is UpdateInterval.NEVER
+    assert website.crawl_type is CrawlType.SITEMAP
+    assert website.download_files is True
+    assert website.http_auth is credentials
+    with pytest.raises(HttpAuthDestinationError):
+        HttpAuthCredentials.require_destination(credentials.auth_domain, website.url)
 
 
 def test_inconsistent_stored_binding_requires_credentials_again(

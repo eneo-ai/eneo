@@ -305,7 +305,7 @@ class Website(Entity):
         http_auth_username: Union[str, None, NotProvided] = NOT_PROVIDED,
         http_auth_password: Union[str, None, NotProvided] = NOT_PROVIDED,
     ) -> "Website":
-        if is_provided(url) and self.http_auth is not None:
+        if is_provided(url) and url != self.url and self.http_auth is not None:
             auth_is_explicit = is_provided(http_auth_username) and is_provided(
                 http_auth_password
             )

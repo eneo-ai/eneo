@@ -532,6 +532,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
         pages_unchanged: int | None = None,
         files_unchanged: int | None = None,
         failure_summary: dict[str, int] | None = None,
+        counts_as_scheduled_run: bool | None = None,
+        http_auth_rejected: bool = False,
     ) -> bool:
         nonlocal terminalized
         if terminalized:
@@ -557,6 +559,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     files_unchanged=files_unchanged,
                     failure_summary=failure_summary,
                     failures=failures,
+                    counts_as_scheduled_run=counts_as_scheduled_run,
+                    http_auth_rejected=http_auth_rejected,
                 )
             if finished:
                 del pending_failures[: len(failures)]
@@ -653,7 +657,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             existing_publications: dict[str, tuple[bytes, UUID]] = {}
             existing_validators: dict[str, tuple[str | None, str | None]] = {}
             conditional_gets_truncated = False
-            website_url: str = ""  # For logging after session closes
 
             start = time.time()
             # Bootstrap phase: Short-lived session for extracting ORM → DTO
@@ -683,7 +686,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     raise Exception(f"Website {params.website_id} not found")
 
                 website = website_row
-                website_url = website_row.url  # Save for logging after session closes
 
                 # Extract HTTP auth credentials if present
                 # NOTE: Using ORM columns directly (http_auth_username, encrypted_auth_password)
@@ -1517,107 +1519,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     operation=_store_sitemap_state,
                 )
 
-            async def _do_circuit_breaker_update(sess: AsyncSession) -> None:
-                """Update circuit breaker state with appropriate backoff/reset."""
-                await _require_current_lease(
-                    sess,
-                    expected_phase=CrawlPhase.FINALIZING,
-                )
-                # Session provided by execute_with_recovery (session-per-operation pattern)
-                # NOTE: Use crawl_context primitives, NOT detached ORM website object
-                if crawl_counts_as_scheduled_run:
-                    # A useful partial result is healthy enough to remain scheduled.
-                    # Failure-dominated results still enter backoff.
-                    logger.info(
-                        "Crawl counts as scheduled; resetting failure backoff",
-                        extra={"website_id": str(params.website_id)},
-                    )
-                    reset_stmt = (
-                        sa.update(WebsitesTable)
-                        .where(WebsitesTable.id == params.website_id)
-                        .where(WebsitesTable.tenant_id == crawl_context.tenant_id)
-                        .values(consecutive_failures=0, next_retry_at=None)
-                    )
-                    await sess.execute(reset_stmt)
-                else:
-                    # Failure: Increment counter and apply exponential backoff
-                    # Get current failure count (with tenant filter for security)
-                    current_failures_stmt = (
-                        sa.select(WebsitesTable.consecutive_failures)
-                        .where(WebsitesTable.id == params.website_id)
-                        .where(WebsitesTable.tenant_id == crawl_context.tenant_id)
-                    )
-                    current_failures: int = (
-                        await sess.scalar(current_failures_stmt)
-                    ) or 0
-                    new_failures = current_failures + 1
-
-                    # Auto-disable threshold: Stop trying after too many failures
-                    MAX_FAILURES_BEFORE_DISABLE = 10
-
-                    if new_failures >= MAX_FAILURES_BEFORE_DISABLE:
-                        # Auto-disable: Set update_interval to NEVER
-                        from eneo.websites.domain.website import UpdateInterval
-
-                        logger.error(
-                            f"Website {params.website_id} auto-disabled after {new_failures} consecutive failures. "
-                            f"User action required to re-enable.",
-                            extra={
-                                "website_id": str(params.website_id),
-                                "url": website_url,  # Use primitive captured during bootstrap
-                                "consecutive_failures": new_failures,
-                            },
-                        )
-
-                        disable_stmt = (
-                            sa.update(WebsitesTable)
-                            .where(WebsitesTable.id == params.website_id)
-                            .where(WebsitesTable.tenant_id == crawl_context.tenant_id)
-                            .values(
-                                consecutive_failures=new_failures,
-                                update_interval=UpdateInterval.NEVER,  # Auto-disable
-                                next_retry_at=None,  # Clear retry time
-                            )
-                        )
-                        await sess.execute(disable_stmt)
-                    else:
-                        # Normal exponential backoff: 1h, 2h, 4h, 8h, 16h, 24h max
-                        backoff_hours = min(2 ** (new_failures - 1), 24)
-                        next_retry = datetime.now(timezone.utc) + timedelta(
-                            hours=backoff_hours
-                        )
-
-                        logger.warning(
-                            f"Crawl failed for website {params.website_id}. "
-                            f"Failure {new_failures}/{MAX_FAILURES_BEFORE_DISABLE}, "
-                            f"backoff {backoff_hours}h until {next_retry.isoformat()}",
-                            extra={
-                                "website_id": str(params.website_id),
-                                "consecutive_failures": new_failures,
-                                "backoff_hours": backoff_hours,
-                                "next_retry_at": next_retry.isoformat(),
-                            },
-                        )
-
-                        backoff_stmt = (
-                            sa.update(WebsitesTable)
-                            .where(WebsitesTable.id == params.website_id)
-                            .where(WebsitesTable.tenant_id == crawl_context.tenant_id)
-                            .values(
-                                consecutive_failures=new_failures,
-                                next_retry_at=next_retry,
-                            )
-                        )
-                        await sess.execute(backoff_stmt)
-
-            await execute_with_recovery(
-                container=container,
-                session_holder=session_holder,
-                created_sessions=created_sessions,
-                operation_name="circuit_breaker_update",
-                operation=_do_circuit_breaker_update,
-            )
-
             await _stop_heartbeat(propagate_failure=True)
             result_location = f"/api/v1/websites/{params.website_id}/info-blobs/"
             finished = await _finish_attempt(
@@ -1632,6 +1533,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 pages_unchanged=num_unchanged_pages,
                 files_unchanged=num_skipped_files,
                 failure_summary=failure_summary,
+                counts_as_scheduled_run=crawl_counts_as_scheduled_run,
             )
             if not finished:
                 raise CrawlLeaseLostError(
@@ -1792,6 +1694,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             pages_unchanged=num_unchanged_pages,
             files_unchanged=num_skipped_files,
             failure_summary=dict(failure_counts) if failure_counts else None,
+            http_auth_rejected=isinstance(exc, HttpAuthDestinationError),
         )
         raise
     finally:
