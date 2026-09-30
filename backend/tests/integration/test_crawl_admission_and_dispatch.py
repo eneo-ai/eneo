@@ -62,6 +62,7 @@ from eneo.websites.domain.crawl_run import (
 )
 from eneo.websites.domain.crawl_run_repo import CrawlRunRepository
 from eneo.websites.domain.crawl_service import CrawlService
+from eneo.websites.domain.http_auth_credentials import HttpAuthDestinationError
 from eneo.websites.domain.source_url import normalize_url
 from eneo.websites.domain.website import UpdateInterval, Website
 from eneo.worker import crawl_tasks as crawl_tasks_module
@@ -1306,6 +1307,137 @@ async def test_worker_terminalizes_a_zero_page_crawl_as_empty(
         assert finished.outcome == CrawlOutcome.EMPTY
         assert finished.pages_crawled == 0
         assert job.status == Status.COMPLETE.value
+
+
+@pytest.mark.parametrize(
+    ("queued_url", "current_url", "binding", "allowed"),
+    [
+        (
+            "https://source.example/docs",
+            "https://source.example/docs",
+            "https://source.example",
+            True,
+        ),
+        (
+            "https://source.example/docs",
+            "https://source.example/other",
+            "source.example",
+            True,
+        ),
+        (
+            "http://source.example/docs",
+            "http://source.example/docs",
+            "http://source.example",
+            True,
+        ),
+        (
+            "http://source.example/docs",
+            "http://source.example/docs",
+            "source.example",
+            False,
+        ),
+        (
+            "https://collector.example/docs",
+            "https://collector.example/docs",
+            "source.example",
+            False,
+        ),
+        (
+            "https://source.example:8443/docs",
+            "https://source.example:8443/docs",
+            "https://source.example",
+            False,
+        ),
+        (
+            "http://source.example/docs",
+            "http://source.example/docs",
+            "https://source.example",
+            False,
+        ),
+        (
+            "https://source.example/docs",
+            "https://collector.example/docs",
+            "https://collector.example",
+            False,
+        ),
+        ("https://source.example/docs", "https://source.example/docs", None, False),
+    ],
+    ids=(
+        "bound-https",
+        "legacy-https",
+        "bound-http",
+        "legacy-http",
+        "stored-mismatch",
+        "port-change",
+        "downgrade",
+        "pending-old-url-new-credentials",
+        "missing-binding",
+    ),
+)
+async def test_worker_checks_persisted_auth_against_queued_url_before_crawling(
+    db_session,
+    admin_user,
+    queued_url: str,
+    current_url: str,
+    binding: str | None,
+    allowed: bool,
+) -> None:
+    class AuthRecordingEngine:
+        request: CrawlRequest | None = None
+
+        async def crawl(self, request: CrawlRequest) -> AsyncIterator[CrawlEvent]:
+            self.request = request
+            yield CrawlFinished(status="completed", pages_crawled=0, pages_failed=0)
+
+    container = Container(session=providers.Object(SessionProxy()))
+    engine = AuthRecordingEngine()
+    container.crawler.override(providers.Object(engine))
+    async with db_session() as session:
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Credential binding",
+        )
+        website.url = queued_url
+        record = await session.get(WebsitesTable, website.id)
+        assert record is not None
+        record.url = current_url
+        record.http_auth_username = "employee"
+        record.http_auth_domain = binding
+        record.encrypted_auth_password = (
+            container.http_auth_encryption_service().encrypt_password(
+                "synthetic-secret"
+            )
+            if allowed
+            else "not-encrypted-must-never-be-decrypted"
+        )
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        task = CrawlTask.model_validate(attempt.dispatch_payload)
+        dispatch_id = attempt.dispatch_id
+        run_id = cast(UUID, run.id)
+
+    if allowed:
+        await crawl_task(job_id=dispatch_id, params=task, container=container)
+        assert engine.request is not None
+        assert engine.request.url == queued_url
+        assert engine.request.http_user == "employee"
+        assert engine.request.http_pass == "synthetic-secret"
+    else:
+        with pytest.raises(HttpAuthDestinationError):
+            await crawl_task(job_id=dispatch_id, params=task, container=container)
+        assert engine.request is None
+        async with db_session() as session:
+            failed = await CrawlRunRepository(session).one(run_id)
+            assert failed.phase == CrawlPhase.TERMINAL
+            assert failed.outcome == CrawlOutcome.FAILED
+            assert failed.failure_code == CrawlFailureCode.PROCESSING_FAILED.value
+            assert failed.failure_detail is not None
+            assert "Re-enter" in failed.failure_detail
 
 
 async def test_file_crawl_reobserves_linked_files_before_stale_cleanup(

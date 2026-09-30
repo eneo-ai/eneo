@@ -57,6 +57,10 @@ from eneo.websites.domain.crawl_schedule import (
     SchedulerRunRecord,
     SchedulerTenantCounts,
 )
+from eneo.websites.domain.http_auth_credentials import (
+    HttpAuthCredentials,
+    HttpAuthDestinationError,
+)
 from eneo.worker.crawl import (
     CrawlLeaseLostError,
     HeartbeatFailedError,
@@ -688,10 +692,19 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 http_pass: str | None = None
                 has_auth_in_db = bool(
                     website_row.http_auth_username
-                    and website_row.encrypted_auth_password
+                    or website_row.encrypted_auth_password
+                    or website_row.http_auth_domain
                 )
 
                 if has_auth_in_db:
+                    HttpAuthCredentials.require_destination(
+                        website_row.http_auth_domain, params.url
+                    )
+                    if not (
+                        website_row.http_auth_username
+                        and website_row.encrypted_auth_password
+                    ):
+                        raise HttpAuthDestinationError()
                     # Decrypt the password using HttpAuthEncryptionService (NOT encryption_service)
                     # HttpAuthEncryptionService uses its own Fernet encryption format
                     # while encryption_service expects 'enc:' prefix format
@@ -1762,12 +1775,16 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     extra={"job_id": str(job_id), "attempt_id": str(attempt_id)},
                 )
         raise
-    except Exception:
+    except Exception as exc:
         await _stop_heartbeat()
         await _finish_attempt(
             CrawlOutcome.FAILED,
             failure_code=CrawlFailureCode.PROCESSING_FAILED,
-            failure_detail="The crawler stopped because of an internal processing error",
+            failure_detail=(
+                str(exc)
+                if isinstance(exc, HttpAuthDestinationError)
+                else "The crawler stopped because of an internal processing error"
+            ),
             pages_crawled=num_published_pages,
             files_downloaded=num_published_files,
             pages_failed=num_failed_pages,

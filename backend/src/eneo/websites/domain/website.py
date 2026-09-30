@@ -7,7 +7,10 @@ from eneo.base.base_entity import Entity
 from eneo.embedding_models.domain.embedding_model import EmbeddingModel
 from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
 from eneo.websites.domain.crawl_run import CrawlRun, CrawlType
-from eneo.websites.domain.http_auth_credentials import HttpAuthCredentials
+from eneo.websites.domain.http_auth_credentials import (
+    HttpAuthCredentials,
+    HttpAuthDestinationError,
+)
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -302,6 +305,16 @@ class Website(Entity):
         http_auth_username: Union[str, None, NotProvided] = NOT_PROVIDED,
         http_auth_password: Union[str, None, NotProvided] = NOT_PROVIDED,
     ) -> "Website":
+        if is_provided(url) and self.http_auth is not None:
+            auth_is_explicit = is_provided(http_auth_username) and is_provided(
+                http_auth_password
+            )
+            if not auth_is_explicit:
+                if HttpAuthCredentials.origin_for_url(
+                    url
+                ) != HttpAuthCredentials.origin_for_url(self.url):
+                    raise HttpAuthDestinationError()
+                HttpAuthCredentials.require_destination(self.http_auth.auth_domain, url)
         if is_provided(url):
             self.url = url
         if is_provided(name):

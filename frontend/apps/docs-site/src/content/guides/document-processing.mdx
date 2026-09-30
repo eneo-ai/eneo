@@ -123,6 +123,17 @@ space's default embedding model when none is selected).
      default embedding model
 4. Click **Create website**
 
+HTTP Basic Authentication credentials are bound to the website's protocol,
+host, and port. You can change the path on the same site without entering them
+again. To change the protocol, host, or port, enter a new username and password
+or remove authentication in the same update. Explicit default ports (`:443`
+for HTTPS and `:80` for HTTP) are equivalent to omitting the port.
+
+Credentials saved before this protection continue to work at their original
+address over HTTPS. For an HTTP site, enter the credentials again before crawling.
+If a crawl reports that authentication is not bound to the
+URL, enter the credentials again for the intended site or remove authentication.
+
 The scheduler checks every hour on the hour (UTC): a daily website is queued
 once at least 24 hours have passed since its last crawl, an every-other-day
 website after 48 hours, and a weekly website only on Fridays (UTC) once seven
