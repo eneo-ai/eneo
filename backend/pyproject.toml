@@ -9,6 +9,7 @@ dependencies = [
     "uvicorn[standard]>=0.30.0,<1",
     "python-dotenv==1.2.2",
     "pydantic[email]>=2,<3",
+    "idna>=3.18,<4",  # IDNA2008 domain matching, also used by email validation
     "tenacity>=8.2.1,<9",
     "tiktoken>=0,<1",
     "numpy>=1.24.2,<2",

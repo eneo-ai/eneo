@@ -375,7 +375,7 @@ A missing claim is rejected with `401 Email claim not found in ID token`; a malf
 
 ### Domain Validation
 
-When `allowed_domains` is configured, the domain part of the email is lower-cased and IDNA-normalized and compared against the (equally normalized) allowlist. A non-matching domain is rejected with:
+When `allowed_domains` is configured, email domains are compared case-insensitively using IDNA2008. Unicode and punycode forms of the same domain match; distinct domains such as `faß.de` and `fass.de` do not. A non-matching domain is rejected with:
 
 ```
 403 Email domain '{domain}' is not allowed for this organization. Contact your administrator to add your domain.
