@@ -1741,6 +1741,41 @@ describe("FlowEditor server validation routing", () => {
     }
   });
 
+  it("drains flow changes made while an assistant flush is in flight", async () => {
+    vi.useFakeTimers();
+    let resolveAssistant!: (value: object) => void;
+    const assistantUpdate = vi.fn(
+      () => new Promise<object>((resolve) => (resolveAssistant = resolve))
+    );
+    const flowUpdate = vi.fn(async ({ flow, update }) => ({
+      ...flow,
+      ...update,
+      draft_revision: flow.draft_revision + 1
+    }));
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1)] }),
+      eneo: makeEneo({ flowUpdate, assistantUpdate })
+    });
+    try {
+      editor.recordAssistantDraft("assistant-1", { prompt: { text: "Updated instruction" } });
+      const flush = editor.flushSaves();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(assistantUpdate).toHaveBeenCalledTimes(1);
+
+      editor.setName("Edited during assistant save");
+      resolveAssistant({ id: "assistant-1", prompt: { text: "Updated instruction" } });
+      await flush;
+
+      expect(flowUpdate).toHaveBeenCalledTimes(1);
+      expect(get(editor.state.resource).name).toBe("Edited during assistant save");
+      expect(get(editor.state.saveStatus)).toBe("saved");
+      expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(false);
+    } finally {
+      editor.destroy();
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects an explicit flush when the draft cannot be persisted yet", async () => {
     vi.useFakeTimers();
     const pending: Array<(value: Flow) => void> = [];

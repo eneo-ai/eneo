@@ -490,8 +490,11 @@ function createFlowEditor(data: FlowEditorInitData) {
   }
 
   async function flushSaves(): Promise<void> {
-    await flushFlowSaves();
-    await flushAssistantSaves();
+    do {
+      await flushFlowSaves();
+      await flushAssistantSaves();
+      // A flow edit can arrive while an assistant save is in flight.
+    } while (get(unifiedSaveStatus) !== "saved");
   }
 
   /**

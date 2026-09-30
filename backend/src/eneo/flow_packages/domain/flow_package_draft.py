@@ -17,7 +17,11 @@ from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageErrorCode,
     FlowPackageValidationError,
 )
-from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowRuntimeInputConfig
+from eneo.flows.domain.flow import (
+    FlowPersistedJsonObject,
+    FlowRuntimeInputConfig,
+    FlowStepRetrievalPolicy,
+)
 from eneo.flows.domain.text_processing import TextProcessingMode
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, StepSpec
 
@@ -73,6 +77,7 @@ class FlowPackageStepOutputConfig(BaseModel):
 
     citation_mode: Literal["off", "inline_inref_sidecar"] | None = None
     speaker_mapping: FlowPackageSpeakerMappingConfig | None = None
+    retrieval_policy: FlowStepRetrievalPolicy | None = None
 
 
 class FlowPackageFlowDraft(BaseModel):

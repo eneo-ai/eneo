@@ -40,6 +40,7 @@ from eneo.flows.assistant_authoring_snapshot import (
 )
 from eneo.flows.citation_sidecar import CITATION_MODE_INLINE_INREF_SIDECAR
 from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
+from eneo.flows.domain.step_config import clean_inactive_step_config
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -311,6 +312,7 @@ def _step_spec(
     requirement_drafts: dict[str, _RequirementDraft],
     usage: _StepUsage,
 ) -> StepSpec:
+    step = clean_inactive_step_config(step)
     has_template_resource = has_template_fill_resource_reference(step.output_config)
     if step.output_mode == FlowOutputMode.TEMPLATE_FILL or has_template_resource:
         raise FlowPackageExportError(
@@ -436,6 +438,8 @@ def _portable_output_config(step: FlowStep) -> FlowPersistedJsonObject | None:
         ) from exc
 
     portable: FlowPersistedJsonObject = {}
+    if parsed.retrieval_policy is not None:
+        portable["retrieval_policy"] = parsed.retrieval_policy.model_dump(mode="json")
     if (
         parsed.speaker_mapping is not None
         and step.output_mode is FlowOutputMode.SPEAKER_MAPPING

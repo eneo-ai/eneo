@@ -45,6 +45,27 @@ function makeState(activeStep: { current: FlowStep | null }) {
 }
 
 describe("FlowStepAssistantState", () => {
+  it("loads the selected step while another assistant is still saving", async () => {
+    const activeStep = { current: makeStep("assistant-1") };
+    const { state, flowEditor } = makeState(activeStep);
+    await state.load("assistant-1");
+    let finishSave!: () => void;
+    flowEditor.flushAssistantSaves.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (finishSave = resolve))
+    );
+
+    activeStep.current = makeStep("assistant-2");
+    state.syncWithActiveStep(activeStep.current);
+    try {
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(state.assistant?.id).toBe("assistant-2");
+      expect(state.loading).toBe(false);
+    } finally {
+      finishSave();
+    }
+  });
+
   it("clears the previous assistant immediately when the active step changes", async () => {
     const activeStep = { current: makeStep("assistant-1") };
     const { state } = makeState(activeStep);

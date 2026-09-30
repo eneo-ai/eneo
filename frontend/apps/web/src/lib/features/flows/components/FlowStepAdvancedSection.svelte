@@ -80,7 +80,7 @@
           </Tooltip.Root>
         </Tooltip.Provider>
       </svelte:fragment>
-      {#if step.input_type !== "json" && step.input_type !== "text"}
+      {#if step.input_contract == null || (step.input_type !== "json" && step.input_type !== "text")}
         <Alert.Root
           class="bg-warning-dimmer/50 text-warning-stronger mb-2 rounded-lg"
           role="status"
@@ -138,7 +138,7 @@
           </Tooltip.Root>
         </Tooltip.Provider>
       </svelte:fragment>
-      {#if step.output_type !== "json"}
+      {#if step.output_contract == null || step.output_type === "text" || step.output_mode === "render_verbatim" || step.output_mode === "speaker_mapping"}
         <Alert.Root
           class="bg-warning-dimmer/50 text-warning-stronger mb-2 rounded-lg"
           role="status"

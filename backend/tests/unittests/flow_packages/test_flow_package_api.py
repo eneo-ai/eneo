@@ -2032,7 +2032,7 @@ async def test_export_nonportable_config_never_writes_or_audits(
                     assistant_id=assistant_id,
                     step_order=1,
                     user_description="Input",
-                    input_source="flow_input",
+                    input_source="http_get" if "auth" in input_config else "flow_input",
                     input_type="text",
                     output_mode="pass_through",
                     output_type="text",

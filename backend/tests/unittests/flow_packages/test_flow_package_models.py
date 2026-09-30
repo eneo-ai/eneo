@@ -6,7 +6,10 @@ import pytest
 from pydantic import ValidationError
 
 from eneo.flow_packages.domain.flow_package_checksum import hash_json_value
-from eneo.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
+from eneo.flow_packages.domain.flow_package_draft import (
+    FlowPackageFlowDraft,
+    FlowPackageStepOutputConfig,
+)
 from eneo.flow_packages.domain.flow_package_manifest import (
     APP_PACKAGE_PAYLOAD_SCHEMA,
     ASSISTANT_PACKAGE_PAYLOAD_SCHEMA,
@@ -42,6 +45,21 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from eneo.flows.flow_resource_bindings import ResourceSlotKind, ResourceSlotRef
+
+
+@pytest.mark.parametrize(
+    "policy",
+    [
+        {"version": True, "mode": "fail_closed"},
+        {"version": "1", "mode": "fail_closed"},
+        {"version": 2, "mode": "fail_closed"},
+        {"version": 1, "mode": "unknown"},
+        {"version": 1, "mode": "fail_closed", "token": "secret"},
+    ],
+)
+def test_package_output_config_rejects_invalid_retrieval_policy(policy: object) -> None:
+    with pytest.raises(ValidationError):
+        FlowPackageStepOutputConfig.model_validate({"retrieval_policy": policy})
 
 
 def test_manifest_rejects_unknown_fields() -> None:
