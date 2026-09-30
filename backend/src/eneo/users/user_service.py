@@ -5,6 +5,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Optional, cast
 from uuid import UUID
 
+import idna
 import jwt
 import sqlalchemy as sa
 from starlette.requests import Request
@@ -452,8 +453,20 @@ class UserService:
             )
 
         if allowed_domains:
-            email_domain = identity.email.rsplit("@", 1)[1].lower()
-            normalized_domains = {domain.lower() for domain in allowed_domains}
+            try:
+                # Match the IDNA2008 normalization used by EmailStr. Python's
+                # legacy IDNA codec aliases distinct domains such as ß and ss.
+                email_domain = idna.encode(
+                    identity.email.rsplit("@", 1)[1], uts46=True
+                ).decode("ascii")
+                normalized_domains = {
+                    idna.encode(domain, uts46=True).decode("ascii")
+                    for domain in allowed_domains
+                }
+            except idna.IDNAError as exc:
+                raise FederatedLoginDenied(
+                    "Allowed email domains are invalid. Contact your administrator."
+                ) from exc
             if email_domain not in normalized_domains:
                 raise FederatedLoginDenied(
                     f"Email domain '{email_domain}' is not allowed for this organization. "

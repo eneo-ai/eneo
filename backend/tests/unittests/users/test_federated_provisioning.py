@@ -225,6 +225,39 @@ async def test_distinct_international_domains_do_not_alias(
     assert users.created == []
 
 
+@pytest.mark.parametrize("email", ["user@bücher.de", "user@xn--bcher-kva.de"])
+@pytest.mark.parametrize("existing", [False, True])
+async def test_international_domains_match_unicode_and_punycode(
+    monkeypatch, tenant, entrypoint, email, existing
+):
+    member = existing_user(tenant, email="user@bücher.de") if existing else None
+    users = UsersInMemory(tenant, [member] if member else [])
+    user, created, _ = await sign_in(
+        monkeypatch,
+        tenant,
+        users,
+        {**CLAIMS, "email": email},
+        ["xn--bcher-kva.de"],
+        entrypoint,
+    )
+    assert user.email == "user@bücher.de"
+    assert created is (not existing)
+    if member:
+        assert user.id == member.id
+        assert users.created == []
+
+
+async def test_invalid_domain_configuration_fails_closed(
+    monkeypatch, tenant, entrypoint
+):
+    users = UsersInMemory(tenant)
+    with pytest.raises(FederatedLoginDenied, match="domains are invalid"):
+        await sign_in(
+            monkeypatch, tenant, users, CLAIMS, ["invalid domain"], entrypoint
+        )
+    assert users.created == []
+
+
 @pytest.mark.parametrize("verified", [None, False, "true", "false", 1, 0])
 async def test_jit_requires_boolean_true_verification(
     monkeypatch, tenant, entrypoint, verified
