@@ -5,7 +5,13 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("$lib/paraglide/messages", () => ({
   m: new Proxy({}, { get: (_target, key) => () => String(key) })
 }));
-vi.mock("@lucide/svelte", () => ({ Globe: "Globe", Image: "Image" }));
+vi.mock("@lucide/svelte", () => ({
+  FileSpreadsheet: "FileSpreadsheet",
+  FileText: "FileText",
+  Globe: "Globe",
+  Image: "Image",
+  Sheet: "Sheet"
+}));
 
 import {
   CAPABILITIES,
@@ -17,16 +23,20 @@ import {
 } from "./capabilities";
 
 describe("capability descriptors", () => {
-  it("lists web search before image generation", () => {
+  it("lists the capabilities in the order admins and chats show them", () => {
     expect(CAPABILITIES.map((capability) => capability.purpose)).toEqual([
       "web_search",
-      "image_generation"
+      "image_generation",
+      "tabular_analysis",
+      "document_creation",
+      "spreadsheet_creation"
     ]);
   });
 
   it("offers a built-in provider for image generation only", () => {
     expect(hasBuiltinProvider("image_generation")).toBe(true);
     expect(hasBuiltinProvider("web_search")).toBe(false);
+    expect(hasBuiltinProvider("tabular_analysis")).toBe(false);
     expect(hasBuiltinProvider("general")).toBe(false);
     expect(hasBuiltinProvider(null)).toBe(false);
     expect(hasBuiltinProvider(undefined)).toBe(false);
