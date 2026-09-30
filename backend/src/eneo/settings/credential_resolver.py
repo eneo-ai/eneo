@@ -390,6 +390,7 @@ class CredentialResolver:
                     "client_id": self.settings.oidc_client_id,
                     "client_secret": self.settings.oidc_client_secret,
                     "tenant_id": self.settings.oidc_tenant_id,
+                    "allowed_domains": self.settings.oidc_allowed_domains,
                     "scopes": ["openid", "email", "profile"],
                 }
 

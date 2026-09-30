@@ -122,6 +122,23 @@ A valid link is still a bearer credential. Binding it to a tenant stops it
 from being redeemed against another tenant's copy of a file; it does not stop
 another person from using a leaked, unexpired link.
 
+## OIDC account provisioning
+
+Both OIDC login paths now use the tenant's `provisioning` setting. The older global OIDC/MobilityGuard path no longer creates accounts when it is `false`.
+
+Before upgrading:
+
+- **SCIM-managed tenants:** explicitly keep `provisioning: false`. Ensure intended users have been provisioned before their first sign-in. OIDC remains the sign-in method for existing active members.
+- **Global OIDC:** configure a valid `OIDC_TENANT_ID`. Existing accounts must belong to that tenant; the older endpoint no longer accepts accounts from another tenant or a missing tenant configuration.
+- **Tenants using JIT:** require a non-empty domain list and an ID token containing boolean `email_verified: true` for `email`. Per-tenant federation uses `allowed_domains`; global OIDC uses the new `OIDC_ALLOWED_DOMAINS` environment variable, for example `OIDC_ALLOWED_DOMAINS=["your-company.com"]`.
+- **IdPs without verified-email claims:** use SCIM or administrative provisioning. Missing claims, strings such as `"true"`, and custom mapped addresses that differ from the standard `email` claim do not authorize JIT creation.
+
+An empty domain list still applies no domain restriction to existing active members, but blocks new JIT accounts. Inactive and removed users cannot be recreated by signing in; restore them through SCIM or an administrator. Existing active accounts do not gain a new `email_verified` requirement.
+
+No database migration or automatic change of tenant settings is needed. For affected users who cannot be created through JIT after upgrading, provision their account through SCIM or administration while correcting IdP/domain configuration. Keep all backend replicas on the same version so admission rules are consistent.
+
+See [Single-tenant OIDC](/guides/oidc-federation/single-tenant#user-provisioning), [Multi-tenant federation](/guides/oidc-federation/multi-tenant) and [SCIM provisioning](/guides/scim-provisioning).
+
 ## API changes for integrations
 
 Clients that call the Eneo API directly must use the new names. The API no

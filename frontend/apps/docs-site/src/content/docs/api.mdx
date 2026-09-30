@@ -114,7 +114,7 @@ Failed attempts are limited to 5 per login name within 10 minutes. Each `401` re
 
 The `429` response also carries a `Retry-After` header. The limit applies to password login only; API keys and OIDC sign-in are unaffected.
 
-Users of tenants that authenticate through OIDC federation obtain their token from the `/api/v1/auth/*` flow instead; see [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant).
+Users of tenants that authenticate through OIDC federation obtain their token from the `/api/v1/auth/*` flow instead; see [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant). Both this flow and `POST /api/v1/users/login/openid-connect/mobilityguard/` return `403` when a validated identity is not permitted to access or join the configured tenant. A missing account requires SCIM/admin provisioning or all [JIT admission requirements](/guides/oidc-federation/single-tenant#user-provisioning).
 
 If a request carries both an `Authorization: Bearer` token and an API key header, the bearer token is used and the API key is ignored.
 

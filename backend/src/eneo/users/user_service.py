@@ -1,9 +1,11 @@
 import random
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Optional, cast
 from uuid import UUID
 
+import idna
 import jwt
 import sqlalchemy as sa
 from starlette.requests import Request
@@ -31,6 +33,7 @@ from eneo.authentication.auth_models import (
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyV2InDB,
+    FederatedIdentity,
     JWTPayload,
     compute_effective_state,
 )
@@ -53,6 +56,7 @@ from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     AuthenticationException,
     BadRequestException,
+    FederatedLoginDenied,
     NotFoundException,
     TenantSuspendedException,
     UniqueUserException,
@@ -76,6 +80,7 @@ from eneo.users.user import (
     PropUserInvite,
     UserAdd,
     UserAddSuperAdmin,
+    UserInDB,
     UserState,
     UserUpdate,
     UserUpdatePublic,
@@ -86,7 +91,6 @@ if TYPE_CHECKING:
     from eneo.database.database import AsyncSession
     from eneo.feature_flag.feature_flag_service import FeatureFlagService
     from eneo.spaces.space_service import SpaceService
-    from eneo.users.user import UserInDB
 
 
 logger = get_logger(__name__)
@@ -429,6 +433,135 @@ class UserService:
             token_type="bearer",
         )
 
+    async def resolve_federated_user(
+        self,
+        *,
+        identity: FederatedIdentity,
+        tenant_id: UUID,
+        allowed_domains: Sequence[str],
+        correlation_id: str,
+    ) -> tuple[UserInDB, bool]:
+        """Resolve an active tenant member, or admit a new one under JIT policy.
+
+        Both OIDC entry points use this decision. SCIM/admin own reactivation;
+        signing in must never undo deprovisioning or switch tenant membership.
+        """
+        tenant = await self.tenant_repo.get(tenant_id)
+        if tenant is None or tenant.state != TenantState.ACTIVE:
+            raise FederatedLoginDenied(
+                "Tenant is not active. Contact your administrator."
+            )
+
+        if allowed_domains:
+            try:
+                # Match the IDNA2008 normalization used by EmailStr. Python's
+                # legacy IDNA codec aliases distinct domains such as ß and ss.
+                email_domain = idna.encode(
+                    identity.email.rsplit("@", 1)[1], uts46=True
+                ).decode("ascii")
+                normalized_domains = {
+                    idna.encode(domain, uts46=True).decode("ascii")
+                    for domain in allowed_domains
+                }
+            except idna.IDNAError as exc:
+                raise FederatedLoginDenied(
+                    "Allowed email domains are invalid. Contact your administrator."
+                ) from exc
+            if email_domain not in normalized_domains:
+                raise FederatedLoginDenied(
+                    f"Email domain '{email_domain}' is not allowed for this organization. "
+                    "Contact your administrator to add your domain."
+                )
+
+        user = await self.repo.get_user_by_email(identity.email)
+        if user is not None:
+            if user.tenant_id != tenant_id:
+                raise FederatedLoginDenied("Access denied for this organization.")
+            if user.state != UserState.ACTIVE or user.deleted_at is not None:
+                raise FederatedLoginDenied(
+                    "User is inactive or has been removed. Contact your administrator."
+                )
+            return user, False
+
+        if await self.repo.has_removed_user_by_email(identity.email, tenant_id):
+            raise FederatedLoginDenied(
+                "User is inactive or has been removed. Contact your administrator."
+            )
+        if not tenant.provisioning:
+            raise FederatedLoginDenied(
+                "User not found. Provision the account through SCIM or contact your administrator for access."
+            )
+        if not allowed_domains:
+            raise FederatedLoginDenied(
+                "Automatic account creation requires allowed email domains. Contact your administrator."
+            )
+        if not identity.email_verified:
+            raise FederatedLoginDenied(
+                "Automatic account creation requires a verified email address. Contact your administrator."
+            )
+
+        roles = []
+        if tenant.default_role_id:
+            roles = [ModelId(id=tenant.default_role_id)]
+        else:
+            logger.warning(
+                "JIT provisioning: No default role configured; creating user without roles",
+                extra={"tenant_id": str(tenant_id), "correlation_id": correlation_id},
+            )
+
+        username = identity.email.split("@", 1)[0].lower()
+        if (
+            await self.repo.get_user_by_username(username, with_deleted=True)
+            is not None
+        ):
+            username = identity.email
+            if await self.repo.get_user_by_username(username, with_deleted=True):
+                username = None
+
+        user = await self.repo.add(
+            UserAdd(
+                email=identity.email,
+                email_verified=True,
+                username=username,
+                tenant_id=tenant_id,
+                roles=roles,
+                state=UserState.ACTIVE,
+            )
+        )
+        logger.info(
+            "JIT provisioning: Created user",
+            extra={
+                "user_id": str(user.id),
+                "tenant_id": str(tenant_id),
+                "correlation_id": correlation_id,
+            },
+        )
+        if self.audit_service is not None:
+            try:
+                await self.audit_service.log(
+                    tenant_id=tenant_id,
+                    actor_id=None,
+                    action=ActionType.USER_CREATED,
+                    entity_type=EntityType.USER,
+                    entity_id=user.id,
+                    description=f"User '{user.email}' auto-provisioned via SSO federation",
+                    metadata={
+                        "provisioning_method": "jit_federation",
+                        "correlation_id": correlation_id,
+                        "email": user.email,
+                        "username": user.username,
+                    },
+                    outcome=Outcome.SUCCESS,
+                    actor_type=ActorType.SYSTEM,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to log JIT user creation audit event",
+                    extra={"user_id": str(user.id), "correlation_id": correlation_id},
+                    exc_info=True,
+                )
+        return user, True
+
     async def login_with_mobilityguard(
         self,
         id_token: str,
@@ -438,7 +571,6 @@ class UserService:
         correlation_id: str | None = None,
     ):
         # MIT License
-        was_federated = False
         correlation_id = correlation_id or "no-correlation-id"
 
         logger.debug(
@@ -458,7 +590,7 @@ class UserService:
                     "System configuration error: OIDC client ID not configured"
                 )
 
-            username, email = self.auth_service.get_username_and_email_from_openid_jwt(
+            payload = self.auth_service.get_payload_from_openid_jwt(
                 id_token=id_token,
                 access_token=access_token,
                 key=key.key,
@@ -468,14 +600,9 @@ class UserService:
                 correlation_id=correlation_id,
             )
 
-            logger.info(
-                "Successfully extracted user info from OIDC JWT",
-                extra={
-                    "correlation_id": correlation_id,
-                    "username": username,
-                    "email": email,
-                },
-            )
+            if not isinstance(payload.get("sub"), str) or not payload["sub"]:
+                raise ValueError("ID token is missing its subject")
+            identity = FederatedIdentity.from_claims(payload)
 
         except jwt.ExpiredSignatureError as e:
             logger.error(
@@ -520,162 +647,24 @@ class UserService:
 
         # Look up user in database
         logger.info(
-            f"OIDC: Looking up user by email: {email}",
+            "OIDC: Resolving tenant membership",
             extra={"correlation_id": correlation_id},
         )
 
-        user_in_db = await self.repo.get_user_by_email(email)
+        settings = get_settings()
+        if not settings.oidc_tenant_id:
+            raise AuthenticationException("OIDC tenant ID is not configured")
+        try:
+            tenant_id = UUID(settings.oidc_tenant_id)
+        except ValueError as exc:
+            raise AuthenticationException("Invalid OIDC tenant ID") from exc
 
-        if user_in_db is None:
-            logger.info(
-                "OIDC: User not found in database, attempting to create new user",
-                extra={
-                    "correlation_id": correlation_id,
-                    "email": email,
-                    "username": username,
-                },
-            )
-
-            # If a the user does not exist in our database, create it
-
-            # Check if tenant ID is configured
-            if not get_settings().oidc_tenant_id:
-                logger.error(
-                    "Cannot create new user: OIDC tenant ID not configured (OIDC_TENANT_ID or deprecated MOBILITYGUARD_TENANT_ID)",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "email": email,
-                        "username": username,
-                    },
-                )
-                raise AuthenticationException(
-                    "System configuration error: Cannot create new users via OIDC. "
-                    "Please contact your administrator."
-                )
-
-            try:
-                # Will only work on one tenant in the instance for now
-                tenant_id = UUID(get_settings().oidc_tenant_id)
-
-                logger.info(
-                    f"Creating user with tenant ID: {tenant_id}",
-                    extra={"correlation_id": correlation_id},
-                )
-
-            except ValueError as e:
-                logger.error(
-                    f"Invalid OIDC_TENANT_ID format: {get_settings().oidc_tenant_id}",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "error": str(e),
-                    },
-                )
-                raise AuthenticationException(
-                    "System configuration error: Invalid tenant ID format"
-                )
-
-            # Verify tenant exists
-            tenant = await self.tenant_repo.get(tenant_id)
-            if tenant is None:
-                logger.error(
-                    f"Tenant not found: {tenant_id}",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "tenant_id": str(tenant_id),
-                    },
-                )
-                raise AuthenticationException(
-                    "System configuration error: Tenant does not exist"
-                )
-
-            # Assign default role if configured on tenant
-            roles = []
-            if tenant.default_role_id:
-                roles = [ModelId(id=tenant.default_role_id)]
-                logger.info(
-                    "OIDC: Assigning default role to new user",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "default_role_id": str(tenant.default_role_id),
-                    },
-                )
-            else:
-                # WARNING (not INFO): a role-less user cannot create
-                # shared spaces, use assistants, apps, or any other
-                # permission-gated feature. This almost always indicates
-                # a misconfigured tenant or a seeder failure — operators
-                # should see it in log alerting.
-                logger.warning(
-                    "OIDC: No default role configured; creating user "
-                    "without role — user will have zero permissions "
-                    "until an admin assigns roles",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "tenant_id": str(tenant_id),
-                    },
-                )
-
-            new_user = UserAdd(
-                email=email,
-                username=username.lower(),
-                tenant_id=tenant_id,
-                roles=roles,
-                state=UserState.ACTIVE,
-            )
-
-            try:
-                user_in_db = await self.repo.add(new_user)
-                was_federated = True
-
-                logger.info(
-                    "Successfully created new user via OIDC federation",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "user_id": str(user_in_db.id),
-                        "email": email,
-                        "username": username.lower(),
-                        "tenant_id": str(tenant_id),
-                    },
-                )
-
-            except Exception as e:
-                logger.error(
-                    "Failed to create new user in database",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "email": email,
-                        "username": username,
-                        "error_type": type(e).__name__,
-                        "error": str(e),
-                    },
-                )
-                raise AuthenticationException("Failed to create user account")
-
-        else:
-            logger.info(
-                "OIDC: User found in database, checking user and tenant state",
-                extra={
-                    "correlation_id": correlation_id,
-                    "user_id": str(user_in_db.id),
-                    "email": user_in_db.email,
-                    "tenant_id": str(user_in_db.tenant_id),
-                    "user_state": user_in_db.state,
-                },
-            )
-
-            try:
-                await self._check_user_and_tenant_state(user_in_db, correlation_id)
-            except (UserInactiveException, TenantSuspendedException) as e:
-                logger.warning(
-                    "User or tenant state check failed",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "user_id": str(user_in_db.id),
-                        "error_type": type(e).__name__,
-                        "error": str(e),
-                    },
-                )
-                raise
+        user_in_db, was_federated = await self.resolve_federated_user(
+            identity=identity,
+            tenant_id=tenant_id,
+            allowed_domains=settings.oidc_allowed_domains,
+            correlation_id=correlation_id,
+        )
 
         # Create access token
         issued_token = self.auth_service.create_access_token_for_user(user=user_in_db)
