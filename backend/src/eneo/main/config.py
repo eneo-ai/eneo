@@ -369,7 +369,11 @@ class Settings(BaseSettings):
     oidc_discovery_endpoint: Optional[str] = None
     oidc_client_id: Optional[str] = None
     oidc_client_secret: Optional[str] = None
-    oidc_tenant_id: Optional[str] = None  # For backward compat with user creation
+    oidc_tenant_id: Optional[str] = None
+    oidc_allowed_domains: list[str] = Field(
+        default_factory=list,
+        description="Allowed email domains for global OIDC; required for JIT provisioning.",
+    )
 
     # Public-facing origin for OIDC redirect_uri (single-tenant fallback)
     # This is the externally-reachable URL for the application
