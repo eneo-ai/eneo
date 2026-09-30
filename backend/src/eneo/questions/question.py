@@ -115,6 +115,13 @@ class ToolCallInfo(BaseModel):
     # general MCP servers and Eneo's own loopback servers. Clients render
     # capability calls by purpose, not by the provider's name.
     purpose: Optional[str] = None
+    # Whether the call ran on one of Eneo's own servers (the loopback
+    # knowledge and files servers, a built-in provider, Skill activation).
+    # Decided by the server the call was routed to, never by its display name,
+    # so an external server named "files" or "knowledge" reports False. None
+    # on rows persisted before this field existed; clients then fall back to
+    # the server name.
+    is_internal: Optional[bool] = None
     # The tool result's MCP `_meta`, as sent by the server (size-capped by the
     # client). Model-backed tools report their own usage here under the
     # OpenTelemetry GenAI attribute names, e.g. `gen_ai.usage.input_tokens`,
