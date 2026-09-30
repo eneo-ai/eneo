@@ -9239,85 +9239,6 @@ export interface components {
       /** Search Match Reasons */
       search_match_reasons?: components["schemas"]["ApiKeySearchMatchReason"][] | null;
     };
-    /** ApiKeyV2InDB */
-    ApiKeyV2InDB: {
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** @default user */
-      ownership?: components["schemas"]["ApiKeyOwnership"];
-      /** Owner User Id */
-      owner_user_id?: string | null;
-      /** Key Prefix */
-      key_prefix: string;
-      /** Key Suffix */
-      key_suffix: string;
-      /** Name */
-      name: string;
-      /** Description */
-      description?: string | null;
-      key_type: components["schemas"]["ApiKeyType"];
-      permission: components["schemas"]["ApiKeyPermission"];
-      scope_type: components["schemas"]["ApiKeyScopeType"];
-      /** Scope Id */
-      scope_id?: string | null;
-      /** Allowed Origins */
-      allowed_origins?: string[] | null;
-      /** Allowed Ips */
-      allowed_ips?: string[] | null;
-      resource_permissions?: {
-        [key: string]: string;
-      } | null;
-      state: components["schemas"]["ApiKeyState"];
-      /** Expires At */
-      expires_at?: string | null;
-      /** Last Used At */
-      last_used_at?: string | null;
-      /** Revoked At */
-      revoked_at?: string | null;
-      revoked_reason_code?: components["schemas"]["ApiKeyStateReasonCode"] | null;
-      /** Revoked Reason Text */
-      revoked_reason_text?: string | null;
-      /** Suspended At */
-      suspended_at?: string | null;
-      suspended_reason_code?: components["schemas"]["ApiKeyStateReasonCode"] | null;
-      /** Suspended Reason Text */
-      suspended_reason_text?: string | null;
-      /** Rotation Grace Until */
-      rotation_grace_until?: string | null;
-      /** Rate Limit */
-      rate_limit?: number | null;
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /** Rotated From Key Id */
-      rotated_from_key_id?: string | null;
-      /** Created By User Id */
-      created_by_user_id?: string | null;
-      owner_user?: components["schemas"]["ApiKeyUserSnapshot"] | null;
-      created_by_user?: components["schemas"]["ApiKeyUserSnapshot"] | null;
-      /** Search Match Reasons */
-      search_match_reasons?: components["schemas"]["ApiKeySearchMatchReason"][] | null;
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      /** Created By Key Id */
-      created_by_key_id?: string | null;
-      /**
-       * Delegation Depth
-       * @default 0
-       */
-      delegation_depth?: number;
-      /** Key Hash */
-      key_hash: string;
-      /** Hash Version */
-      hash_version: string;
-    };
     /** AppFleetAdvanceCountsPublic */
     AppFleetAdvanceCountsPublic: {
       /** Advanced */
@@ -16291,13 +16212,13 @@ export interface components {
        */
       readonly count: number;
     };
-    /** PaginatedResponse[UserInDB] */
-    PaginatedResponse_UserInDB_: {
+    /** PaginatedResponse[UserSysAdminView] */
+    PaginatedResponse_UserSysAdminView_: {
       /**
        * Items
        * @description List of items returned in the response
        */
-      items: components["schemas"]["UserInDB"][];
+      items: components["schemas"]["UserSysAdminView"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -17508,29 +17429,6 @@ export interface components {
       name: string;
       /** Permissions */
       permissions: components["schemas"]["Permission"][];
-    };
-    /** RoleInDB */
-    RoleInDB: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Name */
-      name: string;
-      /** Permissions */
-      permissions: components["schemas"]["Permission"][];
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      /** Predefined Source */
-      predefined_source?: string | null;
     };
     /** RolePublic */
     RolePublic: {
@@ -19846,74 +19744,6 @@ export interface components {
       /** @description Security classification reference (null clears it) */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
-    /** TenantInDB */
-    TenantInDB: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Privacy Policy */
-      privacy_policy?: string | null;
-      /** Name */
-      name: string;
-      /** Display Name */
-      display_name?: string | null;
-      /** Slug */
-      slug?: string | null;
-      /** Quota Limit */
-      quota_limit: number;
-      /** Domain */
-      domain?: string | null;
-      /** Zitadel Org Id */
-      zitadel_org_id?: string | null;
-      /**
-       * Provisioning
-       * @default false
-       */
-      provisioning?: boolean;
-      /** @default active */
-      state?: components["schemas"]["TenantState"];
-      /**
-       * Security Enabled
-       * @default false
-       */
-      security_enabled?: boolean;
-      /**
-       * Show Model Pricing
-       * @default true
-       */
-      show_model_pricing?: boolean;
-      /** Default Role Id */
-      default_role_id?: string | null;
-      /**
-       * Modules
-       * @default []
-       */
-      modules?: components["schemas"]["ModuleInDB"][];
-      /** Api Credentials */
-      api_credentials?: {
-        [key: string]: unknown;
-      };
-      /** Federation Config */
-      federation_config?: {
-        [key: string]: unknown;
-      };
-      /** Crawler Settings */
-      crawler_settings?: {
-        [key: string]: unknown;
-      };
-      /** Api Key Policy */
-      api_key_policy?: {
-        [key: string]: unknown;
-      };
-      /** Favorite Providers */
-      favorite_providers?: string[];
-    };
     /**
      * TenantInfo
      * @description Public tenant information for selector grid.
@@ -20915,90 +20745,6 @@ export interface components {
       /** User Groups */
       user_groups: components["schemas"]["UserGroupRead"][];
     };
-    /** UserCreated */
-    UserCreated: {
-      /**
-       * Email
-       * Format: email
-       * @description Valid email address
-       * @example john.doe@municipality.se
-       */
-      email: string;
-      /**
-       * Username
-       * @description Unique username (optional, will use email prefix if not provided)
-       * @example john.doe
-       */
-      username?: string | null;
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      /** Password */
-      password?: string | null;
-      /** Salt */
-      salt?: string | null;
-      /**
-       * Used Tokens
-       * @default 0
-       */
-      used_tokens?: number;
-      /**
-       * Email Verified
-       * @default false
-       */
-      email_verified?: boolean;
-      /**
-       * Is Active
-       * @default true
-       */
-      is_active?: boolean;
-      state: components["schemas"]["UserState"];
-      /** Quota Limit */
-      quota_limit?: number | null;
-      /**
-       * Credential Version
-       * @default 0
-       */
-      credential_version?: number;
-      /**
-       * User Groups
-       * @default []
-       */
-      user_groups?: components["schemas"]["UserGroupInDBRead"][];
-      tenant: components["schemas"]["TenantInDB"];
-      active_api_key?: components["schemas"]["ApiKeyV2InDB"] | null;
-      /**
-       * Roles
-       * @default []
-       */
-      roles?: components["schemas"]["RoleInDB"][];
-      /**
-       * Quota Used
-       * @default 0
-       */
-      quota_used?: number;
-      /**
-       * Deleted At
-       * @description Timestamp when user was soft-deleted (null for active users)
-       */
-      deleted_at?: string | null;
-      access_token?: components["schemas"]["AccessToken"] | null;
-      /** User Groups Ids */
-      readonly user_groups_ids: string[];
-      /** Permissions */
-      readonly permissions: components["schemas"]["Permission"][];
-    };
     /**
      * UserDeletedListItem
      * @description User information for deleted users list operations
@@ -21033,22 +20779,6 @@ export interface components {
     UserGroupCreateRequest: {
       /** Name */
       name: string;
-    };
-    /** UserGroupInDBRead */
-    UserGroupInDBRead: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Name */
-      name: string;
-      /** State */
-      state?: string | null;
     };
     /** UserGroupPublic */
     UserGroupPublic: {
@@ -21092,89 +20822,6 @@ export interface components {
        * @default []
        */
       users?: components["schemas"]["ModelId"][];
-    };
-    /** UserInDB */
-    UserInDB: {
-      /**
-       * Email
-       * Format: email
-       * @description Valid email address
-       * @example john.doe@municipality.se
-       */
-      email: string;
-      /**
-       * Username
-       * @description Unique username (optional, will use email prefix if not provided)
-       * @example john.doe
-       */
-      username?: string | null;
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      /** Password */
-      password?: string | null;
-      /** Salt */
-      salt?: string | null;
-      /**
-       * Used Tokens
-       * @default 0
-       */
-      used_tokens?: number;
-      /**
-       * Email Verified
-       * @default false
-       */
-      email_verified?: boolean;
-      /**
-       * Is Active
-       * @default true
-       */
-      is_active?: boolean;
-      state: components["schemas"]["UserState"];
-      /** Quota Limit */
-      quota_limit?: number | null;
-      /**
-       * Credential Version
-       * @default 0
-       */
-      credential_version?: number;
-      /**
-       * User Groups
-       * @default []
-       */
-      user_groups?: components["schemas"]["UserGroupInDBRead"][];
-      tenant: components["schemas"]["TenantInDB"];
-      active_api_key?: components["schemas"]["ApiKeyV2InDB"] | null;
-      /**
-       * Roles
-       * @default []
-       */
-      roles?: components["schemas"]["RoleInDB"][];
-      /**
-       * Quota Used
-       * @default 0
-       */
-      quota_used?: number;
-      /**
-       * Deleted At
-       * @description Timestamp when user was soft-deleted (null for active users)
-       */
-      deleted_at?: string | null;
-      /** User Groups Ids */
-      readonly user_groups_ids: string[];
-      /** Permissions */
-      readonly permissions: components["schemas"]["Permission"][];
     };
     /** UserIntegration */
     UserIntegration: {
@@ -21351,6 +20998,112 @@ export interface components {
        * @example 2025-09-10T08:30:00Z
        */
       state_changed_at: string | null;
+    };
+    /** UserSysAdminCreated */
+    UserSysAdminCreated: {
+      /**
+       * Email
+       * Format: email
+       * @description Valid email address
+       * @example john.doe@municipality.se
+       */
+      email: string;
+      /**
+       * Username
+       * @description Unique username (optional, will use email prefix if not provided)
+       * @example john.doe
+       */
+      username?: string | null;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Quota Used
+       * @default 0
+       */
+      quota_used?: number;
+      /** Used Tokens */
+      used_tokens: number;
+      /** Email Verified */
+      email_verified: boolean;
+      /** Quota Limit */
+      quota_limit: number | null;
+      /** Is Active */
+      is_active: boolean;
+      state: components["schemas"]["UserState"];
+      /** Roles */
+      roles: components["schemas"]["RolePublic"][];
+      /** User Groups */
+      user_groups: components["schemas"]["UserGroupRead"][];
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      tenant: components["schemas"]["TenantPublic"];
+      access_token: components["schemas"]["AccessToken"];
+    };
+    /**
+     * UserSysAdminView
+     * @description A user as returned by the sysadmin API, which spans tenants.
+     *
+     *     Declares what is returned instead of inheriting from UserInDB, so the
+     *     password hash, salt, API key hashes and the tenant's stored provider and
+     *     federation secrets are left out.
+     */
+    UserSysAdminView: {
+      /**
+       * Email
+       * Format: email
+       * @description Valid email address
+       * @example john.doe@municipality.se
+       */
+      email: string;
+      /**
+       * Username
+       * @description Unique username (optional, will use email prefix if not provided)
+       * @example john.doe
+       */
+      username?: string | null;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Quota Used
+       * @default 0
+       */
+      quota_used?: number;
+      /** Used Tokens */
+      used_tokens: number;
+      /** Email Verified */
+      email_verified: boolean;
+      /** Quota Limit */
+      quota_limit: number | null;
+      /** Is Active */
+      is_active: boolean;
+      state: components["schemas"]["UserState"];
+      /** Roles */
+      roles: components["schemas"]["RolePublic"][];
+      /** User Groups */
+      user_groups: components["schemas"]["UserGroupRead"][];
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      tenant: components["schemas"]["TenantPublic"];
     };
     /** UserTokenUsage */
     UserTokenUsage: {
@@ -46976,7 +46729,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["PaginatedResponse_UserInDB_"];
+          "application/json": components["schemas"]["PaginatedResponse_UserSysAdminView_"];
         };
       };
       /** @description Unauthorized */
@@ -47009,7 +46762,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["UserCreated"];
+          "application/json": components["schemas"]["UserSysAdminCreated"];
         };
       };
       /** @description Bad Request */
@@ -47058,7 +46811,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["UserInDB"];
+          "application/json": components["schemas"]["UserSysAdminView"];
         };
       };
       /** @description Unauthorized */
@@ -47111,7 +46864,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["UserInDB"];
+          "application/json": components["schemas"]["UserSysAdminView"];
         };
       };
       /** @description Bad Request */

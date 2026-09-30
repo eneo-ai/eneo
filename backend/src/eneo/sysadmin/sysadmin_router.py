@@ -80,8 +80,8 @@ from eneo.tenants.tenant import (
 )
 from eneo.users.user import (
     UserAddSuperAdmin,
-    UserCreated,
-    UserInDB,
+    UserSysAdminCreated,
+    UserSysAdminView,
     UserUpdatePublic,
 )
 from eneo.worker.usage_stats_tasks import recalculate_tenant_usage_stats_direct
@@ -133,7 +133,7 @@ class OIDCDebugToggleResponse(BaseModel):
 
 @router.post(
     "/users/",
-    response_model=UserCreated,
+    response_model=UserSysAdminCreated,
     description="Register a new user as sysadmin and return the created user with an access token.",
     responses=responses.get_responses([400, 401]),
 )
@@ -168,15 +168,12 @@ async def register_new_user(
         },
     )
 
-    return UserCreated(
-        **created_user.model_dump(exclude={"api_key"}),
-        access_token=access_token,
-    )
+    return UserSysAdminCreated.from_user_and_token(created_user, access_token)
 
 
 @router.get(
     "/users/",
-    response_model=PaginatedResponse[UserInDB],
+    response_model=PaginatedResponse[UserSysAdminView],
     description="List all users across all tenants.",
     responses=responses.get_responses([]),
 )
@@ -186,12 +183,14 @@ async def get_all_users(
     user_service = container.user_service()
     users_in_db = await user_service.get_all_users()
 
-    return protocol.to_paginated_response(users_in_db)
+    return protocol.to_paginated_response(
+        [UserSysAdminView.from_user(user) for user in users_in_db]
+    )
 
 
 @router.get(
     "/users/{user_id}/",
-    response_model=UserInDB,
+    response_model=UserSysAdminView,
     description="Get a single user by id.",
     responses=responses.get_responses([404]),
 )
@@ -200,7 +199,7 @@ async def get_user(
     container: Annotated[Container, Depends(get_container())],
 ):
     user_service = container.user_service()
-    return await user_service.get_user(user_id)
+    return UserSysAdminView.from_user(await user_service.get_user(user_id))
 
 
 @router.delete(
@@ -248,7 +247,7 @@ async def delete_user(
 
 @router.post(
     "/users/{user_id}/",
-    response_model=UserInDB,
+    response_model=UserSysAdminView,
     description="Update a user by id; omitted fields are left unchanged.",
     responses=responses.get_responses([400, 404]),
 )
@@ -295,7 +294,7 @@ async def update_user(
         },
     )
 
-    return updated_user
+    return UserSysAdminView.from_user(updated_user)
 
 
 @router.post(

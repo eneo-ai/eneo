@@ -20,7 +20,7 @@ from eneo.authentication.auth_models import (
 from eneo.main.models import BaseModel, InDB, ModelId, partial_model
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleInDB, RolePublic
-from eneo.tenants.tenant import TenantInDB
+from eneo.tenants.tenant import TenantInDB, TenantPublic
 from eneo.users.password import LOCAL_PASSWORD_POLICY, LocalPasswordPolicy
 
 
@@ -322,10 +322,6 @@ class UserInDB(UserInDBBase):
         return Permission.ADMIN in self.permissions or self.tenant.show_model_pricing
 
 
-class UserCreated(UserInDB):
-    access_token: Optional[AccessToken] = None
-
-
 class UserPublicBase(InDB, UserBase):
     quota_used: int = 0
 
@@ -399,6 +395,33 @@ class UserAdminView(UserPublicBase):
 
     roles: list[RolePublic]
     user_groups: list[UserGroupRead]
+
+
+class UserSysAdminView(UserAdminView):
+    """
+    A user as returned by the sysadmin API, which spans tenants.
+
+    Declares what is returned instead of inheriting from UserInDB, so the
+    password hash, salt, API key hashes and the tenant's stored provider and
+    federation secrets are left out.
+    """
+
+    tenant_id: UUID
+    tenant: TenantPublic
+
+    @classmethod
+    def from_user(cls, user: UserInDB) -> "UserSysAdminView":
+        return cls(**user.model_dump())
+
+
+class UserSysAdminCreated(UserSysAdminView):
+    access_token: AccessToken
+
+    @classmethod
+    def from_user_and_token(
+        cls, user: UserInDB, access_token: AccessToken
+    ) -> "UserSysAdminCreated":
+        return cls(**user.model_dump(), access_token=access_token)
 
 
 class UserUpdatePublic(BaseModel):
