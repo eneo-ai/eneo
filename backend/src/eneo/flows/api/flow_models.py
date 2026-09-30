@@ -1014,6 +1014,25 @@ class FlowAssistantUpdateRequest(BaseModel):
     icon_id: UUID | None | NotProvided = Field(default=NOT_PROVIDED)
 
 
+# A security-classification preview evaluates the same fields and writes
+# nothing, so its candidates take `FlowAssistantUpdateRequest` without the fence.
+class FlowAssistantPatchRequest(FlowAssistantUpdateRequest):
+    """A flow assistant update: its fields and the draft revision it is fenced on."""
+
+    expected_revision: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "The flow's `draft_revision` the editor read before making this "
+            "change. A step's assistant is part of the flow's draft: the update "
+            "advances `draft_revision` by one, and is refused with `400` and "
+            "code `stale_revision` if the draft has moved on since; when omitted "
+            "the write is fenced on the revision read at the start of this "
+            "request."
+        ),
+    )
+
+
 class FlowAssistantPublic(InDB, ResourcePermissionsMixin):
     """Public Flow-managed assistant projection without MCP configuration."""
 
@@ -1041,6 +1060,19 @@ class FlowAssistantPublic(InDB, ResourcePermissionsMixin):
     data_retention_days: int | None = None
     metadata_json: dict[str, object] | None = None
     is_help_assistant: bool = False
+
+
+class FlowAssistantUpdatePublic(FlowAssistantPublic):
+    """The updated assistant and the flow draft revision its update produced."""
+
+    draft_revision: int = Field(
+        ge=0,
+        description=(
+            "The flow's `draft_revision` after this update. Send it as "
+            "`expected_revision` with the next change to the flow or to one of "
+            "its assistants."
+        ),
+    )
 
 
 class FlowRunTokenUsagePublic(BaseModel):

@@ -182,6 +182,9 @@ async def test_create_mode_resolves_template_intent_after_flow_creation() -> Non
     async def promote(**_kwargs):
         nonlocal promoted
         service.create_flow.assert_awaited_once()
+        # The template's bytes are read from object storage without the flow
+        # row locked.
+        service.reserve_draft_revision.assert_not_awaited()
         promoted = True
         return asset
 
@@ -223,6 +226,7 @@ async def test_create_mode_resolves_template_intent_after_flow_creation() -> Non
         template_asset_service=template_asset_service,
     )
 
+    service.reserve_draft_revision.assert_awaited_once()
     update = service.update_flow.await_args.kwargs
     assert update["steps"][-1].output_config == {
         "template_asset_id": str(asset.id),
@@ -301,13 +305,15 @@ async def test_edit_mode_updates_assistants_before_flow_and_deletes_nothing() ->
         binding_source=FlowResourceBindingSource.AI_BUILDER,
     )
 
-    service.update_flow_assistant.assert_awaited_once()
+    service.update_reserved_flow_assistant.assert_awaited_once()
     service.update_flow.assert_awaited_once()
     # The flow update deletes the removed step's assistant; a second delete
     # here would fail on the row the update already removed.
     service.delete_flow_assistant.assert_not_awaited()
     call_names = [call[0] for call in service.mock_calls]
-    assert call_names.index("update_flow_assistant") < call_names.index("update_flow")
+    assert call_names.index("update_reserved_flow_assistant") < call_names.index(
+        "update_flow"
+    )
     assert result.steps_updated == 1
     assert result.steps_removed == 1
 
@@ -369,7 +375,7 @@ async def test_knowledge_bindings_are_materialized_by_local_kind() -> None:
         binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
     )
 
-    command = service.update_flow_assistant.await_args.kwargs["update"]
+    command = service.update_reserved_flow_assistant.await_args.kwargs["update"]
     assert isinstance(command, AssistantUpdateCommand)
     assert command.groups == [collection_id]
     assert command.websites == [website_id]
@@ -403,7 +409,7 @@ async def test_step_without_knowledge_clears_resource_lists() -> None:
         binding_source=FlowResourceBindingSource.AI_BUILDER,
     )
 
-    command = service.update_flow_assistant.await_args.kwargs["update"]
+    command = service.update_reserved_flow_assistant.await_args.kwargs["update"]
     assert isinstance(command, AssistantUpdateCommand)
     assert command.groups == []
     assert command.websites == []
@@ -457,7 +463,7 @@ async def test_materializer_clears_completion_model_for_non_completion_create_ch
         binding_source=FlowResourceBindingSource.AI_BUILDER,
     )
 
-    command = service.update_flow_assistant.await_args.kwargs["update"]
+    command = service.update_reserved_flow_assistant.await_args.kwargs["update"]
     assert isinstance(command, AssistantUpdateCommand)
     assert command.completion_model_id is None
     assert "completion_model_id" in command.model_fields_set
@@ -507,7 +513,7 @@ async def test_materializer_clears_completion_model_for_non_completion_update_ch
         binding_source=FlowResourceBindingSource.AI_BUILDER,
     )
 
-    command = service.update_flow_assistant.await_args.kwargs["update"]
+    command = service.update_reserved_flow_assistant.await_args.kwargs["update"]
     assert isinstance(command, AssistantUpdateCommand)
     assert command.completion_model_id is None
     assert "completion_model_id" in command.model_fields_set
@@ -749,9 +755,9 @@ async def _update_command(
         resource_bindings=bindings,
         binding_source=FlowResourceBindingSource.AI_BUILDER,
     )
-    if not service.update_flow_assistant.await_args_list:
+    if not service.update_reserved_flow_assistant.await_args_list:
         return None
-    return service.update_flow_assistant.await_args.kwargs["update"]
+    return service.update_reserved_flow_assistant.await_args.kwargs["update"]
 
 
 @pytest.mark.asyncio
@@ -973,7 +979,8 @@ async def test_the_prompts_to_renumber_are_read_once_per_apply() -> None:
     assert service.get_flow_assistant_snapshots.await_count == 0
     assert service.get_flow_assistant.await_count == 0
     ((_, call),) = [
-        (c.args, c.kwargs) for c in service.update_flow_assistant.await_args_list
+        (c.args, c.kwargs)
+        for c in service.update_reserved_flow_assistant.await_args_list
     ]
     assert call["assistant_id"] == ids[1]
     assert call["update"].prompt.text == "Läs {{ step_3.output.text }}."

@@ -1188,7 +1188,10 @@ class TestExecuteCreateFlow:
         mock_assistant = MagicMock()
         mock_assistant.id = assistant_id
         mock_flow_service.create_flow_assistant.return_value = (mock_assistant, [])
-        mock_flow_service.update_flow_assistant.return_value = (mock_assistant, [])
+        mock_flow_service.update_reserved_flow_assistant.return_value = (
+            mock_assistant,
+            [],
+        )
 
         changeset = FlowDraftChangeSet(
             flow_name="Created flow",
@@ -1254,7 +1257,10 @@ class TestExecuteCreateFlow:
         mock_assistant = MagicMock()
         mock_assistant.id = assistant_id
         mock_flow_service.create_flow_assistant.return_value = (mock_assistant, [])
-        mock_flow_service.update_flow_assistant.return_value = (mock_assistant, [])
+        mock_flow_service.update_reserved_flow_assistant.return_value = (
+            mock_assistant,
+            [],
+        )
 
         changeset = FlowDraftChangeSet(
             flow_name="Created flow",
@@ -1308,7 +1314,10 @@ class TestExecuteCreateFlow:
             return mock, []
 
         mock_flow_service.create_flow_assistant.side_effect = mock_create_assistant
-        mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
+        mock_flow_service.update_reserved_flow_assistant.return_value = (
+            MagicMock(),
+            [],
+        )
 
         changeset = FlowDraftChangeSet(
             flow_name="Multi",
@@ -1368,7 +1377,10 @@ class TestExecuteCreateFlow:
             return mock, []
 
         mock_flow_service.create_flow_assistant.side_effect = mock_create_assistant
-        mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
+        mock_flow_service.update_reserved_flow_assistant.return_value = (
+            MagicMock(),
+            [],
+        )
 
         changeset = FlowDraftChangeSet(
             flow_name="Progress",
@@ -1433,7 +1445,10 @@ class TestExecuteCreateFlow:
         mock_assistant = MagicMock()
         mock_assistant.id = assistant_id
         mock_flow_service.create_flow_assistant.return_value = (mock_assistant, [])
-        mock_flow_service.update_flow_assistant.return_value = (mock_assistant, [])
+        mock_flow_service.update_reserved_flow_assistant.return_value = (
+            mock_assistant,
+            [],
+        )
         mock_flow_service.update_flow.side_effect = RuntimeError("update failed")
 
         changeset = FlowDraftChangeSet(
@@ -1475,7 +1490,7 @@ class TestExecuteCreateFlow:
 
     @pytest.mark.asyncio
     async def test_assistant_configured_with_prompt(self) -> None:
-        """Executor should call update_flow_assistant with PromptCreate."""
+        """Executor should call update_reserved_flow_assistant with PromptCreate."""
         flow_id = uuid4()
         space_id = uuid4()
         assistant_id = uuid4()
@@ -1492,7 +1507,10 @@ class TestExecuteCreateFlow:
         mock_assistant = MagicMock()
         mock_assistant.id = assistant_id
         mock_flow_service.create_flow_assistant.return_value = (mock_assistant, [])
-        mock_flow_service.update_flow_assistant.return_value = (mock_assistant, [])
+        mock_flow_service.update_reserved_flow_assistant.return_value = (
+            mock_assistant,
+            [],
+        )
 
         changeset = FlowDraftChangeSet(
             flow_name="Test",
@@ -1543,9 +1561,9 @@ class TestExecuteCreateFlow:
             ),
         )
 
-        mock_flow_service.update_flow_assistant.assert_called_once()
+        mock_flow_service.update_reserved_flow_assistant.assert_called_once()
         update = _update_command_from_call(
-            mock_flow_service.update_flow_assistant.call_args
+            mock_flow_service.update_reserved_flow_assistant.call_args
         )
         assert update.prompt is not None
         assert update.prompt.text == "Detailed prompt here"
@@ -1574,7 +1592,10 @@ class TestExecuteCreateFlow:
         mock_assistant = MagicMock()
         mock_assistant.id = assistant_id
         mock_flow_service.create_flow_assistant.return_value = (mock_assistant, [])
-        mock_flow_service.update_flow_assistant.return_value = (mock_assistant, [])
+        mock_flow_service.update_reserved_flow_assistant.return_value = (
+            mock_assistant,
+            [],
+        )
 
         changeset = _create_changeset_with_assistant(
             AssistantSpec(
@@ -1607,7 +1628,7 @@ class TestExecuteCreateFlow:
         )
 
         update = _update_command_from_call(
-            mock_flow_service.update_flow_assistant.call_args
+            mock_flow_service.update_reserved_flow_assistant.call_args
         )
         assert update.completion_model_id == model_id
         assert update.groups == [local_policy_id]
@@ -1651,7 +1672,7 @@ class TestExecuteCreateFlow:
             "expected_kind": "model",
             "actual_kind": "model",
         }
-        mock_flow_service.update_flow_assistant.assert_not_called()
+        mock_flow_service.update_reserved_flow_assistant.assert_not_called()
         mock_flow_service.delete_flow.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -1758,7 +1779,7 @@ class TestExecuteCreateFlow:
         )
 
         update = _update_command_from_call(
-            mock_flow_service.update_flow_assistant.call_args
+            mock_flow_service.update_reserved_flow_assistant.call_args
         )
         assert update.groups == []
         assert update.websites == [website_id]
@@ -1817,7 +1838,10 @@ class TestExecuteCreateFlow:
         created_assistant = MagicMock()
         created_assistant.id = assistant_id
         mock_flow_service.create_flow_assistant.return_value = (created_assistant, [])
-        mock_flow_service.update_flow_assistant.return_value = (created_assistant, [])
+        mock_flow_service.update_reserved_flow_assistant.return_value = (
+            created_assistant,
+            [],
+        )
         mock_flow_service.update_flow.side_effect = RuntimeError("apply failed")
 
         changeset = FlowDraftChangeSet(
@@ -1869,7 +1893,10 @@ class TestExecuteCreateFlow:
         created_assistant = MagicMock()
         created_assistant.id = assistant_id
         mock_flow_service.create_flow_assistant.return_value = (created_assistant, [])
-        mock_flow_service.update_flow_assistant.return_value = (created_assistant, [])
+        mock_flow_service.update_reserved_flow_assistant.return_value = (
+            created_assistant,
+            [],
+        )
         mock_flow_service.replace_resource_bindings.side_effect = RuntimeError(
             "binding write failed"
         )
@@ -1923,7 +1950,10 @@ class TestExecuteEditFlow:
         mock_flow_service.get_flow_assistant_prompts.return_value = {}
         updated_flow = _make_flow(flow_id=flow_id, space_id=space_id)
         mock_flow_service.update_flow.return_value = updated_flow
-        mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
+        mock_flow_service.update_reserved_flow_assistant.return_value = (
+            MagicMock(),
+            [],
+        )
 
         changeset = FlowDraftChangeSet(
             flow_name="Updated",
@@ -1959,9 +1989,13 @@ class TestExecuteEditFlow:
             bindings=tuple(),
             source=FlowResourceBindingSource.AI_BUILDER,
         )
-        mock_flow_service.update_flow_assistant.assert_called_once()
-        update_kwargs = mock_flow_service.update_flow_assistant.call_args.kwargs
-        assert update_kwargs["flow_id"] == flow_id
+        mock_flow_service.update_reserved_flow_assistant.assert_called_once()
+        update_kwargs = (
+            mock_flow_service.update_reserved_flow_assistant.call_args.kwargs
+        )
+        reserved = mock_flow_service.reserve_draft_revision
+        assert reserved.await_args.kwargs["flow_id"] == flow_id
+        assert update_kwargs["reservation"] is reserved.return_value
         assert update_kwargs["assistant_id"] == assistant_id
 
     @pytest.mark.asyncio
@@ -1981,7 +2015,10 @@ class TestExecuteEditFlow:
         mock_new_assistant = MagicMock()
         mock_new_assistant.id = new_assistant_id
         mock_flow_service.create_flow_assistant.return_value = (mock_new_assistant, [])
-        mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
+        mock_flow_service.update_reserved_flow_assistant.return_value = (
+            MagicMock(),
+            [],
+        )
 
         changeset = FlowDraftChangeSet(
             flow_name="Mixed",
@@ -2025,7 +2062,7 @@ class TestExecuteEditFlow:
         )
 
         assert mock_flow_service.create_flow_assistant.call_count == 1
-        assert mock_flow_service.update_flow_assistant.call_count >= 1
+        assert mock_flow_service.update_reserved_flow_assistant.call_count >= 1
         assert result.steps_created == 1
         assert result.steps_updated == 1
         assert result.steps_removed == 1
@@ -2046,7 +2083,10 @@ class TestExecuteEditFlow:
             flow_id=flow_id,
             space_id=space_id,
         )
-        mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
+        mock_flow_service.update_reserved_flow_assistant.return_value = (
+            MagicMock(),
+            [],
+        )
         mock_flow_service.replace_resource_bindings.side_effect = RuntimeError(
             "binding write failed"
         )
@@ -2097,7 +2137,10 @@ class TestExecuteEditFlow:
         mock_flow_service.get_flow_assistant_prompts.return_value = {}
         updated_flow = _make_flow(flow_id=flow_id, space_id=space_id)
         mock_flow_service.update_flow.return_value = updated_flow
-        mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
+        mock_flow_service.update_reserved_flow_assistant.return_value = (
+            MagicMock(),
+            [],
+        )
 
         changeset = FlowDraftChangeSet(
             flow_name="Test",
@@ -2131,7 +2174,9 @@ class TestExecuteEditFlow:
             flow_id=flow_id,
         )
 
-        update_kwargs = mock_flow_service.update_flow_assistant.call_args.kwargs
+        update_kwargs = (
+            mock_flow_service.update_reserved_flow_assistant.call_args.kwargs
+        )
         assert "completion_model_id" not in update_kwargs
 
     @pytest.mark.asyncio
@@ -2147,7 +2192,10 @@ class TestExecuteEditFlow:
         mock_flow_service.get_flow_assistant_prompts.return_value = {}
         updated_flow = _make_flow(flow_id=flow_id, space_id=space_id)
         mock_flow_service.update_flow.return_value = updated_flow
-        mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
+        mock_flow_service.update_reserved_flow_assistant.return_value = (
+            MagicMock(),
+            [],
+        )
 
         changeset = FlowDraftChangeSet(
             flow_name="Test",
@@ -2178,7 +2226,7 @@ class TestExecuteEditFlow:
         )
 
         update = _update_command_from_call(
-            mock_flow_service.update_flow_assistant.call_args
+            mock_flow_service.update_reserved_flow_assistant.call_args
         )
         # The spec lists collections only: the ones it no longer names are
         # cleared; a website or integration knowledge the assistant has is not
@@ -2237,7 +2285,7 @@ class TestExecuteEditFlow:
                 flow_id=flow_id,
             )
 
-        mock_flow_service.update_flow_assistant.assert_not_awaited()
+        mock_flow_service.update_reserved_flow_assistant.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -2254,7 +2302,10 @@ class TestExecuteResultCounting:
         mock_assistant = MagicMock()
         mock_assistant.id = uuid4()
         mock_flow_service.create_flow_assistant.return_value = (mock_assistant, [])
-        mock_flow_service.update_flow_assistant.return_value = (mock_assistant, [])
+        mock_flow_service.update_reserved_flow_assistant.return_value = (
+            mock_assistant,
+            [],
+        )
 
         changeset = FlowDraftChangeSet(
             flow_name="Test",
@@ -2295,7 +2346,10 @@ class TestExecuteResultCounting:
         mock_assistant = MagicMock()
         mock_assistant.id = uuid4()
         mock_flow_service.create_flow_assistant.return_value = (mock_assistant, [])
-        mock_flow_service.update_flow_assistant.return_value = (mock_assistant, [])
+        mock_flow_service.update_reserved_flow_assistant.return_value = (
+            mock_assistant,
+            [],
+        )
         mod_assistant_id = uuid4()
 
         changeset = FlowDraftChangeSet(

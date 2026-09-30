@@ -205,6 +205,39 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
     });
   }
 
+  /**
+   * Runs a write to a related resource in the save queue, after the saves
+   * queued before it, with the persisted state they left. `persisted` holds
+   * the fields of this resource the server changed along with it (e.g. a
+   * revision); they are adopted and an unsaved edit of one stays as it is.
+   * The resource's own save status is not involved. A failure rejects to the
+   * caller and adopts nothing.
+   */
+  function queueWrite<R>(
+    write: (
+      resource: AppliedDefaults<T, Defs>
+    ) => Promise<{ persisted: Partial<AppliedDefaults<T, Defs>>; result: R }>
+  ): Promise<R> {
+    const run = saveChain.then(async () => {
+      const { persisted, result } = await write(get(resource));
+      const $resource = get(resource);
+      const next = { ...get(update) };
+      // The editable state gets its own copy: bound inputs edit it in place,
+      // and a shared object would edit the persisted state along with it.
+      const adopted: typeof persisted = JSON.parse(JSON.stringify(persisted));
+      for (const key of Object.keys(persisted) as (keyof AppliedDefaults<T, Defs>)[]) {
+        const unsaved =
+          JSON.stringify(next[key] ?? null) !== JSON.stringify($resource[key] ?? null);
+        if (!unsaved) next[key] = adopted[key] as AppliedDefaults<T, Defs>[typeof key];
+      }
+      resource.set({ ...$resource, ...persisted });
+      update.set(next);
+      return result;
+    });
+    saveChain = run.catch(() => undefined);
+    return run;
+  }
+
   /** Replace both persisted and editable state (e.g. after publish/unpublish) */
   function setResource(value: T) {
     const applied = applyDefaults(value, data.defaults);
@@ -224,6 +257,7 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
       isSaving: readonly(isSaving)
     },
     saveChanges,
+    queueWrite,
     settled,
     discardChanges,
     setResource

@@ -4708,7 +4708,7 @@ export interface paths {
     head?: never;
     /**
      * Update Flow Assistant
-     * @description Update a flow-managed assistant that belongs to the specified draft flow. Only fields accepted by `FlowAssistantUpdateRequest` are applied; omitted fields are left unchanged. Use this endpoint for assistant details that should travel with the flow authoring experience, not for updating unrelated shared assistants.
+     * @description Update a flow-managed assistant that belongs to the specified draft flow. Only fields accepted by `FlowAssistantPatchRequest` are applied; omitted fields are left unchanged. Use this endpoint for assistant details that should travel with the flow authoring experience, not for updating unrelated shared assistants. The assistant is part of the flow's draft: the update advances the flow's `draft_revision` by one and returns it, fenced on `expected_revision` like a flow update.
      */
     patch: operations["update_flow_assistant"];
     trace?: never;
@@ -17888,6 +17888,50 @@ export interface components {
       name: string;
     };
     /**
+     * FlowAssistantPatchRequest
+     * @description A flow assistant update: its fields and the draft revision it is fenced on.
+     * @example {
+     *       "name": "Flow Step Assistant",
+     *       "prompt": {
+     *         "text": "Summarize the extracted contract fields."
+     *       }
+     *     }
+     */
+    FlowAssistantPatchRequest: {
+      /** Attachments */
+      attachments?: components["schemas"]["ModelId"][] | null;
+      completion_model?: components["schemas"]["ModelId"] | null;
+      completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
+      /** Data Retention Days */
+      data_retention_days?: number | null;
+      /** Description */
+      description?: string | null;
+      /**
+       * Expected Revision
+       * @description The flow's `draft_revision` the editor read before making this change. A step's assistant is part of the flow's draft: the update advances `draft_revision` by one, and is refused with `400` and code `stale_revision` if the draft has moved on since; when omitted the write is fenced on the revision read at the start of this request.
+       */
+      expected_revision?: number | null;
+      /** Groups */
+      groups?: components["schemas"]["ModelId"][] | null;
+      /** Icon Id */
+      icon_id?: string | null;
+      /** Insight Enabled */
+      insight_enabled?: boolean | null;
+      /** Integration Knowledge List */
+      integration_knowledge_list?: components["schemas"]["ModelId"][] | null;
+      /** Logging Enabled */
+      logging_enabled?: boolean | null;
+      /** Metadata Json */
+      metadata_json?: {
+        [key: string]: unknown;
+      } | null;
+      /** Name */
+      name?: string | null;
+      prompt?: components["schemas"]["PromptCreate"] | null;
+      /** Websites */
+      websites?: components["schemas"]["ModelId"][] | null;
+    };
+    /**
      * FlowAssistantPublic
      * @description Public Flow-managed assistant projection without MCP configuration.
      */
@@ -17903,6 +17947,78 @@ export interface components {
       data_retention_days?: number | null;
       /** Description */
       description?: string | null;
+      /** Groups */
+      groups: components["schemas"]["CollectionPublic"][];
+      /** Icon Id */
+      icon_id?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Insight Enabled */
+      insight_enabled: boolean;
+      /** Integration Knowledge List */
+      integration_knowledge_list: components["schemas"]["IntegrationKnowledgePublic"][];
+      /**
+       * Is Help Assistant
+       * @default false
+       */
+      is_help_assistant?: boolean;
+      /** Logging Enabled */
+      logging_enabled: boolean | null;
+      /** Metadata Json */
+      metadata_json?: {
+        [key: string]: unknown;
+      } | null;
+      model_info?: components["schemas"]["ModelInfo"] | null;
+      /** Name */
+      name: string;
+      /**
+       * Permissions
+       * @default []
+       */
+      permissions?: components["schemas"]["ResourcePermission"][];
+      prompt?: components["schemas"]["PromptPublic"] | null;
+      /**
+       * Published
+       * @default false
+       */
+      published?: boolean;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      tools: components["schemas"]["UseTools"];
+      type: components["schemas"]["AssistantType"];
+      /** Updated At */
+      updated_at?: string | null;
+      user: components["schemas"]["UserSparse"];
+      /** Websites */
+      websites: components["schemas"]["WebsitePublic"][];
+    };
+    /**
+     * FlowAssistantUpdatePublic
+     * @description The updated assistant and the flow draft revision its update produced.
+     */
+    FlowAssistantUpdatePublic: {
+      allowed_attachments: components["schemas"]["FileRestrictions"];
+      /** Attachments */
+      attachments: components["schemas"]["FilePublic"][];
+      completion_model?: components["schemas"]["CompletionModelSparse"] | null;
+      completion_model_kwargs: components["schemas"]["ModelKwargs"];
+      /** Created At */
+      created_at?: string | null;
+      /** Data Retention Days */
+      data_retention_days?: number | null;
+      /** Description */
+      description?: string | null;
+      /**
+       * Draft Revision
+       * @description The flow's `draft_revision` after this update. Send it as `expected_revision` with the next change to the flow or to one of its assistants.
+       */
+      draft_revision: number;
       /** Groups */
       groups: components["schemas"]["CollectionPublic"][];
       /** Icon Id */
@@ -56021,11 +56137,11 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["FlowAssistantUpdateRequest"];
+        "application/json": components["schemas"]["FlowAssistantPatchRequest"];
       };
     };
     responses: {
-      /** @description Flow-managed assistant updated and returned with effective permissions. */
+      /** @description Flow-managed assistant updated and returned with effective permissions and the flow's new `draft_revision`. */
       200: {
         headers: {
           [name: string]: unknown;
@@ -56043,6 +56159,7 @@ export interface operations {
            *       "attachments": [],
            *       "completion_model_kwargs": {},
            *       "description": "Summarizes extracted contract fields into a reviewer-ready note.",
+           *       "draft_revision": 4,
            *       "groups": [],
            *       "id": "00000000-0000-0000-0000-000000000201",
            *       "insight_enabled": false,
@@ -56066,7 +56183,27 @@ export interface operations {
            *       "websites": []
            *     }
            */
-          "application/json": components["schemas"]["FlowAssistantPublic"];
+          "application/json": components["schemas"]["FlowAssistantUpdatePublic"];
+        };
+      };
+      /** @description The flow's draft has moved on since `expected_revision` (or since the revision this request read); nothing is written. A published flow is refused with 400 `bad_request`. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "stale_revision",
+           *       "context": {
+           *         "expected_revision": 3,
+           *         "flow_id": "00000000-0000-4000-8000-000000000001"
+           *       },
+           *       "eneo_error_code": 9007,
+           *       "message": "Flödet har ändrats sedan det lästes in, till exempel i en annan flik eller av en kollega. Ladda om sidan och gör om din senaste ändring."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Caller lacks permission or API key scope to update assistants for this flow. */

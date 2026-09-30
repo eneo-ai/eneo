@@ -31,7 +31,10 @@ from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
 )
-from eneo.flows.infrastructure.flow_repo import FlowRepository
+from eneo.flows.infrastructure.flow_repo import (
+    DraftRevisionReservation,
+    FlowRepository,
+)
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.users.user import UserInDB
 
@@ -349,6 +352,15 @@ class _FlowRepositoryDouble:
             for flow in self.flows.values()
             if flow.space_id in space_ids
         ]
+
+    async def reserve_draft_revision(
+        self, *, flow_id: UUID, tenant_id: UUID, expected_revision: int
+    ) -> DraftRevisionReservation:
+        self._assert_tenant(tenant_id)
+        assert self.flows[flow_id].draft_revision == expected_revision
+        return DraftRevisionReservation(
+            flow_id=flow_id, tenant_id=tenant_id, revision=expected_revision
+        )
 
     async def update(
         self,

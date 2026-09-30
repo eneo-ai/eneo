@@ -342,6 +342,10 @@ async def test_removing_a_step_deletes_only_an_own_unused_icon(
         headers=headers,
     )
     assert icon_response.status_code == 200, icon_response.text
+    # The assistant update moved the draft on; the step save sends its revision.
+    flow = flow.model_copy(
+        update={"draft_revision": icon_response.json()["draft_revision"]}
+    )
 
     response = await _save_steps(client, flow, flow.steps[:1], headers)
 

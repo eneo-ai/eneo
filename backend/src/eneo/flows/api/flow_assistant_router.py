@@ -17,7 +17,9 @@ from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import error_response
 from eneo.flows.api.flow_models import (
     FlowAssistantCreateRequest,
+    FlowAssistantPatchRequest,
     FlowAssistantPublic,
+    FlowAssistantUpdatePublic,
     FlowAssistantUpdateRequest,
 )
 from eneo.flows.flow_access_policy import FlowApiAction
@@ -35,7 +37,10 @@ def flow_assistant_update_command(
     """The command a flow-managed assistant update applies, and a preview evaluates."""
     return to_flow_assistant_update_command(
         AssistantUpdatePublic.model_validate(
-            assistant_in.model_dump(exclude_unset=True)
+            assistant_in.model_dump(
+                exclude_unset=True,
+                include=set(FlowAssistantUpdateRequest.model_fields),
+            )
         )
     )
 
@@ -232,25 +237,49 @@ async def get_flow_assistant(
 
 @router.patch(
     "/{id}/assistants/{assistant_id}/",
-    response_model=FlowAssistantPublic,
+    response_model=FlowAssistantUpdatePublic,
     status_code=status.HTTP_200_OK,
     operation_id="update_flow_assistant",
     summary="Update Flow Assistant",
     description=(
         "Update a flow-managed assistant that belongs to the specified draft flow. "
-        "Only fields accepted by `FlowAssistantUpdateRequest` are applied; omitted fields "
+        "Only fields accepted by `FlowAssistantPatchRequest` are applied; omitted fields "
         "are left unchanged. Use this endpoint for assistant details that should travel "
-        "with the flow authoring experience, not for updating unrelated shared assistants."
+        "with the flow authoring experience, not for updating unrelated shared assistants. "
+        "The assistant is part of the flow's draft: the update advances the flow's "
+        "`draft_revision` by one and returns it, fenced on `expected_revision` like a "
+        "flow update."
     ),
     responses={
         200: {
             "description": (
-                "Flow-managed assistant updated and returned with effective permissions."
+                "Flow-managed assistant updated and returned with effective permissions "
+                "and the flow's new `draft_revision`."
             ),
             "content": {
-                "application/json": {"example": _FLOW_ASSISTANT_PUBLIC_EXAMPLE}
+                "application/json": {
+                    "example": {**_FLOW_ASSISTANT_PUBLIC_EXAMPLE, "draft_revision": 4}
+                }
             },
         },
+        400: error_response(
+            description=(
+                "The flow's draft has moved on since `expected_revision` (or since "
+                "the revision this request read); nothing is written. A published "
+                "flow is refused with 400 `bad_request`."
+            ),
+            message=(
+                "Flödet har ändrats sedan det lästes in, till exempel i en annan "
+                "flik eller av en kollega. Ladda om sidan och gör om din senaste "
+                "ändring."
+            ),
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            code="stale_revision",
+            context={
+                "flow_id": "00000000-0000-4000-8000-000000000001",
+                "expected_revision": 3,
+            },
+        ),
         403: error_response(
             description="Caller lacks permission or API key scope to update assistants for this flow.",
             message="API key space scope does not match requested flow.",
@@ -275,7 +304,7 @@ async def update_flow_assistant(
         UUID, Path(description="Identifier of the flow-managed assistant to update.")
     ],
     request: Request,
-    assistant_in: FlowAssistantUpdateRequest,
+    assistant_in: FlowAssistantPatchRequest,
     container: Container = Depends(_MUTATING_CONTAINER),
 ):
     await require_flow_assistant_access(request, container, flow_id=id)
@@ -284,10 +313,15 @@ async def update_flow_assistant(
     user = container.user()
     update = flow_assistant_update_command(assistant_in)
 
-    updated_assistant, permissions = await flow_service.update_flow_assistant(
+    (
+        updated_assistant,
+        permissions,
+        draft_revision,
+    ) = await flow_service.update_flow_assistant(
         flow_id=id,
         assistant_id=assistant_id,
         update=update,
+        expected_revision=assistant_in.expected_revision,
     )
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,
@@ -302,9 +336,12 @@ async def update_flow_assistant(
             extra={"flow_id": str(id), "origin": "flow_managed"},
         ),
     )
-    return assistant_assembler.from_assistant_to_model(
-        updated_assistant, permissions=permissions
-    )
+    return {
+        **assistant_assembler.from_assistant_to_model(
+            updated_assistant, permissions=permissions
+        ).model_dump(by_alias=True),
+        "draft_revision": draft_revision,
+    }
 
 
 @router.delete(

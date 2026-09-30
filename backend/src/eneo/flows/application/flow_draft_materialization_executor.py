@@ -38,7 +38,10 @@ from eneo.flows.flow_resource_bindings import (
     local_resource_kinds_for_slot_kind,
     resolve_local_resource_ref,
 )
-from eneo.flows.infrastructure.flow_repo import StoredAssistantPrompt
+from eneo.flows.infrastructure.flow_repo import (
+    DraftRevisionReservation,
+    StoredAssistantPrompt,
+)
 from eneo.main.exceptions import BadRequestException
 from eneo.prompts.api.prompt_models import PromptCreate
 
@@ -126,6 +129,17 @@ class FlowDraftMaterializer:
                 )
             )
 
+        # Before any assistant is written: a direct edit committed since the
+        # plan was prepared refuses the apply here (rolling back a template
+        # asset created above), and the flow row is locked ahead of its
+        # assistants, the order every writer of both follows. After the
+        # template, whose bytes come from object storage: other writers of
+        # the draft do not wait on that read.
+        reservation = await flow_service.reserve_draft_revision(
+            flow_id=flow_id,
+            expected_revision=expected_revision,
+        )
+
         for assistant_to_create in changeset.assistants_to_create:
             assistant, _ = await flow_service.create_flow_assistant(
                 flow_id=flow_id,
@@ -137,7 +151,7 @@ class FlowDraftMaterializer:
 
             await _configure_assistant(
                 flow_service=flow_service,
-                flow_id=flow_id,
+                reservation=reservation,
                 assistant_id=assistant.id,
                 assistant_spec=assistant_to_create.assistant_spec,
                 requires_completion_model_for_step=_completion_required_for_plan_ref(
@@ -165,7 +179,7 @@ class FlowDraftMaterializer:
                 )
             written = await _configure_assistant(
                 flow_service=flow_service,
-                flow_id=flow_id,
+                reservation=reservation,
                 assistant_id=assistant_to_update.existing_assistant_id,
                 assistant_spec=assistant_to_update.assistant_spec,
                 requires_completion_model_for_step=_completion_required_for_assistant_id(
@@ -194,6 +208,7 @@ class FlowDraftMaterializer:
             materialized_flow = await flow_service.update_flow(
                 flow_id=flow_id,
                 steps=final_steps,
+                expected_revision=reservation.revision,
             )
         else:
             materialized_flow = await flow_service.update_flow(
@@ -202,7 +217,7 @@ class FlowDraftMaterializer:
                 description=changeset.flow_description,
                 steps=final_steps,
                 metadata_json=changeset.metadata_json,
-                expected_revision=expected_revision,
+                expected_revision=reservation.revision,
                 unchanged_step_ids=frozenset(
                     compiled.saved_step.id
                     for compiled in changeset.compiled_steps
@@ -403,7 +418,7 @@ def _completion_required_for_assistant_id(
 async def _configure_assistant(
     *,
     flow_service: FlowService,
-    flow_id: UUID,
+    reservation: DraftRevisionReservation,
     assistant_id: UUID,
     assistant_spec: AssistantSpec,
     requires_completion_model_for_step: bool,
@@ -450,9 +465,10 @@ async def _configure_assistant(
 
     # The steps are saved after the assistants, by update_flow in the same
     # transaction, which judges the classification of the flow as saved: a
-    # prompt written for the new step positions is judged against them.
-    await flow_service.update_flow_assistant(
-        flow_id=flow_id,
+    # prompt written for the new step positions is judged against them. That
+    # save also advances the draft revision, once for the whole apply.
+    await flow_service.update_reserved_flow_assistant(
+        reservation=reservation,
         assistant_id=assistant_id,
         update=AssistantUpdateCommand.model_validate(command_fields),
         classification_judged_by_flow_update=True,

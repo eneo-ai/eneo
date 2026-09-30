@@ -1223,7 +1223,7 @@ describe("FlowEditor drafting chain starter", () => {
 
   const makeStarterEditor = (
     assistantCreate: Mock,
-    assistantUpdate: Mock = vi.fn(async (_request: unknown) => undefined)
+    assistantUpdate: Mock = vi.fn(async (_request: unknown) => ({ draft_revision: 0 }))
   ) =>
     createFlowEditor({
       flow: makeFlow(null, { steps: [] }),
@@ -1231,7 +1231,7 @@ describe("FlowEditor drafting chain starter", () => {
     });
 
   it("creates the three-step chain and binds the summary to both earlier steps", async () => {
-    const assistantUpdate = vi.fn(async (_request: unknown) => undefined);
+    const assistantUpdate = vi.fn(async (_request: unknown) => ({ draft_revision: 0 }));
     const editor = makeStarterEditor(assistantCreateFailingOn(0), assistantUpdate);
     try {
       await editor.createDraftingChainStarter();

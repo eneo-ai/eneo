@@ -379,7 +379,7 @@ async def _apply_spec(
     """The edit command applied; how many assistant updates it made, by assistant."""
 
     calls: dict[UUID, int] = {}
-    original = FlowService.update_flow_assistant
+    original = FlowService.update_reserved_flow_assistant
 
     async def counted(self: FlowService, *, assistant_id: UUID, **kwargs: Any) -> Any:
         calls[assistant_id] = calls.get(assistant_id, 0) + 1
@@ -392,7 +392,7 @@ async def _apply_spec(
         applied_at=datetime.now(timezone.utc),
     )
     async with db_container() as container:
-        with patch.object(FlowService, "update_flow_assistant", counted):
+        with patch.object(FlowService, "update_reserved_flow_assistant", counted):
             await FlowAuthoringCommandService().apply(
                 command=EditFlowAuthoringCommand(
                     space_id=seeded.space_id,
@@ -779,10 +779,12 @@ async def _direct_prompt_edit(
     order: int = 2,
     description: str | None = None,
 ) -> None:
-    """Someone else edits a step's assistant directly (the second by default)."""
+    """Someone else edits a step's assistant directly (the second by default).
+    The edit moves the draft on: `seeded.revision` follows it, so a plan made
+    after it is made against it."""
 
     async with db_container() as container:
-        await container.flow_service().update_flow_assistant(
+        _, _, seeded.revision = await container.flow_service().update_flow_assistant(
             flow_id=seeded.flow_id,
             assistant_id=seeded.assistant_ids[order - 1],
             update=AssistantUpdateCommand(
@@ -791,34 +793,53 @@ async def _direct_prompt_edit(
         )
 
 
-async def test_a_rename_applied_after_someone_edits_the_assistant_keeps_that_edit(
+async def _assert_refused_as_stale(
+    db_container, seeded: Seeded, plan_revision: int, apply: Any
+) -> None:
+    """A plan made at `plan_revision`, before a direct edit, is refused whole:
+    every assistant and step row stays as the direct edit left it."""
+
+    assistants = await _states(db_container, seeded, strict=False)
+    rows = await _step_rows(db_container, seeded)
+    edited_revision = seeded.revision
+    seeded.revision = plan_revision
+
+    with pytest.raises(BadRequestException) as refused:
+        await apply()
+
+    assert refused.value.code == "stale_revision"
+    assert await _states(db_container, seeded, strict=False) == assistants
+    assert await _step_rows(db_container, seeded) == rows
+    async with db_container() as container:
+        flow = await container.flow_service().get_flow(seeded.flow_id)
+    assert flow.draft_revision == edited_revision == plan_revision + 1
+
+
+async def test_a_rename_approved_before_someone_edits_the_assistant_is_refused(
     db_container, seeded: Seeded
 ) -> None:
-    """The approval was made against the old prompt. A rename does not write
-    the assistant, so it cannot put the old prompt back."""
+    """The approval was made against the old prompt. The direct edit moved the
+    draft on, so the approval no longer describes it and nothing is applied."""
 
+    plan_revision = seeded.revision
     spec = _renamed_second_step(await _current_spec(db_container, seeded))
     await _direct_prompt_edit(db_container, seeded, "Ändrad av någon annan.")
 
-    calls = await _apply_spec(db_container, seeded, spec, fields={})
-
-    assert calls == {}
+    await _assert_refused_as_stale(
+        db_container,
+        seeded,
+        plan_revision,
+        lambda: _apply_spec(db_container, seeded, spec, fields={}),
+    )
     assert (await _state(db_container, seeded.assistant_ids[1], strict=False))[
         "prompt"
     ] == "Ändrad av någon annan."
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Fencing gap, not fixed here: FlowService.update_flow_assistant does "
-        "not advance the flow's draft_revision, so a plan approved before a "
-        "direct assistant edit still applies on top of it."
-    ),
-)
 async def test_an_assistant_edit_advances_the_draft_revision_that_fences_approvals(
     db_container, seeded: Seeded
 ) -> None:
+    plan_revision = seeded.revision
     await _direct_prompt_edit(db_container, seeded, "Ändrad av någon annan.")
 
     async with db_container() as container:
@@ -826,7 +847,7 @@ async def test_an_assistant_edit_advances_the_draft_revision_that_fences_approva
             await container.flow_service().get_flow(seeded.flow_id)
         ).draft_revision
 
-    assert revision != seeded.revision
+    assert revision == seeded.revision == plan_revision + 1
 
 
 _COLLEAGUE = "Direktredigerad {{ step_2.output.text }} av kollega."
@@ -837,24 +858,26 @@ _COLLEAGUE = "Direktredigerad {{ step_2.output.text }} av kollega."
     [_keep(3), _keep(3, name="Använd analysen")],
     ids=["not in the plan", "renamed in the plan"],
 )
-async def test_a_moved_step_keeps_a_direct_edit_made_after_the_plan_with_its_alias_renumbered(
+async def test_a_move_approved_before_a_colleague_rewrites_a_prompt_is_refused(
     db_container, seeded: Seeded, consumer: dict[str, Any]
 ) -> None:
-    """The plan was made before a colleague rewrote step 3's prompt. The edit
-    only moves step 3's producer, so the prompt written is the colleague's,
-    reading the producer where it now is; the plan's copy is not put back."""
+    """The plan was made before a colleague rewrote step 3's prompt. The
+    rewrite moved the draft on, so the plan is refused and neither its copy
+    of the prompt nor its moves are written over the colleague's edit."""
 
+    plan_revision = seeded.revision
     proposal = await _propose(
         db_container, seeded, [_keep(1), _PREP, _keep(2), consumer]
     )
     await _direct_prompt_edit(db_container, seeded, _COLLEAGUE, order=3)
 
-    calls = await _apply_proposal(db_container, seeded, proposal)
-
-    assert calls == {seeded.assistant_ids[2]: 1}
-    assert await _prompt(db_container, seeded.assistant_ids[2]) == (
-        "Direktredigerad {{ step_3.output.text }} av kollega."
+    await _assert_refused_as_stale(
+        db_container,
+        seeded,
+        plan_revision,
+        lambda: _apply_proposal(db_container, seeded, proposal),
     )
+    assert await _prompt(db_container, seeded.assistant_ids[2]) == _COLLEAGUE
 
 
 async def test_a_moved_alias_is_renumbered_with_the_authors_spacing(

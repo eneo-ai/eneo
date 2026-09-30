@@ -66,6 +66,7 @@ from eneo.flows.http_transport import (
     unresolved_secret_sentinel_fields,
 )
 from eneo.flows.infrastructure.flow_repo import (
+    DraftRevisionReservation,
     FlowRepository,
     StoredAssistantPrompt,
 )
@@ -383,15 +384,58 @@ class FlowService:
             tenant_id=self.user.tenant_id,
         )
 
+    async def reserve_draft_revision(
+        self, *, flow_id: UUID, expected_revision: int | None
+    ) -> DraftRevisionReservation:
+        """The flow's draft locked for this transaction's writes, fenced on
+        `expected_revision` or, when omitted, on the revision read now (the
+        rule of `update_flow`). Taken before writing any of its assistants."""
+
+        if expected_revision is None:
+            expected_revision = (await self.get_flow(flow_id)).draft_revision
+        return await self.flow_repo.reserve_draft_revision(
+            flow_id=flow_id,
+            tenant_id=self.user.tenant_id,
+            expected_revision=expected_revision,
+        )
+
     async def update_flow_assistant(
         self,
         *,
         flow_id: UUID,
         assistant_id: UUID,
         update: AssistantUpdateCommand,
+        expected_revision: int | None = None,
+    ) -> tuple[Assistant, list[ResourcePermission], int]:
+        """A flow-managed assistant is part of its flow's draft, so writing it
+        advances the draft revision once, fenced like a flow update. Returns
+        the assistant, its permissions and the draft's new revision."""
+
+        reservation = await self.reserve_draft_revision(
+            flow_id=flow_id, expected_revision=expected_revision
+        )
+        assistant, permissions = await self.update_reserved_flow_assistant(
+            reservation=reservation, assistant_id=assistant_id, update=update
+        )
+        return (
+            assistant,
+            permissions,
+            await self.flow_repo.advance_draft_revision(reservation),
+        )
+
+    async def update_reserved_flow_assistant(
+        self,
+        *,
+        reservation: DraftRevisionReservation,
+        assistant_id: UUID,
+        update: AssistantUpdateCommand,
         classification_judged_by_flow_update: bool = False,
     ) -> tuple[Assistant, list[ResourcePermission]]:
-        """`classification_judged_by_flow_update`: the caller saves the flow's
+        """Write an assistant of the reserved draft. The revision is advanced
+        by the caller: once per write (`update_flow_assistant`), or once for
+        the whole apply by its `update_flow`.
+
+        `classification_judged_by_flow_update`: the caller saves the flow's
         steps with `update_flow` later in the same transaction, and that judges
         every step's classification with its assistant as then saved. Judging
         this assistant alone now would read a prompt written for the new step
@@ -401,7 +445,7 @@ class FlowService:
             raise BadRequestException(
                 "Flow MCP is unsupported. MCP servers and tools cannot be configured on a Flow assistant."
             )
-        flow = await self.get_flow(flow_id)
+        flow = await self.get_flow(reservation.flow_id)
         self._ensure_flow_is_mutable(flow)
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
         self._assert_flow_assistant_owned_by_flow(flow=flow, assistant=assistant)

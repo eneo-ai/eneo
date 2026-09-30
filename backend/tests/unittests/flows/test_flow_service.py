@@ -4271,8 +4271,8 @@ async def test_update_flow_assistant_rejects_mcp_configuration(user):
             update=AssistantUpdateCommand(mcp_server_ids=[uuid4()]),
         )
 
-    service.flow_repo.get.assert_not_awaited()
     service.assistant_service.update_assistant.assert_not_awaited()
+    service.flow_repo.advance_draft_revision.assert_not_awaited()
 
 
 @pytest.mark.asyncio

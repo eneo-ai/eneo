@@ -698,7 +698,10 @@ export function initFlows(client) {
       },
 
       /**
-       * Update a flow-managed assistant.
+       * Update a flow-managed assistant. The assistant is part of the flow's
+       * draft: the update advances the flow's `draft_revision` and returns it.
+       * Pass the revision you hold as `update.expected_revision`; a draft that
+       * has moved on since is refused with code `stale_revision`.
        * @param {{id: string, assistantId: string, update: object}} params
        * @throws {EneoError}
        */

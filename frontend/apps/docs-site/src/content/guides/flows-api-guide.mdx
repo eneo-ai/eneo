@@ -163,6 +163,14 @@ A flow has at most 256 steps. The flow endpoints that write or evaluate a draft 
 
 Package import has its own contract and applies the limit through it. Import planning and install refuse a package draft over the limit with `flow_package_flow_draft_invalid`, whose `context.reason` is `flow_step_limit_exceeded`. That response has no `step_count` or `max_steps`; its message states the limit and the number of steps in the package.
 
+## Draft revision and concurrent edits
+
+A draft flow carries one `draft_revision`, which `GET /api/v1/flows/{id}/` returns. Every write to the draft advances it by one: a flow update, a publish or unpublish, an AI Builder apply, and an update of one of the flow's assistants with `PATCH /api/v1/flows/{id}/assistants/{assistant_id}/`, whose response carries the new `draft_revision`. Creating or deleting a flow assistant leaves it unchanged, because an assistant that no step uses is not part of the draft.
+
+Send the revision you hold as `expected_revision` with a flow update or an assistant update. If the draft has moved on since, in another tab or through a colleague's edit, the write is refused with HTTP 400 and code `stale_revision`, whose `context` carries `expected_revision`, and nothing is written. Read the flow again and redo the change. Without `expected_revision`, a write is fenced on the revision read at the start of that request. After an assistant update, send the returned `draft_revision` with the next flow update: a revision read before the assistant update is refused.
+
+An AI Builder plan is fenced on the revision it was proposed against. An assistant edit made after the proposal refuses the apply with `stale_revision` instead of letting the plan write its copy of the prompt over the edit; ask the Builder again.
+
 ## Preview security classification while authoring
 
 `POST /api/v1/flows/{id}/security-classification/preview` explains what the security classification rule makes of a draft before it is saved, so an editor can show what each step reads and which models can serve it instead of waiting for a refusal. It is a user-principal authoring endpoint. It reads the flow's assistants, so it needs the permission to edit flows in the space, and service keys are refused.

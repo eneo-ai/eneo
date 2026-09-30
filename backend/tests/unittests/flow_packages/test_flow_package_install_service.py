@@ -263,7 +263,7 @@ async def test_install_omits_only_unbound_optional_knowledge() -> None:
     )
 
     assert result.resource_bindings_count == 1
-    update = service.update_flow_assistant.await_args.kwargs["update"]
+    update = service.update_reserved_flow_assistant.await_args.kwargs["update"]
     assert update.groups == []
     replace_kwargs = service.replace_resource_bindings.await_args.kwargs
     assert replace_kwargs["bindings"] == (model_binding,)
@@ -312,7 +312,7 @@ async def test_install_preserves_selected_knowledge_binding() -> None:
     )
 
     assert result.resource_bindings_count == 2
-    update = service.update_flow_assistant.await_args.kwargs["update"]
+    update = service.update_reserved_flow_assistant.await_args.kwargs["update"]
     assert update.groups == [knowledge_id]
     replace_kwargs = service.replace_resource_bindings.await_args.kwargs
     assert replace_kwargs["bindings"] == (knowledge_binding, model_binding)
@@ -371,7 +371,7 @@ async def test_install_preserves_selected_non_collection_knowledge_binding(
     )
 
     assert result.resource_bindings_count == 2
-    update = service.update_flow_assistant.await_args.kwargs["update"]
+    update = service.update_reserved_flow_assistant.await_args.kwargs["update"]
     assert update.groups == ([] if expected_field != "groups" else [knowledge_id])
     assert update.websites == ([knowledge_id] if expected_field == "websites" else [])
     assert update.integration_knowledge_ids == (

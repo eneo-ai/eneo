@@ -46,7 +46,7 @@ from eneo.flows.api.flow_http_test_router import (
 )
 from eneo.flows.api.flow_models import (
     FlowAssistantCreateRequest,
-    FlowAssistantUpdateRequest,
+    FlowAssistantPatchRequest,
     FlowCreateRequest,
     FlowStepCreateRequest,
     FlowStepUpdateRequest,
@@ -641,8 +641,10 @@ async def test_update_flow_assistant_forwards_payload():
         data_retention_days=None,
         published=False,
     )
-    flow_service.update_flow_assistant.return_value = (updated_assistant, [])
-    assistant_assembler.from_assistant_to_model.return_value = {"id": str(assistant_id)}
+    flow_service.update_flow_assistant.return_value = (updated_assistant, [], 8)
+    assistant_assembler.from_assistant_to_model.return_value = MagicMock(
+        **{"model_dump.return_value": {"id": str(assistant_id)}}
+    )
     container.flow_service.return_value = flow_service
     container.assistant_assembler.return_value = assistant_assembler
     container.audit_service.return_value = audit_service
@@ -654,22 +656,24 @@ async def test_update_flow_assistant_forwards_payload():
         id=flow_id,
         assistant_id=assistant_id,
         request=SimpleNamespace(state=SimpleNamespace()),
-        assistant_in=FlowAssistantUpdateRequest(
+        assistant_in=FlowAssistantPatchRequest(
             name="Updated assistant",
             attachments=[{"id": attachment_id}],
             websites=[{"id": website_id}],
             groups=[{"id": group_id}],
             integration_knowledge_list=[{"id": integration_knowledge_id}],
             completion_model={"id": completion_model_id},
+            expected_revision=7,
         ),
         container=container,
     )
 
-    assert response["id"] == str(assistant_id)
+    assert response == {"id": str(assistant_id), "draft_revision": 8}
     flow_service.update_flow_assistant.assert_awaited_once()
     kwargs = flow_service.update_flow_assistant.await_args.kwargs
     assert kwargs["flow_id"] == flow_id
     assert kwargs["assistant_id"] == assistant_id
+    assert kwargs["expected_revision"] == 7
     update = kwargs["update"]
     assert isinstance(update, AssistantUpdateCommand)
     assert update.name == "Updated assistant"

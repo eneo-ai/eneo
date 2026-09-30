@@ -18,7 +18,7 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
-from eneo.database.tables.flow_tables import FlowSteps
+from eneo.database.tables.flow_tables import Flows, FlowSteps
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from eneo.flows.infrastructure.flow_repo import FlowRepository
@@ -105,6 +105,18 @@ async def _rows(db_container, flow_id: UUID) -> list[dict[str, Any]]:
             .order_by(FlowSteps.step_order)
         )
         return [dict(row._mapping) for row in result]  # pyright: ignore[reportPrivateUsage]
+
+
+async def _flow_row(db_container, flow_id: UUID) -> dict[str, Any]:
+    async with db_container() as container:
+        row = (
+            await container.session().execute(
+                sa.select(Flows.updated_at, Flows.draft_revision).where(
+                    Flows.id == flow_id
+                )
+            )
+        ).one()
+    return dict(row._mapping)  # pyright: ignore[reportPrivateUsage]
 
 
 async def _set_raw(db_container, step_id: UUID, **columns: Any) -> None:
@@ -308,6 +320,7 @@ async def test_the_config_repair_writes_a_config_when_its_json_differs_and_only_
     step_id = (await _rows(db_container, saved.flow_id))[1]["id"]
     await _set_raw(db_container, step_id, input_config=saved_value)
     before = (await _rows(db_container, saved.flow_id))[1]
+    flow_before = await _flow_row(db_container, saved.flow_id)
 
     async with db_container() as container:
         repo = container.flow_service().flow_repo
@@ -325,3 +338,8 @@ async def test_the_config_repair_writes_a_config_when_its_json_differs_and_only_
 
     assert _json(after["input_config"]) == _json(repaired if written else saved_value)
     assert after["updated_at"] == before["updated_at"], "a repair keeps updated_at"
+    # A repair is not an edit of the draft, yet a plan prepared before it must
+    # not write over it: the revision moves, the flow's edit time does not.
+    flow_after = await _flow_row(db_container, saved.flow_id)
+    assert flow_after["updated_at"] == flow_before["updated_at"]
+    assert flow_after["draft_revision"] == flow_before["draft_revision"] + written

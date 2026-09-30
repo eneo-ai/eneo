@@ -373,18 +373,32 @@ function createFlowEditor(data: FlowEditorInitData) {
     return get(editor.state.resource).id;
   }
 
+  // The flow and its step assistants are one draft with one revision,
+  // `state.resource.draft_revision`. An assistant write runs in the flow's
+  // save queue, so it is sent with the revision the write before it
+  // returned, and the revision it returns is adopted while unsaved flow
+  // edits stay as they are.
+  function saveAssistantChanges(
+    assistantId: string,
+    changes: Record<string, unknown>
+  ): Promise<LoadedAssistant> {
+    return editor.queueWrite(async (flow) => {
+      const { draft_revision, ...saved } = await data.eneo.flows.assistants.update({
+        id: flow.id,
+        assistantId,
+        update: { ...changes, expected_revision: flow.draft_revision }
+      });
+      return { persisted: { draft_revision }, result: saved };
+    });
+  }
+
   const assistantSaveManager = new AssistantSaveManager<LoadedAssistant>({
     loadRemote: async (assistantId) =>
       data.eneo.flows.assistants.get({
         id: getFlowId(),
         assistantId
       }),
-    saveRemote: async (assistantId, changes) =>
-      data.eneo.flows.assistants.update({
-        id: getFlowId(),
-        assistantId,
-        update: changes
-      }),
+    saveRemote: saveAssistantChanges,
     shouldSaveImmediately: shouldSaveAssistantImmediately,
     isDisabled: () => get(isPublished),
     getErrorMessage: (error) =>

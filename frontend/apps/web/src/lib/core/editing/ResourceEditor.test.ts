@@ -246,3 +246,113 @@ describe("createResourceEditor save result", () => {
     expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(true);
   });
 });
+
+describe("createResourceEditor queued write", () => {
+  type Doc = { id: string; name: string; revision: number };
+  const makeEditor = (
+    updateResource: (resource: Doc, changes: Partial<Doc>) => Promise<Doc> = async (
+      resource,
+      changes
+    ) => ({ ...resource, ...changes, revision: resource.revision + 1 })
+  ) =>
+    createResourceEditor({
+      resource: { id: "doc-1", name: "Original", revision: 1 } as Doc,
+      defaults: {},
+      editableFields: { name: true },
+      updateResource,
+      manageAttachements: false,
+      eneo: { files: { delete: vi.fn() } } as unknown as Eneo
+    });
+
+  test("runs after the saves queued before it, with the state they persisted, and adopts what it returns", async () => {
+    let resolveSave!: (value: Doc) => void;
+    const editor = makeEditor(
+      () =>
+        new Promise<Doc>((resolve) => {
+          resolveSave = resolve;
+        })
+    );
+    editor.state.update.update((doc) => ({ ...doc, name: "Saved" }));
+    const save = editor.saveChanges();
+    const write = vi.fn(async (doc: Doc) => ({
+      persisted: { revision: doc.revision + 1 },
+      result: `written at ${doc.revision}`
+    }));
+
+    const queued = editor.queueWrite(write);
+    await Promise.resolve();
+    expect(write).not.toHaveBeenCalled();
+
+    resolveSave({ id: "doc-1", name: "Saved", revision: 2 });
+    await expect(save).resolves.toEqual({ saved: true });
+    await expect(queued).resolves.toBe("written at 2");
+
+    expect(get(editor.state.resource).revision).toBe(3);
+    expect(get(editor.state.update).revision).toBe(3);
+    expect(get(editor.state.isSaving)).toBe(false);
+    expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(false);
+  });
+
+  test("keeps unsaved edits when it adopts the persisted fields", async () => {
+    const editor = makeEditor();
+    editor.state.update.update((doc) => ({ ...doc, name: "Unsaved" }));
+
+    await editor.queueWrite(async () => ({
+      persisted: { name: "Server copy", revision: 2 },
+      result: undefined
+    }));
+
+    expect(get(editor.state.resource)).toEqual({ id: "doc-1", name: "Server copy", revision: 2 });
+    expect(get(editor.state.update)).toEqual({ id: "doc-1", name: "Unsaved", revision: 2 });
+    expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(true);
+  });
+
+  test("adopts a persisted object as its own copy, so an in-place edit of it is unsaved and saved", async () => {
+    type Nested = { id: string; metadata: { name: string } };
+    const updateResource = vi.fn(async (resource: Nested, changes: Partial<Nested>) => ({
+      ...resource,
+      ...changes
+    }));
+    const editor = createResourceEditor({
+      resource: { id: "doc-1", metadata: { name: "Original" } } as Nested,
+      defaults: {},
+      editableFields: { metadata: true },
+      updateResource,
+      manageAttachements: false,
+      eneo: { files: { delete: vi.fn() } } as unknown as Eneo
+    });
+
+    await editor.queueWrite(async () => ({
+      persisted: { metadata: { name: "Server" } },
+      result: undefined
+    }));
+    // A bound input (`$update.metadata.name = …`) mutates the object in place.
+    const bound = get(editor.state.update);
+    bound.metadata.name = "Local edit";
+    editor.state.update.set(bound);
+
+    expect(get(editor.state.resource).metadata).toEqual({ name: "Server" });
+    expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(true);
+    await expect(editor.saveChanges()).resolves.toEqual({ saved: true });
+    expect(updateResource).toHaveBeenCalledTimes(1);
+    expect(updateResource.mock.calls[0][1]).toEqual({ metadata: { name: "Local edit" } });
+  });
+
+  test("a failed write rejects to its caller, adopts nothing and leaves the queue running", async () => {
+    toastError.mockClear();
+    const editor = makeEditor();
+    const failure = new Error("stale");
+
+    await expect(
+      editor.queueWrite(async () => {
+        throw failure;
+      })
+    ).rejects.toBe(failure);
+
+    expect(toastError).not.toHaveBeenCalled();
+    expect(get(editor.state.resource).revision).toBe(1);
+    editor.state.update.update((doc) => ({ ...doc, name: "Next" }));
+    await expect(editor.saveChanges()).resolves.toEqual({ saved: true });
+    expect(get(editor.state.resource)).toEqual({ id: "doc-1", name: "Next", revision: 2 });
+  });
+});

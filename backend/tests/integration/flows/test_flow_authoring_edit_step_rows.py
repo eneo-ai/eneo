@@ -839,7 +839,8 @@ async def test_a_step_the_edit_leaves_reads_its_producer_in_its_prompt_after_a_r
             input_bindings=None,
         )
     async with db_container() as container:
-        await container.flow_service().update_flow_assistant(
+        # The prompt edit moves the draft on; the edit below is planned after it.
+        _, _, saved.revision = await container.flow_service().update_flow_assistant(
             flow_id=saved.flow_id,
             assistant_id=rows[2]["assistant_id"],
             update=AssistantUpdateCommand(

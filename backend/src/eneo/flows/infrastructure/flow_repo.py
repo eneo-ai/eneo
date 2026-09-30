@@ -77,6 +77,16 @@ class AssistantScopeRow:
 
 
 @dataclass(frozen=True, slots=True)
+class DraftRevisionReservation:
+    """A flow's draft locked for the writes of the current transaction, at
+    `revision`. Only `FlowRepository.reserve_draft_revision` makes one."""
+
+    flow_id: UUID
+    tenant_id: UUID
+    revision: int
+
+
+@dataclass(frozen=True, slots=True)
 class StoredAssistantPrompt:
     """The prompt an assistant has selected, as stored: text and description
     unchanged, whitespace included."""
@@ -415,9 +425,20 @@ class FlowRepository:
         tenant_id: UUID,
     ) -> int | None:
         """Lock the target Flow row and return its fresh publication pointer."""
+        return (
+            await self._lock_flow_row(flow_id=flow_id, tenant_id=tenant_id)
+        ).published_version
+
+    async def _lock_flow_row(
+        self, *, flow_id: UUID, tenant_id: UUID
+    ) -> sa.Row[tuple[int, int | None]]:
+        """The one lock on a flow row, held until the transaction ends. It is
+        FOR NO KEY UPDATE: the foreign-key checks of rows that reference the
+        flow take FOR KEY SHARE and do not wait on it."""
+
         row = (
             await self.session.execute(
-                sa.select(Flows.published_version)
+                sa.select(Flows.draft_revision, Flows.published_version)
                 .where(Flows.id == flow_id)
                 .where(Flows.tenant_id == tenant_id)
                 .where(Flows.deleted_at.is_(None))
@@ -426,7 +447,7 @@ class FlowRepository:
         ).one_or_none()
         if row is None:
             raise NotFoundException("Flow not found.")
-        return row.published_version
+        return row
 
     async def get_sparse_by_spaces(
         self,
@@ -845,23 +866,14 @@ class FlowRepository:
                 changes.append((step.id, values))
         if not changes:
             return
-        updated_id = await self.session.scalar(
-            sa.update(Flows)
-            .where(
-                Flows.id == flow_id,
-                Flows.tenant_id == flow.tenant_id,
-                Flows.deleted_at.is_(None),
-                Flows.draft_revision == flow.draft_revision,
-            )
-            .values(
-                draft_revision=Flows.draft_revision + 1, updated_at=Flows.updated_at
-            )
-            .returning(Flows.id)
+        await self.advance_draft_revision(
+            await self.reserve_draft_revision(
+                flow_id=flow_id,
+                tenant_id=flow.tenant_id,
+                expected_revision=flow.draft_revision,
+            ),
+            keep_updated_at=True,
         )
-        if updated_id is None:
-            raise _stale_revision_error(
-                flow_id=flow_id, expected_revision=flow.draft_revision
-            )
         for step_id, values in changes:
             await self.session.execute(
                 sa.update(FlowSteps)
@@ -872,6 +884,68 @@ class FlowRepository:
                 )
                 .values(**values, updated_at=FlowSteps.updated_at)
             )
+
+    async def reserve_draft_revision(
+        self, *, flow_id: UUID, tenant_id: UUID, expected_revision: int
+    ) -> DraftRevisionReservation:
+        """Lock the flow row until the transaction ends, refused with
+        `stale_revision` unless the draft is still at `expected_revision`.
+        Taken before any write to the flow's assistants: the flow row before
+        its assistants is the one lock order, the one a step removal (flow
+        update, then the assistants it leaves) follows too."""
+
+        revision = (
+            await self._lock_flow_row(flow_id=flow_id, tenant_id=tenant_id)
+        ).draft_revision
+        if revision != expected_revision:
+            raise _stale_revision_error(
+                flow_id=flow_id, expected_revision=expected_revision
+            )
+        return DraftRevisionReservation(
+            flow_id=flow_id, tenant_id=tenant_id, revision=revision
+        )
+
+    async def advance_draft_revision(
+        self, reservation: DraftRevisionReservation, *, keep_updated_at: bool = False
+    ) -> int:
+        """Advance the reserved draft's revision by one and return it.
+        `keep_updated_at`: an operator repair is not an edit of the draft."""
+
+        advanced = await self._advance_draft(
+            flow_id=reservation.flow_id,
+            tenant_id=reservation.tenant_id,
+            revision=reservation.revision,
+            values={"updated_at": Flows.updated_at} if keep_updated_at else {},
+        )
+        return advanced.draft_revision
+
+    async def _advance_draft(
+        self, *, flow_id: UUID, tenant_id: UUID, revision: int, values: dict[str, Any]
+    ) -> Flows:
+        """The one compare-and-advance of a draft: write `values` and advance
+        `draft_revision` by one while the draft is still at `revision`, else
+        refused with `stale_revision`."""
+
+        flow_in_db = await self.session.scalar(
+            sa.update(Flows)
+            .where(Flows.id == flow_id)
+            .where(Flows.tenant_id == tenant_id)
+            .where(Flows.deleted_at.is_(None))
+            .where(Flows.draft_revision == revision)
+            .values(**values, draft_revision=Flows.draft_revision + 1)
+            .returning(Flows)
+        )
+        if flow_in_db is not None:
+            return flow_in_db
+        existing_id = await self.session.scalar(
+            sa.select(Flows.id)
+            .where(Flows.id == flow_id)
+            .where(Flows.tenant_id == tenant_id)
+            .where(Flows.deleted_at.is_(None))
+        )
+        if existing_id is None:
+            raise NotFoundException("Flow not found.")
+        raise _stale_revision_error(flow_id=flow_id, expected_revision=revision)
 
     async def update(
         self,
@@ -890,34 +964,18 @@ class FlowRepository:
         fenced_revision = (
             flow.draft_revision if expected_revision is None else expected_revision
         )
-        flow_in_db = await self.session.scalar(
-            sa.update(Flows)
-            .where(Flows.id == flow_id)
-            .where(Flows.tenant_id == tenant_id)
-            .where(Flows.deleted_at.is_(None))
-            .where(Flows.draft_revision == fenced_revision)
-            .values(
-                name=flow.name,
-                description=flow.description,
-                owner_user_id=flow.owner_user_id,
-                published_version=flow.published_version,
-                metadata_json=flow.metadata_json,
-                draft_revision=Flows.draft_revision + 1,
-            )
-            .returning(Flows)
+        await self._advance_draft(
+            flow_id=flow_id,
+            tenant_id=tenant_id,
+            revision=fenced_revision,
+            values={
+                "name": flow.name,
+                "description": flow.description,
+                "owner_user_id": flow.owner_user_id,
+                "published_version": flow.published_version,
+                "metadata_json": flow.metadata_json,
+            },
         )
-        if flow_in_db is None:
-            existing_id = await self.session.scalar(
-                sa.select(Flows.id)
-                .where(Flows.id == flow_id)
-                .where(Flows.tenant_id == tenant_id)
-                .where(Flows.deleted_at.is_(None))
-            )
-            if existing_id is not None:
-                raise _stale_revision_error(
-                    flow_id=flow_id, expected_revision=fenced_revision
-                )
-            raise NotFoundException("Flow not found.")
 
         await self._sync_flow_steps(
             flow_id=flow_id, tenant_id=tenant_id, steps=flow.steps

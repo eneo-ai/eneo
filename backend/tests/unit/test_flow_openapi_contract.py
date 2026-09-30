@@ -35,6 +35,9 @@ from eneo.flows.api.flow_runtime_paths import (
     FlowRuntimePathsPublic,
     build_flow_runtime_paths,
 )
+from eneo.flows.api.flow_security_classification_models import (
+    FlowSecurityClassificationAssistantCandidate,
+)
 from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
     FlowApiErrorCode,
@@ -3135,6 +3138,17 @@ def test_openapi_security_classification_preview_is_a_closed_typed_contract(
     assert candidate["properties"]["update"] == {
         "$ref": "#/components/schemas/FlowAssistantUpdateRequest"
     }
+    # A preview writes nothing, so its candidates carry no revision fence.
+    assert (
+        "expected_revision" not in schemas["FlowAssistantUpdateRequest"]["properties"]
+    )
+    with pytest.raises(ValidationError):
+        FlowSecurityClassificationAssistantCandidate.model_validate(
+            {
+                "assistant_id": "00000000-0000-4000-8000-000000000001",
+                "update": {"expected_revision": 0},
+            }
+        )
 
     violation = schemas["FlowStepSecurityClassificationViolationPublic"]["properties"]
     assert _extract_enum_values(openapi_spec, violation["code"]) == {
@@ -3428,7 +3442,9 @@ def test_openapi_flow_contract_does_not_advertise_mcp_or_policy(
         "FlowStepUpdateRequest",
         "FlowStepPublic",
         "FlowAssistantPublic",
+        "FlowAssistantUpdatePublic",
         "FlowAssistantUpdateRequest",
+        "FlowAssistantPatchRequest",
     ):
         assert schema_name in schemas
         properties = schemas[schema_name].get("properties", {})
@@ -3442,16 +3458,27 @@ def test_openapi_flow_contract_does_not_advertise_mcp_or_policy(
     assert "mcp_servers" in standalone_assistant_properties
     assert "mcp_tools" in standalone_assistant_properties
 
-    flow_assistant_ref = "#/components/schemas/FlowAssistantPublic"
-    for path, method in (
-        ("/api/v1/flows/{id}/assistants/", "post"),
-        ("/api/v1/flows/{id}/assistants/{assistant_id}/", "get"),
-        ("/api/v1/flows/{id}/assistants/{assistant_id}/", "patch"),
+    for path, method, schema_name in (
+        ("/api/v1/flows/{id}/assistants/", "post", "FlowAssistantPublic"),
+        ("/api/v1/flows/{id}/assistants/{assistant_id}/", "get", "FlowAssistantPublic"),
+        (
+            "/api/v1/flows/{id}/assistants/{assistant_id}/",
+            "patch",
+            "FlowAssistantUpdatePublic",
+        ),
     ):
         response_schema = openapi_spec["paths"][path][method]["responses"][
             "200" if method != "post" else "201"
         ]["content"]["application/json"]["schema"]
-        assert response_schema == {"$ref": flow_assistant_ref}
+        assert response_schema == {"$ref": f"#/components/schemas/{schema_name}"}
+    # An assistant update is a write to the flow's draft: it is fenced on, and
+    # returns, the draft revision.
+    patch_body = openapi_spec["paths"]["/api/v1/flows/{id}/assistants/{assistant_id}/"][
+        "patch"
+    ]["requestBody"]["content"]["application/json"]["schema"]
+    assert patch_body == {"$ref": "#/components/schemas/FlowAssistantPatchRequest"}
+    assert "expected_revision" in schemas["FlowAssistantPatchRequest"]["properties"]
+    assert "draft_revision" in schemas["FlowAssistantUpdatePublic"]["required"]
 
 
 def test_openapi_flow_package_mcp_import_example_matches_runtime_rejection(
