@@ -155,8 +155,8 @@ class TestPublicEndpoints:
         assert healthz_route is not None, "/api/healthz route not found"
         assert not route_has_dependency_named(healthz_route, "get_current_active_user")
 
-    def test_crawler_healthz_endpoint_exists_without_auth(self):
-        """GET /api/healthz/crawler must not have auth dependencies."""
+    def test_crawler_healthz_endpoint_requires_sysadmin_auth(self):
+        """Detailed crawler diagnostics require deployment administrator access."""
         crawler_route = None
         for route in runtime_app_routes():
             if getattr(route, "path", None) == "/api/healthz/crawler":
@@ -164,7 +164,7 @@ class TestPublicEndpoints:
                 break
 
         assert crawler_route is not None, "/api/healthz/crawler route not found"
-        assert not route_has_dependency_named(crawler_route, "get_current_active_user")
+        assert route_has_dependency_named(crawler_route, "authenticate_super_api_key")
 
 
 class TestAuthPrecedence:

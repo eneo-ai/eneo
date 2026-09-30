@@ -27,6 +27,7 @@ from eneo.ai_models.completion_models.completion_model import (
 from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelLegacy
 from eneo.collections.presentation.collection_models import CollectionPublic
 from eneo.completion_models.domain.completion_model import CompletionModel
+from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 from eneo.files.file_models import File, FilePublic, FileRestrictions
 from eneo.groups_legacy.api.group_models import GroupInDBBase
 from eneo.info_blobs.info_blob import InfoBlobInDBWithScore
@@ -276,7 +277,16 @@ class AssistantUpdatePublic(AssistantCreatePublic):
             "every turn and packs results into the prompt."
         ),
     )
-    data_retention_days: Optional[int] = None
+    data_retention_days: Optional[int] = Field(
+        default=None,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+        description=(
+            "Conversation retention override. Requires space administration permission "
+            "in shared and organization spaces. "
+            "Set to null to inherit the space policy; omit to leave unchanged."
+        ),
+    )
     metadata_json: Union[dict[str, object], None, NotProvided] = Field(
         default=NOT_PROVIDED,
         description="Metadata for the assistant",

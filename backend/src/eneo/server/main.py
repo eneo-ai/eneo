@@ -5,12 +5,13 @@ from datetime import datetime, timezone
 from typing import Any, Literal, cast
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Security
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from eneo.allowed_origins.get_origin_callback import get_origin
+from eneo.authentication.auth import authenticate_super_api_key
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -20,6 +21,7 @@ from eneo.authentication.endpoint_access import (
 from eneo.internal_mcp import internal_mcp_mounts
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.main.models import GeneralError
 from eneo.main.observability import init_observability, instrument_fastapi
 from eneo.main.request_context import get_request_context
 from eneo.object_content.runtime import (
@@ -644,14 +646,21 @@ def get_application():
 
     @app.get(
         "/api/healthz/crawler",
+        dependencies=[Security(authenticate_super_api_key)],
         response_model=CrawlerHealthResponse,
         description="Get detailed crawler queue and worker diagnostics.",
-        responses={200: {"description": "Crawler diagnostics"}},
+        responses={
+            200: {"description": "Crawler diagnostics"},
+            401: {
+                "model": GeneralError,
+                "description": "Missing or invalid super API key",
+            },
+        },
     )
     @endpoint_access(
-        authentication=Authentication.PUBLIC,
-        authorization=Authorization.PUBLIC,
-        reason="Deployment health probes and version discovery are intentionally public.",
+        authentication=Authentication.SYSADMIN,
+        authorization=Authorization.SYSADMIN,
+        reason="Crawler diagnostics require deployment administrator access.",
     )
     async def crawler_health() -> CrawlerHealthResponse:
         """Report aggregate transport and PostgreSQL lifecycle health."""

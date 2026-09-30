@@ -635,6 +635,7 @@
             hasChanges={$currentChanges.diff.data_retention_days !== undefined}
             inheritedDays={$currentSpace.data_retention_days}
             inheritedFrom="space"
+            disabled={!$currentSpace.personal && !$currentSpace.hasPermission("edit", "space")}
             {labelId}
             {descriptionId}
           />

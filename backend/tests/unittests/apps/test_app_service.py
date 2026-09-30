@@ -5,7 +5,10 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.actors.actors.space_actor import SpaceActor, SpaceRole
+from eneo.apps.apps.app_factory import AppFactory
 from eneo.apps.apps.app_service import AppService
+from eneo.data_retention.constants import MAX_RETENTION_DAYS
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
@@ -66,6 +69,87 @@ async def test_update_raise_unauthorized_if_can_not_edit(
 
     with pytest.raises(UnauthorizedException):
         await service.update_app(MagicMock())
+
+
+@pytest.mark.parametrize("retention_actor", [SpaceRole.EDITOR], indirect=True)
+@pytest.mark.parametrize("days", [None, 1, MAX_RETENTION_DAYS])
+async def test_editor_cannot_change_app_retention(
+    service: AppService, retention_actor: SpaceActor, days: int | None
+):
+    space = MagicMock()
+    app = AppFactory(app_template_factory=MagicMock()).create_app(
+        user=retention_actor.user,
+        space=space,
+        name="Original",
+        completion_model=None,
+        transcription_model=None,
+    )
+    app.id = uuid4()
+    app.data_retention_days = 30
+    space.get_app.return_value = app
+    service.space_repo.get_space_by_app.return_value = space
+    service.actor_manager.get_space_actor_from_space.return_value = retention_actor
+
+    with pytest.raises(UnauthorizedException, match="retention"):
+        await service.update_app(
+            app_id=app.id, name="Changed", data_retention_days=days
+        )
+
+    assert app.data_retention_days == 30
+    assert app.name == "Original"
+
+
+@pytest.mark.parametrize(
+    "retention_actor", [SpaceRole.ADMIN, SpaceRole.OWNER], indirect=True
+)
+@pytest.mark.parametrize("days", [None, 1, MAX_RETENTION_DAYS])
+async def test_retention_admin_can_set_or_clear_app_override(
+    service: AppService, retention_actor: SpaceActor, days: int | None
+):
+    space = MagicMock(data_retention_days=30)
+    app = AppFactory(app_template_factory=MagicMock()).create_app(
+        user=retention_actor.user,
+        space=space,
+        name="Original",
+        completion_model=None,
+        transcription_model=None,
+    )
+    app.id = uuid4()
+    app.data_retention_days = 30
+    space.get_app.return_value = app
+    service.space_repo.get_space_by_app.return_value = space
+    service.repo.update.return_value = app
+    service.actor_manager.get_space_actor_from_space.return_value = retention_actor
+
+    updated, _ = await service.update_app(app_id=app.id, data_retention_days=days)
+
+    assert updated.data_retention_days == days
+    assert space.data_retention_days == 30
+
+
+@pytest.mark.parametrize("retention_actor", [SpaceRole.EDITOR], indirect=True)
+async def test_editor_can_edit_app_when_retention_is_omitted(
+    service: AppService, retention_actor: SpaceActor
+):
+    space = MagicMock()
+    app = AppFactory(app_template_factory=MagicMock()).create_app(
+        user=retention_actor.user,
+        space=space,
+        name="Original",
+        completion_model=None,
+        transcription_model=None,
+    )
+    app.id = uuid4()
+    app.data_retention_days = 30
+    space.get_app.return_value = app
+    service.space_repo.get_space_by_app.return_value = space
+    service.repo.update.return_value = app
+    service.actor_manager.get_space_actor_from_space.return_value = retention_actor
+
+    updated, _ = await service.update_app(app_id=app.id, name="Changed")
+
+    assert updated.name == "Changed"
+    assert updated.data_retention_days == 30
 
 
 def _configure_editable_app(service: AppService):
