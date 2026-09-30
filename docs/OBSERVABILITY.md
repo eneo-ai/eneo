@@ -168,6 +168,7 @@ The bounded fields are:
 | `safe_detail.provider_status_class` | Same bounded status class as `failure_code` | Low cardinality; safe to index. |
 | `failure_fingerprint` | Stable 12-character hash of the fixed component, stage, class, and safely exposed status | Parse on demand. It clusters equivalent failures; it is not a replay-safety signal. |
 | `request_id`, `tenant_id` | Present when that boundary owns the correlation value; otherwise `null` | High cardinality; do not pre-index. |
+| `safe_detail.provider_elapsed_ms`, `safe_detail.deadline_reached`, `safe_detail.local_deadline` | Elapsed time in ms of the request the call ended on; whether Eneo's own timer expired; `silence` or `ceiling` when it did. `provider_elapsed_ms` and `deadline_reached` are `null` when the failure came before the call was timed | Parse on demand. The timer is decided by the provider-failure classifier, once per failure. |
 
 Only recognized adapter exception types can supply a status. An exception that
 merely resembles an adapter error—for example, an arbitrary object with a
@@ -183,7 +184,12 @@ request/response bodies, raw provider responses, exception text or tracebacks,
 headers, credentials, DSNs, or local file paths. The proposal-attempt metadata
 that can be persisted with a conversation retains only its existing coarse
 `provider_error` value; the internal class, status, and fingerprint stay in the
-failure-event log.
+failure-event log. When the turn ends with an assistant message, the failed
+call's record in that message's telemetry carries the bounded disposition (`provider_failure_kind`,
+status class, turn state), `local_deadline`, and the call's chunk timing, never
+its content. A terminal turn without an assistant message (for example a known
+provider rejection) leaves only the failure-event log; a persisted snapshot for
+those turns is V0.2c.
 
 Example query:
 

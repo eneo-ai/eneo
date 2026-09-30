@@ -354,6 +354,7 @@ async def test_finalize_compiled_proposal_does_not_record_success_on_quality_rej
         )
 
     assert isinstance(result, CorrectableFailure)
+    assert result.producers == {"lint"}
     assert result.kind == "quality"
     assert result.codes == frozenset({"json_output_no_contract"})
     assert tracker.proposal_first_attempt_success is None
@@ -514,6 +515,7 @@ async def test_unindexed_array_reference_cannot_reach_plan_persistence() -> None
         )
 
     assert isinstance(result, CorrectableFailure)
+    assert result.producers == {"platform_validator"}
     assert result.kind == "validation"
     assert result.codes == frozenset({"unknown_output_contract_field"})
     store_plan.assert_not_awaited()
@@ -551,9 +553,64 @@ async def test_finalize_compiled_proposal_preserves_contextual_quality_issue_cod
         )
 
     assert isinstance(result, CorrectableFailure)
+    assert result.producers == {"critic"}
     assert result.kind == "quality"
     assert "final_text_step_must_reference_relevant_structured_outputs" in result.codes
     assert "Quality issues" in result.feedback
+    store_plan.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_merged_create_failure_names_every_owner_that_contributed() -> None:
+    validation = SpecValidationResult()
+    validation.add_error(
+        step_ref="step_c",
+        code="flow_step_invalid",
+        message="Step 3: the report step is invalid.",
+    )
+    validation.add_warning(
+        step_ref="step_a",
+        code="vague_step_name",
+        message="Step 1: name the step after what it extracts.",
+    )
+    tracker = ProposalTurnTelemetry(
+        request_id="req-merged",
+        model="openai/gpt-5.4",
+        target_kind=TargetKind.CREATE,
+    )
+    tracker.start_attempt(counts_as_repair=False)
+    store_plan = AsyncMock(return_value=_stored_plan_result())
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_finalization."
+        "store_plan_and_update_conversation",
+        new=store_plan,
+    ):
+        result = await _make_finalizer(
+            quality_retry_warning_codes={"vague_step_name"}
+        ).finalize_compiled_proposal(
+            _make_request(
+                usage_tracker=tracker,
+                compiled=CompiledProposal(
+                    content=FlowBuilderProposalContent(
+                        spec=_structured_underbound_spec(),
+                        plan_rationale="Compose a structured report.",
+                    ),
+                    validation=validation,
+                ),
+            )
+        )
+
+    assert isinstance(result, CorrectableFailure)
+    assert result.kind == "validation"
+    assert result.producers == {"platform_validator", "lint", "critic"}
+    tracker.record_attempt_failure(
+        failure_kind=result.kind,
+        failure_codes=result.codes,
+        producers=result.producers,
+    )
+    [attempt] = tracker.build_planner_telemetry()["proposal_attempts"]
+    assert attempt["producers"] == ["critic", "lint", "platform_validator"]
     store_plan.assert_not_awaited()
 
 

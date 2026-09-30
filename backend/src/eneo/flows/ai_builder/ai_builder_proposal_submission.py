@@ -78,6 +78,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_retry import (
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     PROPOSAL_PARSE_JSON_FAILURE_CODE,
     PROPOSAL_PARSE_SCHEMA_FAILURE_CODE,
+    FailureProducer,
     ProposalAttemptFailureKind,
     ProposalFailureKind,
     ProposalRepairReason,
@@ -303,7 +304,9 @@ class ProposalSubmissionOwner:
             return
 
         if not response.choices:
-            usage_tracker.record_attempt_failure(failure_kind="missing_submission_tool")
+            usage_tracker.record_attempt_failure(
+                failure_kind="missing_submission_tool", producers=frozenset()
+            )
             log_proposal_failed_turn(
                 usage_tracker=usage_tracker,
                 session_id=turn.session_id,
@@ -324,7 +327,9 @@ class ProposalSubmissionOwner:
 
         choice = response.choices[0]
         if choice.finish_reason == "length":
-            usage_tracker.record_attempt_failure(failure_kind="provider_truncation")
+            usage_tracker.record_attempt_failure(
+                failure_kind="provider_truncation", producers=frozenset()
+            )
             log_proposal_failed_turn(
                 usage_tracker=usage_tracker,
                 session_id=turn.session_id,
@@ -471,6 +476,7 @@ class ProposalSubmissionOwner:
                 feedback=f"Invalid propose_flow arguments: {error}",
                 kind="parse",
                 codes=frozenset({PROPOSAL_PARSE_SCHEMA_FAILURE_CODE}),
+                producers=frozenset({"parse"}),
             )
         if admitted_arguments is not invocation.arguments:
             invocation = replace(invocation, arguments=admitted_arguments)
@@ -575,7 +581,9 @@ class ProposalSubmissionOwner:
             )
             if usage_tracker is not None:
                 usage_tracker.record_attempt_failure(
-                    failure_kind="architecture", failure_codes=answer.codes
+                    failure_kind="architecture",
+                    failure_codes=answer.codes,
+                    producers=frozenset(),
                 )
 
         answered = await persist_non_plan_turn(
@@ -664,12 +672,14 @@ class ProposalSubmissionOwner:
         usage_tracker: ProposalTurnTelemetry | None,
         request_id: str,
         reason: ProposalRepairReason,
+        producers: frozenset[FailureProducer],
         failure_codes: frozenset[str] = frozenset(),
     ) -> None:
         if usage_tracker is not None:
             usage_tracker.record_attempt_failure(
                 failure_kind=_attempt_failure_kind(reason),
                 failure_codes=failure_codes,
+                producers=producers,
             )
         record_proposal_first_attempt(
             usage_tracker,
@@ -698,6 +708,7 @@ class ProposalSubmissionOwner:
             request_id=ctx.request_id,
             reason=proposal_repair_reason_from_tool_failure(failure.kind),
             failure_codes=failure.codes,
+            producers=failure.producers,
         )
         async for event in run_tool_self_correction(
             self._build_self_correction_request(
@@ -816,6 +827,7 @@ class ProposalSubmissionOwner:
                     feedback=f"Invalid propose_flow arguments: {error}",
                     kind="parse",
                     codes=frozenset({PROPOSAL_PARSE_JSON_FAILURE_CODE}),
+                    producers=frozenset({"parse"}),
                 ),
                 tool_call=tool_call,
                 retry_config=retry_config,
@@ -904,7 +916,9 @@ class ProposalSubmissionOwner:
         )
         if ctx.usage_tracker is not None:
             ctx.usage_tracker.record_attempt_failure(
-                failure_kind=failure.kind, failure_codes=failure.codes
+                failure_kind=failure.kind,
+                failure_codes=failure.codes,
+                producers=frozenset(),
             )
 
     async def _retry_forced_proposal_after_text(
@@ -918,6 +932,7 @@ class ProposalSubmissionOwner:
             usage_tracker=ctx.usage_tracker,
             request_id=ctx.request_id,
             reason="missing_submission_tool",
+            producers=frozenset(),
         )
         retry_config = self._proposal_retry_config(
             target_kind=ctx.target_kind,

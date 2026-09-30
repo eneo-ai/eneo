@@ -40,6 +40,7 @@ import asyncio
 import json
 import math
 import re
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any, Literal, Protocol, cast
@@ -88,11 +89,6 @@ PROVIDER_ERROR_PARAMETERS = frozenset(
     }
 )
 
-# Whether the caller admits one more request without the refused control;
-# the caller charges it to its own call budget and telemetry.
-RetryAdmission = Callable[[str, Exception], bool]
-
-
 ProviderRejectionSource = Literal[
     "unavailable",
     "body",
@@ -132,6 +128,72 @@ class ProviderCallCeilingExpired(TimeoutError):
     """The whole provider call exceeded its ceiling while still producing."""
 
 
+@dataclass(frozen=True, slots=True)
+class ProviderCallTiming:
+    """When the provider's answer arrived, measured from sending the request.
+
+    Each request of a call that is sent again without a refused control is
+    timed from its own start.
+
+    ``first_chunk_ms`` and ``max_gap_ms`` are None when no chunk arrived (a
+    whole, non-streamed answer included). ``max_gap_ms`` is the longest wait
+    for a chunk after the first one, the wait the call ended on included, so
+    a stall that expired the silence deadline shows at least that deadline.
+    """
+
+    provider_elapsed_ms: int
+    first_chunk_ms: int | None = None
+    max_gap_ms: int | None = None
+
+
+# Whether the caller admits one more request without the refused control,
+# given the refused request's own timing; the caller charges it to its own call
+# budget and telemetry.
+RetryAdmission = Callable[[str, Exception, ProviderCallTiming], bool]
+
+
+@dataclass(slots=True)
+class ObservedTiming:
+    """An ``observe_timing`` callback that keeps what the seam reported."""
+
+    value: ProviderCallTiming | None = None
+
+    def __call__(self, timing: ProviderCallTiming) -> None:
+        self.value = timing
+
+
+class _ChunkClock:
+    def __init__(self) -> None:
+        self._started = time.perf_counter()
+        self._first: float | None = None
+        self._last: float | None = None
+        self._max_gap = 0.0
+
+    def wait_ended(self, *, chunk_arrived: bool) -> None:
+        """One wait for the next chunk ended: with a chunk, the end, or an error."""
+
+        now = time.perf_counter()
+        if self._last is not None:
+            self._max_gap = max(self._max_gap, now - self._last)
+        if chunk_arrived:
+            if self._first is None:
+                self._first = now
+            self._last = now
+
+    def timing(self) -> ProviderCallTiming:
+        return ProviderCallTiming(
+            provider_elapsed_ms=_ms(time.perf_counter() - self._started),
+            first_chunk_ms=(
+                None if self._first is None else _ms(self._first - self._started)
+            ),
+            max_gap_ms=None if self._first is None else _ms(self._max_gap),
+        )
+
+
+def _ms(seconds: float) -> int:
+    return max(0, int(seconds * 1000))
+
+
 async def complete_with_silence_deadline(
     litellm_client: CompletionClient,
     *,
@@ -140,6 +202,7 @@ async def complete_with_silence_deadline(
     request: Mapping[str, Any],
     retry_without_refused_control: RetryAdmission | None = None,
     observe_sdk_input: Callable[[Mapping[str, Any]], None] | None = None,
+    observe_timing: Callable[[ProviderCallTiming], None] | None = None,
 ) -> Any:
     """The provider's complete answer, streamed under a silence deadline.
 
@@ -149,9 +212,12 @@ async def complete_with_silence_deadline(
     failure classifier records as a timeout with an unknown provider outcome.
     The stream is closed on every exit, within a bounded wait that never
     hides the original error. ``retry_without_refused_control`` is asked, with
-    the refused control's name and the provider's error, whether one more
-    request without that control may be sent; without it every refusal is
-    raised.
+    the refused control's name, the provider's error and the refused request's
+    own timing, whether one more request without that control may be sent;
+    without it every refusal is raised. ``observe_timing`` receives the timing
+    of the request the call ended on, once, however the call ends, before the
+    stream is closed; a refused request's timing goes to the admission callback
+    only, and the replacement is timed from its own start.
     """
 
     if not (math.isfinite(silence_deadline_seconds) and silence_deadline_seconds > 0):
@@ -172,6 +238,7 @@ async def complete_with_silence_deadline(
     }
     response: Any = None
     ceiling = asyncio.timeout(ceiling_seconds)
+    clock = _ChunkClock()
     async with ProviderStreamCollector() as collector:
         try:
             async with ceiling:
@@ -188,9 +255,12 @@ async def complete_with_silence_deadline(
                         parameter is None
                         or parameter not in outbound
                         or retry_without_refused_control is None
-                        or not retry_without_refused_control(parameter, error)
+                        or not retry_without_refused_control(
+                            parameter, error, clock.timing()
+                        )
                     ):
                         raise
+                    clock = _ChunkClock()
                     logger.warning(
                         "ai_builder_provider_sampling_parameter_rejected",
                         extra={
@@ -215,7 +285,15 @@ async def complete_with_silence_deadline(
                     )
 
                 async def next_chunk(stream: AsyncIterator[Any]) -> Any:
-                    return await _under_silence(anext(stream), silence_deadline_seconds)
+                    try:
+                        chunk = await _under_silence(
+                            anext(stream), silence_deadline_seconds
+                        )
+                    except BaseException:
+                        clock.wait_ended(chunk_arrived=False)
+                        raise
+                    clock.wait_ended(chunk_arrived=True)
+                    return chunk
 
                 return await collector.collect(
                     response, request=outbound, next_chunk=next_chunk
@@ -226,6 +304,9 @@ async def complete_with_silence_deadline(
             if ceiling.expired():
                 raise ProviderCallCeilingExpired(ceiling_seconds) from error
             raise
+        finally:
+            if observe_timing is not None:
+                observe_timing(clock.timing())
 
 
 def rejected_sampling_parameter(rejection: ProviderRejection) -> str | None:

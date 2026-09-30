@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -30,6 +31,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_policy import (
     warnings_for_quality_retry,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+    FailureProducer,
     ProposalTurnTelemetry,
     assistant_metadata_with_usage,
     record_proposal_first_attempt,
@@ -56,6 +58,20 @@ if TYPE_CHECKING:
     from eneo.flows.domain.flow import Flow
 
 logger = get_logger(__name__)
+
+
+def _merged_feedback(
+    parts: Sequence[tuple[FailureProducer, str | None]],
+) -> tuple[str, frozenset[FailureProducer]]:
+    """One feedback text from the parts that said something, and their owners."""
+
+    present: list[tuple[FailureProducer, str]] = [
+        (producer, text) for producer, text in parts if text
+    ]
+    return (
+        "\n\n".join(text for _, text in present),
+        frozenset(producer for producer, _ in present),
+    )
 
 
 @dataclass(frozen=True)
@@ -201,20 +217,19 @@ class CompiledProposalFinalizer:
                 spec=compiled.content.spec,
                 errors=compiled.validation.errors,
             )
-            combined_feedback = "\n\n".join(
-                feedback
-                for feedback in (
-                    hard_feedback,
-                    quality_hint,
-                    contextual_quality.feedback,
+            combined_feedback, producers = _merged_feedback(
+                (
+                    ("platform_validator", hard_feedback),
+                    ("lint", quality_hint),
+                    ("critic", contextual_quality.feedback),
                 )
-                if feedback
             )
             return CorrectableFailure(
                 feedback=format_create_intent_quality_feedback(combined_feedback)
                 or combined_feedback,
                 kind="validation",
                 codes=frozenset(error.code for error in compiled.validation.errors),
+                producers=producers,
             )
 
         quality_feedback = format_quality_feedback(
@@ -237,17 +252,11 @@ class CompiledProposalFinalizer:
             compile_context=request.compile_context,
         )
         quality_failure_codes = quality_failure_codes | contextual_quality.failure_codes
-        combined_quality_feedback = (
-            "\n\n".join(
-                feedback
-                for feedback in (
-                    quality_feedback,
-                    contextual_quality.feedback,
-                )
-                if feedback is not None
-            )
-            or None
+        combined_quality_feedback, producers = _merged_feedback(
+            (("lint", quality_feedback), ("critic", contextual_quality.feedback))
         )
+        if not producers:
+            return None
         combined_quality_feedback = format_create_intent_quality_feedback(
             combined_quality_feedback
         )
@@ -270,6 +279,7 @@ class CompiledProposalFinalizer:
             feedback=combined_quality_feedback,
             kind="quality",
             codes=quality_failure_codes,
+            producers=producers,
         )
 
     def _edit_quality_result(
@@ -298,15 +308,10 @@ class CompiledProposalFinalizer:
             planning_state=request.planning_state,
             compile_context=request.compile_context,
         )
-        combined_quality_feedback = "\n\n".join(
-            feedback
-            for feedback in (
-                quality_feedback,
-                contextual_quality_feedback,
-            )
-            if feedback
+        combined_quality_feedback, producers = _merged_feedback(
+            (("lint", quality_feedback), ("critic", contextual_quality_feedback))
         )
-        if not combined_quality_feedback:
+        if not producers:
             return None
         logger.info(
             "ai_builder_edit_quality_feedback "
@@ -319,6 +324,7 @@ class CompiledProposalFinalizer:
             feedback=combined_quality_feedback,
             kind="quality",
             codes=quality_failure_codes,
+            producers=producers,
         )
 
 

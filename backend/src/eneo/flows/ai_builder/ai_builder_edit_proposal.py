@@ -217,6 +217,7 @@ async def process_edit_arguments(
             feedback=f"Invalid propose_flow arguments: {exc}",
             kind="parse",
             codes=frozenset({PROPOSAL_PARSE_MODEL_FAILURE_CODE}),
+            producers=frozenset({"parse"}),
         )
     if resource_catalog is not None and (
         repair := authored_knowledge_ref_repair(
@@ -244,7 +245,11 @@ async def process_edit_arguments(
         current_step_refs=current_step_refs,
     )
     if review_feedback is not None:
-        return CorrectableFailure(feedback=review_feedback, kind="quality")
+        return CorrectableFailure(
+            feedback=review_feedback,
+            kind="quality",
+            producers=frozenset({"review_guard"}),
+        )
     scoped_proposal_feedback = validate_scoped_edit_proposal(
         context=plan_edit_context,
         proposal=authored_proposal,
@@ -252,7 +257,11 @@ async def process_edit_arguments(
         saved_step_revision=saved_step_revision,
     )
     if scoped_proposal_feedback is not None:
-        return CorrectableFailure(feedback=scoped_proposal_feedback, kind="quality")
+        return CorrectableFailure(
+            feedback=scoped_proposal_feedback,
+            kind="quality",
+            producers=frozenset({"scope_guard"}),
+        )
     proposal = _apply_server_owned_input_fields(
         authored_proposal, planning_state=planning_state
     )
@@ -301,6 +310,7 @@ async def process_edit_arguments(
                 feedback=_format_edit_compilation_request_error(exc),
                 kind="validation",
                 codes=_edit_compilation_request_failure_codes(exc),
+                producers=frozenset({"assembly"}),
             )
         except AIBuilderArchitectureError as exc:
             # A failure only the user can fix ends as an answer naming the fix.
@@ -342,7 +352,9 @@ async def process_edit_arguments(
         )
         if prepared.failure_feedback is not None:
             return CorrectableFailure(
-                feedback=prepared.failure_feedback, kind="validation"
+                feedback=prepared.failure_feedback,
+                kind="validation",
+                producers=frozenset({"platform_validator"}),
             )
         assert prepared.spec is not None
         assert prepared.validation is not None
@@ -380,7 +392,11 @@ async def process_edit_arguments(
             scope=review_scope, diff=own_changes
         )
         if effect_feedback is not None:
-            return CorrectableFailure(feedback=effect_feedback, kind="validation")
+            return CorrectableFailure(
+                feedback=effect_feedback,
+                kind="validation",
+                producers=frozenset({"review_guard"}),
+            )
         if review_edit_changed_nothing(own_changes.step_changes):
             # Finding nothing to change is a real answer to an investigation,
             # and the only honest one when the runs do not support the
@@ -414,6 +430,7 @@ async def process_edit_arguments(
             ),
             kind="validation",
             codes=frozenset(error.code for error in validation.errors),
+            producers=frozenset({"platform_validator"}),
         )
 
     topology_policy = evaluate_edit_topology_policy(
@@ -429,6 +446,7 @@ async def process_edit_arguments(
             feedback=topology_policy.rejection_feedback,
             kind="validation",
             codes=topology_policy.failure_codes,
+            producers=frozenset({"critic"}),
         )
     edit_approval = candidate.approval.model_copy(
         update={
@@ -500,6 +518,7 @@ async def process_edit_arguments(
             feedback=scoped_rejection.feedback,
             kind="quality",
             codes=frozenset({scoped_rejection.reason}),
+            producers=frozenset({"scope_guard"}),
         )
 
     return ProposalReady(
@@ -649,6 +668,7 @@ def _validate_saved_step_consumers(
             + "; ".join(error.message for error in errors),
             kind="validation",
             codes=frozenset(error.code for error in errors),
+            producers=frozenset({"platform_validator"}),
         )
     prior_target = next(
         step for step in prior_spec.steps if step.existing_step_ref == target_ref
@@ -686,5 +706,6 @@ def _validate_saved_step_consumers(
                 "Preserve the producer output_contract, or use a whole-plan edit to revise its consumers.",
                 kind="validation",
                 codes=frozenset({"consumer_requires_output_contract"}),
+                producers=frozenset({"scope_guard"}),
             )
     return None

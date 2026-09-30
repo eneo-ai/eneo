@@ -18,6 +18,7 @@ from litellm.exceptions import (
     Timeout,
     UnprocessableEntityError,
 )
+from litellm.types import utils as litellm_types
 from litellm.utils import get_optional_params
 
 from eneo.ai_models.completion_models.completion_model import (
@@ -2197,3 +2198,212 @@ async def test_local_reasoning_refusal_preserves_known_rejection_without_startin
     assert tracker.proposal_attempts == []
     before_provider_call.assert_not_awaited()
     client.acompletion.assert_not_awaited()
+
+
+def _deadline_budget(
+    *, timeout_seconds: float, ceiling_seconds: float
+) -> AIBuilderRequestBudget:
+    return AIBuilderRequestBudget(
+        capacity=ModelCapacity(100_000, 100),
+        safety_buffer_tokens=0,
+        timeout_seconds=timeout_seconds,
+        ceiling_seconds=ceiling_seconds,
+    )
+
+
+def _stream_chunk(arguments: str, *, first: bool, finish: str | None = None) -> object:
+    call = litellm_types.ChatCompletionDeltaToolCall(
+        id="call_1" if first else None,
+        type="function",
+        index=0,
+        function=litellm_types.Function(
+            name=PROPOSE_FLOW_TOOL_NAME if first else None, arguments=arguments
+        ),
+    )
+    return litellm_types.ModelResponseStream(
+        id="resp",
+        model="gpt-test",
+        choices=[
+            litellm_types.StreamingChoices(
+                index=0,
+                delta=litellm_types.Delta(content=None, tool_calls=[call]),
+                finish_reason=finish,
+            )
+        ],
+    )
+
+
+async def _stalls_after_one_chunk():
+    yield _stream_chunk('{"flow_name": "A', first=True)
+    await asyncio.Event().wait()
+
+
+async def _never_ends():
+    yield _stream_chunk('{"flow_name": "A', first=True)
+    while True:
+        await asyncio.sleep(0.01)
+        yield _stream_chunk("a", first=False)
+
+
+async def _answers_in_two_chunks():
+    yield _stream_chunk('{"flow_name": "A', first=True)
+    await asyncio.sleep(0.02)
+    yield _stream_chunk('"}', first=False, finish="tool_calls")
+
+
+async def _failing_proposal_call(
+    *responses: object, budget: AIBuilderRequestBudget, call_limit: int = 1
+) -> tuple[ProposalTurnTelemetry, Exception]:
+    tracker = ProposalTurnTelemetry(
+        request_id="req-terminal", model="gpt-test", target_kind=TargetKind.CREATE
+    )
+    with pytest.raises(AIBuilderBadRequestException) as raised:
+        async with asyncio.timeout(5):
+            await call_proposal_completion(
+                litellm_client=SimpleNamespace(
+                    acompletion=AsyncMock(side_effect=list(responses))
+                ),
+                usage_tracker=tracker,
+                request=_completion_request(
+                    messages=[{"role": "user", "content": "Build a flow"}],
+                    tool_schemas=[],
+                    route=_route(),
+                    max_output_tokens=100,
+                    temperature=0.0,
+                    call_budget=ProposalCallBudget(call_limit=call_limit),
+                    request_budget=budget,
+                ),
+            )
+    return tracker, raised.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refused_first", [False, True])
+async def test_a_terminal_provider_failure_finalizes_its_call_and_attempt_once(
+    refused_first: bool,
+) -> None:
+    refusal = [_refusal_of_temperature()] if refused_first else []
+
+    tracker, error = await _failing_proposal_call(
+        *refusal,
+        _stalls_after_one_chunk(),
+        budget=_deadline_budget(timeout_seconds=0.05, ceiling_seconds=5.0),
+        call_limit=2,
+    )
+
+    # The failure the provider caused is the one raised, never a telemetry error.
+    assert isinstance(error, AIBuilderProviderOutcomeUnknownException)
+    payload = tracker.build_planner_telemetry()
+    records = payload["call_records"]
+    assert [record["attempt"] for record in records] == (
+        [1, 2] if refused_first else [1]
+    )
+    if refused_first:
+        assert records[0]["provider_failure_kind"] == "rejected"
+        assert "local_deadline" not in records[0]
+    failed = records[-1]
+    assert failed["provider_failure_kind"] == "timeout"
+    assert failed["provider_turn_state"] == "provider_outcome_unknown"
+    assert failed["local_deadline"] == "silence"
+    assert failed["first_chunk_ms"] >= 0
+    assert failed["max_gap_ms"] >= 50
+    assert failed["provider_elapsed_ms"] >= failed["max_gap_ms"]
+    assert [attempt["failure_kind"] for attempt in payload["proposal_attempts"]] == [
+        "provider_error"
+    ]
+    # Nothing afterwards completes the failed call or closes the attempt again.
+    tracker.finalize_pending_attempt()
+    again = tracker.build_planner_telemetry()
+    assert again["call_records"] == records
+    assert again["proposal_attempts"] == payload["proposal_attempts"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("response", "local_deadline", "chunked"),
+    [
+        (_never_ends, "ceiling", True),
+        (lambda: TimeoutError("raised by the SDK"), None, False),
+    ],
+)
+async def test_the_failed_call_names_the_local_deadline_that_ended_it(
+    response: Any, local_deadline: str | None, chunked: bool
+) -> None:
+    tracker, error = await _failing_proposal_call(
+        response(),
+        budget=_deadline_budget(timeout_seconds=0.05, ceiling_seconds=0.1),
+    )
+
+    assert isinstance(error, AIBuilderProviderOutcomeUnknownException)
+    [record] = tracker.build_planner_telemetry()["call_records"]
+    assert record["provider_failure_kind"] == "timeout"
+    assert record.get("local_deadline") == local_deadline
+    assert ("first_chunk_ms" in record) is chunked
+    assert record["provider_elapsed_ms"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_answer_records_when_it_arrived() -> None:
+    tracker = ProposalTurnTelemetry(
+        request_id="req-timed", model="gpt-test", target_kind=TargetKind.CREATE
+    )
+
+    await call_proposal_completion(
+        litellm_client=SimpleNamespace(
+            acompletion=AsyncMock(return_value=_answers_in_two_chunks())
+        ),
+        usage_tracker=tracker,
+        request=_completion_request(
+            messages=[{"role": "user", "content": "Build a flow"}],
+            tool_schemas=[],
+            route=_route(),
+            max_output_tokens=100,
+            temperature=0.0,
+        ),
+    )
+
+    [record] = tracker.build_planner_telemetry()["call_records"]
+    assert "provider_failure_kind" not in record
+    assert "local_deadline" not in record
+    assert record["first_chunk_ms"] >= 0
+    assert record["max_gap_ms"] >= 20
+    assert record["provider_elapsed_ms"] >= record["max_gap_ms"]
+
+
+@pytest.mark.asyncio
+async def test_a_refused_request_and_its_replacement_each_carry_their_own_timing() -> (
+    None
+):
+    calls = 0
+
+    async def acompletion(**_: object) -> object:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await asyncio.sleep(0.15)
+            raise _refusal_of_temperature()
+        return _answers_in_two_chunks()
+
+    tracker = ProposalTurnTelemetry(
+        request_id="req-refused-timing", model="gpt-test", target_kind=TargetKind.CREATE
+    )
+
+    await call_proposal_completion(
+        litellm_client=SimpleNamespace(acompletion=acompletion),
+        usage_tracker=tracker,
+        request=_completion_request(
+            messages=[{"role": "user", "content": "Build a flow"}],
+            tool_schemas=[],
+            route=_route(),
+            max_output_tokens=100,
+            temperature=0.0,
+            call_budget=ProposalCallBudget(call_limit=2),
+        ),
+    )
+
+    refused, answered = tracker.build_planner_telemetry()["call_records"]
+    assert refused["provider_failure_kind"] == "rejected"
+    assert refused["provider_elapsed_ms"] >= 140
+    assert "first_chunk_ms" not in refused
+    assert answered["provider_elapsed_ms"] < 100
+    assert answered["first_chunk_ms"] < 100

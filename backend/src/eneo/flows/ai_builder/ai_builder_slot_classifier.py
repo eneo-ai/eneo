@@ -43,6 +43,8 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     forced_tool_choice,
 )
 from eneo.flows.ai_builder.ai_builder_provider_call import (
+    ObservedTiming,
+    ProviderCallTiming,
     complete_with_silence_deadline,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import RESULT_OBLIGATION_VALUES
@@ -306,11 +308,13 @@ async def classify_slots(
         if usage_tracker is not None
         else None
     )
-    provider_started_at = time.perf_counter()
+    timing = ObservedTiming()
 
-    def admit_request_without_refused_control(_control: str, error: Exception) -> bool:
-        # The refused request is its own failed call record; the one sent
-        # without the control replaces it.
+    def admit_request_without_refused_control(
+        _control: str, error: Exception, refused_timing: ProviderCallTiming
+    ) -> bool:
+        # The refused request is its own failed call record, with its own
+        # timing; the one sent without the control replaces it.
         nonlocal call
         if call is not None and usage_tracker is not None:
             call = usage_tracker.retry_call(
@@ -320,6 +324,7 @@ async def classify_slots(
                     stage="slot_classification",
                     request_id=usage_tracker.request_id,
                 ),
+                timing=refused_timing,
             )
         return True
 
@@ -335,6 +340,7 @@ async def classify_slots(
                 **completion_kwargs,
             },
             retry_without_refused_control=admit_request_without_refused_control,
+            observe_timing=timing,
         )
     except Exception as error:
         failure = record_ai_builder_provider_failure(
@@ -343,10 +349,10 @@ async def classify_slots(
             tenant_id=tenant_id,
             request_id=usage_tracker.request_id if usage_tracker is not None else None,
             request_budget=request_budget,
-            provider_elapsed_ms=int((time.perf_counter() - provider_started_at) * 1000),
+            timing=timing.value,
         )
         if call is not None and usage_tracker is not None:
-            usage_tracker.fail_call(call=call, failure=failure)
+            usage_tracker.fail_call(call=call, failure=failure, timing=timing.value)
         raise failure.as_exception() from error
 
     content = response.choices[0].message.content if response.choices else None
@@ -373,10 +379,7 @@ async def classify_slots(
                 prompt_tokens=prompt_tokens,
                 total_tokens=prompt_tokens + (usage.completion_tokens or 0),
             )
-        usage_tracker.complete_call(
-            call=call,
-            usage=usage,
-        )
+        usage_tracker.complete_call(call=call, usage=usage, timing=timing.value)
 
     finish_reason = response.choices[0].finish_reason if response.choices else None
     refused: SlotClassificationAttempt | None = None

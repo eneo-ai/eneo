@@ -60,6 +60,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
     AIBuilderNotFoundException,
     AIBuilderUnauthorizedException,
+    classify_ai_builder_provider_failure,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStatus
 from eneo.flows.ai_builder.ai_builder_events import (
@@ -70,6 +71,11 @@ from eneo.flows.ai_builder.ai_builder_events import (
     build_usage_event,
 )
 from eneo.flows.ai_builder.ai_builder_plan_lifecycle import CreateFromPlanOutcome
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
+from eneo.flows.ai_builder.ai_builder_provider_call import (
+    ProviderCallTiming,
+    ProviderSilenceExpired,
+)
 from eneo.flows.ai_builder.ai_builder_router import (
     AIBuilderEnvelopedError,
     AIBuilderPublicErrorRoute,
@@ -105,6 +111,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
 )
 from eneo.flows.ai_builder.ai_builder_telemetry_models import SessionTelemetrySummary
+from eneo.flows.ai_builder.ai_builder_token_usage import CompletionTokenUsage
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
@@ -669,6 +676,46 @@ def _make_plan_stream_event():
 # ---------------------------------------------------------------------------
 # Helper function tests
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        (["critic", "future_owner"], ["critic"]),
+        (["critic", {}, [], 7, None, "lint"], ["critic", "lint"]),
+        (["future_owner"], []),
+        ("critic", []),
+        (None, []),
+    ],
+)
+def test_a_stored_attempt_is_kept_whatever_its_stored_producers(
+    stored: object, expected: list[str]
+) -> None:
+    attempt = {
+        "attempt": 1,
+        "kind": "initial",
+        "elapsed_ms": 5,
+        "failure_kind": "validation",
+        "failure_codes": ["x"],
+        "producers": stored,
+    }
+    turns = ai_builder_router_module._proposal_turn_diagnostics(
+        [
+            ConversationMessage(
+                message_id="assistant-stored",
+                role="assistant",
+                metadata={
+                    "planner_telemetry": {
+                        "proposal_attempts": [attempt, {**attempt, "attempt": 2}]
+                    }
+                },
+            )
+        ]
+    )
+
+    [turn] = turns
+    assert [a.attempt for a in turn.attempts] == [1, 2]
+    assert [a.producers for a in turn.attempts] == [expected, expected]
 
 
 def test_classifier_diagnostic_projection_exposes_slot_omission() -> None:
@@ -1283,6 +1330,7 @@ class TestGetSessionEndpoint:
                         "total_tokens": 6135,
                         "failure_kind": "parse",
                         "failure_codes": [],
+                        "producers": [],
                     },
                     {
                         "attempt": 2,
@@ -1293,6 +1341,7 @@ class TestGetSessionEndpoint:
                         "total_tokens": 8088,
                         "failure_kind": "validation",
                         "failure_codes": ["flow_step_invalid"],
+                        "producers": [],
                     },
                     {
                         "attempt": 3,
@@ -1303,6 +1352,7 @@ class TestGetSessionEndpoint:
                         "total_tokens": 10017,
                         "failure_kind": None,
                         "failure_codes": [],
+                        "producers": [],
                     },
                 ],
             }
@@ -1388,6 +1438,10 @@ class TestGetSessionEndpoint:
                 "completion_tokens": 300,
                 "total_tokens": 8_400,
                 "provider_failure_kind": None,
+                "local_deadline": None,
+                "first_chunk_ms": None,
+                "max_gap_ms": None,
+                "provider_elapsed_ms": None,
             },
             {
                 "message_id": "assistant-plan",
@@ -1397,9 +1451,83 @@ class TestGetSessionEndpoint:
                 "completion_tokens": None,
                 "total_tokens": 4_000,
                 "provider_failure_kind": None,
+                "local_deadline": None,
+                "first_chunk_ms": None,
+                "max_gap_ms": None,
+                "provider_elapsed_ms": None,
             },
         ]
         assert dumped["provider_call_records_skipped"] == 1
+
+    @pytest.mark.anyio
+    async def test_proposal_telemetry_diagnostics_attribute_what_the_turn_recorded(
+        self,
+    ):
+        """Producers and provider timing written by the turn read back as written."""
+
+        tracker = ProposalTurnTelemetry(
+            request_id="req-attributed",
+            model="openai/gpt-5.4",
+            target_kind=TargetKind.CREATE,
+        )
+        tracker.start_attempt(counts_as_repair=False)
+        tracker.record_response(
+            finish_reason="tool_calls",
+            usage=CompletionTokenUsage(10, 5, 15, source="provider"),
+            timing=ProviderCallTiming(
+                provider_elapsed_ms=900, first_chunk_ms=300, max_gap_ms=120
+            ),
+        )
+        tracker.record_attempt_failure(
+            failure_kind="quality",
+            failure_codes=frozenset({"vague_step_name"}),
+            producers=frozenset({"lint", "critic"}),
+        )
+        tracker.start_attempt(counts_as_repair=True)
+        tracker.fail_attempt(
+            failure=classify_ai_builder_provider_failure(
+                ProviderSilenceExpired(0.05), stage="proposal_completion"
+            ),
+            timing=ProviderCallTiming(
+                provider_elapsed_ms=400, first_chunk_ms=200, max_gap_ms=180
+            ),
+        )
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        session.conversation = [
+            ConversationMessage(
+                message_id="assistant-attributed",
+                role="assistant",
+                content="Plan skapad.",
+                metadata={"planner_telemetry": tracker.build_planner_telemetry()},
+            )
+        ]
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+        service.get_planning_state.return_value = PlanningState.empty()
+
+        result = await get_session_proposal_telemetry_diagnostics(
+            request=MagicMock(),
+            session_id=session.id,
+            container=container,
+        )
+
+        dumped = result.model_dump(mode="json")
+        [turn] = dumped["proposal_turns"]
+        assert [
+            (attempt["failure_kind"], attempt["producers"])
+            for attempt in turn["attempts"]
+        ] == [("quality", ["critic", "lint"]), ("provider_error", [])]
+        assert [
+            (
+                call["provider_failure_kind"],
+                call["local_deadline"],
+                call["first_chunk_ms"],
+                call["max_gap_ms"],
+                call["provider_elapsed_ms"],
+            )
+            for call in dumped["provider_calls"]
+        ] == [(None, None, 300, 120, 900), ("timeout", "silence", 200, 180, 400)]
 
     @pytest.mark.anyio
     async def test_proposal_telemetry_diagnostics_reject_non_creator(self):

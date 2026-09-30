@@ -8,6 +8,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorPhase,
     coerce_ai_builder_error_code,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import FailureProducer
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CorrectableFailure,
     TerminalFailure,
@@ -28,6 +29,16 @@ ArchitectureRepairDisposition = Literal[
     "server_defect",
 ]
 ArchitectureLogValue = str | int | bool | None
+# The owner of the rule behind each public code: the compilers and the
+# template contract assemble, the critic's invariants judge.
+_PRODUCER_BY_ARCHITECTURE_CODE: Mapping[ArchitectureErrorCode, FailureProducer] = (
+    MappingProxyType(
+        {
+            "architecture_materialization_failed": "assembly",
+            "architecture_critic_invariant_failed": "critic",
+        }
+    )
+)
 
 logger = get_logger(__name__)
 
@@ -43,7 +54,7 @@ class AIBuilderArchitectureError(Exception):
         affected: Sequence[str] = (),
     ) -> None:
         super().__init__(detail)
-        self.public_code = public_code
+        self.public_code: ArchitectureErrorCode = public_code
         self.repair_disposition: ArchitectureRepairDisposition = repair_disposition
         self.detail = detail
         self.log_context: Mapping[str, ArchitectureLogValue] = MappingProxyType(
@@ -94,6 +105,7 @@ def architecture_failure_outcome(
             feedback=error.detail,
             kind="validation",
             codes=codes,
+            producers=frozenset({_PRODUCER_BY_ARCHITECTURE_CODE[error.public_code]}),
         )
     log_architecture_error(error)
     return TerminalFailure(

@@ -437,6 +437,7 @@ async def test_process_edit_arguments_rejects_model_authored_downstream_wiring()
     )
 
     assert isinstance(result, CorrectableFailure)
+    assert result.producers == {"scope_guard"}
     assert result.kind == "quality"
     assert "existing_step_2" in result.feedback
     assert "selected step" in result.feedback
@@ -767,6 +768,7 @@ async def test_edit_enforces_template_preparation_stage_limit() -> None:
     rejected = await _process(flow=flow, arguments=arguments_with_stage_count(6))
 
     assert isinstance(rejected, CorrectableFailure)
+    assert rejected.producers == {"assembly"}
     assert rejected.kind == "validation"
     assert rejected.codes == frozenset({"template_preparation_stage_limit_exceeded"})
 
@@ -801,6 +803,7 @@ async def test_edit_removing_required_source_reader_field_is_rejected() -> None:
     )
 
     assert isinstance(result, CorrectableFailure)
+    assert result.producers == {"critic"}
     assert result.kind == "validation"
     assert "source_reader_required_fields_must_be_captured" in result.codes
     assert "summary" in result.feedback
@@ -1261,6 +1264,7 @@ async def test_an_edit_failure_records_only_a_reason_its_producer_declares() -> 
         )
 
     assert isinstance(result, CorrectableFailure), result
+    assert result.producers == {"assembly"}
     assert result.codes == frozenset({"invalid_existing_step_ref"})
 
 
@@ -3282,6 +3286,7 @@ async def test_an_edit_with_an_unknown_knowledge_ref_is_a_model_repair() -> None
     )
 
     assert isinstance(result, CorrectableFailure), result
+    assert result.producers == {"platform_validator"}
     assert result.kind == "validation"
     assert result.codes == frozenset({"unknown_kb_ref"})
     assert (
@@ -3873,6 +3878,7 @@ async def test_a_review_turn_may_not_change_a_step_the_findings_do_not_name():
         conversation=_review_command_conversation(),
     )
     assert isinstance(refused, CorrectableFailure)
+    assert refused.producers == {"review_guard"}
     assert "existing_step_2" in refused.feedback
 
     # The user's own words are their own edit: the bound is gone.
@@ -6121,6 +6127,7 @@ async def test_saved_step_preserves_contract_used_by_template_bindings(remove_co
     )
     if remove_contract:
         assert isinstance(result, CorrectableFailure), result
+        assert result.producers == {"scope_guard"}
         assert "consumer_requires_output_contract" in result.codes
         assert "step_b" in result.feedback
     else:
@@ -6778,6 +6785,7 @@ async def test_saved_step_implicit_json_consumer_contract_is_preserved(field_nam
         assert isinstance(result, ProposalReady), result
     else:
         assert isinstance(result, CorrectableFailure), result
+        assert result.producers == {"platform_validator"}
         assert "input_contract_type_mismatch" in result.codes
 
 

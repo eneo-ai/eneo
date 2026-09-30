@@ -18,7 +18,9 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     record_ai_builder_provider_failure,
 )
 from eneo.flows.ai_builder.ai_builder_provider_call import (
+    ObservedTiming,
     ProviderCallCeilingExpired,
+    ProviderCallTiming,
     ProviderSilenceExpired,
     ProviderStreamIncomplete,
     complete_with_silence_deadline,
@@ -721,7 +723,7 @@ def _rejection(body: dict[str, object]) -> BadRequestError:
     )
 
 
-def _admit(_control: str, _error: Exception) -> bool:
+def _admit(_control: str, _error: Exception, _timing: ProviderCallTiming) -> bool:
     return True
 
 
@@ -749,7 +751,7 @@ async def test_the_caller_can_refuse_the_second_request() -> None:
     )
     asked: list[str] = []
 
-    def refuse(control: str, _error: Exception) -> bool:
+    def refuse(control: str, _error: Exception, _timing: ProviderCallTiming) -> bool:
         asked.append(control)
         return False
 
@@ -777,7 +779,7 @@ async def test_a_refusal_after_the_stream_started_is_not_retried() -> None:
     client = SimpleNamespace(acompletion=AsyncMock(return_value=refused_midstream()))
     asked: list[str] = []
 
-    def admit(control: str, _error: Exception) -> bool:
+    def admit(control: str, _error: Exception, _timing: ProviderCallTiming) -> bool:
         asked.append(control)
         return True
 
@@ -1227,3 +1229,122 @@ async def test_explicit_reasoning_rejection_is_not_retried_without_effort(code):
     client.acompletion.assert_awaited_once()
     assert client.acompletion.await_args.kwargs["reasoning_effort"] == "high"
     retry.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_stall_reports_the_first_chunk_and_the_silence_it_ended_on() -> None:
+    timings: list[ProviderCallTiming] = []
+    stream = _recording_stream(
+        [
+            _tool_chunk('{"name": "A', first=True, finish=None),
+            _tool_chunk('"}', first=False, finish="tool_calls"),
+        ],
+        _Closed(),
+        stall_after=1,
+    )
+
+    with pytest.raises(ProviderSilenceExpired):
+        await complete_with_silence_deadline(
+            _stream_client(stream),
+            silence_deadline_seconds=0.05,
+            ceiling_seconds=5.0,
+            request=_REQUEST,
+            observe_timing=timings.append,
+        )
+
+    [timing] = timings
+    assert timing.first_chunk_ms is not None
+    assert timing.max_gap_ms is not None and timing.max_gap_ms >= 50
+    assert timing.provider_elapsed_ms >= timing.max_gap_ms
+
+
+@pytest.mark.asyncio
+async def test_a_flowing_answer_reports_its_longest_wait_between_chunks() -> None:
+    timings: list[ProviderCallTiming] = []
+    chunks = [_tool_chunk('{"name": "A', first=True, finish=None)]
+    chunks += [_tool_chunk('"}', first=False, finish="tool_calls"), _usage_chunk()]
+    client = SimpleNamespace(
+        acompletion=AsyncMock(return_value=_stream(chunks, delay=0.03))
+    )
+
+    await complete_with_silence_deadline(
+        client,
+        silence_deadline_seconds=1.0,
+        ceiling_seconds=5.0,
+        request=_REQUEST,
+        observe_timing=timings.append,
+    )
+
+    [timing] = timings
+    assert timing.first_chunk_ms is not None and timing.first_chunk_ms >= 30
+    assert timing.max_gap_ms is not None and timing.max_gap_ms >= 30
+    assert timing.provider_elapsed_ms >= timing.first_chunk_ms + timing.max_gap_ms - 1
+
+
+@pytest.mark.asyncio
+async def test_a_whole_answer_or_a_refused_request_has_no_chunk_timing() -> None:
+    whole = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
+    )
+    timings: list[ProviderCallTiming] = []
+
+    await complete_with_silence_deadline(
+        SimpleNamespace(acompletion=AsyncMock(return_value=whole)),
+        silence_deadline_seconds=1.0,
+        ceiling_seconds=5.0,
+        request=_REQUEST,
+        observe_timing=timings.append,
+    )
+    with pytest.raises(TimeoutError):
+        await complete_with_silence_deadline(
+            SimpleNamespace(acompletion=AsyncMock(side_effect=TimeoutError("sdk"))),
+            silence_deadline_seconds=1.0,
+            ceiling_seconds=5.0,
+            request=_REQUEST,
+            observe_timing=timings.append,
+        )
+
+    assert [(t.first_chunk_ms, t.max_gap_ms) for t in timings] == [
+        (None, None),
+        (None, None),
+    ]
+    assert all(t.provider_elapsed_ms >= 0 for t in timings)
+
+
+@pytest.mark.asyncio
+async def test_each_request_of_a_retried_call_is_timed_on_its_own() -> None:
+    # The refused request's wait is reported to the caller that decides on the
+    # retry; the replacement's timing starts when it is sent.
+    calls = 0
+
+    async def acompletion(**_: object) -> object:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await asyncio.sleep(0.15)
+            raise _rejection(_UNSUPPORTED_TEMPERATURE)
+        return _stream([_tool_chunk('{"name": "A"}', first=True, finish="tool_calls")])
+
+    refused: list[ProviderCallTiming] = []
+
+    def admit(_control: str, _error: Exception, timing: ProviderCallTiming) -> bool:
+        refused.append(timing)
+        return True
+
+    observed = ObservedTiming()
+    await complete_with_silence_deadline(
+        SimpleNamespace(acompletion=acompletion),
+        silence_deadline_seconds=5.0,
+        ceiling_seconds=10.0,
+        request={**_REQUEST, "temperature": 0.0},
+        retry_without_refused_control=admit,
+        observe_timing=observed,
+    )
+
+    [refusal] = refused
+    assert refusal.provider_elapsed_ms >= 140
+    assert refusal.first_chunk_ms is None
+    assert observed.value is not None
+    assert observed.value.provider_elapsed_ms < 100
+    assert observed.value.first_chunk_ms is not None
+    assert observed.value.first_chunk_ms < 100

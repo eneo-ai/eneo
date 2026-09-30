@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from time import monotonic_ns
 from typing import TYPE_CHECKING, Any, Literal, get_args
 from uuid import UUID
@@ -45,18 +45,33 @@ from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
     from eneo.flows.ai_builder.ai_builder_error_contract import (
+        AIBuilderLocalDeadline,
         AIBuilderProviderFailure,
         AIBuilderProviderFailureKind,
         AIBuilderProviderStatusClass,
         AIBuilderProviderTurnState,
         JsonScalar,
     )
+    from eneo.flows.ai_builder.ai_builder_provider_call import ProviderCallTiming
     from eneo.flows.application.flow_authoring_command import FlowAuthoringPreview
 
 ToolProcessingFailureKind = Literal[
     "parse",
     "validation",
     "quality",
+]
+# The owner of the rule that wrote a correctable failure's feedback, named for
+# its module family: argument parsing and tool admission, spec assembly by the
+# compilers, the platform's spec validator and resource resolution, its lint
+# warnings, the plan critic, and the review and scoped-edit guards.
+FailureProducer = Literal[
+    "parse",
+    "assembly",
+    "platform_validator",
+    "lint",
+    "critic",
+    "review_guard",
+    "scope_guard",
 ]
 ProposalFailureKind = Literal[
     "parse",
@@ -104,6 +119,8 @@ ProposalAttemptFailureKind = Literal[
     "provider_truncation",
     "internal_error",
 ]
+# A failure the model can correct carries the owners of the rules that wrote it.
+_CORRECTABLE_FAILURE_KINDS = frozenset[str](get_args(ToolProcessingFailureKind))
 ApplyFailurePhase = Literal["prepare_authoring", "apply_authoring"]
 MaterializerProgressStage = Literal[
     "flow_created",
@@ -114,7 +131,7 @@ MaterializerProgressStage = Literal[
 ]
 
 PROPOSAL_TELEMETRY_LOG_KEY = "ai_builder_proposal_telemetry"
-PROPOSAL_TELEMETRY_SCHEMA_VERSION = 2
+PROPOSAL_TELEMETRY_SCHEMA_VERSION = 3
 APPLY_TELEMETRY_LOG_KEY = "ai_builder_apply_telemetry"
 APPLY_TELEMETRY_SCHEMA_VERSION = 2
 
@@ -176,6 +193,8 @@ class ProposalAttemptTelemetryPayload(BaseModel):
     failure_kind: ProposalAttemptFailureKind | None = None
     failure_codes: tuple[str, ...] = ()
     failure_code_count: int = Field(default=0, ge=0)
+    # Sorted and closed, so bounded by the producer set itself.
+    producers: tuple[FailureProducer, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,6 +209,10 @@ class ProposalCallRecord:
     provider_failure_kind: AIBuilderProviderFailureKind | None = None
     provider_status_class: AIBuilderProviderStatusClass | None = None
     provider_turn_state: AIBuilderProviderTurnState | None = None
+    local_deadline: AIBuilderLocalDeadline | None = None
+    first_chunk_ms: int | None = None
+    max_gap_ms: int | None = None
+    provider_elapsed_ms: int | None = None
 
 
 def _call_record_metadata(record: ProposalCallRecord) -> PlannerCallRecordMetadata:
@@ -223,6 +246,10 @@ def _call_record_metadata(record: ProposalCallRecord) -> PlannerCallRecordMetada
         provider_failure_kind=record.provider_failure_kind,
         provider_status_class=record.provider_status_class,
         provider_turn_state=record.provider_turn_state,
+        local_deadline=record.local_deadline,
+        first_chunk_ms=record.first_chunk_ms,
+        max_gap_ms=record.max_gap_ms,
+        provider_elapsed_ms=record.provider_elapsed_ms,
     )
 
 
@@ -320,53 +347,67 @@ class ProposalTurnTelemetry:
         *,
         call: ProposalCallRecord,
         usage: CompletionTokenUsage,
+        timing: ProviderCallTiming | None = None,
     ) -> None:
-        index = call.attempt - 1
-        if index >= len(self.call_records) or self.call_records[index] != call:
-            raise ValueError("Call record does not belong to this turn")
-        self.call_records[index] = ProposalCallRecord(
-            call_kind=call.call_kind,
-            usage=usage,
-            request_id=call.request_id,
-            attempt=call.attempt,
-            request_budget=call.request_budget,
-        )
+        self._settle_call(call, usage=usage, timing=timing, failure=None)
 
     def fail_call(
         self,
         *,
         call: ProposalCallRecord,
         failure: AIBuilderProviderFailure,
+        timing: ProviderCallTiming | None = None,
+    ) -> None:
+        self._settle_call(
+            call, usage=CompletionTokenUsage(), timing=timing, failure=failure
+        )
+
+    def _settle_call(
+        self,
+        call: ProposalCallRecord,
+        *,
+        usage: CompletionTokenUsage,
+        timing: ProviderCallTiming | None,
+        failure: AIBuilderProviderFailure | None,
     ) -> None:
         index = call.attempt - 1
         if index >= len(self.call_records) or self.call_records[index] != call:
             raise ValueError("Call record does not belong to this turn")
-        self.call_records[index] = ProposalCallRecord(
-            call_kind=call.call_kind,
-            usage=CompletionTokenUsage(),
-            request_id=call.request_id,
-            attempt=call.attempt,
-            request_budget=call.request_budget,
-            provider_failure_kind=failure.kind,
-            provider_status_class=failure.status_class,
-            provider_turn_state=failure.turn_state,
+        if call.provider_failure_kind is not None:
+            raise ValueError("A failed call record is final")
+        self.call_records[index] = replace(
+            call,
+            usage=usage,
+            provider_failure_kind=failure.kind if failure is not None else None,
+            provider_status_class=(
+                failure.status_class if failure is not None else None
+            ),
+            provider_turn_state=failure.turn_state if failure is not None else None,
+            local_deadline=failure.local_deadline if failure is not None else None,
+            first_chunk_ms=timing.first_chunk_ms if timing is not None else None,
+            max_gap_ms=timing.max_gap_ms if timing is not None else None,
+            provider_elapsed_ms=(
+                timing.provider_elapsed_ms if timing is not None else None
+            ),
         )
 
     def retry_call(
         self,
         *,
         failure: AIBuilderProviderFailure,
+        timing: ProviderCallTiming | None = None,
         call: ProposalCallRecord | None = None,
     ) -> ProposalCallRecord:
         """Record a refused request as a failed call and begin its replacement.
 
-        The replacement keeps the refused call's kind and budget; without
-        ``call`` the attempt's pending call is the one refused.
+        The refused call carries its own request's ``timing``. The replacement
+        keeps the refused call's kind and budget; without ``call`` the
+        attempt's pending call is the one refused.
         """
         refused = call if call is not None else self._pending_call
         if refused is None:
             raise ValueError("No provider call to retry")
-        self.fail_call(call=refused, failure=failure)
+        self.fail_call(call=refused, failure=failure, timing=timing)
         replacement = self.begin_call(
             call_kind=refused.call_kind, request_budget=refused.request_budget
         )
@@ -399,18 +440,49 @@ class ProposalTurnTelemetry:
         finish_reason: str | None,
         usage: CompletionTokenUsage,
         counts_as_repair: bool = False,
+        timing: ProviderCallTiming | None = None,
     ) -> None:
         if self._attempt_started_ns is None:
             self.start_attempt(counts_as_repair=counts_as_repair)
-        self._complete_attempt(usage=usage)
+        self._complete_attempt(usage=usage, timing=timing)
         self.finish_reason = finish_reason
+
+    def fail_attempt(
+        self,
+        *,
+        failure: AIBuilderProviderFailure,
+        timing: ProviderCallTiming | None = None,
+    ) -> None:
+        """End the open attempt on a provider failure: the one terminal owner.
+
+        The pending call is consumed here exactly once and recorded as failed
+        with the failure's facts, and the attempt is closed in the same step,
+        so nothing afterwards can complete that call again. With no open attempt
+        there is nothing to fail: a recorded attempt is never rewritten.
+        """
+
+        if self._attempt_started_ns is None:
+            raise ValueError("No open attempt to fail")
+        pending, self._pending_call = self._pending_call, None
+        if pending is not None:
+            self.fail_call(call=pending, failure=failure, timing=timing)
+        self.record_attempt_failure(
+            failure_kind="provider_error", producers=frozenset()
+        )
 
     def record_attempt_failure(
         self,
         *,
         failure_kind: ProposalAttemptFailureKind,
+        producers: frozenset[FailureProducer],
         failure_codes: frozenset[str] = frozenset(),
     ) -> None:
+        """Attribute the attempt's failure: a correctable kind names its owners."""
+
+        if failure_kind in _CORRECTABLE_FAILURE_KINDS and not producers:
+            raise ValueError(
+                f"A {failure_kind} attempt failure names at least one producer"
+            )
         if self._attempt_started_ns is not None:
             self._complete_attempt(usage=None)
         if not self.proposal_attempts:
@@ -423,13 +495,19 @@ class ProposalTurnTelemetry:
                 "failure_kind": failure_kind,
                 "failure_codes": safe_codes[:_MAX_ATTEMPT_FAILURE_CODES],
                 "failure_code_count": len(safe_codes),
+                "producers": tuple(sorted(producers)),
             }
         )
 
     def finalize_pending_attempt(self) -> None:
         self._complete_attempt(usage=None)
 
-    def _complete_attempt(self, *, usage: CompletionTokenUsage | None) -> None:
+    def _complete_attempt(
+        self,
+        *,
+        usage: CompletionTokenUsage | None,
+        timing: ProviderCallTiming | None = None,
+    ) -> None:
         started_ns = self._attempt_started_ns
         if started_ns is None:
             return
@@ -448,7 +526,9 @@ class ProposalTurnTelemetry:
             )
         )
         if self._pending_call is not None:
-            self.complete_call(call=self._pending_call, usage=attempt_usage)
+            self.complete_call(
+                call=self._pending_call, usage=attempt_usage, timing=timing
+            )
             self._pending_call = None
         self._attempt_started_ns = None
         self._attempt_counts_as_repair = False

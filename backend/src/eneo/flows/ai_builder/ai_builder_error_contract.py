@@ -29,6 +29,7 @@ from eneo.completion_models.domain.model_capacity import UnknownModelCapacityErr
 from eneo.flows.ai_builder.ai_builder_provider_call import (
     PROVIDER_ERROR_PARAMETERS,
     ProviderCallCeilingExpired,
+    ProviderCallTiming,
     ProviderRejection,
     ProviderSilenceExpired,
     ProviderStreamIncomplete,
@@ -73,6 +74,9 @@ AIBuilderProviderFailureStage = Literal[
     "review_suggestions",
 ]
 AIBuilderProviderTurnState = Literal["committed", "provider_outcome_unknown"]
+# Which of Eneo's own provider-call timers expired; None when none did (an SDK
+# or gateway timeout included).
+AIBuilderLocalDeadline = Literal["silence", "ceiling"]
 # The public error detail a provider failure carries; the measurement receipt
 # accepts exactly these values as provider evidence.
 AIBuilderProviderDisposition = Literal["known_rejection", "provider_outcome_unknown"]
@@ -307,6 +311,7 @@ class AIBuilderProviderFailure:
     public_error: AIBuilderPublicError
     retry_scope: AIBuilderProviderRetryScope
     another_call_permitted: bool
+    local_deadline: AIBuilderLocalDeadline | None
 
     def as_exception(
         self,
@@ -453,6 +458,13 @@ def classify_ai_builder_provider_failure(
         ),
         retry_scope=retry_scope,
         another_call_permitted=False,
+        local_deadline=(
+            "silence"
+            if isinstance(error, ProviderSilenceExpired)
+            else "ceiling"
+            if isinstance(error, ProviderCallCeilingExpired)
+            else None
+        ),
     )
 
 
@@ -516,10 +528,14 @@ def record_ai_builder_provider_failure(
     tenant_id: UUID | str | None = None,
     incident_evidence: AIBuilderProviderRequestEvidence | None = None,
     request_budget: AIBuilderResolvedRequestBudget | None = None,
-    provider_elapsed_ms: int | None = None,
+    timing: ProviderCallTiming | None = None,
     event_logger: logging.Logger = logger,
 ) -> AIBuilderProviderFailure:
-    """Record one safe event while preserving coarse persisted turn telemetry."""
+    """Record one safe event while preserving coarse persisted turn telemetry.
+
+    With ``usage_tracker`` the failure also ends that turn's open attempt and
+    its pending call, in one step owned by the tracker.
+    """
 
     failure = classify_ai_builder_provider_failure(
         error,
@@ -527,7 +543,7 @@ def record_ai_builder_provider_failure(
         request_id=request_id,
     )
     if usage_tracker is not None:
-        usage_tracker.record_attempt_failure(failure_kind="provider_error")
+        usage_tracker.fail_attempt(failure=failure, timing=timing)
     rejection = failure.rejection
     safe_detail: dict[str, object] = {
         "provider_extraction_source": rejection.source,
@@ -560,16 +576,17 @@ def record_ai_builder_provider_failure(
         )
         if request_budget.input_cap_tokens is not None:
             safe_detail["input_cap_tokens"] = request_budget.input_cap_tokens
-    if provider_elapsed_ms is not None:
-        safe_detail["provider_elapsed_ms"] = provider_elapsed_ms
-        local_deadline = (
-            "silence"
-            if isinstance(error, ProviderSilenceExpired)
-            else "ceiling"
-            if isinstance(error, ProviderCallCeilingExpired)
-            else None
-        )
-        safe_detail["deadline_reached"] = local_deadline is not None
+    # The keys are always present: null when the seam raised before its clock
+    # existed, so the log shape does not depend on where the call failed.
+    safe_detail["provider_elapsed_ms"] = (
+        timing.provider_elapsed_ms if timing is not None else None
+    )
+    safe_detail["deadline_reached"] = (
+        failure.local_deadline is not None if timing is not None else None
+    )
+    if timing is not None:
+        provider_elapsed_ms = timing.provider_elapsed_ms
+        local_deadline = failure.local_deadline
         if local_deadline is not None:
             safe_detail["local_deadline"] = local_deadline
         if request_budget is not None:

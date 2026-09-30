@@ -6,7 +6,7 @@ from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Mapp
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Annotated, Any, NoReturn, cast
+from typing import TYPE_CHECKING, Annotated, Any, NoReturn, cast, get_args
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Request, status
@@ -123,6 +123,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review_sample import FlowReviewSample
 from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
     FlowReviewSuggestions,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import FailureProducer
 from eneo.flows.ai_builder.ai_builder_service import (
     AIBuilderService,
     PreparedMessageContext,
@@ -175,6 +176,7 @@ if TYPE_CHECKING:
     from eneo.tenants.tenant_repo import TenantRepository
 
 logger = get_logger(__name__)
+_FAILURE_PRODUCERS = frozenset(get_args(FailureProducer))
 
 
 def _public_error_code_from_exception(
@@ -498,6 +500,10 @@ def _provider_call_diagnostics(
                     completion_tokens=record.completion_tokens,
                     total_tokens=record.total_tokens,
                     provider_failure_kind=record.provider_failure_kind,
+                    local_deadline=record.local_deadline,
+                    first_chunk_ms=record.first_chunk_ms,
+                    max_gap_ms=record.max_gap_ms,
+                    provider_elapsed_ms=record.provider_elapsed_ms,
                 )
             )
     return calls, skipped
@@ -524,6 +530,7 @@ def _proposal_turn_diagnostics(
                 continue
             attempt_payload = cast(Mapping[str, Any], raw_attempt)
             raw_codes = cast(Any, attempt_payload.get("failure_codes"))
+            raw_producers = cast(Any, attempt_payload.get("producers"))
             try:
                 attempts.append(
                     AIBuilderProposalAttemptDiagnostic.model_validate(
@@ -544,7 +551,17 @@ def _proposal_turn_diagnostics(
                                 code
                                 for code in cast(list[Any], raw_codes or [])
                                 if isinstance(code, str)
-                            ]
+                            ],
+                            "producers": [
+                                producer
+                                for producer in (
+                                    cast(list[Any], raw_producers)
+                                    if isinstance(raw_producers, list)
+                                    else []
+                                )
+                                if isinstance(producer, str)
+                                and producer in _FAILURE_PRODUCERS
+                            ],
                         }
                     )
                 )

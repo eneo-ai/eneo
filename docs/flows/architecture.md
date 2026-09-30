@@ -123,6 +123,34 @@ as the thing to check, since raising Eneo's deadline cannot fix it. A 502 or
 remains unknown unless the provider reports it. Prompts, attachment text,
 credentials, and raw provider messages are excluded.
 
+A failed turn that ends with an assistant message persists typed attribution in
+that message's telemetry (attempts, producers, timing). A terminal turn without an
+assistant message leaves a structured log event instead: a known provider rejection
+emits `ai_builder.provider.failure` (`schema_version` 1, the provider failure with its
+timing, without the proposal attempts), and a failed proposal turn emits
+`ai_builder.proposal.failed_turn` (`schema_version` 3, with the attempts). A persisted
+snapshot for these turns is V0.2c.
+Every correctable failure names the owner of each rule whose feedback it carries
+(`parse`, `assembly`, `platform_validator`, `lint`, `critic`, `review_guard`,
+`scope_guard`); a merged failure names every contributor, and each failed
+proposal attempt records that set as `producers`. Each call record carries the
+provider timing measured in the provider-call owner: `first_chunk_ms` (from the
+start of that call's own request; absent for a whole, non-streamed answer),
+`max_gap_ms` (the longest wait between chunks, the wait the call ended on
+included), `provider_elapsed_ms`, and, on a failed call, `local_deadline`
+(`silence` or `ceiling` when Eneo's own timer expired, absent for an SDK or
+gateway timeout). A request refused for one sampling control and sent again
+without it is two call records, each timed from its own request; the shared
+ceiling still bounds both. One owner ends an attempt on a provider failure: it
+records the failure on the pending call and closes the attempt in the same step,
+so a failed call is never completed afterwards, and it refuses to fail a turn
+that has no open attempt. A cancelled turn is not persisted and its open call is
+not recorded as failed. The provider-failure log always carries
+`provider_elapsed_ms` and `deadline_reached`, `null` when the failure came
+before the provider call was timed. The creator-only proposal-telemetry diagnostics project
+these fields; records written before them read as empty or absent. The
+failed-turn log event is `schema_version` 3.
+
 The AI Builder failure summary reads `builder_sessions`, `flow_runs`, and
 `builder_client_errors`. Each section returns at most 20 failure families and
 five sample identifiers per family, with `truncated` and `total_families`

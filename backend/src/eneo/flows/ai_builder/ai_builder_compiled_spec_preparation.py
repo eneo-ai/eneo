@@ -141,6 +141,7 @@ def authored_knowledge_ref_repair(
         ),
         kind="validation",
         codes=frozenset(codes),
+        producers=frozenset({"platform_validator"}),
     )
 
 

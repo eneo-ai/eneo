@@ -306,6 +306,7 @@ async def test_scoped_edit_still_rejects_quality_warnings_on_the_selected_step(
         )
 
     assert isinstance(result, CorrectableFailure), result
+    assert result.producers == {"lint"}
     assert result.codes == frozenset({"vague_step_name"})
     store.assert_not_awaited()
 
@@ -935,8 +936,10 @@ async def test_create_propose_flow_retryable_assembly_rejection_invokes_repair()
             feedback="uses_previous_fields is backend-owned wiring.",
             kind="validation",
             codes=frozenset({"assembly_explicit_refs_not_supported"}),
+            producers=frozenset({"assembly"}),
         )
     )
+    tracker.start_attempt(counts_as_repair=False)
 
     async def _repair_events(request):
         assert request.failure.codes == frozenset(
@@ -968,6 +971,11 @@ async def test_create_propose_flow_retryable_assembly_rejection_invokes_repair()
     assert telemetry["proposal_first_attempt_failure_kind"] == "validation"
     assert telemetry["proposal_repair_invocation_count"] == 1
     assert telemetry["proposal_repair_invocation_reasons"] == ["validation"]
+    [attempt] = telemetry["proposal_attempts"]
+    assert (attempt["failure_kind"], attempt["producers"]) == (
+        "validation",
+        ["assembly"],
+    )
 
 
 @pytest.mark.asyncio
@@ -1401,6 +1409,7 @@ async def test_create_propose_flow_retry_does_not_preserve_failed_attempt_step_c
         return_value=CorrectableFailure(
             feedback="Invalid propose_flow arguments: bad shape",
             kind="parse",
+            producers=frozenset({"parse"}),
         )
     )
 
@@ -1528,7 +1537,9 @@ async def test_create_admission_rehomes_field_shaped_step_before_compilation() -
     schema = build_propose_flow_tool_schema(resource_catalog=resource_catalog)
     process_create = AsyncMock(
         return_value=CorrectableFailure(
-            feedback="Continue with normal validation.", kind="validation"
+            feedback="Continue with normal validation.",
+            kind="validation",
+            producers=frozenset({"platform_validator"}),
         )
     )
     arguments = {

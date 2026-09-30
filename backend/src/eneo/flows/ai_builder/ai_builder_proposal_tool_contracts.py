@@ -36,6 +36,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     ProposalObligationProjection,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+    FailureProducer,
     ProposalAttemptFailureKind,
     ProposalTurnTelemetry,
     ToolProcessingFailureKind,
@@ -510,12 +511,18 @@ class CorrectableFailure:
 
     Producers write feedback that stands on its own: the failure, the exact
     path, and the correction. No consumer adds recipes or inspects `codes` to
-    decide whether to retry.
+    decide whether to retry. `producers` names the owner of every rule whose
+    feedback the text carries, so a failed attempt is attributable.
     """
 
     feedback: str
     kind: ToolProcessingFailureKind
+    producers: frozenset[FailureProducer]
     codes: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        if not self.producers:
+            raise ValueError("A correctable failure names at least one producer")
 
 
 @dataclass(frozen=True)

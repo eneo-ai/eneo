@@ -439,6 +439,7 @@ async def test_outline_processing_reports_unknown_resource_from_compiled_spec() 
     # test_an_invented_unrequested_model_is_cleared_before_resolution); an
     # unknown knowledge ref is still reported.
     assert isinstance(result, CorrectableFailure)
+    assert result.producers == {"platform_validator"}
     assert result.kind == "validation"
     assert "Unknown knowledge base reference 'missing-policy'" in result.feedback
 
@@ -717,6 +718,7 @@ async def test_outline_assembly_rejection_succeeds_after_model_correction() -> N
     )
 
     assert isinstance(result, CorrectableFailure)
+    assert result.producers == {"assembly"}
     assert result.kind == "validation"
     assert result.codes == frozenset({"assembly_source_file_first_step_requires_json"})
     assert "first semantic step" in result.feedback
@@ -863,6 +865,7 @@ async def test_model_correctable_architecture_failure_becomes_repair_feedback() 
         )
 
     assert isinstance(result, CorrectableFailure)
+    assert result.producers == {"assembly"}
     assert result.feedback == error.detail
     assert result.kind == "validation"
     assert result.codes == frozenset({"assembly_source_file_first_step_requires_json"})

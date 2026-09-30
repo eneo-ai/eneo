@@ -20,6 +20,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderLocalDeadline,
     AIBuilderProviderFailureKind,
     AIBuilderProviderStatusClass,
     AIBuilderProviderTurnState,
@@ -71,6 +72,12 @@ class PlannerCallRecordMetadata(BaseModel):
     provider_failure_kind: AIBuilderProviderFailureKind | None = None
     provider_status_class: AIBuilderProviderStatusClass | None = None
     provider_turn_state: AIBuilderProviderTurnState | None = None
+    # Measured at the provider seam; absent when the call yielded no chunk or
+    # an older build wrote the record.
+    local_deadline: AIBuilderLocalDeadline | None = None
+    first_chunk_ms: int | None = Field(default=None, ge=0)
+    max_gap_ms: int | None = Field(default=None, ge=0)
+    provider_elapsed_ms: int | None = Field(default=None, ge=0)
 
 
 class _PersistedPlannerTelemetry(BaseModel):

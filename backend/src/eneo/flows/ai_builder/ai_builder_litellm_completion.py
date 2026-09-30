@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
@@ -33,6 +32,8 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     outbound_proposal_tool_schemas,
 )
 from eneo.flows.ai_builder.ai_builder_provider_call import (
+    ObservedTiming,
+    ProviderCallTiming,
     complete_with_silence_deadline,
 )
 from eneo.flows.ai_builder.ai_builder_token_usage import (
@@ -122,7 +123,7 @@ async def call_proposal_completion(
             call_kind=call_kind,
             request_budget=request_budget,
         )
-    provider_started_at = time.perf_counter()
+    timing = ObservedTiming()
 
     def observe_sdk_input(sdk_input: Mapping[str, Any]) -> None:
         nonlocal incident_evidence
@@ -130,9 +131,11 @@ async def call_proposal_completion(
             request=request, sdk_input=sdk_input
         )
 
-    def admit_request_without_refused_control(_control: str, error: Exception) -> bool:
+    def admit_request_without_refused_control(
+        _control: str, error: Exception, refused_timing: ProviderCallTiming
+    ) -> bool:
         # One more request costs one call of the turn's budget and is its own
-        # call record; the refused one is recorded as failed.
+        # call record; the refused one is recorded as failed, with its own timing.
         if not request.call_budget.try_start_call():
             return False
         if usage_tracker is not None:
@@ -141,7 +144,8 @@ async def call_proposal_completion(
                     error,
                     stage="proposal_completion",
                     request_id=usage_tracker.request_id,
-                )
+                ),
+                timing=refused_timing,
             )
         return True
 
@@ -162,6 +166,7 @@ async def call_proposal_completion(
             },
             retry_without_refused_control=admit_request_without_refused_control,
             observe_sdk_input=observe_sdk_input,
+            observe_timing=timing,
         )
     except Exception as error:
         failure = record_ai_builder_provider_failure(
@@ -171,7 +176,7 @@ async def call_proposal_completion(
             request_id=usage_tracker.request_id if usage_tracker is not None else None,
             incident_evidence=incident_evidence,
             request_budget=request_budget,
-            provider_elapsed_ms=int((time.perf_counter() - provider_started_at) * 1000),
+            timing=timing.value,
         )
         raise failure.as_exception() from error
     response = normalize_litellm_completion_response(raw_response)
@@ -188,6 +193,7 @@ async def call_proposal_completion(
             finish_reason=metadata.finish_reason,
             usage=metadata.usage,
             counts_as_repair=request.counts_as_repair,
+            timing=timing.value,
         )
     return response
 

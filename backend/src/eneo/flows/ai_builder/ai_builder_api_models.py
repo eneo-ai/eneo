@@ -38,6 +38,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCategory,
     AIBuilderErrorPhase,
+    AIBuilderLocalDeadline,
     AIBuilderProviderFailureKind,
     AIBuilderPublicError,
 )
@@ -58,6 +59,7 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     AIBuilderStepEditIntent,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import FailureProducer
 from eneo.flows.ai_builder.ai_builder_telemetry import ProviderCallKind
 from eneo.flows.ai_builder.ai_builder_telemetry_models import (
     SessionTelemetrySummary,
@@ -303,6 +305,10 @@ class AIBuilderConversationMessage(BaseModel):
     named_content_fields_edit: NamedContentFieldsEditRequest | None = None
 
 
+def _no_producers() -> list[FailureProducer]:
+    return []
+
+
 class AIBuilderProposalAttemptDiagnostic(BaseModel):
     """Content-free accounting facts for one proposal provider attempt."""
 
@@ -316,6 +322,8 @@ class AIBuilderProposalAttemptDiagnostic(BaseModel):
     total_tokens: int | None = None
     failure_kind: str | None = None
     failure_codes: list[str] = Field(default_factory=list)
+    # Empty for an attempt that did not fail correctably or an older record.
+    producers: list[FailureProducer] = Field(default_factory=_no_producers)
 
 
 class AIBuilderProviderCallDiagnostic(BaseModel):
@@ -335,6 +343,10 @@ class AIBuilderProviderCallDiagnostic(BaseModel):
     completion_tokens: int | None = None
     total_tokens: int | None = None
     provider_failure_kind: AIBuilderProviderFailureKind | None = None
+    local_deadline: AIBuilderLocalDeadline | None = None
+    first_chunk_ms: int | None = None
+    max_gap_ms: int | None = None
+    provider_elapsed_ms: int | None = None
 
 
 class AIBuilderProposalTurnDiagnostic(BaseModel):

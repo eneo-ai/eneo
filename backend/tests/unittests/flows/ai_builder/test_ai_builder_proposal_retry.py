@@ -189,7 +189,12 @@ def _correctable(
     kind: str = "validation",
     codes: frozenset[str] = frozenset(),
 ) -> CorrectableFailure:
-    return CorrectableFailure(feedback=feedback, kind=kind, codes=codes)  # type: ignore[arg-type]
+    return CorrectableFailure(
+        feedback=feedback,
+        kind=kind,  # type: ignore[arg-type]
+        codes=codes,
+        producers=frozenset({"platform_validator"}),
+    )
 
 
 def _terminal() -> TerminalFailure:
@@ -567,6 +572,33 @@ async def test_malformed_json_from_a_repair_is_correctable_once_more() -> None:
     assert seen == [{"flow_name": "Valid"}]
     telemetry = usage.build_planner_telemetry()
     assert PROPOSAL_PARSE_JSON_FAILURE_CODE in json.dumps(telemetry)
+    assert [
+        (attempt.get("failure_kind"), attempt["producers"])
+        for attempt in telemetry["proposal_attempts"]
+    ] == [("parse", ["parse"]), (None, [])]
+
+
+@pytest.mark.asyncio
+async def test_a_repair_attempt_records_who_wrote_its_feedback() -> None:
+    async def judged(_arguments: dict[str, Any]) -> CorrectableFailure:
+        return CorrectableFailure(
+            feedback="Quality issues: name the step.",
+            kind="quality",
+            codes=frozenset({"vague_step_name"}),
+            producers=frozenset({"lint", "critic"}),
+        )
+
+    attempt = await _recorded_repair_attempt(
+        repair_arguments={"flow_name": "Vague"},
+        process_arguments=judged,
+        target_kind=TargetKind.CREATE,
+    )
+
+    assert (
+        attempt["failure_kind"],
+        attempt["failure_codes"],
+        attempt["producers"],
+    ) == ("quality", ["vague_step_name"], ["critic", "lint"])
 
 
 @pytest.mark.asyncio

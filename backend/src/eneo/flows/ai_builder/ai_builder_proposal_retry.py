@@ -41,6 +41,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_capture import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     PROPOSAL_PARSE_JSON_FAILURE_CODE,
+    FailureProducer,
     ProposalAttemptFailureKind,
     ProposalFailedTurnBranch,
     ProposalTerminalFailureKind,
@@ -168,12 +169,14 @@ def _record_attempt_failure(
     ctx: ProposalTurnContext,
     *,
     failure_kind: ProposalAttemptFailureKind,
+    producers: frozenset[FailureProducer],
     failure_codes: frozenset[str] = frozenset(),
 ) -> None:
     if ctx.usage_tracker is not None:
         ctx.usage_tracker.record_attempt_failure(
             failure_kind=failure_kind,
             failure_codes=failure_codes,
+            producers=producers,
         )
 
 
@@ -575,11 +578,15 @@ async def _repair_call_result(
     """Classify one repair completion; text without a tool gets one forced call."""
 
     if not response.choices:
-        _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
+        _record_attempt_failure(
+            ctx, failure_kind="missing_submission_tool", producers=frozenset()
+        )
         return _RepairCallResult(missing_tool_call_failure(), None, None)
     choice = response.choices[0]
     if choice.finish_reason == "length":
-        _record_attempt_failure(ctx, failure_kind="provider_truncation")
+        _record_attempt_failure(
+            ctx, failure_kind="provider_truncation", producers=frozenset()
+        )
         return _RepairCallResult(
             provider_truncation_failure(phase=AIBuilderErrorPhase.SELF_CORRECTION),
             None,
@@ -596,7 +603,9 @@ async def _repair_call_result(
             assistant_content=assistant_text or "Här är mitt korrigerade förslag:",
         )
         return _RepairCallResult(outcome, tool_call, assistant_text)
-    _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
+    _record_attempt_failure(
+        ctx, failure_kind="missing_submission_tool", producers=frozenset()
+    )
     if not assistant_text:
         return _RepairCallResult(missing_tool_call_failure(), None, None)
     continuation = await _execute_forced_tool_retry(
@@ -631,13 +640,19 @@ async def _process_tool_call(
             session_id=str(ctx.session_id),
             error_message=str(error),
         )
-        failure_codes = frozenset({PROPOSAL_PARSE_JSON_FAILURE_CODE})
-        _record_attempt_failure(ctx, failure_kind="parse", failure_codes=failure_codes)
-        return CorrectableFailure(
+        outcome = CorrectableFailure(
             feedback=_invalid_tool_arguments_message(error),
             kind="parse",
-            codes=failure_codes,
+            codes=frozenset({PROPOSAL_PARSE_JSON_FAILURE_CODE}),
+            producers=frozenset({"parse"}),
         )
+        _record_attempt_failure(
+            ctx,
+            failure_kind=outcome.kind,
+            failure_codes=outcome.codes,
+            producers=outcome.producers,
+        )
+        return outcome
     outcome = await retry_config.process_tool_invocation(
         _build_tool_retry_invocation(
             ctx=ctx,
@@ -653,11 +668,17 @@ async def _process_tool_call(
             issues=[f"{outcome.kind}: {outcome.feedback}"],
         )
         _record_attempt_failure(
-            ctx, failure_kind=outcome.kind, failure_codes=outcome.codes
+            ctx,
+            failure_kind=outcome.kind,
+            failure_codes=outcome.codes,
+            producers=outcome.producers,
         )
     elif isinstance(outcome, TerminalFailure):
         _record_attempt_failure(
-            ctx, failure_kind=outcome.kind, failure_codes=outcome.codes
+            ctx,
+            failure_kind=outcome.kind,
+            failure_codes=outcome.codes,
+            producers=frozenset(),
         )
     return outcome
 
@@ -695,15 +716,21 @@ async def _execute_forced_tool_retry(
         )
         return internal_error_failure(phase=request.error_phase)
     if not response.choices:
-        _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
+        _record_attempt_failure(
+            ctx, failure_kind="missing_submission_tool", producers=frozenset()
+        )
         return missing_tool_call_failure()
     choice = response.choices[0]
     if choice.finish_reason == "length":
-        _record_attempt_failure(ctx, failure_kind="provider_truncation")
+        _record_attempt_failure(
+            ctx, failure_kind="provider_truncation", producers=frozenset()
+        )
         return provider_truncation_failure(phase=request.error_phase)
     tool_call = _sole_proposal_tool_call(choice.message.tool_calls)
     if tool_call is None:
-        _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
+        _record_attempt_failure(
+            ctx, failure_kind="missing_submission_tool", producers=frozenset()
+        )
         return missing_tool_call_failure()
     outcome = await _process_tool_call(
         tool_call,

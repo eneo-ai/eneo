@@ -4338,7 +4338,9 @@ def _failed_proposal_tracker() -> ProposalTurnTelemetry:
             9_000, 4_000, 13_000, source="provider", reasoning_tokens=3_900
         ),
     )
-    tracker.record_attempt_failure(failure_kind="provider_truncation")
+    tracker.record_attempt_failure(
+        failure_kind="provider_truncation", producers=frozenset()
+    )
     return tracker
 
 

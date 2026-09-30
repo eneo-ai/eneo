@@ -52,6 +52,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     review_prompt_groups,
 )
 from eneo.flows.ai_builder.ai_builder_provider_call import (
+    ObservedTiming,
     complete_with_silence_deadline,
 )
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
@@ -750,7 +751,8 @@ async def generate_review_suggestions(
     # A failed review must not silently repeat work through SDK retries.
     completion_kwargs.update(num_retries=0, max_retries=0)
     completion_kwargs["max_tokens"] = resolved_budget.provider_output_cap_tokens
-    started = time.monotonic()
+    timing = ObservedTiming()
+
     try:
         response = await complete_with_silence_deadline(
             litellm_client,
@@ -764,7 +766,8 @@ async def generate_review_suggestions(
             },
             # A review makes one call and keeps no call budget; a request
             # without the refused control is always admitted.
-            retry_without_refused_control=lambda _control, _error: True,
+            retry_without_refused_control=lambda _control, _error, _timing: True,
+            observe_timing=timing,
         )
     except Exception as error:
         failure = record_ai_builder_provider_failure(
@@ -772,7 +775,7 @@ async def generate_review_suggestions(
             stage="review_suggestions",
             tenant_id=tenant_id,
             request_budget=resolved_budget,
-            provider_elapsed_ms=int((time.monotonic() - started) * 1000),
+            timing=timing.value,
         )
         raise failure.as_exception() from error
 
@@ -826,7 +829,9 @@ async def generate_review_suggestions(
             "excerpts_truncated": summary.excerpts_truncated,
             "excerpts_omitted_by_budget": summary.excerpts_omitted_by_budget,
             "fit_ms": fit_ms,
-            "duration_ms": int((time.monotonic() - started) * 1000),
+            "duration_ms": (
+                timing.value.provider_elapsed_ms if timing.value is not None else None
+            ),
             "provider_prompt_tokens": getattr(usage, "prompt_tokens", None),
             "provider_completion_tokens": getattr(usage, "completion_tokens", None),
         },

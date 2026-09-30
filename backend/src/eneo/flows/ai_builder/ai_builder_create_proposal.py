@@ -120,6 +120,7 @@ async def process_create_intent_arguments(
             feedback=f"Invalid propose_flow arguments: {error}",
             kind="parse",
             codes=frozenset({PROPOSAL_PARSE_MODEL_FAILURE_CODE}),
+            producers=frozenset({"parse"}),
         )
     except AIBuilderArchitectureError as error:
         outcome = architecture_failure_outcome(error)
@@ -202,6 +203,7 @@ async def _process_create_spec(
             codes=frozenset(error.code for error in prepared.validation.errors)
             if prepared.validation is not None
             else frozenset(),
+            producers=frozenset({"platform_validator"}),
         )
     assert prepared.spec is not None
     assert prepared.validation is not None
@@ -244,6 +246,7 @@ async def _process_create_spec(
             or scoped_rejection.feedback,
             kind="quality",
             codes=frozenset({scoped_rejection.reason}),
+            producers=frozenset({"scope_guard"}),
         )
 
     # Diagnostics travel on validation: the storage boundary is the sole

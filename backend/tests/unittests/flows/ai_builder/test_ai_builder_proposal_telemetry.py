@@ -36,6 +36,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_LOG_KEY,
     AIBuilderErrorCode,
+    AIBuilderProviderFailure,
     AIBuilderProviderFailureKind,
     AIBuilderProviderRequestEvidence,
     classify_ai_builder_provider_failure,
@@ -49,18 +50,27 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     PROPOSAL_TELEMETRY_SCHEMA_VERSION,
     ChangesetCountSummary,
     MaterializerProgressSnapshot,
+    ProposalAttemptFailureKind,
     ProposalCallKind,
     ProposalFailureKind,
     ProposalRepairReason,
     ProposalTurnTelemetry,
     ToolProcessingFailureKind,
     assistant_metadata_with_usage,
+    build_proposal_failed_turn_payload,
     log_apply_failed,
     log_proposal_first_attempt,
     log_proposal_repair_invoked,
     proposal_repair_reason_from_tool_failure,
 )
-from eneo.flows.ai_builder.ai_builder_provider_call import ProviderSilenceExpired
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    CorrectableFailure,
+)
+from eneo.flows.ai_builder.ai_builder_provider_call import (
+    ProviderCallCeilingExpired,
+    ProviderCallTiming,
+    ProviderSilenceExpired,
+)
 from eneo.flows.ai_builder.ai_builder_settings import (
     AIBuilderRequestBudget,
     AIBuilderResolvedRequestBudget,
@@ -370,6 +380,7 @@ def test_proposal_attempt_telemetry_is_bounded_and_content_free() -> None:
                 "raw user text must never be telemetry",
             }
         ),
+        producers=frozenset({"lint"}),
     )
 
     payload = telemetry.build_planner_telemetry()
@@ -391,6 +402,7 @@ def test_proposal_attempt_telemetry_is_bounded_and_content_free() -> None:
                 "named_result_obligations_must_survive",
             ],
             "failure_code_count": 2,
+            "producers": ["lint"],
         }
     ]
     assert attempts[0]["elapsed_ms"] >= 0
@@ -684,6 +696,8 @@ def test_provider_failure_event_is_one_bounded_content_free_row() -> None:
             "provider_status_class": "4xx",
             "provider_extraction_source": "response",
             "provider_extraction_status": "absent",
+            "provider_elapsed_ms": None,
+            "deadline_reached": None,
         },
     }
     attempts = telemetry.build_planner_telemetry()["proposal_attempts"]
@@ -814,6 +828,8 @@ def test_classifier_failure_logs_provider_rejection_fields(source: str) -> None:
             else "response.error"
         ),
         "provider_extraction_status": "found",
+        "provider_elapsed_ms": None,
+        "deadline_reached": None,
     }
     assert failure.parameter == "temperature"
     assert "private" not in json.dumps(payload)
@@ -841,6 +857,8 @@ def test_provider_failure_retains_unknown_code_and_reports_suppressed_parameter(
         "provider_error_code": "future_code",
         "provider_extraction_source": "body.error",
         "provider_extraction_status": "suppressed",
+        "provider_elapsed_ms": None,
+        "deadline_reached": None,
     }
     assert "private" not in json.dumps(payload)
 
@@ -1230,7 +1248,7 @@ def test_a_gateway_status_before_the_deadline_is_named_as_an_upstream_timeout() 
         stage="slot_classification",
         request_id="req-upstream-timeout",
         request_budget=_classification_budget_at_the_gateway(),
-        provider_elapsed_ms=125_172,
+        timing=ProviderCallTiming(provider_elapsed_ms=125_172),
         event_logger=event_logger,
     )
 
@@ -1253,7 +1271,7 @@ def test_a_call_that_ran_into_the_silence_deadline_is_not_blamed_on_a_proxy() ->
         stage="slot_classification",
         request_id="req-local-deadline",
         request_budget=_classification_budget_at_the_gateway(),
-        provider_elapsed_ms=180_004,
+        timing=ProviderCallTiming(provider_elapsed_ms=180_004),
         event_logger=event_logger,
     )
 
@@ -1279,7 +1297,7 @@ def test_a_provider_error_after_long_healthy_streaming_is_not_a_deadline() -> No
         stage="proposal_completion",
         request_id="req-long-stream",
         request_budget=_classification_budget_at_the_gateway(),
-        provider_elapsed_ms=350_000,
+        timing=ProviderCallTiming(provider_elapsed_ms=350_000),
         event_logger=event_logger,
     )
 
@@ -1302,7 +1320,7 @@ def test_a_503_before_the_deadline_is_an_upstream_failure_not_a_timeout() -> Non
         stage="slot_classification",
         request_id="req-upstream-503",
         request_budget=_classification_budget_at_the_gateway(),
-        provider_elapsed_ms=2_000,
+        timing=ProviderCallTiming(provider_elapsed_ms=2_000),
         event_logger=event_logger,
     )
 
@@ -1365,7 +1383,9 @@ def test_a_truncated_call_reports_its_usage_provenance_and_cap() -> None:
             9_000, 4_000, 13_000, source="provider", reasoning_tokens=3_900
         ),
     )
-    telemetry.record_attempt_failure(failure_kind="provider_truncation")
+    telemetry.record_attempt_failure(
+        failure_kind="provider_truncation", producers=frozenset()
+    )
 
     assert telemetry.failed_turn_details() == {
         "llm_calls": 1,
@@ -1382,7 +1402,9 @@ def test_a_truncated_call_reports_its_usage_provenance_and_cap() -> None:
 def test_a_call_without_provider_usage_is_reported_unknown_never_zero() -> None:
     telemetry, request_budget = _failed_turn_tracker()
     telemetry.start_attempt(counts_as_repair=False, request_budget=request_budget)
-    telemetry.record_attempt_failure(failure_kind="internal_error")
+    telemetry.record_attempt_failure(
+        failure_kind="internal_error", producers=frozenset()
+    )
 
     details = telemetry.failed_turn_details()
 
@@ -1426,7 +1448,9 @@ def _record_call(
 ) -> None:
     telemetry.start_attempt(counts_as_repair=False, request_budget=request_budget)
     if usage is None:
-        telemetry.record_attempt_failure(failure_kind="internal_error")
+        telemetry.record_attempt_failure(
+            failure_kind="internal_error", producers=frozenset()
+        )
     else:
         telemetry.record_response(finish_reason=finish_reason, usage=usage)
 
@@ -1657,3 +1681,316 @@ def test_an_oversized_provider_count_is_never_published_as_call_evidence() -> No
 
     assert details["token_usage_source"] == "litellm_estimate"
     assert all(value < 10**6 for value in details.values() if isinstance(value, int))
+
+
+def test_a_correctable_failure_names_the_owner_that_wrote_its_feedback() -> None:
+    with pytest.raises(ValueError, match="producer"):
+        CorrectableFailure(feedback="fix it", kind="validation", producers=frozenset())
+    with pytest.raises(TypeError):
+        CorrectableFailure(feedback="fix it", kind="validation")  # type: ignore[call-arg]
+
+    failure = CorrectableFailure(
+        feedback="fix it", kind="quality", producers=frozenset({"lint", "critic"})
+    )
+
+    assert failure.producers == {"lint", "critic"}
+
+
+def test_a_failed_attempt_carries_the_producers_to_every_sink() -> None:
+    telemetry, request_budget = _failed_turn_tracker()
+    telemetry.start_attempt(counts_as_repair=False, request_budget=request_budget)
+    telemetry.record_response(
+        finish_reason="tool_calls",
+        usage=CompletionTokenUsage(10, 5, 15, source="provider"),
+    )
+    telemetry.record_attempt_failure(
+        failure_kind="quality",
+        failure_codes=frozenset({"vague_step_name"}),
+        producers=frozenset({"platform_validator", "lint", "critic"}),
+    )
+    telemetry.start_attempt(counts_as_repair=True, request_budget=request_budget)
+    telemetry.record_attempt_failure(
+        failure_kind="missing_submission_tool", producers=frozenset()
+    )
+
+    attempts = telemetry.build_planner_telemetry()["proposal_attempts"]
+    logged = build_proposal_failed_turn_payload(
+        usage_tracker=telemetry,
+        session_id=uuid4(),
+        branch="self_correction_invalid_tool_result",
+        final_failure_kind="repair_quality_failure",
+        final_error_code="self_correction_quality_failure",
+    ).model_dump(mode="json", exclude_none=True)
+
+    assert [attempt["producers"] for attempt in attempts] == [
+        ["critic", "lint", "platform_validator"],
+        [],
+    ]
+    assert logged["schema_version"] == PROPOSAL_TELEMETRY_SCHEMA_VERSION == 3
+    assert [attempt["producers"] for attempt in logged["proposal_attempts"]] == [
+        ["critic", "lint", "platform_validator"],
+        [],
+    ]
+
+
+@pytest.mark.parametrize(
+    ("error", "local_deadline"),
+    [
+        (ProviderSilenceExpired(0.05), "silence"),
+        (ProviderCallCeilingExpired(1.0), "ceiling"),
+        (TimeoutError("raised by the SDK"), None),
+        (
+            Timeout("sdk", model="private-model", llm_provider="private-provider"),
+            None,
+        ),
+    ],
+)
+def test_the_classifier_names_the_local_deadline_that_expired(
+    error: Exception, local_deadline: str | None
+) -> None:
+    failure = classify_ai_builder_provider_failure(error, stage="proposal_completion")
+
+    assert failure.kind == "timeout"
+    assert failure.local_deadline == local_deadline
+
+
+def test_a_failed_call_record_is_final() -> None:
+    telemetry, request_budget = _failed_turn_tracker()
+    call = telemetry.begin_call(
+        call_kind="slot_classification", request_budget=request_budget
+    )
+    telemetry.fail_call(
+        call=call,
+        failure=classify_ai_builder_provider_failure(
+            ProviderSilenceExpired(0.05), stage="slot_classification"
+        ),
+        timing=ProviderCallTiming(
+            provider_elapsed_ms=90, first_chunk_ms=10, max_gap_ms=60
+        ),
+    )
+    failed = telemetry.call_records[0]
+
+    with pytest.raises(ValueError):
+        telemetry.complete_call(
+            call=failed, usage=CompletionTokenUsage(1, 1, 2, source="provider")
+        )
+
+    record = telemetry.build_planner_telemetry()["call_records"][0]
+    assert record["provider_failure_kind"] == "timeout"
+    assert record["local_deadline"] == "silence"
+    assert (
+        record["first_chunk_ms"],
+        record["max_gap_ms"],
+        record["provider_elapsed_ms"],
+    ) == (10, 60, 90)
+    assert "prompt_tokens" not in record
+
+
+# Every construction site of a correctable failure, by the owner of the rule
+# that wrote its feedback (not by the module that returns it). A merged failure
+# is attributed where it is built, from the parts that contributed.
+_CORRECTABLE_FAILURE_PRODUCERS: dict[tuple[str, str], list[str]] = {
+    ("ai_builder_architecture_errors.py", "architecture_failure_outcome"): [
+        "frozenset({_PRODUCER_BY_ARCHITECTURE_CODE[error.public_code]})"
+    ],
+    ("ai_builder_compiled_spec_preparation.py", "authored_knowledge_ref_repair"): [
+        "platform_validator"
+    ],
+    ("ai_builder_create_proposal.py", "_process_create_spec"): [
+        "platform_validator",
+        "scope_guard",
+    ],
+    ("ai_builder_create_proposal.py", "process_create_intent_arguments"): ["parse"],
+    ("ai_builder_edit_proposal.py", "_validate_saved_step_consumers"): [
+        "platform_validator",
+        "scope_guard",
+    ],
+    ("ai_builder_edit_proposal.py", "compile_and_prepare"): [
+        "assembly",
+        "platform_validator",
+    ],
+    ("ai_builder_edit_proposal.py", "process_edit_arguments"): [
+        "parse",
+        "review_guard",
+        "scope_guard",
+        "review_guard",
+        "platform_validator",
+        "critic",
+        "scope_guard",
+    ],
+    ("ai_builder_proposal_finalization.py", "_create_quality_result"): [
+        "merged",
+        "merged",
+    ],
+    ("ai_builder_proposal_finalization.py", "_edit_quality_result"): ["merged"],
+    ("ai_builder_proposal_retry.py", "_process_tool_call"): ["parse"],
+    ("ai_builder_proposal_submission.py", "_handle_propose_flow_tool_call"): ["parse"],
+    ("ai_builder_proposal_submission.py", "_process_submission_invocation"): ["parse"],
+}
+
+
+def _correctable_failure_sites() -> dict[tuple[str, str], list[str]]:
+    sites: dict[tuple[str, str], list[str]] = {}
+    source_root = _REPO_ROOT / "backend/src/eneo/flows"
+    for path in sorted(source_root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for function in ast.walk(tree):
+            if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for node in ast.walk(function):
+                if not (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "CorrectableFailure"
+                ):
+                    continue
+                owner = min(
+                    (
+                        inner
+                        for inner in ast.walk(function)
+                        if isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef))
+                        and node in list(ast.walk(inner))
+                    ),
+                    key=lambda inner: len(list(ast.walk(inner))),
+                )
+                if owner is not function:
+                    continue
+                producers = next(
+                    (kw.value for kw in node.keywords if kw.arg == "producers"), None
+                )
+                if producers is None:
+                    label = "missing"
+                elif (
+                    isinstance(producers, ast.Call)
+                    and isinstance(producers.func, ast.Name)
+                    and producers.func.id == "frozenset"
+                    and len(producers.args) == 1
+                    and isinstance(producers.args[0], ast.Set)
+                    and all(
+                        isinstance(element, ast.Constant)
+                        for element in producers.args[0].elts
+                    )
+                ):
+                    label = "+".join(
+                        sorted(ast.literal_eval(producers.args[0]))  # type: ignore[arg-type]
+                    )
+                elif isinstance(producers, ast.Name) and producers.id == "producers":
+                    label = "merged"
+                else:
+                    label = ast.unparse(producers)
+                sites.setdefault((path.name, function.name), []).append(label)
+    return sites
+
+
+def test_every_correctable_failure_site_names_its_rule_owner() -> None:
+    sites = _correctable_failure_sites()
+
+    assert sum(len(labels) for labels in sites.values()) == 22
+    assert {site: sorted(labels) for site, labels in sites.items()} == {
+        site: sorted(labels) for site, labels in _CORRECTABLE_FAILURE_PRODUCERS.items()
+    }
+
+
+def _rate_limited() -> AIBuilderProviderFailure:
+    return classify_ai_builder_provider_failure(
+        RateLimitError("limited", model="gpt-test", llm_provider="azure"),
+        stage="proposal_completion",
+    )
+
+
+def test_a_refused_request_keeps_the_timing_of_its_own_request() -> None:
+    tracker = ProposalTurnTelemetry(
+        request_id="req-retry-timing", model="gpt-test", target_kind=TargetKind.CREATE
+    )
+    tracker.start_attempt(counts_as_repair=False)
+
+    tracker.retry_call(
+        failure=_rate_limited(), timing=ProviderCallTiming(provider_elapsed_ms=400)
+    )
+    tracker.record_response(
+        finish_reason="stop",
+        usage=CompletionTokenUsage(1, 1, 2, source="provider"),
+        timing=ProviderCallTiming(
+            provider_elapsed_ms=30, first_chunk_ms=10, max_gap_ms=5
+        ),
+    )
+
+    refused, replacement = tracker.call_records
+    assert (refused.provider_elapsed_ms, refused.first_chunk_ms) == (400, None)
+    assert (replacement.provider_elapsed_ms, replacement.first_chunk_ms) == (30, 10)
+
+
+def test_a_failure_without_an_open_attempt_changes_no_recorded_attempt() -> None:
+    tracker = ProposalTurnTelemetry(
+        request_id="req-closed", model="gpt-test", target_kind=TargetKind.CREATE
+    )
+    tracker.start_attempt(counts_as_repair=False)
+    tracker.record_response(
+        finish_reason="stop", usage=CompletionTokenUsage(1, 1, 2, source="provider")
+    )
+    tracker.record_attempt_failure(
+        failure_kind="validation",
+        failure_codes=frozenset({"c1"}),
+        producers=frozenset({"critic"}),
+    )
+    before = tracker.build_planner_telemetry()
+
+    with pytest.raises(ValueError, match="open attempt"):
+        tracker.fail_attempt(failure=_rate_limited())
+
+    assert tracker.build_planner_telemetry() == before
+
+
+@pytest.mark.parametrize("failure_kind", ["parse", "validation", "quality"])
+def test_a_correctable_failure_is_never_recorded_without_its_producers(
+    failure_kind: ProposalAttemptFailureKind,
+) -> None:
+    tracker = ProposalTurnTelemetry(
+        request_id="req-producers", model="gpt-test", target_kind=TargetKind.CREATE
+    )
+    tracker.start_attempt(counts_as_repair=False)
+
+    with pytest.raises(ValueError, match="producer"):
+        tracker.record_attempt_failure(failure_kind=failure_kind, producers=frozenset())
+
+    assert tracker.proposal_attempts == []
+
+
+@pytest.mark.parametrize(
+    "failure_kind",
+    [
+        "missing_submission_tool",
+        "architecture",
+        "provider_truncation",
+        "internal_error",
+    ],
+)
+def test_a_failure_nobody_corrects_may_name_no_producer(
+    failure_kind: ProposalAttemptFailureKind,
+) -> None:
+    tracker = ProposalTurnTelemetry(
+        request_id="req-no-producers", model="gpt-test", target_kind=TargetKind.CREATE
+    )
+    tracker.start_attempt(counts_as_repair=False)
+
+    tracker.record_attempt_failure(failure_kind=failure_kind, producers=frozenset())
+
+    assert tracker.proposal_attempts[-1].failure_kind == failure_kind
+    assert tracker.proposal_attempts[-1].producers == ()
+
+
+def test_a_provider_failure_log_keeps_its_shape_when_the_seam_never_timed_it() -> None:
+    event_logger = MagicMock()
+
+    record_ai_builder_provider_failure(
+        RateLimitError("limited", model="gpt-test", llm_provider="azure"),
+        stage="proposal_completion",
+        request_id="req-untimed",
+        timing=None,
+        event_logger=event_logger,
+    )
+
+    safe_detail = event_logger.info.call_args.kwargs["extra"]["safe_detail"]
+    assert safe_detail["provider_elapsed_ms"] is None
+    assert safe_detail["deadline_reached"] is None
+    assert "local_deadline" not in safe_detail
