@@ -706,6 +706,8 @@ class FederatedIdentity(BaseModel):
         email = claims.get(email_claim)
         if not isinstance(email, str) or not email:
             raise ValueError("Email claim not found in ID token")
+        if email_claim == "email" and claims.get("email_verified") is False:
+            raise ValueError("Email is not verified by the identity provider")
         try:
             return cls(
                 email=email,

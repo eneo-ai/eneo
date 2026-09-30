@@ -344,7 +344,7 @@ uv run python -m eneo.cli.generate_encryption_key
 
 ### Claims Validated
 
-The backend validates these claims (`auth_service.py`):
+`auth_service.py` owns token validation; `FederatedIdentity` owns the validated email identity:
 
 | Claim | Validated? | Details |
 |-------|------------|---------|
@@ -354,6 +354,7 @@ The backend validates these claims (`auth_service.py`):
 | `iat` | **Yes** | A token issued more than the clock leeway in the future is rejected as not yet valid (`ImmatureSignatureError`); the drift is logged |
 | `nonce` | **No** | Not validated in ID token |
 | `at_hash` | Conditional | If present, must match access token hash |
+| `email_verified` | Conditional | For the standard `email`, explicit `false` rejects login before account lookup; omission is allowed for existing active members, while JIT requires `true` |
 
 **Clock skew tolerance:** 120 seconds (2 minutes) - configurable via `oidc_clock_leeway_seconds`
 
@@ -368,10 +369,15 @@ claims_mapping: OIDCClaimsMapping = federation_config.get(
 ) or {"email": "email"}
 email_claim = claims_mapping.get("email", "email")
 ...
-email = payload.get(email_claim)
+identity = FederatedIdentity.from_claims(payload, email_claim=email_claim)
+email = identity.email
 ```
 
 A missing claim is rejected with `401 Email claim not found in ID token`; a malformed address with `401 Email claim from identity provider is invalid. Contact your administrator.`
+
+An explicit boolean `email_verified: false` for the standard `email` claim is rejected before account lookup or JIT provisioning. The federation callback returns `401 Email is not verified by the identity provider`; global MobilityGuard login also rejects the token. A missing flag remains accepted for existing active members when enterprise IdPs issue administrator-controlled directory addresses without this claim. JIT creation still requires verified email, as described below.
+
+Eneo still links accounts by email, so the configured IdP must control who can claim that address. If `claims_mapping.email` uses a different claim, such as `upn`, the standard `email_verified` flag does not describe that claim and is not applied to it. Administrators must choose a claim controlled by their organization's directory. This check does not introduce an issuer/subject account binding.
 
 ### Domain Validation
 

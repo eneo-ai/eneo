@@ -989,7 +989,9 @@ async def test_callback_enforces_jit_admission(monkeypatch, admission_case):
     if admission_case != "allowed":
         with pytest.raises(HTTPException) as caught:
             await federation_router.auth_callback(callback, container=container)
-        assert caught.value.status_code == 403
+        assert caught.value.status_code == (
+            401 if admission_case == "unverified" else 403
+        )
         assert caught.value.headers["X-Correlation-ID"] == "corr-jit"
         assert user_repo._created_user is None
         assert audit_service.logged_events == []
