@@ -11,7 +11,10 @@ from eneo.flows.application.flow_draft_materialization import (
     compile_flow_draft_changeset,
 )
 from eneo.flows.application.flow_template_attachment_materialization import (
+    approved_template_placeholders,
+    attach_template_asset,
     materialize_template_attachment,
+    require_template_placeholder_contract,
 )
 from eneo.flows.domain.flow import FlowTemplateAsset
 from eneo.flows.flow_authoring_spec import (
@@ -236,3 +239,63 @@ async def test_materialize_template_attachment_refuses_missing_approved_bindings
     assert exc_info.value.code == "architecture_materialization_failed"
     assert exc_info.value.context["reason"] == "template_binding_contract_missing"
     template_asset_service.create_from_existing_attached_file.assert_not_awaited()
+
+
+def test_the_approved_placeholders_are_the_plans_own_before_any_file_is_read() -> None:
+    changeset = _changeset(
+        bindings={"kundnamn": "{{ flow_input.case_id }}", "datum": "{{ datum }}"}
+    )
+
+    assert approved_template_placeholders(
+        changeset=changeset, plan_step_ref="step_b"
+    ) == {"kundnamn", "datum"}
+
+    with pytest.raises(BadRequestException) as not_terminal:
+        approved_template_placeholders(changeset=changeset, plan_step_ref="step_a")
+    assert not_terminal.value.context["reason"] == "template_attachment_target_invalid"
+
+
+def test_attaching_an_asset_sets_its_identity_on_the_terminal_step_and_nothing_else() -> (
+    None
+):
+    changeset = _changeset()
+    asset_id = uuid4()
+
+    attached = attach_template_asset(
+        changeset=changeset, plan_step_ref="step_b", asset_id=asset_id
+    )
+
+    terminal = changeset.compiled_steps[-1]
+    assert attached.compiled_steps[-1].output_config == {
+        **(terminal.output_config or {}),
+        "template_asset_id": str(asset_id),
+    }
+    assert "template_asset_id" not in (terminal.output_config or {})
+    assert attached.compiled_steps[:-1] == changeset.compiled_steps[:-1]
+    assert attached.metadata_json == changeset.metadata_json
+
+    with pytest.raises(BadRequestException) as not_terminal:
+        attach_template_asset(
+            changeset=changeset, plan_step_ref="step_a", asset_id=asset_id
+        )
+    assert not_terminal.value.context["reason"] == "template_attachment_target_invalid"
+
+
+def test_the_placeholder_contract_names_what_a_file_lacks_and_what_it_adds() -> None:
+    require_template_placeholder_contract(
+        approved=frozenset({"a"}), actual=frozenset({"a"})
+    )
+
+    with pytest.raises(BadRequestException) as refused:
+        require_template_placeholder_contract(
+            approved=frozenset({"a", "b"}), actual=frozenset({"a", "c"})
+        )
+
+    assert refused.value.code == "architecture_materialization_failed"
+    assert refused.value.context == {
+        "reason": "template_placeholder_contract_changed",
+        "approved_count": 2,
+        "actual_count": 2,
+        "missing_placeholders": ["b"],
+        "added_placeholders": ["c"],
+    }

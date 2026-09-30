@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import cast
 from uuid import UUID
 
@@ -8,6 +9,7 @@ from eneo.flows.domain.flow_step_validation import (
     FlowStepValidationError,
     FlowStepValidationView,
 )
+from eneo.main.exceptions import BadRequestException
 
 _STEP_REFERENCE_PATTERN = re.compile(r"^step_(\d+)$")
 _EXACT_TEMPLATE_EXPRESSION_PATTERN = re.compile(r"^\s*\{\{\s*([^{}]+)\s*\}\}\s*$")
@@ -132,3 +134,33 @@ def validate_template_expression_reference(
             f"Template binding references unknown step order: {referenced_order}.",
             step_order=current_step_order,
         )
+
+
+def validate_template_placeholder_bindings(
+    *,
+    step_order: int,
+    placeholder_names: Sequence[str],
+    bindings: object,
+) -> None:
+    """Every placeholder the template file holds has a binding, and every
+    binding is a named template expression or an explicit empty string."""
+
+    if not isinstance(bindings, dict):
+        raise BadRequestException(
+            f"Step {step_order}: output_config.bindings must be an object."
+        )
+    bound = cast(dict[str, object], bindings)
+    missing = [name for name in placeholder_names if name not in bound]
+    if missing:
+        raise BadRequestException(
+            f"Step {step_order}: template placeholders are missing bindings: {', '.join(missing)}."
+        )
+    for placeholder, binding in bound.items():
+        if not placeholder.strip():
+            raise BadRequestException(
+                f"Step {step_order}: output_config.bindings keys must be non-empty strings."
+            )
+        if not isinstance(binding, str):
+            raise BadRequestException(
+                f"Step {step_order}: binding '{placeholder}' must be a template expression or an explicit empty string."
+            )

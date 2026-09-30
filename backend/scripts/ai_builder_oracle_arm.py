@@ -31,7 +31,9 @@ arm fixes it), so specs may not name a model or a knowledge source.
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
+import importlib
 import json
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
@@ -41,7 +43,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Protocol, cast
 from urllib.error import URLError
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from eneo.flows.application.flow_authoring_command import (
     CreateFlowAuthoringCommand,
@@ -53,21 +55,36 @@ from eneo.flows.application.flow_authoring_origin_policy import (
     NoopFlowAuthoringOriginPolicy,
 )
 from eneo.flows.application.flow_draft_materialization import (
-    build_flow_draft_metadata_json,
+    FlowDraftCompiledStep,
     compile_flow_draft_changeset,
 )
+from eneo.flows.application.flow_draft_materialization_executor import (
+    build_flow_steps,
+)
+from eneo.flows.application.flow_template_attachment_materialization import (
+    approved_template_placeholders,
+    attach_template_asset,
+    require_template_placeholder_contract,
+)
+from eneo.flows.domain.flow_step_validation import (
+    flow_step_validation_views_from_flow_steps,
+)
+from eneo.flows.domain.step_config import clean_inactive_step_config
 from eneo.flows.enums import FlowAuthoringOutputMode
+from eneo.flows.flow_authoring_name import normalize_flow_name
 from eneo.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
-from eneo.flows.flow_authoring_variable_rewriting import (
-    flow_step_validation_views_from_draft_spec,
+from eneo.flows.flow_metadata import (
+    normalize_flow_metadata_for_write,
+    normalize_persisted_flow_metadata,
 )
 from eneo.flows.flow_validators import collect_step_graph_issues
 from eneo.flows.flow_validators_form import (
-    validate_form_schema,
     validate_variable_alias_collisions_for_step_graph,
 )
+from eneo.flows.flow_validators_template import validate_template_placeholder_bindings
 from eneo.flows.input_binding_contract_rules import InputBindingContractError
+from eneo.flows.runtime.docx_template_runtime import docx_template_placeholder_names
 from eneo.main.exceptions import (
     BadRequestException,
     ConflictException,
@@ -81,6 +98,7 @@ JsonObject = dict[str, Any]
 
 ORACLE_SPEC_SCHEMA_VERSION = 1
 MANIFEST_FILE = "manifest.json"
+HARNESS_MODULE = "ai_builder_api_battle_test"
 # What the bundle says happened, in the vocabulary the receipt reads. A spec
 # the platform refused is an outcome of the arm (the contract said no to an
 # expert), not a fault of the instrument.
@@ -203,6 +221,9 @@ def load_gold_spec(specs_dir: Path, case_id: str) -> GoldSpec:
 # whether the platform's own validators accept the spec and the arm's rules.
 
 
+_ATTACHED_TEMPLATE_STAND_IN = UUID(int=0)
+
+
 @dataclass(frozen=True, slots=True)
 class ContractIssue:
     code: str
@@ -218,7 +239,11 @@ def check_authoring_contract(
     *,
     template_attachment: str | None,
     case_attachments: Sequence[str],
+    read_template: Callable[[str], bytes] | None = None,
 ) -> list[ContractIssue]:
+    """`read_template` answers the bytes of a named attachment. Without one a
+    template cannot be resolved, which is an issue and never a skipped rule."""
+
     issues: list[ContractIssue] = []
     if not spec.steps:
         return [ContractIssue("no_steps", "the spec has no steps.")]
@@ -275,22 +300,66 @@ def check_authoring_contract(
                 f"{template_attachment} is not one of the request's attachments.",
             )
         )
+    try:
+        normalize_flow_name(spec.flow_name)
+    except ValueError as error:
+        issues.append(ContractIssue("flow_name_invalid", str(error)))
     if issues:
         return issues
+    # The platform judges what an apply persists: the spec as normalised, the
+    # steps as the flow stores them, the graph as a publish reads it.
     try:
-        compile_flow_draft_changeset(spec, None)
-        views = flow_step_validation_views_from_draft_spec(spec.steps)
-        metadata_json = build_flow_draft_metadata_json(spec=spec, current_flow=None)
-        validate_form_schema(metadata_json)
+        changeset = compile_flow_draft_changeset(normalize_like_builder(spec), None)
+        if template_attachment is not None:
+            terminal_ref = spec.steps[-1].plan_step_ref
+            approved: frozenset[str] | None = None
+            try:
+                approved = approved_template_placeholders(
+                    changeset=changeset, plan_step_ref=terminal_ref
+                )
+            except BadRequestException as error:
+                issues.append(_refusal_issue(error))
+            changeset = attach_template_asset(
+                changeset=changeset,
+                plan_step_ref=terminal_ref,
+                asset_id=_ATTACHED_TEMPLATE_STAND_IN,
+            )
+            # A plan without a binding contract has nothing to compare the file to.
+            if approved is not None:
+                issues += _template_file_issues(
+                    name=template_attachment,
+                    read_template=read_template,
+                    approved=approved,
+                    terminal=changeset.compiled_steps[-1],
+                )
+        metadata_json = normalize_persisted_flow_metadata(
+            normalize_flow_metadata_for_write(changeset.metadata_json)
+        )
+        instructions = {
+            create.plan_step_ref: create.assistant_spec.instructions
+            for create in changeset.assistants_to_create
+        }
+        steps = [
+            clean_inactive_step_config(step)
+            for step in build_flow_steps(
+                compiled_steps=changeset.compiled_steps,
+                ref_to_assistant_id={ref: uuid4() for ref in instructions},
+            )
+        ]
+        views = flow_step_validation_views_from_flow_steps(
+            steps,
+            prompt_templates={
+                compiled.step_order: instructions[compiled.plan_step_ref]
+                for compiled in changeset.compiled_steps
+            },
+        )
         validate_variable_alias_collisions_for_step_graph(
             steps=views, metadata_json=metadata_json
         )
-        # The template is attached at apply, so a draft graph is checked here
-        # as a draft; a template_fill step is complete once it is attached.
         for graph_issue in collect_step_graph_issues(
             views,
             metadata_json=metadata_json,
-            require_complete_template_fill_config=False,
+            require_complete_template_fill_config=True,
         ):
             issues.append(
                 ContractIssue(
@@ -304,10 +373,59 @@ def check_authoring_contract(
     except InputBindingContractError as error:
         issues.append(ContractIssue("input_binding_contract", str(error)))
     except BadRequestException as error:
-        issues.append(
-            ContractIssue(str(getattr(error, "code", "bad_request")), str(error))
-        )
+        issues.append(_refusal_issue(error))
     return issues
+
+
+def _refusal_issue(error: BadRequestException) -> ContractIssue:
+    return ContractIssue(str(error.code or "bad_request"), str(error))
+
+
+def _template_file_issues(
+    *,
+    name: str,
+    read_template: Callable[[str], bytes] | None,
+    approved: frozenset[str],
+    terminal: FlowDraftCompiledStep,
+) -> list[ContractIssue]:
+    """The rules that read the template file: the apply's placeholder contract
+    and the publish's binding for every placeholder the file holds."""
+
+    try:
+        if read_template is None:
+            raise ValueError("no reader for the template was given.")
+        blob = read_template(name)
+    except (ValueError, OSError) as error:
+        return [ContractIssue("template_file_unresolved", f"{name}: {error}")]
+    try:
+        names = docx_template_placeholder_names(blob, filename=name)
+    except BadRequestException as error:
+        return [_refusal_issue(error)]
+    issues: list[ContractIssue] = []
+    for rule in (
+        lambda: require_template_placeholder_contract(
+            approved=approved, actual=frozenset(names)
+        ),
+        lambda: validate_template_placeholder_bindings(
+            step_order=terminal.step_order,
+            placeholder_names=names,
+            bindings=(terminal.output_config or {}).get("bindings"),
+        ),
+    ):
+        try:
+            rule()
+        except BadRequestException as error:
+            issues.append(_refusal_issue(error))
+    return issues
+
+
+def battle_fixture_bytes(harness: ModuleType, name: str) -> bytes:
+    """The bytes of a fixture the run will upload, verified by the harness's own
+    function against its manifest: the one place a fixture name means a file."""
+
+    return harness._verified_fixture_path(
+        name, harness._fixture_manifest()
+    ).read_bytes()
 
 
 def normalize_like_builder(spec: FlowDraftSpecCore) -> FlowDraftSpecCore:
@@ -623,6 +741,7 @@ def run_oracle_case(
         gold.spec,
         template_attachment=gold.template_attachment,
         case_attachments=tuple(case.attachments),
+        read_template=functools.partial(battle_fixture_bytes, harness),
     )
     if issues:
         # The frozen spec set was checked before the freeze; a failure now is
@@ -1091,6 +1210,10 @@ def _issues_for(
         spec,
         template_attachment=template,
         case_attachments=_case_attachments(cases_file, case_id),
+        # The harness loads only when a template is read: it is heavy.
+        read_template=lambda name: battle_fixture_bytes(
+            importlib.import_module(HARNESS_MODULE), name
+        ),
     )
 
 

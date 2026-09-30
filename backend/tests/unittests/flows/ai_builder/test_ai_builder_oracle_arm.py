@@ -11,6 +11,7 @@ import importlib.util
 import json
 import sys
 import threading
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -34,6 +35,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from tests.docx_template_fixtures import control_template_bytes
 
 _SCRIPTS = Path(__file__).resolve().parents[4] / "scripts"
 
@@ -211,6 +213,235 @@ def test_a_template_step_needs_a_named_attached_template(arm: ModuleType) -> Non
     }
 
 
+def _template_spec(*, output_config: dict[str, Any] | None) -> FlowDraftSpecCore:
+    spec = _spec(final_instructions="x")
+    spec.steps[1].output_mode = OutputMode.TEMPLATE_FILL
+    spec.steps[1].output_type = OutputType.DOCX
+    spec.steps[1].output_config = output_config
+    return spec
+
+
+def _template_file(*tags: str) -> Callable[[str], bytes]:
+    """The reader `check` is given for the manifest's template: a DOCX whose
+    content controls carry `tags` (a name the case attached, as bytes)."""
+
+    blob = control_template_bytes(text=list(tags or ("dnr",)))
+    return lambda name: blob
+
+
+def _check_template(
+    arm: ModuleType,
+    spec: FlowDraftSpecCore,
+    read_template: Callable[[str], bytes] | None = None,
+) -> list[Any]:
+    return arm.check_authoring_contract(
+        spec,
+        template_attachment="mall.docx",
+        case_attachments=("mall.docx",),
+        read_template=read_template or _template_file(),
+    )
+
+
+@pytest.mark.parametrize(
+    "output_config",
+    [
+        None,
+        {},
+        # A key the platform does not read: the contract sits at the top level.
+        {"template_fill": {"bindings": {"dnr": "{{ flow_input.diarienummer }}"}}},
+        {"bindings": ["dnr"]},
+        {"bindings": {"": "{{ flow_input.diarienummer }}"}},
+    ],
+)
+def test_a_template_step_without_a_placeholder_binding_contract_is_refused_as_the_platform_refuses_it(
+    arm: ModuleType, output_config: dict[str, Any] | None
+) -> None:
+    issues = _check_template(arm, _template_spec(output_config=output_config))
+
+    # The attach's own contract speaks first; the graph rule may name the same
+    # defect in its own words.
+    assert issues[0].code == "architecture_materialization_failed"
+    assert "placeholder binding contract" in issues[0].message
+    assert {i.code for i in issues} <= {
+        "architecture_materialization_failed",
+        "flow_step_invalid",
+    }
+
+
+def test_a_valid_template_spec_passes_before_its_file_is_attached(
+    arm: ModuleType,
+) -> None:
+    spec = _template_spec(
+        output_config={"bindings": {"dnr": "{{ flow_input.diarienummer }}"}}
+    )
+
+    assert _check_template(arm, spec) == []
+
+
+def test_a_template_whose_placeholders_differ_from_the_bindings_is_refused_as_the_apply_refuses_it(
+    arm: ModuleType,
+) -> None:
+    spec = _template_spec(
+        output_config={
+            "bindings": {
+                "dnr": "{{ flow_input.diarienummer }}",
+                "ghost": "{{ flow_input.diarienummer }}",
+            }
+        }
+    )
+
+    issues = _check_template(arm, spec)
+
+    # The plan binds a name the file does not hold.
+    assert [i.code for i in issues] == ["architecture_materialization_failed"]
+    assert "no longer matches" in issues[0].message
+
+
+def test_a_template_placeholder_without_a_binding_is_refused_as_apply_and_publish_refuse_it(
+    arm: ModuleType,
+) -> None:
+    spec = _template_spec(
+        output_config={"bindings": {"dnr": "{{ flow_input.diarienummer }}"}}
+    )
+
+    issues = _check_template(arm, spec, _template_file("dnr", "beslut"))
+
+    assert [i.code for i in issues] == [
+        "architecture_materialization_failed",
+        "bad_request",
+    ]
+    assert "template placeholders are missing bindings: beslut" in issues[1].message
+
+
+def test_a_file_that_is_not_a_template_is_refused_with_the_platforms_code(
+    arm: ModuleType,
+) -> None:
+    spec = _template_spec(
+        output_config={"bindings": {"dnr": "{{ flow_input.diarienummer }}"}}
+    )
+
+    issues = _check_template(arm, spec, lambda name: b"not a docx")
+
+    assert len(issues) == 1 and issues[0].code != "template_file_unresolved"
+    assert issues[0].code and issues[0].message
+
+
+def _unreadable(name: str) -> bytes:
+    raise ValueError(f"{name} is not a known battle fixture")
+
+
+@pytest.mark.parametrize("reader", [_unreadable, None])
+def test_a_template_file_that_cannot_be_resolved_is_a_typed_issue_never_a_skip(
+    arm: ModuleType, reader: Callable[[str], bytes] | None
+) -> None:
+    spec = _template_spec(
+        output_config={"bindings": {"dnr": "{{ flow_input.diarienummer }}"}}
+    )
+
+    issues = arm.check_authoring_contract(
+        spec,
+        template_attachment="mall.docx",
+        case_attachments=("mall.docx",),
+        **({} if reader is None else {"read_template": reader}),
+    )
+
+    assert [i.code for i in issues] == ["template_file_unresolved"]
+
+
+def test_the_template_is_read_by_the_harnesss_own_fixture_function(
+    arm: ModuleType, harness: ModuleType
+) -> None:
+    """The bytes are the manifest-verified fixture the run uploads."""
+
+    name = "tra01_mall_beslut_prh.docx"
+    read = lambda n: arm.battle_fixture_bytes(harness, n)  # noqa: E731
+    assert read(name) == (harness.FIXTURE_DIR / name).read_bytes()
+    with pytest.raises(ValueError, match="Unknown battle fixture"):
+        read("annat.docx")
+
+    from eneo.flows.runtime.docx_template_runtime import docx_template_placeholder_names
+
+    names = docx_template_placeholder_names(read(name), filename=name)
+    spec = _template_spec(
+        output_config={
+            "bindings": {
+                placeholder: "{{ flow_input.diarienummer }}" for placeholder in names
+            }
+        }
+    )
+    assert (
+        arm.check_authoring_contract(
+            spec,
+            template_attachment=name,
+            case_attachments=(name,),
+            read_template=read,
+        )
+        == []
+    )
+
+
+def test_a_template_binding_the_platform_would_not_publish_is_refused_with_its_code(
+    arm: ModuleType,
+) -> None:
+    """The graph is judged as complete but for the file: a binding to nothing a
+    publish can read is refused now, not when the flow is published."""
+
+    spec = _template_spec(output_config={"bindings": {"dnr": "{{ step_a.nothing }}"}})
+
+    assert {i.code for i in _check_template(arm, spec)} == {"flow_step_invalid"}
+
+
+def test_a_question_binding_that_ignores_the_uploaded_file_is_refused_as_the_platform_refuses_it(
+    arm: ModuleType,
+) -> None:
+    """The step takes an upload because of its input type; the check reads the
+    step as the apply persists it, with its runtime input enabled."""
+
+    spec = _spec(final_instructions="x")
+    spec.steps[0].input_type = InputType.DOCUMENT
+    spec.steps[0].input_bindings = {"question": "Läs {{ flow_input.diarienummer }}"}
+    refused = arm.check_authoring_contract(
+        spec, template_attachment=None, case_attachments=()
+    )
+    assert {i.code for i in refused} == {"flow_input_binding_runtime_input_unused"}
+
+    spec.steps[0].input_bindings = {"question": "Läs {{ step_input.text }}"}
+    assert (
+        arm.check_authoring_contract(
+            spec, template_attachment=None, case_attachments=()
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize("flow_name", ["  ", "x" * 121])
+def test_a_flow_name_the_apply_would_refuse_is_refused_before_the_freeze(
+    arm: ModuleType, flow_name: str
+) -> None:
+    spec = _spec(final_instructions="x")
+    spec.flow_name = flow_name
+
+    issues = arm.check_authoring_contract(
+        spec, template_attachment=None, case_attachments=()
+    )
+
+    assert [i.code for i in issues] == ["flow_name_invalid"]
+
+
+def test_a_step_that_reads_free_text_the_run_does_not_collect_is_refused_as_a_publish_refuses_it(
+    arm: ModuleType,
+) -> None:
+    spec = _spec(final_instructions="Skriv om {{ indata_text }}.")
+    spec.steps[0].input_type = InputType.DOCUMENT
+    spec.form_fields = None
+
+    issues = arm.check_authoring_contract(
+        spec, template_attachment=None, case_attachments=()
+    )
+
+    assert {i.code for i in issues} == {"flow_input_alias_not_received"}
+
+
 def test_the_runtime_input_normalisation_is_the_builders_own(arm: ModuleType) -> None:
     """The gold step is persisted as a Builder step is: same function, same result."""
 
@@ -230,6 +461,51 @@ def test_the_runtime_input_normalisation_is_the_builders_own(arm: ModuleType) ->
         s.input_config for s in builder.steps
     ]
     assert ours.steps[0].input_config["runtime_input"]["enabled"] is True
+
+
+def test_the_builders_normalisation_is_idempotent_over_every_step_shape(
+    arm: ModuleType,
+) -> None:
+    """The check and the apply each normalise the same spec, so a second pass
+    must change nothing, whatever a step's source, type and runtime input."""
+
+    prior_configs: list[dict[str, Any] | None] = [
+        None,
+        {},
+        {"runtime_input": {"enabled": True, "input_format": "audio"}},
+        {
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "file",
+                "description": "Egen text",
+                "accepted_mimetypes_override": ["application/pdf"],
+            }
+        },
+        {"runtime_input": {"enabled": False}, "other": 1},
+    ]
+    steps = [
+        StepSpec(
+            plan_step_ref=f"s{index}",
+            name=f"S{index}",
+            assistant_spec=AssistantSpec(instructions="x"),
+            input_source=source,
+            input_type=input_type,
+            output_type=OutputType.TEXT,
+            input_config=config,
+        )
+        for index, (source, input_type, config) in enumerate(
+            (source, input_type, config)
+            for source in InputSource
+            for input_type in InputType
+            for config in prior_configs
+        )
+    ]
+    spec = FlowDraftSpecCore(flow_name="F", steps=steps)
+
+    once = arm.normalize_like_builder(spec)
+
+    assert arm.normalize_like_builder(once) == once
+    assert once != spec  # the fixture does exercise the normalisation
 
 
 # ------------------------------------------------------------ applying the spec
@@ -1138,6 +1414,56 @@ def test_check_and_freeze_read_only_a_cases_attachments(
     # Frozen means once: a second freeze never overwrites the manifest.
     with pytest.raises(FileExistsError):
         arm.freeze_manifest(cases_file=corpus, specs_dir=specs, case_ids=["case-1"])
+
+
+def test_the_command_line_check_reads_the_template_from_the_harness_fixtures(
+    arm: ModuleType,
+    harness: ModuleType,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    del harness  # loaded first; the check imports it by name only when it needs a file
+    name = "tra01_mall_beslut_prh.docx"
+    corpus = tmp_path / "cases.json"
+    corpus.write_text(json.dumps({"cases": [{"id": "case-1", "attachments": [name]}]}))
+    placeholders = [
+        "diarienummer",
+        "beslutsdatum",
+        "sokande",
+        "ansokan_avser",
+        "underlag",
+        "utfall",
+        "giltighet",
+        "motivering",
+        "upplysningar",
+    ]
+
+    def check(bound: list[str]) -> int:
+        spec = _template_spec(
+            output_config={
+                "bindings": {p: "{{ flow_input.diarienummer }}" for p in bound}
+            }
+        )
+        spec_file = tmp_path / "case-1.spec.json"
+        spec_file.write_bytes(spec.model_dump_json().encode())
+        return arm.main(
+            [
+                "check",
+                "--cases-file",
+                str(corpus),
+                "--case-id",
+                "case-1",
+                "--spec",
+                str(spec_file),
+                "--template",
+                name,
+            ]
+        )
+
+    assert check(placeholders) == 0
+    capsys.readouterr()
+    assert check(placeholders[:-1]) == 1
+    assert "architecture_materialization_failed" in capsys.readouterr().out
 
 
 # ----------------------------------------------------- equal information (intake)

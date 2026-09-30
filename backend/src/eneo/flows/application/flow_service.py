@@ -52,6 +52,7 @@ from eneo.flows.flow_validators import (
     validate_variable_alias_collisions,
 )
 from eneo.flows.flow_validators_http import credential_template_error
+from eneo.flows.flow_validators_template import validate_template_placeholder_bindings
 from eneo.flows.http_transport import (
     AuthoredSecretEncryptionUnavailableError,
     HttpAuthoredConfig,
@@ -1138,25 +1139,11 @@ class FlowService:
         )
         placeholders = self._inspect_docx_template(template_file)
         placeholder_names = self._placeholder_names(placeholders)
-        bindings = step.output_config.get("bindings")
-        if not isinstance(bindings, dict):
-            raise BadRequestException(
-                f"Step {step.step_order}: output_config.bindings must be an object."
-            )
-        missing = [name for name in placeholder_names if name not in bindings]
-        if missing:
-            raise BadRequestException(
-                f"Step {step.step_order}: template placeholders are missing bindings: {', '.join(missing)}."
-            )
-        for placeholder, binding in cast(FlowPersistedJsonObject, bindings).items():
-            if not placeholder.strip():
-                raise BadRequestException(
-                    f"Step {step.step_order}: output_config.bindings keys must be non-empty strings."
-                )
-            if not isinstance(binding, str):
-                raise BadRequestException(
-                    f"Step {step.step_order}: binding '{placeholder}' must be a template expression or an explicit empty string."
-                )
+        validate_template_placeholder_bindings(
+            step_order=step.step_order,
+            placeholder_names=placeholder_names,
+            bindings=step.output_config.get("bindings"),
+        )
 
         next_output_config = dict(step.output_config)
         next_output_config["template_asset_id"] = str(template_asset.id)

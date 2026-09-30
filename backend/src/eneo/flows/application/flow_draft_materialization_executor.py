@@ -185,7 +185,7 @@ class FlowDraftMaterializer:
             progress.assistants_updated += 1
             progress.emit(FlowDraftMaterializationStage.ASSISTANTS_UPDATED)
 
-        final_steps = _build_flow_steps(
+        final_steps = build_flow_steps(
             compiled_steps=changeset.compiled_steps,
             ref_to_assistant_id=ref_to_assistant_id,
         )
@@ -312,7 +312,7 @@ def index_and_validate_changeset_resource_bindings(
     return resource_bindings_by_slot_ref
 
 
-def _build_flow_steps(
+def build_flow_steps(
     *,
     compiled_steps: list[FlowDraftCompiledStep],
     ref_to_assistant_id: Mapping[str, UUID],

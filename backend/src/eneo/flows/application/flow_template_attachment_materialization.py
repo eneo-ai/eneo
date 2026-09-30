@@ -32,6 +32,68 @@ class MaterializedTemplateAttachment:
     binding: LocalResourceBinding
 
 
+def approved_template_placeholders(
+    *,
+    changeset: FlowDraftChangeSet,
+    plan_step_ref: str,
+) -> frozenset[str]:
+    """The placeholder names the plan approved for its terminal template step:
+    what an attachment reads from the plan before it reads any file."""
+
+    _, terminal_step = _terminal_template_step(
+        changeset=changeset, plan_step_ref=plan_step_ref
+    )
+    return _approved_placeholder_names(terminal_step)
+
+
+def attach_template_asset(
+    *,
+    changeset: FlowDraftChangeSet,
+    plan_step_ref: str,
+    asset_id: UUID,
+) -> FlowDraftChangeSet:
+    """The changeset with the asset's identity on its terminal template step:
+    the one change an attachment makes to the plan's steps."""
+
+    terminal_index, terminal_step = _terminal_template_step(
+        changeset=changeset, plan_step_ref=plan_step_ref
+    )
+    compiled_steps = list(changeset.compiled_steps)
+    compiled_steps[terminal_index] = terminal_step.model_copy(
+        update={
+            "output_config": {
+                **(terminal_step.output_config or {}),
+                "template_asset_id": str(asset_id),
+            }
+        }
+    )
+    return changeset.model_copy(update={"compiled_steps": compiled_steps})
+
+
+def require_template_placeholder_contract(
+    *,
+    approved: frozenset[str],
+    actual: frozenset[str],
+) -> None:
+    """The template file must hold exactly the placeholders the plan approved."""
+
+    if actual == approved:
+        return
+    missing = sorted(approved - actual)
+    added = sorted(actual - approved)
+    raise BadRequestException(
+        "The selected DOCX template no longer matches the approved Flow plan. Generate a new proposal and approve it before applying.",
+        code="architecture_materialization_failed",
+        context={
+            "reason": "template_placeholder_contract_changed",
+            "approved_count": len(approved),
+            "actual_count": len(actual),
+            "missing_placeholders": _bounded_names(missing),
+            "added_placeholders": _bounded_names(added),
+        },
+    )
+
+
 async def materialize_template_attachment(
     *,
     intent: TemplateAttachmentIntent,
@@ -41,41 +103,17 @@ async def materialize_template_attachment(
 ) -> MaterializedTemplateAttachment:
     """Replace an approved attachment intent with one local template asset."""
 
-    terminal_index, terminal_step = _terminal_template_step(
-        changeset=changeset,
-        plan_step_ref=intent.terminal_plan_step_ref,
+    approved_placeholders = approved_template_placeholders(
+        changeset=changeset, plan_step_ref=intent.terminal_plan_step_ref
     )
-    approved_placeholders = _approved_placeholder_names(terminal_step)
     asset = await template_asset_service.create_from_existing_attached_file(
         flow_id=flow_id,
         file_id=intent.file_id,
     )
-    actual_placeholders = frozenset(asset.placeholders)
-    if actual_placeholders != approved_placeholders:
-        missing = sorted(approved_placeholders - actual_placeholders)
-        added = sorted(actual_placeholders - approved_placeholders)
-        raise BadRequestException(
-            "The selected DOCX template no longer matches the approved Flow plan. Generate a new proposal and approve it before applying.",
-            code="architecture_materialization_failed",
-            context={
-                "reason": "template_placeholder_contract_changed",
-                "approved_count": len(approved_placeholders),
-                "actual_count": len(actual_placeholders),
-                "missing_placeholders": _bounded_names(missing),
-                "added_placeholders": _bounded_names(added),
-            },
-        )
-
-    compiled_steps = list(changeset.compiled_steps)
-    compiled_steps[terminal_index] = terminal_step.model_copy(
-        update={
-            "output_config": {
-                **(terminal_step.output_config or {}),
-                "template_asset_id": str(asset.id),
-            }
-        }
+    require_template_placeholder_contract(
+        approved=approved_placeholders, actual=frozenset(asset.placeholders)
     )
-    resolved_changeset = changeset.model_copy(update={"compiled_steps": compiled_steps})
+
     binding = LocalResourceBinding(
         slot_ref=ResourceSlotRef(
             kind=ResourceSlotKind.TEMPLATE_ASSET,
@@ -86,7 +124,11 @@ async def materialize_template_attachment(
         local_id=asset.id,
     )
     return MaterializedTemplateAttachment(
-        changeset=resolved_changeset,
+        changeset=attach_template_asset(
+            changeset=changeset,
+            plan_step_ref=intent.terminal_plan_step_ref,
+            asset_id=asset.id,
+        ),
         binding=binding,
     )
 
