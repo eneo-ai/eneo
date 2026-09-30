@@ -521,7 +521,7 @@ correlating a user report with server logs.
 | `GET /api/livez`       | Liveness: the API process can serve requests                                                                      |
 | `GET /api/healthz`     | Backend, worker heartbeat, and object-content readiness; `503` when the worker is stale or the store is not ready |
 | `GET /api/readyz`      | Alias of `/api/healthz` for readiness probes                                                                      |
-| `GET /api/healthz/crawler` | Crawler queue and feeder diagnostics; not intended for orchestrator probes                                    |
+| `GET /api/healthz/crawler` | Detailed crawler diagnostics; requires the deployment's super API key; not intended for orchestrator probes |
 
 ---
 

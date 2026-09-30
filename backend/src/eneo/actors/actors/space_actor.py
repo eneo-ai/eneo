@@ -781,6 +781,12 @@ class SpaceActor:
             resource_type=SpaceResourceType.SPACE,
         )
 
+    def can_edit_retention(self) -> bool:
+        """Preserve personal ownership; managed spaces use policy administration."""
+        if self.space.is_personal():
+            return self.can_edit_assistants() or self.can_edit_apps()
+        return self.can_edit_space()
+
     def can_delete_space(self):
         return self.can_perform_action(
             action=SpaceAction.DELETE,

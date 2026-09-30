@@ -169,6 +169,10 @@ shows image generation progress or token usage.
 
 ## Commands and monitoring
 
+Detailed crawler diagnostics at `GET /api/healthz/crawler` now require the deployment's `ENEO_SUPER_API_KEY`, sent in `X-API-Key` (or your configured `API_KEY_HEADER_NAME`). Update diagnostic scripts and monitoring clients to send that credential. The regular `/api/livez`, `/api/healthz`, and `/api/readyz` probes remain public.
+
+Assistant/app conversation-retention overrides in shared and organization spaces now require space administration permission, including clearing an override to restore inheritance. Editors can still change other assistant/app settings. Personal-space owners retain their existing retention controls. Stored overrides, the existing 1–2555-day range, and the precedence of assistant/app values over the space default are unchanged.
+
 If you override the container commands, use the new module paths:
 
 ```bash

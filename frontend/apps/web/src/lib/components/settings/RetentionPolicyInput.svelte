@@ -15,6 +15,7 @@
     inheritedFrom?: "space" | "tenant" | null;
     labelId?: string;
     descriptionId?: string;
+    disabled?: boolean;
   }
 
   /* eslint-disable @typescript-eslint/no-unused-vars -- props are part of component's public API */
@@ -24,7 +25,8 @@
     inheritedDays = null,
     inheritedFrom = null,
     labelId,
-    descriptionId
+    descriptionId,
+    disabled = false
   }: Props = $props();
   /* eslint-enable @typescript-eslint/no-unused-vars */
 
@@ -59,7 +61,7 @@
 
 <div class="border-default flex flex-col gap-3 rounded-lg border p-4">
   <!-- Switch to enable override -->
-  <Input.Switch value={isOverrideEnabled} sideEffect={handleSwitchChange}>
+  <Input.Switch value={isOverrideEnabled} sideEffect={handleSwitchChange} {disabled}>
     <span class="text-sm">
       {m.conversation_retention_override_label()}
       {#if inheritedDays !== null}
@@ -72,6 +74,7 @@
   {#if isOverrideEnabled}
     <div class="border-default flex items-center gap-2 border-t pt-2">
       <Input.Number
+        {disabled}
         bind:value={inputValue}
         min={1}
         max={2555}
