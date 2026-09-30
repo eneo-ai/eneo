@@ -1,6 +1,13 @@
 """Unit tests for shared Redis connection helpers."""
 
-from eneo.redis.connection import build_arq_redis_settings, build_redis_pool_kwargs
+import pytest
+
+from eneo.redis.connection import (
+    build_arq_redis_settings,
+    build_redis_auth_kwargs,
+    build_redis_pool_kwargs,
+    build_redis_url,
+)
 
 
 def test_build_arq_redis_settings_uses_custom_values(test_settings):
@@ -57,3 +64,40 @@ def test_build_redis_pool_kwargs_omits_max_connections_when_none(test_settings):
 
     assert kwargs["decode_responses"] is True
     assert "max_connections" not in kwargs
+
+
+def test_connections_carry_no_credentials_by_default(test_settings):
+    assert test_settings.redis_password is None
+
+    assert build_redis_auth_kwargs(test_settings) == {}
+    pool_kwargs = build_redis_pool_kwargs(test_settings, decode_responses=True)
+    assert "password" not in pool_kwargs and "username" not in pool_kwargs
+    arq_settings = build_arq_redis_settings(test_settings)
+    assert arq_settings.password is None and arq_settings.username is None
+
+
+@pytest.mark.parametrize("username", [None, "eneo"])
+def test_every_connection_builder_carries_configured_credentials(
+    test_settings, username
+):
+    settings = test_settings.model_copy(
+        update={"redis_username": username, "redis_password": "example-password"}
+    )
+    expected = {"password": "example-password"}
+    if username is not None:
+        expected["username"] = username
+
+    assert build_redis_auth_kwargs(settings) == expected
+    pool_kwargs = build_redis_pool_kwargs(settings, decode_responses=False)
+    assert {k: pool_kwargs[k] for k in expected} == expected
+    arq_settings = build_arq_redis_settings(settings)
+    assert arq_settings.password == "example-password"
+    assert arq_settings.username == username
+
+
+def test_credentials_are_never_part_of_the_address(test_settings):
+    settings = test_settings.model_copy(update={"redis_password": "example-password"})
+
+    assert build_redis_url(settings) == (
+        f"redis://{settings.redis_host}:{settings.redis_port}"
+    )

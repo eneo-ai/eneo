@@ -6,7 +6,7 @@ from typing import Any, NamedTuple, cast
 
 import redis.asyncio as aioredis
 from eneo.main.config import get_settings
-from eneo.redis.connection import build_redis_pool_kwargs
+from eneo.redis.connection import build_redis_pool_kwargs, build_redis_url
 
 
 def _get_redis_connection() -> aioredis.Redis:
@@ -16,7 +16,7 @@ def _get_redis_connection() -> aioredis.Redis:
     Redis database as the worker/feeder.
     """
     settings = get_settings()
-    redis_url = f"redis://{settings.redis_host}:{settings.redis_port}"
+    redis_url = build_redis_url(settings)
     redis_kwargs = build_redis_pool_kwargs(settings, decode_responses=False)
     connection_pool_factory: Any = aioredis.ConnectionPool
     pool = connection_pool_factory.from_url(redis_url, **redis_kwargs)

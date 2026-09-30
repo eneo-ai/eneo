@@ -18,6 +18,12 @@ POSTGRES_DB=eneo
 # Redis cache
 REDIS_HOST=redis              # Docker service name
 REDIS_PORT=6379
+# Optional Redis authentication. With the bundled Compose stack, define
+# REDIS_PASSWORD in the deployment .env instead, so the Redis container and
+# the backend services receive the same value. Set it here only when Redis
+# runs outside this Compose file.
+# REDIS_PASSWORD=
+# REDIS_USERNAME=             # Only for a Redis ACL user; requires REDIS_PASSWORD
 
 # ----------------------------------------------------------------------------
 # Security (REQUIRED)
