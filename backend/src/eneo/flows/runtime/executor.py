@@ -3020,7 +3020,7 @@ class FlowRunExecutor:
             file_service=self.file_service,
             compile_validators=compile_validators,
             parse_json_output=parse_json_output,
-            validate_against_contract=validate_against_contract,
+            validate_against_contract=partial(validate_against_contract, side="output"),
             render_document=self.document_render_service.render_document,
             render_structured_document=(
                 self.document_render_service.render_structured_document

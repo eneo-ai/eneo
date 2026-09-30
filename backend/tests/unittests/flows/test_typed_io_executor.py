@@ -5765,3 +5765,324 @@ async def test_per_source_reader_keeps_the_value_of_a_key_that_differs_only_by_d
     assert "typed_output_keys_renamed" in {
         diagnostic.code for diagnostic in output.diagnostics
     }
+
+
+# --- Contract violation fact on the terminal run error ---
+
+_FACT_CONTRACT = {
+    "type": "object",
+    "required": ["summary"],
+    "properties": {
+        "summary": {
+            "type": "object",
+            "required": ["verdict"],
+            "properties": {"verdict": {"type": "string"}, "note": {"type": "string"}},
+        }
+    },
+}
+_FACT_PRIVATE_VALUE = "Privat anteckning 4711"
+
+
+async def _terminal_run_error(executor, *, run, step, typed_exc):
+    executor._terminalize_run = AsyncMock()
+    claimed = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=step.step_order,
+        text="",
+    )
+    await executor._handle_typed_step_failure(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=typed_exc,
+        failed_input_payload=None,
+    )
+    return executor._terminalize_run.await_args.kwargs["error"]
+
+
+@pytest.mark.asyncio
+async def test_output_violation_fact_is_identical_for_every_model_route(user):
+    from eneo.flows.api.flow_models import FlowRunPublic
+    from eneo.flows.flow_run_error import FlowRunContractViolation, dump_flow_run_error
+
+    facts = []
+    for name, route in (
+        ("luna6", "hosted_vllm/luna6"),
+        ("gemma4-31b-it", "gemini/gemma-4-31b-it"),
+    ):
+        executor, _, _, _ = _build_executor(user)
+        assistant = _mock_assistant_for_execute_step(
+            response_text=json.dumps({"summary": {"note": _FACT_PRIVATE_VALUE}})
+        )
+        assistant.completion_model = SimpleNamespace(
+            id=uuid4(),
+            name=name,
+            provider_type="hosted",
+            litellm_model_name=route,
+            supported_model_kwargs=SupportedModelKwargs(),
+        )
+        executor._load_assistant = AsyncMock(return_value=assistant)
+        step = _runtime_step(output_type="json", output_contract=_FACT_CONTRACT)
+        run = _run(status=FlowRunStatus.RUNNING, user=user)
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            await executor._execute_step(step=step, run=run, attempt_no=1)
+
+        error = await _terminal_run_error(
+            executor, run=run, step=step, typed_exc=exc_info.value
+        )
+        public = FlowRunPublic.model_validate(
+            run.model_copy(update={"status": FlowRunStatus.FAILED, "error": error}),
+            from_attributes=True,
+        )
+        assert public.error.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION
+        assert _FACT_PRIVATE_VALUE not in json.dumps(dump_flow_run_error(error))
+        facts.append(public.error.details.contract_violation)
+
+    assert (
+        facts
+        == [
+            FlowRunContractViolation(
+                side="output", schema_rule="required", json_pointer="/summary"
+            )
+        ]
+        * 2
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("input_type", ["json", "text"])
+async def test_input_violation_fact_names_the_input_side(user, input_type):
+    from eneo.flows.flow_run_error import FlowRunContractViolation
+
+    executor, _, _, _ = _build_executor(user)
+    assistant = _mock_assistant_for_execute_step()
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = _runtime_step(input_type=input_type, input_contract=_FACT_CONTRACT)
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"text": json.dumps({"summary": {"note": "x"}})},
+    )
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    error = await _terminal_run_error(
+        executor, run=run, step=step, typed_exc=exc_info.value
+    )
+    assert error.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION
+    assert error.details.contract_violation == FlowRunContractViolation(
+        side="input", schema_rule="required", json_pointer="/summary"
+    )
+    assistant.get_response.assert_not_awaited()
+
+
+def _mapped_fact_case(user, *, mode):
+    executor, _, run_repo, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    file_ids = [uuid4() for _ in range(3)]
+    files = {
+        file_id: SimpleNamespace(
+            id=file_id,
+            text="source",
+            name=f"source-{index}.pdf",
+            checksum="x",
+            size=6,
+            mimetype="application/pdf",
+            file_type=FileType.TEXT,
+            transcription=None,
+        )
+        for index, file_id in enumerate(file_ids)
+    }
+
+    async def get_files(*, file_ids, **kwargs):
+        return [files[file_id] for file_id in file_ids]
+
+    executor.file_service.get_files_by_ids.side_effect = get_files
+    executor.file_service.get_owned_file_infos.side_effect = get_files
+    run_repo.list_step_input_file_ids.return_value = file_ids
+    assistant = _mock_assistant_for_execute_step(
+        response_text=json.dumps({"documents": [{"title": "T"}]})
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._retrieve_rag_chunks = AsyncMock(
+        side_effect=lambda **kwargs: ([], {"status": "success", "references": []}, []),
+    )
+    properties = {
+        "title": {"type": "string"},
+        "source_label": {"type": "string"},
+        "source_file_id": {"type": "string"},
+    }
+    if mode == "per_source":
+        properties["extraction_warnings"] = {
+            "type": "array",
+            "items": {"type": "string", "enum": sorted(TEXT_EXTRACTION_WARNINGS)},
+        }
+    # Each call returns one record, so only the assembled output breaks maxItems.
+    contract = {
+        "type": "object",
+        "properties": {
+            "documents": {
+                "type": "array",
+                "maxItems": 2,
+                "items": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": list(properties),
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["documents"],
+        "additionalProperties": False,
+    }
+    state = RunExecutionState({}, [], {}, {}, {})
+    if mode == "per_item":
+        state.append_completed(
+            _completed_step_result(
+                run_id=run.id,
+                flow_id=run.flow_id,
+                tenant_id=run.tenant_id,
+                step_order=1,
+                text="",
+                structured={
+                    "documents": [
+                        {"source_label": files[fid].name, "source_file_id": str(fid)}
+                        for fid in file_ids
+                    ]
+                },
+            )
+        )
+    step = _runtime_step(
+        step_order=2 if mode == "per_item" else 1,
+        input_source="previous_step" if mode == "per_item" else "flow_input",
+        input_type="json" if mode == "per_item" else "document",
+        input_contract={
+            "type": "object",
+            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "required": ["documents"],
+        }
+        if mode == "per_item"
+        else None,
+        output_type="json",
+        output_contract=contract,
+        input_config={"item_map": {"enabled": True, "max_items": 3}}
+        if mode == "per_item"
+        else {
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 3,
+            }
+        },
+    )
+    return executor, run, state, step, assistant
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["per_item", "per_source"])
+async def test_assembled_mapped_output_violation_records_the_fact(user, mode):
+    from eneo.flows.flow_run_error import FlowRunContractViolation
+
+    executor, run, state, step, assistant = _mapped_fact_case(user, mode=mode)
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert assistant.get_response.await_count == 3
+    error = await _terminal_run_error(
+        executor, run=run, step=step, typed_exc=exc_info.value
+    )
+    assert error.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION
+    assert error.details.contract_violation == FlowRunContractViolation(
+        side="output", schema_rule="maxItems", json_pointer="/documents"
+    )
+
+
+@pytest.mark.asyncio
+async def test_assembled_section_output_violation_records_the_fact(user):
+    from eneo.flows.flow_run_error import FlowRunContractViolation
+    from tests.unittests.flows.test_text_sections import _case
+
+    executor, _, assistant, run, state, step, *_ = _case(user)
+    contract = json.loads(json.dumps(step.output_contract))
+    # Each section call is held to one record, so only the assembly breaks this.
+    contract["properties"]["records"]["maxItems"] = 2
+    step = replace(step, output_contract=contract)
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert assistant.get_response.await_count > 2
+    error = await _terminal_run_error(
+        executor, run=run, step=step, typed_exc=exc_info.value
+    )
+    assert error.details.contract_violation == FlowRunContractViolation(
+        side="output", schema_rule="maxItems", json_pointer="/records"
+    )
+
+
+@pytest.mark.asyncio
+async def test_output_violation_beyond_the_pointer_bound_keeps_code_without_a_fact(
+    user,
+):
+    key = "k" * 450
+    executor, _, _, _ = _build_executor(user)
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step(
+            response_text=json.dumps({key: 1})
+        )
+    )
+    step = _runtime_step(
+        output_type="json",
+        output_contract={"type": "object", "properties": {key: {"type": "string"}}},
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    error = await _terminal_run_error(
+        executor, run=run, step=step, typed_exc=exc_info.value
+    )
+    assert error.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION
+    assert error.details is None or error.details.contract_violation is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "context",
+    [
+        {"json_pointer": 1, "schema_rule": "required", "contract_side": "output"},
+        {"json_pointer": "/a", "schema_rule": "not a rule", "contract_side": "output"},
+        {"json_pointer": "/a~9", "schema_rule": "type", "contract_side": "output"},
+        {
+            "json_pointer": "/" + "a" * 5000,
+            "schema_rule": "type",
+            "contract_side": "input",
+        },
+        {"json_pointer": "/a", "schema_rule": "type", "contract_side": ["output"]},
+        {"json_pointer": "/a", "schema_rule": "type"},
+        {"unknown": {"json_pointer": "/a"}},
+    ],
+)
+async def test_hostile_contract_context_still_terminalizes_without_a_fact(
+    user, context
+):
+    executor, _, _, _ = _build_executor(user)
+    step = _runtime_step(output_type="json", output_contract=_FACT_CONTRACT)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    typed_exc = TypedIOValidationException(
+        "Step 1 output at /a: rejected.",
+        code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        context=context,
+    )
+
+    error = await _terminal_run_error(executor, run=run, step=step, typed_exc=typed_exc)
+
+    assert error.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION
+    assert error.details is None
+    assert executor._terminalize_run.await_args.kwargs["target_status"] == (
+        FlowRunStatus.FAILED
+    )

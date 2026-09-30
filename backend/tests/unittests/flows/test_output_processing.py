@@ -5,8 +5,11 @@ from __future__ import annotations
 import tracemalloc
 
 import pytest
+from referencing import Registry
 
+from eneo.flows.flow_run_error import FlowRunContractViolation
 from eneo.flows.output_processing import (
+    _contract_named_pointer,
     compile_validators,
     conform_keys_to_schema,
     parse_json_output,
@@ -145,6 +148,302 @@ def test_contract_error_bounds_record_content_and_escapes_json_pointer():
     assert "/a~1b~0c" in str(exc_info.value)
     assert "maxLength" in str(exc_info.value)
     assert len(str(exc_info.value)) < 500
+    assert exc_info.value.context == {
+        "json_pointer": "/a~1b~0c",
+        "schema_rule": "maxLength",
+    }
+
+
+_NESTED_CONTRACT = {
+    "type": "object",
+    "required": ["summary"],
+    "properties": {
+        "summary": {
+            "type": "object",
+            "required": ["verdict"],
+            "properties": {"verdict": {"type": "string"}, "note": {"type": "string"}},
+        }
+    },
+}
+
+
+@pytest.mark.parametrize("side", ["input", "output"])
+def test_contract_violation_context_names_its_side_rule_and_location(side):
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        validate_against_contract(
+            {"summary": {"note": "Private note"}},
+            _NESTED_CONTRACT,
+            label="Step 2 output",
+            side=side,
+        )
+
+    assert exc_info.value.context == {
+        "json_pointer": "/summary",
+        "schema_rule": "required",
+        "contract_side": side,
+    }
+    assert str(exc_info.value) == (
+        "Step 2 output at /summary: 'verdict' is a required property"
+    )
+
+
+def test_root_contract_violation_is_the_empty_pointer_and_keeps_its_message():
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        validate_against_contract([], _NESTED_CONTRACT, label="Out", side="output")
+
+    assert exc_info.value.context == {
+        "json_pointer": "",
+        "schema_rule": "type",
+        "contract_side": "output",
+    }
+    assert str(exc_info.value) == "Out at /: Value is not of type 'object'."
+
+
+def test_empty_property_name_is_a_pointer_distinct_from_the_root():
+    schema = {"type": "object", "properties": {"": {"type": "string"}}}
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        validate_against_contract({"": 1}, schema, label="Out")
+
+    assert exc_info.value.context == {"json_pointer": "/", "schema_rule": "type"}
+    assert str(exc_info.value) == "Out at /: Value is not of type 'string'."
+
+
+def test_contract_violation_beyond_the_pointer_bound_records_no_location():
+    key = "k" * 450
+    schema = {"type": "object", "properties": {key: {"type": "string"}}}
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        validate_against_contract({key: 1}, schema, label="Out", side="output")
+
+    assert FlowRunContractViolation.from_context(exc_info.value.context) is None
+    assert str(exc_info.value) == (
+        f"Out at {('/' + key)[:400]}: Value is not of type 'string'."
+    )
+
+
+def test_pointer_at_exactly_the_bound_is_recorded_in_full():
+    key = "k" * 399
+    schema = {"type": "object", "properties": {key: {"type": "string"}}}
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        validate_against_contract({key: 1}, schema, label="Out", side="output")
+
+    violation = FlowRunContractViolation.from_context(exc_info.value.context)
+    assert violation is not None
+    assert violation.json_pointer == "/" + key
+
+
+_DATA_KEYS = ["19121212-1212", "a@b.se", "åäö 😀", "a/b~c", "", "0"]
+_FREE_FORM_CONTRACTS = {
+    "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {"type": "string"},
+    },
+    "patternProperties": {
+        "type": "object",
+        "patternProperties": {".*": {"type": "string"}},
+        "additionalProperties": False,
+    },
+}
+
+
+@pytest.mark.parametrize("key", _DATA_KEYS)
+@pytest.mark.parametrize("keyword", sorted(_FREE_FORM_CONTRACTS))
+def test_pointer_stops_before_a_key_that_comes_from_the_data(keyword, key):
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        validate_against_contract(
+            {key: 5}, _FREE_FORM_CONTRACTS[keyword], label="Out", side="output"
+        )
+
+    # The pointer is stored on the run; the message keeps the full location.
+    assert exc_info.value.context["json_pointer"] == ""
+    assert not key or key not in repr(exc_info.value.context)
+    token = key.replace("~", "~0").replace("/", "~1")
+    assert str(exc_info.value) == f"Out at /{token}: Value is not of type 'string'."
+
+
+def test_pointer_keeps_declared_names_and_indices_up_to_the_first_data_key():
+    schema = {
+        "type": "object",
+        "properties": {
+            "people": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "tags": {
+                            "type": "object",
+                            "additionalProperties": {"type": "integer"},
+                        }
+                    },
+                },
+            }
+        },
+    }
+    data = {"people": [{"tags": {}}, {"tags": {"kalle@example.se": "x"}}]}
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        validate_against_contract(data, schema, label="Out", side="input")
+
+    assert exc_info.value.context["json_pointer"] == "/people/1/tags"
+    assert "kalle@example.se" in str(exc_info.value)
+
+
+def test_pointer_follows_references_and_prefix_items_to_declared_names():
+    schema = {
+        "type": "array",
+        "prefixItems": [
+            {"$ref": "#/$defs/person"},
+            {"type": "object", "properties": {"x": {"type": "string"}}},
+        ],
+        "$defs": {
+            "person": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+            }
+        },
+    }
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        validate_against_contract([{"name": 1}], schema, label="Out", side="output")
+    assert exc_info.value.context["json_pointer"] == "/0/name"
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        validate_against_contract([{}, {"x": 1}], schema, label="Out", side="output")
+    assert exc_info.value.context["json_pointer"] == "/1/x"
+
+
+def test_pointer_is_the_ancestor_when_a_data_key_was_cut_before_the_failure():
+    schema = {
+        "type": "object",
+        "properties": {
+            "people": {
+                "type": "object",
+                "additionalProperties": {
+                    "type": "object",
+                    "required": ["verdict"],
+                },
+            }
+        },
+    }
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        validate_against_contract(
+            {"people": {"a@b.se": {}}}, schema, label="Out", side="output"
+        )
+
+    assert exc_info.value.context["json_pointer"] == "/people"
+    assert "/people/a@b.se" in str(exc_info.value)
+
+
+def _reference_chain(length: int) -> dict[str, object]:
+    """A publish-valid contract whose `verdict` sits behind `length` local references."""
+    defs: dict[str, object] = {
+        f"h{index}": {"$ref": f"#/$defs/h{index + 1}"} for index in range(length - 1)
+    }
+    defs[f"h{length - 1}"] = {
+        "type": "object",
+        "properties": {"verdict": {"type": "string"}},
+    }
+    return {"$ref": "#/$defs/h0", "$defs": defs}
+
+
+@pytest.mark.parametrize("length", [1, 16, 17, 40, 400])
+def test_pointer_keeps_its_location_through_any_finite_reference_chain(length):
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        validate_against_contract(
+            {"verdict": 1}, _reference_chain(length), label="Out", side="output"
+        )
+
+    assert exc_info.value.context["json_pointer"] == "/verdict"
+
+
+def test_pointer_stops_at_the_last_declared_name_when_references_cycle():
+    # The data-keyed rule fails first, so validation ends before it could follow the cycle.
+    schema = {
+        "type": "object",
+        "properties": {
+            "outer": {
+                "additionalProperties": {"type": "string"},
+                "$ref": "#/$defs/a",
+            }
+        },
+        "$defs": {"a": {"$ref": "#/$defs/b"}, "b": {"$ref": "#/$defs/a"}},
+    }
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        validate_against_contract(
+            {"outer": {"inner": 1}}, schema, label="Out", side="output"
+        )
+
+    assert exc_info.value.context["json_pointer"] == "/outer"
+
+
+def test_pointer_walk_crawls_the_contract_once_however_many_references_it_follows(
+    monkeypatch,
+):
+    crawls_with_work: list[int] = []
+    original = Registry.crawl
+
+    def counting_crawl(self):
+        if getattr(self, "_uncrawled", None):
+            crawls_with_work.append(1)
+        return original(self)
+
+    monkeypatch.setattr(Registry, "crawl", counting_crawl)
+
+    pointer = _contract_named_pointer(_reference_chain(40), ["verdict"])
+
+    assert pointer == "/verdict"
+    assert len(crawls_with_work) == 1
+
+
+def test_pointer_keeps_an_index_the_contract_reaches_through_composition():
+    schema = {"type": "array", "allOf": [{"items": {"type": "string"}}]}
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        validate_against_contract([1], schema, label="Out", side="output")
+
+    assert exc_info.value.context["json_pointer"] == "/0"
+
+
+def test_pointer_names_a_required_property_the_contract_does_not_describe():
+    schema = {
+        "type": "object",
+        "required": ["flag"],
+        "additionalProperties": {"type": "string"},
+    }
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        validate_against_contract({"flag": 1}, schema, label="Out", side="output")
+
+    assert exc_info.value.context["json_pointer"] == "/flag"
+
+
+def test_pointer_stops_where_the_contract_composes_its_shape():
+    schema = {
+        "type": "object",
+        "properties": {
+            "outer": {
+                "allOf": [
+                    {
+                        "type": "object",
+                        "properties": {"inner": {"type": "string"}},
+                    }
+                ]
+            }
+        },
+    }
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        validate_against_contract(
+            {"outer": {"inner": 1}}, schema, label="Out", side="output"
+        )
+
+    assert exc_info.value.context["json_pointer"] == "/outer"
+
+
+def test_false_schema_violation_names_no_rule():
+    # jsonschema reports a false subschema without a keyword (validator None).
+    schema = {"type": "object", "properties": {"x": False}}
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        validate_against_contract({"x": 1}, schema, label="Out", side="output")
+
+    assert exc_info.value.context == {"json_pointer": "", "contract_side": "output"}
+    assert str(exc_info.value) == (
+        "Out at /: Value does not satisfy schema rule 'None'."
+    )
 
 
 def test_conform_keys_to_schema_drops_extra_item_property():

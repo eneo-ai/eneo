@@ -118,6 +118,7 @@ def validate_input_contract(
                 structured,
                 input_contract,
                 label=f"Step {step_order} input",
+                side="input",
             )
         except TypedIOValidationException as exc:
             setattr(exc, "contract_validation", contract_validation)
@@ -147,6 +148,7 @@ def validate_input_contract(
                 candidate,
                 input_contract,
                 label=f"Step {step_order} input",
+                side="input",
             )
         except TypedIOValidationException as exc:
             setattr(exc, "contract_validation", contract_validation)

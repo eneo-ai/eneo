@@ -34,6 +34,10 @@ from eneo.flows.flow_api_error_code import (
 FlowRunErrorJson: TypeAlias = dict[str, object]
 FlowRunDispatchErrorJson: TypeAlias = dict[str, object]
 
+ContractSide: TypeAlias = Literal["input", "output"]
+# Invariant bounds shared with the producer (output_processing.validate_against_contract).
+CONTRACT_VIOLATION_POINTER_MAX_LENGTH = 400
+CONTRACT_VIOLATION_RULE_MAX_LENGTH = 80
 _MAX_STEP_DESCRIPTION_LENGTH = 256
 _MAX_MESSAGE_LENGTH = 4096
 TRANSCRIPTION_SERVICE_REASON_MAX_LENGTH = 512
@@ -225,8 +229,66 @@ class FlowRunAbandonmentFacts(BaseModel):
         return self
 
 
+class FlowRunContractViolation(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    side: ContractSide = Field(
+        description="Whether the step's input contract or its output contract was broken.",
+    )
+    schema_rule: str = Field(
+        min_length=1,
+        max_length=CONTRACT_VIOLATION_RULE_MAX_LENGTH,
+        pattern=r"^\$?[A-Za-z][A-Za-z0-9]*$",
+        strict=True,
+        description="JSON Schema keyword that rejected the value, for example `required` or `type`.",
+    )
+    json_pointer: str = Field(
+        max_length=CONTRACT_VIOLATION_POINTER_MAX_LENGTH,
+        pattern=r"^(/([^~/\x00-\x1f]|~[01])*)*$",
+        strict=True,
+        description=(
+            "RFC 6901 pointer into the value the contract checked: the step input or "
+            "output. For a per-item, section or mapped step a check of one call "
+            "points into that call's value, and a failure of the assembled output "
+            "points into the complete assembled output. It is the deepest location "
+            "the contract declares (properties and array indices), so it can be an "
+            "ancestor of the failing object when a key that comes from the data was "
+            "cut; the empty string is the whole value. For `required` it names the "
+            "object missing the property."
+        ),
+    )
+
+    @classmethod
+    def from_context(
+        cls, context: Mapping[str, object]
+    ) -> FlowRunContractViolation | None:
+        """All three facts from the validator's context, or none (never raises)."""
+        try:
+            return cls.model_validate(
+                {
+                    "side": context.get("contract_side"),
+                    "schema_rule": context.get("schema_rule"),
+                    "json_pointer": context.get("json_pointer"),
+                }
+            )
+        except ValidationError:
+            return None
+
+
 class FlowRunErrorDetails(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+    contract_violation: FlowRunContractViolation | None = Field(
+        default=None,
+        description=(
+            "Where and which rule a value broke in a step's input or output contract. "
+            "For a per-item, section or mapped step the rule can come from the bound "
+            "the platform puts on one call, such as exactly one item. Absent when not "
+            "recorded: a pointer longer than 400 characters, a violation found "
+            "outside the platform's contract validator, or a run that failed before "
+            "this field existed. Never contains the value itself."
+        ),
+    )
 
     recovery: FlowRunRecoveryFacts | None = Field(
         default=None,
@@ -322,6 +384,7 @@ class FlowRunErrorDetails(BaseModel):
         reason = context.get("transcription_service_reason")
 
         details = cls(
+            contract_violation=FlowRunContractViolation.from_context(context),
             transcription_failure_kind=kind
             if isinstance(kind, TranscriptionFailureKind)
             else None,

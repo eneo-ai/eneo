@@ -925,6 +925,50 @@ are the machine-readable contract. The bounded service reason is human text.
 Stage and queue position describe the last observed poll when a failure or
 timeout interrupts transcription.
 
+#### Contract violation details
+
+For `typed_io_contract_violation`, `error.details.contract_violation` locates the
+failure when the platform's contract validator rejected a value:
+
+```json
+"details": {
+  "contract_violation": {
+    "side": "output",
+    "schema_rule": "required",
+    "json_pointer": "/summary"
+  }
+}
+```
+
+`side` is `input` or `output`: which of the step's contracts rejected the value.
+`schema_rule` is the JSON Schema keyword that failed, such as `required`, `type`
+or `maxItems`. `json_pointer` is an RFC 6901 pointer into the value the contract
+checked; the empty string is the whole value. The example says that the output's
+`summary` object broke `required`: the pointer names the object that lacks a
+property, not the property. The run-level `message` is generic. The name of the
+missing property is in the message of the step attempt.
+
+The pointer is the deepest location the contract declares: properties and array
+indices only. It stops before a key that comes from the data, for example a key
+under `additionalProperties` or `patternProperties`, so it can be an ancestor of
+the failing object. A missing `verdict` inside `people["a@b.se"]` gives
+`/people`, and the empty string when the first key comes from the data. It also
+stops where the contract reaches a property only through `allOf`, `anyOf` or
+`oneOf`. The field never contains the value itself.
+
+For a per-item, section or mapped step each call is checked against its own
+value, so a pointer from that check is relative to that call's value. When the
+calls are put together the platform checks the complete assembled output, and a
+failure there has a pointer into the assembled output. The rule can come from
+the bound the platform puts on the call: a section or mapped step asks the model
+for exactly one item, so `minItems` or `maxItems` can fail even when the
+contract you wrote has no such bound.
+
+The field is absent when the pointer would exceed 400 characters, when a runtime
+check outside the contract validator found the violation, and on runs that failed
+before the field existed. Absence means the location was not recorded, not that
+no violation occurred. Do not parse `message` for the location.
+
 External transcription submissions use one idempotency key for the tenant, run,
 step attempt, audio file and digest, and task. A confirmed admission refusal
 waits within the step budget, honours `Retry-After`, and checks cancellation.

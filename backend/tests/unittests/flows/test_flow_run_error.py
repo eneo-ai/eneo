@@ -434,3 +434,148 @@ def test_old_timeout_error_has_no_unobserved_facts():
     payload = {"code": "flow_step_timeout", "message": "Budget exhausted."}
     assert parse_flow_run_error(payload).details is None
     assert "details" not in dump_flow_run_error(parse_flow_run_error(payload))
+
+
+_CONTRACT_CONTEXT: dict[str, object] = {
+    "json_pointer": "/summary/items/0",
+    "schema_rule": "required",
+    "contract_side": "output",
+}
+
+
+def test_contract_violation_context_persists_as_a_typed_fact():
+    details = FlowRunErrorDetails.from_budget_context(
+        {**_CONTRACT_CONTEXT, "completed_items": 2, "total_items": 3}
+    )
+    error = FlowRunError.from_source(
+        FlowRunLifecycleSource.EXECUTOR_FAILED,
+        code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION,
+        message="Step 2: output does not match the step output contract.",
+        step_order=2,
+        details=details,
+    )
+
+    persisted = dump_flow_run_error(error)
+    assert persisted["details"] == {
+        "contract_violation": {
+            "side": "output",
+            "schema_rule": "required",
+            "json_pointer": "/summary/items/0",
+        },
+        "completed_items": 2,
+        "total_items": 3,
+    }
+    assert parse_flow_run_error(json.loads(json.dumps(persisted))) == error
+
+
+def test_root_contract_violation_round_trips_as_the_empty_pointer():
+    details = FlowRunErrorDetails.from_budget_context(
+        {**_CONTRACT_CONTEXT, "json_pointer": "", "contract_side": "input"}
+    )
+
+    assert details is not None
+    assert details.model_dump(mode="json", exclude_none=True) == {
+        "contract_violation": {
+            "side": "input",
+            "schema_rule": "required",
+            "json_pointer": "",
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"contract_side": None},
+        {"contract_side": "both"},
+        {"contract_side": 1},
+        {"schema_rule": None},
+        {"schema_rule": "not a rule"},
+        {"schema_rule": "r" * 81},
+        {"schema_rule": ""},
+        {"schema_rule": ["required"]},
+        {"json_pointer": None},
+        {"json_pointer": 7},
+        {"json_pointer": "summary"},
+        {"json_pointer": "/a~2b"},
+        {"json_pointer": "/a~"},
+        {"json_pointer": "/a\x00b"},
+        {"json_pointer": "/a\nb"},
+        {"json_pointer": "/a\x1fb"},
+        {"json_pointer": "/" + "k" * 400},
+        {"json_pointer": {"nested": "/a"}},
+    ],
+)
+def test_incomplete_or_malformed_contract_context_yields_no_fact(override):
+    context = {**_CONTRACT_CONTEXT, **override}
+    context = {key: value for key, value in context.items() if value is not None}
+
+    assert FlowRunErrorDetails.from_budget_context(context) is None
+    counted = FlowRunErrorDetails.from_budget_context({**context, "total_items": 1})
+    assert counted == FlowRunErrorDetails(total_items=1)
+
+
+def test_contract_fact_carries_exactly_its_three_parts():
+    details = FlowRunErrorDetails.from_budget_context(
+        {**_CONTRACT_CONTEXT, "instance": "Private value", "secret_token": "x"}
+    )
+
+    assert details is not None
+    serialized = json.dumps(details.model_dump(mode="json", exclude_none=True))
+    assert "Private value" not in serialized
+    assert "secret_token" not in serialized
+    assert FlowRunErrorDetails.from_budget_context({"unknown": "/a"}) is None
+
+
+def test_schema_document_pointer_without_a_side_is_not_a_run_fact():
+    # validate_schema_syntax names a location in the schema, not in a value.
+    assert (
+        FlowRunErrorDetails.from_budget_context(
+            {"json_pointer": "/properties/a/$ref", "schema_rule": "$ref"}
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "persisted",
+    [
+        {
+            "schema_version": 1,
+            "code": "typed_io_contract_violation",
+            "message": "Step 3: A submitted or generated value does not match "
+            "the step output contract (typed_io_contract_violation)",
+            "source": "executor_failed",
+            "step_order": 3,
+        },
+        {
+            "schema_version": 1,
+            "code": "typed_io_contract_violation",
+            "message": "Step 1: mapped output failed.",
+            "source": "executor_failed",
+            "step_order": 1,
+            "details": {"completed_items": 1, "total_items": 4},
+        },
+    ],
+)
+def test_pre_change_contract_errors_round_trip_identically(persisted):
+    assert dump_flow_run_error(parse_flow_run_error(persisted)) == persisted
+
+
+def test_persisted_malformed_contract_fact_is_an_invalid_payload():
+    error = parse_flow_run_error(
+        {
+            "schema_version": 1,
+            "code": "typed_io_contract_violation",
+            "message": "Step 1 failed.",
+            "details": {
+                "contract_violation": {
+                    "side": "output",
+                    "schema_rule": "required",
+                    "json_pointer": "summary",
+                }
+            },
+        }
+    )
+
+    _assert_corrupt_run_error(error)

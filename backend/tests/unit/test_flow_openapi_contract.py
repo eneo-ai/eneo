@@ -2649,7 +2649,24 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
         # Budget facts from an admission or structured-output refusal.
         "measured_bytes",
         "ceiling_bytes",
+        # Where and which rule a value broke in a step's input or output contract.
+        "contract_violation",
     }
+    violation_ref = next(
+        option
+        for option in details_schema["properties"]["contract_violation"]["anyOf"]
+        if option.get("type") != "null"
+    )
+    violation_schema = _resolve_component_ref(openapi_spec, violation_ref)
+    assert violation_schema.get("additionalProperties") is False
+    assert set(violation_schema["required"]) == {"side", "schema_rule", "json_pointer"}
+    violation_properties = violation_schema["properties"]
+    assert set(violation_properties) == {"side", "schema_rule", "json_pointer"}
+    assert violation_properties["side"]["enum"] == ["input", "output"]
+    assert violation_properties["schema_rule"]["maxLength"] == 80
+    assert violation_properties["schema_rule"]["pattern"]
+    assert violation_properties["json_pointer"]["maxLength"] == 400
+    assert violation_properties["json_pointer"]["pattern"]
     recovery_ref = next(
         option
         for option in details_schema["properties"]["recovery"]["anyOf"]

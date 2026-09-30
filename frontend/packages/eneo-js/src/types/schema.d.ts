@@ -20395,6 +20395,25 @@ export interface components {
       /** @description Options for a flow that transcribes recorded audio: whether the audio step can show a live transcript preview, and whether a run may choose speaker labels with `speaker_labels` on run creation. Null when the flow transcribes no audio. */
       transcription?: components["schemas"]["FlowTranscriptionContractPublic"] | null;
     };
+    /** FlowRunContractViolation */
+    FlowRunContractViolation: {
+      /**
+       * Json Pointer
+       * @description RFC 6901 pointer into the value the contract checked: the step input or output. For a per-item, section or mapped step a check of one call points into that call's value, and a failure of the assembled output points into the complete assembled output. It is the deepest location the contract declares (properties and array indices), so it can be an ancestor of the failing object when a key that comes from the data was cut; the empty string is the whole value. For `required` it names the object missing the property.
+       */
+      json_pointer: string;
+      /**
+       * Schema Rule
+       * @description JSON Schema keyword that rejected the value, for example `required` or `type`.
+       */
+      schema_rule: string;
+      /**
+       * Side
+       * @description Whether the step's input contract or its output contract was broken.
+       * @enum {string}
+       */
+      side: "input" | "output";
+    };
     /**
      * FlowRunCreateRequest
      * @example {
@@ -21372,6 +21391,8 @@ export interface components {
        * @description Mapped items completed before the interruption.
        */
       completed_items?: number | null;
+      /** @description Where and which rule a value broke in a step's input or output contract. For a per-item, section or mapped step the rule can come from the bound the platform puts on one call, such as exactly one item. Absent when not recorded: a pointer longer than 400 characters, a violation found outside the platform's contract validator, or a run that failed before this field existed. Never contains the value itself. */
+      contract_violation?: components["schemas"]["FlowRunContractViolation"] | null;
       /** Measured Bytes */
       measured_bytes?: number | null;
       /** @description Observed execution phase when the step failed or its budget expired. */

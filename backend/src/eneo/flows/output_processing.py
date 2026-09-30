@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, NoReturn, Protocol, cast
@@ -15,11 +15,16 @@ import jsonschema
 from jsonschema.exceptions import UnknownType
 from jsonschema.protocols import Validator
 from jsonschema.validators import validator_for
-from referencing import Registry
+from referencing import Registry, Resource
 from referencing.exceptions import NoSuchResource, Unresolvable
 from referencing.jsonschema import DRAFT202012, Schema
 
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_error import (
+    CONTRACT_VIOLATION_POINTER_MAX_LENGTH,
+    CONTRACT_VIOLATION_RULE_MAX_LENGTH,
+    ContractSide,
+)
 from eneo.json_types import JsonObject, JsonValue
 from eneo.main.exceptions import TypedIOValidationException
 
@@ -183,18 +188,38 @@ def parse_json_output(raw_text: str) -> StructuredOutputValue:
         ) from exc
 
 
-def validate_against_contract(data: Any, schema: dict[str, Any], *, label: str) -> None:
-    """Validate data against JSON Schema. Raises TypedIOValidationException."""
+def validate_against_contract(
+    data: Any,
+    schema: dict[str, Any],
+    *,
+    label: str,
+    side: ContractSide | None = None,
+) -> None:
+    """Validate data against JSON Schema. Raises TypedIOValidationException.
+
+    A run boundary passes `side`; the context then carries the facts a terminal
+    run error keeps (FlowRunContractViolation, which owns their bounds): the rule
+    and the RFC 6901 pointer ("" is the root), cut before any key that comes from
+    the data. The message keeps the full location.
+    """
     try:
         _check_metaschema(schema, _dialect_of(schema))
         with _panic_as_recursion():
             build_schema_validator(schema).validate(data)
     except jsonschema.ValidationError as exc:
-        path = "/" + "/".join(
-            _json_pointer_token(str(part)) for part in exc.absolute_path
+        pointer = "".join(
+            "/" + _json_pointer_token(str(part)) for part in exc.absolute_path
         )
-        path = path[:400]
-        rule = str(exc.validator)[:80]
+        path = (pointer or "/")[:CONTRACT_VIOLATION_POINTER_MAX_LENGTH]
+        rule = str(exc.validator)[:CONTRACT_VIOLATION_RULE_MAX_LENGTH]
+        context: dict[str, object] = {
+            "json_pointer": _contract_named_pointer(schema, exc.absolute_path)
+        }
+        # A false subschema fails without a keyword (validator is None).
+        if isinstance(exc.validator, str):
+            context["schema_rule"] = exc.validator
+        if side is not None:
+            context["contract_side"] = side
         if rule == "type":
             detail = f"Value is not of type {exc.validator_value!r}."
         elif rule == "required":
@@ -206,7 +231,7 @@ def validate_against_contract(data: Any, schema: dict[str, Any], *, label: str) 
         raise TypedIOValidationException(
             f"{label} at {path}: {detail[:400]}",
             code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
-            context={"json_pointer": path, "schema_rule": rule},
+            context=context,
         ) from exc
     except _CONTRACT_FAILURES as exc:
         raise _unevaluable(label) from exc
@@ -385,6 +410,80 @@ def _json_pointer_token(token: str) -> str:
     return token.replace("~", "~0").replace("/", "~1")
 
 
+def _crawled_resolver(resource: Resource[Schema]):
+    """A resolver over `resource` alone, crawled once: a lookup on an uncrawled
+    registry crawls the document again."""
+    uri = resource.id() or ""
+    return _LOCAL_SCHEMA_REGISTRY.with_resource(uri, resource).crawl().resolver(uri)
+
+
+def _contract_named_pointer(schema: Schema, path: Iterable[str | int]) -> str:
+    """The RFC 6901 pointer to the deepest part of `path` that the contract names.
+
+    Keeps declared property names (`properties`, `required`) and array indices and
+    stops before a key that comes from the data (additionalProperties,
+    patternProperties, unevaluatedProperties), or that the contract reaches only
+    through composition. A terminal run error stores this pointer, and a person's
+    data must not become part of it.
+    """
+    tokens: list[str] = []
+    try:
+        resolver = _crawled_resolver(
+            Resource.from_contents(schema, default_specification=DRAFT202012)
+        )
+        node: object = schema
+        for part in path:
+            step = _named_step(node, part, lambda ref: resolver.lookup(ref).contents)
+            if step is None:
+                break
+            node = step[0]
+            tokens.append(_json_pointer_token(str(part)))
+    except _CONTRACT_FAILURES:
+        pass
+    return "".join("/" + token for token in tokens)
+
+
+def _named_step(
+    node: object,
+    part: str | int,
+    lookup: Callable[[str], object],
+) -> tuple[object] | None:
+    """The subschema after `part` (None when unknown), or None when not named.
+
+    Follows a chain of `$ref`s until a schema declares `part`; a reference already
+    followed in this chain ends it, so a cycle stops and a finite chain never does.
+    """
+    chain: list[dict[str, object]] = []
+    followed: set[str] = set()
+    current = node
+    while isinstance(current, dict):
+        schema = cast(dict[str, object], current)
+        chain.append(schema)
+        if isinstance(part, int):
+            prefix = schema.get("prefixItems")
+            items = schema.get("items")
+            if isinstance(prefix, list) and part < len(cast(list[object], prefix)):
+                return (cast(list[object], prefix)[part],)
+            if isinstance(items, dict):
+                return (cast(dict[str, object], items),)
+        else:
+            properties = schema.get("properties")
+            if isinstance(properties, dict) and part in properties:
+                return (cast(dict[str, object], properties)[part],)
+        reference = schema.get("$ref")
+        if not isinstance(reference, str) or reference in followed:
+            break
+        followed.add(reference)
+        current = lookup(reference)
+    if isinstance(part, int):
+        return (None,)
+    named = any(
+        isinstance(required, list) and part in cast(list[object], required)
+        for required in (schema.get("required") for schema in chain)
+    )
+    return (None,) if named else None
+
+
 def validate_schema_syntax(
     schema: dict[str, Any], *, label: str, retained: bool = False
 ) -> None:
@@ -501,11 +600,7 @@ def _self_containment_issue(schema: dict[str, Any]) -> tuple[str, str, str] | No
     # A boolean has no identity of its own: it is a schema by its pointer.
     boolean_pointers = {path for path, node in positions if isinstance(node, bool)}
     # Crawled once here: a lookup on an uncrawled registry crawls the document again.
-    resolver = (
-        _LOCAL_SCHEMA_REGISTRY.with_resource("", DRAFT202012.create_resource(schema))
-        .crawl()
-        .resolver()
-    )
+    resolver = _crawled_resolver(DRAFT202012.create_resource(schema))
 
     def points_at_schema(target: object) -> bool:
         if not (isinstance(target, str) and target.startswith("#")):

@@ -1352,6 +1352,106 @@ async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
     assert completion_service.get_response.await_count == 1
 
 
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_contract_violation_fact_reaches_fresh_sessions_detail_and_evidence(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    from eneo.flows.api.flow_assembler import FlowAssembler
+
+    private_value = "Privat anteckning 4711"
+    output_contract: FlowPersistedJsonObject = {
+        "type": "object",
+        "required": ["summary"],
+        "properties": {
+            "summary": {
+                "type": "object",
+                "required": ["verdict"],
+                "properties": {
+                    "verdict": {"type": "string"},
+                    "note": {"type": "string"},
+                },
+            }
+        },
+    }
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(
+            return_value=SimpleNamespace(
+                completion=json.dumps({"summary": {"note": private_value}}),
+                total_token_count=1,
+            )
+        )
+    )
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+            output_type="json",
+            output_contract=output_contract,
+        )
+        result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            dispatch_task_id=f"runtime-contract-fact-{uuid4()}",
+            retry_count=0,
+        )
+
+    assert result["status"] == "failed"
+    fact = {"side": "output", "schema_rule": "required", "json_pointer": "/summary"}
+    run_row, _, attempt_rows, outbox_rows = await _failure_state_from_fresh_session(
+        run_id=context.run_id, tenant_id=context.tenant_id
+    )
+    assert run_row is not None
+    assert run_row.status == FlowRunStatus.FAILED.value
+    assert run_row.error_json["code"] == "typed_io_contract_violation"
+    assert run_row.error_json["details"] == {"contract_violation": fact}
+    assert private_value not in json.dumps(run_row.error_json)
+    assert len(attempt_rows) == 1
+    # Lifecycle events carry the code and message only.
+    assert [(row.error_code, row.error_message) for row in outbox_rows] == [
+        (run_row.error_json["code"], run_row.error_json["message"])
+    ]
+
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+            tenant=providers.Object(test_tenant),
+        )
+        run_service = container.flow_run_service()
+        view = await run_service.get_run_detail_with_result_files_and_usage(
+            flow_id=context.flow_id, run_id=context.run_id
+        )
+        detail = FlowAssembler().to_run_detail_public(view.run).model_dump(mode="json")
+        assert detail["error"]["details"]["contract_violation"] == fact
+        statuses = await run_service.list_run_statuses(flow_id=context.flow_id)
+        summaries = [
+            FlowAssembler.to_run_summary_public(status).model_dump(mode="json")
+            for status in statuses
+        ]
+        assert [summary["id"] for summary in summaries] == [str(context.run_id)]
+        assert "contract_violation" not in json.dumps(summaries)
+        evidence = (
+            await container.flow_run_evidence_service().get_redacted_evidence_bundle(
+                run_id=context.run_id
+            )
+        ).to_dict()
+        assert evidence["run"]["error"]["details"]["contract_violation"] == fact
+
+
 @pytest.mark.parametrize(
     ("text", "inline_ceiling"),
     [
