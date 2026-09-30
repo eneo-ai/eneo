@@ -6,10 +6,16 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-from pydantic import Field, computed_field, field_validator, model_validator
+from pydantic import (
+    Field,
+    ValidationError,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from eneo.main.removed_env import check_removed_variables
+from eneo.main.removed_env import UPGRADE_GUIDE_URL, check_removed_variables
 
 # Version manifest lookup:
 # - Docker: Package is installed with --no-editable, so __file__ points to site-packages.
@@ -24,6 +30,9 @@ _LOCAL_MANIFEST = (
 
 
 URL_SIGNING_KEY_MINIMUM_BYTES = 32
+# Absolute upper bound for a login session; a longer-lived captured token
+# would stay replayable for as long. 1440 (24 hours) is the recommended value.
+JWT_EXPIRY_TIME_MAXIMUM_MINUTES = 30 * 24 * 60
 
 
 def validate_public_origin(origin: str | None) -> str | None:
@@ -467,7 +476,8 @@ class Settings(BaseSettings):
     jwt_audience: str
     jwt_issuer: str
     # Session token lifetime in minutes. The value has always been applied as
-    # minutes; it is not reinterpreted on upgrade.
+    # minutes; it is not reinterpreted on upgrade, but it may not exceed
+    # JWT_EXPIRY_TIME_MAXIMUM_MINUTES.
     jwt_expiry_time: int
     jwt_algorithm: str
     jwt_secret: str
@@ -580,6 +590,12 @@ class Settings(BaseSettings):
             raise ValueError(
                 "JWT_EXPIRY_TIME must be a positive number of minutes "
                 "(for example 1440 for 24 hours)"
+            )
+        if v > JWT_EXPIRY_TIME_MAXIMUM_MINUTES:
+            raise ValueError(
+                "JWT_EXPIRY_TIME is the session lifetime in minutes and may not "
+                f"exceed {JWT_EXPIRY_TIME_MAXIMUM_MINUTES} (30 days). "
+                "Set 1440 for 24-hour sessions."
             )
         return v
 
@@ -1032,15 +1048,49 @@ class Settings(BaseSettings):
 _settings: Optional[Settings] = None
 
 
+class InvalidConfiguration(SystemExit):
+    """The settings could not be loaded; the reasons were already logged.
+
+    A ``SystemExit`` so that a service stops with exit code 1 and no traceback.
+    Command-line tools that report their own outcome catch it explicitly.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(1)
+
+
+def _describe_configuration_errors(error: ValidationError) -> list[str]:
+    """One line per problem, naming the environment variable, never its value."""
+    lines: list[str] = []
+    for problem in error.errors(include_url=False, include_input=False):
+        variable = "_".join(str(part) for part in problem["loc"]).upper()
+        message = problem["msg"].removeprefix("Value error, ")
+        lines.append(
+            message if message.startswith(variable) else f"{variable}: {message}"
+        )
+    return lines
+
+
 def get_settings() -> Settings:
     """Get settings singleton, creating it if needed.
+
+    Exits with one readable message per configuration problem instead of a
+    traceback, so an operator reading the service log sees what to change.
 
     Returns:
         Settings: The application settings instance.
     """
     global _settings
     if _settings is None:
-        _settings = Settings()  # pyright: ignore[reportCallIssue]
+        try:
+            _settings = Settings()  # pyright: ignore[reportCallIssue]
+        except ValidationError as error:
+            logging.error(
+                "Eneo cannot start until its configuration is corrected:\n  %s\nSee %s",
+                "\n  ".join(_describe_configuration_errors(error)),
+                UPGRADE_GUIDE_URL,
+            )
+            raise InvalidConfiguration() from None
     return _settings
 
 

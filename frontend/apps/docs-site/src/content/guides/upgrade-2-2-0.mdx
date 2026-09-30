@@ -50,10 +50,14 @@ secret store, check there too.
 `JWT_EXPIRY_TIME` is the login session lifetime in **minutes**. Earlier
 environment templates labelled the value as seconds while the backend applied
 it as minutes, so the template value `86400` produced sessions of roughly 60
-days. The unit has not changed and existing values are not reinterpreted: a
-deployment that keeps `86400` keeps 60-day sessions. Set the value you intend,
-for example `1440` for 24 hours. The backend refuses to start when the value is
-zero or negative.
+days. The unit has not changed and existing values are not reinterpreted, but
+the backend now refuses to start when the value is zero, negative, or above
+`43200` (30 days). A deployment that still has `86400` must set the value it
+intends before upgrading, for example `1440` for 24 hours:
+
+```
+JWT_EXPIRY_TIME=1440
+```
 
 A shorter lifetime applies to sessions issued after the restart. Sessions
 issued earlier stay valid until they expire, unless the user changes their
@@ -69,6 +73,7 @@ session issued before that moment.
 | Both the old and the new name are set             | Starts; warns that the old name is ignored      | Starts; warns that the old name is ignored |
 | `ENEO_SUPER_DUPER_API_KEY` or its old name is set | Starts; logs an error that it is no longer read | —                                          |
 | `ENEO_BACKEND_URL` is not set                     | —                                               | Does not start; says that it is required   |
+| `JWT_EXPIRY_TIME` is above `43200` (30 days)      | Does not start; names the limit and `1440`      | —                                          |
 
 A service that does not start logs, for example:
 
