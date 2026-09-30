@@ -94,6 +94,35 @@ def test_tool_call_sse_carries_the_capability_purpose():
     assert tools[1]["purpose"] is None
 
 
+@pytest.mark.parametrize(
+    "response_type",
+    [ResponseType.TOOL_CALL, ResponseType.TOOL_APPROVAL_REQUIRED],
+)
+def test_tool_sse_tells_the_client_which_server_is_eneos_own(response_type):
+    """An admin can name an external server "files", so the client cannot tell
+    Eneo's own tools from the name. The flag reaches it on tool calls and on
+    the approval request the user is asked to decide."""
+    event = to_sse_response(
+        Completion(
+            response_type=response_type,
+            approval_id=str(uuid4()),
+            tool_calls_metadata=[
+                ToolCallMetadata(
+                    server_name="files", tool_name="read_file", is_internal=True
+                ),
+                ToolCallMetadata(
+                    server_name="files", tool_name="echo", is_internal=False
+                ),
+            ],
+        ),
+        uuid4(),
+    )
+
+    tools = json.loads(event.data)["tools"]
+
+    assert [tool["is_internal"] for tool in tools] == [True, False]
+
+
 def test_token_usage_sse_separates_turn_cost_from_context_headroom():
     event = to_sse_response(
         Completion(

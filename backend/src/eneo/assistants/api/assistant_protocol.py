@@ -64,6 +64,7 @@ class _SupportsToolCallMetadata(Protocol):
     mcp_tool_name: str | None
     meta: dict[str, Any] | None
     purpose: str | None
+    is_internal: bool | None
 
 
 def _require_approval_id(chunk: Completion) -> str:
@@ -242,6 +243,7 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
                     result_status=tc.result_status,
                     mcp_tool_name=tc.mcp_tool_name,
                     purpose=tc.purpose,
+                    is_internal=tc.is_internal,
                     meta=tc.meta,
                 )
                 for tc in tool_calls
@@ -277,6 +279,7 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
                     approved=tc.approved,
                     result_status=tc.result_status,
                     purpose=tc.purpose,
+                    is_internal=tc.is_internal,
                 )
                 for tc in tool_calls
             ],
@@ -299,6 +302,7 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
                     approved=tc.approved,
                     result_status=tc.result_status,
                     purpose=tc.purpose,
+                    is_internal=tc.is_internal,
                 )
                 for tc in tool_calls
             ],
