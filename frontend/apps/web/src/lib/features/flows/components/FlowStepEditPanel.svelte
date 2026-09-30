@@ -553,7 +553,28 @@
   // ---------------------------------------------------------------------------
 
   function templateContext() {
-    return { activeStep: activeStep!, steps, formSchema, updateStep };
+    const origin = activeStep!;
+    const findIndex = () =>
+      steps.findIndex((step) =>
+        origin.assistant_id ? step.assistant_id === origin.assistant_id : step.id === origin.id
+      );
+    return {
+      activeStep: origin,
+      get steps() {
+        return steps;
+      },
+      get formSchema() {
+        return formSchema;
+      },
+      getStep: () => steps[findIndex()] ?? null,
+      // Step IDs can be assigned by autosave while the upload is pending.
+      updateStep: (field: string, value: unknown) => {
+        const index = findIndex();
+        const step = steps[index];
+        if (!step || isPublished || step.output_mode !== "template_fill") return;
+        onStepChanged?.({ index, step: { ...step, [field]: value } });
+      }
+    };
   }
 
   function applyAllTemplateSuggestions() {
@@ -861,25 +882,16 @@
       resolvedTemplateAssetId
     );
     if (assetToInspect && activeStep) {
-      void templateState.inspectFile(
-        assetToInspect,
-        { persist: false },
-        {
-          activeStep,
-          steps,
-          formSchema,
-          updateStep
-        }
-      );
+      void templateState.inspectFile(assetToInspect, { persist: false }, templateContext());
     }
   });
 
   $effect(() => {
     if (
-      isAdvancedMode &&
       isTemplateFill &&
       !templateState.filesLoaded &&
-      !templateState.filesLoading
+      !templateState.filesLoading &&
+      !templateState.filesError
     ) {
       void templateState.loadFiles();
     }
@@ -1245,12 +1257,14 @@
         >
           {#if isTemplateFill}
             <FlowStepTemplateFillSection
+              stepKey={activeStepStateKey}
               {isPublished}
               {isAdvancedMode}
               {templateFillConfig}
               templateInspection={templateState.inspection}
               templateInspecting={templateState.inspecting}
-              templateConfigError={templateState.configError}
+              templateConfigError={templateState.configError ?? templateState.filesError}
+              templateCanRetry={templateState.canRetry}
               templateFilesLoading={templateState.filesLoading}
               {templatePlaceholders}
               {templateBindingRows}
@@ -1270,6 +1284,7 @@
                 void templateState.handleFileSelection(detail.assetId, templateContext())}
               onTemplateUpload={(detail) =>
                 void templateState.handleUpload(detail.event, templateContext())}
+              onTemplateRetry={() => templateState.retry()}
               onTemplateDownload={() =>
                 resolvedTemplateAssetId && void templateState.download(resolvedTemplateAssetId)}
               onTemplateRefresh={() =>

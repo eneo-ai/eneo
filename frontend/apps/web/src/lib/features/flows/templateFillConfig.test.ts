@@ -29,6 +29,19 @@ const labels = {
 };
 
 describe("templateFillConfig", () => {
+  it("preserves an intentionally empty field when reinspecting a template", () => {
+    const config = applyTemplateInspection(
+      { bindings: { body: "" } },
+      {
+        asset_id: "asset",
+        file_id: "file",
+        file_name: "template.docx",
+        placeholders: [{ name: "body", label: "Body", kind: "rich", location: "body" }]
+      },
+      { body: "{{step_1.output.text}}" }
+    );
+    expect(config.bindings?.body).toBe("");
+  });
   it("recognizes template_fill steps", () => {
     expect(isTemplateFillStep({ output_mode: "template_fill" })).toBe(true);
     expect(isTemplateFillStep({ output_mode: "pass_through" })).toBe(false);

@@ -175,8 +175,6 @@ export function applyTemplateInspection(
       if (suggestedBindings[placeholder.name]) {
         nextBindings[placeholder.name] = suggestedBindings[placeholder.name];
       }
-    } else if (!nextBindings[placeholder.name]?.trim() && suggestedBindings[placeholder.name]) {
-      nextBindings[placeholder.name] = suggestedBindings[placeholder.name];
     }
   }
   return {
