@@ -58,6 +58,10 @@ class _FakeMCPProxy:
             return ("server", "lookup", "Lookup")
         return None
 
+    def is_internal_tool(self, name: str) -> bool:
+        del name
+        return False
+
     def get_tool_purpose(self, name: str) -> str | None:
         del name
         return None
