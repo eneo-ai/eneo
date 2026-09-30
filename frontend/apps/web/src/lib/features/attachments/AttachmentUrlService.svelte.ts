@@ -29,7 +29,7 @@ class AttachmentUrlService {
 
   /**
    * Returns a signed URL for the exact bytes originally stored, never a processed
-   * representation. Use it to download documents: for a text-type file (a DOCX, PDF or XLSX
+   * representation. Use it to download documents: for a file of type TEXT (a DOCX, PDF or XLSX
    * a tool created) the primary representation is its extracted text.
    */
   getOriginalUrl(file: { id: string }) {

@@ -215,6 +215,9 @@ class TestPermissionSemantics:
             "modules",
             "web_search",
             "image_generation",
+            "tabular_analysis",
+            "document_creation",
+            "spreadsheet_creation",
         }
         actual = {p.value for p in Permission}
         assert actual == expected
