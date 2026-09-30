@@ -996,6 +996,17 @@ class Settings(BaseSettings):
 _settings: Optional[Settings] = None
 
 
+class InvalidConfiguration(SystemExit):
+    """The settings could not be loaded; the reasons were already logged.
+
+    A ``SystemExit`` so that a service stops with exit code 1 and no traceback.
+    Command-line tools that report their own outcome catch it explicitly.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(1)
+
+
 def _describe_configuration_errors(error: ValidationError) -> list[str]:
     """One line per problem, naming the environment variable, never its value."""
     lines: list[str] = []
@@ -1027,7 +1038,7 @@ def get_settings() -> Settings:
                 "\n  ".join(_describe_configuration_errors(error)),
                 UPGRADE_GUIDE_URL,
             )
-            sys.exit(1)
+            raise InvalidConfiguration() from None
     return _settings
 
 
