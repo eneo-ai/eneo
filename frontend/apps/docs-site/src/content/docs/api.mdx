@@ -25,7 +25,9 @@ The reference `docker-compose.yml` routes only `/api`, `/scim`, `/docs`, `/opena
 Paths are exact. Most routers use a trailing slash (`/api/v1/users/me/`, `/api/v1/conversations/`), while the API key endpoints do not (`/api/v1/api-keys`). Copy paths from the specification rather than guessing.
 </Callout>
 
-Health probes live outside the versioned prefix and require no authentication: `GET /api/healthz` returns `200` or `503` with backend, worker, and object-store status, and `GET /api/healthz/crawler` returns crawler queue diagnostics. `/api/livez` and `/api/readyz` exist for orchestrators but are hidden from the specification.
+Health probes live outside the versioned prefix. `GET /api/healthz` requires no authentication and returns `200` or `503` with backend, worker, and object-store status. `/api/livez` and `/api/readyz` are also public and exist for orchestrators, but are hidden from the specification.
+
+`GET /api/healthz/crawler` returns detailed crawler diagnostics and requires the deployment's `ENEO_SUPER_API_KEY`, sent in `X-API-Key` (or the configured `API_KEY_HEADER_NAME`). User sessions and ordinary tenant API keys do not grant access. A missing or invalid super API key returns `401`. Use the public health probes for orchestrator checks.
 
 The specification includes the Server-Sent Event payload models described below under `components.schemas`, and names its API key security scheme `APIKeyAuth`.
 

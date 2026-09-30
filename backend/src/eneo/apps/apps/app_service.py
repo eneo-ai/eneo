@@ -24,7 +24,13 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
-from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided, ResourcePermission
+from eneo.main.models import (
+    NOT_PROVIDED,
+    ModelId,
+    NotProvided,
+    ResourcePermission,
+    is_provided,
+)
 from eneo.prompts.prompt_service import PromptService
 from eneo.skills.domain.skill import (
     AppPinAdvanceIncompatibleReason,
@@ -400,6 +406,17 @@ class AppService:
                 context={
                     "resource_type": "app",
                     "action": "update",
+                    "auth_layer": "domain_policy",
+                },
+            )
+
+        if is_provided(data_retention_days) and not actor.can_edit_retention():
+            raise UnauthorizedException(
+                "Only space admins can change conversation retention",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "update_retention",
                     "auth_layer": "domain_policy",
                 },
             )
