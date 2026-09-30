@@ -67,8 +67,12 @@ from tests.integration.flows.conftest import (
 _CHILD_ARGUMENT = "--ai-builder-turn-retry-child"
 _HARD_EXIT_CODE = 86
 _LEASE_SECONDS = 30
-_PROCESS_DEADLINE_SECONDS = 20.0
-_RECOVERY_DEADLINE_SECONDS = 45.0
+# Hang guards only. The waits below finish on the child's exit and on the
+# session reaching the expected public state; how long that takes depends on
+# host load (each child imports the whole application and starts it), so the
+# bounds are sized for a stuck process, never for a healthy one.
+_PROCESS_DEADLINE_SECONDS = 300.0
+_RECOVERY_DEADLINE_SECONDS = _LEASE_SECONDS + 120.0
 _POLL_INTERVAL_SECONDS = 0.1
 _COMPACTION_SETUP_TURNS = (MAX_SESSION_MESSAGES // 2) + 1
 
@@ -611,6 +615,10 @@ def _child_environment(*, test_settings: Settings) -> dict[str, str]:
         queue_name=test_settings.task_execution_queue,
     )
     environment["TESTING"] = "true" if test_settings.testing else "false"
+    # The provider is scripted, so the child must not fetch LiteLLM's model
+    # catalogue from the internet while it imports; an unreachable host turned
+    # that fetch's retries into the child's startup time.
+    environment["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
     environment["AI_BUILDER_SEND_LOCK_LEASE_SECONDS"] = str(_LEASE_SECONDS)
     return environment
 

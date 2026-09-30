@@ -69,6 +69,7 @@ from eneo.flows.infrastructure.flow_provider_call_repo import (
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from eneo.flows.runtime.run_cancellation import FlowStepCancelledError
 from eneo.model_providers.domain.provider_call_observer import (
     CompletionCallRequestFacts,
     CompletionCallResultFacts,
@@ -255,6 +256,15 @@ async def _create_started_attempt(
             }
         ],
     )
+    # A started attempt belongs to a run a worker has claimed. The in-flight
+    # cancel watch reads the run row and treats any status other than RUNNING
+    # as a cancellation, so a run left QUEUED is "cancelled" as soon as a
+    # provider call outlives one poll interval.
+    assert await run_repo.mark_running_if_claimable(
+        run_id=run.id,
+        tenant_id=admin_user.tenant_id,
+        expected_revision=run.revision,
+    )
     attempt = await run_repo.create_or_get_attempt_started(
         run_id=run.id,
         flow_id=flow.id,
@@ -411,8 +421,15 @@ async def test_summarization_receipts_resolve_before_worker_finalization(
         return response
 
     assistant.get_response.side_effect = dispatch
-    with pytest.raises(RuntimeError, match="Injected failure mid-fold"):
+    # With the API cancel, the step ends with whichever the executor observes
+    # first: the injected failure or the cancel watch seeing the run cancelled.
+    expected_failures = (
+        (RuntimeError, FlowStepCancelledError) if cancel_via_api else RuntimeError
+    )
+    with pytest.raises(expected_failures) as raised:
         await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    if not isinstance(raised.value, FlowStepCancelledError):
+        assert "Injected failure mid-fold" in str(raised.value)
     assert len(dispatched) > 3
     before, receipts, status = await _read_summarization_evidence(context)
     assert before == checkpoint
