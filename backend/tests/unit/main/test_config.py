@@ -1,10 +1,14 @@
 import pytest
 from pydantic import ValidationError
 
-from eneo.main.config import Settings, get_settings
+from eneo.main.config import (
+    JWT_EXPIRY_TIME_MAXIMUM_MINUTES,
+    Settings,
+    get_settings,
+)
 
 
-@pytest.mark.parametrize("minutes", [1, 60, 1440])
+@pytest.mark.parametrize("minutes", [1, 60, 1440, JWT_EXPIRY_TIME_MAXIMUM_MINUTES])
 def test_jwt_expiry_time_accepts_positive_minutes(minutes: int) -> None:
     settings = Settings.model_validate(
         {**get_settings().model_dump(), "jwt_expiry_time": minutes}
@@ -16,6 +20,16 @@ def test_jwt_expiry_time_accepts_positive_minutes(minutes: int) -> None:
 @pytest.mark.parametrize("minutes", [0, -1])
 def test_jwt_expiry_time_rejects_nonpositive_values(minutes: int) -> None:
     with pytest.raises(ValidationError, match="JWT_EXPIRY_TIME"):
+        Settings.model_validate(
+            {**get_settings().model_dump(), "jwt_expiry_time": minutes}
+        )
+
+
+@pytest.mark.parametrize("minutes", [JWT_EXPIRY_TIME_MAXIMUM_MINUTES + 1, 86400])
+def test_jwt_expiry_time_rejects_values_beyond_thirty_days(minutes: int) -> None:
+    # 86400 is the value earlier templates shipped when the unit was mislabelled
+    # as seconds; it means 60 days and must be corrected, not reinterpreted.
+    with pytest.raises(ValidationError, match="30 days"):
         Settings.model_validate(
             {**get_settings().model_dump(), "jwt_expiry_time": minutes}
         )

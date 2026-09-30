@@ -24,6 +24,9 @@ _LOCAL_MANIFEST = (
 
 
 URL_SIGNING_KEY_MINIMUM_BYTES = 32
+# Absolute upper bound for a login session; a longer-lived captured token
+# would stay replayable for as long. 1440 (24 hours) is the recommended value.
+JWT_EXPIRY_TIME_MAXIMUM_MINUTES = 30 * 24 * 60
 
 
 def validate_public_origin(origin: str | None) -> str | None:
@@ -467,7 +470,8 @@ class Settings(BaseSettings):
     jwt_audience: str
     jwt_issuer: str
     # Session token lifetime in minutes. The value has always been applied as
-    # minutes; it is not reinterpreted on upgrade.
+    # minutes; it is not reinterpreted on upgrade, but it may not exceed
+    # JWT_EXPIRY_TIME_MAXIMUM_MINUTES.
     jwt_expiry_time: int
     jwt_algorithm: str
     jwt_secret: str
@@ -580,6 +584,12 @@ class Settings(BaseSettings):
             raise ValueError(
                 "JWT_EXPIRY_TIME must be a positive number of minutes "
                 "(for example 1440 for 24 hours)"
+            )
+        if v > JWT_EXPIRY_TIME_MAXIMUM_MINUTES:
+            raise ValueError(
+                "JWT_EXPIRY_TIME is the session lifetime in minutes and may not "
+                f"exceed {JWT_EXPIRY_TIME_MAXIMUM_MINUTES} (30 days). "
+                "Set 1440 for 24-hour sessions."
             )
         return v
 
