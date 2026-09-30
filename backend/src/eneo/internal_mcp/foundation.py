@@ -7,9 +7,10 @@ An internal MCP server is a FastMCP app the backend both *hosts* (mounted at
 ``/internal-mcp/<name>``) and *connects to* as an MCP client during a
 completion, so built-in tools ride the exact same proxy plumbing as any
 external MCP server. Authentication rides in the bearer token: a short-lived
-access token that authenticates the user and carries an ``assistant_id``
-claim fixing the scope, so tools take no scope arguments and cannot be
-pointed at another assistant.
+token minted for the loopback audience (the rest of the API refuses it) that
+authenticates the user and carries an ``assistant_id`` claim fixing the
+scope, so tools take no scope arguments and cannot be pointed at another
+assistant.
 
 Internal servers are stateless (``stateless_http=True``): no MCP protocol
 session id is ever assigned, and any backend worker can serve a loopback
@@ -30,7 +31,7 @@ from uuid import UUID, uuid4
 from dependency_injector import providers
 from mcp.server.fastmcp import Context, FastMCP
 
-from eneo.authentication.auth_service import AuthService
+from eneo.authentication.auth_service import INTERNAL_MCP_AUDIENCE, AuthService
 from eneo.database.database import sessionmanager
 from eneo.main.config import get_settings
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
@@ -57,7 +58,7 @@ def assistant_id_from_token(token: str) -> UUID:
     _, claims = AuthService().get_jwt_payload_with_claims(
         token,
         key=str(settings.jwt_secret),
-        aud=settings.jwt_audience,
+        aud=INTERNAL_MCP_AUDIENCE,
         algs=[settings.jwt_algorithm],
     )
     raw = claims.get("assistant_id")
@@ -72,7 +73,7 @@ def mcp_server_id_from_token(token: str) -> UUID:
     _, claims = AuthService().get_jwt_payload_with_claims(
         token,
         key=str(settings.jwt_secret),
-        aud=settings.jwt_audience,
+        aud=INTERNAL_MCP_AUDIENCE,
         algs=[settings.jwt_algorithm],
     )
     raw = claims.get("mcp_server_id")
@@ -100,7 +101,7 @@ async def internal_tool_context(ctx: Context):
     async with sessionmanager.session() as session:
         async with session.begin():
             container = Container(session=providers.Object(session))
-            user = await container.user_service().authenticate(token=token)
+            user = await container.user_service().authenticate_internal_mcp_token(token)
             override_user(container=container, user=user)
             yield ToolContext(container=container, user=user, assistant_id=assistant_id)
 
