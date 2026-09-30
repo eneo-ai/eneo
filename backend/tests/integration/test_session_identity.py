@@ -6,10 +6,10 @@ import jwt
 import pytest
 from sqlalchemy import update
 
-from eneo.authentication.federation_router import _jit_provision_user
+from eneo.authentication.auth_models import FederatedIdentity
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.users_table import Users
-from eneo.tenants.tenant import TenantBase
+from eneo.tenants.tenant import TenantBase, TenantUpdate
 from eneo.users.user import UserAdd, UserState
 
 pytestmark = pytest.mark.integration
@@ -38,14 +38,24 @@ async def test_colliding_usernames_keep_identity_and_private_resources_isolated(
             )
             second_tenant_id = other_tenant.id
 
+        if login_method == "jit":
+            for tenant_id in {first_tenant_id, second_tenant_id}:
+                await container.tenant_repo().update_tenant(
+                    TenantUpdate(id=tenant_id, provisioning=True)
+                )
+
         for tenant_id, email in (
             (first_tenant_id, "anna.svensson@sundsvall.se"),
             (second_tenant_id, "anna.svensson@ange.se"),
         ):
             if login_method == "jit":
-                owner = await _jit_provision_user(
-                    container, tenant_id, email, "session-identity-regression"
+                owner, created = await container.user_service().resolve_federated_user(
+                    identity=FederatedIdentity(email=email, email_verified=True),
+                    tenant_id=tenant_id,
+                    allowed_domains=["sundsvall.se", "ange.se"],
+                    correlation_id="session-identity-regression",
                 )
+                assert created is True
                 token = container.auth_service().create_access_token_for_user(owner)
             else:
                 salt, hashed = container.auth_service().create_salt_and_hashed_password(

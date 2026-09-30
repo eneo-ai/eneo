@@ -171,7 +171,7 @@ Use the federation API to provide the tenant's OIDC configuration. `PUT` is the 
 | `discovery_endpoint` | Yes | The IdP's OIDC discovery URL |
 | `client_id` | Yes | OAuth client ID |
 | `client_secret` | Yes | OAuth client secret (at least 8 characters, encrypted at rest) |
-| `allowed_domains` | No | Email domains allowed to authenticate - restricts who can log in (defaults to no restriction) |
+| `allowed_domains` | No | Email domains allowed to authenticate. Empty means no domain filter for existing members; a non-empty list is required for JIT account creation |
 | `canonical_public_origin` | No | The URL where this tenant's users access Eneo; used to build the redirect URI. Falls back to the backend's `PUBLIC_ORIGIN` when omitted |
 | `redirect_path` | No | Callback path, default `/login/callback` |
 | `additional_redirect_uris` | No | Extra fully-qualified callback URLs accepted for this tenant (each must also be registered in the IdP) |
@@ -280,7 +280,11 @@ To onboard a new organization:
 3. **Register Eneo** in their IdP with the callback URL `{canonical_public_origin}/login/callback`
 4. **Configure via API** with their IdP details
 5. **Test** the configuration
-6. **Invite users**, or enable JIT provisioning for the tenant (`POST /api/v1/sysadmin/tenants/{tenant_id}/` with `{"provisioning": true}` and a `default_role_id`)
+6. **Provision users through SCIM**, or create/invite them, and keep tenant `provisioning: false`. For deployments without SCIM, optionally enable JIT (`POST /api/v1/sysadmin/tenants/{tenant_id}/` with `{"provisioning": true}` and a `default_role_id`), configure a non-empty `allowed_domains`, and ensure the ID token provides boolean `email_verified: true` for `email`.
+
+An existing active tenant member can sign in without an `email_verified` claim. Creating a new member requires all JIT conditions above. A custom email claims mapping can be used for existing accounts, but JIT only accepts verification when the selected address equals the token's standard `email` address. Missing verification is not an implied approval. Use SCIM or administrative provisioning when your IdP does not provide this guarantee.
+
+JIT never restores inactive or removed accounts. SCIM or an administrator must reactivate the original account. Enabling SCIM does not automatically change `provisioning`; explicitly keep it `false` when SCIM manages membership.
 
 ---
 
@@ -298,13 +302,13 @@ curl -X PATCH "https://eneo.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/
   -d '{"allowed_domains": ["domain1.com", "domain2.com"]}'
 ```
 
-### "User not found. Contact your administrator for access."
+### "User not found. Provision the account through SCIM or contact your administrator for access."
 
 The user authenticated successfully with the IdP but doesn't exist in Eneo and the tenant has JIT provisioning disabled (`403`).
 
 **Fix:** Either:
 - Create or invite the user in the tenant first
-- Enable JIT provisioning for the tenant (`provisioning: true`) and set a `default_role_id`, otherwise auto-created users have no permissions
+- For deployments without SCIM, enable JIT (`provisioning: true`), configure a non-empty `allowed_domains`, require boolean `email_verified: true` from the IdP, and set a `default_role_id`. Otherwise auto-created users have no permissions. Do not enable JIT to bypass a SCIM provisioning failure.
 
 ### "Authorization session is invalid or has expired"
 

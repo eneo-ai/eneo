@@ -46,7 +46,7 @@ from eneo.main import config
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import validate_public_origin
 from eneo.main.container.container import Container
-from eneo.main.exceptions import AuthenticationException
+from eneo.main.exceptions import AuthenticationException, FederatedLoginDenied
 from eneo.main.logging import get_logger
 from eneo.main.models import CursorPaginatedResponse
 from eneo.main.request_context import set_request_context
@@ -417,7 +417,7 @@ async def user_login_with_email_and_password(
     "/login/openid-connect/mobilityguard/",
     response_model=AccessToken,
     description="Authenticate via OpenID Connect (MobilityGuard / generic OIDC provider).",
-    responses=responses.get_responses([400, 401, 500, 502]),
+    responses=responses.get_responses([400, 401, 403, 500, 502]),
 )
 async def login_with_mobilityguard(
     request: Request,
@@ -740,6 +740,12 @@ async def login_with_mobilityguard(
             },
         )
 
+    except FederatedLoginDenied as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+            headers={"X-Correlation-ID": correlation_id},
+        ) from exc
     except Exception as e:
         total_time = time.time() - start_time
         logger.error(

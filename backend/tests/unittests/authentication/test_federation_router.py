@@ -16,6 +16,7 @@ from eneo.authentication.federation_router import CallbackRequest
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.tenant import TenantInDB, TenantState
 from eneo.users.user import UserInDB
+from eneo.users.user_service import UserService
 
 
 class DummySettings(SimpleNamespace):
@@ -38,6 +39,7 @@ class DummySettings(SimpleNamespace):
             "oidc_client_secret": None,
             "oidc_client_id": None,
             "oidc_tenant_id": None,
+            "oidc_allowed_domains": [],
         }
         defaults.update(overrides)
         super().__init__(**defaults)
@@ -121,6 +123,9 @@ class UserRepoStub:
     def __init__(self, user: UserInDB):
         self._user = user
 
+    async def has_removed_user_by_email(self, email: str, tenant_id) -> bool:
+        return False
+
     async def get_user_by_email(self, email: str):
         if email.lower() == self._user.email.lower():
             return self._user
@@ -128,8 +133,15 @@ class UserRepoStub:
 
 
 class AuthServiceStub:
+    def __init__(self, claims: dict[str, object] | None = None):
+        self.claims = (
+            claims
+            if claims is not None
+            else {"sub": "subject", "email": "user@Example.COM", "email_verified": True}
+        )
+
     def get_payload_from_openid_jwt(self, **kwargs):  # noqa: ARG002
-        return {"email": "user@Example.COM"}
+        return self.claims
 
     def create_access_token_for_user(self, user: UserInDB):  # noqa: ARG002
         return "access-token"
@@ -176,6 +188,18 @@ class MockContainer:
 
     def user_repo(self):
         return self._user_repo
+
+    def user_service(self):
+        return UserService(
+            user_repo=self._user_repo,
+            tenant_repo=self._tenant_repo,
+            auth_service=self._auth_service,
+            audit_service=getattr(self, "_audit_service", None),
+            api_key_auth_resolver=None,
+            api_key_v2_repo=None,
+            settings_repo=None,
+            info_blob_repo=None,
+        )
 
 
 @pytest.mark.asyncio
@@ -716,8 +740,20 @@ class UserRepoStubForJIT:
         self._tenant = tenant
         self._created_user = None
 
+    async def has_removed_user_by_email(self, email: str, tenant_id) -> bool:
+        return bool(
+            self._user
+            and self._user.tenant_id == tenant_id
+            and self._user.email.lower() == email.lower()
+            and self._user.deleted_at is not None
+        )
+
     async def get_user_by_email(self, email: str):
-        if self._user and email.lower() == self._user.email.lower():
+        if (
+            self._user
+            and self._user.deleted_at is None
+            and email.lower() == self._user.email.lower()
+        ):
             return self._user
         if self._created_user and email.lower() == self._created_user.email.lower():
             return self._created_user
@@ -792,6 +828,18 @@ class MockContainerForJIT:
     def user_repo(self):
         return self._user_repo
 
+    def user_service(self):
+        return UserService(
+            user_repo=self._user_repo,
+            tenant_repo=self._tenant_repo,
+            auth_service=self._auth_service,
+            audit_service=getattr(self, "_audit_service", None),
+            api_key_auth_resolver=None,
+            api_key_v2_repo=None,
+            settings_repo=None,
+            info_blob_repo=None,
+        )
+
     def audit_service(self):
         return self._audit_service
 
@@ -800,8 +848,22 @@ class MockContainerForJIT:
 
 
 @pytest.mark.asyncio
-async def test_jit_provisioning_creates_user_when_enabled(monkeypatch):
-    """Test that JIT provisioning creates a user when enabled and user doesn't exist."""
+@pytest.mark.parametrize(
+    "admission_case",
+    [
+        "allowed",
+        "empty-domains",
+        "wrong-domain",
+        "unverified",
+        "missing-verification",
+        "mapped-unverified",
+        "jit-disabled",
+        "removed",
+        "inactive",
+    ],
+)
+async def test_callback_enforces_jit_admission(monkeypatch, admission_case):
+    """The callback only creates users that meet the complete admission policy."""
     dummy_settings = DummySettings(federation_enabled=True)
     monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
 
@@ -838,14 +900,45 @@ async def test_jit_provisioning_creates_user_when_enabled(monkeypatch):
         updated_at=datetime.now(timezone.utc),
     )
 
-    # User repo that returns None (user doesn't exist)
-    user_repo = UserRepoStubForJIT(existing_user=None, tenant=tenant)
+    claims: dict[str, object] = {
+        "sub": "subject",
+        "email": "user@example.com",
+        "email_verified": True,
+    }
+    existing = None
+    if admission_case == "empty-domains":
+        tenant.federation_config["allowed_domains"] = []
+    elif admission_case == "wrong-domain":
+        tenant.federation_config["allowed_domains"] = ["outside.example"]
+    elif admission_case == "unverified":
+        claims["email_verified"] = False
+    elif admission_case == "missing-verification":
+        claims.pop("email_verified")
+    elif admission_case == "mapped-unverified":
+        tenant.federation_config["claims_mapping"] = {"email": "mail"}
+        claims["mail"] = "another@example.com"
+    elif admission_case == "jit-disabled":
+        tenant.provisioning = False
+    elif admission_case in ("removed", "inactive"):
+        existing = UserInDB(
+            id=uuid4(),
+            email="user@example.com",
+            username="user",
+            tenant=tenant,
+            tenant_id=tenant.id,
+            state="deleted" if admission_case == "removed" else "inactive",
+            deleted_at=datetime.now(timezone.utc)
+            if admission_case == "removed"
+            else None,
+        )
+
+    user_repo = UserRepoStubForJIT(existing_user=existing, tenant=tenant)
     audit_service = AuditServiceStub()
 
     container = MockContainerForJIT(
         tenant_repo=TenantRepoStub(tenant),
         user_repo=user_repo,
-        auth_service=AuthServiceStub(),
+        auth_service=AuthServiceStub(claims),
         redis_client=redis_client,
         encryption_service=EncryptionService(None),
         audit_service=audit_service,
@@ -892,6 +985,16 @@ async def test_jit_provisioning_creates_user_when_enabled(monkeypatch):
     monkeypatch.setattr(federation_router, "JWKClient", FakeJWKClient)
 
     callback = CallbackRequest(code="auth-code", state=signed_state)
+
+    if admission_case != "allowed":
+        with pytest.raises(HTTPException) as caught:
+            await federation_router.auth_callback(callback, container=container)
+        assert caught.value.status_code == 403
+        assert caught.value.headers["X-Correlation-ID"] == "corr-jit"
+        assert user_repo._created_user is None
+        assert audit_service.logged_events == []
+        assert await redis_client.get("oidc:state:nonce-jit") is None
+        return
 
     result = await federation_router.auth_callback(callback, container=container)
 
@@ -954,9 +1057,16 @@ async def test_jit_provisioning_does_not_reuse_a_taken_username():
         encryption_service=EncryptionService(None),
     )
 
-    created = await federation_router._jit_provision_user(
-        container, tenant.id, "anna.svensson@ange.se", "corr-jit-username"
+    from eneo.authentication.auth_models import FederatedIdentity
+
+    created, was_created = await container.user_service().resolve_federated_user(
+        identity=FederatedIdentity(email="anna.svensson@ange.se", email_verified=True),
+        tenant_id=tenant.id,
+        allowed_domains=["ange.se"],
+        correlation_id="corr-jit-username",
     )
+
+    assert was_created is True
 
     assert created.email == "anna.svensson@ange.se"
     assert created.username == "anna.svensson@ange.se"
@@ -1175,3 +1285,104 @@ async def test_auth_callback_rejects_malformed_state_redirect_uri(monkeypatch):
 
     assert exc.value.status_code == 400
     assert "Redirect URI mismatch" in exc.value.detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "admission_case",
+    [
+        "allowed",
+        "jit-disabled",
+        "empty-domains",
+        "missing-verification",
+        "removed",
+        "existing-scim",
+    ],
+)
+async def test_global_oidc_endpoint_uses_shared_admission(monkeypatch, admission_case):
+    from starlette.requests import Request
+
+    from eneo.authentication.auth_models import OpenIdConnectLogin
+    from eneo.users import user_router, user_service
+
+    tenant = TenantInDB(
+        id=uuid4(),
+        name="OIDC tenant",
+        state=TenantState.ACTIVE,
+        quota_limit=1024**3,
+        provisioning=admission_case != "jit-disabled",
+    )
+    settings = DummySettings(
+        oidc_discovery_endpoint="https://idp.example.com/discovery",
+        oidc_client_id="client",
+        oidc_client_secret="secret",
+        oidc_tenant_id=str(tenant.id),
+        oidc_allowed_domains=[]
+        if admission_case in ("empty-domains", "existing-scim")
+        else ["example.com"],
+    )
+    claims: dict[str, object] = {"sub": "subject", "email": "user@example.com"}
+    if admission_case not in ("missing-verification", "existing-scim"):
+        claims["email_verified"] = True
+    existing = None
+    if admission_case in ("removed", "existing-scim"):
+        existing = UserInDB(
+            id=uuid4(),
+            email="user@example.com",
+            username="user",
+            tenant=tenant,
+            tenant_id=tenant.id,
+            state="deleted" if admission_case == "removed" else "active",
+            deleted_at=datetime.now(timezone.utc)
+            if admission_case == "removed"
+            else None,
+        )
+    if admission_case == "existing-scim":
+        tenant.provisioning = False
+    repository = UserRepoStubForJIT(existing_user=existing, tenant=tenant)
+    container = MockContainerForJIT(
+        tenant_repo=TenantRepoStub(tenant),
+        user_repo=repository,
+        auth_service=AuthServiceStub(claims),
+        redis_client=FakeRedis(),
+        encryption_service=EncryptionService(None),
+    )
+    monkeypatch.setattr(user_router.config, "get_settings", lambda: settings)
+    monkeypatch.setattr(user_service, "get_settings", lambda: settings)
+    response = FakeResponse(
+        {
+            "token_endpoint": "https://idp.example.com/token",
+            "jwks_uri": "https://idp.example.com/jwks",
+            "id_token_signing_alg_values_supported": ["RS256"],
+            "id_token": "id",
+            "access_token": "token",
+        }
+    )
+    monkeypatch.setattr(
+        user_router, "aiohttp_client", lambda: FakeAioHttpClient(response)
+    )
+    monkeypatch.setattr(user_router.jwt, "PyJWKClient", FakeJWKClient)
+    login = OpenIdConnectLogin(
+        code="code",
+        code_verifier="verifier",
+        client_id="client",
+        redirect_uri="https://global.example.com/login/callback",
+    )
+    request = Request({"type": "http", "headers": []})
+    # The existing token exchange uses aiohttp.BasicAuth; explicitly capture
+    # its deprecation while exercising the account decision through the route.
+    with pytest.warns(DeprecationWarning, match="BasicAuth is deprecated"):
+        if admission_case in ("allowed", "existing-scim"):
+            token = await user_router.login_with_mobilityguard(
+                request, login, container
+            )
+            assert token.access_token == "access-token"
+            assert (repository._created_user is not None) is (
+                admission_case == "allowed"
+            )
+        else:
+            with pytest.raises(HTTPException) as caught:
+                await user_router.login_with_mobilityguard(request, login, container)
+            assert caught.value.status_code == 403
+            assert caught.value.headers["X-Correlation-ID"]
+            assert repository._created_user is None
