@@ -6,7 +6,9 @@ whose columns match, or every drive item whose name or content matches, and
 hands back flat file rows with the path they live at.
 """
 
+import unicodedata
 from typing import Any, cast
+from urllib.parse import unquote
 
 from eneo.info_blobs.info_blob import SourceMetadataEntry
 from eneo.integration.infrastructure.content_service.sharepoint_metadata import (
@@ -16,6 +18,14 @@ from eneo.integration.infrastructure.content_service.sharepoint_metadata import 
 
 # Enough to choose from; a wider net wants a narrower search, not more rows.
 MAX_SEARCH_RESULTS = 200
+# Graph rejects longer search text; what a person types is cut here first.
+MAX_SEARCH_TEXT_LENGTH = 200
+
+
+def clean_search_text(text: str) -> str:
+    """The free text as sent to Graph: trimmed, control characters out, capped."""
+    cleaned = "".join(ch for ch in text if ch.isprintable() or ch == " ")
+    return " ".join(cleaned.split())[:MAX_SEARCH_TEXT_LENGTH]
 
 
 def parse_filter_params(raw_filters: list[str]) -> dict[str, str]:
@@ -61,13 +71,15 @@ def library_path(parent_reference: dict[str, Any] | None, name: str) -> str:
     """``/Folder/Sub/name`` from Graph's ``parentReference.path``.
 
     Graph writes the parent as ``/drives/{id}/root:/Folder/Sub``; the part
-    after ``root:`` is the folder path, empty at the root.
+    after ``root:`` is the folder path, empty at the root. It arrives
+    percent-encoded, so it is decoded and NFC-normalised the way the sync
+    treats the same value, or a hit would never match the tree's paths.
     """
     raw = (parent_reference or {}).get("path")
     folder = ""
     if isinstance(raw, str):
         _, marker, rest = raw.partition("root:")
-        folder = rest if marker else ""
+        folder = unicodedata.normalize("NFC", unquote(rest)) if marker else ""
     folder = folder.rstrip("/")
     return f"{folder}/{name}" if folder else f"/{name}"
 
@@ -127,8 +139,10 @@ def row_matches(row: dict[str, Any], text: str, residual: dict[str, str]) -> boo
         for entry in cast(list[Any], row.get("source_metadata") or [])
     ]
     if text:
+        # Only what the results list can highlight: a hit on the folder path
+        # alone would show a row with nothing marked.
         needle = text.lower()
-        haystack = [str(row.get("name", "")), str(row.get("path", ""))]
+        haystack = [str(row.get("name", ""))]
         for entry in entries:
             haystack.append(entry.label)
             haystack.extend(

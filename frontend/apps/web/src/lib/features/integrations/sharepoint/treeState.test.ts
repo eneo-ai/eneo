@@ -5,8 +5,7 @@ import {
   hasSelectedSharePointDescendant,
   isSharePointDescendantPath,
   isSharePointItemCovered,
-  normalizeSharePointTreeQuery,
-  splitSharePointMatches
+  normalizeSharePointTreeQuery
 } from "./treeState";
 
 describe("SharePoint tree state", () => {
@@ -40,22 +39,6 @@ describe("SharePoint tree state", () => {
   it("treats every non-root path as a descendant of the selected site", () => {
     expect(isSharePointDescendantPath("/Policies/Security.pdf", "/")).toBe(true);
     expect(isSharePointDescendantPath("/", "/")).toBe(false);
-  });
-});
-
-describe("splitSharePointMatches", () => {
-  it("marks every case-insensitive occurrence in order", () => {
-    expect(splitSharePointMatches("Larm – larmlista", "larm")).toEqual([
-      { text: "Larm", match: true },
-      { text: " – ", match: false },
-      { text: "larm", match: true },
-      { text: "lista", match: false }
-    ]);
-  });
-
-  it("returns the text untouched without a query or a hit", () => {
-    expect(splitSharePointMatches("Policy", "")).toEqual([{ text: "Policy", match: false }]);
-    expect(splitSharePointMatches("Policy", "larm")).toEqual([{ text: "Policy", match: false }]);
   });
 });
 

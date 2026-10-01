@@ -3,6 +3,8 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+import pytest
+
 from eneo.integration.domain.entities.oauth_token import SharePointToken
 from eneo.integration.domain.value_objects import IntegrationType
 from eneo.integration.infrastructure.content_service.sharepoint_metadata import (
@@ -13,6 +15,7 @@ from eneo.integration.infrastructure.preview_service import (
 )
 from eneo.integration.infrastructure.preview_service.sharepoint_search import (
     build_odata_filter,
+    clean_search_text,
     filter_columns,
     library_path,
     parse_filter_params,
@@ -86,6 +89,13 @@ class TestRows:
         assert library_path({"path": "/drives/b!x/root:/Rutiner/Larm"}, "a.docx") == (
             "/Rutiner/Larm/a.docx"
         )
+        # Graph percent-encodes the parent path; the tree shows it decoded.
+        assert (
+            library_path(
+                {"path": "/drives/b!x/root:/Styrande%20dokument/Policyer"}, "x.pdf"
+            )
+            == "/Styrande dokument/Policyer/x.pdf"
+        )
         assert library_path({"path": "/drives/b!x/root:"}, "a.docx") == "/a.docx"
         assert library_path(None, "a.docx") == "/a.docx"
 
@@ -141,6 +151,9 @@ class TestRows:
         assert row is not None
         assert row_matches(row, "larm", {})
         assert row_matches(row, "rutin", {})
+        # The folder path is shown but never highlighted, so it is not a hit.
+        row["path"] = "/Brandskydd/Larm.docx"
+        assert not row_matches(row, "brandskydd", {})
         assert row_matches(row, "", {"Verksamhet": "vård"})
         assert not row_matches(row, "", {"Verksamhet": "Skola"})
         assert not row_matches(row, "policy", {})
@@ -167,24 +180,30 @@ def _client():
     return client, context
 
 
+def test_search_text_is_trimmed_cleaned_and_capped():
+    assert clean_search_text("  larm \x00 natt  ") == "larm natt"
+    assert len(clean_search_text("x" * 500)) == 200
+
+
 class TestSearchLibrary:
     async def test_column_filters_query_the_list_and_text_narrows_the_rows(self):
         client, context = _client()
-        client.get_list_items_filtered = AsyncMock(
-            return_value=(
-                [
-                    {
-                        "fields": {"Dokumenttyp": "Rutin"},
-                        "driveItem": {"id": "1", "name": "Larm.docx", "file": {}},
-                    },
-                    {
-                        "fields": {"Dokumenttyp": "Rutin"},
-                        "driveItem": {"id": "2", "name": "Brand.docx", "file": {}},
-                    },
-                ],
-                True,
-            )
-        )
+        raw_rows = [
+            {
+                "fields": {"Dokumenttyp": "Rutin"},
+                "driveItem": {"id": "1", "name": "Larm.docx", "file": {}},
+            },
+            {
+                "fields": {"Dokumenttyp": "Rutin"},
+                "driveItem": {"id": "2", "name": "Brand.docx", "file": {}},
+            },
+        ]
+
+        async def filtered(drive_id, odata_filter, *, max_items, accept):
+            # The client pages until enough rows pass; here it only applies the check.
+            return [raw for raw in raw_rows if accept(raw)], True
+
+        client.get_list_items_filtered = AsyncMock(side_effect=filtered)
         with patch(
             f"{tree_module.__name__}.SharePointContentClient", return_value=context
         ):
@@ -192,11 +211,23 @@ class TestSearchLibrary:
                 _token(), site_id="s1", text="larm", filters={"Dokumenttyp": "Rutin"}
             )
 
-        client.get_list_items_filtered.assert_awaited_once_with(
-            "d1", "fields/Dokumenttyp eq 'Rutin'", max_items=200
-        )
+        call = client.get_list_items_filtered.await_args
+        assert call.args == ("d1", "fields/Dokumenttyp eq 'Rutin'")
+        assert call.kwargs["max_items"] == 200
         assert [row["name"] for row in result["items"]] == ["Larm.docx"]
         assert result["truncated"] is True
+
+    async def test_a_column_graph_cannot_compare_is_rejected(self):
+        client, context = _client()
+        client.get_list_items_filtered = AsyncMock()
+        with patch(
+            f"{tree_module.__name__}.SharePointContentClient", return_value=context
+        ):
+            with pytest.raises(ValueError, match="Unknown filter column: Ansvarig"):
+                await SharePointTreeService().search_library(
+                    _token(), site_id="s1", filters={"Ansvarig": "Anna"}
+                )
+        client.get_list_items_filtered.assert_not_awaited()
 
     async def test_text_alone_uses_the_drive_search(self):
         client, context = _client()

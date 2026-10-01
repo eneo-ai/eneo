@@ -184,14 +184,16 @@ class TestLibrarySearchQueries:
         )
 
         rows, truncated = await client.get_list_items_filtered(
-            "d1", "fields/Extern eq true", max_items=2
+            "d1", "fields/Verksamhet eq 'HR & People'", max_items=2
         )
 
         assert [r["id"] for r in rows] == ["1", "2"]
         assert truncated is True
         first_call = client.client.get.await_args_list[0]
+        # & and spaces inside the value must not end or break the query string.
         assert first_call.args[0] == (
-            "v1.0/drives/d1/list/items?$expand=fields,driveItem&$filter=fields/Extern eq true"
+            "v1.0/drives/d1/list/items?$expand=fields,driveItem"
+            "&$filter=fields/Verksamhet%20eq%20%27HR%20%26%20People%27"
         )
         assert first_call.kwargs["headers"]["Prefer"] == (
             "HonorNonIndexedQueriesWarningMayFailRandomly"
@@ -200,10 +202,14 @@ class TestLibrarySearchQueries:
     async def test_drive_search_quotes_the_text_and_expands_list_items(self):
         client = _client(include=True, responses=[{"value": [{"id": "1"}]}])
 
-        rows, truncated = await client.search_drive_items("d1", "o'neil", max_items=10)
+        rows, truncated = await client.search_drive_items(
+            "d1", "o'neil #3", max_items=10
+        )
 
         assert [r["id"] for r in rows] == ["1"] and truncated is False
-        assert _urls(client) == [f"v1.0/drives/d1/root/search(q='o''neil')?{EXPAND}"]
+        assert _urls(client) == [
+            f"v1.0/drives/d1/root/search(q='o%27%27neil%20%233')?{EXPAND}"
+        ]
 
     async def test_drive_search_falls_back_without_the_expansion(self):
         client = _client(include=True, responses=[_bad_request(), {"value": []}])
@@ -214,3 +220,46 @@ class TestLibrarySearchQueries:
             f"v1.0/drives/d1/root/search(q='x')?{EXPAND}",
             "v1.0/drives/d1/root/search(q='x')",
         ]
+
+
+class TestAcceptedPaging:
+    async def test_keeps_paging_until_enough_rows_pass_the_check(self):
+        client = _client(
+            include=True,
+            responses=[
+                {
+                    "value": [{"id": "a"}, {"id": "b"}],
+                    "@odata.nextLink": "https://g/p2",
+                },
+                {
+                    "value": [{"id": "c"}, {"id": "B"}],
+                    "@odata.nextLink": "https://g/p3",
+                },
+                {"value": [{"id": "d"}]},
+            ],
+        )
+
+        rows, truncated = await client.get_list_items_filtered(
+            "d1", None, max_items=2, accept=lambda row: row["id"].lower() == "b"
+        )
+
+        assert [r["id"] for r in rows] == ["b", "B"]
+        assert truncated is True, "a third page was never read"
+        assert client.client.get.await_count == 2
+
+    async def test_scan_budget_bounds_a_search_that_matches_nothing(self):
+        pages = [
+            {
+                "value": [{"id": str(i)} for i in range(500)],
+                "@odata.nextLink": "https://g/next",
+            }
+            for _ in range(10)
+        ]
+        client = _client(include=True, responses=pages)
+
+        rows, truncated = await client.get_list_items_filtered(
+            "d1", None, max_items=10, accept=lambda row: False
+        )
+
+        assert rows == [] and truncated is True
+        assert client.client.get.await_count == 4  # 4 x 500 reaches the 2000-row budget

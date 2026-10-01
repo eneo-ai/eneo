@@ -72,6 +72,21 @@ async def test_files_carry_their_admitted_columns_and_folders_do_not():
     client.get_list_columns.assert_awaited_once_with("d1")
 
 
+async def test_subfolders_without_files_do_not_ask_for_the_columns():
+    client, context = _client(
+        columns=[{"name": "Dokumenttyp", "displayName": "Dokumenttyp", "choice": {}}],
+        items=[{"id": "f2", "name": "Sub", "folder": {}}],
+    )
+
+    with patch(CLIENT_PATCH, return_value=context):
+        result = await SharePointTreeService().get_folder_tree(
+            _token(), site_id="s1", drive_id="d1", folder_id="f1"
+        )
+
+    client.get_list_columns.assert_not_awaited()
+    assert result["columns"] == []
+
+
 async def test_unreadable_columns_leave_the_tree_without_properties():
     client, context = _client(
         columns=[],
