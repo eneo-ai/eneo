@@ -41,6 +41,7 @@ from eneo.flows.ai_builder.ai_builder_token_usage import (
     combine_token_usage,
 )
 from eneo.flows.ai_builder.ai_builder_tools import AdmissionNormalizerFamily
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -197,6 +198,37 @@ class ProposalAttemptTelemetryPayload(BaseModel):
     producers: tuple[FailureProducer, ...] = ()
 
 
+class DeclaredStepAuthoring(BaseModel):
+    """What the model wrote on one proposal step, before assembly admitted it.
+
+    `uses_form_fields` are the names after argument normalization (trimmed,
+    de-duplicated), not the model's raw text.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    step: int = Field(ge=1, strict=True)
+    uses_form_fields: list[str]
+    review_mode: FlowStepReviewMode | None
+
+
+class DeclaredAuthoring(BaseModel):
+    """The create proposal's own declarations, kept so error analysis reads them
+    instead of inferring them from the assembled flow. Only an accepted create
+    turn records them; an edit turn or an older record reads as not recorded.
+
+    `review_target` covers the structured-result review only: whether the
+    reviewed step was named by the model (`declared`), placed by the server from
+    the requested review (`inferred`), or no structured-result review was
+    requested (`none`; a transcript review can still exist).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    steps: list[DeclaredStepAuthoring]
+    review_target: Literal["declared", "inferred", "none"]
+
+
 @dataclass(frozen=True, slots=True)
 class ProposalCallRecord:
     """Content-free accounting fact for one provider call in a send turn."""
@@ -311,6 +343,7 @@ class ProposalTurnTelemetry:
     admission_normalization_hits: dict[AdmissionNormalizerFamily, int] = field(
         default_factory=_empty_admission_normalization_hits
     )
+    declared_authoring: DeclaredAuthoring | None = None
     _turn_started_ns: int = field(default_factory=monotonic_ns, repr=False)
     _attempt_started_ns: int | None = field(default=None, init=False, repr=False)
     _attempt_counts_as_repair: bool = field(default=False, init=False, repr=False)
@@ -663,6 +696,10 @@ class ProposalTurnTelemetry:
             attempt.model_dump(mode="json", exclude_none=True)
             for attempt in self.proposal_attempts
         ]
+        if self.declared_authoring is not None:
+            telemetry["declared_authoring"] = self.declared_authoring.model_dump(
+                mode="json"
+            )
         if self.admission_normalization_hits:
             telemetry["admission_normalization_hits"] = dict(
                 self.admission_normalization_hits

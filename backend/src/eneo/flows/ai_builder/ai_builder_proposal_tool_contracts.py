@@ -36,6 +36,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     ProposalObligationProjection,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+    DeclaredAuthoring,
     FailureProducer,
     ProposalAttemptFailureKind,
     ProposalTurnTelemetry,
@@ -381,6 +382,7 @@ class CompiledProposal:
     validation: SpecValidationResult
     resource_bindings: tuple[LocalResourceBinding, ...] = tuple()
     aggregation_intent: AggregationIntent = "linear"
+    declared_authoring: DeclaredAuthoring | None = None
 
 
 @dataclass(frozen=True)

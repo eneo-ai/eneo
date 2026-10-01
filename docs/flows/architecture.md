@@ -151,6 +151,21 @@ before the provider call was timed. The creator-only proposal-telemetry diagnost
 these fields; records written before them read as empty or absent. The
 failed-turn log event is `schema_version` 3.
 
+An accepted create proposal also records what the model declared, before assembly
+admitted it, in `planner_telemetry.declared_authoring`: per proposal step its
+`uses_form_fields` (after argument normalization: trimmed, de-duplicated) and
+`review_mode`, and `review_target`, which covers the structured-result review only: `declared` when
+the model named the reviewed step, `inferred` when the server placed the requested
+review, and `none` when no structured-result review was requested (a transcript
+review can still exist). Every accepted create plan records it: the first attempt,
+a repaired plan and a forced continuation. The creator-only proposal-telemetry diagnostics
+project it per turn as `declared_authoring`, and the battle bundle's
+`journey.plan_outcome.proposal_turns[].declared_authoring` carries the same record.
+`null` means not recorded: an edit turn, a record written before the field, or one
+that does not read back whole. Only a create turn tells "declared nothing" (empty
+lists) from "not recorded". It is evidence for error analysis only; no scorer reads
+it.
+
 The AI Builder failure summary reads `builder_sessions`, `flow_runs`, and
 `builder_client_errors`. Each section returns at most 20 failure families and
 five sample identifiers per family, with `truncated` and `total_families`

@@ -59,7 +59,10 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     AIBuilderStepEditIntent,
 )
-from eneo.flows.ai_builder.ai_builder_proposal_telemetry import FailureProducer
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+    DeclaredAuthoring,
+    FailureProducer,
+)
 from eneo.flows.ai_builder.ai_builder_telemetry import ProviderCallKind
 from eneo.flows.ai_builder.ai_builder_telemetry_models import (
     SessionTelemetrySummary,
@@ -364,6 +367,9 @@ class AIBuilderProposalTurnDiagnostic(BaseModel):
     attempts: list[AIBuilderProposalAttemptDiagnostic] = Field(
         default_factory=lambda: cast(list[AIBuilderProposalAttemptDiagnostic], [])
     )
+    # None for a record written before the field, a turn that committed no
+    # create plan, or a stored value that does not read back whole.
+    declared_authoring: DeclaredAuthoring | None = None
 
 
 class AIBuilderArchitectureTupleDiagnostic(BaseModel):

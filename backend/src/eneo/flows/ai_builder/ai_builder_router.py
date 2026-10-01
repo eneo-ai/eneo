@@ -128,7 +128,10 @@ from eneo.flows.ai_builder.ai_builder_flow_review_sample import FlowReviewSample
 from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
     FlowReviewSuggestions,
 )
-from eneo.flows.ai_builder.ai_builder_proposal_telemetry import FailureProducer
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+    DeclaredAuthoring,
+    FailureProducer,
+)
 from eneo.flows.ai_builder.ai_builder_read_access import (
     AIBuilderAuthorization,
     BuilderReadAccess,
@@ -559,10 +562,20 @@ def _proposal_turn_diagnostics(
                 admission_normalization_hits=_admission_normalization_hits(
                     telemetry.get("admission_normalization_hits")
                 ),
+                declared_authoring=_declared_authoring(
+                    telemetry.get("declared_authoring")
+                ),
                 attempts=attempts,
             )
         )
     return turns
+
+
+def _declared_authoring(value: object) -> DeclaredAuthoring | None:
+    try:
+        return DeclaredAuthoring.model_validate(value)
+    except ValidationError:
+        return None
 
 
 def _admission_normalization_hits(

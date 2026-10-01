@@ -132,6 +132,21 @@ def structured_review_declaration(
     )
 
 
+def review_target_source(
+    declared_modes: Sequence[FlowStepReviewMode | None],
+    checkpoint_intents: Sequence[CheckpointIntent],
+) -> Literal["declared", "inferred", "none"]:
+    """Who named the reviewed structured-result step of an admitted create plan:
+    the model, the server from the requested review, or nobody."""
+
+    declared_step, _ = structured_review_declaration(declared_modes, checkpoint_intents)
+    if declared_step is not None:
+        return "declared"
+    if structured_result_review_mode(checkpoint_intents) is not None:
+        return "inferred"
+    return "none"
+
+
 def project_checkpoint_intents(
     spec: FlowDraftSpecCore,
     checkpoint_intents: Sequence[CheckpointIntent],

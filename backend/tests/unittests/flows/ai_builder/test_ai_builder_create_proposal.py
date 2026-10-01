@@ -1013,8 +1013,7 @@ async def test_report_citations_degrade_to_one_user_visible_warning() -> None:
     ] == [("citation_mode_unsupported", "warning")]
 
 
-@pytest.mark.asyncio
-async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
+def _audio_docx_state() -> PlanningState:
     state = PlanningState.empty()
     state.architecture_commit = finalize_architecture_commit(
         ArchitectureCommitDraft(
@@ -1068,6 +1067,12 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
             evidence=["quote:user_message:1:Edit the extracted facts."],
         )
     ]
+    return state
+
+
+@pytest.mark.asyncio
+async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
+    state = _audio_docx_state()
 
     result = await process_create_intent_arguments(
         turn=_make_turn(),
@@ -1124,6 +1129,93 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
     assert spec.steps[-1].output_type == OutputType.DOCX
     assert spec.steps[-1].output_mode == OutputMode.RENDER_VERBATIM
     await assert_create_spec_prepares_through_authoring_command_async(spec)
+
+
+def _audio_docx_arguments(
+    *, review_mode: str | None, reads_form_fields: list[str]
+) -> dict[str, Any]:
+    return {
+        "flow_name": "Ljudrapport",
+        "plan_rationale": "Skapa en DOCX-rapport från uppladdat ljud.",
+        "steps": [
+            {
+                "name": "Analysera inspelningen",
+                "instructions": "Extrahera sakuppgifter ur transkriptionen.",
+                "review_mode": review_mode,
+                "output_fields": [
+                    {
+                        "name": "sakuppgifter",
+                        "field_type": "string",
+                        "description": "Sakuppgifter ur inspelningen.",
+                    }
+                ],
+            },
+            {
+                "name": "Skriv rapporten",
+                "instructions": "Skriv rapporten från sakuppgifterna.",
+                "uses_form_fields": reads_form_fields,
+            },
+        ],
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("review_mode", "expected_target", "expected_modes"),
+    [
+        ("edit", "declared", ["edit", None]),
+        (None, "inferred", [None, None]),
+    ],
+)
+async def test_a_ready_create_proposal_carries_what_the_model_declared(
+    review_mode: str | None,
+    expected_target: str,
+    expected_modes: list[str | None],
+) -> None:
+    result = await process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=[ConversationMessage(role="user", content="Bygg ett flöde.")],
+        arguments=_audio_docx_arguments(
+            review_mode=review_mode, reads_form_fields=["arendenummer", "handlaggare"]
+        ),
+        tool_call_id="call-declared-authoring",
+        available_model_refs=None,
+        available_kb_refs=None,
+        planning_state=_audio_docx_state(),
+    )
+
+    assert isinstance(result, ProposalReady)
+    declared = result.compiled.declared_authoring
+    assert declared is not None
+    assert declared.review_target == expected_target
+    assert [step.step for step in declared.steps] == [1, 2]
+    assert [step.review_mode for step in declared.steps] == expected_modes
+    assert [step.uses_form_fields for step in declared.steps] == [
+        [],
+        ["arendenummer", "handlaggare"],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_proposal_without_a_requested_review_declares_no_review_target() -> (
+    None
+):
+    result = await process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=[ConversationMessage(role="user", content="Bygg ett flöde.")],
+        arguments=_one_step_arguments(None),
+        tool_call_id="call-no-review",
+        available_model_refs=None,
+        available_kb_refs=None,
+    )
+
+    assert isinstance(result, ProposalReady)
+    declared = result.compiled.declared_authoring
+    assert declared is not None
+    assert declared.review_target == "none"
+    assert [(s.step, s.uses_form_fields, s.review_mode) for s in declared.steps] == [
+        (1, [], None)
+    ]
 
 
 def _main_text_field() -> ConfirmedRuntimeMetadataField:

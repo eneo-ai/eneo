@@ -11829,6 +11829,87 @@ def test_journey_economics_report_zero_classifier_spend_for_an_empty_projection(
     }
 
 
+_DECLARED_AUTHORING = {
+    "steps": [
+        {"step": 1, "uses_form_fields": [], "review_mode": "edit"},
+        {"step": 2, "uses_form_fields": ["ref", "owner"], "review_mode": None},
+    ],
+    "review_target": "inferred",
+}
+_ABSENT = object()
+
+
+def _bundle_turns(*turn_declarations: object) -> list[dict[str, object]]:
+    harness = _battle_harness()
+    turns = [
+        {"message_id": f"assistant-{index}", "attempts": []}
+        | ({} if declaration is _ABSENT else {"declared_authoring": declaration})
+        for index, declaration in enumerate(turn_declarations)
+    ]
+    journey = harness._journey_with_proposal_economics(
+        {"outcome_class": "plan_first_pass"},
+        diagnostics={"proposal_turns": turns, "provider_calls": []},
+    )
+    return journey["plan_outcome"]["proposal_turns"]
+
+
+def test_the_bundle_records_each_turns_declared_steps_and_review_target() -> None:
+    first, second = _bundle_turns(_DECLARED_AUTHORING, _ABSENT)
+
+    assert first["declared_authoring"] == _DECLARED_AUTHORING
+    assert second["declared_authoring"] is None
+
+
+@mark.parametrize(
+    "declaration",
+    [
+        _ABSENT,
+        None,
+        "inferred",
+        [],
+        {},
+        {**_DECLARED_AUTHORING, "review_target": "guessed"},
+        {**_DECLARED_AUTHORING, "review_target": None},
+        {**_DECLARED_AUTHORING, "steps": {}},
+        {**_DECLARED_AUTHORING, "steps": [[]]},
+        {**_DECLARED_AUTHORING, "extra": 1},
+        {
+            **_DECLARED_AUTHORING,
+            "steps": [{"step": True, "uses_form_fields": [], "review_mode": None}],
+        },
+        {
+            **_DECLARED_AUTHORING,
+            "steps": [{"step": 1, "uses_form_fields": "ref", "review_mode": None}],
+        },
+        {
+            **_DECLARED_AUTHORING,
+            "steps": [{"step": 1, "uses_form_fields": [None], "review_mode": None}],
+        },
+        {
+            **_DECLARED_AUTHORING,
+            "steps": [{"step": 1, "uses_form_fields": [], "review_mode": "write"}],
+        },
+        {**_DECLARED_AUTHORING, "steps": [{"step": 1, "uses_form_fields": []}]},
+    ],
+)
+def test_a_missing_or_malformed_declaration_is_recorded_as_not_recorded(
+    declaration: object,
+) -> None:
+    """Nothing is invented: no steps, no target, only the absence."""
+
+    [turn] = _bundle_turns(declaration)
+
+    assert turn["declared_authoring"] is None
+
+
+def test_an_older_diagnostics_response_leaves_the_bundle_without_the_record() -> None:
+    harness = _battle_harness()
+
+    assert "proposal_turns" not in harness._journey_with_proposal_economics(
+        {"outcome_class": "plan_first_pass"}, diagnostics=None
+    ).get("plan_outcome", {})
+
+
 @mark.parametrize(
     "diagnostics",
     [

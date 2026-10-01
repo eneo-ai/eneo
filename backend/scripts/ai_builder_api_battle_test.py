@@ -268,6 +268,9 @@ from eneo.flows.ai_builder.ai_builder_flow_schema_values import (  # noqa: E402
 from eneo.flows.ai_builder.ai_builder_new_step_models import (  # noqa: E402
     normalize_authoring_string_list,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (  # noqa: E402
+    DeclaredAuthoring,
+)
 from eneo.flows.api.flow_runtime_paths import (  # noqa: E402
     FLOW_REVIEW_ACTIVE_PATH,
     FLOW_REVIEW_APPROVE_AND_CONTINUE_PATH,
@@ -7643,6 +7646,16 @@ def _token_count(value: object) -> int | None:
     return value
 
 
+def _declared_authoring_of(value: object) -> JsonObject | None:
+    """A turn's declared step reads and review target, read back through the
+    product's own model, or None for "not recorded". Never filled in."""
+
+    try:
+        return DeclaredAuthoring.model_validate(value).model_dump(mode="json")
+    except ValidationError:
+        return None
+
+
 def _journey_with_proposal_economics(
     journey: JsonObject,
     *,
@@ -7700,6 +7713,10 @@ def _journey_with_proposal_economics(
             )
     plan_outcome = enriched.get("plan_outcome")
     plan_outcome = dict(plan_outcome) if isinstance(plan_outcome, Mapping) else {}
+    for turn in turns:
+        turn["declared_authoring"] = _declared_authoring_of(
+            turn.get("declared_authoring")
+        )
     plan_outcome["proposal_turns"] = turns
     plan_outcome["attempt_failure_ladder"] = attempt_ladder
     plan_outcome["initial_token_cost"] = initial_token_cost

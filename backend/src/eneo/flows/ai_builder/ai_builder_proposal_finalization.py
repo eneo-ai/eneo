@@ -122,19 +122,28 @@ class CompiledProposalFinalizer:
             nonlocal assistant_metadata, metadata_built
             if metadata_built:
                 return assistant_metadata
-            if request.metadata_tool_call is not None:
-                # Record success before building metadata; telemetry reads it.
-                record_proposal_first_attempt(
-                    request.usage_tracker,
-                    request_id=request.request_id,
-                    tool_name=request.tool_name,
-                    success=True,
-                )
+            first_attempt = request.metadata_tool_call is not None
+            declared = request.compiled.declared_authoring
+            # A repaired or forced-continuation proposal arrives with metadata
+            # serialized before it was compiled, so it is rebuilt here as well.
+            if first_attempt or declared is not None:
+                if first_attempt:
+                    # Record success before building metadata; telemetry reads it.
+                    record_proposal_first_attempt(
+                        request.usage_tracker,
+                        request_id=request.request_id,
+                        tool_name=request.tool_name,
+                        success=True,
+                    )
+                if request.usage_tracker is not None:
+                    request.usage_tracker.declared_authoring = declared
                 assistant_metadata = assistant_metadata_with_usage(
                     conversation=request.conversation,
                     base_metadata=assistant_metadata,
                     usage_tracker=request.usage_tracker,
-                    tool_calls=[request.metadata_tool_call],
+                    tool_calls=(
+                        [request.metadata_tool_call] if first_attempt else None
+                    ),
                 )
             metadata_built = True
             return assistant_metadata

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -36,6 +37,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     parse_create_flow_intent_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+    DeclaredAuthoring,
     ProposalTurnTelemetry,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
@@ -318,6 +320,45 @@ async def test_finalize_compiled_proposal_records_success_once_when_persisted() 
     assert tracker.proposal_first_attempt_tool == PROPOSE_FLOW_TOOL_NAME
     assert captured_metadata[0] is not None
     assert captured_metadata[0]["planner_telemetry"]["proposal_first_attempt_success"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("declared", [True, False])
+async def test_the_accepted_proposals_declarations_reach_the_persisted_telemetry(
+    declared: bool,
+) -> None:
+    authoring = DeclaredAuthoring.model_validate(
+        {
+            "steps": [{"step": 1, "uses_form_fields": ["ref"], "review_mode": "edit"}],
+            "review_target": "declared",
+        }
+    )
+    compiled = replace(
+        _compiled_outline_proposal(),
+        declared_authoring=authoring if declared else None,
+    )
+    captured_metadata: list[dict[str, object] | None] = []
+
+    async def store_plan(**kwargs):
+        captured_metadata.append(kwargs["assistant_metadata"])
+        return await _store_compiled_plan(**kwargs)
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+        new=store_plan,
+    ):
+        await _make_finalizer().finalize_compiled_proposal(
+            _make_request(compiled=compiled)
+        )
+
+    [metadata] = captured_metadata
+    assert metadata is not None
+    telemetry = metadata["planner_telemetry"]
+    assert isinstance(telemetry, dict)
+    if declared:
+        assert telemetry["declared_authoring"] == authoring.model_dump(mode="json")
+    else:
+        assert "declared_authoring" not in telemetry
 
 
 @pytest.mark.asyncio

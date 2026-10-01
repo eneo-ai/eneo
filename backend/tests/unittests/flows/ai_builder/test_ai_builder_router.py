@@ -771,6 +771,75 @@ def test_a_stored_attempt_is_kept_whatever_its_stored_producers(
     assert [a.producers for a in turn.attempts] == [expected, expected]
 
 
+_STORED_AUTHORING = {
+    "steps": [
+        {"step": 1, "uses_form_fields": [], "review_mode": "view"},
+        {"step": 2, "uses_form_fields": ["ref"], "review_mode": None},
+    ],
+    "review_target": "declared",
+}
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected_recorded"),
+    [
+        (_STORED_AUTHORING, True),
+        # Absent in a record written before the field, and every malformed
+        # shape: the turn stays, the declaration reads as not recorded.
+        (None, False),
+        ("declared", False),
+        ([], False),
+        ({}, False),
+        ({**_STORED_AUTHORING, "review_target": "guessed"}, False),
+        ({**_STORED_AUTHORING, "steps": "none"}, False),
+        ({**_STORED_AUTHORING, "steps": [None]}, False),
+        ({**_STORED_AUTHORING, "extra": 1}, False),
+        (
+            {
+                **_STORED_AUTHORING,
+                "steps": [{"step": 0, "uses_form_fields": [], "review_mode": None}],
+            },
+            False,
+        ),
+        (
+            {
+                **_STORED_AUTHORING,
+                "steps": [{"step": 1, "uses_form_fields": [7], "review_mode": None}],
+            },
+            False,
+        ),
+        (
+            {
+                **_STORED_AUTHORING,
+                "steps": [{"step": 1, "uses_form_fields": [], "review_mode": "write"}],
+            },
+            False,
+        ),
+    ],
+)
+def test_a_stored_proposal_declaration_is_read_back_or_reads_as_not_recorded(
+    stored: object, expected_recorded: bool
+) -> None:
+    attempt = {"attempt": 1, "kind": "initial", "failure_codes": []}
+    telemetry: dict[str, object] = {"proposal_attempts": [attempt]}
+    if stored is not None:
+        telemetry["declared_authoring"] = stored
+
+    [turn] = ai_builder_router_module._proposal_turn_diagnostics(
+        [
+            ConversationMessage(
+                message_id="assistant-declared",
+                role="assistant",
+                metadata={"planner_telemetry": telemetry},
+            )
+        ]
+    )
+
+    assert (turn.declared_authoring is not None) is expected_recorded
+    if expected_recorded:
+        assert turn.model_dump(mode="json")["declared_authoring"] == _STORED_AUTHORING
+
+
 def test_classifier_diagnostic_projection_exposes_slot_omission() -> None:
     runs = _classifier_diagnostic_runs(
         [
@@ -1489,6 +1558,7 @@ class TestGetSessionEndpoint:
                 "repair_attempts": 2,
                 "parse_repair_attempts": 0,
                 "total_tokens": 24240,
+                "declared_authoring": None,
                 "admission_normalization_hits": {
                     "_discard_punctuation_serialization_artifacts": 1,
                     "_normalize_structured_field_children": 2,

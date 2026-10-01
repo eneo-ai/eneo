@@ -637,6 +637,76 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
     assert elapsed_ms < 155_900
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "provider_turns",
+    ["first_attempt", "after_a_repair", "after_a_forced_continuation"],
+)
+async def test_every_accepted_create_proposal_persists_what_the_model_declared(
+    provider_turns: str,
+) -> None:
+    """The first attempt, a repaired plan and a forced continuation each reach
+    the stored message with the declarations, through the real attempt loop."""
+
+    valid = _make_response_with_tool_calls(
+        _make_tool_call(
+            PROPOSE_FLOW_TOOL_NAME,
+            _decision_report_proposal_arguments(),
+            tool_call_id="call-declared",
+        )
+    )
+    earlier = {
+        "first_attempt": [],
+        "after_a_repair": [
+            _make_response_with_tool_calls(
+                _make_tool_call(PROPOSE_FLOW_TOOL_NAME, {}, tool_call_id="call-bad")
+            )
+        ],
+        "after_a_forced_continuation": [_make_response_with_text("Jag föreslår...")],
+    }[provider_turns]
+    submission = _make_submission()
+    assert isinstance(submission, ProposalSubmissionOwner)
+    submission.litellm_client.acompletion = AsyncMock(side_effect=[*earlier, valid])
+    usage_tracker = ProposalTurnTelemetry(
+        request_id="req-declared",
+        model=_route().litellm_model,
+        target_kind=TargetKind.CREATE,
+    )
+    stored_telemetry: list[dict[str, object]] = []
+
+    async def store_plan(**kwargs: object):
+        metadata = kwargs["assistant_metadata"]
+        assert isinstance(metadata, dict)
+        stored_telemetry.append(dict(metadata["planner_telemetry"]))
+        return await _store_compiled_plan(**kwargs)
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_finalization."
+        "store_plan_and_update_conversation",
+        new=store_plan,
+    ):
+        events = _wire_events(
+            [
+                event
+                async for event in submission.run_active_submission_attempt(
+                    **_decision_report_attempt_kwargs(
+                        usage_tracker=usage_tracker, request_id="req-declared"
+                    )
+                )
+            ]
+        )
+
+    assert events[-1]["event"] == "plan"
+    assert submission.litellm_client.acompletion.await_count == len(earlier) + 1
+    [telemetry] = stored_telemetry
+    declared = telemetry["declared_authoring"]
+    assert isinstance(declared, dict)
+    assert len(declared["steps"]) == len(
+        _decision_report_proposal_arguments()["steps"]  # type: ignore[arg-type]
+    )
+    assert declared["review_target"] in {"declared", "inferred", "none"}
+
+
 @pytest.mark.parametrize(
     "message",
     [

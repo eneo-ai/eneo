@@ -6,6 +6,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
     architecture_failure_outcome,
 )
+from eneo.flows.ai_builder.ai_builder_checkpoint_contract import review_target_source
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     authored_knowledge_ref_repair,
     prepare_compiled_spec_for_session,
@@ -40,6 +41,8 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     PROPOSAL_PARSE_MODEL_FAILURE_CODE,
+    DeclaredAuthoring,
+    DeclaredStepAuthoring,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
@@ -153,6 +156,7 @@ async def process_create_intent_arguments(
             if compile_context is not None
             else "linear"
         ),
+        declared_authoring=_declared_authoring(intent, compile_context),
         committed_terminal_output_type=(
             compile_context.final_output_type if compile_context is not None else None
         ),
@@ -161,6 +165,25 @@ async def process_create_intent_arguments(
         field_diagnostics=field_diagnostics,
         ui_language=(
             compile_context.ui_language if compile_context is not None else None
+        ),
+    )
+
+
+def _declared_authoring(
+    intent: CreateFlowIntent, context: CreateCompileContext | None
+) -> DeclaredAuthoring:
+    modes = [step.review_mode for step in intent.steps]
+    return DeclaredAuthoring(
+        steps=[
+            DeclaredStepAuthoring(
+                step=number,
+                uses_form_fields=list(step.uses_form_fields),
+                review_mode=step.review_mode,
+            )
+            for number, step in enumerate(intent.steps, start=1)
+        ],
+        review_target=review_target_source(
+            modes, (context.checkpoint_intents if context is not None else None) or ()
         ),
     )
 
@@ -176,6 +199,7 @@ async def _process_create_spec(
     available_kb_refs: set[str] | None,
     resource_catalog: AIBuilderResourceCatalog | None,
     aggregation_intent: AggregationIntent,
+    declared_authoring: DeclaredAuthoring,
     committed_terminal_output_type: OutputType | None,
     plan_edit_context: ResolvedAIBuilderEditContext | None = None,
     prior_spec_for_revision: FlowDraftSpecCore | None = None,
@@ -269,5 +293,6 @@ async def _process_create_spec(
                 else tuple()
             ),
             aggregation_intent=aggregation_intent,
+            declared_authoring=declared_authoring,
         ),
     )
