@@ -15,10 +15,9 @@ const file = (overrides: Partial<SharePointTreeItem> = {}): SharePointTreeItem =
   ...overrides
 });
 
-function renderNode(item: SharePointTreeItem, query = "") {
+function renderNode(item: SharePointTreeItem) {
   return render(SharePointFolderTreeNode, {
     node: createSharePointTreeNode(item),
-    query,
     selectedItemKeySet: new Set<string>(),
     selectedPaths: [],
     onToggleSelect: vi.fn(),
@@ -50,20 +49,5 @@ describe("SharePointFolderTreeNode document properties", () => {
 
     await expect.element(page.getByText("Rutin för larm.docx")).toBeVisible();
     expect(page.getByText("Dokumenttyp:").query()).toBeNull();
-  });
-
-  it("marks the part of a name or property that the search hit", async () => {
-    renderNode(
-      file({
-        source_metadata: [
-          { name: "Dokumenttyp", label: "Dokumenttyp", value: "Rutin", kind: "choice" }
-        ]
-      }),
-      "rutin"
-    );
-
-    const marks = document.querySelectorAll("mark");
-    expect([...marks].map((mark) => mark.textContent)).toEqual(["Rutin", "Rutin"]);
-    await expect.element(page.getByText("Rutin för larm.docx")).toBeVisible();
   });
 });

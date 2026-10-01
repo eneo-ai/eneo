@@ -138,12 +138,35 @@ class SharePointTreeItem(BaseModel):
     source_metadata: list[SourceMetadataEntry] = []
 
 
+class SharePointFilterColumn(BaseModel):
+    """A library column a person can filter on without typing a value."""
+
+    name: str
+    label: str
+    kind: Literal["choice", "boolean"]
+    # The allowed values of a choice column; empty for yes/no columns.
+    choices: list[str] = []
+
+
 class SharePointTreeResponse(BaseModel):
     items: list[SharePointTreeItem]
     current_path: str
     parent_id: Optional[str] = None
     drive_id: str
     site_id: Optional[str] = None  # None for OneDrive
+    # Filterable columns of the library behind the drive. Empty when the drive
+    # has no backing list or its columns cannot be read.
+    columns: list[SharePointFilterColumn] = []
+
+
+class SharePointSearchResponse(BaseModel):
+    """Files anywhere in a library that match a text and column filters."""
+
+    items: list[SharePointTreeItem]
+    # True when more files matched than ``items`` holds; narrow the search.
+    truncated: bool = False
+    drive_id: str
+    site_id: Optional[str] = None
 
 
 class IntegrationKnowledgeMetaData(BaseModel):

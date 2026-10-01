@@ -168,3 +168,49 @@ class TestListColumns:
 
         assert [c["name"] for c in columns] == ["A", "B"]
         assert _urls(client)[0] == "v1.0/drives/d1/list/columns"
+
+
+class TestLibrarySearchQueries:
+    async def test_filtered_list_items_ask_for_fields_and_drive_item_with_prefer(self):
+        client = _client(
+            include=True,
+            responses=[
+                {
+                    "value": [{"id": "1"}],
+                    "@odata.nextLink": "https://g/v1.0/drives/d1/list/items?$skiptoken=2",
+                },
+                {"value": [{"id": "2"}, {"id": "3"}]},
+            ],
+        )
+
+        rows, truncated = await client.get_list_items_filtered(
+            "d1", "fields/Extern eq true", max_items=2
+        )
+
+        assert [r["id"] for r in rows] == ["1", "2"]
+        assert truncated is True
+        first_call = client.client.get.await_args_list[0]
+        assert first_call.args[0] == (
+            "v1.0/drives/d1/list/items?$expand=fields,driveItem&$filter=fields/Extern eq true"
+        )
+        assert first_call.kwargs["headers"]["Prefer"] == (
+            "HonorNonIndexedQueriesWarningMayFailRandomly"
+        )
+
+    async def test_drive_search_quotes_the_text_and_expands_list_items(self):
+        client = _client(include=True, responses=[{"value": [{"id": "1"}]}])
+
+        rows, truncated = await client.search_drive_items("d1", "o'neil", max_items=10)
+
+        assert [r["id"] for r in rows] == ["1"] and truncated is False
+        assert _urls(client) == [f"v1.0/drives/d1/root/search(q='o''neil')?{EXPAND}"]
+
+    async def test_drive_search_falls_back_without_the_expansion(self):
+        client = _client(include=True, responses=[_bad_request(), {"value": []}])
+
+        await client.search_drive_items("d1", "x", max_items=10)
+
+        assert _urls(client) == [
+            f"v1.0/drives/d1/root/search(q='x')?{EXPAND}",
+            "v1.0/drives/d1/root/search(q='x')",
+        ]

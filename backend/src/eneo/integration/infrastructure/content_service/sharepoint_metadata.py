@@ -114,6 +114,14 @@ class SharePointColumn:
     name: str
     label: str
     kind: SourceMetadataKind
+    # The allowed values of a choice column, in the library's order. Empty for
+    # other kinds and for managed metadata, whose terms live in the term store.
+    choices: tuple[str, ...] = ()
+
+    @property
+    def filterable(self) -> bool:
+        """Columns a person can filter on without typing: yes/no and fixed choices."""
+        return self.kind == "boolean" or (self.kind == "choice" and bool(self.choices))
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,8 +163,29 @@ def _column_from_definition(definition: dict[str, Any]) -> SharePointColumn | No
     if not isinstance(label, str) or not label.strip():
         label = name
     return SharePointColumn(
-        name=name, label=label.strip()[:255], kind=_kind_of(definition)
+        name=name,
+        label=label.strip()[:255],
+        kind=_kind_of(definition),
+        choices=_choices_of(definition),
     )
+
+
+def _choices_of(definition: dict[str, Any]) -> tuple[str, ...]:
+    choice = definition.get("choice")
+    if not isinstance(choice, dict):
+        return ()
+    raw = cast(dict[str, Any], choice).get("choices")
+    if not isinstance(raw, list):
+        return ()
+    values: list[str] = []
+    for element in cast(list[Any], raw):
+        if (
+            isinstance(element, str)
+            and element.strip()
+            and element.strip() not in values
+        ):
+            values.append(element.strip()[:MAX_VALUE_LENGTH])
+    return tuple(values[: MAX_LIST_VALUES * 5])
 
 
 def _kind_of(definition: dict[str, Any]) -> SourceMetadataKind:
