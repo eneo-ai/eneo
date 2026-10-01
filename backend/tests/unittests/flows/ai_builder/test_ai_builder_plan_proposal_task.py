@@ -4,6 +4,8 @@ import json
 from datetime import datetime, timezone
 from uuid import UUID
 
+import pytest
+
 from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
@@ -154,6 +156,39 @@ def test_create_prompt_projects_confirmed_runtime_input_identity_and_purpose() -
     assert rendered in create_prompt
     assert "server-owned runtime inputs" in create_prompt
     assert "Confirmed runtime inputs:" not in edit_prompt
+
+
+@pytest.mark.parametrize(
+    ("requirements", "is_pure_audio_transcription", "asks_for_reads"),
+    [
+        ((ConfirmedRuntimeInputRequirement("hyra", "interpret_input"),), False, True),
+        ((ConfirmedRuntimeInputRequirement("hyra", "interpret_input"),), True, False),
+        ((), False, False),
+    ],
+)
+def test_create_prompt_asks_for_step_reads_exactly_when_the_schema_offers_them(
+    requirements: tuple[ConfirmedRuntimeInputRequirement, ...],
+    is_pure_audio_transcription: bool,
+    asks_for_reads: bool,
+) -> None:
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=PlanningState.empty(),
+        confirmed_requirements=_requirements(),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        is_pure_audio_transcription=is_pure_audio_transcription,
+        resource_catalog=_empty_catalog(),
+        confirmed_runtime_inputs=requirements,
+    )
+    step_properties = build_propose_flow_tool_schema(
+        resource_catalog=_empty_catalog(),
+        is_pure_audio_transcription=is_pure_audio_transcription,
+        confirmed_runtime_inputs=requirements,
+    )["function"]["parameters"]["properties"]["steps"]["items"]["properties"]
+
+    assert ("uses_form_fields" in prompt) is asks_for_reads
+    assert ("uses_form_fields" in step_properties) is asks_for_reads
 
 
 def test_runtime_input_projection_preserves_long_and_delimited_names_exactly() -> None:

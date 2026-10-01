@@ -71,6 +71,8 @@ When a modified step's patch names a review mode (`view` or `edit`), it changes 
 
 The requirements card summarises what the Builder understood. Its wording is never read back as if you had written it.
 
+The purpose you choose for a runtime field guides where a new plan places it: the step that interprets the input, the step that shapes the result, or every step. A plan can also ask for the field on further steps that read it, such as a calculation in the middle of the flow. Such a request is accepted only on steps that can read a form value directly; a request on any other step, such as one that runs once per source, sends the plan back for revision.
+
 The review step matters. A plan can be valid but still not be the best workflow for your organization. Check the input contract, final output, external tool access, and evidence requirements before publishing.
 
 ## Template attachments and reference material

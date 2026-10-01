@@ -1083,7 +1083,6 @@ def _document_report_compose_step(
         output_type=OutputType.TEXT,
         output_mode=OutputMode.COMPOSE_TEXT,
         underlag_channel="whole_object",
-        form_field_refs=body_writer_step.form_field_refs,
     )
 
 

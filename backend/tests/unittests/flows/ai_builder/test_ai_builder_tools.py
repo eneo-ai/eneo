@@ -607,7 +607,7 @@ class TestBuildToolSchema:
         assert admitted["steps"][-1]["output_fields"] == fields
         assert "citations_requested" in arguments
 
-    def test_create_schema_projects_runtime_identity_without_argument_shape_change(
+    def test_create_schema_projects_runtime_identity_and_offers_it_as_step_reads(
         self,
     ) -> None:
         requirements = (
@@ -632,7 +632,17 @@ class TestBuildToolSchema:
             baseline_parameters["properties"]
         )
         assert contextual_parameters["required"] == baseline_parameters["required"]
-        assert set(contextual_step["properties"]) == set(baseline_step["properties"])
+        # The only argument the confirmed inputs add is the per-step read list,
+        # closed over exactly their names.
+        assert set(contextual_step["properties"]) == {
+            *baseline_step["properties"],
+            "uses_form_fields",
+        }
+        assert contextual_step["properties"]["uses_form_fields"]["items"]["enum"] == [
+            "audience",
+            "case_id",
+            "policy",
+        ]
         assert contextual_step["required"] == baseline_step["required"]
         assert (
             contextual_step["properties"]["output_fields"]["items"]
@@ -1002,7 +1012,6 @@ class TestBuildToolSchema:
             ("root", "input_fields", [], "input_fields"),
             ("step", "output_type", "text", "steps.0.output_type"),
             ("step", "review_mode", "view", "steps.0.review_mode"),
-            ("step", "uses_form_fields", ["case_id"], "steps.0.uses_form_fields"),
             (
                 "step",
                 "uses_previous_fields",
@@ -1034,6 +1043,34 @@ class TestBuildToolSchema:
 
         with pytest.raises(ProposalIntentArgumentError, match=expected_path):
             parse_create_flow_intent_arguments(arguments)
+
+    def test_create_step_reads_are_refused_when_no_runtime_input_is_confirmed(
+        self,
+    ) -> None:
+        schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+        arguments = {
+            "flow_name": "Report",
+            "plan_rationale": "Create the report.",
+            "steps": [
+                {
+                    "name": "Write",
+                    "instructions": "Write the report.",
+                    "output_fields": [
+                        {
+                            "name": "report",
+                            "field_type": "string",
+                            "description": "The report.",
+                        }
+                    ],
+                    "uses_form_fields": ["case_id"],
+                }
+            ],
+        }
+
+        with pytest.raises(ProposalToolArgumentsError, match="uses_form_fields"):
+            validate_propose_flow_tool_arguments(
+                arguments=arguments, tool_schema=schema
+            )
 
     def test_create_parser_rejects_unknown_root_keys_through_the_typed_model(
         self,

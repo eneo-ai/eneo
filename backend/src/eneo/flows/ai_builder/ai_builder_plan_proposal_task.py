@@ -38,6 +38,7 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
     ConfirmedRuntimeInputRequirement,
+    proposal_steps_declare_runtime_input_reads,
     render_confirmed_runtime_input_requirements,
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
@@ -226,7 +227,16 @@ def build_plan_proposal_system_prompt(
                 render_confirmed_runtime_input_requirements(confirmed_runtime_inputs),
                 "- Keep these exact identities as server-owned runtime inputs; "
                 "do not repeat an identity as a source output field. Preserve "
-                "each listed purpose when designing semantic work.",
+                "each listed purpose when designing semantic work."
+                + (
+                    " List an input in uses_form_fields on every step whose "
+                    "work needs its value."
+                    if proposal_steps_declare_runtime_input_reads(
+                        confirmed_runtime_inputs,
+                        is_pure_audio_transcription=is_pure_audio_transcription,
+                    )
+                    else ""
+                ),
             ]
         )
     file_roles_block = _file_roles_block(planning_state)

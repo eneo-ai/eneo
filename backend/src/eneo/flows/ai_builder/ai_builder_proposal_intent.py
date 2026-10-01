@@ -9,6 +9,7 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    PrivateAttr,
     ValidationError,
     field_validator,
     model_validator,
@@ -33,6 +34,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
     ConfirmedRuntimeInputRequirement,
+    proposal_steps_declare_runtime_input_reads,
     render_confirmed_runtime_input_requirements,
 )
 from eneo.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
@@ -460,6 +462,42 @@ class SemanticStepIntent(BaseModel):
     knowledge_refs: list[str] = Field(default_factory=list)
     citations_requested: bool = False
     review_mode: FlowStepReviewMode | None = None
+    # Create only: the proposal step (1-based) whose work this step carries,
+    # and the proposal step of each read folded in from a dropped step, so a
+    # read the compiler cannot bind is reported on the step that listed it.
+    _proposal_step: int | None = PrivateAttr(default=None)
+    _folded_read_steps: dict[str, int | None] = PrivateAttr(
+        default_factory=lambda: cast(dict[str, int | None], {})
+    )
+
+    @property
+    def proposal_step(self) -> int | None:
+        return self._proposal_step
+
+    def mark_proposal_step(self, position: int) -> None:
+        self._proposal_step = position
+
+    def form_field_read_step(self, field_name: str) -> int | None:
+        return self._folded_read_steps.get(field_name, self._proposal_step)
+
+    def with_folded_form_field_reads(
+        self, folded: "SemanticStepIntent"
+    ) -> "SemanticStepIntent":
+        """This step taking over the reads of a step the backend drops."""
+
+        added = [
+            name
+            for name in folded.uses_form_fields
+            if name not in self.uses_form_fields
+        ]
+        merged = self.model_copy(
+            update={"uses_form_fields": [*self.uses_form_fields, *added]}
+        )
+        merged._folded_read_steps = {
+            **self._folded_read_steps,
+            **{name: folded.form_field_read_step(name) for name in added},
+        }
+        return merged
 
     @field_validator("name", "instructions")
     @classmethod
@@ -516,6 +554,7 @@ class _CreateSemanticStepArguments(BaseModel):
     output_fields: list["ProposalStructuredFieldIntent"] | None = None
     # Null on the wire (strict makes the property required) means none.
     knowledge_refs: list[str] | None = None
+    uses_form_fields: list[str] | None = None
     citations_requested: bool = False
 
 
@@ -576,6 +615,7 @@ def _validate_create_semantic_step(value: object) -> dict[str, object]:
     step = _CreateSemanticStepArguments.model_validate(value)
     lowered = step.model_dump(exclude={"output_fields"})
     lowered["knowledge_refs"] = step.knowledge_refs or []
+    lowered["uses_form_fields"] = step.uses_form_fields or []
     lowered["output_fields"] = (
         [field.to_structured_field_draft() for field in step.output_fields]
         if step.output_fields
@@ -733,6 +773,8 @@ class CreateFlowIntent(BaseModel):
             raise ValueError(
                 f"propose_flow supports at most {MAX_FLOW_AUTHORING_STEPS} semantic steps."
             )
+        for position, step in enumerate(value, start=1):
+            step.mark_proposal_step(position)
         return value
 
     @field_validator("assumptions")
@@ -878,6 +920,26 @@ def build_create_flow_tool_schema(
             name: step_schema["properties"][name] for name in ("name", "instructions")
         }
     else:
+        if proposal_steps_declare_runtime_input_reads(
+            confirmed_runtime_inputs,
+            is_pure_audio_transcription=is_pure_audio_transcription,
+        ):
+            # The prepared schema is the one allowlist of readable names.
+            step_schema["properties"]["uses_form_fields"] = {
+                "type": ["array", "null"],
+                "items": {
+                    "type": "string",
+                    "enum": [
+                        requirement.name for requirement in confirmed_runtime_inputs
+                    ],
+                },
+                "description": (
+                    "List each confirmed runtime input this step reads; repeat it "
+                    "on every step whose work needs the value. The backend binds "
+                    "each listed input into that step's input. Null or an empty "
+                    "list keeps only the input's purpose placement."
+                ),
+            }
         step_schema["properties"]["output_fields"]["minItems"] = 1
         # Keep the only recursive step property last on the wire. Non-strict
         # providers are less likely to strand later step properties at the

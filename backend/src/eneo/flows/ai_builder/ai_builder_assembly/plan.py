@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
@@ -60,6 +60,13 @@ UnderlagChannel = Literal[
 ]
 
 
+class DeclaredFormFieldRead(NamedTuple):
+    """A run-form field one proposal step listed in its uses_form_fields."""
+
+    field_name: str
+    proposal_step: int
+
+
 @dataclass(frozen=True, slots=True)
 class PlannedStep:
     role: PlannedStepRole
@@ -77,6 +84,10 @@ class PlannedStep:
     previous_item_map_enabled: bool = False
     semantic_origin_eligible: bool = False
     form_field_refs: tuple[str, ...] = ()
+    # The proposal steps (1-based) whose work this step carries, and the reads
+    # they declared; placement turns admitted reads into form_field_refs.
+    proposal_steps: tuple[int, ...] = ()
+    declared_form_field_reads: tuple[DeclaredFormFieldRead, ...] = ()
     previous_field_refs: tuple[PreviousFieldRef, ...] = ()
     previous_output_refs: tuple[PreviousOutputRef, ...] = ()
     output_fields: tuple[StructuredFieldDraft, ...] = ()

@@ -31,6 +31,7 @@ from eneo.flows.ai_builder.ai_builder_assembly.fixed_steps import (
 from eneo.flows.ai_builder.ai_builder_assembly.lower import lower_assembly_plan
 from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     SOURCE_READER_INPUT_TYPES,
+    DeclaredFormFieldRead,
     FlowAssemblyPlan,
     PlannedStep,
     PlannedStepRole,
@@ -644,13 +645,6 @@ def _assemble_create_intent(
             prior_step_count=len(planned_steps),
             aggregate_terminal_uses_source_refs=bool(structured_previous_refs),
         )
-        if input_source == InputSource.ALL_PREVIOUS_STEPS and (
-            semantic_step.uses_previous_fields or semantic_step.uses_previous_outputs
-        ):
-            return _reject(
-                "all_previous_step_cannot_use_explicit_refs",
-                step_index=index + 1,
-            )
         input_type = _linear_step_input_type(
             input_source=input_source,
             runtime_input_type=runtime_input_type,
@@ -720,6 +714,8 @@ def _assemble_create_intent(
                 else None
             ),
             semantic_origin_eligible=semantic_origin_eligibility[index],
+            proposal_steps=_proposal_steps(semantic_step),
+            declared_form_field_reads=_declared_form_field_reads(semantic_step),
             previous_field_refs=previous_field_refs,
             previous_output_refs=previous_output_refs,
             output_fields=tuple(semantic_step.output_fields or ()),
@@ -785,6 +781,7 @@ def _assemble_create_intent(
         form_fields=admitted_form_fields,
         runtime_input_fields=runtime_input_fields,
         template_form_field_names=template_form_field_names,
+        proposal_step_names=tuple(step.name for step in intent.steps),
     )
     if isinstance(placement, CreateAssemblyRejection):
         return placement
@@ -909,20 +906,20 @@ def _semantic_steps_without_terminal_document_render_helper(
     ):
         return semantic_steps
 
-    retained_steps = semantic_steps[:-1]
-    if helper_candidate.output_fields:
-        retained_steps = (
-            *semantic_steps[:-2],
-            previous_step.model_copy(
-                update={
-                    "instructions": append_terminal_helper_output_fields(
-                        previous_step.instructions,
-                        helper_candidate.output_fields,
-                        ui_language=ui_language,
-                    )
-                }
-            ),
-        )
+    # The step before the helper writes the document, so it keeps the
+    # helper's field meanings and the run-form values the helper reads.
+    retained_steps = (
+        *semantic_steps[:-2],
+        previous_step.with_folded_form_field_reads(helper_candidate).model_copy(
+            update={
+                "instructions": append_terminal_helper_output_fields(
+                    previous_step.instructions,
+                    helper_candidate.output_fields or (),
+                    ui_language=ui_language,
+                ),
+            }
+        ),
+    )
 
     logger.info(
         "ai_builder_terminal_document_render_helper_dropped",
@@ -1323,6 +1320,8 @@ def _assemble_docx_template_fill(
                 previous_field_refs=(),
             ),
             semantic_origin_eligible=True,
+            proposal_steps=_proposal_steps(semantic_step),
+            declared_form_field_reads=_declared_form_field_reads(semantic_step),
             output_fields=tuple(semantic_step.output_fields or ()),
             knowledge_refs=tuple(semantic_step.knowledge_refs),
             citations_requested=semantic_step.citations_requested,
@@ -1372,6 +1371,7 @@ def _assemble_docx_template_fill(
         form_fields=admitted_form_fields,
         runtime_input_fields=runtime_input_fields,
         template_form_field_names=template_form_field_names,
+        proposal_step_names=tuple(step.name for step in intent.steps),
     )
     if isinstance(placement, CreateAssemblyRejection):
         return placement
@@ -1542,6 +1542,7 @@ def _assemble_pure_audio_transcription(
         semantic_step.output_fields
         or semantic_step.uses_previous_fields
         or semantic_step.uses_previous_outputs
+        or semantic_step.uses_form_fields
         or semantic_step.output_type not in {None, OutputType.TEXT}
     ):
         return _reject(
@@ -1567,6 +1568,7 @@ def _assemble_pure_audio_transcription(
         form_fields=tuple(form_fields),
         runtime_input_fields=runtime_input_fields,
         template_form_field_names=template_form_field_names,
+        proposal_step_names=tuple(step.name for step in intent.steps),
     )
     if isinstance(placement, CreateAssemblyRejection):
         return placement
@@ -1588,6 +1590,7 @@ def _place_runtime_form_fields(
     form_fields: tuple[FormFieldSpec, ...],
     runtime_input_fields: Sequence[ConfirmedRuntimeMetadataField],
     template_form_field_names: tuple[str, ...],
+    proposal_step_names: tuple[str, ...],
 ) -> tuple[PlannedStep, ...] | CreateAssemblyRejection:
     """Place server-owned runtime fields on the completed create topology."""
 
@@ -1624,7 +1627,30 @@ def _place_runtime_form_fields(
         ),
         None,
     )
-    field_names_by_step: list[list[str]] = [[] for _ in planned_steps]
+    # A declared read joins the purpose placement. Every step that carries a
+    # proposal step's work must bind it; one that cannot is a repairable error
+    # on the proposal step that listed it, never a silently dropped read.
+    binding_indexes = frozenset(
+        index
+        for index in semantic_target_indexes
+        if _binds_form_field_reads(planned_steps[index])
+    )
+    for index, step in enumerate(planned_steps):
+        if step.declared_form_field_reads and index not in binding_indexes:
+            return _unbound_form_field_read(
+                step.declared_form_field_reads[0],
+                carrier=step,
+                proposal_step_names=proposal_step_names,
+                reading_steps=frozenset(
+                    proposal_step
+                    for binding_index in binding_indexes
+                    for proposal_step in planned_steps[binding_index].proposal_steps
+                ),
+            )
+    field_names_by_step: list[list[str]] = [
+        [read.field_name for read in step.declared_form_field_reads]
+        for step in planned_steps
+    ]
     for field in form_fields:
         name = field.name
         record = runtime_fields_by_name.get(name)
@@ -1705,6 +1731,76 @@ def _place_runtime_form_fields(
             form_field_refs=tuple(dict.fromkeys(field_names_by_step[index])),
         )
         for index, step in enumerate(planned_steps)
+    )
+
+
+def _proposal_steps(step: SemanticStepIntent) -> tuple[int, ...]:
+    return () if step.proposal_step is None else (step.proposal_step,)
+
+
+def _declared_form_field_reads(
+    step: SemanticStepIntent,
+) -> tuple[DeclaredFormFieldRead, ...]:
+    reads: list[DeclaredFormFieldRead] = []
+    for field_name in step.uses_form_fields:
+        proposal_step = step.form_field_read_step(field_name)
+        if proposal_step is None:
+            raise ValueError(
+                f"Backend step {step.name!r} declares form-field read {field_name!r}."
+            )
+        reads.append(DeclaredFormFieldRead(field_name, proposal_step))
+    return tuple(reads)
+
+
+def _binds_form_field_reads(step: PlannedStep) -> bool:
+    """Whether the compiler turns a form read on this step into a binding."""
+
+    return not step.previous_item_map_enabled and not (
+        step.input_source is InputSource.FLOW_INPUT
+        and step.input_type is InputType.JSON
+    )
+
+
+def _unbound_form_field_read(
+    read: DeclaredFormFieldRead,
+    *,
+    carrier: PlannedStep,
+    proposal_step_names: tuple[str, ...],
+    reading_steps: frozenset[int],
+) -> CreateAssemblyRejection:
+    reason: CreateAssemblyRejectionReason = "form_field_no_legal_target"
+    if carrier.input_source is InputSource.ALL_PREVIOUS_STEPS:
+        reason = "all_previous_step_cannot_use_explicit_refs"
+        cause = "combines the outputs of all earlier steps"
+    elif carrier.previous_item_map_enabled:
+        cause = "runs once per item of an earlier step's list"
+    elif (
+        carrier.input_source is InputSource.FLOW_INPUT
+        and carrier.input_type is InputType.JSON
+    ):
+        cause = "reads the run's JSON input as it is"
+    else:
+        cause = "has its input assembled by the backend"
+    alternative = (
+        "Steps that can read it: "
+        + ", ".join(
+            f"step {number} {proposal_step_names[number - 1]!r}"
+            for number in sorted(reading_steps)
+        )
+        + "."
+        if reading_steps
+        else "No proposed step can read a runtime input in this flow."
+    )
+    return _reject(
+        reason,
+        step_index=read.proposal_step,
+        detail=(
+            f"{proposal_step_names[read.proposal_step - 1]!r} lists "
+            f"{read.field_name!r} in uses_form_fields, but the step doing that "
+            f"work {cause}, so it cannot read a runtime input. Remove "
+            f"{read.field_name!r} from this step. {alternative}"
+        ),
+        field_names=(read.field_name,),
     )
 
 

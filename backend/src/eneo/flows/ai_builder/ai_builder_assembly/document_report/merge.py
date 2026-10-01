@@ -35,6 +35,17 @@ def _merge_report_writer_semantics(
                 (*planned_step.form_field_refs, *semantic_step.form_field_refs)
             )
         ),
+        proposal_steps=tuple(
+            dict.fromkeys((*planned_step.proposal_steps, *semantic_step.proposal_steps))
+        ),
+        declared_form_field_reads=tuple(
+            dict.fromkeys(
+                (
+                    *planned_step.declared_form_field_reads,
+                    *semantic_step.declared_form_field_reads,
+                )
+            )
+        ),
         semantic_origin_eligible=(
             planned_step.semantic_origin_eligible
             or semantic_step.semantic_origin_eligible
