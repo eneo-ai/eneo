@@ -65,6 +65,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderProviderOutcomeUnknownException,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
+from eneo.flows.ai_builder.ai_builder_provider_call import ProviderCallTiming
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_declared_schema_candidate,
 )
@@ -1287,11 +1288,243 @@ async def test_truncated_classification_is_not_accepted_or_cached() -> None:
     attempt = await classify_slots(**kwargs)
     assert attempt.outcome == "output_limit_exceeded"
     assert attempt.result is None
-    assert client.acompletion.await_count == 1
+    # An unread reply is asked once more; this provider cuts both off.
+    assert client.acompletion.await_count == 2
 
     response.choices[0].finish_reason = "stop"
     assert (await classify_slots(**kwargs)).outcome == "resolved"
+    assert client.acompletion.await_count == 3
+
+
+def _cut_off_response() -> MagicMock:
+    response = _make_response(json.dumps(_VALID_CLASSIFICATION_RESPONSE))
+    response.choices[0].finish_reason = "length"
+    return response
+
+
+def _reask_tracker() -> ProposalTurnTelemetry:
+    return ProposalTurnTelemetry(
+        request_id="req-classifier-reask",
+        model="private-model",
+        target_kind=TargetKind.CREATE,
+    )
+
+
+def _classification_outcomes(tracker: ProposalTurnTelemetry) -> list[str | None]:
+    return [record.classification_outcome for record in tracker.call_records]
+
+
+@pytest.mark.asyncio
+async def test_a_reply_cut_off_at_the_output_cap_is_asked_once_more() -> None:
+    client = AsyncMock()
+    client.acompletion.side_effect = [
+        _cut_off_response(),
+        _make_response(json.dumps(_VALID_CLASSIFICATION_RESPONSE)),
+    ]
+    tracker = _reask_tracker()
+
+    attempt = await classify_slots(
+        litellm_client=client,
+        completion_model_route=_route(),
+        classification_input=_classification_input(f"Summarize {uuid4()}"),
+        allowed_slot_values={},
+        tenant_id=uuid4(),
+        usage_tracker=tracker,
+    )
+
+    assert attempt.outcome == "resolved"
     assert client.acompletion.await_count == 2
+    first, second = client.acompletion.await_args_list
+    assert first.kwargs == second.kwargs
+    assert [record.call_kind for record in tracker.call_records] == [
+        "slot_classification",
+        "slot_classification",
+    ]
+    assert _classification_outcomes(tracker) == ["output_limit_exceeded", "resolved"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("first_reply", "first_outcome"),
+    [
+        (lambda: _make_response(""), "no_content"),
+        (lambda: _make_response("{not-json"), "parse_failed"),
+    ],
+)
+async def test_an_empty_or_unparsable_reply_is_not_asked_again(
+    first_reply: Any, first_outcome: str
+) -> None:
+    # The identical request at temperature 0 would most likely repeat it.
+    client = AsyncMock()
+    client.acompletion.side_effect = [
+        first_reply(),
+        _make_response(json.dumps(_VALID_CLASSIFICATION_RESPONSE)),
+    ]
+    tracker = _reask_tracker()
+
+    attempt = await classify_slots(
+        litellm_client=client,
+        completion_model_route=_route(),
+        classification_input=_classification_input(f"Summarize {uuid4()}"),
+        allowed_slot_values={},
+        tenant_id=uuid4(),
+        usage_tracker=tracker,
+    )
+
+    assert attempt.outcome == first_outcome
+    assert client.acompletion.await_count == 1
+    assert _classification_outcomes(tracker) == [first_outcome]
+
+
+@pytest.mark.asyncio
+async def test_a_classification_cut_off_twice_ends_unread_after_two_asks() -> None:
+    client = AsyncMock()
+    client.acompletion.return_value = _cut_off_response()
+    tracker = _reask_tracker()
+    kwargs = dict(
+        litellm_client=client,
+        completion_model_route=_route(),
+        classification_input=_classification_input(f"Summarize {uuid4()}"),
+        allowed_slot_values={},
+        tenant_id=uuid4(),
+        usage_tracker=tracker,
+    )
+
+    attempt = await classify_slots(**kwargs)
+
+    assert attempt == SlotClassificationAttempt(outcome="output_limit_exceeded")
+    assert client.acompletion.await_count == 2
+    assert _classification_outcomes(tracker) == ["output_limit_exceeded"] * 2
+    # Nothing unread is cached: the next turn asks the provider again.
+    await classify_slots(**kwargs)
+    assert client.acompletion.await_count == 4
+
+
+def _connection_reset() -> APIConnectionError:
+    return APIConnectionError(
+        message="connection reset", llm_provider="openai", model="gpt-test"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_failed_first_classification_call_is_not_asked_again() -> None:
+    failure = _connection_reset()
+    client = AsyncMock()
+    client.acompletion.side_effect = [
+        failure,
+        _make_response(json.dumps(_VALID_CLASSIFICATION_RESPONSE)),
+    ]
+    tracker = _reask_tracker()
+
+    with pytest.raises(Exception) as raised:
+        await classify_slots(
+            litellm_client=client,
+            completion_model_route=_route(),
+            classification_input=_classification_input(f"Summarize {uuid4()}"),
+            allowed_slot_values={},
+            tenant_id=uuid4(),
+            usage_tracker=tracker,
+        )
+
+    assert raised.value.__cause__ is failure
+    assert client.acompletion.await_count == 1
+    assert _classification_outcomes(tracker) == [None]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reask_failure",
+    [_connection_reset, lambda: Timeout("slow", model="gpt-test", llm_provider="x")],
+)
+async def test_a_failed_re_ask_keeps_the_first_reply_unread(reask_failure: Any) -> None:
+    client = AsyncMock()
+    client.acompletion.side_effect = [
+        _cut_off_response(),
+        reask_failure(),
+        _make_response(json.dumps(_VALID_CLASSIFICATION_RESPONSE)),
+    ]
+    tracker = _reask_tracker()
+
+    attempt = await classify_slots(
+        litellm_client=client,
+        completion_model_route=_route(),
+        classification_input=_classification_input(f"Summarize {uuid4()}"),
+        allowed_slot_values={},
+        tenant_id=uuid4(),
+        usage_tracker=tracker,
+    )
+
+    # The user is asked to send the message again, as without the re-ask.
+    assert attempt == SlotClassificationAttempt(outcome="output_limit_exceeded")
+    assert client.acompletion.await_count == 2
+    first, second = tracker.call_records
+    assert (first.classification_outcome, first.provider_failure_kind) == (
+        "output_limit_exceeded",
+        None,
+    )
+    assert second.classification_outcome is None
+    assert second.provider_failure_kind is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("first_ask_elapsed_ms", "expected_ceilings"),
+    [
+        ((700_000,), [1000.0, 300.0]),
+        # A request refused for one control and sent again without it: both
+        # requests of the first ask are its provider time.
+        ((200_000, 500_000), [1000.0, 300.0]),
+        ((950_000,), [1000.0]),
+        ((400_000, 550_000), [1000.0]),
+    ],
+)
+async def test_the_second_ask_gets_only_the_remaining_call_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+    first_ask_elapsed_ms: tuple[int, ...],
+    expected_ceilings: list[float],
+) -> None:
+    ceilings: list[float] = []
+
+    def timing(elapsed_ms: int) -> ProviderCallTiming:
+        return ProviderCallTiming(
+            provider_elapsed_ms=elapsed_ms, first_chunk_ms=None, max_gap_ms=None
+        )
+
+    async def provider(
+        _client: object,
+        *,
+        ceiling_seconds: float,
+        observe_timing: Any,
+        retry_without_refused_control: Any,
+        **_kwargs: object,
+    ) -> MagicMock:
+        ceilings.append(ceiling_seconds)
+        *refused, last = first_ask_elapsed_ms
+        for elapsed_ms in refused:
+            assert retry_without_refused_control(
+                "temperature", ValueError("refused"), timing(elapsed_ms)
+            )
+        observe_timing(timing(last))
+        return _cut_off_response()
+
+    monkeypatch.setattr(classifier, "complete_with_silence_deadline", provider)
+
+    attempt = await classify_slots(
+        litellm_client=AsyncMock(),
+        completion_model_route=_route(),
+        classification_input=_classification_input(f"Summarize {uuid4()}"),
+        allowed_slot_values={},
+        tenant_id=uuid4(),
+        budget_policy=AIBuilderBudgetPolicy(
+            conversation_safety_buffer_tokens=0,
+            minimum_conversation_budget_tokens=0,
+            classification_timeout_seconds=100.0,
+            provider_call_ceiling_seconds=1000.0,
+        ),
+    )
+
+    assert attempt.outcome == "output_limit_exceeded"
+    assert ceilings == pytest.approx(expected_ceilings)
 
 
 @pytest.mark.asyncio
@@ -7178,7 +7411,12 @@ async def test_strict_classifier_failed_response_is_recorded_and_not_cached(
             "empty_object": "{}",
         }[case]
     client = AsyncMock()
-    client.acompletion.side_effect = [response, _classification_tool_response(valid)]
+    # A reply cut off at the output cap is asked once more; it is cut off again.
+    asks = 2 if case == "truncated" else 1
+    client.acompletion.side_effect = [
+        *[response] * asks,
+        _classification_tool_response(valid),
+    ]
     tracker = ProposalTurnTelemetry(
         request_id="strict-failure", model="gpt-test", target_kind=TargetKind.CREATE
     )
@@ -7201,10 +7439,11 @@ async def test_strict_classifier_failed_response_is_recorded_and_not_cached(
         assert parser.call_count == (
             1 if case in {"invalid_json", "empty_object"} else 0
         )
-    assert tracker.llm_calls_made == 1
-    assert len(tracker.token_usages) == 1
+    assert tracker.llm_calls_made == asks
+    assert len(tracker.token_usages) == asks
+    # Nothing unread was cached, so the next turn reads the valid reply.
     assert (await classify_slots(**kwargs)).outcome == "resolved"
-    assert client.acompletion.await_count == 2
+    assert client.acompletion.await_count == asks + 1
 
 
 @pytest.mark.asyncio

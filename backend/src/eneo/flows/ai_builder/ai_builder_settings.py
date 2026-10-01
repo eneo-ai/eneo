@@ -33,13 +33,18 @@ AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS = 300.0
 
 # The most a slot classification answer may take, reasoning included, whatever
 # the model allows. The reply itself is a small bounded object: the largest of
-# 82 captured replies (2026-09-26, gpt-5.6-luna and gemma4-31b-it) was 4,785
-# characters, about 1,500 tokens. A reasoning model spends more than it writes:
-# across 276 receipted classification calls the largest that resolved used
-# 7,340 completion tokens (gemma4-31b-it), while the 7 calls that ran to the
-# model's 32,768-token ceiling all ended output_limit_exceeded. The cap keeps
-# twice the largest resolved call; re-measure before lowering it.
+# 82 captured replies (2026-09-26, both measured routes) was 4,785 characters,
+# about 1,500 tokens. A reasoning model spends more than it writes: the largest
+# of 109 resolved calls in a 2026-10-01 paired run used 10,419 completion
+# tokens. A call that runs away does not stop at any cap (all reached 32,768
+# when that was the cap, 16,384 since), so it is asked again instead of given
+# more room. Re-measure before lowering it.
 SLOT_CLASSIFICATION_ANSWER_CAP_TOKENS = 16_384
+
+# How often a classification reply cut off at the output cap is asked again
+# with the identical request: runaway replies come per call, not per input, and
+# a bounded retry is an invariant, not a tunable.
+SLOT_CLASSIFICATION_CUT_OFF_REASKS = 1
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

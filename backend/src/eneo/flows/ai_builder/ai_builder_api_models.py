@@ -63,6 +63,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     DeclaredAuthoring,
     FailureProducer,
 )
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    SlotClassificationReplyOutcome,
+)
 from eneo.flows.ai_builder.ai_builder_telemetry import ProviderCallKind
 from eneo.flows.ai_builder.ai_builder_telemetry_models import (
     SessionTelemetrySummary,
@@ -350,6 +353,9 @@ class AIBuilderProviderCallDiagnostic(BaseModel):
     first_chunk_ms: int | None = None
     max_gap_ms: int | None = None
     provider_elapsed_ms: int | None = None
+    # A classification call's reply; an unread one followed by another
+    # classification call in the same turn is a re-ask.
+    classification_outcome: SlotClassificationReplyOutcome | None = None
 
 
 class AIBuilderProposalTurnDiagnostic(BaseModel):

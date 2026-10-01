@@ -25,6 +25,9 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderProviderStatusClass,
     AIBuilderProviderTurnState,
 )
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    SlotClassificationReplyOutcome,
+)
 from eneo.flows.ai_builder.ai_builder_token_usage import TokenUsageSource
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
@@ -78,6 +81,9 @@ class PlannerCallRecordMetadata(BaseModel):
     first_chunk_ms: int | None = Field(default=None, ge=0)
     max_gap_ms: int | None = Field(default=None, ge=0)
     provider_elapsed_ms: int | None = Field(default=None, ge=0)
+    # What a classification call's reply was; with an unread first reply the
+    # turn holds the reply of the ask that followed it as the next record.
+    classification_outcome: SlotClassificationReplyOutcome | None = None
 
 
 class _PersistedPlannerTelemetry(BaseModel):

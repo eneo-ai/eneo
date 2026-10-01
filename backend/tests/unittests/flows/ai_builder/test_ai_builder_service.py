@@ -2566,6 +2566,10 @@ class TestUnreadMessage:
         assert not [
             call for call in acompletion.await_args_list if call.kwargs.get("tools")
         ]
+        # Only a reply cut off at the output cap is asked once more.
+        assert acompletion.await_count == (
+            2 if outcome == "output_limit_exceeded" else 1
+        )
         committed = repo.commit_turn.await_args.kwargs
         user_message, answer = committed["new_messages"]
         assert user_message.content == _NAMING_REQUEST
@@ -2578,6 +2582,50 @@ class TestUnreadMessage:
         committed_slots = committed["planning_state"].resolved_slots
         for name, slot in _make_committed_planning_state().resolved_slots.items():
             assert committed_slots[name].value == slot.value
+
+    @pytest.mark.anyio
+    async def test_a_reading_cut_off_once_is_asked_again_and_the_turn_proposes(
+        self, unset_mapped_deployment_default: None
+    ) -> None:
+        readings = iter(
+            [
+                _output_limit_response(),
+                _make_llm_response(
+                    content=json.dumps(
+                        {
+                            "slots": [],
+                            "file_roles": [],
+                            "checkpoint_updates": [],
+                            "form_intake": None,
+                            "named_result_evidence": None,
+                            "example_output_constraints": None,
+                            "schema_direction": None,
+                            "secondary_obligations": [],
+                        }
+                    )
+                ),
+            ]
+        )
+        proposal = _classifier_or_proposal_responses(_parse_failed_response())
+
+        async def respond(**kwargs: Any) -> MagicMock:
+            if kwargs.get("tools"):
+                return await proposal(**kwargs)
+            return next(readings)
+
+        events, repo = await self._send(
+            conversation=_make_post_plan_conversation(),
+            acompletion=AsyncMock(side_effect=respond),
+            message="Gör sammanfattningen kortare.",
+            planning_state=_make_committed_planning_state(),
+        )
+
+        repo.create_plan.assert_awaited_once()
+        assert SSE_EVENT_PLAN in [event["event"] for event in events]
+        user_message = repo.commit_turn.await_args.kwargs["new_messages"][0]
+        classification = slot_classification_from_metadata(user_message.metadata)
+        assert classification is not None
+        assert classification.outcome == "resolved"
 
     @pytest.mark.anyio
     async def test_an_unread_first_message_is_answered_instead_of_questioned(

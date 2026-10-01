@@ -29,6 +29,9 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderResolvedRequestBudget
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    SlotClassificationReplyOutcome,
+)
 from eneo.flows.ai_builder.ai_builder_telemetry import (
     PlannerCallRecordMetadata,
     ProviderCallKind,
@@ -245,6 +248,7 @@ class ProposalCallRecord:
     first_chunk_ms: int | None = None
     max_gap_ms: int | None = None
     provider_elapsed_ms: int | None = None
+    classification_outcome: SlotClassificationReplyOutcome | None = None
 
 
 def _call_record_metadata(record: ProposalCallRecord) -> PlannerCallRecordMetadata:
@@ -282,6 +286,7 @@ def _call_record_metadata(record: ProposalCallRecord) -> PlannerCallRecordMetada
         first_chunk_ms=record.first_chunk_ms,
         max_gap_ms=record.max_gap_ms,
         provider_elapsed_ms=record.provider_elapsed_ms,
+        classification_outcome=record.classification_outcome,
     )
 
 
@@ -423,6 +428,19 @@ class ProposalTurnTelemetry:
                 timing.provider_elapsed_ms if timing is not None else None
             ),
         )
+
+    def record_classification_outcome(
+        self, *, attempt: int, outcome: SlotClassificationReplyOutcome
+    ) -> None:
+        """Record what the reply of the classification call ``attempt`` was."""
+
+        index = attempt - 1
+        if not 0 <= index < len(self.call_records):
+            raise ValueError("Call record does not belong to this turn")
+        record = self.call_records[index]
+        if record.call_kind != "slot_classification":
+            raise ValueError("Only a classification call has a classification outcome")
+        self.call_records[index] = replace(record, classification_outcome=outcome)
 
     def retry_call(
         self,

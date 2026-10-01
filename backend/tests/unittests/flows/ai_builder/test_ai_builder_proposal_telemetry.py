@@ -1193,7 +1193,66 @@ def test_persisted_call_records_read_back_through_the_typed_model() -> None:
     ]
     assert read.records[0].prompt_tokens == 9_000
     assert read.records[0].provider_failure_kind is None
+    assert read.records[0].classification_outcome is None
     assert read.skipped == 0
+
+
+def test_a_reasked_classification_persists_the_outcome_of_each_ask() -> None:
+    telemetry = ProposalTurnTelemetry(
+        request_id="req-reask", model="private-model", target_kind=TargetKind.CREATE
+    )
+    for outcome in ("output_limit_exceeded", "resolved"):
+        call = telemetry.begin_call(call_kind="slot_classification")
+        telemetry.complete_call(
+            call=call, usage=CompletionTokenUsage(900, 40, 940, source="provider")
+        )
+        telemetry.record_classification_outcome(attempt=call.attempt, outcome=outcome)
+
+    read = planner_call_records_from_metadata(
+        {"planner_telemetry": telemetry.build_planner_telemetry()}
+    )
+
+    assert [(r.attempt, r.classification_outcome) for r in read.records] == [
+        (1, "output_limit_exceeded"),
+        (2, "resolved"),
+    ]
+    assert read.skipped == 0
+
+
+def test_a_classification_outcome_belongs_to_a_classification_call_only() -> None:
+    telemetry = ProposalTurnTelemetry(
+        request_id="req-reask", model="private-model", target_kind=TargetKind.CREATE
+    )
+    call = telemetry.begin_call(call_kind="proposal_initial")
+
+    with pytest.raises(ValueError):
+        telemetry.record_classification_outcome(
+            attempt=call.attempt, outcome="resolved"
+        )
+    with pytest.raises(ValueError):
+        telemetry.record_classification_outcome(attempt=2, outcome="resolved")
+    with pytest.raises(ValueError):
+        telemetry.record_classification_outcome(attempt=0, outcome="resolved")
+
+
+@pytest.mark.parametrize("stored", ["skipped_context_budget", "bogus", 3, []])
+def test_a_stored_classification_outcome_outside_the_per_call_set_is_skipped(
+    stored: object,
+) -> None:
+    record: dict[str, object] = {
+        "call_kind": "slot_classification",
+        "request_id": "r",
+        "attempt": 1,
+        "token_usage_source": "provider",
+        "token_usage_estimated": False,
+        "classification_outcome": stored,
+    }
+
+    read = planner_call_records_from_metadata(
+        {"planner_telemetry": {"call_records": [record]}}
+    )
+
+    assert (read.records, read.skipped) == ((), 1)
 
 
 def test_call_records_an_older_build_wrote_in_another_shape_are_counted_as_skipped() -> (

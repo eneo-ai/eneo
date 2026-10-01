@@ -141,7 +141,14 @@ included), `provider_elapsed_ms`, and, on a failed call, `local_deadline`
 (`silence` or `ceiling` when Eneo's own timer expired, absent for an SDK or
 gateway timeout). A request refused for one sampling control and sent again
 without it is two call records, each timed from its own request; the shared
-ceiling still bounds both. One owner ends an attempt on a provider failure: it
+ceiling still bounds both. A requirement-classification call record also carries
+`classification_outcome`, what its reply was (`resolved`, `no_content`,
+`parse_failed`, `output_limit_exceeded`). A reply cut off at the output cap is
+asked once more with the identical request, as a second call record, under what
+the first ask left of the same ceiling (every request of the first ask counted);
+when the re-ask fails at the provider, its failure stays on that record and the
+turn keeps the first reply's outcome, so the user is asked to send the message
+again. Empty and unparsable replies are not asked again. One owner ends an attempt on a provider failure: it
 records the failure on the pending call and closes the attempt in the same step,
 so a failed call is never completed afterwards, and it refuses to fail a turn
 that has no open attempt. A cancelled turn is not persisted and its open call is

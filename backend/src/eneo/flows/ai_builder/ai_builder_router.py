@@ -486,6 +486,7 @@ def _provider_call_diagnostics(
                     first_chunk_ms=record.first_chunk_ms,
                     max_gap_ms=record.max_gap_ms,
                     provider_elapsed_ms=record.provider_elapsed_ms,
+                    classification_outcome=record.classification_outcome,
                 )
             )
     return calls, skipped

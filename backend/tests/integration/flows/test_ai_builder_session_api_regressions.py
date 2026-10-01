@@ -5012,6 +5012,82 @@ async def test_a_healthy_provider_call_outlives_ownership_probes_and_completes(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_a_reading_cut_off_at_the_output_cap_is_asked_again_and_the_turn_goes_on(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Classifier Re-ask",
+        # The requirement classifier only runs when the planner model's context
+        # window can admit it; the fixture tenant default (8000) cannot.
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
+    )
+    session_id = await _create_ai_builder_session(
+        client=client,
+        bearer_token=bearer_token,
+        space_id=space_id,
+    )
+    cut_off = _make_llm_response(content='{"slots": [')
+    cut_off.choices[0].finish_reason = "length"
+    reading = _make_llm_response(
+        content=json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "checkpoint_updates": [],
+                "form_intake": None,
+                "named_result_evidence": None,
+                "example_output_constraints": None,
+                "schema_direction": None,
+                "secondary_obligations": [],
+            }
+        )
+    )
+    classifier_replies = [cut_off, reading]
+    classifier_calls = 0
+
+    async def scripted_completion(**kwargs: object) -> object:
+        nonlocal classifier_calls
+        if "tools" in kwargs:
+            return _make_llm_response(content="Vad ska flödet göra?")
+        classifier_calls += 1
+        return classifier_replies.pop(0)
+
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+            new=AsyncMock(side_effect=scripted_completion),
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
+        ),
+    ):
+        events = await _send_builder_message(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            message="Hjälp mig bygga ett flöde.",
+        )
+
+    assert classifier_calls == 2
+    outcome = [event["event"] for event in events if event["event"] != "status"]
+    assert "error" not in outcome, _builder_event_outline(events)
+    assert {"text": unsettled_text_answer("unread", ui_language="sv")} not in [
+        event["data"] for event in events if event["event"] == "text"
+    ]
+    assert outcome[-1] == "done"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_the_ownership_probe_reads_the_lease_without_touching_it(
     client,
     bearer_token,

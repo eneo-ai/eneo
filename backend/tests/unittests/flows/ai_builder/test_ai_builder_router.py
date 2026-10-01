@@ -1685,6 +1685,7 @@ class TestGetSessionEndpoint:
                 "first_chunk_ms": None,
                 "max_gap_ms": None,
                 "provider_elapsed_ms": None,
+                "classification_outcome": None,
             },
             {
                 "message_id": "assistant-plan",
@@ -1698,6 +1699,7 @@ class TestGetSessionEndpoint:
                 "first_chunk_ms": None,
                 "max_gap_ms": None,
                 "provider_elapsed_ms": None,
+                "classification_outcome": None,
             },
         ]
         assert dumped["provider_call_records_skipped"] == 1

@@ -39,11 +39,15 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 SlotClassificationConfidence = Literal["high", "medium", "low"]
 SlotClassificationEvidenceLevel = SlotEvidenceLevel
 CheckpointUpdateOperation = Literal["update", "clear"]
-SlotClassificationAttemptOutcome = Literal[
+# What one provider reply to a classification request turned out to be.
+SlotClassificationReplyOutcome = Literal[
     "resolved",
     "no_content",
     "parse_failed",
     "output_limit_exceeded",
+]
+SlotClassificationAttemptOutcome = Literal[
+    SlotClassificationReplyOutcome,
     "skipped_context_budget",
     "skipped_no_resolvable_slots",
 ]
