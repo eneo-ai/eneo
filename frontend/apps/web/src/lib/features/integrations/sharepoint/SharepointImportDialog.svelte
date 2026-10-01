@@ -574,11 +574,15 @@
           >
             <Command.Input
               bind:value={sourceFilter}
+              variant="field"
               placeholder={m.find_sharepoint_site()}
               aria-label={m.find_sharepoint_site()}
             />
+            <!-- The shared list caps its height at 18rem and hides the scrollbar
+                 for the command palette; here the list owns the rest of the box
+                 and a tenant with hundreds of sites must be visibly scrollable. -->
             <Command.List
-              class="min-h-0 flex-1 border-t"
+              class="mt-2 min-h-0 max-h-none flex-1 border-t [scrollbar-width:thin]! [&::-webkit-scrollbar]:block!"
               aria-busy={loadPreview.isLoading}
               aria-label={m.sharepoint_available_sources()}
             >

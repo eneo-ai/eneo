@@ -4462,5 +4462,11 @@
   "material_read_directly": "Load directly",
   "config_attachment_meter_scope": "Estimate for prompt text and directly loaded attachments. Chat history, skills, tools and retrieved content use additional context.",
   "material_attachments_description": "Files attached to the assistant. Each file shows whether it is loaded before every answer or opened on demand.",
-  "source_metadata_label": "Document properties"
+  "source_metadata_label": "Document properties",
+  "source_metadata_label": "Document properties",
+  "sharepoint_search_content": "Search files, folders and properties in {name}",
+  "sharepoint_search_scope_hint": "Searches names and properties in folders that have been opened.",
+  "sharepoint_search_no_matches": "Nothing loaded matches the search. Open more folders or change the search.",
+  "sharepoint_search_matches_one": "{count} match",
+  "sharepoint_search_matches_other": "{count} matches"
 }
