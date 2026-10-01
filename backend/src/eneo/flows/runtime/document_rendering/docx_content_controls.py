@@ -383,9 +383,22 @@ def _control_text(sdt: Any) -> str:
     content = sdt.find(qn("w:sdtContent"))
     if content is None:
         return ""
-    return " ".join(
-        "".join(text.text or "" for text in content.iter(qn("w:t"))).split()
-    )
+
+    def inline_text(element: Any) -> str:
+        pieces: list[str] = []
+        for node in element.iter():
+            if node.tag == qn("w:t"):
+                pieces.append(node.text or "")
+            elif node.tag == qn("w:tab"):
+                pieces.append("\t")
+            elif node.tag in (qn("w:br"), qn("w:cr")):
+                pieces.append("\n")
+        return "".join(pieces).strip()
+
+    paragraphs = list(content.iter(qn("w:p")))
+    if paragraphs:
+        return "\n\n".join(inline_text(paragraph) for paragraph in paragraphs)
+    return inline_text(content)
 
 
 def _style_names_by_id(document: Any) -> dict[str, str]:

@@ -62,6 +62,26 @@ def _bytes(document) -> bytes:
 # --- discovery ------------------------------------------------------------------
 
 
+def test_control_preview_preserves_paragraphs_inline_runs_breaks_and_tabs() -> None:
+    document = Document()
+    control = append_rich_control(document, tag="dokument", label="Dokument", hint="")
+    content = control.find(qn("w:sdtContent"))
+    content.clear()
+    content.append(document.add_heading("Exempelmall", level=1)._p)
+    paragraph = document.add_paragraph("Första ")
+    paragraph.add_run("stycket").bold = True
+    paragraph.add_run(".").add_break()
+    paragraph.add_run("Nästa rad\tmed tabulator.")
+    content.append(paragraph._p)
+    content.append(document.add_paragraph("Andra stycket.")._p)
+
+    fields = inspect_docx_template_bytes(_bytes(document), filename="example.docx")
+
+    assert fields[0]["hint"] == (
+        "Exempelmall\n\nFörsta stycket.\nNästa rad\tmed tabulator.\n\nAndra stycket."
+    )
+
+
 @pytest.mark.parametrize("text", ["Ordinary source document", "Case: {{ case_id }}"])
 def test_empty_control_discovery_is_allowed_but_template_use_is_rejected(
     text: str,

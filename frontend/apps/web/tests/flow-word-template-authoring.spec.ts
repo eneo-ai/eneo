@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { backendFetch, expectOk, MOCK_REPLY, uniqueName } from "./helpers";
 
@@ -20,13 +21,18 @@ async function api(page: Page, request: APIRequestContext, path: string, data?: 
   return response.json();
 }
 
-async function createFlow(page: Page, request: APIRequestContext) {
+async function createFlow(page: Page, request: APIRequestContext, includeForm = false) {
   const space = await api(page, request, "/api/v1/spaces/type/personal/");
   const flow = await api(page, request, "/api/v1/flows/", {
     space_id: space.id,
     name: uniqueName("E2E Word mapping"),
     steps: [],
-    metadata_json: { wizard: { transcription_enabled: false } }
+    metadata_json: {
+      wizard: { transcription_enabled: false },
+      ...(includeForm
+        ? { form_schema: { fields: [{ name: "brukarens_namn", type: "text", required: false }] } }
+        : {})
+    }
   });
   const steps = [];
   for (const [index, name] of [TEXT_STEP, "Other step", TEMPLATE].entries()) {
@@ -144,14 +150,37 @@ test("simple mode exposes Word guidance, a valid example and editable field mapp
   ).toBeVisible();
   await page.getByText(/unique tag|unik tagg/).scrollIntoViewIfNeeded();
   await page.screenshot({ path: test.info().outputPath("word-setup-guide.png"), fullPage: true });
-  await upload(page);
+  const downloadedPath = test.info().outputPath("eneo-word-template(1).docx");
+  await example.saveAs(downloadedPath);
+  expect(
+    createHash("sha256")
+      .update(await readFile(downloadedPath))
+      .digest("hex")
+  ).toBe(
+    createHash("sha256")
+      .update(await readFile(FILE))
+      .digest("hex")
+  );
+  await page.locator('input[type="file"][accept=".docx"]').setInputFiles(downloadedPath);
   await expect(page.getByRole("button", { name: SOURCE })).toBeVisible();
+  await expect(page.getByText(/^(Template checked|Mallen är kontrollerad)$/)).toBeVisible();
   const exampleText = page.getByRole("button", {
-    name: /^(Show template text|Visa texten i mallen)$/
+    name: /^(Show text to replace|Visa texten som ersätts)$/
   });
   await expect(exampleText).toHaveAttribute("aria-expanded", "false");
   await exampleText.click();
   await expect(exampleText).toHaveAttribute("aria-expanded", "true");
+  const preview = page.getByRole("region", {
+    name: /This text is replaced|Den här texten ersätts/
+  });
+  await expect(preview).toBeVisible();
+  await expect(preview).toContainText("Exempelmall för Eneo\n\nDen här mallen");
+  await preview.focus();
+  await expect(preview).toBeFocused();
+  await page.screenshot({
+    path: test.info().outputPath("word-readable-preview.png"),
+    fullPage: true
+  });
   await exampleText.click();
   await mapText(page);
   await expect
@@ -268,7 +297,7 @@ test("template fields stay usable on laptops, desktop and ultrawide displays wit
   page,
   request
 }) => {
-  const flow = await createFlow(page, request);
+  const flow = await createFlow(page, request, true);
   await openTemplate(page, flow.id);
   await upload(page);
   const source = page.getByRole("button", { name: SOURCE });
@@ -281,6 +310,11 @@ test("template fields stay usable on laptops, desktop and ultrawide displays wit
   await expect
     .poll(async () => (await savedTemplate(page, request, flow.id))?.bindings?.dokument)
     .toBe("{{datum}}");
+  await source.click();
+  await page.getByRole("option", { name: /^(Field|Fält): brukarens_namn$/ }).click();
+  await expect(
+    page.getByText(/You selected a form field|Du har valt ett formulärfält/)
+  ).toBeVisible();
   for (const [width, height] of [
     [1024, 768],
     [1440, 1000],

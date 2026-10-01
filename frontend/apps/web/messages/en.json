@@ -7160,7 +7160,7 @@
   "flow_template_fill_word_help_migration": "Text placeholders in double braces need to be replaced with Word content controls. Otherwise they do not mark a place Eneo can fill.",
   "flow_template_fill_example_action": "Download example template",
   "flow_template_fill_binding_label": "Text for {name}",
-  "flow_template_fill_kind_help_rich": "This section can contain paragraphs, headings, lists and tables. The template’s styles are used.",
+  "flow_template_fill_kind_help_rich": "The full text from the selected source fills this section. It can contain paragraphs, headings, lists and tables. The template’s styles are used.",
   "flow_template_fill_kind_help_text": "Text is inserted at the marked place in the paragraph. Use a section for longer text.",
   "flow_template_fill_mapping_help": "Choose the text for each place in the template. Leave empty is an intentional choice; Select source means a mapping is missing.",
   "flow_template_fill_ready_to_test": "All fields are mapped. Test the flow and open the Word result to check text placement and formatting.",
@@ -7173,5 +7173,11 @@
   "flow_template_fill_word_help_tab_link": "Microsoft: show Developer in Windows and on Mac (opens in a new tab)",
   "flow_template_fill_word_help_controls_link": "Microsoft: create forms in Word (opens in a new tab)",
   "flow_template_fill_example_help": "The example has a Dokument field tagged dokument and instructions for both systems. Map the field to text from a step. The help text in the template is replaced when the flow fills the document.",
-  "flow_template_fill_example_text_action": "Show template text"
+  "flow_template_fill_example_text_action": "Show text to replace",
+  "flow_template_fill_asset_ready": "Template checked",
+  "flow_template_fill_asset_needs_action": "Template needs attention",
+  "flow_template_fill_asset_read_only": "Template is read-only",
+  "flow_template_fill_asset_unavailable": "Template unavailable",
+  "flow_template_fill_template_text_label": "This text is replaced with the selected source when the flow runs.",
+  "flow_template_fill_form_source_help": "You selected a form field. Only that field’s value is inserted here. Choose text from a step to fill the whole section with that step’s result."
 }

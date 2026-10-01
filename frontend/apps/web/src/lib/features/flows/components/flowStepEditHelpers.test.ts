@@ -1,3 +1,4 @@
+import { m } from "$lib/paraglide/messages";
 import { describe, expect, test } from "vitest";
 import type { FlowStep, SecurityClassification } from "@eneo/eneo-js";
 import {
@@ -165,20 +166,22 @@ describe("getMimePresetsForFormat", () => {
 
 describe("getTemplateAssetStatusLabel", () => {
   test("maps ready", () => {
-    expect(getTemplateAssetStatusLabel("ready")).toBe("Ready");
+    expect(getTemplateAssetStatusLabel("ready")).toBe(m.flow_template_fill_asset_ready());
   });
 
   test("maps needs_action", () => {
-    expect(getTemplateAssetStatusLabel("needs_action")).toBe("Needs action");
+    expect(getTemplateAssetStatusLabel("needs_action")).toBe(
+      m.flow_template_fill_asset_needs_action()
+    );
   });
 
   test("maps read_only", () => {
-    expect(getTemplateAssetStatusLabel("read_only")).toBe("Read-only");
+    expect(getTemplateAssetStatusLabel("read_only")).toBe(m.flow_template_fill_asset_read_only());
   });
 
   test("defaults to Unavailable for unknown", () => {
-    expect(getTemplateAssetStatusLabel(null)).toBe("Unavailable");
-    expect(getTemplateAssetStatusLabel(undefined)).toBe("Unavailable");
+    expect(getTemplateAssetStatusLabel(null)).toBe(m.flow_template_fill_asset_unavailable());
+    expect(getTemplateAssetStatusLabel(undefined)).toBe(m.flow_template_fill_asset_unavailable());
   });
 });
 

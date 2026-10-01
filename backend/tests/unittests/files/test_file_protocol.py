@@ -8,6 +8,7 @@ import time
 from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
+from tempfile import SpooledTemporaryFile
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -16,8 +17,10 @@ from fastapi import UploadFile
 
 from eneo.files import audio
 from eneo.files import file_protocol as file_protocol_module
+from eneo.files import file_size_service as file_size_module
 from eneo.files.file_models import FileContentVariant
 from eneo.files.file_protocol import FileProtocol
+from eneo.files.file_size_service import FileSizeService
 from eneo.files.text import (
     PdfExtractionLimitExceeded,
     PdfExtractionLimits,
@@ -115,6 +118,31 @@ def _make_upload(content_type: str, size: int) -> tuple[UploadFile, int]:
 
 async def _content_bytes(content) -> bytes:
     return b"".join([chunk async for chunk in content.chunks])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rolled_to_disk", [False, True])
+@pytest.mark.parametrize("position", [17, None])
+async def test_document_preparation_preserves_all_bytes_after_prior_read(
+    tmp_path, monkeypatch, rolled_to_disk, position
+):
+    monkeypatch.setattr(
+        file_size_module,
+        "get_settings",
+        lambda: SimpleNamespace(upload_tmp_dir=tmp_path),
+    )
+    payload = b"PK\x03\x04" + b"document bytes" * 100
+    stream = SpooledTemporaryFile(max_size=1 if rolled_to_disk else len(payload) * 2)
+    stream.write(payload)
+    stream.seek(len(payload) if position is None else position)
+    upload = UploadFile(file=stream, filename="eneo-word-template(1).docx")
+    real_protocol = FileProtocol(FileSizeService(), MagicMock(), MagicMock())
+
+    async with real_protocol.prepare_document_upload(
+        upload, upload_admission_snapshot=_UPLOAD_ADMISSION
+    ) as prepared:
+        assert await _content_bytes(prepared.contents[0]) == payload
+    assert list(tmp_path.iterdir()) == []
 
 
 async def _prepare(protocol: FileProtocol, upload: UploadFile, *, pdf_limits=None):

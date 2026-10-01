@@ -247,13 +247,13 @@ export function parseMimeOverrideDraft(rawValue: string): string[] {
 export function getTemplateAssetStatusLabel(status: string | null | undefined): string {
   switch (status) {
     case "ready":
-      return "Ready";
+      return m.flow_template_fill_asset_ready();
     case "needs_action":
-      return "Needs action";
+      return m.flow_template_fill_asset_needs_action();
     case "read_only":
-      return "Read-only";
+      return m.flow_template_fill_asset_read_only();
     default:
-      return "Unavailable";
+      return m.flow_template_fill_asset_unavailable();
   }
 }
 

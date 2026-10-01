@@ -7160,7 +7160,7 @@
   "flow_template_fill_word_help_migration": "Textplatshållare med dubbla klammerparenteser behöver ersättas med innehållskontroller i Word. De anger annars ingen plats som Eneo kan fylla i.",
   "flow_template_fill_example_action": "Ladda ner exempelmall",
   "flow_template_fill_binding_label": "Text till {name}",
-  "flow_template_fill_kind_help_rich": "Avsnittet kan innehålla flera stycken, rubriker, listor och tabeller. Mallens format används.",
+  "flow_template_fill_kind_help_rich": "Hela texten från den valda källan fyller detta avsnitt. Texten kan innehålla stycken, rubriker, listor och tabeller. Mallens format används.",
   "flow_template_fill_kind_help_text": "Texten fylls i på den markerade platsen i stycket. Använd ett avsnitt för längre text.",
   "flow_template_fill_mapping_help": "Välj vilken text som ska fylla varje plats i mallen. Lämna tomt är ett avsiktligt val; Välj källa betyder att kopplingen saknas.",
   "flow_template_fill_ready_to_test": "Alla fält är kopplade. Provkör flödet och öppna Word-resultatet för att kontrollera textens placering och format.",
@@ -7173,5 +7173,11 @@
   "flow_template_fill_word_help_tab_link": "Microsoft: visa fliken Utvecklare i Windows och på Mac (öppnas i ny flik)",
   "flow_template_fill_word_help_controls_link": "Microsoft: skapa formulär i Word (öppnas i ny flik)",
   "flow_template_fill_example_help": "Exempelmallen har fältet Dokument med taggen dokument och instruktioner för båda systemen. Koppla fältet till text från ett steg. Hjälptexten i mallen ersätts när flödet fyller i dokumentet.",
-  "flow_template_fill_example_text_action": "Visa texten i mallen"
+  "flow_template_fill_example_text_action": "Visa texten som ersätts",
+  "flow_template_fill_asset_ready": "Mallen är kontrollerad",
+  "flow_template_fill_asset_needs_action": "Mallen behöver åtgärdas",
+  "flow_template_fill_asset_read_only": "Mallen kan inte ändras",
+  "flow_template_fill_asset_unavailable": "Mallen är inte tillgänglig",
+  "flow_template_fill_template_text_label": "Den här texten ersätts med den valda källan när flödet körs.",
+  "flow_template_fill_form_source_help": "Du har valt ett formulärfält. Bara fältets värde fylls i här. Välj text från ett steg om du vill fylla hela avsnittet med stegets resultat."
 }
